@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO blobs (sha256, mime_type, size, data)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (sha256) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d41eefbf2471d01d55ddd7cf56ec9de2a5e565fa1a75bc9637002309f2289e3b"
+}

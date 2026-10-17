@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tasks\n        SET status = CASE\n                WHEN status = 'running' THEN 'running'\n                ELSE 'queued'\n            END,\n            updated_at = now()\n        WHERE id = $1\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c6ec44278b151bffe4ae95de6e2e7ac7fd1ab4e197eaee3a4e7f3c6f0f4d8fd0"
+}

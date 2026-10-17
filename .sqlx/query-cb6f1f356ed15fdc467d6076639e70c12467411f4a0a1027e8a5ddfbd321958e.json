@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE projects\n        SET next_task_number = next_task_number + 1,\n            updated_at = now()\n        WHERE id = $1\n        RETURNING key, next_task_number - 1 AS \"allocated_number!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "allocated_number!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "cb6f1f356ed15fdc467d6076639e70c12467411f4a0a1027e8a5ddfbd321958e"
+}

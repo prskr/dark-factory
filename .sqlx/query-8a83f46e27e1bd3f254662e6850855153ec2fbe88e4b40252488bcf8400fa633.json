@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT sha256, mime_type, size, data, created_at\n            FROM blobs\n            WHERE sha256 = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "mime_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "data",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8a83f46e27e1bd3f254662e6850855153ec2fbe88e4b40252488bcf8400fa633"
+}

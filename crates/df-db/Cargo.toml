@@ -1,0 +1,30 @@
+[package]
+name = "df-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+df-core.workspace = true
+df-proto.workspace = true
+futures.workspace = true
+hex.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+static_assertions.workspace = true
+tempfile.workspace = true

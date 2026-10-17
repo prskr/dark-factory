@@ -1,0 +1,25 @@
+[package]
+name = "df-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+pbjson.workspace = true
+pbjson-types.workspace = true
+prost.workspace = true
+serde.workspace = true
+tonic.workspace = true
+
+[build-dependencies]
+pbjson-build.workspace = true
+prost-build.workspace = true
+tonic-build.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

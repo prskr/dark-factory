@@ -1,0 +1,18 @@
+[package]
+name = "dark-factory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+df-core.workspace = true
+df-db.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true

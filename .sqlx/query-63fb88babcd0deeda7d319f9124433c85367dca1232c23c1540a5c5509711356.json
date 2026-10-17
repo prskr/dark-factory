@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO task_messages (id, task_id, author, content)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "author",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "queued_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "delivered_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "delivered_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "63fb88babcd0deeda7d319f9124433c85367dca1232c23c1540a5c5509711356"
+}
