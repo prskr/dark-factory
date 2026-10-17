@@ -30,6 +30,7 @@
 - **No database credentials.** The gateway receives everything it needs from the control plane (§6); it is the component sandbox traffic touches directly, so it holds as little as possible.
 - Authenticates to the control plane with mTLS (cert-manager `Certificate`).
 - Fail-closed: until a gateway pod has received its first policy snapshot, it denies everything.
+- The per-connection allowlist decision ("may this source pod reach host:port?") is an internal interface of the gateway. That keeps the option open to replace only the egress proxy with Envoy later, using the decision as its `ext_authz` service and its access logs as the live log's source (ADR-0029, alternatives).
 - Its own network policy: ingress from the sandbox namespace (proxy port) and from the control plane pods (internal API port, for `Tail`); egress to the control plane (`PolicyWatch`) and to the internet on the ports allowlists can use.
 
 ## 4. Allowlist model
