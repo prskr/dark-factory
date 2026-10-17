@@ -52,6 +52,7 @@ The slice deliberately exercises the riskiest parts early: the agent protocol, t
 - Credentials: references to existing Kubernetes Secrets (name + key) only, never secret values.
 - Tasks: list with status, create form (title, description, project, persona, optional issue).
 - Task detail: live transcript via SSE (tool calls collapsed), message input for queued messages, runs with status and end reason, links to PR and issue, raw token counts per run.
+- Form factors (ADR-0035): task list, task creation and task detail work on a phone; projects, personas, credentials and the egress log page are desktop-only.
 
 ### Build, deployment, tests
 - Cargo workspace as the source of truth for crates; Bazel (rules_rust with crate_universe from the Cargo workspace, rules_oci) builds static amd64 musl binaries, packages images, pushes to Harbor and applies manifests to the dev namespace in one target.
@@ -94,7 +95,7 @@ Deviations from the original plan, approved on 2026-10-16 (details in `contract/
 5. **Runtime core**: connect/resume, workspace prepare/finalize, Git hardening, credential helper, MCP stdio proxy — tested with the fake ACP agent.
 6. **Plugin host and Forgejo plugin**: wasmtime + wasi-http, credential injection, draft PR on first push, PR/issue tools.
 7. **Claude Code**: ACP client against the real adapter, subscription token delivery, usage capture, rate-limit end reason.
-8. **UI**: task detail with live transcript, message queue, runs; end-to-end demo of §2.
+8. **UI**: task detail with live transcript, message queue, runs; end-to-end demo of §2, with task creation, transcript and follow-up message also done on a phone.
 
 ## 7. Verify first (spikes)
 - Image volumes on the cluster's Kubernetes version with Talos' containerd **and** Kata.

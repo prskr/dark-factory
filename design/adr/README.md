@@ -38,3 +38,6 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
 | [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 2) |
+| [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
+| [ADR-0036](0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
+| [ADR-0037](0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |

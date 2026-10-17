@@ -24,6 +24,7 @@
 - Agents may manage the instance itself (hire agents, adjust skills, …), but which instance-management operations an agent may perform is explicitly controlled and configurable per instance (ADR-0011).
 - Throughput comes from many tasks being worked on concurrently, not from fast sandbox start-up; cold starts are acceptable (ADR-0022).
 - Claude Code support exists primarily to use Claude **subscriptions** instead of API pricing; other subscription-style providers (e.g. OpenCode Go) should follow (F5, F6).
+- Deliberately out of scope: **feedback on changes** (code review). Review happens in the forge on the pull request; Dark Factory routes review events to the agent but doesn't reproduce line comments, review threads or approvals (ADR-0036).
 - Typical workflow: an ongoing chat with the CEO per project, where the CEO creates tasks for other agents, e.g. an implementation task for agent A and a review task for agent B blocked by it; when A completes, B is woken automatically.
 
 ## 2. Target environment
@@ -69,7 +70,7 @@
 - **Credential management** for inference providers and external harnesses (e.g. Claude subscriptions).
 - **Egress control**: per-run generated network policies, host allowlists enforced by the gateway's egress proxy, cluster targets for in-cluster services, and a live egress log ([`design/egress.md`](../design/egress.md), ADR-0029).
 - **Skill management** for agents.
-- **Web UI** to manage multiple agents ("employees", similar to Paperclip): harness configuration, skills, tools, …
+- **Web UI** to manage multiple agents ("employees", similar to Paperclip): harness configuration, skills, tools, … One responsive UI: starting tasks, reading transcripts, answering questions and chatting with agents work on a phone; workspace changes, configuration and audit views are desktop-only (ADR-0035).
 - **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), a tree of subtasks with per-subtree settings for subtask branches and merging (ADR-0034), …
 - **Task history** displayed in a chat-style UI.
 - **Chats** with employees, one per (persona, project) (ADR-0026).
@@ -158,6 +159,9 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0032](../design/adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](../design/adr/0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
 | [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 2) |
+| [ADR-0035](../design/adr/0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
+| [ADR-0036](../design/adr/0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
+| [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
 
 ## 9. Future options
 
@@ -189,7 +193,7 @@ Multiple Claude subscriptions (or other subscription credentials) as a pool: ass
 Commits are signed at commit time through a signing shim that sends the commit payload over the agent stream to a signing service in the control plane holding the bot's key (managed externally, referenced as a Kubernetes Secret, kept in memory only); the key never enters the sandbox, commit IDs stay stable, and every signature is audited per run. Signing in the Git proxy was rejected because it would rewrite commit IDs. Details: `design/agent-run.md` §12.
 
 ### F8 — Workspace changes view (idea, 2026-10-16)
-Browse a task's repository in the dashboard, including uncommitted changes, current as of the last turn. The runtime pushes the WIP snapshot after every turn (not only at finalize); the UI reads committed (base … task branch) and uncommitted (task branch … WIP snapshot) changes from Git — first via a `repository` capability of the integrations plugin, later from the gateway's Git mirror. While a run is active, a `SnapshotWorkspace` command over the agent stream triggers an immediate snapshot. Caveats: snapshot pushes may trigger CI (filter `factory/wip/*` or use a non-branch ref namespace), and workspace content is rendered as escaped text only. Details: `design/agent-run.md` §13.
+Browse a task's repository in the dashboard, including uncommitted changes, current as of the last turn. The runtime pushes the WIP snapshot after every turn (not only at finalize); the UI reads committed (base … task branch) and uncommitted (task branch … WIP snapshot) changes from Git — first via a `repository` capability of the integrations plugin, later from the gateway's Git mirror. While a run is active, a `SnapshotWorkspace` command over the agent stream triggers an immediate snapshot. Caveats: snapshot pushes may trigger CI (filter `factory/wip/*` or use a non-branch ref namespace), and workspace content is rendered as escaped text only. The view is read-only and desktop-only; feedback on the changes goes to the pull request in the forge (ADR-0035, ADR-0036). Details: `design/agent-run.md` §13.
 
 ### F9 — Workspace lifecycle hooks (idea, 2026-10-17)
 Script snippets the runtime runs at `workspace-init` (fresh workspace only), `run-start` (every run, before the harness starts) and `run-end` (after the harness stopped, before push and WIP snapshot), defined at instance and project scope as inline snippets or repository scripts. Hooks run as the harness user with the harness's environment only, so they can't escalate privileges; timeouts, per-hook failure policy (`fail` / `warn`, `run-end` always `warn`), output recorded in the transcript. Turn-based hooks: native harness hooks via the harness settings now, built-in loop later. Details: `design/agent-run.md` §14.

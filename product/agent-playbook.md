@@ -60,7 +60,7 @@
 **Situation:** a change should be reviewed by a second agent before a human looks at it.
 
 1. The coordinator creates an implementation task and a review task blocked by its completion (ADR-0026).
-2. The reviewer reads the PR and comments; it doesn't push to the implementation branch.
+2. The reviewer reads the PR and reviews it in the forge (line comments, submitted review — ADR-0036); it doesn't push to the implementation branch.
 3. A submitted review wakes the implementation task (ADR-0015); it addresses the comments and completes again, which can re-trigger the review.
 4. The PR is marked ready for the human only when the review task completes without open findings.
 

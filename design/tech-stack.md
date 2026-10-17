@@ -71,7 +71,7 @@
 | Templates | maud (UI in its own crate) | Decided | [0004](adr/0004-server-rendered-ui-maud-htmx-alpine.md) |
 | Interactivity | htmx 4 (fetch-based, SSE, morph swaps), Alpine.js — both vendored | Decided | [0004](adr/0004-server-rendered-ui-maud-htmx-alpine.md) |
 | Live updates | Server-sent events (per task transcript, per page dashboard) | Decided | [0004](adr/0004-server-rendered-ui-maud-htmx-alpine.md) |
-| CSS | Hand-written CSS, or Tailwind via its standalone binary (no Node) | Suggested — open | — |
+| CSS | Tailwind CSS v4 via its standalone binary (no Node), pinned in Bazel, output embedded; mobile-first responsive layout | Decided | [0035](adr/0035-ui-form-factors-phone-for-core-flows.md), [0037](adr/0037-tailwind-css-standalone-binary.md) |
 
 ## Agent runtime
 
@@ -142,7 +142,6 @@
 | CI integration environment | kind/k3d with Cilium, cert-manager, agent-sandbox | Later | [0024](adr/0024-build-tooling-and-dev-loop.md) |
 
 ## Open choices
-- CSS approach for the UI.
 - OIDC client, session store and JWT libraries (suggested above).
 - Secret scanner for the Git proxy (Kingfisher suggested; embedded library vs subprocess depends on whether its Vectorscan dependency builds cleanly in Bazel).
 - Protobuf linting/breaking-change checks (e.g. `buf`) — not discussed yet.
