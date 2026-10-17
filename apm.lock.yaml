@@ -1,0 +1,336 @@
+lockfile_version: '1'
+apm_version: 0.33.0
+dependencies:
+- repo_url: prskr/agent-tools
+  name: openspec
+  host: code.icb4dc0.de
+  resolved_commit: a4ed3a0b7a1434ab67eec1a347144aa38c940644
+  resolved_ref: v0.4.1
+  version: 0.1.1
+  virtual_path: plugins/openspec
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/openspec-apply-change
+  - .agents/skills/openspec-apply-change/SKILL.md
+  - .agents/skills/openspec-archive-change
+  - .agents/skills/openspec-archive-change/SKILL.md
+  - .agents/skills/openspec-explore
+  - .agents/skills/openspec-explore/SKILL.md
+  - .agents/skills/openspec-propose
+  - .agents/skills/openspec-propose/SKILL.md
+  - .agents/skills/openspec-sync-specs
+  - .agents/skills/openspec-sync-specs/SKILL.md
+  - .agents/skills/openspec-update-change
+  - .agents/skills/openspec-update-change/SKILL.md
+  - .claude/skills/openspec-apply-change
+  - .claude/skills/openspec-apply-change/SKILL.md
+  - .claude/skills/openspec-archive-change
+  - .claude/skills/openspec-archive-change/SKILL.md
+  - .claude/skills/openspec-explore
+  - .claude/skills/openspec-explore/SKILL.md
+  - .claude/skills/openspec-propose
+  - .claude/skills/openspec-propose/SKILL.md
+  - .claude/skills/openspec-sync-specs
+  - .claude/skills/openspec-sync-specs/SKILL.md
+  - .claude/skills/openspec-update-change
+  - .claude/skills/openspec-update-change/SKILL.md
+  deployed_file_hashes:
+    .agents/skills/openspec-apply-change/SKILL.md: sha256:cccb13131268cf1d830c30b649e695dbc46e42331b9aaff7401dad152d088701
+    .agents/skills/openspec-archive-change/SKILL.md: sha256:faa510800a1306763f4c3f209345b2ae445942cc8912c2a3052881c1d531a03b
+    .agents/skills/openspec-explore/SKILL.md: sha256:2f4b8dc5cb4370fe3d73a38fdd24fceb2115230bdbbc7df7158cb5313f4420b0
+    .agents/skills/openspec-propose/SKILL.md: sha256:874f03a92979dec878627709410f91933fdcb66abddf521b67be23ac117b4645
+    .agents/skills/openspec-sync-specs/SKILL.md: sha256:cdb1b182315c86b8038c42fce9c65ec7b92627bd9d5c51908f494b2e5af08b87
+    .agents/skills/openspec-update-change/SKILL.md: sha256:f4ffb89ece3be2a55a95a693ca0a1dbcd2139c17ab45edf796b14c99cb7d5a50
+    .claude/skills/openspec-apply-change/SKILL.md: sha256:cccb13131268cf1d830c30b649e695dbc46e42331b9aaff7401dad152d088701
+    .claude/skills/openspec-archive-change/SKILL.md: sha256:faa510800a1306763f4c3f209345b2ae445942cc8912c2a3052881c1d531a03b
+    .claude/skills/openspec-explore/SKILL.md: sha256:2f4b8dc5cb4370fe3d73a38fdd24fceb2115230bdbbc7df7158cb5313f4420b0
+    .claude/skills/openspec-propose/SKILL.md: sha256:874f03a92979dec878627709410f91933fdcb66abddf521b67be23ac117b4645
+    .claude/skills/openspec-sync-specs/SKILL.md: sha256:cdb1b182315c86b8038c42fce9c65ec7b92627bd9d5c51908f494b2e5af08b87
+    .claude/skills/openspec-update-change/SKILL.md: sha256:f4ffb89ece3be2a55a95a693ca0a1dbcd2139c17ab45edf796b14c99cb7d5a50
+  content_hash: sha256:a3e040d79c5395a643dfc802673ae3133aa6a81fee2317fef3a427b63a876c3c
+  declared_license: MIT
+deployments:
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-apply-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-apply-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:cccb13131268cf1d830c30b649e695dbc46e42331b9aaff7401dad152d088701
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-archive-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-archive-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:faa510800a1306763f4c3f209345b2ae445942cc8912c2a3052881c1d531a03b
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-explore
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-explore/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:2f4b8dc5cb4370fe3d73a38fdd24fceb2115230bdbbc7df7158cb5313f4420b0
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-propose
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-propose/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:874f03a92979dec878627709410f91933fdcb66abddf521b67be23ac117b4645
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-sync-specs
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-sync-specs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:cdb1b182315c86b8038c42fce9c65ec7b92627bd9d5c51908f494b2e5af08b87
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-update-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/openspec-update-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:f4ffb89ece3be2a55a95a693ca0a1dbcd2139c17ab45edf796b14c99cb7d5a50
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-apply-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-apply-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:cccb13131268cf1d830c30b649e695dbc46e42331b9aaff7401dad152d088701
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-archive-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-archive-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:faa510800a1306763f4c3f209345b2ae445942cc8912c2a3052881c1d531a03b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-explore
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-explore/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:2f4b8dc5cb4370fe3d73a38fdd24fceb2115230bdbbc7df7158cb5313f4420b0
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-propose
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-propose/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:874f03a92979dec878627709410f91933fdcb66abddf521b67be23ac117b4645
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-sync-specs
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-sync-specs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:cdb1b182315c86b8038c42fce9c65ec7b92627bd9d5c51908f494b2e5af08b87
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-update-change
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-update-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  active_owner: code.icb4dc0.de/prskr/agent-tools/plugins/openspec
+  content_hash: sha256:f4ffb89ece3be2a55a95a693ca0a1dbcd2139c17ab45edf796b14c99cb7d5a50
+- kind: uri
+  target: mcp
+  value: codegraph
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: obscura
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: codegraph
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: obscura
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+mcp_servers:
+- codegraph
+- obscura
+mcp_configs:
+  codegraph:
+    name: codegraph
+    transport: stdio
+    args:
+    - serve
+    - --mcp
+    registry: false
+    tools:
+    - '*'
+    command: codegraph
+  obscura:
+    name: obscura
+    transport: stdio
+    args:
+    - mcp
+    - --allow-private-network
+    registry: false
+    tools:
+    - '*'
+    command: obscura
+mcp_target_servers:
+  antigravity:
+  - codegraph
+  - obscura
+  claude:
+  - codegraph
+  - obscura

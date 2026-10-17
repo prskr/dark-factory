@@ -1,0 +1,32 @@
+name: dark-factory
+version: 0.1.0
+description: APM project for dark-factory
+author: Peter Kurfer
+# Which agent platforms to deploy to.
+# Resolution order: --target flag > this field > auto-detect from filesystem.
+# Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, hermes, kiro, opencode, vscode, windsurf
+targets:
+  - agent-skills
+  - claude
+  - antigravity
+dependencies:
+  apm:
+    - git: https://code.icb4dc0.de/prskr/agent-tools
+      path: plugins/openspec
+      ref: v0.4.1
+  mcp:
+    - name: obscura
+      transport: stdio
+      command: obscura
+      args: ['mcp', '--allow-private-network']
+      tools: ['*']
+      registry: false
+    - name: codegraph
+      transport: stdio
+      command: codegraph
+      args: ['serve', '--mcp']
+      tools: ['*']
+      registry: false
+  lsp: []
+includes: auto
+scripts: {}

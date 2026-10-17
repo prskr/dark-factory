@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "obscura": {
+      "command": "obscura",
+      "args": [
+        "mcp",
+        "--allow-private-network"
+      ]
+    },
+    "codegraph": {
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}

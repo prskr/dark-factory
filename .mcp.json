@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "obscura": {
+      "type": "stdio",
+      "command": "obscura",
+      "args": [
+        "mcp",
+        "--allow-private-network"
+      ]
+    },
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}
