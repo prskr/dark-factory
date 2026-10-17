@@ -41,3 +41,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
+| [ADR-0038](0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2) |

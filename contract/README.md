@@ -66,6 +66,7 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 - `ControlMessage`: `ToolsChanged` for lazy tool loading (`load_server`); `SnapshotWorkspace` for an immediate WIP snapshot (F8).
 - WIT: `issues.list`/webhook handling (`handle-webhook`, ADR-0015), PR comments and review data for the review loop, a `repository` capability (compare refs, read a file at a ref, list a tree) for the workspace changes view (F8). Also for ADR-0033: `pull-requests.list-open` with filters (head prefix, author, label) and a `checks` capability (CI status and job logs for a ref or PR). For ADR-0034: `pull-requests.merge` (merge method) and `branches.create` (new branch at a ref).
 - Agent protocol: the branch rewrite policy in `Assign.workspace` (ADR-0033). Subtasks based on a parent branch need no change; the parent branch arrives as `Workspace.base_branch` (ADR-0034).
+- Factory tools: `ask_question` (text, suggested answers, addressee, blocking) and `request_approval` (type, typed payload, reason, blocking) (ADR-0038). Transcript: request and decision events.
 - Factory tools: "create subtask" (assignee, prompt, optional base and settings no looser than the resolved ones) and "merge subtask PR" (ADR-0034).
 - Transcript: a hook execution event (phase, name, exit code, duration, output tail) for lifecycle hooks (F9).
 - Artifacts, agent-side WASI tools (F2), `Assign.harness` for the built-in loop (inference endpoint URL, model), the gateway MCP endpoint for the harness configuration (ADR-0032).

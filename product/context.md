@@ -74,6 +74,7 @@
 - **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), a tree of subtasks with per-subtree settings for subtask branches and merging (ADR-0034), …
 - **Task history** displayed in a chat-style UI.
 - **Chats** with employees, one per (persona, project) (ADR-0026).
+- **Questions and approvals**: agents ask questions and raise typed approval requests (network access, tool access, push-check exceptions, …); the control plane applies approved actions and keeps one inbox and audit trail (ADR-0038).
 - **Full-text search** across tasks and transcripts.
 - **Projects**: typically one Git repository in a forge + one issue tracker + a sandbox image (ADR-0022) + a project context document (ADR-0026) + Git config entries and commit hooks for the agents' own commits (also at instance scope, ADR-0009), probably more config later.
 - **Agent memory**: agents store, search and retrieve memories *(not in the first iteration; planned before LSP)*.
@@ -162,6 +163,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0035](../design/adr/0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](../design/adr/0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
+| [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2) |
 
 ## 9. Future options
 
