@@ -15,5 +15,6 @@ Status: **design** — nothing runnable yet.
 | [`design/adr/`](design/adr/README.md) | Architecture Decision Records |
 | [`design/`](design/) | Technical deep dives ([`agent-run.md`](design/agent-run.md), [`egress.md`](design/egress.md), [`deployment.md`](design/deployment.md)) |
 | [`contract/`](contract/README.md) | Wire and plugin contracts: protobuf (agent protocol, transcript), WIT (integration plugins), factory tool schemas |
+| [`openspec/`](openspec/README.md) | Specs and implementation changes; order of work per iteration |
 
 Planned as the code arrives: a Cargo workspace (`crates/`), WASI plugins (`plugins/`), the Helm chart (`deploy/helm/dark-factory/`, [ADR-0031](design/adr/0031-helm-chart-deployment-packaging.md)) and Bazel build files (`MODULE.bazel`), see [ADR-0024](design/adr/0024-build-tooling-and-dev-loop.md).
