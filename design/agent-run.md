@@ -162,9 +162,9 @@ Trust policy for configuration found in the repository:
 ### 6.5 Finalize
 1. Stop the harness gracefully (timeout, then kill).
 2. Rewrite `.git/config` again (§7).
-3. Push the task branch with an explicit refspec, never forced:
+3. Push the task branch with an explicit refspec. Fast-forward pushes are plain; rewritten history (e.g. after a rebase) is pushed with `--force-with-lease=<ref>:<expected>` only if the project's branch rewrite policy allows it (`never` / `with-lease` (default) / `always`, ADR-0033). `<expected>` is the remote SHA the runtime last fetched or pushed:
    `git push <repo_url> refs/heads/factory/task/<key>:refs/heads/factory/task/<key>`.
-   If rejected because the remote moved: fetch, don't force, mark the task diverged.
+   If rejected because the remote moved (lease no longer matches): fetch, don't retry with force, mark the task diverged.
 4. WIP snapshot without touching the agent's index or branch:
    ```
    export GIT_INDEX_FILE=/data/runtime/wip.index
@@ -188,7 +188,7 @@ Trust policy for configuration found in the repository:
 |---|---|---|
 | Pod killed mid-run | No finalize | Unpushed commits and uncommitted work stay on the PVC; next run's prepare pushes them; run marked failed |
 | PVC lost | Caches and unpushed work lost | Re-clone, restore from WIP branch; at most the work since the last push/finalize is lost |
-| Push rejected (non-fast-forward) | Remote moved | No force push; task marked diverged; resolved at next prepare per policy |
+| Push rejected (non-fast-forward or lease mismatch) | Remote moved, or rewrite not allowed by policy | No unconditional force push; task marked diverged; resolved at next prepare per policy |
 | Forge unreachable | Push fails | Work kept on the PVC; retried at next prepare; task flagged |
 | Token or time limit reached | Run stops | Finalize normally; run ends with the limit as reason; task resumable with a new run |
 | Provider rate limit | Run stops | Finalize normally; distinct resumable outcome with retry time if known |
@@ -283,7 +283,7 @@ Kept deliberately as a planned option. It runs in the gateway Deployment (ADR-00
   - *Configurable per project:* **protected paths** (e.g. `.forgejo/workflows/**`, `CODEOWNERS`) — the most important one, because CI runs with secrets and a modified workflow could leak them; size and file-type limits (large files that belong in LFS, binaries); linear history (no merge commits).
   - *Approval-gated rules* can't hold a push open (git would time out). They reject it and open an approval; once approved for the task, the next push passes.
   - *Plugin extension point:* a `push-check` WIT world executed by the gateway's Wasmtime host. The host gives read-only access to the pushed refs, commits, changed paths and blob contents; the plugin returns allow, reject with reason, or approval required. No network access, no credentials, deterministic. Built-in checks stay native; plugins cover project conventions such as commit message formats (e.g. Conventional Commits, a required `Task: DF-42` trailer).
-- **Ref enforcement**: `receive-pack` ref update commands are pkt-lines in front of the packfile. The proxy parses them and allows only the task's branch (fast-forward) and `refs/heads/factory/wip/<key>` (force allowed), rejecting everything else before forwarding. The branch → task mapping comes from the database (ADR-0025).
+- **Ref enforcement**: `receive-pack` ref update commands are pkt-lines in front of the packfile. The proxy parses them and allows only the task's branch (non-fast-forward updates only if the branch rewrite policy permits; `receive-pack`'s old-value check provides the lease semantics) and `refs/heads/factory/wip/<key>` (force allowed), rejecting everything else before forwarding. The branch → task mapping comes from the database (ADR-0025).
 - **Benefits**: no forge token and no forge egress in the sandbox; audit log of every push; per-task ref enforcement independent of forge features.
 - **Costs**: the gateway is in the clone data path (bandwidth), Git protocol details to get right, LFS handled separately.
 

@@ -64,11 +64,12 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 ## Planned additive changes (no new major version needed)
 - `Assign`: skills bundle, project context document (ADR-0026), keep-alive window for `AwaitingInput`, workspace lifecycle hooks (phase, name, command or script, timeout, failure policy — F9).
 - `ControlMessage`: `ToolsChanged` for lazy tool loading (`load_server`); `SnapshotWorkspace` for an immediate WIP snapshot (F8).
+- WIT: `issues.list`/webhook handling (`handle-webhook`, ADR-0015), PR comments and review data for the review loop, a `repository` capability (compare refs, read a file at a ref, list a tree) for the workspace changes view (F8). Also for ADR-0033: `pull-requests.list-open` with filters (head prefix, author, label) and a `checks` capability (CI status and job logs for a ref or PR).
+- Agent protocol: the branch rewrite policy in `Assign.workspace` (ADR-0033).
 - Transcript: a hook execution event (phase, name, exit code, duration, output tail) for lifecycle hooks (F9).
 - Artifacts, agent-side WASI tools (F2), `Assign.harness` for the built-in loop (inference endpoint URL, model), the gateway MCP endpoint for the harness configuration (ADR-0032).
 
 Not planned: inference messages. Inference goes through the gateway's OpenAI-compatible endpoint, not the agent protocol (ADR-0007, ADR-0029). The gateway's own link to the control plane will be a separate contract (`darkfactory.gateway.v1`).
-- WIT: `issues.list`/webhook handling (`handle-webhook`, ADR-0015), PR comments and review data for the review loop, a `repository` capability (compare refs, read a file at a ref, list a tree) for the workspace changes view (F8).
 
 ## Open points
 1. Transcript ordering across runs: `seq` is per run; the UI's SSE event id would be `(run, seq)` or a global id assigned by the control plane.

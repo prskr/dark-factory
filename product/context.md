@@ -8,6 +8,7 @@
 > - [`contract/`](../contract/README.md) — protobuf, WIT and tool contracts.
 > - [`design/tech-stack.md`](../design/tech-stack.md) — the whole stack in one place.
 > - [`design/adr/`](../design/adr/README.md) — Architecture Decision Records.
+> - [`product/agent-playbook.md`](agent-playbook.md) — how agents are expected to work in Dark Factory; the source for built-in and project skills.
 > - [`design/deployment.md`](../design/deployment.md) — what an instance needs in the cluster and in PostgreSQL; basis for the setup documentation.
 
 ## 1. Motivation and vision
@@ -147,7 +148,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0022](../design/adr/0022-project-images-runtime-volume-no-warm-pools.md) | Per-project sandbox images, runtime via image volume, no warm pools | Accepted |
 | [ADR-0023](../design/adr/0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](../design/adr/0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
-| [ADR-0025](../design/adr/0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted |
+| [ADR-0025](../design/adr/0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033) |
 | [ADR-0026](../design/adr/0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 2) |
 | [ADR-0027](../design/adr/0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](../design/adr/0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
@@ -155,11 +156,12 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0030](../design/adr/0030-kubernetes-only-with-sandbox-provider-seam.md) | Kubernetes only, with a sandbox provider seam and scoped RBAC | Accepted |
 | [ADR-0031](../design/adr/0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](../design/adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
+| [ADR-0033](../design/adr/0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
 
 ## 9. Future options
 
 ### F1 — Git smart-HTTP proxy in the gateway (planned option)
-The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. The gateway identifies the sandbox, injects the forge credential, streams `upload-pack`/`receive-pack`, and enforces that pushes only touch the task's branch (fast-forward) and `factory/wip/<key>`, and scans every pushed pack for secrets (Kingfisher or similar) — the single secret-scanning point. Removes the last forge token and the forge egress rule from sandboxes and gives an audit log of every push. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11. The same pass-through point runs further push checks (server-side hooks): commit identity, signature verification, protected paths (e.g. CI workflows), size/file-type limits and linear history, plus project-specific checks as `push-check` WASI plugins (`design/agent-run.md` §11).
+The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. The gateway identifies the sandbox, injects the forge credential, streams `upload-pack`/`receive-pack`, and enforces that pushes only touch the task's branch (rewrites per the project's branch rewrite policy, ADR-0033) and `factory/wip/<key>`, and scans every pushed pack for secrets (Kingfisher or similar) — the single secret-scanning point. Removes the last forge token and the forge egress rule from sandboxes and gives an audit log of every push. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11. The same pass-through point runs further push checks (server-side hooks): commit identity, signature verification, protected paths (e.g. CI workflows), size/file-type limits and linear history, plus project-specific checks as `push-check` WASI plugins (`design/agent-run.md` §11).
 
 ### F2 — MCP tools as WASI components, placed by capability (idea, 2026-10-16)
 Because the harness only sees tools through Dark Factory's MCP servers, custom tools can be WASI components implementing one shared WIT `tool` world (describe tools with JSON schemas, handle calls), and run in one of three places:

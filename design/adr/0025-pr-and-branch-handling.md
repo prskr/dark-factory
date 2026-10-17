@@ -1,6 +1,6 @@
 # ADR-0025: Pull request and branch handling
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by ADR-0033)
 - **Date:** 2026-10-16
 - **Related:** [ADR-0009](0009-agent-managed-workspaces-git-durable.md), [ADR-0015](0015-webhook-filtering-and-routing.md)
 

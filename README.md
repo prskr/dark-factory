@@ -10,6 +10,7 @@ Status: **design** — nothing runnable yet.
 |---|---|
 | [`product/context.md`](product/context.md) | Vision, requirements, decision index, future options |
 | [`product/iterations/`](product/iterations/) | Iteration plans — scope, milestones, spikes |
+| [`product/agent-playbook.md`](product/agent-playbook.md) | How agents are expected to work; source for built-in and project skills |
 | [`design/tech-stack.md`](design/tech-stack.md) | The whole tech stack in one place |
 | [`design/adr/`](design/adr/README.md) | Architecture Decision Records |
 | [`design/`](design/) | Technical deep dives ([`agent-run.md`](design/agent-run.md), [`egress.md`](design/egress.md), [`deployment.md`](design/deployment.md)) |
