@@ -70,7 +70,7 @@
 - **Egress control**: per-run generated network policies, host allowlists enforced by the gateway's egress proxy, cluster targets for in-cluster services, and a live egress log ([`design/egress.md`](../design/egress.md), ADR-0029).
 - **Skill management** for agents.
 - **Web UI** to manage multiple agents ("employees", similar to Paperclip): harness configuration, skills, tools, …
-- **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), …
+- **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), a tree of subtasks with per-subtree settings for subtask branches and merging (ADR-0034), …
 - **Task history** displayed in a chat-style UI.
 - **Chats** with employees, one per (persona, project) (ADR-0026).
 - **Full-text search** across tasks and transcripts.
@@ -139,7 +139,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0013](../design/adr/0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
 | [ADR-0014](../design/adr/0014-tasks-authoritative-issues-linked.md) | Tasks are authoritative; issues are linked | Accepted |
 | [ADR-0015](../design/adr/0015-webhook-filtering-and-routing.md) | Inbound events: plugins normalize, the control plane filters and routes | Accepted |
-| [ADR-0016](../design/adr/0016-runs-and-triggers.md) | Runs and triggers | Accepted |
+| [ADR-0016](../design/adr/0016-runs-and-triggers.md) | Runs and triggers | Accepted (amended by ADR-0034) |
 | [ADR-0017](../design/adr/0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](../design/adr/0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](../design/adr/0019-identifiers.md) | Identifiers | Accepted |
@@ -157,6 +157,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0031](../design/adr/0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](../design/adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](../design/adr/0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
+| [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 2) |
 
 ## 9. Future options
 

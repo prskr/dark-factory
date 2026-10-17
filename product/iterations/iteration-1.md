@@ -61,7 +61,7 @@ The slice deliberately exercises the riskiest parts early: the agent protocol, t
 ## 4. Out of scope (later iterations)
 - CEO chat per (persona, project), task dependencies (`blocked_by`), project context document → iteration 2 candidates.
 - Webhooks and event routing (ADR-0015).
-- Delegation, multiple personas working together, routines, approvals and `AwaitingInput`.
+- Delegation and the task tree (ADR-0034), multiple personas working together, routines, approvals and `AwaitingInput`.
 - Full-harness mode and the inference gateway.
 - Tasks starting from existing branches, PR modes other than "create draft PR".
 - Artifacts view, full-text search, audit log view, cost and "what if" views, dashboard-wide live status, cancel button.

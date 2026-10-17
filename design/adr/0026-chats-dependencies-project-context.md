@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (planned for iteration 2)
 - **Date:** 2026-10-16
-- **Related:** [ADR-0016](0016-runs-and-triggers.md)
+- **Related:** [ADR-0016](0016-runs-and-triggers.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md)
 
 ## Context
 

@@ -19,7 +19,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0013](0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
 | [ADR-0014](0014-tasks-authoritative-issues-linked.md) | Tasks are authoritative; issues are linked | Accepted |
 | [ADR-0015](0015-webhook-filtering-and-routing.md) | Inbound events: plugins normalize, the control plane filters and routes | Accepted |
-| [ADR-0016](0016-runs-and-triggers.md) | Runs and triggers | Accepted |
+| [ADR-0016](0016-runs-and-triggers.md) | Runs and triggers | Accepted (amended by ADR-0034) |
 | [ADR-0017](0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](0019-identifiers.md) | Identifiers | Accepted |
@@ -37,3 +37,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0031](0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
+| [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 2) |

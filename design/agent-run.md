@@ -6,7 +6,7 @@
 
 | Term | Meaning |
 |---|---|
-| **Task** | Unit of delegated work, linked to at most one issue (an issue can have many tasks). Owns a task branch, a PVC and one transcript shared by all its runs. Identified by a per-project key, e.g. `DF-42`. |
+| **Task** | Unit of delegated work, linked to at most one issue (an issue can have many tasks). Owns a task branch, a PVC and one transcript shared by all its runs. Identified by a per-project key, e.g. `DF-42`. Tasks form a tree (optional parent, any depth); a task without an agent only groups its subtasks (ADR-0034). |
 | **Run** | One execution of an agent on a task inside one sandbox. A task has 1..n runs, strictly sequential. A run ends when the agent finishes, asks a question or requests approval, hits a limit, or fails. |
 | **Sandbox** | An agent-sandbox `Sandbox` (one pod) hosting exactly one run. Always cold-started; no warm pools. |
 | **Runtime** | The Rust agent binary, mounted into the sandbox via an image volume. |
@@ -108,7 +108,7 @@ States: `Pending → Provisioning → Connecting → Preparing → Running ⇄ A
 - Control plane → `Assign { run_id, task, workspace, harness, tools, budgets, continuation }`, followed by harness credentials and the queued prompts. Budgets cover wall-clock time, tokens and turns; both runtime and control plane enforce them.
 
 ### 6.2 Prepare workspace
-Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. Tasks starting from existing branches (ADR-0025) are not covered here yet.
+Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. Tasks starting from existing branches (ADR-0025) are not covered here yet. `<base>` is the project's default branch or, for subtasks with `subtask_base: parent-branch`, the parent's task branch (ADR-0034); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
 
 ```
 if /data/repo/.git does not exist:
@@ -255,7 +255,7 @@ Target state after the Git proxy: the mTLS identity and third-party harness auth
 ## 9. Tools: factory server and gateway MCP endpoint
 The harness sees two MCP servers, both configured by the runtime (ADR-0027, ADR-0032):
 
-- **`factory`** — the factory tools, which act on Dark Factory's state (iteration 1: update the PR, comment on the issue, report progress, complete the task; later: ask a human or agent, delegate a subtask, artifacts). Configured as a stdio command (`/opt/factory/factory-agent mcp`); no network listener — the subprocess connects to the parent runtime via a Unix socket on tmpfs (`/run/factory/mcp.sock`). The runtime answers `tools/list` from `Assign.tools` and forwards calls as typed tool-call messages over the agent stream; the control plane authorizes them against the task binding and executes them (database, run control, WASI plugins). Large results can be stored as artifacts and returned by reference.
+- **`factory`** — the factory tools, which act on Dark Factory's state (iteration 1: update the PR, comment on the issue, report progress, complete the task; later: ask a human or agent, create a subtask, merge a subtask's PR into the task's own branch if `subtask_merge` allows it (ADR-0034), artifacts). Configured as a stdio command (`/opt/factory/factory-agent mcp`); no network listener — the subprocess connects to the parent runtime via a Unix socket on tmpfs (`/run/factory/mcp.sock`). The runtime answers `tools/list` from `Assign.tools` and forwards calls as typed tool-call messages over the agent stream; the control plane authorizes them against the task binding and executes them (database, run control, WASI plugins). Large results can be stored as artifacts and returned by reference.
 - **Gateway MCP endpoint** *(later)* — third-party MCP servers (e.g. forgejo-mcp), aggregated by the gateway over Streamable HTTP. The gateway identifies the sandbox by pod IP, injects upstream credentials, exposes only the run's tool set (enabled catalog ∩ persona grants ∩ project restrictions) and offers `search_tools` / `load_server` when that set is large. No token is needed in the sandbox.
 
 In full-harness mode the runtime's own loop uses both directly, without the stdio hop.
