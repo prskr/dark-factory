@@ -107,7 +107,7 @@ Original options considered:
 - Full permission catalogue: more permissions will appear over time, especially instance-management operations (CRUD on agents, skills, tools, routines, projects).
 - Harness delivery beyond iteration 1: baked into project images (iteration 1) vs a second image volume once a second project or harness appears.
 - Webhook routing details beyond the rules in ADR-0015 (e.g. CI events when no task waits for CI).
-- Further agent-run questions (divergence policy, UID separation, keep-alive window) are tracked in `design/agent-run.md` §15.
+- Further agent-run questions (divergence policy, UID separation, keep-alive window) are tracked in `design/agent-run.md` §16.
 
 ### Verify early
 - Whether the Claude ACP adapter (`@zed-industries/claude-agent-acp`) reports token usage; "what if" cost depends on it. Fallback: Claude Code's own session JSONL (`~/.claude/projects`) records usage.
@@ -199,3 +199,6 @@ Browse a task's repository in the dashboard, including uncommitted changes, curr
 
 ### F9 — Workspace lifecycle hooks (idea, 2026-10-17)
 Script snippets the runtime runs at `workspace-init` (fresh workspace only), `run-start` (every run, before the harness starts) and `run-end` (after the harness stopped, before push and WIP snapshot), defined at instance and project scope as inline snippets or repository scripts. Hooks run as the harness user with the harness's environment only, so they can't escalate privileges; timeouts, per-hook failure policy (`fail` / `warn`, `run-end` always `warn`), output recorded in the transcript. Turn-based hooks: native harness hooks via the harness settings now, built-in loop later. Details: `design/agent-run.md` §14.
+
+### F10 — Sidecar services in the sandbox (idea, 2026-10-17)
+Service containers next to the agent in the sandbox pod, e.g. a PostgreSQL to develop against, defined per project by humans (name, image, ports, env, resources, probe). Native Kubernetes sidecars: started and ready before the runtime, stopped with the pod. The agent reaches them at `localhost`, so no egress rules are involved; the pod's egress policy applies to the sidecars too. Data is ephemeral per run or kept on the task PVC; migrations and seeding run as lifecycle hooks (F9). Credentials are plain development values; no nested containers needed (ADR-0023). Details: `design/agent-run.md` §15.

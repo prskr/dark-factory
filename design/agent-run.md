@@ -329,7 +329,24 @@ Script snippets the runtime executes at fixed points of a run, defined in Dark F
 - **Turn-based hooks:** in ACP mode, the harness's native hooks (e.g. Claude Code hooks) can already be configured through the harness settings the control plane sends (`Assign.harness.acp.settings_json`). Equivalent turn/tool hooks for the built-in loop are a later addition.
 - The run phase `Preparing` covers `workspace-init` and `run-start`; `Finalizing` starts with `run-end`.
 
-## 15. Open questions
+## 15. Future option: sidecar services
+Service containers that run next to the agent in the sandbox pod — e.g. a PostgreSQL the agent develops against — defined in Dark Factory per project, so the agent never needs to provision containers itself (no nested containers, ADR-0023).
+
+- **Mechanism:** extra containers in the `Sandbox` pod template, as Kubernetes native sidecars (init containers with `restartPolicy: Always`). They start before the agent container, a startup or readiness probe gates the start of the runtime, and they stop with the pod at the end of the run.
+- **Reachability:** containers of a pod share the network namespace, so the agent reaches a sidecar at `localhost:<port>`. That traffic never leaves the pod: no allowlist entry, no network policy, no proxy. The control plane lists the configured sidecars (name, ports, purpose) in the run's instructions so the agent knows they exist.
+- **Definition (project scope, humans only):** name, image, ports, env, resources, probe, data mode. Images come from the project configuration like the sandbox image (ADR-0022); agents can neither add sidecars nor change images — at most request it as a human decision (ADR-0038).
+- **Data:** `ephemeral` (default, `emptyDir` — a fresh service each run) or `task` (a directory on the task PVC, `/data/sidecars/<name>`, so state survives across runs of the task and is deleted with the PVC). Schema migrations and seed data run as workspace lifecycle hooks (§14), e.g. a `run-start` hook calling the project's migration command.
+- **Credentials:** sidecar services are throwaway development instances; credentials are plain values in the definition and also given to the agent's environment (e.g. `DATABASE_URL`). Real secrets don't belong in sidecars.
+- **Isolation:**
+  - With Kata, all containers of the pod share one VM: the isolation boundary stays the same, the VM's memory grows by the sidecars' limits.
+  - The sidecar is as untrusted as the sandbox: the agent can talk to it freely, and the pod's egress policy applies to it as well. Proxy settings aren't injected into sidecars, so they have no outbound access unless their image honours an explicitly configured proxy.
+  - No shared process namespace: the agent can't see sidecar processes or their environment beyond what's configured.
+- **Cost:** image pulls and service start-up add to the cold start of every run (accepted, ADR-0022); `task` data mode avoids re-seeding.
+- **Logs:** humans see sidecar logs in the UI (read through the Kubernetes API, desktop view); for the agent, a factory tool returning a sidecar's recent log lines — so it can debug e.g. failed queries — is a later addition.
+- **Not covered:** services that need their own pod or privileged setup (e.g. a Kubernetes cluster, Docker daemon) — container-based integration tests keep running via Bazel RBE (ADR-0023); and sidecars shared between tasks, which would couple tasks' state.
+- **To verify:** native sidecar support in agent-sandbox's pod template and with the Kata runtime class (native sidecars are stable since Kubernetes 1.33).
+
+## 16. Open questions
 - Divergence policy: agent rebases automatically vs human decides.
 - Separate UIDs for runtime and harness to protect `/data/runtime` and `.git/config` within the sandbox.
 - Keep-alive window length for `AwaitingInput` (responsiveness vs resource use).
