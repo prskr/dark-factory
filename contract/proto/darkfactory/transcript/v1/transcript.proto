@@ -1,0 +1,341 @@
+// Dark Factory transcript schema, v1 (D17).
+//
+// Modelled on the session/update vocabulary of the Agent Client Protocol (ACP),
+// but owned by Dark Factory: the agent runtime translates whatever the harness
+// emits (ACP today, the built-in loop later) into these events, so ACP changes
+// stay contained in the runtime.
+//
+// Storage: the control plane stores one row per Event, keyed by (run_id, seq),
+// as JSONB using the canonical protobuf JSON mapping (D12). Inline binary data
+// is moved to the blob store before storing (see BlobData).
+//
+// Compatibility: only additive changes within v1. Breaking changes go into a
+// new package (darkfactory.transcript.v2); stored rows carry schema_version so
+// the reader knows which package to decode them with.
+
+syntax = "proto3";
+
+package darkfactory.transcript.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// One entry of a task's transcript. All runs of a task share one transcript.
+message Event {
+  // Always 1 for this package.
+  uint32 schema_version = 1;
+  google.protobuf.Timestamp occurred_at = 2;
+  // Groups all events of one turn (prompt in, harness response out). Assigned
+  // by the runtime, unique within the task.
+  string turn_id = 3;
+
+  oneof kind {
+    TurnStarted turn_started = 10;
+    UserMessage user_message = 11;
+    AgentMessageChunk agent_message_chunk = 12;
+    AgentThoughtChunk agent_thought_chunk = 13;
+    ToolCall tool_call = 14;
+    ToolCallUpdate tool_call_update = 15;
+    Plan plan = 16;
+    TurnEnded turn_ended = 17;
+    Notice notice = 18;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Turns
+// ---------------------------------------------------------------------------
+
+// Marks the start of a turn. Followed by one UserMessage per consumed prompt.
+message TurnStarted {
+  // Prompts (agent.v1.Prompt.prompt_id) delivered to the harness in this turn.
+  repeated string prompt_ids = 1;
+}
+
+// A prompt as it was delivered to the harness. Emitting this event is the
+// runtime's delivery confirmation: the control plane marks the queued message
+// as delivered when it persists the event.
+message UserMessage {
+  string prompt_id = 1;
+  Principal author = 2;
+  repeated ContentBlock content = 3;
+}
+
+message TurnEnded {
+  StopReason stop_reason = 1;
+  // One entry per model used in the turn (harnesses may call several models,
+  // e.g. a small model for sub-tasks). Empty if the harness didn't report usage.
+  repeated Usage usage = 2;
+  UsageSource usage_source = 3;
+  // Human-readable detail, e.g. the provider's rate-limit message.
+  string detail = 4;
+}
+
+enum StopReason {
+  STOP_REASON_UNSPECIFIED = 0;
+  // The harness finished its response.
+  STOP_REASON_END_TURN = 1;
+  STOP_REASON_MAX_TOKENS = 2;
+  STOP_REASON_MAX_TURN_REQUESTS = 3;
+  STOP_REASON_REFUSAL = 4;
+  STOP_REASON_CANCELLED = 5;
+  // The model provider rejected further requests (e.g. subscription window).
+  STOP_REASON_RATE_LIMITED = 6;
+  // The harness failed (crash, protocol error, ...).
+  STOP_REASON_ERROR = 7;
+}
+
+// Token usage per model (D21). Prices are applied by the control plane.
+message Usage {
+  string model_id = 1;
+  uint64 input_tokens = 2;
+  uint64 output_tokens = 3;
+  uint64 cache_read_tokens = 4;
+  uint64 cache_write_tokens = 5;
+}
+
+enum UsageSource {
+  USAGE_SOURCE_UNSPECIFIED = 0;
+  // Reported by the harness over ACP.
+  USAGE_SOURCE_HARNESS = 1;
+  // Parsed by the runtime from the harness's own session files.
+  USAGE_SOURCE_SESSION_LOG = 2;
+  // Measured by the gateway's inference endpoint (full-harness mode).
+  USAGE_SOURCE_GATEWAY = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Agent output
+// ---------------------------------------------------------------------------
+
+// A streamed piece of the agent's visible answer. Consecutive chunks with the
+// same message_id form one message; the UI uses message_id as the stable DOM
+// id it morphs while chunks arrive (D4).
+message AgentMessageChunk {
+  // Assigned by the runtime: a new id whenever agent text resumes after a
+  // tool call or thought.
+  string message_id = 1;
+  ContentBlock content = 2;
+}
+
+message AgentThoughtChunk {
+  string message_id = 1;
+  ContentBlock content = 2;
+}
+
+// The agent's current plan. Each event replaces the previous plan entirely.
+message Plan {
+  repeated PlanEntry entries = 1;
+}
+
+message PlanEntry {
+  string content = 1;
+  PlanEntryPriority priority = 2;
+  PlanEntryStatus status = 3;
+}
+
+enum PlanEntryPriority {
+  PLAN_ENTRY_PRIORITY_UNSPECIFIED = 0;
+  PLAN_ENTRY_PRIORITY_HIGH = 1;
+  PLAN_ENTRY_PRIORITY_MEDIUM = 2;
+  PLAN_ENTRY_PRIORITY_LOW = 3;
+}
+
+enum PlanEntryStatus {
+  PLAN_ENTRY_STATUS_UNSPECIFIED = 0;
+  PLAN_ENTRY_STATUS_PENDING = 1;
+  PLAN_ENTRY_STATUS_IN_PROGRESS = 2;
+  PLAN_ENTRY_STATUS_COMPLETED = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Tool calls
+// ---------------------------------------------------------------------------
+
+message ToolCall {
+  // The harness's id for the call (ACP toolCallId). Unique within the turn.
+  string tool_call_id = 1;
+  string title = 2;
+  ToolKind kind = 3;
+  ToolCallStatus status = 4;
+  repeated ToolCallContent content = 5;
+  repeated Location locations = 6;
+  // Raw input/output as JSON, possibly truncated by the runtime (see truncated).
+  string raw_input_json = 7;
+  string raw_output_json = 8;
+  ToolOrigin origin = 9;
+  // For origin FACTORY: the agent.v1.ToolCallRequest.call_id this harness call
+  // was matched to. Best effort; empty if the runtime couldn't correlate.
+  string factory_call_id = 10;
+  // True if any field above was shortened to respect size limits.
+  bool truncated = 11;
+}
+
+// Partial update of a ToolCall. Only fields that are set change; list fields
+// are replaced as a whole when their wrapper is set.
+message ToolCallUpdate {
+  string tool_call_id = 1;
+  optional string title = 2;
+  optional ToolKind kind = 3;
+  optional ToolCallStatus status = 4;
+  ToolCallContentList content = 5;
+  LocationList locations = 6;
+  optional string raw_input_json = 7;
+  optional string raw_output_json = 8;
+  optional bool truncated = 9;
+}
+
+message ToolCallContentList {
+  repeated ToolCallContent items = 1;
+}
+
+message LocationList {
+  repeated Location items = 1;
+}
+
+message ToolCallContent {
+  oneof kind {
+    ContentBlock content = 1;
+    Diff diff = 2;
+  }
+}
+
+message Diff {
+  string path = 1;
+  // Absent for newly created files.
+  optional string old_text = 2;
+  string new_text = 3;
+}
+
+message Location {
+  string path = 1;
+  optional uint32 line = 2;
+}
+
+enum ToolKind {
+  TOOL_KIND_UNSPECIFIED = 0;
+  TOOL_KIND_READ = 1;
+  TOOL_KIND_EDIT = 2;
+  TOOL_KIND_DELETE = 3;
+  TOOL_KIND_MOVE = 4;
+  TOOL_KIND_SEARCH = 5;
+  TOOL_KIND_EXECUTE = 6;
+  TOOL_KIND_THINK = 7;
+  TOOL_KIND_FETCH = 8;
+  TOOL_KIND_SWITCH_MODE = 9;
+  TOOL_KIND_OTHER = 10;
+}
+
+enum ToolCallStatus {
+  TOOL_CALL_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_STATUS_PENDING = 1;
+  TOOL_CALL_STATUS_IN_PROGRESS = 2;
+  TOOL_CALL_STATUS_COMPLETED = 3;
+  TOOL_CALL_STATUS_FAILED = 4;
+}
+
+enum ToolOrigin {
+  TOOL_ORIGIN_UNSPECIFIED = 0;
+  // A tool built into the harness (shell, file edits, ...), executed in the sandbox.
+  TOOL_ORIGIN_HARNESS = 1;
+  // A tool served by the runtime's MCP proxy and executed by the control plane.
+  TOOL_ORIGIN_FACTORY = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime notices
+// ---------------------------------------------------------------------------
+
+// Something the runtime wants to surface in the transcript that isn't model
+// output, e.g. "task branch diverged from remote" or "push rejected: secret
+// detected".
+message Notice {
+  NoticeLevel level = 1;
+  // Machine-readable code, dot-separated, e.g. "workspace.diverged".
+  string code = 2;
+  string message = 3;
+}
+
+enum NoticeLevel {
+  NOTICE_LEVEL_UNSPECIFIED = 0;
+  NOTICE_LEVEL_INFO = 1;
+  NOTICE_LEVEL_WARNING = 2;
+  NOTICE_LEVEL_ERROR = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Shared building blocks (also used by darkfactory.agent.v1)
+// ---------------------------------------------------------------------------
+
+// Who authored a prompt. Set by the control plane; the runtime only echoes it.
+message Principal {
+  oneof kind {
+    HumanPrincipal human = 1;
+    AgentPrincipal agent = 2;
+    SystemPrincipal system = 3;
+  }
+}
+
+message HumanPrincipal {
+  string user_id = 1;
+  string display_name = 2;
+}
+
+message AgentPrincipal {
+  string persona_id = 1;
+  string display_name = 2;
+  // The task the authoring agent was working on (e.g. a delegating parent task).
+  string task_id = 3;
+}
+
+// Messages generated by Dark Factory itself, e.g. the task assignment or a
+// routed webhook notification.
+message SystemPrincipal {
+  // Machine-readable reason, e.g. "task.assigned", "webhook.review_submitted".
+  string reason = 1;
+}
+
+message ContentBlock {
+  oneof kind {
+    TextContent text = 1;
+    ImageContent image = 2;
+    ResourceLink resource_link = 3;
+    EmbeddedResource resource = 4;
+  }
+}
+
+message TextContent {
+  // Markdown.
+  string text = 1;
+}
+
+message ImageContent {
+  string mime_type = 1;
+  BlobData data = 2;
+}
+
+message ResourceLink {
+  string uri = 1;
+  string name = 2;
+  string mime_type = 3;
+  optional string title = 4;
+  optional uint64 size_bytes = 5;
+}
+
+message EmbeddedResource {
+  string uri = 1;
+  string mime_type = 2;
+  oneof contents {
+    string text = 3;
+    BlobData blob = 4;
+  }
+}
+
+// Binary data. On the wire it is sent inline; before storing an event the
+// control plane moves it to the blob store and replaces it with the hash (D12).
+message BlobData {
+  oneof source {
+    bytes inline = 1;
+    // Hex-encoded SHA-256 of the content in the blob store.
+    string sha256 = 2;
+  }
+}

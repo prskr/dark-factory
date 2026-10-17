@@ -1,0 +1,417 @@
+// Dark Factory agent protocol, v1 (D6, D7, D17).
+//
+// The agent runtime inside a sandbox dials the control plane's dedicated agent
+// port and opens one bidirectional stream. mTLS (cert-manager csi-driver,
+// per-pod certificate) identifies the sandbox pod; the control plane maps
+// pod -> run -> task -> persona and authorizes everything against that binding.
+//
+// DELIVERY SEMANTICS
+//
+// Agent -> control plane: reliable and ordered.
+//   * Every AgentMessage except Hello carries a seq, strictly increasing per
+//     run, starting at 1.
+//   * The runtime keeps each message in its on-disk outbox
+//     (/data/runtime/outbox) until it is acknowledged.
+//   * The control plane acknowledges cumulatively (ControlMessage.ack) only
+//     after the message is persisted, and drops messages with a seq it has
+//     already persisted. Delivery is therefore effectively exactly-once.
+//   * After a reconnect, HelloAck.last_persisted_seq tells the runtime where
+//     to resume its replay.
+//
+// Control plane -> agent: idempotent commands, not sequenced.
+//   * Every command is keyed (run_id, prompt_id, call_id, request_id) and
+//     derived from database state, so any control plane replica can serve a
+//     reconnect without in-memory session state.
+//   * After HelloAck the control plane (re-)sends Assign, HarnessCredentials,
+//     every prompt not yet confirmed as delivered, and Cancel if requested.
+//     The runtime ignores duplicates.
+//   * Request/response pairs (tool calls, credentials): after a reconnect the
+//     runtime re-sends every request still waiting for a response, with the
+//     same id. The control plane answers from its stored result or executes
+//     the request if it never started, so retries never execute twice.
+//
+// Liveness uses HTTP/2 keepalive pings; there are no application heartbeats.
+//
+// VERSIONING
+//   * Additive changes within v1, advertised through capabilities in
+//     Hello/HelloAck.
+//   * Breaking changes go into darkfactory.agent.v2, served side by side on
+//     the same port; the control plane supports the current and the previous
+//     major version.
+
+syntax = "proto3";
+
+package darkfactory.agent.v1;
+
+import "darkfactory/transcript/v1/transcript.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+service AgentChannel {
+  rpc Connect(stream AgentMessage) returns (stream ControlMessage);
+}
+
+// ---------------------------------------------------------------------------
+// Envelopes
+// ---------------------------------------------------------------------------
+
+message AgentMessage {
+  // 0 for Hello, otherwise strictly increasing per run starting at 1.
+  uint64 seq = 1;
+
+  oneof body {
+    Hello hello = 10;
+    PhaseChanged phase_changed = 11;
+    darkfactory.transcript.v1.Event transcript_event = 12;
+    ToolCallRequest tool_call_request = 13;
+    CredentialRequest credential_request = 14;
+    PushReport push_report = 15;
+    RunReport run_report = 16;
+  }
+}
+
+message ControlMessage {
+  // Highest AgentMessage.seq the control plane has persisted (cumulative).
+  // A ControlMessage without a body is a pure acknowledgement.
+  uint64 ack = 1;
+
+  oneof body {
+    HelloAck hello_ack = 10;
+    Assign assign = 11;
+    HarnessCredentials harness_credentials = 12;
+    Prompt prompt = 13;
+    Cancel cancel = 14;
+    ToolCallResult tool_call_result = 15;
+    CredentialGrant credential_grant = 16;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handshake
+// ---------------------------------------------------------------------------
+
+// First message on every connection.
+message Hello {
+  string runtime_version = 1;
+  // Optional protocol features the runtime supports, e.g. "transcript.images".
+  repeated string capabilities = 2;
+  // The run the runtime was working on, read from /data/runtime. Empty on the
+  // first connect of a run. Informational only: the control plane trusts its
+  // own pod -> run binding. If it differs from HelloAck.run_id, the runtime
+  // discards the leftover outbox of the old run and emits a Notice.
+  string previous_run_id = 3;
+}
+
+message HelloAck {
+  // The run bound to this sandbox.
+  string run_id = 1;
+  // Highest AgentMessage.seq already persisted for this run (0 if none). The
+  // runtime replays its outbox from last_persisted_seq + 1.
+  uint64 last_persisted_seq = 2;
+  repeated string capabilities = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Run setup (control plane -> agent)
+// ---------------------------------------------------------------------------
+
+// Everything the runtime needs for a run except secrets and prompts. Sent
+// after every HelloAck; identical content for the same run_id.
+message Assign {
+  string run_id = 1;
+  TaskRef task = 2;
+  Workspace workspace = 3;
+  Harness harness = 4;
+  // Factory tools the runtime exposes to the harness through its MCP server
+  // (third-party MCP servers come from the gateway, ADR-0032). The
+  // runtime answers tools/list from this list; calls go to the control plane.
+  repeated ToolDescriptor tools = 5;
+  Budgets budgets = 6;
+  Continuation continuation = 7;
+}
+
+message TaskRef {
+  string task_id = 1;
+  // Per-project key, e.g. "DF-1" (D19).
+  string task_key = 2;
+  string project_key = 3;
+  string title = 4;
+}
+
+message Workspace {
+  // HTTPS remote used for fetch and push. v1: the forge; later the control
+  // plane's Git proxy (F1). The runtime never derives URLs itself.
+  string repo_url = 1;
+  string base_branch = 2;
+  // e.g. "factory/task/DF-1".
+  string task_branch = 3;
+  // e.g. "factory/wip/DF-1".
+  string wip_branch = 4;
+  CommitIdentity commit_identity = 5;
+  // Commit hooks for the harness's own commits, from instance and project
+  // scope, in execution order (instance first). The runtime generates a hook
+  // directory from them and points the harness's core.hooksPath at it; its own
+  // Git operations never run hooks. Empty: no hooks.
+  repeated GitHookCommand git_hooks = 6;
+  // Git config entries from instance and project scope, already validated and
+  // in application order (instance first, then project). Multi-valued keys
+  // appear several times. The runtime re-validates them against its denylist
+  // and applies them between the fresh-clone template and its own keys.
+  repeated GitConfigEntry git_config = 7;
+}
+
+message GitHookCommand {
+  GitHookType hook = 1;
+  // Shell command run from the repository root, e.g.
+  // "pre-commit run --hook-stage pre-commit" or "./.githooks/pre-commit".
+  string command = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+enum GitHookType {
+  GIT_HOOK_TYPE_UNSPECIFIED = 0;
+  GIT_HOOK_TYPE_PRE_COMMIT = 1;
+  GIT_HOOK_TYPE_PREPARE_COMMIT_MSG = 2;
+  GIT_HOOK_TYPE_COMMIT_MSG = 3;
+}
+
+message GitConfigEntry {
+  // Full key, e.g. "rebase.autoStash".
+  string key = 1;
+  string value = 2;
+}
+
+message CommitIdentity {
+  string name = 1;
+  string email = 2;
+}
+
+message Harness {
+  // The persona's system prompt, added to the harness's own defaults.
+  string system_prompt = 1;
+
+  oneof kind {
+    AcpHarness acp = 10;
+    // Reserved for the built-in loop (full-harness mode).
+  }
+}
+
+message AcpHarness {
+  // Command line of the ACP agent, e.g. ["/opt/harness/bin/claude-agent-acp"].
+  repeated string command = 1;
+  // Non-secret environment only. Secrets arrive via HarnessCredentials.
+  map<string, string> env = 2;
+  // Model override, if the persona sets one.
+  optional string model = 3;
+  // Harness-specific settings as JSON (e.g. Claude Code settings), written by
+  // the runtime before every start, overwriting what is on the PVC.
+  string settings_json = 4;
+}
+
+message ToolDescriptor {
+  // Name as exposed via MCP, e.g. "update_pull_request".
+  string name = 1;
+  string title = 2;
+  string description = 3;
+  // JSON Schema of the arguments.
+  string input_schema_json = 4;
+  // JSON Schema of structured results, if the tool returns any.
+  optional string output_schema_json = 5;
+  ToolAnnotations annotations = 6;
+}
+
+// Mirrors MCP tool annotations (hints for the harness, not enforcement).
+message ToolAnnotations {
+  bool read_only = 1;
+  bool destructive = 2;
+  bool idempotent = 3;
+  bool open_world = 4;
+}
+
+message Budgets {
+  // Hard limit for the whole run; the runtime finalizes when it's reached.
+  google.protobuf.Duration max_wall_clock = 1;
+  optional uint64 max_output_tokens = 2;
+  optional uint32 max_turns = 3;
+}
+
+message Continuation {
+  // Harness session to resume via ACP session/load. Empty on a task's first run.
+  string harness_session_id = 1;
+  // Seeded into a new session when resuming isn't possible. Empty on a task's
+  // first run.
+  string summary = 2;
+}
+
+// Secrets for the harness, e.g. CLAUDE_CODE_OAUTH_TOKEN (D8, D10). Kept in
+// memory and on tmpfs (/run/factory) only; never written to the PVC, never
+// logged. Re-sent after every HelloAck and whenever a credential rotates.
+message HarnessCredentials {
+  map<string, string> env = 1;
+}
+
+// A queued message for the harness (D16). The runtime delivers prompts
+// turn-based: all prompts it holds when a turn starts form that turn's input.
+// Delivery is confirmed by the transcript.v1.UserMessage event carrying the
+// prompt_id; until then the control plane re-sends the prompt after reconnects
+// and, if the run ends first, it starts the next run.
+message Prompt {
+  string prompt_id = 1;
+  darkfactory.transcript.v1.Principal author = 2;
+  repeated darkfactory.transcript.v1.ContentBlock content = 3;
+  google.protobuf.Timestamp queued_at = 4;
+}
+
+// Stop the current turn, then finalize (push, WIP snapshot, RunReport).
+message Cancel {
+  string reason = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Progress (agent -> control plane)
+// ---------------------------------------------------------------------------
+
+message PhaseChanged {
+  RunPhase phase = 1;
+  string detail = 2;
+}
+
+// Phases the runtime reports. Pending/Provisioning/Connecting are tracked by
+// the control plane itself; the outcome comes with RunReport.
+enum RunPhase {
+  RUN_PHASE_UNSPECIFIED = 0;
+  RUN_PHASE_PREPARING = 1;
+  RUN_PHASE_RUNNING = 2;
+  RUN_PHASE_AWAITING_INPUT = 3;
+  RUN_PHASE_FINALIZING = 4;
+}
+
+// Sent after every push attempt. The control plane opens the draft PR on the
+// first successful task-branch push that is ahead of base (D25).
+message PushReport {
+  PushTarget target = 1;
+  // Full ref name, e.g. "refs/heads/factory/task/DF-1".
+  string ref = 2;
+  // Commit pushed (or attempted). Empty for PUSH_STATUS_DELETED.
+  string sha = 3;
+  PushStatus status = 4;
+  uint32 commits_ahead_of_base = 5;
+  string detail = 6;
+}
+
+enum PushTarget {
+  PUSH_TARGET_UNSPECIFIED = 0;
+  PUSH_TARGET_TASK_BRANCH = 1;
+  PUSH_TARGET_WIP_BRANCH = 2;
+}
+
+enum PushStatus {
+  PUSH_STATUS_UNSPECIFIED = 0;
+  PUSH_STATUS_OK = 1;
+  // The remote moved; the runtime never force-pushes the task branch.
+  PUSH_STATUS_REJECTED_NON_FAST_FORWARD = 2;
+  PUSH_STATUS_FAILED = 3;
+  // The Git proxy's secret scan rejected the push (once the proxy exists).
+  PUSH_STATUS_REJECTED_SECRET_DETECTED = 4;
+  // WIP branch removed because there was no uncommitted work.
+  PUSH_STATUS_DELETED = 5;
+}
+
+// Last message of a run, sent after finalizing.
+message RunReport {
+  RunOutcome outcome = 1;
+  string detail = 2;
+  // For RUN_OUTCOME_RATE_LIMITED: when the provider window resets, if known.
+  google.protobuf.Timestamp retry_after = 3;
+  // Harness session to resume in the next run (Continuation).
+  string harness_session_id = 4;
+  WorkspaceState workspace = 5;
+}
+
+enum RunOutcome {
+  RUN_OUTCOME_UNSPECIFIED = 0;
+  // The agent called complete_task.
+  RUN_OUTCOME_COMPLETED = 1;
+  // The harness ended its turn without completing and nothing was queued:
+  // the task waits for a human (e.g. the agent asked a question in text).
+  RUN_OUTCOME_END_TURN = 2;
+  // Waiting for an answer or approval after the keep-alive window (later).
+  RUN_OUTCOME_BLOCKED = 3;
+  // A budget from Assign.budgets was exhausted.
+  RUN_OUTCOME_LIMIT_REACHED = 4;
+  // The model provider rate-limited the harness; resumable (D16).
+  RUN_OUTCOME_RATE_LIMITED = 5;
+  RUN_OUTCOME_CANCELLED = 6;
+  RUN_OUTCOME_FAILED = 7;
+}
+
+message WorkspaceState {
+  string task_branch_sha = 1;
+  // Empty if no WIP snapshot exists.
+  string wip_sha = 2;
+  // True if the remote task branch equals the local one after finalizing.
+  bool task_branch_pushed = 3;
+  bool diverged = 4;
+  uint64 size_bytes = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Tool calls (runtime MCP proxy <-> control plane)
+// ---------------------------------------------------------------------------
+
+// A harness called one of the tools from Assign.tools.
+message ToolCallRequest {
+  // Generated by the runtime (UUIDv7); idempotency key for retries.
+  string call_id = 1;
+  string tool_name = 2;
+  string arguments_json = 3;
+}
+
+message ToolCallResult {
+  string call_id = 1;
+  // Tool-level failure (including "not permitted"); content explains it to the
+  // model, as in MCP.
+  bool is_error = 2;
+  repeated darkfactory.transcript.v1.ContentBlock content = 3;
+  // Structured result matching ToolDescriptor.output_schema_json, if any.
+  string structured_content_json = 4;
+  // Set by the control plane, e.g. for complete_task: the runtime lets the
+  // current turn finish and then finalizes the run instead of continuing.
+  bool end_run_after_turn = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Credentials (v1: Git only, D10)
+// ---------------------------------------------------------------------------
+
+message CredentialRequest {
+  string request_id = 1;
+
+  oneof kind {
+    GitCredentialRequest git = 10;
+  }
+}
+
+// Fields as passed to the runtime acting as Git credential helper.
+message GitCredentialRequest {
+  string protocol = 1;
+  string host = 2;
+  string path = 3;
+}
+
+message CredentialGrant {
+  string request_id = 1;
+
+  oneof result {
+    GitCredential git = 10;
+    // The request doesn't match the run's repository or isn't permitted.
+    string denied_reason = 11;
+  }
+}
+
+// Short-lived, repo-scoped forge credential. Never persisted by the runtime.
+message GitCredential {
+  string username = 1;
+  string password = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}

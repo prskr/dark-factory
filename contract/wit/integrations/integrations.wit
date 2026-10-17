@@ -1,0 +1,202 @@
+/// Dark Factory integration plugins (D2, D18).
+///
+/// Plugins are WebAssembly components executed by the control plane. Each
+/// plugin exports one or more capability interfaces; the control plane detects
+/// which ones by inspecting the component's exports:
+///
+///   * `pull-requests` — code forges (Forgejo, GitHub, ...)
+///   * `issues`        — issue trackers (Forgejo, GitHub, Jira, ...)
+///
+/// A forge like Forgejo exports both (world `forge`); an issue-only tracker
+/// exports just `issues` (world `issue-provider`).
+///
+/// Security model:
+///   * Plugins reach the network only through `wasi:http/outgoing-handler`.
+///     The host links the standard WASI interfaces with no capabilities
+///     granted: no preopened directories, no environment, no sockets.
+///   * The host allows requests only to the hosts configured for the plugin
+///     instance and injects the `Authorization` header itself. Plugins never
+///     see credentials; an `Authorization` header set by a plugin is replaced.
+///   * Non-secret settings come from `wasi:config/store`.
+///   * Plugins may log to stderr; the host forwards it to its tracing output.
+///
+/// Configuration keys every integration plugin reads:
+///   * `base-url` — e.g. `https://git.example.org`
+package darkfactory:integrations@0.1.0;
+
+/// Types shared by all capability interfaces.
+interface types {
+    /// A repository on the integration's server.
+    record repo-ref {
+        /// User or organisation, e.g. `peter`.
+        owner: string,
+        /// Repository name, e.g. `dark-factory`.
+        name: string,
+    }
+
+    /// Identifies a pull request.
+    record pull-request-ref {
+        repo: repo-ref,
+        number: u64,
+    }
+
+    /// Identifies an issue. On forges where pull requests are issues
+    /// (Forgejo, GitHub), a pull request number is a valid issue number.
+    record issue-ref {
+        repo: repo-ref,
+        number: u64,
+    }
+
+    record rate-limit {
+        retry-after-seconds: option<u32>,
+        message: string,
+    }
+
+    record upstream-error {
+        /// HTTP status returned by the upstream server.
+        status: u16,
+        message: string,
+    }
+
+    variant error {
+        /// The object doesn't exist or isn't visible to the bot account.
+        not-found(string),
+        /// Credentials are missing, invalid or lack permission.
+        unauthorized(string),
+        /// The request conflicts with the current state, e.g. an open pull
+        /// request for the same head and base already exists.
+        conflict(string),
+        /// The input was rejected, e.g. an unknown branch.
+        invalid-input(string),
+        /// The upstream server asked to slow down.
+        rate-limited(rate-limit),
+        /// Any other non-success response from the upstream server.
+        upstream(upstream-error),
+        /// Plugin configuration is missing or invalid.
+        config(string),
+        /// The upstream server couldn't be reached, or the host denied the
+        /// request (destination not allowed).
+        transport(string),
+        /// A bug in the plugin.
+        internal(string),
+    }
+}
+
+/// Pull requests on a code forge.
+interface pull-requests {
+    use types.{repo-ref, pull-request-ref, error};
+
+    enum pull-request-state {
+        open,
+        closed,
+        merged,
+    }
+
+    record pull-request {
+        id: pull-request-ref,
+        /// Web URL for humans.
+        url: string,
+        head: string,
+        base: string,
+        /// Without any draft marker the forge may add to the title.
+        title: string,
+        /// Markdown.
+        body: string,
+        draft: bool,
+        state: pull-request-state,
+        head-sha: string,
+    }
+
+    record new-pull-request {
+        repo: repo-ref,
+        /// Source branch, e.g. `factory/task/DF-1`.
+        head: string,
+        /// Target branch, e.g. `main`.
+        base: string,
+        title: string,
+        /// Markdown.
+        body: string,
+        /// Forges without native drafts emulate them (e.g. Forgejo's
+        /// work-in-progress title prefix); the plugin hides that detail.
+        draft: bool,
+    }
+
+    /// Only fields that are set change.
+    record pull-request-update {
+        title: option<string>,
+        body: option<string>,
+        /// `false` marks the pull request ready for review.
+        draft: option<bool>,
+    }
+
+    /// Opens a pull request. Fails with `conflict` if an open pull request
+    /// for the same head and base exists; callers then use `find-open`.
+    create: func(request: new-pull-request) -> result<pull-request, error>;
+
+    /// The open pull request from `head` into `base`, if any. Makes creation
+    /// idempotent and supports attaching tasks to existing pull requests.
+    find-open: func(repo: repo-ref, head: string, base: string) -> result<option<pull-request>, error>;
+
+    get: func(id: pull-request-ref) -> result<pull-request, error>;
+
+    update: func(id: pull-request-ref, changes: pull-request-update) -> result<pull-request, error>;
+}
+
+/// Issues in an issue tracker.
+interface issues {
+    use types.{issue-ref, error};
+
+    enum issue-state {
+        open,
+        closed,
+    }
+
+    record issue {
+        id: issue-ref,
+        /// Web URL for humans.
+        url: string,
+        title: string,
+        /// Markdown.
+        body: string,
+        state: issue-state,
+        labels: list<string>,
+    }
+
+    record comment {
+        /// Tracker-specific identifier.
+        id: string,
+        url: string,
+    }
+
+    get: func(id: issue-ref) -> result<issue, error>;
+
+    /// Adds a Markdown comment. Not idempotent: the host only retries when
+    /// the error is `rate-limited` or `transport` and accepts rare duplicates.
+    add-comment: func(id: issue-ref, body: string) -> result<comment, error>;
+}
+
+/// What every integration plugin may import.
+world plugin-base {
+    import wasi:http/outgoing-handler@0.2.12;
+    import wasi:config/store@0.2.0-rc.1;
+    import wasi:clocks/monotonic-clock@0.2.12;
+    import wasi:clocks/wall-clock@0.2.12;
+    import wasi:random/random@0.2.12;
+    import wasi:cli/stderr@0.2.12;
+}
+
+world pull-request-provider {
+    include plugin-base;
+    export pull-requests;
+}
+
+world issue-provider {
+    include plugin-base;
+    export issues;
+}
+
+/// A code forge that also hosts issues, e.g. Forgejo.
+world forge {
+    include pull-request-provider;
+    include issue-provider;
+}

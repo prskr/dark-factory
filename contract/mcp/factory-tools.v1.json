@@ -1,0 +1,107 @@
+{
+  "$comment": "Factory MCP tools v1 (iteration 1). The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
+  "version": 1,
+  "tools": [
+    {
+      "name": "update_pull_request",
+      "title": "Update pull request",
+      "description": "Change the title and/or description of this task's pull request. You don't open pull requests yourself: a draft pull request is opened automatically after your first commits are pushed (the runtime pushes after every turn that produced new commits). If it doesn't exist yet, the values you set are stored and used when it is opened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "New title, without any draft or WIP marker."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "New description in Markdown. Replaces the current description."
+          }
+        },
+        "minProperties": 1,
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "comment_on_issue",
+      "title": "Comment on issue",
+      "description": "Add a comment to the issue linked to this task, e.g. to record findings, decisions or open questions for humans and for later tasks on the same issue. Fails if the task has no linked issue. Comments are public to everyone with access to the issue; never include secrets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "description": "Comment text in Markdown."
+          }
+        },
+        "required": ["body"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "report_progress",
+      "title": "Report progress",
+      "description": "Set a short status line for this task, shown to humans in Dark Factory and mirrored to the linked issue according to project settings. Use it at meaningful milestones (e.g. 'reproduced the bug', 'tests pass'), not after every step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "One or two sentences, plain text."
+          }
+        },
+        "required": ["summary"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "complete_task",
+      "title": "Complete task",
+      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: end your turn with the question instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "What was done and anything reviewers should know, in Markdown."
+          }
+        },
+        "required": ["summary"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}
