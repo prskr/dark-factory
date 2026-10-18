@@ -99,7 +99,7 @@ cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buildifier`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher` and `shellcheck` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine.
 
 | Task | Command |
@@ -108,5 +108,8 @@ lefthook hooks use the same versions on every machine.
 | Bump tools to the latest upstream releases | `cargo xtask update-tools` |
 | Fail if `multitool.lock.json` is stale (CI / scheduled job) | `cargo xtask update-tools --check` |
 | Add a tool | add an entry to `TOOLS` in `tools/xtask/src/main.rs` and to `//:bazel_env` |
+| Check Rust formatting (pinned rustfmt, hermetic) | `bazel build --config=fmt //crates/... //plugins/...` |
+| Format protos / lint protos | `bazel run //contract:format` / `bazel test //contract:buf_lint_test` |
+| Install git hooks without direnv | `LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install` (git hooks use `LEFTHOOK_BIN`) |
 
 `multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits.

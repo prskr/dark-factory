@@ -9,6 +9,9 @@ bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "35.1")
+
+bazel_dep(name = "rules_buf", version = "0.5.4", dev_dependency = True)
+
 bazel_dep(name = "rules_img", version = "0.3.23")
 bazel_dep(name = "rules_multirun", version = "0.14.0")
 bazel_dep(name = "rules_multitool", version = "1.11.1")
@@ -26,6 +29,10 @@ toolchains_musl = use_extension("@toolchains_musl//:toolchains_musl.bzl", "toolc
 toolchains_musl.config(
     extra_target_compatible_with = ["//build/platforms:musl"],
 )
+
+buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
+buf.toolchains(version = "v1.68.4")
+use_repo(buf, "rules_buf_toolchains")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(

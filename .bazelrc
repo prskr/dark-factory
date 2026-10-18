@@ -11,6 +11,9 @@ test --test_summary=terse
 build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:lint --output_groups=+clippy_checks
 
+build:fmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:fmt --output_groups=rustfmt_checks
+
 build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
 build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2

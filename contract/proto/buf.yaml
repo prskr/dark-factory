@@ -1,0 +1,9 @@
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    # Bidirectional stream with AgentMessage/ControlMessage envelopes (ADR-0007); renaming would change the wire API.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - SERVICE_SUFFIX

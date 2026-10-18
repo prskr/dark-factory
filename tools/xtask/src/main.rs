@@ -59,7 +59,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 7] = [
+const TOOLS: [GithubTool; 8] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -67,6 +67,14 @@ const TOOLS: [GithubTool; 7] = [
             let os = p.os.replace("macos", "darwin");
             let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
             (format!("shellcheck-v{v}.{os}.{cpu}.tar.gz"), format!("shellcheck-v{v}/shellcheck"))
+        },
+    },
+    GithubTool {
+        name: "lefthook",
+        repo: "evilmartians/lefthook",
+        asset: |v, p| {
+            let os = if p.os == "macos" { "MacOS" } else { "Linux" };
+            (format!("lefthook_{v}_{os}_{}", p.cpu), String::new())
         },
     },
     GithubTool {
@@ -322,6 +330,14 @@ mod tests {
         assert_eq!(bins.len(), 4);
         assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
         assert!(bins.iter().any(|b| b.os == "linux" && b.cpu == "x86_64" && b.url.ends_with("kube-linter-linux")));
+    }
+
+    #[test]
+    fn lefthook_asset_names() {
+        let (name, file) = (tool("lefthook").asset)("2.2.2", PLATFORMS[3]);
+        assert_eq!((name.as_str(), file.as_str()), ("lefthook_2.2.2_MacOS_arm64", ""));
+        let (name, _) = (tool("lefthook").asset)("2.2.2", PLATFORMS[0]);
+        assert_eq!(name, "lefthook_2.2.2_Linux_x86_64");
     }
 
     #[test]

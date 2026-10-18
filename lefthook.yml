@@ -18,8 +18,8 @@ pre-commit:
   commands:
     fmt:
       glob: '*.rs'
-      # rustfmt: Bazel's copy is not runnable standalone (missing librustc_driver), use the rustup toolchain pinned in rust-toolchain.toml
-      run: cargo fmt --all --check
+      # Bazel's rustfmt aspect: the standalone rustfmt binary is not runnable (missing librustc_driver)
+      run: bazel build --config=fmt //crates/... //plugins/...
 
     kingfisher:
       run: build/with_tools.sh kingfisher scan . --staged --no-update-check --no-validate
@@ -34,7 +34,7 @@ pre-commit:
 
     buf-format:
       glob: '*.proto'
-      run: buf format -d --exit-code contract/proto
+      run: build/with_tools.sh buf format -d --exit-code contract/proto
 
     helm-lint:
       glob: 'deploy/helm/**'

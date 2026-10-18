@@ -1,3 +1,6 @@
+load("@rules_buf//buf:defs.bzl", "buf_format", "buf_lint_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
@@ -9,3 +12,33 @@ filegroup(
     name = "wit_integrations",
     srcs = glob(["wit/integrations/**/*.wit"]),
 )
+
+proto_library(
+    name = "transcript_v1_proto",
+    srcs = ["proto/darkfactory/transcript/v1/transcript.proto"],
+    strip_import_prefix = "proto",
+    deps = ["@protobuf//:timestamp_proto"],
+)
+
+proto_library(
+    name = "agent_v1_proto",
+    srcs = ["proto/darkfactory/agent/v1/agent.proto"],
+    strip_import_prefix = "proto",
+    deps = [
+        ":transcript_v1_proto",
+        "@protobuf//:duration_proto",
+        "@protobuf//:timestamp_proto",
+    ],
+)
+
+buf_lint_test(
+    name = "buf_lint_test",
+    config = "proto/buf.yaml",
+    targets = [
+        ":agent_v1_proto",
+        ":transcript_v1_proto",
+    ],
+)
+
+# `bazel run //contract:format` rewrites the protos in place.
+buf_format(name = "format")
