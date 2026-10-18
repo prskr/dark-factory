@@ -1,6 +1,10 @@
+load("@bazel_env.bzl", "bazel_env")
+load("@multitool//:tools.bzl", "TOOLS")
+
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    ".kube-linter.yaml",
     "Cargo.lock",
     "Cargo.toml",
 ])
@@ -9,3 +13,35 @@ filegroup(
     name = "sqlx_data",
     srcs = glob([".sqlx/*.json"]) + ["Cargo.toml"],
 )
+
+# `bazel run //:bazel_env` then `direnv allow`: puts the pinned linters on PATH (see .envrc).
+bazel_env(
+    name = "bazel_env",
+    tools = {
+        "buildifier": "@buildifier_prebuilt//:buildifier",
+        "cargo": "@rules_rust//tools/upstream_wrapper:cargo",
+        "cargo-clippy": "@rules_rust//tools/upstream_wrapper:cargo_clippy",
+        "cargo-deny": TOOLS["cargo-deny"],
+        "helm": TOOLS["helm"],
+        "helm-unittest": TOOLS["helm-unittest"],
+        "kingfisher": TOOLS["kingfisher"],
+        "kube-linter": TOOLS["kube-linter"],
+        "kubeconform": TOOLS["kubeconform"],
+        "rustc": "@rules_rust//tools/upstream_wrapper:rustc",
+        "shellcheck": TOOLS["shellcheck"],
+        "yq": TOOLS["yq"],
+    },
+)
+
+# Bazel-managed Rust tools: `bazel run //:cargo -- test`.
+[
+    alias(
+        name = tool,
+        actual = "@rules_rust//tools/upstream_wrapper:" + tool,
+    )
+    for tool in [
+        "cargo",
+        "cargo_clippy",
+        "rustc",
+    ]
+]

@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/component: control-plane
 spec:
   replicas: {{ .Values.controlPlane.replicas }}
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "dark-factory.controlPlane.selectorLabels" . | nindent 6 }}

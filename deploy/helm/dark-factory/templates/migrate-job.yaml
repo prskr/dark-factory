@@ -10,6 +10,10 @@ metadata:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # Failed Jobs are kept for debugging; probes do not apply to a run-to-completion Job.
+    ignore-check.kube-linter.io/job-ttl-seconds-after-finished: "failed hooks are kept for debugging"
+    ignore-check.kube-linter.io/no-liveness-probe: "run-to-completion Job"
+    ignore-check.kube-linter.io/no-readiness-probe: "run-to-completion Job"
 spec:
   backoffLimit: 3
   template:
@@ -45,6 +49,8 @@ spec:
             capabilities:
               drop:
                 - ALL
+          resources:
+            {{- toYaml .Values.database.migrate.resources | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/dark-factory

@@ -1,0 +1,16 @@
+checks:
+  addAllBuiltIn: true
+  exclude:
+    - 'access-to-secrets' # required for External Secrets
+    - 'default-service-account'
+    - 'dnsconfig-options'
+    - 'env-value-from' # broken with External Secrets & Crossplane managed role secrets
+    - 'no-anti-affinity' # gateway runs 2 replicas; spreading is left to the operator
+    - 'minimum-three-replicas' # no need for that in a homelab
+    - 'no-node-affinity' # no meaningful node topology in a homelab
+    - 'non-isolated-pod' # will to in the future...probably
+    - 'read-secret-from-env-var' # check in the future
+    - 'required-annotation-email' # what the heck...
+    - 'required-label-owner'
+    - 'restart-policy'
+    - 'sorted-keys'

@@ -1,0 +1,287 @@
+{
+  "$schema": "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json",
+  "cargo-deny": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "cargo-deny-0.20.2-aarch64-unknown-linux-musl/cargo-deny",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "cargo-deny-0.20.2-x86_64-apple-darwin/cargo-deny",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "248da7f581724e470071990c088ffc55c811981715f4cbdb258621fb79f8b7a6",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-apple-darwin.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz"
+      }
+    ]
+  },
+  "helm": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "linux-amd64/helm",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b",
+        "url": "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "linux-arm64/helm",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88",
+        "url": "https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "darwin-amd64/helm",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "34bec4eba761ba5c16d1965ee6b8f5b0abe5993974a802274e2a4f0418893d89",
+        "url": "https://get.helm.sh/helm-v4.3.1-darwin-amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "darwin-arm64/helm",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "6b4e61c8cd27d99e5a801e63ff25dd5c70b36875c2cd659d3e9ce6b76fc23198",
+        "url": "https://get.helm.sh/helm-v4.3.1-darwin-arm64.tar.gz"
+      }
+    ]
+  },
+  "helm-unittest": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "untt-linux-amd64",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "48e86ecc1467b009630e5954375e5d8494139f73b466df5fe8c04fa45b634939",
+        "url": "https://github.com/helm-unittest/helm-unittest/releases/download/v1.2.1/helm-unittest-linux-amd64-1.2.1.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "untt-linux-arm64",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "c66062713cd3cbb1a80d7098bd1d4a48db8438f56b43fb6377df65447f93f8de",
+        "url": "https://github.com/helm-unittest/helm-unittest/releases/download/v1.2.1/helm-unittest-linux-arm64-1.2.1.tgz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "untt-macos-amd64",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "3e57daace5249d8dafd5fd2f6fbebf773c7e53a56e904db1f903031866853158",
+        "url": "https://github.com/helm-unittest/helm-unittest/releases/download/v1.2.1/helm-unittest-macos-amd64-1.2.1.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "untt-macos-arm64",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "38ec0475b9206ba62454ab0f51a7fecbb9bfe103e9a7a1426f3b799d4f432ab2",
+        "url": "https://github.com/helm-unittest/helm-unittest/releases/download/v1.2.1/helm-unittest-macos-arm64-1.2.1.tgz"
+      }
+    ]
+  },
+  "kingfisher": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "kingfisher",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "5209e9d260b93ae0cf467690c71e5f272469d9324cf2915a36c68405c2edf202",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-linux-x64.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "kingfisher",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "00088ab409e44f9370e5edfea653f03b83ea1927863fbcae296b77e773105077",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-linux-arm64.tgz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "kingfisher",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "5ce19ddfc904ec80e96c3f12672f1a53232b4a02aa02697824b1a71a4cfa8028",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-darwin-x64.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "kingfisher",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "caed7302e3d233bd177a3c865ca4b869c024c0fdc01fa4576a91f16409e3ce36",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-darwin-arm64.tgz"
+      }
+    ]
+  },
+  "kube-linter": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "618d299a3e2839c8ca9d86fce0db617be0fba41f0fecbbbfb7fbf1c04299fae1",
+        "url": "https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-linux"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "9c39d35252e0dcafb16b26197b9e93ba578e44eb402c3c6660fc94e08f94094f",
+        "url": "https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-linux_arm64"
+      },
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "d935e2bc89e272c74227cdc4ac4dba35f468e0e486e846e5892231a301c91a67",
+        "url": "https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-darwin"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "662277a6a267ba2cb1371b56539a371872ef142b196fa0d87195e4213773cdf8",
+        "url": "https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-darwin_arm64"
+      }
+    ]
+  },
+  "kubeconform": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "kubeconform",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883",
+        "url": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "kubeconform",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "1f53fc8e81258197a35e8603054162a5af1de8c5af13746c71ab680d9534ed87",
+        "url": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-arm64.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "kubeconform",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "71dbc87ac9f24099a62b93570e65aa06312ba6ac8aea63b7f86e9d999edf5a92",
+        "url": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "kubeconform",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "f84f4dfbebf4a6b0b230385fa065a39ea35e02608c2b50d025dcf64775a69d67",
+        "url": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-arm64.tar.gz"
+      }
+    ]
+  },
+  "shellcheck": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "shellcheck-v0.11.0/shellcheck",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6",
+        "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "shellcheck-v0.11.0/shellcheck",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc",
+        "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "shellcheck-v0.11.0/shellcheck",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51",
+        "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "shellcheck-v0.11.0/shellcheck",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f",
+        "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.gz"
+      }
+    ]
+  },
+  "yq": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "yq_linux_amd64",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "e68a456f90c577af3fe4960184b3a3cf5c461e0348407c10f107da3a5fec8972",
+        "url": "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "yq_linux_arm64",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "8c27f6e7476fb5acefb9352e3d30f6bc2dc93f1956eb92e8da727173fb7ec6d3",
+        "url": "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_arm64.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "yq_darwin_amd64",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "b2cc367e9f5491b3b9b191aa19ba3a3163daf99d84f90bc7bd8918010a66e69a",
+        "url": "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_darwin_amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "yq_darwin_arm64",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "60d0c91aa8bf4030d38e80bb05f84c20be2e955f24d62b2e55d15ad643fa7afa",
+        "url": "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_darwin_arm64.tar.gz"
+      }
+    ]
+  }
+}

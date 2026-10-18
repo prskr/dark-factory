@@ -36,6 +36,13 @@ database:
     passwordKey: password
   migrate:
     manageAppRole: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
 oidc:
   issuerUrl: https://id.example.com/realms/dark-factory

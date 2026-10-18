@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/component: gateway
 spec:
   replicas: {{ .Values.gateway.replicas }}
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "dark-factory.gateway.selectorLabels" . | nindent 6 }}

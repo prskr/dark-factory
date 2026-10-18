@@ -96,3 +96,17 @@ EOF
 
 cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 ```
+
+## Pinned linters (`bazel_env` + `rules_multitool`)
+
+`buildifier`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher` and `shellcheck` come from Bazel, so the
+lefthook hooks use the same versions on every machine.
+
+| Task | Command |
+|------|---------|
+| Put the tools on `PATH` (once, needs [direnv](https://direnv.net/)) | `bazel run //:bazel_env && direnv allow` |
+| Bump tools to the latest upstream releases | `cargo xtask update-tools` |
+| Fail if `multitool.lock.json` is stale (CI / scheduled job) | `cargo xtask update-tools --check` |
+| Add a tool | add an entry to `TOOLS` in `tools/xtask/src/main.rs` and to `//:bazel_env` |
+
+`multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits.

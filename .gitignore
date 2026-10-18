@@ -40,3 +40,4 @@ target
 
 apm_modules/
 
+/.bazel_env

@@ -40,6 +40,10 @@ Every key in `values.yaml` is documented below:
 | `database.owner.user` | `string` | `"dark_factory_owner"` | PostgreSQL owner role used exclusively by the `dark-factory migrate` hook Job. |
 | `database.owner.existingSecret` | `string` | `"dark-factory-db-owner"` | Name of the existing Secret in the instance namespace containing the owner role password. |
 | `database.owner.passwordKey` | `string` | `"password"` | Key within `database.owner.existingSecret` holding the owner role password. |
+| `database.migrate.resources.requests.cpu` | `string` | `"50m"` | Migrate Job CPU request. |
+| `database.migrate.resources.requests.memory` | `string` | `"64Mi"` | Migrate Job memory request. |
+| `database.migrate.resources.limits.cpu` | `string` | `"500m"` | Migrate Job CPU limit. |
+| `database.migrate.resources.limits.memory` | `string` | `"256Mi"` | Migrate Job memory limit. |
 | `database.migrate.manageAppRole` | `bool` | `true` | When `true`, `dark-factory migrate` mounts `database.app.existingSecret` and creates/rotates `database.app.user`. |
 | `oidc.issuerUrl` | `string` | `"https://id.example.com/realms/dark-factory"` | OIDC provider issuer URL for web UI authentication. |
 | `oidc.clientId` | `string` | `"dark-factory"` | OIDC relying-party client ID. |

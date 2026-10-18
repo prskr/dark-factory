@@ -12,25 +12,25 @@
 #       run: hadolint {staged_files}
 #   - cargo-machete (Unused dependencies detector):
 #       run: cargo machete
-#   - kubeconform (Kubernetes manifest schema validator)
 
 pre-commit:
   parallel: true
   commands:
     fmt:
       glob: '*.rs'
+      # rustfmt: Bazel's copy is not runnable standalone (missing librustc_driver), use the rustup toolchain pinned in rust-toolchain.toml
       run: cargo fmt --all --check
 
     kingfisher:
-      run: kingfisher scan . --staged --no-update-check --no-validate
+      run: build/with_tools.sh kingfisher scan . --staged --no-update-check --no-validate
 
     buildifier:
-      glob: '*.{bazel,bzl}|BUILD.bazel|MODULE.bazel'
-      run: buildifier -mode=check {staged_files}
+      glob: ['*.bazel', '*.bzl']
+      run: build/with_tools.sh buildifier -mode=check {staged_files}
 
     shellcheck:
       glob: '*.sh'
-      run: shellcheck --severity=warning {staged_files}
+      run: build/with_tools.sh shellcheck --severity=warning {staged_files}
 
     buf-format:
       glob: '*.proto'
@@ -38,14 +38,18 @@ pre-commit:
 
     helm-lint:
       glob: 'deploy/helm/**'
-      run: helm lint deploy/helm/dark-factory
+      run: build/with_tools.sh helm lint deploy/helm/dark-factory
+
+    helm-unittest:
+      glob: 'deploy/helm/**'
+      run: build/with_tools.sh helm-unittest deploy/helm/dark-factory
 
 pre-push:
   # Sequential execution prevents Cargo target/ lock contention
   parallel: false
   commands:
     clippy:
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: build/with_tools.sh cargo clippy --all-targets --all-features -- -D warnings
 
     cargo-deny:
-      run: cargo deny check
+      run: build/with_tools.sh cargo deny check

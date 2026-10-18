@@ -18,6 +18,8 @@ bazel_dep(name = "rules_rust", version = "0.73.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tar.bzl", version = "0.10.7")
 
+bazel_dep(name = "bazel_env.bzl", version = "0.10.0", dev_dependency = True)
+bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "toolchains_musl", version = "0.1.29", dev_dependency = True)
 
 toolchains_musl = use_extension("@toolchains_musl//:toolchains_musl.bzl", "toolchains_musl", dev_dependency = True)
@@ -154,6 +156,11 @@ crate.from_cargo(
     ],
 )
 use_repo(crate, "crates")
+
+# Linter binaries; regenerate the lock with `cargo xtask update-tools`.
+multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitool")
+multitool.hub(lockfile = "//:multitool.lock.json")
+use_repo(multitool, "multitool")
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 

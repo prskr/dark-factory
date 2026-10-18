@@ -209,12 +209,36 @@ sh_test(
     name = "helm_chart_test",
     srcs = ["test_chart.sh"],
     args = [
-        "$(location helm/dark-factory/Chart.yaml)",
-        "$(location values-dev.yaml)",
+        "$(rootpath @multitool//tools/helm)",
+        "$(rootpath @multitool//tools/kubeconform)",
+        "$(rootpath @multitool//tools/yq)",
+        "$(rootpath @multitool//tools/kube-linter)",
+        "$(rootpath //:.kube-linter.yaml)",
+        "$(rootpath helm/dark-factory/Chart.yaml)",
+        "$(rootpath values-dev.yaml)",
     ],
     data = [
         "helm/dark-factory/Chart.yaml",
         "values-dev.yaml",
         ":helm_chart_files",
+        "//:.kube-linter.yaml",
+        "@multitool//tools/helm",
+        "@multitool//tools/kube-linter",
+        "@multitool//tools/kubeconform",
+        "@multitool//tools/yq",
+    ],
+)
+
+sh_test(
+    name = "helm_chart_unittest",
+    srcs = ["test_chart_unit.sh"],
+    args = [
+        "$(rootpath @multitool//tools/helm-unittest)",
+        "$(rootpath helm/dark-factory/Chart.yaml)",
+    ],
+    data = [
+        "helm/dark-factory/Chart.yaml",
+        ":helm_chart_files",
+        "@multitool//tools/helm-unittest",
     ],
 )

@@ -1,0 +1,355 @@
+//! Generates `multitool.lock.json` from the latest upstream releases.
+//!
+//! Usage: `cargo xtask update-tools [--check]` (alias in `.cargo/config.toml`).
+//! `--check` fails if the committed lock differs from what upstream would produce now.
+//! Set `GITHUB_TOKEN` to avoid API rate limits.
+
+use std::collections::BTreeMap;
+
+use anyhow::{Context, Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
+
+const LOCK_PATH: &str = "multitool.lock.json";
+const SCHEMA: &str = "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json";
+
+#[derive(Clone, Copy)]
+struct Platform {
+    os: &'static str,
+    cpu: &'static str,
+}
+
+const PLATFORMS: [Platform; 4] = [
+    Platform { os: "linux", cpu: "x86_64" },
+    Platform { os: "linux", cpu: "arm64" },
+    Platform { os: "macos", cpu: "x86_64" },
+    Platform { os: "macos", cpu: "arm64" },
+];
+
+#[derive(Deserialize)]
+struct Release {
+    tag_name: String,
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+    digest: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct Binary {
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    url: String,
+    sha256: String,
+    os: &'static str,
+    cpu: &'static str,
+}
+
+/// Maps `(version without leading "v", platform)` to `(asset name, path of the binary inside the archive)`.
+/// An empty path means the asset is the bare binary (`kind: file`).
+type AssetFn = fn(&str, Platform) -> (String, String);
+
+struct GithubTool {
+    name: &'static str,
+    repo: &'static str,
+    asset: AssetFn,
+}
+
+const TOOLS: [GithubTool; 7] = [
+    GithubTool {
+        name: "shellcheck",
+        repo: "koalaman/shellcheck",
+        asset: |v, p| {
+            let os = p.os.replace("macos", "darwin");
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            (format!("shellcheck-v{v}.{os}.{cpu}.tar.gz"), format!("shellcheck-v{v}/shellcheck"))
+        },
+    },
+    GithubTool {
+        name: "kube-linter",
+        repo: "stackrox/kube-linter",
+        asset: |_, p| {
+            let os = p.os.replace("macos", "darwin");
+            let suffix = if p.cpu == "arm64" { "_arm64" } else { "" };
+            (format!("kube-linter-{os}{suffix}"), String::new())
+        },
+    },
+    GithubTool {
+        name: "kubeconform",
+        repo: "yannh/kubeconform",
+        asset: |_, p| {
+            let os = p.os.replace("macos", "darwin");
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            (format!("kubeconform-{os}-{arch}.tar.gz"), "kubeconform".into())
+        },
+    },
+    GithubTool {
+        name: "kingfisher",
+        repo: "mongodb/kingfisher",
+        asset: |_, p| {
+            let os = p.os.replace("macos", "darwin");
+            let cpu = if p.cpu == "x86_64" { "x64" } else { p.cpu };
+            (format!("kingfisher-{os}-{cpu}.tgz"), "kingfisher".into())
+        },
+    },
+    GithubTool {
+        name: "helm-unittest",
+        repo: "helm-unittest/helm-unittest",
+        // Standalone `untt` binary; works without the helm plugin machinery.
+        asset: |v, p| {
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            (
+                format!("helm-unittest-{}-{arch}-{v}.tgz", p.os),
+                format!("untt-{}-{arch}", p.os),
+            )
+        },
+    },
+    GithubTool {
+        name: "yq",
+        repo: "mikefarah/yq",
+        asset: |_, p| {
+            let os = p.os.replace("macos", "darwin");
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            (format!("yq_{os}_{arch}.tar.gz"), format!("yq_{os}_{arch}"))
+        },
+    },
+    GithubTool {
+        name: "cargo-deny",
+        repo: "EmbarkStudios/cargo-deny",
+        asset: |v, p| {
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            let triple = match p.os {
+                "macos" => format!("{cpu}-apple-darwin"),
+                _ => format!("{cpu}-unknown-linux-musl"),
+            };
+            (
+                format!("cargo-deny-{v}-{triple}.tar.gz"),
+                format!("cargo-deny-{v}-{triple}/cargo-deny"),
+            )
+        },
+    },
+];
+
+fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> {
+    let version = release.tag_name.trim_start_matches('v');
+    PLATFORMS
+        .iter()
+        .map(|&p| {
+            let (name, file) = (tool.asset)(version, p);
+            let asset = release
+                .assets
+                .iter()
+                .find(|a| a.name == name)
+                .ok_or_else(|| anyhow!("{}: no asset {name}", tool.name))?;
+            let sha256 = asset
+                .digest
+                .as_deref()
+                .and_then(|d| d.strip_prefix("sha256:"))
+                .ok_or_else(|| anyhow!("{}: missing digest for {name}", tool.name))?;
+            Ok(Binary {
+                kind: if file.is_empty() { "file" } else { "archive" },
+                file: Some(file).filter(|f| !f.is_empty()),
+                url: asset.browser_download_url.clone(),
+                sha256: sha256.into(),
+                os: p.os,
+                cpu: p.cpu,
+            })
+        })
+        .collect()
+}
+
+/// helm is hosted on get.helm.sh and publishes `<archive>.sha256` sidecar files.
+fn helm_binaries(version: &str, mut fetch_sha: impl FnMut(&str) -> Result<String>) -> Result<Vec<Binary>> {
+    let version = format!("v{}", version.trim_start_matches('v'));
+    PLATFORMS
+        .iter()
+        .map(|&p| {
+            let os = p.os.replace("macos", "darwin");
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            let url = format!("https://get.helm.sh/helm-{version}-{os}-{arch}.tar.gz");
+            let sha256 = parse_sha_file(&fetch_sha(&format!("{url}.sha256"))?)?;
+            Ok(Binary { kind: "archive", file: Some(format!("{os}-{arch}/helm")), url, sha256, os: p.os, cpu: p.cpu })
+        })
+        .collect()
+}
+
+/// Accepts `<hash>` or `<hash>  <filename>`.
+fn parse_sha_file(body: &str) -> Result<String> {
+    let hash = body.split_whitespace().next().unwrap_or_default();
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!("not a sha256: {body:?}");
+    }
+    Ok(hash.to_ascii_lowercase())
+}
+
+fn render(tools: BTreeMap<&str, Vec<Binary>>) -> Result<String> {
+    let mut doc = serde_json::Map::new();
+    doc.insert("$schema".into(), SCHEMA.into());
+    for (name, binaries) in tools {
+        doc.insert(name.into(), serde_json::json!({ "binaries": binaries }));
+    }
+    Ok(serde_json::to_string_pretty(&doc)? + "\n")
+}
+
+fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    let mut req = ureq::get(url).header("User-Agent", "dark-factory-xtask");
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if url.starts_with("https://api.github.com/") {
+            req = req.header("Authorization", &format!("Bearer {token}"));
+        }
+    }
+    req.call().with_context(|| format!("GET {url}"))
+}
+
+fn latest_release(repo: &str) -> Result<Release> {
+    Ok(get(&format!("https://api.github.com/repos/{repo}/releases/latest"))?
+        .body_mut()
+        .read_json()?)
+}
+
+fn generate() -> Result<String> {
+    let mut tools = BTreeMap::new();
+    for tool in &TOOLS {
+        tools.insert(tool.name, github_binaries(tool, &latest_release(tool.repo)?)?);
+    }
+    let helm = latest_release("helm/helm")?;
+    tools.insert(
+        "helm",
+        helm_binaries(&helm.tag_name, |url| Ok(get(url)?.body_mut().read_to_string()?))?,
+    );
+    render(tools)
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["update-tools"] => std::fs::write(LOCK_PATH, generate()?)?,
+        ["update-tools", "--check"] => {
+            if std::fs::read_to_string(LOCK_PATH)? != generate()? {
+                bail!("{LOCK_PATH} is stale; run `cargo xtask update-tools`");
+            }
+        }
+        _ => bail!("usage: cargo xtask update-tools [--check]"),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(tag: &str, names: &[&str], digest: Option<&str>) -> Release {
+        Release {
+            tag_name: tag.into(),
+            assets: names
+                .iter()
+                .map(|n| Asset {
+                    name: (*n).into(),
+                    browser_download_url: format!("https://example.test/{n}"),
+                    digest: digest.map(Into::into),
+                })
+                .collect(),
+        }
+    }
+
+    fn tool(name: &str) -> &'static GithubTool {
+        TOOLS.iter().find(|t| t.name == name).unwrap()
+    }
+
+    const ALL_KINGFISHER: [&str; 4] = [
+        "kingfisher-darwin-arm64.tgz",
+        "kingfisher-darwin-x64.tgz",
+        "kingfisher-linux-arm64.tgz",
+        "kingfisher-linux-x64.tgz",
+    ];
+
+    #[test]
+    fn github_maps_every_platform() {
+        let r = release("v2.13.0", &ALL_KINGFISHER, Some("sha256:abc"));
+        let bins = github_binaries(tool("kingfisher"), &r).unwrap();
+        assert_eq!(bins.len(), 4);
+        assert!(bins.iter().any(|b| b.os == "macos"
+            && b.cpu == "x86_64"
+            && b.url.ends_with("kingfisher-darwin-x64.tgz")
+            && b.sha256 == "abc"));
+    }
+
+    #[test]
+    fn github_fails_without_digest() {
+        let r = release("v2.13.0", &ALL_KINGFISHER, None);
+        assert!(github_binaries(tool("kingfisher"), &r).is_err());
+    }
+
+    #[test]
+    fn github_fails_on_missing_asset() {
+        let r = release("v2.13.0", &ALL_KINGFISHER[..3], Some("sha256:abc"));
+        assert!(github_binaries(tool("kingfisher"), &r).is_err());
+    }
+
+    #[test]
+    fn archive_paths_embed_version() {
+        let (name, file) = (tool("cargo-deny").asset)("0.20.2", PLATFORMS[3]);
+        assert_eq!(name, "cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz");
+        assert_eq!(file, "cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny");
+        let (_, file) = (tool("shellcheck").asset)("0.11.0", PLATFORMS[0]);
+        assert_eq!(file, "shellcheck-v0.11.0/shellcheck");
+    }
+
+    #[test]
+    fn helm_unittest_names() {
+        let (name, file) = (tool("helm-unittest").asset)("1.2.1", PLATFORMS[2]);
+        assert_eq!(name, "helm-unittest-macos-amd64-1.2.1.tgz");
+        assert_eq!(file, "untt-macos-amd64");
+    }
+
+    #[test]
+    fn kubeconform_and_yq_names() {
+        let (name, file) = (tool("kubeconform").asset)("0.8.0", PLATFORMS[1]);
+        assert_eq!((name.as_str(), file.as_str()), ("kubeconform-linux-arm64.tar.gz", "kubeconform"));
+        let (name, file) = (tool("yq").asset)("4.54.1", PLATFORMS[2]);
+        assert_eq!((name.as_str(), file.as_str()), ("yq_darwin_amd64.tar.gz", "yq_darwin_amd64"));
+    }
+
+    #[test]
+    fn kube_linter_is_a_bare_file() {
+        let names = ["kube-linter-darwin", "kube-linter-darwin_arm64", "kube-linter-linux", "kube-linter-linux_arm64"];
+        let r = release("v0.8.3", &names, Some("sha256:abc"));
+        let bins = github_binaries(tool("kube-linter"), &r).unwrap();
+        assert_eq!(bins.len(), 4);
+        assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
+        assert!(bins.iter().any(|b| b.os == "linux" && b.cpu == "x86_64" && b.url.ends_with("kube-linter-linux")));
+    }
+
+    #[test]
+    fn helm_uses_sidecar_hash_and_adds_v_prefix() {
+        let hash = "a".repeat(64);
+        let body = format!("{hash}  helm.tar.gz\n");
+        let bins = helm_binaries("4.3.1", |_| Ok(body.clone())).unwrap();
+        assert_eq!(bins.len(), 4);
+        let b = &bins[1];
+        assert_eq!(b.url, "https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz");
+        assert_eq!(b.file.as_deref(), Some("linux-arm64/helm"));
+        assert_eq!(b.sha256, hash);
+    }
+
+    #[test]
+    fn sha_file_rejects_garbage() {
+        assert!(parse_sha_file("<html>").is_err());
+        assert!(parse_sha_file(&"g".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn render_is_sorted_and_has_schema() {
+        let mut t = BTreeMap::new();
+        t.insert("zz", vec![]);
+        t.insert("aa", vec![]);
+        let out = render(t).unwrap();
+        assert!(out.contains("\"$schema\""));
+        assert!(out.find("\"aa\"").unwrap() < out.find("\"zz\"").unwrap());
+        assert!(out.ends_with('\n'));
+    }
+}
