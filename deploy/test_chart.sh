@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: test_chart.sh <helm> <kubeconform> <yq> <kube-linter> <.kube-linter.yaml> <Chart.yaml> <values-dev.yaml>
+# Usage: test_chart.sh <helm> <kubeconform> <yq> <kube-linter> <.kube-linter.yaml> <k8s _definitions.json> <crds certificate_v1.json> <Chart.yaml> <values-dev.yaml>
 set -euo pipefail
 
 helm="$1"
@@ -7,8 +7,11 @@ kubeconform="$2"
 yq="$3"
 kube_linter="$4"
 KUBE_LINTER_CONFIG="$5"
-CHART_FILE="$6"
-VALUES_DEV_FILE="$7"
+# The vendored schema repos are located via one known file each: <root>/_definitions.json and <root>/<group>/certificate_v1.json.
+k8s_schemas="$(dirname "$6")"
+crd_schemas="$(dirname "$(dirname "$7")")"
+CHART_FILE="$8"
+VALUES_DEV_FILE="$9"
 CHART_DIR="$(dirname "$CHART_FILE")"
 
 echo "=== 1. Verifying every key in values.yaml is documented in README.md ==="
@@ -38,8 +41,14 @@ HOME="$(mktemp -d)" "$helm" lint "$CHART_DIR"
 HOME="$(mktemp -d)" "$helm" lint "$CHART_DIR" -f "$VALUES_DEV_FILE"
 
 echo "=== 3. Running kubeconform ==="
-HOME="$(mktemp -d)" "$helm" template dark-factory "$CHART_DIR" | "$kubeconform" -strict -ignore-missing-schemas -summary
-HOME="$(mktemp -d)" "$helm" template dark-factory "$CHART_DIR" -f "$VALUES_DEV_FILE" | "$kubeconform" -strict -ignore-missing-schemas -summary
+# Offline: schemas come from the vendored repos; unknown kinds fail instead of being skipped.
+kubeconform_args=(
+  -strict -summary
+  -schema-location "$k8s_schemas/{{ .ResourceKind }}{{ .KindSuffix }}.json"
+  -schema-location "$crd_schemas/{{ .Group }}/{{ .ResourceKind }}_{{ .ResourceAPIVersion }}.json"
+)
+HOME="$(mktemp -d)" "$helm" template dark-factory "$CHART_DIR" | "$kubeconform" "${kubeconform_args[@]}"
+HOME="$(mktemp -d)" "$helm" template dark-factory "$CHART_DIR" -f "$VALUES_DEV_FILE" | "$kubeconform" "${kubeconform_args[@]}"
 
 echo "=== 4. Running kube-linter ==="
 # --namespace avoids false positives for objects in the "default" namespace.

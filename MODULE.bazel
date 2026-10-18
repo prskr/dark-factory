@@ -195,6 +195,38 @@ http_file(
     urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-linux-x64-musl"],
 )
 
+# Vendored schemas so kubeconform never touches the network.
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+git_repository(
+    name = "k8s_json_schema",
+    build_file_content = """exports_files(["_definitions.json"])
+
+filegroup(
+    name = "schemas",
+    srcs = glob(["**/*.json"]),
+    visibility = ["//visibility:public"],
+)""",
+    commit = "aff1ca44984cbbcfa376c1cb6fdc4bb6aa0381fd",
+    remote = "https://github.com/yannh/kubernetes-json-schema.git",
+    sparse_checkout_patterns = ["v1.34.3-standalone-strict"],
+    strip_prefix = "v1.34.3-standalone-strict",
+)
+
+git_repository(
+    name = "crds_catalog",
+    build_file_content = """exports_files(["cert-manager.io/certificate_v1.json"])
+
+filegroup(
+    name = "schemas",
+    srcs = glob(["**/*.json"]),
+    visibility = ["//visibility:public"],
+)""",
+    commit = "d373c2da9702bc9509a004db83e57263fe3bdfc1",
+    remote = "https://github.com/datreeio/CRDs-catalog.git",
+    sparse_checkout_patterns = ["cert-manager.io"],
+)
+
 pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
 
 pull(
