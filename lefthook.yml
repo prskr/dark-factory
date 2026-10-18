@@ -1,17 +1,5 @@
 # Lefthook Git Hooks Configuration
 # Reference: https://github.com/evilmartians/lefthook
-#
-# Future linters to consider adding if installed:
-#   - taplo (TOML formatting & linting):
-#       glob: '*.toml'
-#       run: taplo fmt --check {staged_files}
-#   - typos (Spell checking across code and docs):
-#       run: typos {staged_files}
-#   - hadolint (Dockerfile linting):
-#       glob: '*Dockerfile*'
-#       run: hadolint {staged_files}
-#   - cargo-machete (Unused dependencies detector):
-#       run: cargo machete
 
 pre-commit:
   parallel: true
@@ -35,6 +23,17 @@ pre-commit:
     buf-format:
       glob: '*.proto'
       run: build/with_tools.sh buf format -d --exit-code contract/proto
+
+    hadolint:
+      glob: '*Dockerfile*'
+      run: build/with_tools.sh hadolint {staged_files}
+
+    typos:
+      run: build/with_tools.sh typos {staged_files}
+
+    cargo-machete:
+      glob: ['Cargo.toml', '*.rs']
+      run: build/with_tools.sh cargo-machete
 
     helm-lint:
       glob: 'deploy/helm/**'

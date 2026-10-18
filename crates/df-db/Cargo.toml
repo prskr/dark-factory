@@ -28,3 +28,7 @@ uuid.workspace = true
 [dev-dependencies]
 static_assertions.workspace = true
 tempfile.workspace = true
+
+[package.metadata.cargo-machete]
+# Declared ahead of use.
+ignored = ["futures", "tokio-stream"]

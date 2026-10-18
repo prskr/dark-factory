@@ -1,0 +1,11 @@
+[files]
+extend-exclude = [
+    # Vendored WASI WIT definitions.
+    "contract/wit/integrations/deps/**",
+]
+
+[default]
+extend-ignore-re = [
+    # Verbatim linker error message.
+    "mis-aligned",
+]

@@ -23,6 +23,8 @@ bazel_env(
         "cargo": "@rules_rust//tools/upstream_wrapper:cargo",
         "cargo-clippy": "@rules_rust//tools/upstream_wrapper:cargo_clippy",
         "cargo-deny": TOOLS["cargo-deny"],
+        "cargo-machete": TOOLS["cargo-machete"],
+        "hadolint": TOOLS["hadolint"],
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],
         "kingfisher": TOOLS["kingfisher"],
@@ -31,6 +33,7 @@ bazel_env(
         "kubeconform": TOOLS["kubeconform"],
         "rustc": "@rules_rust//tools/upstream_wrapper:rustc",
         "shellcheck": TOOLS["shellcheck"],
+        "typos": TOOLS["typos"],
         "yq": TOOLS["yq"],
     },
 )

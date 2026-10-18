@@ -29,3 +29,7 @@ uuid.workspace = true
 [dev-dependencies]
 df-core = { path = ".", features = ["test-util"] }
 tempfile.workspace = true
+
+[package.metadata.cargo-machete]
+# Declared ahead of use.
+ignored = ["chrono"]

@@ -1,0 +1,2 @@
+ignored:
+  - DL3008 # apt packages are intentionally unpinned; the base image tag is the pin

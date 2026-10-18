@@ -59,7 +59,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 8] = [
+const TOOLS: [GithubTool; 11] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -75,6 +75,38 @@ const TOOLS: [GithubTool; 8] = [
         asset: |v, p| {
             let os = if p.os == "macos" { "MacOS" } else { "Linux" };
             (format!("lefthook_{v}_{os}_{}", p.cpu), String::new())
+        },
+    },
+    GithubTool {
+        name: "hadolint",
+        repo: "hadolint/hadolint",
+        asset: |_, p| (format!("hadolint-{}-{}", p.os, p.cpu), String::new()),
+    },
+    GithubTool {
+        name: "typos",
+        repo: "crate-ci/typos",
+        asset: |v, p| {
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            let target = match p.os {
+                "macos" => format!("{cpu}-apple-darwin"),
+                _ => format!("{cpu}-unknown-linux-musl"),
+            };
+            (format!("typos-v{v}-{target}.tar.gz"), "typos".into())
+        },
+    },
+    GithubTool {
+        name: "cargo-machete",
+        repo: "bnjbvr/cargo-machete",
+        asset: |v, p| {
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            // upstream ships a gnu build for linux arm64 and musl for x86_64
+            let target = match (p.os, p.cpu) {
+                ("macos", _) => format!("{cpu}-apple-darwin"),
+                (_, "arm64") => format!("{cpu}-unknown-linux-gnu"),
+                _ => format!("{cpu}-unknown-linux-musl"),
+            };
+            let stem = format!("cargo-machete-v{v}-{target}");
+            (format!("{stem}.tar.gz"), format!("{stem}/cargo-machete"))
         },
     },
     GithubTool {
@@ -338,6 +370,17 @@ mod tests {
         assert_eq!((name.as_str(), file.as_str()), ("lefthook_2.2.2_MacOS_arm64", ""));
         let (name, _) = (tool("lefthook").asset)("2.2.2", PLATFORMS[0]);
         assert_eq!(name, "lefthook_2.2.2_Linux_x86_64");
+    }
+
+    #[test]
+    fn hadolint_typos_machete_names() {
+        let (name, file) = (tool("hadolint").asset)("2.15.1", PLATFORMS[3]);
+        assert_eq!((name.as_str(), file.as_str()), ("hadolint-macos-arm64", ""));
+        let (name, file) = (tool("typos").asset)("1.51.1", PLATFORMS[0]);
+        assert_eq!((name.as_str(), file.as_str()), ("typos-v1.51.1-x86_64-unknown-linux-musl.tar.gz", "typos"));
+        let (name, file) = (tool("cargo-machete").asset)("0.9.2", PLATFORMS[1]);
+        assert_eq!(name, "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu.tar.gz");
+        assert_eq!(file, "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu/cargo-machete");
     }
 
     #[test]

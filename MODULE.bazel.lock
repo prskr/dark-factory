@@ -581,12 +581,12 @@
           "FILE:@@//Cargo.lock 117b7273c9ac3eeaa1570c1cf65f903e98d0c1cd3ece8d4db6010fe11744e15c",
           "FILE:@@//Cargo.toml 1c1d7ebc3de8e54fe9659ccacd2c5ec308237e0cfad141307ba895a9cc63ff44",
           "FILE:@@//crates/dark-factory/Cargo.toml b518799159ee3dd632e1b744ba02ada4cbbbf6734411ded54c91ebedbe5cc3dc",
-          "FILE:@@//crates/df-core/Cargo.toml fc3d02cb9207ef1991254c95ad2116e9ca563a8fd7023e2a385276854f50ec8b",
-          "FILE:@@//crates/df-db/Cargo.toml f12bf991600bc295621b0cd471747f5e20cddbf17bdc656b14567f732f2e2a94",
-          "FILE:@@//crates/df-proto/Cargo.toml ddbf686d3336abbd10253bd3980827cc6dc550ee59b6abf2d46d325bf2ebacc0",
+          "FILE:@@//crates/df-core/Cargo.toml 430d20a981d6c277f45ec0cd5edfad76087971f75b1c45616bd52dad174ebe60",
+          "FILE:@@//crates/df-db/Cargo.toml 707304a0b32bee96feb2ecff9657b6380780ed31ae1463f8c244a8d4b56db37a",
+          "FILE:@@//crates/df-proto/Cargo.toml 0c5d1b6969cedd316d189b1fa2141a346dc9fb1db2774b40bdc426d61d7f74bd",
           "FILE:@@//crates/df-web/Cargo.toml 6e0470333a1b09cda4ecc7b26ced4b433d803d3bd8d177c51e2618aee5d23803",
-          "FILE:@@//crates/factory-agent/Cargo.toml a3ad0258856d8d6e478213ffd2d9b8f5a0e2fdeca1d7fa8e09269011342a6ae9",
-          "FILE:@@//crates/fake-acp-agent/Cargo.toml be07fba9a365aa837a3fd20f5cca332b695a566664d69ffec1f40fe538f3379e",
+          "FILE:@@//crates/factory-agent/Cargo.toml f3e3d87a5656186c9d8f67ce0fcbf0d92712c89d58d9d481bf5f4d93515468cd",
+          "FILE:@@//crates/fake-acp-agent/Cargo.toml 6c97fc2c343b444d10911ff7e925d9ca1a18ef4ee7c8461068f3e83ac13c3466",
           "FILE:@@//plugins/forgejo/Cargo.toml 42918a6991d985e6ee4a90325f664c67a95b883af8ff2ad7fa6ec48ef2d615d0"
         ],
         "generatedRepoSpecs": {
