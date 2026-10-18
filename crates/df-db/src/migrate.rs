@@ -24,10 +24,11 @@ fn advisory_lock_subkey(schema: &str) -> i32 {
 }
 
 /// Validates and quotes a PostgreSQL identifier (such as a database name that may contain
-/// hyphens) as `"..."` with embedded double quotes doubled (`""`). Rejects empty strings
-/// and NUL bytes.
+/// hyphens) as `"..."` with embedded double quotes doubled (`""`). Rejects empty strings,
+/// identifiers longer than 63 bytes (`MAX_SQL_IDENTIFIER_LEN`), and NUL bytes.
 pub fn quote_sql_identifier(ident: &str) -> Result<String, DbError> {
-    if ident.is_empty() || ident.contains('\0') {
+    if ident.is_empty() || ident.len() > crate::pool::MAX_SQL_IDENTIFIER_LEN || ident.contains('\0')
+    {
         return Err(DbError::InvalidIdentifier(ident.to_string()));
     }
     Ok(format!("\"{}\"", ident.replace('"', "\"\"")))
@@ -195,6 +196,10 @@ mod tests {
         );
         assert!(quote_sql_identifier("").is_err());
         assert!(quote_sql_identifier("bad\0name").is_err());
+        let exact_63 = "a".repeat(63);
+        assert!(quote_sql_identifier(&exact_63).is_ok());
+        let too_long_64 = "a".repeat(64);
+        assert!(quote_sql_identifier(&too_long_64).is_err());
     }
 
     async fn setup_owner_and_schema(

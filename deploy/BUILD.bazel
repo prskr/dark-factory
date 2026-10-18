@@ -1,0 +1,220 @@
+load("@rules_img//img:image.bzl", "image_index", "image_manifest")
+load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
+load("@rules_img//img:multi_deploy.bzl", "multi_deploy")
+load("@rules_img//img:push.bzl", "image_push")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:public"])
+
+LINUX_MUSL_PLATFORMS = [
+    "//build/platforms:linux_amd64_musl",
+    "//build/platforms:linux_arm64_musl",
+]
+
+image_layer(
+    name = "control_plane_layer",
+    srcs = {
+        "/dark-factory": "//crates/dark-factory:dark-factory",
+        "/plugins/forgejo.wasm": "//plugins/forgejo:forgejo",
+    },
+    file_metadata = {
+        "/dark-factory": file_metadata(mode = "0755"),
+        "/plugins/forgejo.wasm": file_metadata(mode = "0644"),
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "control_plane_manifest",
+    base = "@distroless_static_debian13_nonroot",
+    entrypoint = ["/dark-factory"],
+    layers = [":control_plane_layer"],
+)
+
+image_index(
+    name = "control_plane_image",
+    manifests = [":control_plane_manifest"],
+    platforms = LINUX_MUSL_PLATFORMS,
+    tags = ["oci_image"],
+)
+
+filegroup(
+    name = "control_plane_digest",
+    srcs = [":control_plane_image"],
+    output_group = "digest",
+)
+
+filegroup(
+    name = "control_plane_oci_layout",
+    srcs = [":control_plane_image"],
+    output_group = "oci_layout",
+)
+
+image_layer(
+    name = "runtime_layer",
+    srcs = {
+        "/factory-agent": "//crates/factory-agent:factory-agent",
+        "/gitconfig": "//crates/factory-agent:image/gitconfig",
+        "/hooks-empty": "//crates/factory-agent:hooks_empty",
+    },
+    file_metadata = {
+        "/factory-agent": file_metadata(mode = "0755"),
+        "/gitconfig": file_metadata(mode = "0644"),
+        "/hooks-empty": file_metadata(mode = "0755"),
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "runtime_manifest",
+    layers = [":runtime_layer"],
+)
+
+image_index(
+    name = "runtime_image",
+    manifests = [":runtime_manifest"],
+    platforms = LINUX_MUSL_PLATFORMS,
+    tags = ["oci_image"],
+)
+
+filegroup(
+    name = "runtime_digest",
+    srcs = [":runtime_image"],
+    output_group = "digest",
+)
+
+filegroup(
+    name = "runtime_oci_layout",
+    srcs = [":runtime_image"],
+    output_group = "oci_layout",
+)
+
+image_layer(
+    name = "test_project_layer",
+    srcs = {
+        "/opt/harness/bin/fake-acp-agent": "//crates/fake-acp-agent:fake-acp-agent",
+    },
+    file_metadata = {
+        "/opt/harness/bin/fake-acp-agent": file_metadata(mode = "0755"),
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "test_project_manifest",
+    base = "@debian_trixie_git",
+    layers = [":test_project_layer"],
+)
+
+image_index(
+    name = "test_project_image",
+    manifests = [":test_project_manifest"],
+    platforms = LINUX_MUSL_PLATFORMS,
+    tags = ["oci_image"],
+)
+
+filegroup(
+    name = "test_project_digest",
+    srcs = [":test_project_image"],
+    output_group = "digest",
+)
+
+filegroup(
+    name = "test_project_oci_layout",
+    srcs = [":test_project_image"],
+    output_group = "oci_layout",
+)
+
+image_push(
+    name = "push_control_plane",
+    image = ":control_plane_image",
+    registry = "harbor.home.icb4dc0.de",
+    repository = "dark-factory/control-plane",
+    tag = "dev",
+    tool_cfg = "target",
+)
+
+image_push(
+    name = "push_runtime",
+    image = ":runtime_image",
+    registry = "harbor.home.icb4dc0.de",
+    repository = "dark-factory/runtime",
+    tag = "dev",
+    tool_cfg = "target",
+)
+
+image_push(
+    name = "push_test_project",
+    image = ":test_project_image",
+    registry = "harbor.home.icb4dc0.de",
+    repository = "dark-factory/test-project",
+    tag = "dev",
+    tool_cfg = "target",
+)
+
+multi_deploy(
+    name = "push_images",
+    operations = [
+        ":push_control_plane",
+        ":push_runtime",
+        ":push_test_project",
+    ],
+    tool_cfg = "target",
+)
+
+filegroup(
+    name = "helm_chart_files",
+    srcs = glob(["helm/dark-factory/**"]),
+)
+
+sh_binary(
+    name = "dev",
+    srcs = ["dev.sh"],
+    args = [
+        "$(location :push_images)",
+        "$(location :control_plane_digest)",
+        "$(location :runtime_digest)",
+        "$(location :test_project_digest)",
+        "$(location helm/dark-factory/Chart.yaml)",
+        "$(location values-dev.yaml)",
+    ],
+    data = [
+        "helm/dark-factory/Chart.yaml",
+        "values-dev.yaml",
+        ":control_plane_digest",
+        ":helm_chart_files",
+        ":push_images",
+        ":runtime_digest",
+        ":test_project_digest",
+    ],
+)
+
+sh_test(
+    name = "images_structure_test",
+    srcs = ["test_images.sh"],
+    args = [
+        "$(location :control_plane_oci_layout)",
+        "$(location :runtime_oci_layout)",
+        "$(location :test_project_oci_layout)",
+    ],
+    data = [
+        ":control_plane_oci_layout",
+        ":runtime_oci_layout",
+        ":test_project_oci_layout",
+    ],
+)
+
+sh_test(
+    name = "helm_chart_test",
+    srcs = ["test_chart.sh"],
+    args = [
+        "$(location helm/dark-factory/Chart.yaml)",
+        "$(location values-dev.yaml)",
+    ],
+    data = [
+        "helm/dark-factory/Chart.yaml",
+        "values-dev.yaml",
+        ":helm_chart_files",
+    ],
+)

@@ -1,0 +1,94 @@
+{{- if .Values.tls.ca.create }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-selfsigned-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ include "dark-factory.fullname" . }}-ca
+  secretName: {{ include "dark-factory.fullname" . }}-ca-key-pair
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ include "dark-factory.fullname" . }}-selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-ca-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ include "dark-factory.fullname" . }}-ca-key-pair
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  secretName: {{ include "dark-factory.fullname" . }}-control-plane-tls
+  duration: {{ .Values.tls.duration }}
+  renewBefore: {{ .Values.tls.renewBefore }}
+  commonName: {{ include "dark-factory.fullname" . }}-control-plane
+  dnsNames:
+    - {{ include "dark-factory.fullname" . }}-control-plane
+    - {{ include "dark-factory.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc
+    - {{ include "dark-factory.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc.cluster.local
+  usages:
+    - server auth
+    - client auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    {{- include "dark-factory.issuerRef" . | nindent 4 }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-gateway-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  secretName: {{ include "dark-factory.fullname" . }}-gateway-tls
+  duration: {{ .Values.tls.duration }}
+  renewBefore: {{ .Values.tls.renewBefore }}
+  commonName: {{ include "dark-factory.fullname" . }}-gateway
+  dnsNames:
+    - {{ include "dark-factory.fullname" . }}-gateway
+    - {{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}.svc
+    - {{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}.svc.cluster.local
+    - "*.{{ include "dark-factory.fullname" . }}-gateway-headless.{{ .Release.Namespace }}.svc.cluster.local"
+  usages:
+    - server auth
+    - client auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    {{- include "dark-factory.issuerRef" . | nindent 4 }}

@@ -1,0 +1,51 @@
+# Lefthook Git Hooks Configuration
+# Reference: https://github.com/evilmartians/lefthook
+#
+# Future linters to consider adding if installed:
+#   - taplo (TOML formatting & linting):
+#       glob: '*.toml'
+#       run: taplo fmt --check {staged_files}
+#   - typos (Spell checking across code and docs):
+#       run: typos {staged_files}
+#   - hadolint (Dockerfile linting):
+#       glob: '*Dockerfile*'
+#       run: hadolint {staged_files}
+#   - cargo-machete (Unused dependencies detector):
+#       run: cargo machete
+#   - kubeconform (Kubernetes manifest schema validator)
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: '*.rs'
+      run: cargo fmt --all --check
+
+    kingfisher:
+      run: kingfisher scan . --staged --no-update-check --no-validate
+
+    buildifier:
+      glob: '*.{bazel,bzl}|BUILD.bazel|MODULE.bazel'
+      run: buildifier -mode=check {staged_files}
+
+    shellcheck:
+      glob: '*.sh'
+      run: shellcheck --severity=warning {staged_files}
+
+    buf-format:
+      glob: '*.proto'
+      run: buf format -d --exit-code contract/proto
+
+    helm-lint:
+      glob: 'deploy/helm/**'
+      run: helm lint deploy/helm/dark-factory
+
+pre-push:
+  # Sequential execution prevents Cargo target/ lock contention
+  parallel: false
+  commands:
+    clippy:
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    cargo-deny:
+      run: cargo deny check

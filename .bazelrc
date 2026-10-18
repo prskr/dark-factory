@@ -1,0 +1,26 @@
+common --enable_bzlmod --experimental_isolated_extension_usages --incompatible_enable_proto_toolchain_resolution --@protobuf//bazel/flags:prefer_prebuilt_protoc
+common --repo_env=DO_NOT_TRACK=1
+
+build --verbose_failures
+build --@rules_rust//rust/settings:extra_exec_rustc_flags=-Cstrip=none
+build --@rules_img//img/settings:shallow_oci_layout=i_know_what_i_am_doing
+
+test --test_output=errors
+test --test_summary=terse
+
+build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:lint --output_groups=+clippy_checks
+
+build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
+build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
+build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2
+
+# Remote execution (ARM64 RBE worker)
+build:remote --remote_executor=grpcs://nativelink.home.icb4dc0.de
+build:remote --extra_execution_platforms=//build/platforms:linux_arm64_rbe
+build:remote --host_platform=//build/platforms:linux_arm64_rbe
+build:remote --remote_download_minimal
+build:remote --experimental_remote_cache_eviction_retries=5
+
+try-import %workspace%/.bazelrc.local
+try-import %workspace%/.bazelrc.user

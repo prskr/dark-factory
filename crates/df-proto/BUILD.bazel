@@ -1,0 +1,45 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+cargo_build_script(
+    name = "build_script",
+    srcs = ["build.rs"],
+    build_script_env = {
+        "PROTOC": "$(execpath @protobuf//:protoc)",
+        "PROTOC_INCLUDE": "$${pwd}/external/protobuf+/src",
+    },
+    data = [
+        "//contract:protos",
+        "@protobuf//:well_known_type_protos",
+    ],
+    edition = "2024",
+    tools = [
+        "@protobuf//:protoc",
+    ],
+    deps = all_crate_deps(build = True),
+)
+
+rust_library(
+    name = "df_proto",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_proto",
+    edition = "2024",
+    deps = all_crate_deps(normal = True) + [":build_script"],
+)
+
+alias(
+    name = "df-proto",
+    actual = ":df_proto",
+)
+
+rust_test(
+    name = "df_proto_test",
+    crate = ":df_proto",
+    deps = all_crate_deps(normal_dev = True),
+)

@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dark-factory.gateway.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane-sandbox
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+rules:
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  {{- if eq .Values.enforcement.mode "cilium" }}
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane-sandbox
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "dark-factory.fullname" . }}-control-plane-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane-instance
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane-instance
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "dark-factory.fullname" . }}-control-plane-instance
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.clusterTargets.anyNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-cluster-targets-reader
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-cluster-targets-reader
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "dark-factory.fullname" . }}-cluster-targets-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- range $ns := .Values.clusterTargets.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dark-factory.fullname" $ }}-cluster-target-reader
+  namespace: {{ $ns }}
+  labels:
+    {{- include "dark-factory.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dark-factory.fullname" $ }}-cluster-target-reader
+  namespace: {{ $ns }}
+  labels:
+    {{- include "dark-factory.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "dark-factory.fullname" $ }}-cluster-target-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dark-factory.controlPlane.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,69 @@
+{{- if .Values.sandboxNamespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    kubernetes.io/metadata.name: {{ .Values.sandboxNamespace.name }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-sandbox-quota
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  hard:
+    pods: {{ .Values.sandboxNamespace.resourceQuota.pods | quote }}
+    requests.cpu: {{ .Values.sandboxNamespace.resourceQuota.requestsCpu | quote }}
+    requests.memory: {{ .Values.sandboxNamespace.resourceQuota.requestsMemory | quote }}
+    limits.cpu: {{ .Values.sandboxNamespace.resourceQuota.limitsCpu | quote }}
+    limits.memory: {{ .Values.sandboxNamespace.resourceQuota.limitsMemory | quote }}
+    requests.storage: {{ .Values.sandboxNamespace.resourceQuota.requestsStorage | quote }}
+    persistentvolumeclaims: {{ .Values.sandboxNamespace.resourceQuota.persistentVolumeClaims | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-sandbox-limits
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ .Values.sandboxNamespace.limitRange.defaultCpu | quote }}
+        memory: {{ .Values.sandboxNamespace.limitRange.defaultMemory | quote }}
+      defaultRequest:
+        cpu: {{ .Values.sandboxNamespace.limitRange.defaultRequestCpu | quote }}
+        memory: {{ .Values.sandboxNamespace.limitRange.defaultRequestMemory | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.sandboxNamespace.serviceAccountName }}
+  namespace: {{ .Values.sandboxNamespace.name }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox
+automountServiceAccountToken: false
+{{- end }}

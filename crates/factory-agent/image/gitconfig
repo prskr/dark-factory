@@ -1,0 +1,4 @@
+[safe]
+	directory = /data/repo
+[init]
+	defaultBranch = main

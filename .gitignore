@@ -35,5 +35,8 @@ target
 /.ijwb/
 /.aswb/
 /.clwb/
+/.bazelrc.local
+/.bazelrc.user
 
 apm_modules/
+

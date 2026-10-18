@@ -1,0 +1,58 @@
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+write_file(
+    name = "sqlx_dotenv",
+    out = ".env",
+    content = ["SQLX_OFFLINE_DIR=.sqlx\n"],
+)
+
+rust_library(
+    name = "df_db",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = glob(["migrations/*.sql"]) + [
+        ":sqlx_dotenv",
+        "//:sqlx_data",
+    ],
+    crate_name = "df_db",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env = {
+        "SQLX_OFFLINE": "true",
+    },
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+alias(
+    name = "df-db",
+    actual = ":df_db",
+)
+
+rust_test(
+    name = "df_db_test",
+    compile_data = glob(["migrations/*.sql"]) + [
+        ":sqlx_dotenv",
+        "//:sqlx_data",
+    ],
+    crate = ":df_db",
+    env = {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
+    },
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    rustc_env = {
+        "SQLX_OFFLINE": "true",
+    },
+    deps = all_crate_deps(normal_dev = True),
+)

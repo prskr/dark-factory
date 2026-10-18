@@ -1,0 +1,69 @@
+# Homelab development instance values (admin@homelab-linden).
+instanceName: 'homelab-dev'
+
+image:
+  pullPolicy: Always
+  pullSecrets: []
+  controlPlane:
+    repository: harbor.home.icb4dc0.de/dark-factory/control-plane
+    tag: 'dev'
+    digest: ''
+  runtime:
+    repository: harbor.home.icb4dc0.de/dark-factory/runtime
+    tag: 'dev'
+    digest: ''
+  testProject:
+    repository: harbor.home.icb4dc0.de/dark-factory/test-project
+    tag: 'dev'
+    digest: ''
+
+database:
+  host: app-cluster-18-rw.postgres.svc
+  port: 5432
+  database: dark-factory-dev
+  schema: dark_factory
+  maxConnections: 16
+  app:
+    user: dark-factory-dev-app
+    existingSecret: dark-factory-dev-app-role-secret
+    passwordKey: password
+  owner:
+    user: dark-factory-dev-owner
+    existingSecret: dark-factory-dev-role-secret
+    passwordKey: password
+  migrate:
+    manageAppRole: false
+
+oidc:
+  issuerUrl: https://id.home.icb4dc0.de/realms/dark-factory
+  clientId: dark-factory
+  existingSecret: dark-factory-oidc
+  clientSecretKey: client-secret
+
+sandboxNamespace:
+  create: false
+  name: dark-factory-dev-sandboxes
+  runtimeClassName: kata
+  serviceAccountName: dark-factory-sandbox
+  resourceQuota:
+    pods: '20'
+    requestsCpu: '16'
+    requestsMemory: '32Gi'
+    limitsCpu: '32'
+    limitsMemory: '64Gi'
+    requestsStorage: '200Gi'
+    persistentVolumeClaims: '40'
+  limitRange:
+    defaultCpu: '2'
+    defaultMemory: '4Gi'
+    defaultRequestCpu: '250m'
+    defaultRequestMemory: '512Mi'
+
+enforcement:
+  mode: kubernetes
+
+clusterTargets:
+  anyNamespace: false
+  namespaces:
+    - nativelink
+    - forgejo

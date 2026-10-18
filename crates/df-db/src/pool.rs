@@ -27,14 +27,18 @@ pub enum DbError {
     RoleManagement(String),
 }
 
-/// Validates that `ident` is a safe unquoted PostgreSQL identifier (`^[a-zA-Z_][a-zA-Z0-9_]*$`).
+/// Maximum length of a PostgreSQL identifier (`NAMEDATALEN - 1` = 63 bytes).
+pub const MAX_SQL_IDENTIFIER_LEN: usize = 63;
+
+/// Validates that `ident` is a safe PostgreSQL identifier (`^[a-zA-Z0-9_-]+$`)
+/// up to 63 bytes (`MAX_SQL_IDENTIFIER_LEN`) for double-quoted SQL interpolation
+/// and catalog lookups.
 pub fn validate_sql_identifier(ident: &str) -> Result<&str, DbError> {
-    let mut chars = ident.chars();
-    let Some(first) = chars.next() else {
-        return Err(DbError::InvalidIdentifier(ident.to_string()));
-    };
-    if !(first.is_ascii_alphabetic() || first == '_')
-        || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    if ident.is_empty()
+        || ident.len() > MAX_SQL_IDENTIFIER_LEN
+        || !ident
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return Err(DbError::InvalidIdentifier(ident.to_string()));
     }
@@ -84,11 +88,18 @@ mod tests {
     #[test]
     fn validates_sql_identifiers() {
         assert!(validate_sql_identifier("dark_factory").is_ok());
+        assert!(validate_sql_identifier("dark-factory-dev-app").is_ok());
         assert!(validate_sql_identifier("_schema1").is_ok());
         assert!(validate_sql_identifier("").is_err());
-        assert!(validate_sql_identifier("1bad").is_err());
-        assert!(validate_sql_identifier("bad-name").is_err());
+        assert!(validate_sql_identifier("1bad").is_ok());
+        assert!(validate_sql_identifier("-bad").is_ok());
+        assert!(validate_sql_identifier("bad\"quote").is_err());
         assert!(validate_sql_identifier("bad; DROP TABLE users;--").is_err());
+        assert!(validate_sql_identifier("bad name").is_err());
+        let exact_63 = "a".repeat(63);
+        assert!(validate_sql_identifier(&exact_63).is_ok());
+        let too_long_64 = "a".repeat(64);
+        assert!(validate_sql_identifier(&too_long_64).is_err());
     }
 
     #[sqlx::test(migrations = "./migrations")]

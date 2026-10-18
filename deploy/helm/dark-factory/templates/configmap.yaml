@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    instanceName: {{ .Values.instanceName | quote }}
+    database:
+      host: {{ .Values.database.host | quote }}
+      port: {{ .Values.database.port }}
+      database: {{ .Values.database.database | quote }}
+      user: {{ .Values.database.app.user | quote }}
+      passwordFile: /run/secrets/db-app/password
+      schema: {{ .Values.database.schema | quote }}
+      maxConnections: {{ .Values.database.maxConnections }}
+    server:
+      httpPort: {{ .Values.controlPlane.ports.http }}
+      agentPort: {{ .Values.controlPlane.ports.agent }}
+      internalGrpcPort: {{ .Values.controlPlane.ports.internalGrpc }}
+    gateway:
+      proxyPort: {{ .Values.gateway.ports.proxy }}
+      internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
+      healthPort: {{ .Values.gateway.ports.health }}
+    sandbox:
+      namespace: {{ .Values.sandboxNamespace.name | quote }}
+      instanceNamespace: {{ .Release.Namespace | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-migrate-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  migrate-config.yaml: |
+    instanceName: {{ .Values.instanceName | quote }}
+    database:
+      host: {{ .Values.database.host | quote }}
+      port: {{ .Values.database.port }}
+      database: {{ .Values.database.database | quote }}
+      user: {{ .Values.database.owner.user | quote }}
+      passwordFile: /run/secrets/db-owner/password
+      schema: {{ .Values.database.schema | quote }}
+      maxConnections: 2
+      migrate:
+        appRole: {{ .Values.database.app.user | quote }}
+        manageAppRole: {{ .Values.database.migrate.manageAppRole }}
+        {{- if .Values.database.migrate.manageAppRole }}
+        appPasswordFile: /run/secrets/db-app/password
+        {{- end }}
+    server:
+      httpPort: {{ .Values.controlPlane.ports.http }}
+      agentPort: {{ .Values.controlPlane.ports.agent }}
+      internalGrpcPort: {{ .Values.controlPlane.ports.internalGrpc }}
+    gateway:
+      proxyPort: {{ .Values.gateway.ports.proxy }}
+      internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
+      healthPort: {{ .Values.gateway.ports.health }}
+    sandbox:
+      namespace: {{ .Values.sandboxNamespace.name | quote }}
+      instanceNamespace: {{ .Release.Namespace | quote }}

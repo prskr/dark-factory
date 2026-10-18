@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dark-factory.controlPlane.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.controlPlane.ports.http }}
+      targetPort: http
+      protocol: TCP
+    - name: agent-grpc
+      port: {{ .Values.controlPlane.ports.agent }}
+      targetPort: agent-grpc
+      protocol: TCP
+    - name: internal-grpc
+      port: {{ .Values.controlPlane.ports.internalGrpc }}
+      targetPort: internal-grpc
+      protocol: TCP

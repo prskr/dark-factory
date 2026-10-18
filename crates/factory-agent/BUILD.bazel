@@ -1,0 +1,35 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//build:empty_dir.bzl", "empty_dir")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "Cargo.toml",
+    "image/gitconfig",
+])
+
+empty_dir(
+    name = "hooks_empty",
+)
+
+rust_binary(
+    name = "factory-agent",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "factory_agent_test",
+    crate = ":factory-agent",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True),
+)

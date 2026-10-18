@@ -1,0 +1,77 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+filegroup(
+    name = "rs_srcs",
+    srcs = glob(["src/**/*.rs"]),
+)
+
+alias(
+    name = "tailwindcss",
+    actual = select(
+        {
+            "//build/platforms:macos_arm64": "@tailwindcss_macos_arm64//file",
+            "//build/platforms:linux_arm64": "@tailwindcss_linux_arm64//file",
+            "//build/platforms:linux_x86_64": "@tailwindcss_linux_x64//file",
+        },
+        no_match_error = "No prebuilt tailwindcss binary configured for this exec platform. Supported: macos_arm64, linux_arm64, linux_x86_64.",
+    ),
+)
+
+genrule(
+    name = "app_css",
+    srcs = [
+        "styles/input.css",
+        ":rs_srcs",
+    ],
+    outs = ["app.css"],
+    cmd = """
+        TMP=$$(mktemp -d)
+        trap 'rm -rf "$$TMP"' EXIT
+        TMPDIR="$$TMP" $(execpath :tailwindcss) --input $(location styles/input.css) --output $@
+    """,
+    tools = [":tailwindcss"],
+)
+
+cargo_build_script(
+    name = "build_script",
+    srcs = ["build.rs"],
+    build_script_env = {
+        "TAILWIND_APP_CSS": "$(execpath :app_css)",
+    },
+    data = glob(["assets/**"]) + [":app_css"],
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(build_proc_macro = True),
+    deps = all_crate_deps(build = True),
+)
+
+rust_library(
+    name = "df_web",
+    srcs = [":rs_srcs"],
+    aliases = aliases(),
+    compile_data = glob(["assets/**"]),
+    crate_name = "df_web",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [":build_script"],
+)
+
+alias(
+    name = "df-web",
+    actual = ":df_web",
+)
+
+rust_test(
+    name = "df_web_test",
+    crate = ":df_web",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True) + [":build_script"],
+)

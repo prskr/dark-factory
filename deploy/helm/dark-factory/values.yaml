@@ -1,0 +1,118 @@
+# Default values for dark-factory.
+nameOverride: ""
+fullnameOverride: ""
+
+instanceName: "dark-factory"
+
+image:
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  controlPlane:
+    repository: harbor.home.icb4dc0.de/dark-factory/control-plane
+    tag: "0.1.0"
+    digest: ""
+  runtime:
+    repository: harbor.home.icb4dc0.de/dark-factory/runtime
+    tag: "0.1.0"
+    digest: ""
+  testProject:
+    repository: harbor.home.icb4dc0.de/dark-factory/test-project
+    tag: "0.1.0"
+    digest: ""
+
+database:
+  host: postgres.default.svc
+  port: 5432
+  database: dark_factory
+  schema: dark_factory
+  maxConnections: 16
+  app:
+    user: dark_factory_app
+    existingSecret: dark-factory-db-app
+    passwordKey: password
+  owner:
+    user: dark_factory_owner
+    existingSecret: dark-factory-db-owner
+    passwordKey: password
+  migrate:
+    manageAppRole: true
+
+oidc:
+  issuerUrl: https://id.example.com/realms/dark-factory
+  clientId: dark-factory
+  existingSecret: dark-factory-oidc
+  clientSecretKey: client-secret
+
+sandboxNamespace:
+  create: true
+  name: dark-factory-sandboxes
+  runtimeClassName: ""
+  serviceAccountName: dark-factory-sandbox
+  resourceQuota:
+    pods: "20"
+    requestsCpu: "16"
+    requestsMemory: "32Gi"
+    limitsCpu: "32"
+    limitsMemory: "64Gi"
+    requestsStorage: "200Gi"
+    persistentVolumeClaims: "40"
+  limitRange:
+    defaultCpu: "2"
+    defaultMemory: "4Gi"
+    defaultRequestCpu: "250m"
+    defaultRequestMemory: "512Mi"
+
+enforcement:
+  mode: kubernetes
+
+clusterTargets:
+  anyNamespace: false
+  namespaces: []
+
+controlPlane:
+  replicas: 1
+  serviceAccountName: ""
+  ports:
+    http: 8080
+    agent: 9443
+    internalGrpc: 9444
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+gateway:
+  replicas: 2
+  serviceAccountName: ""
+  pdb:
+    minAvailable: 1
+  ports:
+    proxy: 3128
+    internalGrpc: 9444
+    health: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+tls:
+  ca:
+    create: true
+    existingIssuer:
+      name: ""
+      kind: Issuer
+  duration: 2160h
+  renewBefore: 360h
+
+networkPolicy:
+  enabled: true
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}

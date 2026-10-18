@@ -1,0 +1,198 @@
+"""Dark Factory Bazel module."""
+
+module(
+    name = "dark_factory",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "protobuf", version = "35.1")
+bazel_dep(name = "rules_img", version = "0.3.23")
+bazel_dep(name = "rules_multirun", version = "0.14.0")
+bazel_dep(name = "rules_multitool", version = "1.11.1")
+bazel_dep(name = "rules_pkg", version = "1.2.0")
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "rules_rust", version = "0.73.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "tar.bzl", version = "0.10.7")
+
+bazel_dep(name = "toolchains_musl", version = "0.1.29", dev_dependency = True)
+
+toolchains_musl = use_extension("@toolchains_musl//:toolchains_musl.bzl", "toolchains_musl", dev_dependency = True)
+toolchains_musl.config(
+    extra_target_compatible_with = ["//build/platforms:musl"],
+)
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    extra_rustc_flags_triples = {
+        "aarch64-unknown-linux-musl": ["-Ctarget-feature=+crt-static"],
+        "x86_64-unknown-linux-musl": ["-Ctarget-feature=+crt-static"],
+    },
+    extra_target_triples = [
+        "wasm32-wasip2",
+    ],
+    versions = ["1.93.1"],
+)
+rust.repository_set(
+    name = "rust_macos_aarch64",
+    edition = "2024",
+    exec_triple = "aarch64-apple-darwin",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "x86_64-unknown-linux-musl",
+    versions = ["1.93.1"],
+)
+rust.repository_set(
+    name = "rust_macos_aarch64",
+    target_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "aarch64-unknown-linux-musl",
+)
+rust.repository_set(
+    name = "rust_macos_aarch64",
+    target_compatible_with = [
+        "@platforms//cpu:wasm32",
+        "@platforms//os:wasi",
+        "@rules_rust//rust/platform:wasi_preview_2",
+    ],
+    target_triple = "wasm32-wasip2",
+)
+rust.repository_set(
+    name = "rust_linux_aarch64",
+    edition = "2024",
+    exec_triple = "aarch64-unknown-linux-gnu",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "x86_64-unknown-linux-musl",
+    versions = ["1.93.1"],
+)
+rust.repository_set(
+    name = "rust_linux_aarch64",
+    target_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "aarch64-unknown-linux-musl",
+)
+rust.repository_set(
+    name = "rust_linux_aarch64",
+    target_compatible_with = [
+        "@platforms//cpu:wasm32",
+        "@platforms//os:wasi",
+        "@rules_rust//rust/platform:wasi_preview_2",
+    ],
+    target_triple = "wasm32-wasip2",
+)
+rust.repository_set(
+    name = "rust_linux_x86_64",
+    edition = "2024",
+    exec_triple = "x86_64-unknown-linux-gnu",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "x86_64-unknown-linux-musl",
+    versions = ["1.93.1"],
+)
+rust.repository_set(
+    name = "rust_linux_x86_64",
+    target_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+        "//build/platforms:musl",
+    ],
+    target_triple = "aarch64-unknown-linux-musl",
+)
+rust.repository_set(
+    name = "rust_linux_x86_64",
+    target_compatible_with = [
+        "@platforms//cpu:wasm32",
+        "@platforms//os:wasi",
+        "@rules_rust//rust/platform:wasi_preview_2",
+    ],
+    target_triple = "wasm32-wasip2",
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = [
+        "//:Cargo.toml",
+        "//crates/dark-factory:Cargo.toml",
+        "//crates/df-core:Cargo.toml",
+        "//crates/df-db:Cargo.toml",
+        "//crates/df-proto:Cargo.toml",
+        "//crates/df-web:Cargo.toml",
+        "//crates/factory-agent:Cargo.toml",
+        "//crates/fake-acp-agent:Cargo.toml",
+        "//plugins/forgejo:Cargo.toml",
+    ],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "wasm32-wasip2",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "crates")
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "tailwindcss_macos_arm64",
+    downloaded_file_path = "tailwindcss",
+    executable = True,
+    sha256 = "c7ba62456c6d9441775c90ca6f0a3df800f82cede4e92389f934536de8cf52e9",
+    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-macos-arm64"],
+)
+
+http_file(
+    name = "tailwindcss_linux_arm64",
+    downloaded_file_path = "tailwindcss",
+    executable = True,
+    sha256 = "1a3c33590eada49e9658c72f1f2946b04afe897149c98512e4563e39ed1ac1c0",
+    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-linux-arm64-musl"],
+)
+
+http_file(
+    name = "tailwindcss_linux_x64",
+    downloaded_file_path = "tailwindcss",
+    executable = True,
+    sha256 = "85c31481ace4c66071c8ec4e05164e7a67baecb0454955160925caf2611849f0",
+    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-linux-x64-musl"],
+)
+
+pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
+
+pull(
+    name = "distroless_static_debian13_nonroot",
+    digest = "sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3",
+    registry = "gcr.io",
+    repository = "distroless/static-debian13",
+)
+
+pull(
+    name = "debian_trixie_git",
+    digest = "sha256:4241005cb2c47ea99750627baeb06714f6fde7f01a69ce451d85f8dccf0f5691",
+    registry = "public.ecr.aws",
+    repository = "docker/library/buildpack-deps",
+)

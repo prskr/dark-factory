@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-control-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicas }}
+  selector:
+    matchLabels:
+      {{- include "dark-factory.controlPlane.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "dark-factory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: control-plane
+          image: {{ include "dark-factory.controlPlane.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/dark-factory/config.yaml"
+            - "serve"
+          ports:
+            - name: http
+              containerPort: {{ .Values.controlPlane.ports.http }}
+              protocol: TCP
+            - name: agent-grpc
+              containerPort: {{ .Values.controlPlane.ports.agent }}
+              protocol: TCP
+            - name: internal-grpc
+              containerPort: {{ .Values.controlPlane.ports.internalGrpc }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dark-factory
+              readOnly: true
+            - name: db-app-secret
+              mountPath: /run/secrets/db-app
+              readOnly: true
+            - name: oidc-secret
+              mountPath: /run/secrets/oidc
+              readOnly: true
+            - name: tls
+              mountPath: /etc/dark-factory/tls
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "dark-factory.fullname" . }}-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: db-app-secret
+          secret:
+            secretName: {{ .Values.database.app.existingSecret }}
+            items:
+              - key: {{ .Values.database.app.passwordKey }}
+                path: password
+        - name: oidc-secret
+          secret:
+            secretName: {{ .Values.oidc.existingSecret }}
+            optional: true
+            items:
+              - key: {{ .Values.oidc.clientSecretKey }}
+                path: client-secret
+        - name: tls
+          secret:
+            secretName: {{ include "dark-factory.fullname" . }}-control-plane-tls

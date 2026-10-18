@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "dark-factory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ include "dark-factory.controlPlane.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/dark-factory/migrate-config.yaml"
+            - "migrate"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dark-factory
+              readOnly: true
+            - name: db-owner-secret
+              mountPath: /run/secrets/db-owner
+              readOnly: true
+            {{- if .Values.database.migrate.manageAppRole }}
+            - name: db-app-secret
+              mountPath: /run/secrets/db-app
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "dark-factory.fullname" . }}-migrate-config
+            items:
+              - key: migrate-config.yaml
+                path: migrate-config.yaml
+        - name: db-owner-secret
+          secret:
+            secretName: {{ .Values.database.owner.existingSecret }}
+            items:
+              - key: {{ .Values.database.owner.passwordKey }}
+                path: password
+        {{- if .Values.database.migrate.manageAppRole }}
+        - name: db-app-secret
+          secret:
+            secretName: {{ .Values.database.app.existingSecret }}
+            items:
+              - key: {{ .Values.database.app.passwordKey }}
+                path: password
+        {{- end }}

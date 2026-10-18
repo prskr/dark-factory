@@ -1,0 +1,11 @@
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "protos",
+    srcs = glob(["proto/**/*.proto"]),
+)
+
+filegroup(
+    name = "wit_integrations",
+    srcs = glob(["wit/integrations/**/*.wit"]),
+)
