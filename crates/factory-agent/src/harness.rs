@@ -292,7 +292,7 @@ impl PromptQueue {
     ///
     /// Returns the drained prompts and the `TurnStarted` + `UserMessage` transcript events.
     pub fn start_turn(&mut self, turn_id: &str) -> (Vec<Prompt>, Vec<Event>) {
-        let prompts: Vec<Prompt> = self.queued.drain(..).collect();
+        let prompts = std::mem::take(&mut self.queued);
         let prompt_ids: Vec<String> = prompts.iter().map(|p| p.prompt_id.clone()).collect();
 
         let now = chrono::Utc::now().into();

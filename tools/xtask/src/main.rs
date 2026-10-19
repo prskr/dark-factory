@@ -1,8 +1,12 @@
-//! Generates `multitool.lock.json` from the latest upstream releases.
+//! Repository tasks (`cargo xtask <task>`, alias in `.cargo/config.toml`).
 //!
-//! Usage: `cargo xtask update-tools [--check]` (alias in `.cargo/config.toml`).
-//! `--check` fails if the committed lock differs from what upstream would produce now.
-//! Set `GITHUB_TOKEN` to avoid API rate limits.
+//! - `update-tools [--check]` generates `multitool.lock.json` from the latest upstream releases.
+//!   `--check` fails if the committed lock differs from what upstream would produce now.
+//!   Set `GITHUB_TOKEN` to avoid API rate limits.
+//! - `outdated [--since <rev>]` fails if a declared dependency requirement excludes the latest
+//!   crates.io release (see `outdated.rs`).
+
+mod outdated;
 
 use std::collections::BTreeMap;
 
@@ -273,7 +277,9 @@ fn main() -> Result<()> {
                 bail!("{LOCK_PATH} is stale; run `cargo xtask update-tools`");
             }
         }
-        _ => bail!("usage: cargo xtask update-tools [--check]"),
+        ["outdated"] => outdated::run(None)?,
+        ["outdated", "--since", rev] => outdated::run(Some(rev))?,
+        _ => bail!("usage: cargo xtask update-tools [--check] | outdated [--since <rev>]"),
     }
     Ok(())
 }

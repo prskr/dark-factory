@@ -4,7 +4,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 
 ## 1. Prerequisites
 
-- **Rust toolchain**: pinned via [`rust-toolchain.toml`](../rust-toolchain.toml) (`stable`, edition 2024, with targets `x86_64-unknown-linux-musl` and `wasm32-wasip2`, and `llvm-tools-preview`).
+- **Rust toolchain**: pinned via [`rust-toolchain.toml`](../rust-toolchain.toml) (1.99.1, edition 2024, with targets `x86_64-unknown-linux-musl` and `wasm32-wasip2`, and `llvm-tools-preview`).
 - **Protobuf compiler**: `protoc` (`>= 29.x`) on `PATH` (or set via `PROTOC`).
 - **Cargo subcommands**:
   - `cargo-deny` (`cargo deny check`)
@@ -113,3 +113,20 @@ lefthook hooks use the same versions on every machine.
 | Install git hooks without direnv | `LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install` (git hooks use `LEFTHOOK_BIN`) |
 
 `multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits.
+
+## Dependency freshness
+
+New dependencies start on their latest release. `cargo xtask outdated` fails when a requirement in the
+root `Cargo.toml` (`[workspace.dependencies]`) or in a member crate excludes the newest stable, non-yanked
+crates.io release (for example `tonic = "0.12"` while 0.14 is out). Compatible updates within a requirement
+are `cargo update`'s job and are not reported.
+
+| Task | Command |
+|------|---------|
+| Check all dependencies | `cargo xtask outdated` |
+| Check only what is new or changed since a revision (the pre-commit hook) | `cargo xtask outdated --since HEAD` |
+| Hold a dependency back on purpose | add `crate-name = "reason"` under `[workspace.metadata.outdated.ignore]` in `Cargo.toml` |
+
+The pre-commit hook `outdated-deps` runs when a `Cargo.toml` is staged. If crates.io cannot be reached it
+prints a warning and passes. When you bump the Rust version, change `rust-toolchain.toml` and `versions` in
+`MODULE.bazel` together.

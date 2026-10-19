@@ -68,7 +68,8 @@ pub async fn connect_pool(cfg: &DatabaseConfig) -> Result<PgPool, DbError> {
             let schema = schema.clone();
             Box::pin(async move {
                 let query = format!("SET search_path TO \"{schema}\"");
-                conn.execute(query.as_str()).await?;
+                // `schema` was validated by `validate_sql_identifier`
+                conn.execute(sqlx::AssertSqlSafe(query)).await?;
                 Ok(())
             })
         })

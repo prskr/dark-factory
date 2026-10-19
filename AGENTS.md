@@ -171,6 +171,7 @@ Hand-rolling is always a tradeoff: an extra dependency on one side, extra code t
 
 Rules for adding one:
 - Declare it in the root `[workspace.dependencies]` and reference it with `.workspace = true`.
+- Start on the latest release. `cargo xtask outdated` (also a pre-commit hook for changed dependencies) fails when a requirement excludes the newest stable release. Holding a dependency back needs an entry with a reason under `[workspace.metadata.outdated.ignore]` in the root `Cargo.toml`.
 - Enable only the features that are needed (`default-features = false` where sensible).
 - Remove dependencies that are no longer used; `cargo-machete` runs in the pre-commit hook. Don't silence it with `ignored = [...]` to keep an unused dependency.
 - `cargo deny check` must pass (licenses, advisories).

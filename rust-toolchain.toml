@@ -1,5 +1,5 @@
 [toolchain]
 # Keep in sync with `versions` in MODULE.bazel.
-channel = "1.93.1"
+channel = "1.99.1"
 components = ["rustfmt", "clippy", "llvm-tools-preview"]
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "wasm32-wasip2"]

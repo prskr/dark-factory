@@ -35,6 +35,12 @@ pre-commit:
       glob: ['Cargo.toml', '*.rs']
       run: build/with_tools.sh cargo-machete
 
+    # Requirements of new or changed dependencies must not exclude the latest crates.io release.
+    # Checks only what differs from HEAD; passes with a warning when crates.io is unreachable.
+    outdated-deps:
+      glob: ['Cargo.toml', '*/Cargo.toml', '*/*/Cargo.toml']
+      run: build/with_tools.sh cargo xtask outdated --since HEAD
+
     helm-lint:
       glob: 'deploy/helm/**'
       run: build/with_tools.sh helm lint deploy/helm/dark-factory

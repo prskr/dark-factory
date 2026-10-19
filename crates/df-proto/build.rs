@@ -21,14 +21,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = prost_build::Config::new();
     config.bytes(["."]);
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
         .build_transport(false)
         .compile_well_known_types(true)
         .extern_path(".google.protobuf", "::pbjson_types")
         .file_descriptor_set_path(&descriptor_path)
-        .compile_protos_with_config(config, &protos, &[proto_root])?;
+        .compile_with_config(config, &protos, &[proto_root])?;
 
     let descriptor_set = std::fs::read(&descriptor_path)?;
     pbjson_build::Builder::new()

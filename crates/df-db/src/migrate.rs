@@ -75,7 +75,8 @@ async fn run_migrate_locked(
 ) -> Result<(), DbError> {
     // Ensure the target schema exists when connected as owner.
     let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS \"{schema}\"");
-    pool.execute(create_schema_sql.as_str()).await?;
+    // `schema` was validated by `validate_sql_identifier`
+    pool.execute(sqlx::AssertSqlSafe(create_schema_sql)).await?;
 
     // Step 1: Apply embedded migrations under sqlx's advisory lock and checksum verification.
     MIGRATOR.run(pool).await?;
@@ -130,13 +131,16 @@ async fn manage_application_role(
         format!("CREATE ROLE \"{app_role}\" LOGIN PASSWORD '{escaped_pw}'")
     };
 
-    conn.execute(ddl.as_str()).await.map_err(|err| {
-        DbError::RoleManagement(format!(
-            "failed to manage application role `{app_role}` ({err}); \
+    // `app_role` was validated by `validate_sql_identifier`, the password quotes are doubled
+    conn.execute(sqlx::AssertSqlSafe(ddl))
+        .await
+        .map_err(|err| {
+            DbError::RoleManagement(format!(
+                "failed to manage application role `{app_role}` ({err}); \
              if the role is managed externally (e.g. by a DBA), disable role management \
              by setting `database.migrate.manageAppRole: false`"
-        ))
-    })?;
+            ))
+        })?;
 
     if exists {
         info!(app_role = %app_role, "updated application role password");
@@ -164,8 +168,9 @@ async fn apply_grants(
     ];
 
     let mut tx = pool.begin().await?;
-    for stmt in &statements {
-        tx.execute(stmt.as_str()).await?;
+    for stmt in statements {
+        // Identifiers were validated/quoted by the caller
+        tx.execute(sqlx::AssertSqlSafe(stmt)).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -215,30 +220,34 @@ mod tests {
         let schema = format!("df_schema_{suffix}");
 
         // Clean up any leftover roles from previous runs
-        let _ = sqlx::query(&format!("DROP ROLE IF EXISTS \"{app_role}\""))
-            .execute(superuser_pool)
-            .await;
-        let _ = sqlx::query(&format!("DROP ROLE IF EXISTS \"{owner_role}\""))
-            .execute(superuser_pool)
-            .await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP ROLE IF EXISTS \"{app_role}\""
+        )))
+        .execute(superuser_pool)
+        .await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP ROLE IF EXISTS \"{owner_role}\""
+        )))
+        .execute(superuser_pool)
+        .await;
 
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE ROLE \"{owner_role}\" LOGIN PASSWORD 'owner-pass' CREATEROLE"
-        ))
+        )))
         .execute(superuser_pool)
         .await
         .unwrap();
 
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "GRANT ALL PRIVILEGES ON DATABASE \"{db_name}\" TO \"{owner_role}\" WITH GRANT OPTION"
-        ))
+        )))
         .execute(superuser_pool)
         .await
         .unwrap();
 
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE SCHEMA \"{schema}\" AUTHORIZATION \"{owner_role}\""
-        ))
+        )))
         .execute(superuser_pool)
         .await
         .unwrap();
@@ -252,29 +261,35 @@ mod tests {
         owner_role: &str,
         app_role: &str,
     ) {
-        let _ = sqlx::query(&format!("DROP SCHEMA IF EXISTS \"{schema}\" CASCADE"))
-            .execute(superuser_pool)
-            .await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE"
+        )))
+        .execute(superuser_pool)
+        .await;
         let (db_name,): (String,) = sqlx::query_as("SELECT current_database()")
             .fetch_one(superuser_pool)
             .await
             .unwrap();
-        let _ = sqlx::query(&format!(
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
             "REVOKE ALL PRIVILEGES ON DATABASE \"{db_name}\" FROM \"{app_role}\""
-        ))
+        )))
         .execute(superuser_pool)
         .await;
-        let _ = sqlx::query(&format!(
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
             "REVOKE ALL PRIVILEGES ON DATABASE \"{db_name}\" FROM \"{owner_role}\""
-        ))
+        )))
         .execute(superuser_pool)
         .await;
-        let _ = sqlx::query(&format!("DROP ROLE IF EXISTS \"{app_role}\""))
-            .execute(superuser_pool)
-            .await;
-        let _ = sqlx::query(&format!("DROP ROLE IF EXISTS \"{owner_role}\""))
-            .execute(superuser_pool)
-            .await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP ROLE IF EXISTS \"{app_role}\""
+        )))
+        .execute(superuser_pool)
+        .await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP ROLE IF EXISTS \"{owner_role}\""
+        )))
+        .execute(superuser_pool)
+        .await;
     }
 
     #[sqlx::test(migrations = false)]
@@ -398,9 +413,9 @@ mod tests {
 
         // Pre-create `app_role` as superuser so `owner_role` (without ADMIN option on `app_role`)
         // cannot ALTER it.
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE ROLE \"{app_role}\" LOGIN PASSWORD 'dba-created'"
-        ))
+        )))
         .execute(&superuser_pool)
         .await
         .unwrap();
@@ -439,9 +454,9 @@ mod tests {
         r2.expect("concurrent migrate 2 should succeed");
 
         // Scenario: Tampered migration checksum -> fails naming the migration
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE \"{schema}\"._sqlx_migrations SET checksum = decode('00', 'hex') WHERE version = 20261017000001"
-        ))
+        )))
         .execute(&superuser_pool)
         .await
         .unwrap();
