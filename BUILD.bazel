@@ -7,6 +7,7 @@ exports_files([
     ".kube-linter.yaml",
     "Cargo.lock",
     "Cargo.toml",
+    "rustfmt.toml",
 ])
 
 filegroup(

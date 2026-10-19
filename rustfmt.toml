@@ -1,0 +1,4 @@
+# Keep `max_width` in sync with `max_line_length` for `*.rs` in .editorconfig.
+edition = "2024"
+max_width = 100
+newline_style = "Unix"

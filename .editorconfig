@@ -15,3 +15,16 @@ insert_final_newline = true
 [*.{sh,bash}]
 indent_style = tab
 indent_size = 2
+
+[*.rs]
+indent_size = 4
+max_line_length = 100
+
+[*.{toml,bazel,bzl}]
+indent_size = 4
+
+[*.{proto,wit,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
