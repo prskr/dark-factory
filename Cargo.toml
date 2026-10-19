@@ -15,6 +15,7 @@ unsafe_code = "forbid"
 all = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
+agent-client-protocol = { version = "3.4.0", features = ["stdio"] }
 anyhow = "1"
 async-trait = "0.1"
 bytes = "1"
@@ -32,7 +33,9 @@ pbjson-types = "0.7"
 prost = "0.13"
 prost-build = "0.13"
 prost-types = "0.13"
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 regex = "1"
+rmcp = { version = "3.5.1", default-features = false, features = ["client", "server", "transport-async-rw"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 secrecy = { version = "0.10", features = ["serde"] }
@@ -55,7 +58,7 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tonic = { version = "0.12", default-features = false, features = ["transport", "prost", "codegen"] }
+tonic = { version = "0.12", default-features = false, features = ["transport", "prost", "codegen", "tls"] }
 tonic-build = { version = "0.12", default-features = false, features = ["prost", "transport"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }

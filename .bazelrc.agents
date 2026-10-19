@@ -1,0 +1,9 @@
+common --experimental_convenience_symlinks=clean
+# The agent sandbox sets HOME under /workspace/.paperclip-runtime, which places
+# Bazel's default cache inside the workspace root. Bazel errors out unless this is disabled.
+common --repo_contents_cache=
+
+import %workspace%/.bazelrc
+
+# Make remote execution the default for builds and tests
+build --config=remote
