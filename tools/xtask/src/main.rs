@@ -14,7 +14,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 const LOCK_PATH: &str = "multitool.lock.json";
-const SCHEMA: &str = "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json";
+const SCHEMA: &str =
+    "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json";
 
 #[derive(Clone, Copy)]
 struct Platform {
@@ -23,10 +24,22 @@ struct Platform {
 }
 
 const PLATFORMS: [Platform; 4] = [
-    Platform { os: "linux", cpu: "x86_64" },
-    Platform { os: "linux", cpu: "arm64" },
-    Platform { os: "macos", cpu: "x86_64" },
-    Platform { os: "macos", cpu: "arm64" },
+    Platform {
+        os: "linux",
+        cpu: "x86_64",
+    },
+    Platform {
+        os: "linux",
+        cpu: "arm64",
+    },
+    Platform {
+        os: "macos",
+        cpu: "x86_64",
+    },
+    Platform {
+        os: "macos",
+        cpu: "arm64",
+    },
 ];
 
 #[derive(Deserialize)]
@@ -70,7 +83,10 @@ const TOOLS: [GithubTool; 11] = [
         asset: |v, p| {
             let os = p.os.replace("macos", "darwin");
             let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
-            (format!("shellcheck-v{v}.{os}.{cpu}.tar.gz"), format!("shellcheck-v{v}/shellcheck"))
+            (
+                format!("shellcheck-v{v}.{os}.{cpu}.tar.gz"),
+                format!("shellcheck-v{v}/shellcheck"),
+            )
         },
     },
     GithubTool {
@@ -128,7 +144,10 @@ const TOOLS: [GithubTool; 11] = [
         asset: |_, p| {
             let os = p.os.replace("macos", "darwin");
             let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
-            (format!("kubeconform-{os}-{arch}.tar.gz"), "kubeconform".into())
+            (
+                format!("kubeconform-{os}-{arch}.tar.gz"),
+                "kubeconform".into(),
+            )
         },
     },
     GithubTool {
@@ -207,7 +226,10 @@ fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> 
 }
 
 /// helm is hosted on get.helm.sh and publishes `<archive>.sha256` sidecar files.
-fn helm_binaries(version: &str, mut fetch_sha: impl FnMut(&str) -> Result<String>) -> Result<Vec<Binary>> {
+fn helm_binaries(
+    version: &str,
+    mut fetch_sha: impl FnMut(&str) -> Result<String>,
+) -> Result<Vec<Binary>> {
     let version = format!("v{}", version.trim_start_matches('v'));
     PLATFORMS
         .iter()
@@ -216,7 +238,14 @@ fn helm_binaries(version: &str, mut fetch_sha: impl FnMut(&str) -> Result<String
             let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
             let url = format!("https://get.helm.sh/helm-{version}-{os}-{arch}.tar.gz");
             let sha256 = parse_sha_file(&fetch_sha(&format!("{url}.sha256"))?)?;
-            Ok(Binary { kind: "archive", file: Some(format!("{os}-{arch}/helm")), url, sha256, os: p.os, cpu: p.cpu })
+            Ok(Binary {
+                kind: "archive",
+                file: Some(format!("{os}-{arch}/helm")),
+                url,
+                sha256,
+                os: p.os,
+                cpu: p.cpu,
+            })
         })
         .collect()
 }
@@ -250,27 +279,39 @@ fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
 }
 
 fn latest_release(repo: &str) -> Result<Release> {
-    Ok(get(&format!("https://api.github.com/repos/{repo}/releases/latest"))?
-        .body_mut()
-        .read_json()?)
+    Ok(get(&format!(
+        "https://api.github.com/repos/{repo}/releases/latest"
+    ))?
+    .body_mut()
+    .read_json()?)
 }
 
 fn generate() -> Result<String> {
     let mut tools = BTreeMap::new();
     for tool in &TOOLS {
-        tools.insert(tool.name, github_binaries(tool, &latest_release(tool.repo)?)?);
+        tools.insert(
+            tool.name,
+            github_binaries(tool, &latest_release(tool.repo)?)?,
+        );
     }
     let helm = latest_release("helm/helm")?;
     tools.insert(
         "helm",
-        helm_binaries(&helm.tag_name, |url| Ok(get(url)?.body_mut().read_to_string()?))?,
+        helm_binaries(&helm.tag_name, |url| {
+            Ok(get(url)?.body_mut().read_to_string()?)
+        })?,
     );
     render(tools)
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["update-tools"] => std::fs::write(LOCK_PATH, generate()?)?,
         ["update-tools", "--check"] => {
             if std::fs::read_to_string(LOCK_PATH)? != generate()? {
@@ -355,25 +396,43 @@ mod tests {
     #[test]
     fn kubeconform_and_yq_names() {
         let (name, file) = (tool("kubeconform").asset)("0.8.0", PLATFORMS[1]);
-        assert_eq!((name.as_str(), file.as_str()), ("kubeconform-linux-arm64.tar.gz", "kubeconform"));
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("kubeconform-linux-arm64.tar.gz", "kubeconform")
+        );
         let (name, file) = (tool("yq").asset)("4.54.1", PLATFORMS[2]);
-        assert_eq!((name.as_str(), file.as_str()), ("yq_darwin_amd64.tar.gz", "yq_darwin_amd64"));
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("yq_darwin_amd64.tar.gz", "yq_darwin_amd64")
+        );
     }
 
     #[test]
     fn kube_linter_is_a_bare_file() {
-        let names = ["kube-linter-darwin", "kube-linter-darwin_arm64", "kube-linter-linux", "kube-linter-linux_arm64"];
+        let names = [
+            "kube-linter-darwin",
+            "kube-linter-darwin_arm64",
+            "kube-linter-linux",
+            "kube-linter-linux_arm64",
+        ];
         let r = release("v0.8.3", &names, Some("sha256:abc"));
         let bins = github_binaries(tool("kube-linter"), &r).unwrap();
         assert_eq!(bins.len(), 4);
         assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
-        assert!(bins.iter().any(|b| b.os == "linux" && b.cpu == "x86_64" && b.url.ends_with("kube-linter-linux")));
+        assert!(
+            bins.iter().any(|b| b.os == "linux"
+                && b.cpu == "x86_64"
+                && b.url.ends_with("kube-linter-linux"))
+        );
     }
 
     #[test]
     fn lefthook_asset_names() {
         let (name, file) = (tool("lefthook").asset)("2.2.2", PLATFORMS[3]);
-        assert_eq!((name.as_str(), file.as_str()), ("lefthook_2.2.2_MacOS_arm64", ""));
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("lefthook_2.2.2_MacOS_arm64", "")
+        );
         let (name, _) = (tool("lefthook").asset)("2.2.2", PLATFORMS[0]);
         assert_eq!(name, "lefthook_2.2.2_Linux_x86_64");
     }
@@ -383,10 +442,19 @@ mod tests {
         let (name, file) = (tool("hadolint").asset)("2.15.1", PLATFORMS[3]);
         assert_eq!((name.as_str(), file.as_str()), ("hadolint-macos-arm64", ""));
         let (name, file) = (tool("typos").asset)("1.51.1", PLATFORMS[0]);
-        assert_eq!((name.as_str(), file.as_str()), ("typos-v1.51.1-x86_64-unknown-linux-musl.tar.gz", "typos"));
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("typos-v1.51.1-x86_64-unknown-linux-musl.tar.gz", "typos")
+        );
         let (name, file) = (tool("cargo-machete").asset)("0.9.2", PLATFORMS[1]);
-        assert_eq!(name, "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu.tar.gz");
-        assert_eq!(file, "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu/cargo-machete");
+        assert_eq!(
+            name,
+            "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu.tar.gz"
+        );
+        assert_eq!(
+            file,
+            "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu/cargo-machete"
+        );
     }
 
     #[test]
