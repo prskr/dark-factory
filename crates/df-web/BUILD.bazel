@@ -13,14 +13,7 @@ filegroup(
 
 alias(
     name = "tailwindcss",
-    actual = select(
-        {
-            "//build/platforms:macos_arm64": "@tailwindcss_macos_arm64//file",
-            "//build/platforms:linux_arm64": "@tailwindcss_linux_arm64//file",
-            "//build/platforms:linux_x86_64": "@tailwindcss_linux_x64//file",
-        },
-        no_match_error = "No prebuilt tailwindcss binary configured for this exec platform. Supported: macos_arm64, linux_arm64, linux_x86_64.",
-    ),
+    actual = "@multitool//tools/tailwindcss",
 )
 
 genrule(

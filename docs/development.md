@@ -99,7 +99,7 @@ cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck` and `yq` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `tailwindcss` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine.
 
 | Task | Command |

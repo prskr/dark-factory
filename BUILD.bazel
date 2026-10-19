@@ -34,6 +34,7 @@ bazel_env(
         "kubeconform": TOOLS["kubeconform"],
         "rustc": "@rules_rust//tools/upstream_wrapper:rustc",
         "shellcheck": TOOLS["shellcheck"],
+        "tailwindcss": TOOLS["tailwindcss"],
         "typos": TOOLS["typos"],
         "yq": TOOLS["yq"],
     },

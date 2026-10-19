@@ -76,7 +76,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 11] = [
+const TOOLS: [GithubTool; 12] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -195,6 +195,15 @@ const TOOLS: [GithubTool; 11] = [
             )
         },
     },
+    GithubTool {
+        name: "tailwindcss",
+        repo: "tailwindlabs/tailwindcss",
+        asset: |_, p| {
+            let cpu = if p.cpu == "x86_64" { "x64" } else { p.cpu };
+            let suffix = if p.os == "linux" { "-musl" } else { "" };
+            (format!("tailwindcss-{}-{cpu}{suffix}", p.os), String::new())
+        },
+    },
 ];
 
 fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> {
@@ -270,10 +279,10 @@ fn render(tools: BTreeMap<&str, Vec<Binary>>) -> Result<String> {
 
 fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
     let mut req = ureq::get(url).header("User-Agent", "dark-factory-xtask");
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        if url.starts_with("https://api.github.com/") {
-            req = req.header("Authorization", &format!("Bearer {token}"));
-        }
+    if let Ok(token) = std::env::var("GITHUB_TOKEN")
+        && url.starts_with("https://api.github.com/")
+    {
+        req = req.header("Authorization", &format!("Bearer {token}"));
     }
     req.call().with_context(|| format!("GET {url}"))
 }
@@ -484,5 +493,43 @@ mod tests {
         assert!(out.contains("\"$schema\""));
         assert!(out.find("\"aa\"").unwrap() < out.find("\"zz\"").unwrap());
         assert!(out.ends_with('\n'));
+    }
+
+    #[test]
+    fn tailwindcss_asset_names() {
+        let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[0]);
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("tailwindcss-linux-x64-musl", "")
+        );
+        let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[1]);
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("tailwindcss-linux-arm64-musl", "")
+        );
+        let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[2]);
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("tailwindcss-macos-x64", "")
+        );
+        let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[3]);
+        assert_eq!(
+            (name.as_str(), file.as_str()),
+            ("tailwindcss-macos-arm64", "")
+        );
+    }
+
+    #[test]
+    fn tailwindcss_is_a_bare_file() {
+        let names = [
+            "tailwindcss-linux-x64-musl",
+            "tailwindcss-linux-arm64-musl",
+            "tailwindcss-macos-x64",
+            "tailwindcss-macos-arm64",
+        ];
+        let r = release("v4.3.3", &names, Some("sha256:abc"));
+        let bins = github_binaries(tool("tailwindcss"), &r).unwrap();
+        assert_eq!(bins.len(), 4);
+        assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
     }
 }

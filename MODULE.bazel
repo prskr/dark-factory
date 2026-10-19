@@ -172,32 +172,6 @@ multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitoo
 multitool.hub(lockfile = "//:multitool.lock.json")
 use_repo(multitool, "multitool")
 
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-
-http_file(
-    name = "tailwindcss_macos_arm64",
-    downloaded_file_path = "tailwindcss",
-    executable = True,
-    sha256 = "c7ba62456c6d9441775c90ca6f0a3df800f82cede4e92389f934536de8cf52e9",
-    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-macos-arm64"],
-)
-
-http_file(
-    name = "tailwindcss_linux_arm64",
-    downloaded_file_path = "tailwindcss",
-    executable = True,
-    sha256 = "1a3c33590eada49e9658c72f1f2946b04afe897149c98512e4563e39ed1ac1c0",
-    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-linux-arm64-musl"],
-)
-
-http_file(
-    name = "tailwindcss_linux_x64",
-    downloaded_file_path = "tailwindcss",
-    executable = True,
-    sha256 = "85c31481ace4c66071c8ec4e05164e7a67baecb0454955160925caf2611849f0",
-    urls = ["https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.4/tailwindcss-linux-x64-musl"],
-)
-
 # Vendored schemas so kubeconform never touches the network.
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
