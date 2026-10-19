@@ -76,8 +76,8 @@
 - **Chats** with employees, one per (persona, project) (ADR-0026).
 - **Questions and approvals**: agents ask questions and raise typed approval requests (network access, tool access, push-check exceptions, …); the control plane applies approved actions and keeps one inbox and audit trail (ADR-0038).
 - **Full-text search** across tasks and transcripts.
-- **Projects**: typically one Git repository in a forge + one issue tracker + a sandbox image (ADR-0022) + a project context document (ADR-0026) + Git config entries and commit hooks for the agents' own commits (also at instance scope, ADR-0009), probably more config later.
-- **Agent memory**: agents store, search and retrieve memories *(not in the first iteration; planned before LSP)*.
+- **Projects**: typically one Git repository in a forge + one issue tracker + a sandbox image (ADR-0022) + a project context document (ADR-0026) + Git config entries and commit hooks for the agents' own commits (also at instance scope, ADR-0009), optionally a repository configuration file `.dark-factory/config.toml`, activated by approval (F11, ADR-0039).
+- **Agent memory**: agents store, search and retrieve memories at project and (project, persona) scope; memories are hints with provenance, reviewable in the UI, and can be promoted into the project context by approval. Explicit memories with full-text search first, curation and semantic retrieval later (ADR-0040) *(not in the first iteration; planned before LSP)*.
 - **Artifacts per task**: text documents (Markdown) an agent creates for the human in the loop, or as intermediate results to be consumed later.
 - **Routines**: scheduled tasks with a fixed prompt, always assigned to a specific agent.
 - **Audit log**:
@@ -102,12 +102,12 @@ Original options considered:
 - Protocol question: directly **ACP** vs a **custom protocol**, and where runtime configuration (env, config injection) should live. → resolved in ADR-0007/ADR-0008/ADR-0017.
 
 ## 7. Open questions
-- Agent memory design (next after the first iterations; pgvector is the likely storage). LSP support comes after memory.
+- Agent memory phase 3: selecting relevant memories by embeddings or by a small selection model on a local provider (ADR-0040). LSP support comes after memory.
 - Chat context management for long-running employee chats: compaction strategy — candidate for the plugin API (F3).
 - Full permission catalogue: more permissions will appear over time, especially instance-management operations (CRUD on agents, skills, tools, routines, projects).
 - Harness delivery beyond iteration 1: baked into project images (iteration 1) vs a second image volume once a second project or harness appears.
 - Webhook routing details beyond the rules in ADR-0015 (e.g. CI events when no task waits for CI).
-- Further agent-run questions (divergence policy, UID separation, keep-alive window) are tracked in `design/agent-run.md` §16.
+- Further agent-run questions (divergence policy, UID separation, keep-alive window) are tracked in `design/agent-run.md` §17.
 
 ### Verify early
 - Whether the Claude ACP adapter (`@zed-industries/claude-agent-acp`) reports token usage; "what if" cost depends on it. Fallback: Claude Code's own session JSONL (`~/.claude/projects`) records usage.
@@ -145,7 +145,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0017](../design/adr/0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](../design/adr/0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](../design/adr/0019-identifiers.md) | Identifiers | Accepted |
-| [ADR-0020](../design/adr/0020-configuration-in-database.md) | Configuration lives in the database | Accepted |
+| [ADR-0020](../design/adr/0020-configuration-in-database.md) | Configuration lives in the database | Accepted (amended by ADR-0039) |
 | [ADR-0021](../design/adr/0021-usage-and-cost-data.md) | Usage and cost data | Accepted |
 | [ADR-0022](../design/adr/0022-project-images-runtime-volume-no-warm-pools.md) | Per-project sandbox images, runtime via image volume, no warm pools | Accepted |
 | [ADR-0023](../design/adr/0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
@@ -163,7 +163,9 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0035](../design/adr/0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](../design/adr/0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
-| [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2) |
+| [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039) |
+| [ADR-0039](../design/adr/0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
+| [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned after iteration 2) |
 
 ## 9. Future options
 
@@ -183,7 +185,7 @@ Because the harness only sees tools through Dark Factory's MCP servers, custom t
 Chat and task context management (summaries across runs, compaction of long employee chats) as a WIT world, so different strategies can be swapped without implementing all of them in core. Such plugins need model access, so the world would import a host-provided inference interface backed by the gateway's inference endpoint.
 
 ### F4 — Declarative configuration import (idea, 2026-10-16)
-A declarative format, inspired by the shape of Kubernetes custom resources but not backed by them, plus a CLI to push personas, skills, system prompts, … from a pipeline into an instance. The database stays authoritative (ADR-0020).
+A declarative format, inspired by the shape of Kubernetes custom resources but not backed by them, plus a CLI to push personas, skills, system prompts, … from a pipeline into an instance. The database stays authoritative (ADR-0020). Unlike the repository configuration (F11), the import may configure everything, including instance settings such as the image allowlist — which makes digest-pinned allowlist entries maintainable by a bot like renovate.
 
 ### F5 — Inference provider abstraction (idea, 2026-10-16)
 Most providers speak an OpenAI-compatible API but differ in details — e.g. OpenCode Go needs only an API key but also a session ID header. A small per-provider adapter layer in the inference gateway (hosted in the gateway Deployment, ADR-0029) handles auth, extra headers and usage mapping. Being per-provider HTTP glue with injected credentials, it's a natural candidate for the WASI plugin model.
@@ -202,3 +204,6 @@ Script snippets the runtime runs at `workspace-init` (fresh workspace only), `ru
 
 ### F10 — Sidecar services in the sandbox (idea, 2026-10-17)
 Service containers next to the agent in the sandbox pod, e.g. a PostgreSQL to develop against, defined per project by humans (name, image, ports, env, resources, probe). Native Kubernetes sidecars: started and ready before the runtime, stopped with the pod. The agent reaches them at `localhost`, so no egress rules are involved; the pod's egress policy applies to the sidecars too. Data is ephemeral per run or kept on the task PVC; migrations and seeding run as lifecycle hooks (F9). Credentials are plain development values; no nested containers needed (ADR-0023). Details: `design/agent-run.md` §15.
+
+### F11 — Repository configuration file (decided, 2026-10-19)
+Project settings maintained in the repository as `.dark-factory/config.toml`: commit hooks, lifecycle hooks (F9), non-secret environment variables, Git config entries, project image and sidecars (F10), egress hosts and named cluster targets. The control plane reads the file from the project's base branch — never from the worktree or a task branch — and a new version takes effect only after a human approves its effective diff (`project-config` approval); runs meanwhile use the last approved version. Project and sidecar images — from the repository and from the UI — must match the instance's glob-based image allowlist; an empty allowlist allows every image. Credentials, isolation settings, resources, budgets, branch and subtask policies, push checks and tool grants stay UI-only. Per task, `repo_config` selects the approved version (default), `ignore` (database settings only, e.g. for a broken config) or a pinned `ref` to test a change; subtasks inherit it. Decision: ADR-0039; details: `design/agent-run.md` §16.

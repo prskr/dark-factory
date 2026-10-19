@@ -145,7 +145,7 @@ Trust policy for configuration found in the repository:
 | Repo skills (`.agents/skills`, `.claude/skills`) | Accepted unless the project disables them |
 | MCP server definitions (`.mcp.json`, …) | Not used by the runtime; can be surfaced to the control plane as a `repository-mcp-server` approval request (ADR-0038) |
 | Harness hooks/settings in the repo | Whatever the harness honours runs inside the sandbox only; none of the runtime's privileged operations depend on them |
-| Runtime project config (own file) | Non-privileged settings only (e.g. build cache env) |
+| `.dark-factory/config.toml` | Never read from the worktree. The control plane reads it from the base branch and applies only the approved version (§16) |
 | Repository Git hooks (`.githooks/`, `.pre-commit-config.yaml`, …) | Only run when a commit hook command configured in Dark Factory calls them (§7.1) |
 
 ### 6.4 Execute
@@ -280,12 +280,14 @@ Kept deliberately as a planned option. It runs in the gateway Deployment (ADR-00
 - **Push checks (server-side hooks)**: the proxy is the only point every push passes through, so pre-receive checks belong here.
   - *Mechanism:* thin packs reference objects the push doesn't contain, so the gateway keeps a cached bare mirror per repository (rebuildable, on ephemeral or volume storage). Each push is received into a quarantine on top of the mirror, checked, and forwarded upstream only if all checks pass. Rejections go back through `report-status`, so git shows `remote rejected (reason)`. For pushes made by the runtime, the runtime feeds the rejection into the agent's next turn so it can fix the commits.
   - *Built-in checks:* ref rules (below); **secret scanning** of every pushed pack (Kingfisher or similar, live validation off) — the only secret scan, covering pushes by the runtime and by the harness alike, which a scan inside the sandbox couldn't; **commit identity** (author and committer must be the bot, so an agent can't commit as a human); **signature verification** once signing exists (§12).
-  - *Configurable per project:* **protected paths** (e.g. `.forgejo/workflows/**`, `CODEOWNERS`) — the most important one, because CI runs with secrets and a modified workflow could leak them; size and file-type limits (large files that belong in LFS, binaries); linear history (no merge commits).
+  - *Configurable per project:* **protected paths** (e.g. `.forgejo/workflows/**`, `CODEOWNERS`; `.dark-factory/**` is always protected, §16) — the most important one, because CI runs with secrets and a modified workflow could leak them; size and file-type limits (large files that belong in LFS, binaries); linear history (no merge commits).
   - *Approval-gated rules* can't hold a push open (git would time out). They reject it and open a `push-check-exception` approval request (ADR-0038); once approved for the task, the next push passes.
   - *Plugin extension point:* a `push-check` WIT world executed by the gateway's Wasmtime host. The host gives read-only access to the pushed refs, commits, changed paths and blob contents; the plugin returns allow, reject with reason, or approval required. No network access, no credentials, deterministic. Built-in checks stay native; plugins cover project conventions such as commit message formats (e.g. Conventional Commits, a required `Task: DF-42` trailer).
 - **Ref enforcement**: `receive-pack` ref update commands are pkt-lines in front of the packfile. The proxy parses them and allows only the task's branch (non-fast-forward updates only if the branch rewrite policy permits; `receive-pack`'s old-value check provides the lease semantics) and `refs/heads/factory/wip/<key>` (force allowed), rejecting everything else before forwarding. The branch → task mapping comes from the database (ADR-0025).
 - **Benefits**: no forge token and no forge egress in the sandbox; audit log of every push; per-task ref enforcement independent of forge features.
 - **Costs**: the gateway is in the clone data path (bandwidth), Git protocol details to get right, LFS handled separately.
+- **Implementation candidate: [gitoxide](https://github.com/GitoxideLabs/gitoxide)** for parsing — pkt-line decoding (ref commands), pack parsing including deltified objects (quarantine), tree diffs (changed paths for protected paths) and blob reads (secret scanning). Its server-side protocol (`upload-pack`/`receive-pack` serving) is not implemented, but the proxy only parses and forwards. Status as of 2026-10: [`crate-status.md`](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md).
+- **Not planned: a restricted `git` CLI in the sandbox.** A `git` replacement exposing only allowed commands (e.g. no `--no-verify`) wouldn't enforce anything: the real binary stays in the image for tools that need it (cargo, pre-commit, Bazel, build scripts), and the agent can write `.git` directly. Enforcement stays here, at the boundary. Nudges such as refusing `--no-verify` go into the harness settings (deny rules or hooks in `Assign.harness.acp.settings_json`).
 
 ## 12. Future option: commit signing without keys in the sandbox
 - **Not in the proxy:** a signature is part of the commit object, so signing in the proxy would rewrite every pushed commit and change its ID and those of all descendants. The sandbox's branch would then diverge from the remote, and the runtime would have to reset after every push, racing the agent's next commits.
@@ -301,7 +303,7 @@ Browse a task's repository in the dashboard, including changes the agent hasn't 
 
 - **Snapshot per turn:** the runtime pushes the WIP snapshot (§6.5 step 4) after every turn, not only at finalize, alongside the per-turn push of the task branch. Same denylist, same `PushReport`.
 - **Isolation from the agent:** the snapshot uses its own index file, creates a commit no local branch points to (`git commit-tree`) and pushes it by hash to the URL (no remote-tracking ref appears). The agent's index, staged/unstaged state, HEAD, branches, reflog and working tree are untouched; its `git status`/`diff`/`log` look the same before and after.
-  - Snapshots taken mid-turn ("refresh now") may capture a half-finished edit; the UI marks them as mid-turn. Concurrent writes are safe for Git's object store, and the separate index avoids `index.lock` conflicts.
+  - Snapshots are taken only at tool-call boundaries: the runtime tracks the harness's tool calls from ACP `session/update` (started → completed/failed) and snapshots only while none is running, so a half-written file is never captured. A mid-turn request ("refresh now") waits for the running tool call to finish, up to a timeout; a snapshot forced by the timeout is marked as possibly incomplete in the UI. Concurrent writes are safe for Git's object store, and the separate index avoids `index.lock` conflicts.
   - Performance: start the snapshot index from a copy of the agent's index (consistent, since Git replaces it atomically) so the stat cache is reused and only changed files are hashed.
   - Unreferenced snapshot commits accumulate; Git's automatic maintenance prunes them, or the runtime runs `git gc` at finalize.
 - **One read path — Git:** committed changes are base … task branch, uncommitted changes are task branch … WIP snapshot, and the file browser shows the repository at the WIP snapshot. This works whether or not a sandbox is running and survives a lost PVC.
@@ -346,10 +348,100 @@ Service containers that run next to the agent in the sandbox pod — e.g. a Post
 - **Not covered:** services that need their own pod or privileged setup (e.g. a Kubernetes cluster, Docker daemon) — container-based integration tests keep running via Bazel RBE (ADR-0023); and sidecars shared between tasks, which would couple tasks' state.
 - **To verify:** native sidecar support in agent-sandbox's pod template and with the Kata runtime class (native sidecars are stable since Kubernetes 1.33).
 
-## 16. Open questions
+## 16. Future option: repository configuration file
+Project settings maintained in the repository as `.dark-factory/config.toml`, activated only after a human approves them in Dark Factory. Decision and rejected alternatives: ADR-0039.
+
+### 16.1 Contents
+| Setting | Notes |
+|---|---|
+| Commit hook commands (§7.1) | Run after instance and project commands |
+| Lifecycle hooks (§14) | Failure policy defaults to `warn` |
+| Environment variables | Non-secret values only |
+| Git config entries (§7.1) | Same denylist as entries made in the UI |
+| Project image, sidecars (§15) | Each image must match the instance image allowlist |
+| Egress `http-host` entries | Project scope ([`egress.md`](egress.md)); no further approval |
+| Cluster targets | By name, from targets an admin defined |
+
+Everything else stays in the UI (and the declarative import, F4): credentials, runtime class, security context, service account, node placement, resources, PVC size, budgets, branch rewrite policy, subtask settings, push checks, MCP servers and tool grants, persona settings. Everything the file triggers runs inside the sandbox as the harness user.
+
+**Image allowlist** (instance setting): glob patterns over full image references. `*` matches within one path segment, `**` across segments.
+
+- Applies to all project and sidecar images, from the repository and from the UI.
+- Checked when an image is saved in the UI, when a repository version is validated, and again at run provisioning. A non-matching image fails provisioning with a clear reason, so a tightened allowlist takes effect on the next run.
+- **Empty allowlist = implicitly open:** with no patterns configured, every image is allowed.
+
+| Pattern | Allows |
+|---|---|
+| `harbor.example.com/**` | every image of the registry |
+| `harbor.example.com/dev/*` | every image directly under `dev/` |
+| `harbor.example.com/dev/rust:1.99` | one image and tag |
+
+### 16.2 Format
+```toml
+version = 1
+
+[image]
+ref = "harbor.example.com/dev/rust:1.99"
+
+[env]
+CARGO_TARGET_DIR = "/data/cache/cargo-target"
+
+[git.config]
+"rebase.autoStash" = "true"
+
+[commit_hooks]
+pre-commit = ["lefthook run pre-commit"]
+
+[[lifecycle_hooks]]
+phase = "run-start"
+run = "./scripts/df-setup.sh"
+timeout = "5m"
+on_failure = "warn"
+
+[[sidecars]]
+name = "postgres"
+image = "harbor.example.com/library/postgres:17"
+ports = [5432]
+env = { POSTGRES_PASSWORD = "dev" }
+
+[egress]
+http_hosts = ["crates.io", "static.crates.io", "index.crates.io"]
+cluster_targets = ["nativelink"]
+```
+The schema above is illustrative. Unknown fields are rejected, so a typo fails validation instead of silently dropping a hook. `dark-factory config validate <file>` runs the same validation offline (e.g. in CI).
+
+### 16.3 Activation
+```mermaid
+stateDiagram-v2
+    [*] --> Detected: run provisioning or push event on base branch
+    Detected --> Invalid: validation fails
+    Detected --> Pending: valid, differs from approved
+    Pending --> Approved: human approves effective diff
+    Pending --> Superseded: newer version detected
+    Pending --> Rejected: human denies
+    Approved --> [*]: used by runs provisioned afterwards
+```
+- The control plane reads the file through the forge plugin at the project's base branch from the database. It never reads it from the forge's default-branch setting, a task or parent branch, or the PVC. Symlinks, LFS pointers and submodule entries are rejected, and the size is capped.
+- A pending, invalid or rejected version never blocks runs: they use the last approved version (or database settings only if none was ever approved). If the forge is unreachable, the last approved version is used.
+- The approval request (`project-config`, ADR-0038) belongs to the project, not a task, and shows the diff of the effective settings. The run record stores the config version a run used.
+- Layering: instance → project (database) → approved repository config → task. List entries add up; for single values the later layer wins; runtime-owned Git keys can't be overridden. The project page shows the effective configuration with the source of every value.
+
+### 16.4 Per-task selection
+| `repo_config` | Effect |
+|---|---|
+| `approved` (default) | Last approved version |
+| `ignore` | Database settings only, e.g. while the approved config breaks runs |
+| `ref` | Version at a commit the human picks at task creation, resolved to a SHA and pinned; the form shows the effective diff, creating the task counts as approval for its subtree |
+
+Resolved like the subtask settings of ADR-0034: the task's own value, else the nearest ancestor's, else `approved`. Humans set any value without an extra permission; agents creating subtasks may only set `ignore`.
+
+Configuration from the base branch can be ahead of or behind the code on an older task branch, e.g. a hook calling a command the branch doesn't have yet. `warn` as the default failure policy and `ref` for testing cover this.
+
+## 17. Open questions
 - Divergence policy: agent rebases automatically vs human decides.
 - Separate UIDs for runtime and harness to protect `/data/runtime` and `.git/config` within the sandbox.
 - Keep-alive window length for `AwaitingInput` (responsiveness vs resource use).
 - How the harness (Node + Claude ACP adapter) gets into project images beyond iteration 1: baked in, or a second image volume.
 - Forgejo token scoping and expiry options for the v1 credential helper.
 - Tasks starting from existing branches (ADR-0025): prepare/finalize with a non-`factory/task/` branch.
+- [gitoxide](https://github.com/GitoxideLabs/gitoxide) instead of the Git CLI for the runtime's own operations (prepare, push, WIP snapshot): no hooks or config-triggered programs by construction, typed errors. Blocked as of 2026-10 by missing push and partial-clone (promisor) support; revisit when both exist. Until then a mixed setup would put two Git implementations on one repository, and the runtime would have to read whatever format the agent's `git` writes (index versions, extensions, reftable).

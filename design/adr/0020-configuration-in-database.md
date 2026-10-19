@@ -1,6 +1,6 @@
 # ADR-0020: Configuration lives in the database
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0039](0039-repository-configuration-activated-by-approval.md): approved repository configuration as an additional project layer, stored in the database)
 - **Date:** 2026-10-16
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md)
 

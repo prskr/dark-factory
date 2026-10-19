@@ -1,6 +1,6 @@
 # ADR-0038: Agent questions and typed approval requests
 
-- **Status:** Accepted (planned for iteration 2)
+- **Status:** Accepted (planned for iteration 2; amended by [ADR-0039](0039-repository-configuration-activated-by-approval.md): `project-config` approval type, raised by the control plane on the project instead of a task)
 - **Date:** 2026-10-17
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0029](0029-egress-gateway-and-generated-network-policies.md), [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md), [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md)
 

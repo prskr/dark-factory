@@ -23,7 +23,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0017](0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](0019-identifiers.md) | Identifiers | Accepted |
-| [ADR-0020](0020-configuration-in-database.md) | Configuration lives in the database | Accepted |
+| [ADR-0020](0020-configuration-in-database.md) | Configuration lives in the database | Accepted (amended by ADR-0039) |
 | [ADR-0021](0021-usage-and-cost-data.md) | Usage and cost data | Accepted |
 | [ADR-0022](0022-project-images-runtime-volume-no-warm-pools.md) | Per-project sandbox images, runtime via image volume, no warm pools | Accepted |
 | [ADR-0023](0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
@@ -41,4 +41,6 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
-| [ADR-0038](0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2) |
+| [ADR-0038](0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039) |
+| [ADR-0039](0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
+| [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned after iteration 2) |

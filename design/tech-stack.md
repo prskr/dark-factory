@@ -111,7 +111,7 @@
 | Primary store | PostgreSQL (existing homelab instance or CloudNativePG) | Decided | [0012](adr/0012-postgresql-and-blob-store.md) |
 | Full-text search | `tsvector` + `pg_trgm` on text-only extracts | Decided | [0012](adr/0012-postgresql-and-blob-store.md) |
 | Blobs | `BlobStore` trait: Postgres `bytea` default, S3-compatible optional | Decided | [0012](adr/0012-postgresql-and-blob-store.md) |
-| Agent memory | pgvector | Later | — |
+| Agent memory | PostgreSQL tables + full-text search; pgvector or a small selection model later | Later | [0040](adr/0040-agent-memory-built-in-on-postgresql.md) |
 
 ## Infrastructure (assumed present)
 
