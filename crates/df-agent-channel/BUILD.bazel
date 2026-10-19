@@ -1,0 +1,87 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+# Production library: without the `test-util` feature (no test PKI, no scripted runtime client).
+rust_library(
+    name = "df_agent_channel",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["//contract:mcp"],
+    crate_name = "df_agent_channel",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+alias(
+    name = "df-agent-channel",
+    actual = ":df_agent_channel",
+)
+
+# Same crate with `test-util`, for tests of this and dependent crates only.
+rust_library(
+    name = "df_agent_channel_test_util",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["//contract:mcp"],
+    crate_features = ["test-util"],
+    crate_name = "df_agent_channel",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//crates:__subpackages__"],
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "df_agent_channel_test",
+    compile_data = ["//contract:mcp"],
+    crate = ":df_agent_channel_test_util",
+    # `crate` does not pass on the library's features.
+    crate_features = ["test-util"],
+    env = {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
+    },
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "agent_port_test",
+    srcs = ["tests/agent_port.rs"],
+    edition = "2024",
+    env = {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
+    },
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_agent_channel_test_util",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
+)

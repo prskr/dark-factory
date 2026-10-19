@@ -12,18 +12,35 @@ rust_binary(
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
+        "//crates/df-agent-channel:df_agent_channel",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-web:df_web",
     ],
 )
 
+# Rebuilt from source (instead of `crate = ":dark-factory"`) so that the tests can use the
+# `test-util` variant of `df-agent-channel` without the binary linking it.
 rust_test(
     name = "dark_factory_test",
-    crate = ":dark-factory",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_root = "src/main.rs",
+    edition = "2024",
+    env = {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
+    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
     ),
-    deps = all_crate_deps(normal_dev = True),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        "//crates/df-agent-channel:df_agent_channel_test_util",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-web:df_web",
+    ],
 )

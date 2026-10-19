@@ -27,6 +27,11 @@ data:
     sandbox:
       namespace: {{ .Values.sandboxNamespace.name | quote }}
       instanceNamespace: {{ .Release.Namespace | quote }}
+    agent:
+      tls:
+        certFile: /etc/dark-factory/tls/tls.crt
+        keyFile: /etc/dark-factory/tls/tls.key
+        clientCaFile: /etc/dark-factory/tls/ca.crt
 ---
 apiVersion: v1
 kind: ConfigMap

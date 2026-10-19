@@ -3,8 +3,9 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-8.
-- Origin: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-27.
+- Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
+- Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 
 ## Summary
 
@@ -17,6 +18,25 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-5 | low    | `factory-agent` tests | Shutdown-while-disconnected test relies on a 100 ms sleep |
 | TD-6 | low    | `factory-agent` connection | Timed-out tool calls are still re-sent after a reconnect |
 | TD-7 | low    | `factory-agent` tests | Several behaviors have no test |
+| TD-8 | medium | `df-agent-channel` scheduler | Timeout and Gone handling await provider teardown inline in the scheduler loop |
+| TD-9 | low    | `df-agent-channel` session | Sandbox teardown after a RunReport is awaited inline in the session loop |
+| TD-10 | low   | `df-agent-channel` server | Streams opened during shutdown start new sessions |
+| TD-11 | low   | `df-agent-channel` PR | `completion_summary` is never cleared and can be posted again |
+| TD-12 | low   | `df-agent-channel` PR | A completed run without a push still tries to open a PR |
+| TD-13 | low   | `df-agent-channel` PR | Concurrent PR creation can mark an unrecorded PR ready |
+| TD-14 | low   | `df-agent-channel` session | Two extra database round trips per batch |
+| TD-15 | low   | `df-agent-channel` runs | Guarded run update + `RunChanged` publish exists in three copies |
+| TD-16 | low   | `df-agent-channel` tests | `eventually` test helper polls with `sleep` and ends in `panic!` |
+| TD-17 | medium | `df-agent-channel` session | Tool-call handlers have no timeout; drain timeouts disagree with the shutdown budget |
+| TD-18 | medium | `df-agent-channel` scheduler | A run whose provisioning was interrupted is never provisioned again |
+| TD-19 | low   | `df-agent-channel` storage | Run, task and tool-call SQL is runtime-checked and partly duplicates `df-db` |
+| TD-20 | low   | Helm chart | `agent.tls.clientCaFile` needs `ca.crt`, which an external issuer may not fill |
+| TD-21 | low   | Helm chart | `terminationGracePeriodSeconds` equals `SHUTDOWN_GRACE` (30 s) |
+| TD-22 | low   | `df-agent-channel` runs | `pod_ip` is not stored when `Hello` arrives before `Started` |
+| TD-23 | low   | `df-agent-channel` scheduler | `enforce_timeouts` loads every active run on every tick |
+| TD-24 | low   | `df-agent-channel` tests | Lock-wait test is not scoped to its own database |
+| TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
+| TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
 
 ## Entries
 
@@ -85,6 +105,158 @@ These behaviors were verified by reading the code only:
 
 The most valuable tests are the WIP restore, because it prevents data loss, and the timeouts and diverged start SHA. Those can be reached with `tokio::time::pause()` and the existing diverged-repo fixtures.
 
+### TD-8. Provider teardown blocks the scheduler loop
+
+`crates/df-agent-channel/src/scheduler.rs` (`enforce_timeouts`, Gone handling), `crates/df-agent-channel/src/runs.rs` (`finish_run`)
+
+`finish_run` awaits `provider.teardown`, and `enforce_timeouts` calls it for each timed-out run in sequence, inside the `select!` loop. Sandbox events, task notifications and the shutdown signal wait until all teardowns return. This contradicts the doc comment on `Scheduler::run`. It matters when many runs time out at once and the provider's delete is slow (Kubernetes API under load).
+
+**Fix:** End the run in the database inline, run the teardown in the scheduler's existing provisioning `JoinSet` (bounded by a timeout), the same way provisioning was moved off the loop.
+
+### TD-9. Session teardown is awaited inline
+
+`crates/df-agent-channel/src/session.rs` (`run_effects`, `RunReport` branch)
+
+After a `RunReport` the session awaits `runs::teardown` before it reads the next message. A slow provider delays the remaining acks of the ended run. Impact is small because the session ends right after; tool calls spawned from the same batch still store their results.
+
+**Fix:** Run the teardown in the session's task set, like the forge work after a `RunReport`.
+
+### TD-10. Streams opened during shutdown start new sessions
+
+`crates/df-agent-channel/src/server.rs` (`serve`, `AgentService::stop_sessions`, `accept_loop`)
+
+`stop_sessions` clears the sessions before tonic stops accepting streams and sends GOAWAY, and the TLS acceptor is only aborted after the server returns. A runtime that reconnects in that window starts a session that keeps graceful shutdown waiting until `SHUTDOWN_GRACE` (30 s) ends and `abort_all` runs.
+
+**Fix:** Refuse new `Connect` calls once shutdown started (a flag checked in `connect`, returning `UNAVAILABLE`), and stop the acceptor first.
+
+### TD-11. Stale completion summary
+
+`crates/df-agent-channel/src/pr.rs` (`on_run_end`, `completion_summary`), `crates/df-agent-channel/src/tools.rs` (`complete_task`)
+
+`tasks.completion_summary` is set by `complete_task` and never cleared. A later run that ends `completed` without its own `complete_task` call posts the earlier summary again. Today a run normally ends `completed` only through `complete_task`, which overwrites the value, so this is unlikely.
+
+**Fix:** Clear the summary after posting it, or store it per run (`runs.completion_summary`) and read the ended run's value.
+
+### TD-12. PR opened for a completed run without a push
+
+`crates/df-agent-channel/src/pr.rs` (`on_run_end`, condition `pushed || completed`)
+
+When a run ends `completed` and the task has no PR, `try_ensure_draft` runs even if the task branch was never pushed. The forge rejects the request (branch missing or no diff) and a warning is logged on every such completion, or it opens an empty PR.
+
+**Fix:** Require `task_branch_pushed` (from this or an earlier run) before creating a PR; decide whether a completed run with no changes needs a PR at all and record that in `specs/pull-request-lifecycle/spec.md`.
+
+### TD-13. Concurrent PR creation
+
+`crates/df-agent-channel/src/pr.rs` (`try_ensure_draft`, `record_pr`)
+
+`on_push_report` and `on_run_end` run as separate forge tasks. If both see `pr_number` as `NULL` and the forge does not return `Conflict` for the second create, two PRs exist. `record_pr` keeps the first, but `on_run_end` marks its own, unrecorded PR ready and posts the summary there. Forgejo rejects a second PR for the same head and base, so this needs a forge that does not.
+
+**Fix:** After `record_pr`, return the PR number stored in the database (`RETURNING pr_number`) and use that; optionally close the duplicate.
+
+### TD-14. Extra round trips per batch
+
+`crates/df-agent-channel/src/session.rs` (`Session::active`, `persist_batch`)
+
+Each batch loads the full run row (`active`) and reads `last_persisted_seq` once outside and once inside the transaction. A runtime that sends one transcript chunk per batch causes four or more queries per message.
+
+**Fix:** One `SELECT state, last_persisted_seq FROM runs` before preparing blobs serves both checks; keep the `FOR UPDATE` read in the transaction.
+
+### TD-15. Duplicated run update and publish
+
+`crates/df-agent-channel/src/runs.rs` (`set_run_state_tx`, `mark_started`, `mark_connected`, `notify_run`)
+
+Three places update a run with a state guard and publish `RunChanged` (`mark_started` inline, `mark_connected` via `notify_run`, `set_run_state_tx`). A change to the guard or notification semantics has to be made in each.
+
+**Fix:** Route `mark_started` and `mark_connected` through one helper that takes the update and publishes `RunChanged`, and inline `notify_run`.
+
+### TD-16. `eventually` helper polls with `sleep`
+
+`crates/df-agent-channel/tests/agent_port.rs` (`eventually`)
+
+The helper checks a condition 200 times with a 25 ms `sleep` and ends with a hand-written `panic!`. AGENTS.md: avoid timing-based tests and hand-written panic guards. The 5 s budget can be too short on a loaded remote executor.
+
+**Fix:** Wait on a notification (`Notifier` subscription for `RunChanged`/`TaskChanged`) or on the scripted client's received messages, with one overall `tokio::time::timeout`; fail with `assert!`.
+
+### TD-17. Tool-call timeouts and drain budgets
+
+`crates/df-agent-channel/src/session.rs` (`run_effects`, `DRAIN_TIMEOUT` = 60 s, `FORGE_TIMEOUT` = 60 s), `crates/df-agent-channel/src/server.rs` (`SESSION_DRAIN` = 20 s), `crates/dark-factory/src/main.rs` (`SHUTDOWN_GRACE` = 30 s)
+
+Tool-call handlers call the forge without a timeout, while forge work after a `PushReport`/`RunReport` is bounded by `FORGE_TIMEOUT`. A hanging forge keeps a claimed `tool_calls` row without a result until the stream ends; re-sent calls get "still in progress" for 5 minutes, then "did not finish". At shutdown the session believes it has 60 s to drain, but `stop_sessions` aborts after 20 s, so a call that needs longer loses its result although the effect may have happened.
+
+**Fix:** Bound each tool handler by `FORGE_TIMEOUT` and store a timeout error as the result. Derive the session drain from one budget that fits into `SHUTDOWN_GRACE` (and TD-21).
+
+### TD-18. Interrupted provisioning is not retried
+
+`crates/df-agent-channel/src/scheduler.rs` (`run`, `SHUTDOWN_DRAIN`, `provision_or_fail`)
+
+If a replica stops (rollout beyond the 10 s drain, crash) between `start_queued_runs` and `provider.provision`, the run stays `pending`/`provisioning` without a sandbox. After `connectTimeoutSeconds` (10 min) it ends as `connect_timeout` and the task becomes `failed`; the user has to queue a message to retry.
+
+**Fix:** On each tick, re-provision runs that have been `pending` longer than a short threshold and have no sandbox (provider calls must be idempotent, which `ensure_task_volume`/`provision` are meant to be), or end them as `provisioning_failed` with the task re-queued.
+
+### TD-19. Runtime-checked SQL outside `df-db`
+
+`crates/df-agent-channel/src/runs.rs`, `tools.rs`, `transcript.rs`, `pr.rs`, `session.rs`
+
+Run, task, tool-call and transcript persistence uses `sqlx::query(...)` strings (some built with `concat!`), not the compile-time checked `query!` macros and `.sqlx/` metadata that `df-db` uses. A column rename compiles and fails only at runtime; the tests against PostgreSQL catch it, plain builds do not. `transcript::insert` repeats the update of `df_db::mark_prompt_delivered` (now with an extra `task_id` scope).
+
+**Fix:** Move the queries into `df-db` as `query!`/`query_as!` functions generic over `PgExecutor`, regenerate `.sqlx/`, and give `mark_prompt_delivered` the `task_id` scope so `transcript` can call it.
+
+### TD-20. Client CA file depends on the issuer
+
+`deploy/helm/dark-factory/templates/configmap.yaml` (`agent.tls.clientCaFile: /etc/dark-factory/tls/ca.crt`), `values.yaml` (`tls.ca.existingIssuer`)
+
+`serve` refuses to start without readable `agent.tls` files. The chart's own CA issuer (`tls.ca.create=true`, default) fills `ca.crt`; an external issuer set through `tls.ca.existingIssuer` may not, and the control plane then crash-loops.
+
+**Fix:** Document in the chart that `existingIssuer` must be a CA-type issuer that fills `ca.crt`, or add a value for a separate client CA secret.
+
+### TD-21. Termination grace period equals the shutdown budget
+
+`crates/dark-factory/src/main.rs` (`SHUTDOWN_GRACE` = 30 s), control-plane Deployment (no `terminationGracePeriodSeconds`, Kubernetes default 30 s)
+
+The kubelet sends SIGKILL at the same moment the supervisor gives up. Today the session drain (20 s) and scheduler drain (10 s) fit, so nothing is lost; any longer drain would be cut off by SIGKILL instead of the supervisor.
+
+**Fix:** Set `terminationGracePeriodSeconds` in the chart a few seconds above `SHUTDOWN_GRACE` (for example 40).
+
+### TD-22. `pod_ip` missing when the runtime connects first
+
+`crates/df-agent-channel/src/runs.rs` (`mark_started`)
+
+`mark_started` only writes `pod_ip` while the run is `pending`/`provisioning`. If `Hello` is processed before the provider's `Started` event, the run is already `preparing` and `pod_ip` stays `NULL`. Authentication does not use the column (`SandboxProvider::resolve_identity`), so only diagnostics are affected.
+
+**Fix:** Store `pod_ip` with `COALESCE` for any non-terminal run, and change state only from `pending`/`provisioning`.
+
+### TD-23. Timeout scan loads every active run
+
+`crates/df-agent-channel/src/scheduler.rs` (`enforce_timeouts`), `crates/df-agent-channel/src/runs.rs` (`list_active_runs`)
+
+Every 15 s tick on every replica loads all non-terminal runs and filters the deadlines in Rust. Fine for tens of runs; wasteful for hundreds with several replicas.
+
+**Fix:** Filter overdue runs in SQL (`started_at`/`connected_at` plus interval) and keep the Rust check for the final decision.
+
+### TD-24. Lock-wait test is not scoped to its database
+
+`crates/df-agent-channel/src/runs.rs` (`message_queued_while_the_run_ends_is_not_stranded`)
+
+The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the whole cluster. A lock wait in another parallel `#[sqlx::test]` database ends the wait early; the test then passes without exercising the race (it does not fail spuriously).
+
+**Fix:** Add `AND datname = current_database()`.
+
+### TD-25. Log message interpolates a value
+
+`crates/dark-factory/src/main.rs` (`supervise_listeners`)
+
+`error!("{component} listeners still running after the grace period")` (and the `info!` on shutdown) put a value into the message. AGENTS.md (Logging) asks for structured fields.
+
+**Fix:** `error!(component, "listeners still running after the grace period")`.
+
+### TD-26. Small duplicates and indirections
+
+`crates/df-agent-channel/src/session.rs` (`stop_requested`), `crates/dark-factory/src/main.rs` (`stopped`), `crates/df-agent-channel/src/scheduler.rs` (`Scheduler::start_runs`), `crates/df-agent-channel/src/testing.rs` (`anyhow_free`)
+
+`stop_requested` and `stopped` do the same `watch` wait but treat a dropped sender differently (never stop vs. stop). `start_runs` only forwards to `start_queued_runs`; `anyhow_free` is an alias module.
+
+**Fix:** One shared helper with the dropped-sender behavior stated in its doc; inline the wrapper and the alias.
+
 ## Accepted decisions
 
 These were reviewed and kept on purpose. Don't raise them as issues unless the stated assumption changes.
@@ -97,3 +269,8 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 - **Harness exit:** stdin is closed when the ACP transport is dropped. The runtime waits 5 s, then kills the harness.
 - **Fake agent cancel flag:** `fake-acp-agent` resets `cancelled` at the end of a prompt, because a cancel can be handled before the spawned prompt task starts.
 - **Hooks path not configurable:** `/opt/factory/hooks-empty` is a constant. It matches the runtime image layer (`deploy/BUILD.bazel`, `/hooks-empty` in the image mounted at `/opt/factory`). Generated commit hooks (`/run/factory/git-hooks`, `design/agent-run.md` §7.1) are not implemented yet.
+- **Placeholder sandbox provider fails queued tasks:** `crates/dark-factory/src/unconfigured.rs` fails every provision, so queued tasks end as `provisioning_failed` instead of waiting forever. It stands in until `iter1-sandbox-provisioning` and `iter1-integration-plugins` are implemented. Don't deploy this build to an instance with queued tasks before then.
+- **`RunPhase::AwaitingInput` maps to no run state:** `AwaitingInput` is a non-goal of `iter1-run-orchestration` (`design.md`, Non-Goals). Revisit with blocking questions and approvals.
+- **At-most-once tool calls:** a crash between the forge call and storing its result loses the result; the call is not repeated (`crates/df-agent-channel/src/tools.rs`, spec `factory-tools`).
+- **Session ends the stream once its run ended:** after a `RunReport` a relevant notification closes the stream. The runtime sends `RunReport` last (`crates/factory-agent/src/runner.rs`), it is acked before the effects run, and in-flight handlers are drained, so nothing is lost.
+- **`Assign` may differ on reconnect:** `continuation.summary` is rebuilt from the transcript on every connect. The runtime uses only the first `Assign` per `run_id` (`CommandFilter`, `crates/factory-agent/src/connection.rs`).

@@ -21,12 +21,14 @@ async-trait = "0.1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
+df-agent-channel = { path = "crates/df-agent-channel" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
 df-proto = { path = "crates/df-proto" }
 df-web = { path = "crates/df-web" }
 futures = "0.3"
 hex = "0.4"
+jsonschema = { version = "0.59", default-features = false }
 pbjson = "0.9"
 pbjson-build = "0.9"
 pbjson-types = "0.9"
@@ -57,6 +59,7 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "router", "tls-ring"] }
 tonic-prost = "0.14"
@@ -65,4 +68,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 wit-bindgen = "0.63"
+x509-parser = "0.18"
 

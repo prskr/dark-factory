@@ -1,0 +1,46 @@
+[package]
+name = "df-agent-channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# PKI and scripted runtime client for tests of this and dependent crates.
+test-util = ["dep:rcgen", "dep:tempfile", "df-core/test-util"]
+
+[dependencies]
+chrono.workspace = true
+df-core.workspace = true
+df-db.workspace = true
+df-proto.workspace = true
+futures.workspace = true
+jsonschema.workspace = true
+rcgen = { workspace = true, optional = true }
+rustls.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tempfile = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+x509-parser.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+df-agent-channel = { path = ".", features = ["test-util"] }
+df-core = { workspace = true, features = ["test-util"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tracing-subscriber.workspace = true

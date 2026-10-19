@@ -2,6 +2,7 @@
 //!
 //! Secrets are always referenced via file paths (`*_file`), never inline values.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -44,6 +45,12 @@ pub struct InstanceConfig {
     pub gateway: GatewayConfig,
     #[serde(default)]
     pub sandbox: SandboxSectionConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
+    #[serde(default)]
+    pub harness: HarnessConfig,
+    #[serde(default)]
+    pub runs: RunsConfig,
 }
 
 impl InstanceConfig {
@@ -183,6 +190,116 @@ impl Default for SandboxSectionConfig {
     }
 }
 
+/// Agent port settings: server certificate, commit identity and Git credential user name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentConfig {
+    /// Server certificate and client CA for the mTLS agent port. Required by `serve`.
+    #[serde(default)]
+    pub tls: Option<AgentTlsConfig>,
+    #[serde(default)]
+    pub commit_identity: CommitIdentityConfig,
+    /// User name sent with the project's forge token in a Git credential grant.
+    #[serde(default = "default_git_username")]
+    pub git_username: String,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            tls: None,
+            commit_identity: CommitIdentityConfig::default(),
+            git_username: default_git_username(),
+        }
+    }
+}
+
+/// PEM files of the agent port: server certificate chain, its key and the CA bundle that
+/// signs the sandbox pods' client certificates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentTlsConfig {
+    pub cert_file: PathBuf,
+    pub key_file: PathBuf,
+    pub client_ca_file: PathBuf,
+}
+
+/// Author and committer identity of commits made by agents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommitIdentityConfig {
+    #[serde(default = "default_commit_name")]
+    pub name: String,
+    #[serde(default = "default_commit_email")]
+    pub email: String,
+}
+
+impl Default for CommitIdentityConfig {
+    fn default() -> Self {
+        Self {
+            name: default_commit_name(),
+            email: default_commit_email(),
+        }
+    }
+}
+
+/// Instance-wide harness defaults; persona fields override them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HarnessConfig {
+    #[serde(default)]
+    pub claude_code: ClaudeCodeConfig,
+}
+
+/// Defaults for the `claude-code` harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClaudeCodeConfig {
+    #[serde(default = "default_adapter_command")]
+    pub adapter_command: Vec<String>,
+    /// Non-secret environment, e.g. `DISABLE_AUTOUPDATER=1`.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Claude Code `settings.json` content.
+    #[serde(default)]
+    pub settings_json: String,
+}
+
+impl Default for ClaudeCodeConfig {
+    fn default() -> Self {
+        Self {
+            adapter_command: default_adapter_command(),
+            env: BTreeMap::new(),
+            settings_json: String::new(),
+        }
+    }
+}
+
+/// Run budgets and timeouts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunsConfig {
+    /// Hard limit handed to the runtime in `Assign.budgets`.
+    #[serde(default = "default_max_wall_clock")]
+    pub max_wall_clock_seconds: u64,
+    /// Time from run creation until the runtime must have opened its stream.
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_seconds: u64,
+    /// Extra time after the wall-clock budget before `Cancel`, and again before teardown.
+    #[serde(default = "default_cancel_grace")]
+    pub cancel_grace_seconds: u64,
+}
+
+impl Default for RunsConfig {
+    fn default() -> Self {
+        Self {
+            max_wall_clock_seconds: default_max_wall_clock(),
+            connect_timeout_seconds: default_connect_timeout(),
+            cancel_grace_seconds: default_cancel_grace(),
+        }
+    }
+}
+
 /// Reads a secret from a file, trimming a single trailing `\r\n` or `\n`.
 pub fn read_secret_file(path: &Path) -> Result<SecretString, ConfigError> {
     let raw = fs::read_to_string(path).map_err(|source| ConfigError::SecretFile {
@@ -194,6 +311,34 @@ pub fn read_secret_file(path: &Path) -> Result<SecretString, ConfigError> {
         .or_else(|| raw.strip_suffix('\n'))
         .unwrap_or(&raw);
     Ok(SecretString::from(trimmed.to_owned()))
+}
+
+fn default_git_username() -> String {
+    "dark-factory".to_string()
+}
+
+fn default_commit_name() -> String {
+    "Dark Factory".to_string()
+}
+
+fn default_commit_email() -> String {
+    "dark-factory@localhost".to_string()
+}
+
+fn default_adapter_command() -> Vec<String> {
+    vec!["/opt/harness/bin/claude-agent-acp".to_string()]
+}
+
+fn default_max_wall_clock() -> u64 {
+    2 * 60 * 60
+}
+
+fn default_connect_timeout() -> u64 {
+    10 * 60
+}
+
+fn default_cancel_grace() -> u64 {
+    5 * 60
 }
 
 fn default_instance_name() -> String {
@@ -300,6 +445,65 @@ sandbox:
 
         let secret = cfg.database.read_password().unwrap();
         assert_eq!(secret.expose_secret(), "s3cr3t-pass");
+    }
+
+    #[test]
+    fn run_orchestration_sections_have_defaults_and_can_be_overridden() {
+        let minimal = r#"
+database:
+  host: pg
+  database: d
+  user: u
+  passwordFile: /p
+"#;
+        let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
+        assert!(cfg.agent.tls.is_none());
+        assert_eq!(cfg.agent.commit_identity.name, "Dark Factory");
+        assert_eq!(cfg.agent.git_username, "dark-factory");
+        assert_eq!(cfg.runs.max_wall_clock_seconds, 7200);
+        assert_eq!(cfg.runs.connect_timeout_seconds, 600);
+        assert_eq!(cfg.runs.cancel_grace_seconds, 300);
+        assert_eq!(
+            cfg.harness.claude_code.adapter_command,
+            ["/opt/harness/bin/claude-agent-acp"]
+        );
+
+        let custom = format!(
+            r#"{minimal}
+agent:
+  tls:
+    certFile: /tls/tls.crt
+    keyFile: /tls/tls.key
+    clientCaFile: /tls/ca.crt
+runs:
+  maxWallClockSeconds: 60
+harness:
+  claudeCode:
+    env:
+      DISABLE_AUTOUPDATER: "1"
+"#
+        );
+        let cfg = InstanceConfig::from_yaml_str(&custom).unwrap();
+        let tls = cfg.agent.tls.unwrap();
+        assert_eq!(tls.client_ca_file, PathBuf::from("/tls/ca.crt"));
+        assert_eq!(cfg.runs.max_wall_clock_seconds, 60);
+        assert_eq!(cfg.runs.connect_timeout_seconds, 600);
+        assert_eq!(cfg.harness.claude_code.env["DISABLE_AUTOUPDATER"], "1");
+    }
+
+    #[test]
+    fn typos_in_agent_and_harness_sections_are_rejected() {
+        let base = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        for section in [
+            "agent:\n  gitUserName: bot\n",
+            "harness:\n  claude_code:\n    env: {}\n",
+        ] {
+            let err = InstanceConfig::from_yaml_str(&format!("{base}{section}")).unwrap_err();
+            assert!(
+                err.to_string().contains("unknown field"),
+                "{section}: {err}"
+            );
+        }
     }
 
     #[test]

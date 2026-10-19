@@ -9,6 +9,11 @@ filegroup(
 )
 
 filegroup(
+    name = "mcp",
+    srcs = glob(["mcp/*.json"]),
+)
+
+filegroup(
     name = "wit_integrations",
     srcs = glob(["wit/integrations/**/*.wit"]),
 )

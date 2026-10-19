@@ -1,0 +1,59 @@
+//! Control plane end of the agent protocol v1: the mTLS agent port, run scheduling and state
+//! machine, transcript persistence, factory tools, pull request lifecycle and credentials.
+//!
+//! Every decision is derived from the database, so any replica can serve any reconnect.
+
+use std::sync::Arc;
+
+use df_core::config::{AgentConfig, HarnessConfig, RunsConfig};
+use df_core::{ForgeClient, InstanceConfig, SandboxProvider, SecretStore};
+use df_db::Notifier;
+use sqlx::PgPool;
+
+pub mod assign;
+pub mod credentials;
+pub mod error;
+pub mod identity;
+pub mod pr;
+pub mod runs;
+pub mod scheduler;
+pub mod server;
+pub mod session;
+pub mod tools;
+pub mod transcript;
+
+#[cfg(feature = "test-util")]
+pub mod testing;
+
+pub use error::ChannelError;
+pub use scheduler::Scheduler;
+pub use server::{AgentService, TlsError, TlsReloader, serve};
+
+/// The sections of the instance configuration the agent channel reads.
+#[derive(Debug, Clone, Default)]
+pub struct ChannelConfig {
+    pub agent: AgentConfig,
+    pub harness: HarnessConfig,
+    pub runs: RunsConfig,
+}
+
+impl From<&InstanceConfig> for ChannelConfig {
+    fn from(cfg: &InstanceConfig) -> Self {
+        Self {
+            agent: cfg.agent.clone(),
+            harness: cfg.harness.clone(),
+            runs: cfg.runs.clone(),
+        }
+    }
+}
+
+/// Everything the agent port, the sessions and the scheduler of one replica share.
+#[derive(Clone)]
+pub struct ChannelContext {
+    pub pool: PgPool,
+    pub notifier: Arc<Notifier>,
+    pub provider: Arc<dyn SandboxProvider>,
+    pub forge: Arc<dyn ForgeClient>,
+    pub secrets: Arc<dyn SecretStore>,
+    pub config: Arc<ChannelConfig>,
+}

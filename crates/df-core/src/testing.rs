@@ -186,6 +186,8 @@ struct ForgeState {
     issues: HashMap<(ProjectId, u64), Issue>,
     create_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     find_open_results: VecDeque<Result<Option<PullRequest>, IntegrationError>>,
+    hang_find_open: bool,
+    comment_gate: Option<Arc<tokio::sync::Semaphore>>,
     update_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     get_issue_results: VecDeque<Result<Issue, IntegrationError>>,
     add_comment_results: VecDeque<Result<Comment, IntegrationError>>,
@@ -236,6 +238,20 @@ impl FakeForgeClient {
             .expect("lock poisoned")
             .find_open_results
             .push_back(res);
+    }
+
+    /// Makes `find_open_pull_request` record the call and then never return, like a forge that
+    /// does not answer.
+    pub fn hang_find_open_pull_request(&self) {
+        self.state.lock().expect("lock poisoned").hang_find_open = true;
+    }
+
+    /// Makes `add_issue_comment` record the call and then wait until a permit of the returned
+    /// semaphore is added, like a slow forge.
+    pub fn hold_issue_comments(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        self.state.lock().expect("lock poisoned").comment_gate = Some(gate.clone());
+        gate
     }
 
     /// Queues a scripted result for `update_pull_request`.
@@ -314,12 +330,19 @@ impl ForgeClient for FakeForgeClient {
         head: &str,
         base: &str,
     ) -> Result<Option<PullRequest>, IntegrationError> {
+        let hang = {
+            let mut state = self.state.lock().expect("lock poisoned");
+            state.calls.push(ForgeCall::FindOpenPullRequest {
+                project_id: *p,
+                head: head.to_string(),
+                base: base.to_string(),
+            });
+            state.hang_find_open
+        };
+        if hang {
+            return std::future::pending().await;
+        }
         let mut state = self.state.lock().expect("lock poisoned");
-        state.calls.push(ForgeCall::FindOpenPullRequest {
-            project_id: *p,
-            head: head.to_string(),
-            base: base.to_string(),
-        });
         if let Some(scripted) = state.find_open_results.pop_front() {
             return scripted;
         }
@@ -383,12 +406,22 @@ impl ForgeClient for FakeForgeClient {
         number: u64,
         body: &str,
     ) -> Result<Comment, IntegrationError> {
+        let gate = {
+            let mut state = self.state.lock().expect("lock poisoned");
+            state.calls.push(ForgeCall::AddIssueComment {
+                project_id: *p,
+                number,
+                body: body.to_string(),
+            });
+            state.comment_gate.clone()
+        };
+        if let Some(gate) = gate {
+            // The semaphore is never closed.
+            if let Ok(permit) = gate.acquire().await {
+                permit.forget();
+            }
+        }
         let mut state = self.state.lock().expect("lock poisoned");
-        state.calls.push(ForgeCall::AddIssueComment {
-            project_id: *p,
-            number,
-            body: body.to_string(),
-        });
         if let Some(scripted) = state.add_comment_results.pop_front() {
             return scripted;
         }
