@@ -21,43 +21,29 @@ build:fmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
 build:fmt --output_groups=rustfmt_checks
 build:fmt --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
 
+# Linux targets are static musl everywhere: tests run the binaries that ship, the images (`image_index`
+# transitions to the amd64/arm64 musl platforms) reuse them. macOS keeps its native target platform.
+build:linux --platforms=//build/platforms:host_musl
+
 build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
 build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2
 
-# Release artifacts: static musl binaries. Do not combine with --config=remote: the RBE workers use the
-# glibc LLVM toolchain, and the musl toolchain must win for the musl target platform.
-build:release --platforms=//build/platforms:linux_amd64_musl
-build:release --extra_toolchains=@musl_toolchains_hub//:all
-# On Linux exec platforms the default `x86_64-unknown-linux-gnu` Rust toolchain (cpu+os only) also matches
-# the musl platform and is registered first: links glibc libstd with musl-gcc. Prefer the musl ones.
-build:release --extra_toolchains=@rust_toolchains//:rust_linux_x86_64__x86_64-unknown-linux-musl__stable
-build:release --extra_toolchains=@rust_toolchains//:rust_linux_aarch64__aarch64-unknown-linux-musl__stable
-build:release --extra_toolchains=//build/platforms:musl_test_toolchain
-
 # BuildBuddy API key from the BUILDBUDDY_API_KEY environment variable (alternative to --remote_header)
 common --credential_helper=remote.buildbuddy.io=%workspace%/build/buildbuddy_credentials.sh
 
-# BuildBuddy remote cache and build event stream, no remote execution (CI adds it to --config=release)
+# BuildBuddy remote cache and build event stream (optional, no remote execution)
 build:cache --bes_results_url=https://app.buildbuddy.io/invocation/
 build:cache --bes_backend=grpcs://remote.buildbuddy.io
 build:cache --build_metadata=REPO_URL=https://github.com/prskr/dark-factory.git
 build:cache --remote_cache=grpcs://remote.buildbuddy.io
 build:cache --remote_cache_compression
 build:cache --experimental_remote_cache_chunking
+build:cache --remote_timeout=10m
 
-# Remote execution on BuildBuddy (linux/amd64 workers)
-build:remote --config=cache
-build:remote --remote_executor=grpcs://remote.buildbuddy.io
-build:remote --noremote_upload_local_results # Uploads logs & artifacts without writing to cache
-build:remote --remote_timeout=10m
-build:remote --jobs=50
-build:remote --extra_execution_platforms=//build/platforms:linux_amd64_rbe
-build:remote --platforms=//build/platforms:linux_amd64_musl
-
-# Debugging remote builds: gRPC and execution logs in the workspace root (git-ignored)
-build:remote-debug --remote_grpc_log=bazel-remote-grpc.log
-build:remote-debug --execution_log_compact_file=execution_log.binpb.zst
+# Debugging the remote cache: gRPC and execution logs in the workspace root (git-ignored)
+build:cache-debug --remote_grpc_log=bazel-remote-grpc.log
+build:cache-debug --execution_log_compact_file=execution_log.binpb.zst
 
 build:ci --build_metadata=ROLE=CI
 

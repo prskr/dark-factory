@@ -36,12 +36,11 @@ proto_library(
     ],
 )
 
-# manual: the buf toolchain is downloaded for the machine running Bazel, so on macOS it cannot run on
-# the Linux RBE workers. CI (a Linux host) runs it explicitly.
+# Runs on the machine running Bazel: the buf toolchain is downloaded for that host. Needs a `manual` tag
+# again once tests run with remote execution from macOS clients (docs/remote-execution.md).
 buf_lint_test(
     name = "buf_lint_test",
     config = "proto/buf.yaml",
-    tags = ["manual"],
     targets = [
         ":agent_v1_proto",
         ":transcript_v1_proto",

@@ -6,7 +6,7 @@ CONTROL_PLANE_IMAGE_DIR="$2"
 RUNTIME_IMAGE_DIR="$3"
 TEST_PROJECT_IMAGE_DIR="$4"
 
-# the pinned jq: the RBE workers do not ship one
+# the pinned jq: hosts do not necessarily ship one
 jq() { "$JQ_BIN" "$@"; }
 
 WORK_DIR="$(mktemp -d)"

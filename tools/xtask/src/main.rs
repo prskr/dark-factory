@@ -209,7 +209,7 @@ const TOOLS: [GithubTool; 13] = [
         repo: "tailwindlabs/tailwindcss",
         asset: |_, p| {
             let cpu = if p.cpu == "x86_64" { "x64" } else { p.cpu };
-            // glibc build: the musl one needs a musl loader the RBE workers lack
+            // glibc build: the musl one needs a musl loader that glibc hosts (CI runners, dev VMs) lack
             (format!("tailwindcss-{}-{cpu}", p.os), String::new())
         },
     },

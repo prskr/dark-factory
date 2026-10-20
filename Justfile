@@ -4,10 +4,6 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# Remote cache and execution on BuildBuddy; put the API key into .bazelrc.user:
-#   build:remote --remote_header=x-buildbuddy-api-key=<key>
-remote := "--config=remote"
-
 default:
     @just --list
 
@@ -64,24 +60,20 @@ sqlx-prepare:
 
 # --- Bazel ---------------------------------------------------------------------------------------
 
-# Build everything on the BuildBuddy workers
+# Build everything (Linux: static musl; add --config=cache to .bazelrc.user for the BuildBuddy cache)
 bazel-build:
-    bazel build {{remote}} //...
+    bazel build //...
 
-# Run all tests on the BuildBuddy workers
+# Run all tests; DB tests use the local Docker
 bazel-test:
-    bazel test {{remote}} //...
-
-# Run all tests on this machine; DB tests use the local Docker
-bazel-test-local:
     bazel test //...
 
 # Clippy and rustfmt through Bazel (pinned, hermetic)
 bazel-lint:
-    bazel build {{remote}} --config=lint //crates/... //plugins/...
-    bazel build {{remote}} --config=fmt //crates/... //plugins/...
+    bazel build --config=lint //crates/... //plugins/...
+    bazel build --config=fmt //crates/... //plugins/...
 
-# Proto lint (the buf toolchain only runs on the machine that runs Bazel, so no remote)
+# Proto lint
 buf-lint:
     bazel test //contract:buf_lint_test
 
@@ -103,16 +95,16 @@ dev:
 chart-test:
     bazel test //deploy:helm_chart_test //deploy:helm_chart_unittest
 
-# --- Release (static musl binaries, no remote execution) ------------------------------------------
+# --- Release (static musl binaries for amd64 and arm64) -------------------------------------------
 
-# Build the OCI image layouts with the musl toolchain
+# Build the OCI image layouts
 release-build:
-    bazel build --config=release //deploy:control_plane_oci_layout //deploy:runtime_oci_layout //deploy:test_project_oci_layout
+    bazel build //deploy:control_plane_oci_layout //deploy:runtime_oci_layout //deploy:test_project_oci_layout
 
-# Check that the images are multi-arch and the binaries are static (needs a Linux host, CI runs it)
+# Check that the images are multi-arch and the binaries are static (Linux hosts only, skipped on macOS)
 release-test:
-    bazel test --config=release //deploy:images_structure_test
+    bazel test --skip_incompatible_explicit_targets //deploy:images_structure_test
 
 # Push the release images to ghcr.io/prskr/dark-factory (log in with `docker login ghcr.io` first)
 release-push TAG="dev":
-    bazel run --config=release --//deploy:image_tag={{TAG}} //deploy:push_images
+    bazel run --//deploy:image_tag={{TAG}} //deploy:push_images
