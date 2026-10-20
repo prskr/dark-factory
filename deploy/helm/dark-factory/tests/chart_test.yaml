@@ -272,3 +272,80 @@ tests:
           path: spec.ingress[1].ports[0].port
           value: 9444
         documentIndex: 1
+
+  - it: renders self-signed CA chain and issues control plane and gateway Certificates from it
+    template: certs.yaml
+    release:
+      name: df
+    asserts:
+      - hasDocuments:
+          count: 5
+      - isKind:
+          of: Issuer
+        documentIndex: 0
+      - isNotNull:
+          path: spec.selfSigned
+        documentIndex: 0
+      - isKind:
+          of: Certificate
+        documentIndex: 1
+      - equal:
+          path: spec.isCA
+          value: true
+        documentIndex: 1
+      - equal:
+          path: spec.secretName
+          value: df-dark-factory-ca-key-pair
+        documentIndex: 1
+      - isKind:
+          of: Issuer
+        documentIndex: 2
+      - equal:
+          path: spec.ca.secretName
+          value: df-dark-factory-ca-key-pair
+        documentIndex: 2
+      - equal:
+          path: spec.issuerRef
+          value:
+            name: df-dark-factory-ca-issuer
+            kind: Issuer
+            group: cert-manager.io
+        documentIndex: 3
+      - equal:
+          path: spec.secretName
+          value: df-dark-factory-control-plane-tls
+        documentIndex: 3
+      - contains:
+          path: spec.dnsNames
+          content: df-dark-factory-control-plane.NAMESPACE.svc
+        documentIndex: 3
+      - equal:
+          path: spec.issuerRef.name
+          value: df-dark-factory-ca-issuer
+        documentIndex: 4
+      - equal:
+          path: spec.secretName
+          value: df-dark-factory-gateway-tls
+        documentIndex: 4
+      - contains:
+          path: spec.dnsNames
+          content: "*.df-dark-factory-gateway-headless.NAMESPACE.svc.cluster.local"
+        documentIndex: 4
+
+  - it: issues Certificates from an existing issuer when tls.ca.create is false
+    template: certs.yaml
+    set:
+      tls.ca.create: false
+      tls.ca.existingIssuer.name: homelab-ca
+      tls.ca.existingIssuer.kind: ClusterIssuer
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Certificate
+      - equal:
+          path: spec.issuerRef
+          value:
+            name: homelab-ca
+            kind: ClusterIssuer
+            group: cert-manager.io
