@@ -35,6 +35,9 @@ build:release --extra_toolchains=@rust_toolchains//:rust_linux_x86_64__x86_64-un
 build:release --extra_toolchains=@rust_toolchains//:rust_linux_aarch64__aarch64-unknown-linux-musl__stable
 build:release --extra_toolchains=//build/platforms:musl_test_toolchain
 
+# BuildBuddy API key from the BUILDBUDDY_API_KEY environment variable (alternative to --remote_header)
+common --credential_helper=remote.buildbuddy.io=%workspace%/build/buildbuddy_credentials.sh
+
 # BuildBuddy remote cache and build event stream, no remote execution (CI adds it to --config=release)
 build:cache --bes_results_url=https://app.buildbuddy.io/invocation/
 build:cache --bes_backend=grpcs://remote.buildbuddy.io
