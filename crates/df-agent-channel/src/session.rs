@@ -551,7 +551,6 @@ mod tests {
     use crate::testing::Env;
     use df_core::testing::SandboxCall;
     use df_proto::transcript::v1 as wire;
-    use sqlx::PgPool;
 
     fn msg(seq: u64, body: agent_message::Body) -> AgentMessage {
         AgentMessage {
@@ -609,8 +608,9 @@ mod tests {
         watch::channel(false).1
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn effects_before_a_sequence_gap_still_happen(pool: PgPool) {
+    #[tokio::test]
+    async fn effects_before_a_sequence_gap_still_happen() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.running_run().await;
 
@@ -637,8 +637,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn tool_calls_finish_after_the_stream_ended(pool: PgPool) {
+    #[tokio::test]
+    async fn tool_calls_finish_after_the_stream_ended() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.running_run().await;
         let call = ToolCallRequest {
@@ -688,8 +689,9 @@ mod tests {
         (session, rx)
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn a_hanging_forge_does_not_block_the_stream(pool: PgPool) {
+    #[tokio::test]
+    async fn a_hanging_forge_does_not_block_the_stream() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool).await;
         let run_id = env.running_run().await;
         env.forge.hang_find_open_pull_request();
@@ -710,8 +712,9 @@ mod tests {
         assert!(handled.is_ok(), "the stream loop waited for the forge");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn tool_calls_and_credentials_are_refused_after_the_run_ended(pool: PgPool) {
+    #[tokio::test]
+    async fn tool_calls_and_credentials_are_refused_after_the_run_ended() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.running_run().await;
         let (mut session, mut rx) = session_for(&env, run_id).await;
@@ -762,8 +765,9 @@ mod tests {
         assert_ne!(line, "too late");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn a_stream_error_before_hello_is_reported(pool: PgPool) {
+    #[tokio::test]
+    async fn a_stream_error_before_hello_is_reported() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool).await;
         let run_id = env.running_run().await;
         let row = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
@@ -777,8 +781,9 @@ mod tests {
         assert_eq!(status.code(), tonic::Code::ResourceExhausted);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn a_tool_call_in_flight_at_shutdown_stores_its_result(pool: PgPool) {
+    #[tokio::test]
+    async fn a_tool_call_in_flight_at_shutdown_stores_its_result() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.running_run().await;
         sqlx::query("UPDATE tasks SET issue_number = 42 WHERE id = $1")
@@ -826,8 +831,9 @@ mod tests {
         assert_eq!(stored, 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn no_prompts_are_sent_once_the_run_ended(pool: PgPool) {
+    #[tokio::test]
+    async fn no_prompts_are_sent_once_the_run_ended() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.running_run().await;
 

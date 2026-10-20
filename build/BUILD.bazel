@@ -1,1 +1,5 @@
+load(":protoc.bzl", "protoc")
+
 package(default_visibility = ["//visibility:public"])
+
+protoc(name = "protoc")

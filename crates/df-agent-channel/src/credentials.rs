@@ -183,15 +183,17 @@ mod tests {
         ));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn claude_token_is_delivered_as_env(pool: PgPool) {
+    #[tokio::test]
+    async fn claude_token_is_delivered_as_env() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = context(pool).await;
         let creds = harness_credentials(&env.ctx, &rc).await.unwrap();
         assert_eq!(creds.env["CLAUDE_CODE_OAUTH_TOKEN"], "claude-secret-value");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn missing_secret_names_the_reference_not_the_value(pool: PgPool) {
+    #[tokio::test]
+    async fn missing_secret_names_the_reference_not_the_value() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = context(pool).await;
         env.secrets.insert_error(
             "claude",
@@ -206,8 +208,9 @@ mod tests {
         assert!(!err.to_string().contains("claude-secret-value"));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn git_credentials_only_for_the_project_repository(pool: PgPool) {
+    #[tokio::test]
+    async fn git_credentials_only_for_the_project_repository() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = context(pool).await;
 
         let granted = grant(

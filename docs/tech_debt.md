@@ -237,7 +237,7 @@ Every 15 s tick on every replica loads all non-terminal runs and filters the dea
 
 `crates/df-agent-channel/src/runs.rs` (`message_queued_while_the_run_ends_is_not_stranded`)
 
-The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the whole cluster. A lock wait in another parallel `#[sqlx::test]` database ends the wait early; the test then passes without exercising the race (it does not fail spuriously).
+The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the whole cluster. A lock wait in another parallel test database ends the wait early; the test then passes without exercising the race (it does not fail spuriously).
 
 **Fix:** Add `AND datname = current_database()`.
 

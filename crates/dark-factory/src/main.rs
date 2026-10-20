@@ -502,10 +502,9 @@ mod tests {
         InstanceConfig::from_yaml_str(&yaml).unwrap()
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn serve_runs_the_agent_port_next_to_the_ui_port(
-        pool: sqlx::PgPool,
-    ) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn serve_runs_the_agent_port_next_to_the_ui_port() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         use df_agent_channel::testing::{POD_SAN, RuntimeClient, TestPki, TestServer};
 
         let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
@@ -550,8 +549,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn serve_requires_agent_tls_configuration(pool: sqlx::PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn serve_requires_agent_tls_configuration() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let dir = tempfile::tempdir()?;
         let cfg = serve_config(&pool, dir.path(), None);
         let listeners = [

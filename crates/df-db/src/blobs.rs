@@ -84,8 +84,9 @@ impl PgBlobStore {
 mod tests {
     use super::*;
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn blob_store_put_and_get_are_idempotent_and_content_addressed(pool: PgPool) {
+    #[tokio::test]
+    async fn blob_store_put_and_get_are_idempotent_and_content_addressed() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let store = PgBlobStore::new(pool);
         let payload = b"\x89PNG\r\n\x1a\nfake-image-bytes";
 

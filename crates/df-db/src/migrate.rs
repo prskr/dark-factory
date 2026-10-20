@@ -292,10 +292,10 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test(migrations = false)]
-    async fn migrate_fresh_schema_role_creation_password_rotation_and_grants(
-        superuser_pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn migrate_fresh_schema_role_creation_password_rotation_and_grants() {
+        let server = df_test_postgres::server().await;
+        let superuser_pool = server.database().await;
         let suffix = Uuid::now_v7().simple().to_string();
         let (db_name, owner_role, app_role, schema) =
             setup_owner_and_schema(&superuser_pool, &suffix).await;
@@ -305,8 +305,8 @@ mod tests {
 
         // Use max_connections = 1 to verify advisory locking does not deadlock a single-connection pool
         let cfg = DatabaseConfig {
-            host: "127.0.0.1".into(),
-            port: 5432,
+            host: server.host().into(),
+            port: server.port(),
             database: db_name.clone(),
             user: owner_role.clone(),
             password_file: owner_pw.path().to_path_buf(),
@@ -326,8 +326,8 @@ mod tests {
 
         // Connect as the newly created application role with password v1
         let app_cfg_v1 = DatabaseConfig {
-            host: "127.0.0.1".into(),
-            port: 5432,
+            host: server.host().into(),
+            port: server.port(),
             database: db_name.clone(),
             user: app_role.clone(),
             password_file: app_pw_v1.path().to_path_buf(),
@@ -403,10 +403,10 @@ mod tests {
         cleanup_roles(&superuser_pool, &schema, &owner_role, &app_role).await;
     }
 
-    #[sqlx::test(migrations = false)]
-    async fn concurrent_migrate_runs_and_tampered_checksum_and_unmanageable_role(
-        superuser_pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn concurrent_migrate_runs_and_tampered_checksum_and_unmanageable_role() {
+        let server = df_test_postgres::server().await;
+        let superuser_pool = server.database().await;
         let suffix = Uuid::now_v7().simple().to_string();
         let (db_name, owner_role, app_role, schema) =
             setup_owner_and_schema(&superuser_pool, &suffix).await;
@@ -425,8 +425,8 @@ mod tests {
 
         // Scenario: Role not manageable -> exits non-zero with message to disable role management
         let cfg_manage = DatabaseConfig {
-            host: "127.0.0.1".into(),
-            port: 5432,
+            host: server.host().into(),
+            port: server.port(),
             database: db_name.clone(),
             user: owner_role.clone(),
             password_file: owner_pw.path().to_path_buf(),

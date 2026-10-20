@@ -314,8 +314,9 @@ mod tests {
         runs
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn new_task_gets_a_run_and_a_sandbox(pool: PgPool) {
+    #[tokio::test]
+    async fn new_task_gets_a_run_and_a_sandbox() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         tick(&Scheduler::new(env.ctx.clone()), Utc::now())
             .await
@@ -340,8 +341,9 @@ mod tests {
         assert_eq!(spec.labels["dark-factory.io/task-key"], "DF-1");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn two_schedulers_create_exactly_one_run(pool: PgPool) {
+    #[tokio::test]
+    async fn two_schedulers_create_exactly_one_run() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let a = Scheduler::new(env.ctx.clone());
         let b = Scheduler::new(env.other_replica().await);
@@ -359,8 +361,9 @@ mod tests {
         assert_eq!(provisions, 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn task_with_an_active_run_is_not_started_again(pool: PgPool) {
+    #[tokio::test]
+    async fn task_with_an_active_run_is_not_started_again() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         env.insert_run(env.task.id, 1, "running").await;
         tick(&Scheduler::new(env.ctx.clone()), Utc::now())
@@ -369,8 +372,9 @@ mod tests {
         assert_eq!(list_runs(&pool).await.len(), 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn provider_rejection_fails_the_run_and_the_task(pool: PgPool) {
+    #[tokio::test]
+    async fn provider_rejection_fails_the_run_and_the_task() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         env.provider
             .push_provision_result(Err(ProviderError::Backend("quota exceeded".into())));
@@ -390,8 +394,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn started_event_moves_the_run_to_connecting_with_the_pod_ip(pool: PgPool) {
+    #[tokio::test]
+    async fn started_event_moves_the_run_to_connecting_with_the_pod_ip() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let scheduler = Scheduler::new(env.ctx.clone());
         tick(&scheduler, Utc::now()).await.unwrap();
@@ -409,8 +414,9 @@ mod tests {
         assert_eq!(run.pod_ip.as_deref(), Some("10.0.0.7"));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn gone_event_fails_a_running_run_and_keeps_the_volume(pool: PgPool) {
+    #[tokio::test]
+    async fn gone_event_fails_a_running_run_and_keeps_the_volume() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "running").await;
         let scheduler = Scheduler::new(env.ctx.clone());
@@ -455,8 +461,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn sandbox_that_never_connects_fails_with_connect_timeout(pool: PgPool) {
+    #[tokio::test]
+    async fn sandbox_that_never_connects_fails_with_connect_timeout() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let scheduler = Scheduler::new(env.ctx.clone());
         let now = Utc::now();
@@ -485,8 +492,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn run_past_budget_and_both_graces_is_torn_down(pool: PgPool) {
+    #[tokio::test]
+    async fn run_past_budget_and_both_graces_is_torn_down() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "running").await;
         let scheduler = Scheduler::new(env.ctx.clone());
@@ -533,8 +541,9 @@ mod tests {
         assert!(!is_before(after(Utc::now(), u64::MAX), Utc::now()));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn enforcing_timeouts_with_unbounded_budgets_does_not_panic(pool: PgPool) {
+    #[tokio::test]
+    async fn enforcing_timeouts_with_unbounded_budgets_does_not_panic() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let mut env = Env::new(pool.clone()).await;
         env.ctx.config = std::sync::Arc::new(crate::ChannelConfig {
             runs: RunsConfig {
@@ -553,8 +562,9 @@ mod tests {
         assert_eq!(run.state, RunState::Running);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn wall_clock_budget_counts_from_the_runtime_connect(pool: PgPool) {
+    #[tokio::test]
+    async fn wall_clock_budget_counts_from_the_runtime_connect() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "running").await;
         let started = get_run(&pool, run_id).await.unwrap().unwrap().started_at;
@@ -576,10 +586,9 @@ mod tests {
         assert_eq!(state().await, RunState::Failed);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn bookkeeping_failure_after_the_run_was_created_ends_it_as_provisioning_failed(
-        pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn bookkeeping_failure_after_the_run_was_created_ends_it_as_provisioning_failed() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         // `load_run_context` joins `credential_refs`; without it, provisioning cannot start.
         sqlx::query("ALTER TABLE credential_refs RENAME TO credential_refs_gone")
@@ -597,8 +606,9 @@ mod tests {
         assert_eq!(task_status(&pool, &env).await, "failed");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn no_sandbox_is_created_for_a_run_that_ended_meanwhile(pool: PgPool) {
+    #[tokio::test]
+    async fn no_sandbox_is_created_for_a_run_that_ended_meanwhile() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "pending").await;
         let stale = get_run(&pool, run_id).await.unwrap().unwrap();
@@ -622,8 +632,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn an_unreadable_run_does_not_stop_the_timeouts_of_the_others(pool: PgPool) {
+    #[tokio::test]
+    async fn an_unreadable_run_does_not_stop_the_timeouts_of_the_others() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let broken = env.insert_run(env.task.id, 1, "running").await;
         let second = df_db::create_task(
@@ -660,8 +671,9 @@ mod tests {
         assert_eq!(run.state, RunState::Failed);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn run_loop_starts_runs_on_notification_and_applies_events(pool: PgPool) {
+    #[tokio::test]
+    async fn run_loop_starts_runs_on_notification_and_applies_events() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let scheduler = Scheduler::new(env.ctx.clone());

@@ -27,9 +27,6 @@ rust_test(
     aliases = aliases(),
     crate_root = "src/main.rs",
     edition = "2024",
-    env = {
-        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
-    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -41,6 +38,7 @@ rust_test(
         "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-test-postgres:df_test_postgres",
         "//crates/df-web:df_web",
     ],
 )

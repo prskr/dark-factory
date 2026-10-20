@@ -126,7 +126,6 @@ where
 mod tests {
     use super::*;
     use df_core::{CredentialRefId, PersonaId, RunId, TaskId, UserId};
-    use sqlx::PgPool;
 
     /// Compile-time check that `secrecy::SecretString` does NOT implement `serde::Serialize`,
     /// guaranteeing it can never be passed into `NewAuditEntry::with_details`.
@@ -135,8 +134,9 @@ mod tests {
         static_assertions::assert_not_impl_any!(secrecy::SecretString: Serialize);
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn human_task_creation_and_agent_tool_call_and_credential_ref_are_audited(pool: PgPool) {
+    #[tokio::test]
+    async fn human_task_creation_and_agent_tool_call_and_credential_ref_are_audited() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         // Scenario 1: Task creation is audited
         let peter = Principal::human(UserId::new(), "Peter");
         let entry1 = NewAuditEntry::new(

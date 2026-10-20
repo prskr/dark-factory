@@ -190,7 +190,6 @@ mod tests {
         AgentMessageChunk, ImageContent, TextContent, UserMessage,
         tool_call_content::Kind as TcKind,
     };
-    use sqlx::PgPool;
 
     fn text(t: &str) -> ContentBlock {
         ContentBlock {
@@ -220,8 +219,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn inline_image_is_replaced_by_its_hash(pool: PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn inline_image_is_replaced_by_its_hash() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let blobs = PgBlobStore::new(pool);
         let prepared = prepare(&blobs, 1, image_event(b"png-bytes")).await?;
 
@@ -236,8 +236,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn tool_call_content_blobs_are_externalized_too(pool: PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn tool_call_content_blobs_are_externalized_too() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let blobs = PgBlobStore::new(pool);
         let mut event = image_event(b"shot");
         let Some(event::Kind::AgentMessageChunk(chunk)) = event.kind.take() else {
@@ -256,10 +257,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn duplicate_events_are_stored_once_and_ids_increase_across_runs(
-        pool: PgPool,
-    ) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn duplicate_events_are_stored_once_and_ids_increase_across_runs() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let blobs = PgBlobStore::new(pool.clone());
         let run1 = env.insert_run(env.task.id, 1, "running").await;
@@ -311,8 +311,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn user_message_marks_the_queued_prompt_delivered(pool: PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn user_message_marks_the_queued_prompt_delivered() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let blobs = PgBlobStore::new(pool.clone());
         let run = env.insert_run(env.task.id, 1, "running").await;
@@ -348,10 +349,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn user_message_cannot_deliver_the_prompt_of_another_task(
-        pool: PgPool,
-    ) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn user_message_cannot_deliver_the_prompt_of_another_task() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let blobs = PgBlobStore::new(pool.clone());
         let other = df_db::create_task(

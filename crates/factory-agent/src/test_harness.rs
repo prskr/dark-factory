@@ -382,6 +382,10 @@ impl LocalHttpsGitServer {
                                     &root,
                                     expected.as_deref(),
                                 );
+                                // Responses end at EOF: GnuTLS clients reject it without close_notify.
+                                // Best effort, the client may already be gone.
+                                conn.send_close_notify();
+                                let _ = conn.complete_io(&mut sock);
                             }
                         });
                     }

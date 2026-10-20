@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bazel:
+    runs-on: ubuntu-latest
+    env:
+      # Auth for BuildBuddy remote cache/execution, see docs/development.md
+      BAZEL_ARGS: >-
+        --config=remote --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+
+      # testcontainers belongs in dev-dependencies only (crate `df-test-postgres`)
+      - name: No testcontainers in the production binary
+        run: |
+          deps="$(bazel query 'deps(//crates/dark-factory:dark-factory)' 2>/dev/null)"
+          if grep -q testcontainers <<<"$deps"; then
+            echo "testcontainers is a dependency of //crates/dark-factory:dark-factory" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: bazel test $BAZEL_ARGS //...
+
+      # Static musl images cannot be built on the RBE workers (glibc toolchain): build on the runner with
+      # the remote cache only, as the release workflow does.
+      - name: Images (static musl)
+        run: >-
+          bazel test --config=release --config=cache --config=ci
+          --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+          //deploy:images_structure_test
+
+      - name: Buf lint
+        run: bazel test $BAZEL_ARGS //contract:buf_lint_test
+
+      - name: Clippy
+        run: bazel build $BAZEL_ARGS --config=lint //crates/... //plugins/...
+
+      - name: Rustfmt
+        run: bazel build $BAZEL_ARGS --config=fmt //crates/... //plugins/...

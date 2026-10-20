@@ -5,15 +5,15 @@ image:
   pullPolicy: Always
   pullSecrets: []
   controlPlane:
-    repository: harbor.home.icb4dc0.de/dark-factory/control-plane
+    repository: ghcr.io/prskr/dark-factory/control-plane
     tag: 'dev'
     digest: ''
   runtime:
-    repository: harbor.home.icb4dc0.de/dark-factory/runtime
+    repository: ghcr.io/prskr/dark-factory/runtime
     tag: 'dev'
     digest: ''
   testProject:
-    repository: harbor.home.icb4dc0.de/dark-factory/test-project
+    repository: ghcr.io/prskr/dark-factory/test-project
     tag: 'dev'
     digest: ''
 

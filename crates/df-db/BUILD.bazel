@@ -44,9 +44,6 @@ rust_test(
         "//:sqlx_data",
     ],
     crate = ":df_db",
-    env = {
-        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
-    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -54,5 +51,7 @@ rust_test(
     rustc_env = {
         "SQLX_OFFLINE": "true",
     },
-    deps = all_crate_deps(normal_dev = True),
+    deps = all_crate_deps(normal_dev = True) + [
+        "//crates/df-test-postgres:df_test_postgres",
+    ],
 )

@@ -282,8 +282,9 @@ mod tests {
         assert!(repo_ref("https://git.example.org/").is_err());
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn first_push_ahead_opens_a_draft_with_default_title_and_body(pool: PgPool) {
+    #[tokio::test]
+    async fn first_push_ahead_opens_a_draft_with_default_title_and_body() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         on_push_report(&env.ctx, &rc, &push(2, PushStatus::Ok)).await;
 
@@ -303,16 +304,18 @@ mod tests {
         assert_eq!(creates(&env).len(), 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn push_without_commits_ahead_opens_nothing(pool: PgPool) {
+    #[tokio::test]
+    async fn push_without_commits_ahead_opens_nothing() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         on_push_report(&env.ctx, &rc, &push(0, PushStatus::Ok)).await;
         assert!(creates(&env).is_empty());
         assert_eq!(pr_number(&pool, rc.task.id).await, None);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn stored_title_and_body_are_used(pool: PgPool) {
+    #[tokio::test]
+    async fn stored_title_and_body_are_used() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         sqlx::query(
             "UPDATE tasks SET pr_title = 'Better title', pr_body = 'Better body' WHERE id = $1",
@@ -326,8 +329,9 @@ mod tests {
         assert_eq!(creates(&env)[0].body, "Better body");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn existing_open_pr_is_recorded_instead_of_creating_a_second(pool: PgPool) {
+    #[tokio::test]
+    async fn existing_open_pr_is_recorded_instead_of_creating_a_second() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         env.forge
             .push_find_open_pull_request_result(Ok(Some(pull_request(7))));
@@ -336,8 +340,9 @@ mod tests {
         assert_eq!(pr_number(&pool, rc.task.id).await, Some(7));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn creation_conflict_records_the_existing_pr(pool: PgPool) {
+    #[tokio::test]
+    async fn creation_conflict_records_the_existing_pr() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         env.forge.push_find_open_pull_request_result(Ok(None));
         env.forge
@@ -348,8 +353,9 @@ mod tests {
         assert_eq!(pr_number(&pool, rc.task.id).await, Some(9));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn failed_creation_is_retried_on_the_next_push(pool: PgPool) {
+    #[tokio::test]
+    async fn failed_creation_is_retried_on_the_next_push() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         env.forge.push_find_open_pull_request_result(Ok(None));
         env.forge
@@ -364,8 +370,9 @@ mod tests {
         assert!(pr_number(&pool, rc.task.id).await.is_some());
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn completed_run_marks_the_pr_ready_and_posts_the_summary(pool: PgPool) {
+    #[tokio::test]
+    async fn completed_run_marks_the_pr_ready_and_posts_the_summary() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
         sqlx::query("UPDATE tasks SET completion_summary = 'All done' WHERE id = $1")
@@ -383,8 +390,9 @@ mod tests {
             ForgeCall::AddIssueComment { number: 1, body, .. } if body == "All done")));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn summary_is_posted_even_if_marking_the_pr_ready_failed(pool: PgPool) {
+    #[tokio::test]
+    async fn summary_is_posted_even_if_marking_the_pr_ready_failed() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
         sqlx::query("UPDATE tasks SET completion_summary = 'All done' WHERE id = $1")
@@ -404,8 +412,9 @@ mod tests {
             ForgeCall::AddIssueComment { number: 1, body, .. } if body == "All done")));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn run_end_retries_a_missing_pr_when_the_branch_was_pushed(pool: PgPool) {
+    #[tokio::test]
+    async fn run_end_retries_a_missing_pr_when_the_branch_was_pushed() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let workspace = WorkspaceState {
             task_branch_pushed: true,
@@ -415,8 +424,9 @@ mod tests {
         assert_eq!(creates(&env).len(), 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn non_fast_forward_push_flags_divergence(pool: PgPool) {
+    #[tokio::test]
+    async fn non_fast_forward_push_flags_divergence() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         on_push_report(&env.ctx, &rc, &push(0, PushStatus::RejectedNonFastForward)).await;
         let diverged: bool = sqlx::query_scalar("SELECT diverged FROM tasks WHERE id = $1")

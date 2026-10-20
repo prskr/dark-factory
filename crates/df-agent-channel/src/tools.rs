@@ -393,8 +393,9 @@ mod tests {
         assert_eq!(VALIDATORS.len(), 4);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn unknown_tool_executes_nothing(pool: PgPool) {
+    #[tokio::test]
+    async fn unknown_tool_executes_nothing() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let res = execute(&env.ctx, &rc, call("delete_project", serde_json::json!({}))).await;
         assert!(res.is_error);
@@ -406,8 +407,9 @@ mod tests {
         assert_eq!(rows, 0);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn schema_violation_names_the_missing_field(pool: PgPool) {
+    #[tokio::test]
+    async fn schema_violation_names_the_missing_field() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool).await;
         let res = execute(
             &env.ctx,
@@ -419,8 +421,9 @@ mod tests {
         assert!(message(&res).contains("summary"), "{}", message(&res));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn retry_with_the_same_call_id_executes_once(pool: PgPool) {
+    #[tokio::test]
+    async fn retry_with_the_same_call_id_executes_once() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let request = call("comment_on_issue", serde_json::json!({"body": "findings"}));
 
@@ -444,8 +447,9 @@ mod tests {
         assert_eq!(audited, 1);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn a_claimed_call_that_is_still_running_is_not_executed_again(pool: PgPool) {
+    #[tokio::test]
+    async fn a_claimed_call_that_is_still_running_is_not_executed_again() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let request = call("comment_on_issue", serde_json::json!({"body": "x"}));
         // Another attempt claimed the call and has not stored a result yet.
@@ -463,8 +467,9 @@ mod tests {
         assert!(env.forge.calls().is_empty());
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn an_abandoned_claim_is_closed_with_an_error_and_never_executed(pool: PgPool) {
+    #[tokio::test]
+    async fn an_abandoned_claim_is_closed_with_an_error_and_never_executed() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let request = call("comment_on_issue", serde_json::json!({"body": "x"}));
         // The claiming replica died long ago without storing a result.
@@ -494,8 +499,9 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn the_forge_call_does_not_hold_a_database_transaction(pool: PgPool) {
+    #[tokio::test]
+    async fn the_forge_call_does_not_hold_a_database_transaction() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let request = call("comment_on_issue", serde_json::json!({"body": "x"}));
         // While the forge call runs, the claim is committed: visible to other connections.
@@ -576,8 +582,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn update_pull_request_before_the_pr_exists_stores_the_values(pool: PgPool) {
+    #[tokio::test]
+    async fn update_pull_request_before_the_pr_exists_stores_the_values() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let res = execute(
             &env.ctx,
@@ -598,8 +605,9 @@ mod tests {
         assert!(env.forge.calls().is_empty());
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn update_pull_request_updates_an_existing_pr(pool: PgPool) {
+    #[tokio::test]
+    async fn update_pull_request_updates_an_existing_pr() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let pr = env
             .forge
@@ -636,8 +644,9 @@ mod tests {
             ForgeCall::UpdatePullRequest { number: 1, changes, .. } if changes.body.as_deref() == Some("Details"))));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn comment_without_linked_issue_is_an_error(pool: PgPool) {
+    #[tokio::test]
+    async fn comment_without_linked_issue_is_an_error() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, mut rc) = setup(pool).await;
         rc.task.issue_number = None;
         let res = execute(
@@ -650,8 +659,9 @@ mod tests {
         assert!(message(&res).contains("this task has no linked issue"));
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn report_progress_sets_the_status_line(pool: PgPool) {
+    #[tokio::test]
+    async fn report_progress_sets_the_status_line() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let res = execute(
             &env.ctx,
@@ -671,8 +681,9 @@ mod tests {
         assert_eq!(line, "tests pass");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn complete_task_stores_the_summary_and_ends_the_run_after_the_turn(pool: PgPool) {
+    #[tokio::test]
+    async fn complete_task_stores_the_summary_and_ends_the_run_after_the_turn() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool.clone()).await;
         let res = execute(
             &env.ctx,
@@ -690,8 +701,9 @@ mod tests {
         assert_eq!(stored, "Done.");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn forge_errors_are_tool_errors_with_actionable_text(pool: PgPool) {
+    #[tokio::test]
+    async fn forge_errors_are_tool_errors_with_actionable_text() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let (env, rc) = setup(pool).await;
         env.forge
             .push_add_issue_comment_result(Err(IntegrationError::RateLimited(RateLimit {

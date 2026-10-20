@@ -42,5 +42,6 @@ async-trait.workspace = true
 bytes.workspace = true
 df-agent-channel = { path = ".", features = ["test-util"] }
 df-core = { workspace = true, features = ["test-util"] }
+df-test-postgres.workspace = true
 tokio-stream = { workspace = true, features = ["net"] }
 tracing-subscriber.workspace = true

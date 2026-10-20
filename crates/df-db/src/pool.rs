@@ -103,8 +103,10 @@ mod tests {
         assert!(validate_sql_identifier(&too_long_64).is_err());
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn connect_pool_sets_schema_search_path(pool: PgPool) {
+    #[tokio::test]
+    async fn connect_pool_sets_schema_search_path() {
+        let server = df_test_postgres::server().await;
+        let pool = server.database().await;
         sqlx::query("CREATE SCHEMA IF NOT EXISTS custom_df_schema")
             .execute(&pool)
             .await
@@ -120,8 +122,8 @@ mod tests {
         writeln!(pw_file, "postgres").unwrap();
 
         let cfg = DatabaseConfig {
-            host: "127.0.0.1".into(),
-            port: 5432,
+            host: server.host().into(),
+            port: server.port(),
             database: db_name,
             user: "postgres".into(),
             password_file: pw_file.path().to_path_buf(),

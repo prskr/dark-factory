@@ -64,18 +64,24 @@ Project images are owned by individual projects rather than Dark Factory's Bazel
 docker build \
   --load \
   --platform linux/amd64 \
-  -t harbor.home.icb4dc0.de/apps/dark-factory/claude-project:0.23.1 \
+  -t ghcr.io/prskr/dark-factory/claude-project:0.23.1 \
   deploy/images/claude-project
 
 docker run --rm --platform linux/amd64 \
-  harbor.home.icb4dc0.de/apps/dark-factory/claude-project:0.23.1 \
+  ghcr.io/prskr/dark-factory/claude-project:0.23.1 \
   claude-agent-acp --help
 ```
 
-#### Push to Harbor
+#### Push to GHCR
+
+Log in once with a personal access token that has the `write:packages` scope:
 
 ```bash
-docker push harbor.home.icb4dc0.de/dark-factory/claude-project:0.23.1
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+```bash
+docker push ghcr.io/prskr/dark-factory/claude-project:0.23.1
 ```
 
 ---
@@ -91,7 +97,7 @@ bazel run //deploy:dev
 Override the target registry or Helm release namespace via environment variables:
 
 ```bash
-DARK_FACTORY_REGISTRY=harbor.home.icb4dc0.de/dark-factory \
+DARK_FACTORY_REGISTRY=ghcr.io/prskr/dark-factory \
 DARK_FACTORY_NAMESPACE=dark-factory-dev \
   bazel run //deploy:dev
 ```

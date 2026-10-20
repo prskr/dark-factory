@@ -459,8 +459,9 @@ mod tests {
         Ok((project_id, persona_id))
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn first_task_gets_df_1_and_queues_assignment_prompt(pool: PgPool) {
+    #[tokio::test]
+    async fn first_task_gets_df_1_and_queues_assignment_prompt() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let project_key: ProjectKey = "DF".parse().unwrap();
         let (project_id, persona_id) = seed_project_and_persona(&pool, &project_key, "Linus")
             .await
@@ -496,8 +497,9 @@ mod tests {
         assert_eq!(undelivered[0].id, msg.id);
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn concurrent_task_creation_allocates_consecutive_gap_free_keys(pool: PgPool) {
+    #[tokio::test]
+    async fn concurrent_task_creation_allocates_consecutive_gap_free_keys() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let project_key: ProjectKey = "DF".parse().unwrap();
         let (project_id, persona_id) = seed_project_and_persona(&pool, &project_key, "Linus")
             .await
@@ -538,8 +540,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn queueing_message_on_waiting_or_failed_or_rate_limited_task(pool: PgPool) {
+    #[tokio::test]
+    async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let notifier = Notifier::start(&pool).await.unwrap();
         let mut rx = notifier.subscribe();
 
@@ -646,10 +649,10 @@ mod tests {
         assert!(matches!(mismatched, Err(DbError::InvalidData(_))));
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn database_check_constraints_reject_invalid_project_keys_task_statuses_and_duplicate_active_runs(
-        pool: PgPool,
-    ) {
+    #[tokio::test]
+    async fn database_check_constraints_reject_invalid_project_keys_task_statuses_and_duplicate_active_runs()
+     {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         // Invalid project keys `df` and `D` rejected by DB check constraint
         for bad_key in ["df", "D"] {
             let res = sqlx::query(

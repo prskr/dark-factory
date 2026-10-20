@@ -10,7 +10,7 @@ cargo_build_script(
     name = "build_script",
     srcs = ["build.rs"],
     build_script_env = {
-        "PROTOC": "$(execpath @protobuf//:protoc)",
+        "PROTOC": "$(execpath //build:protoc)",
         "PROTOC_INCLUDE": "$${pwd}/external/protobuf+/src",
     },
     data = [
@@ -19,7 +19,7 @@ cargo_build_script(
     ],
     edition = "2024",
     tools = [
-        "@protobuf//:protoc",
+        "//build:protoc",
     ],
     deps = all_crate_deps(build = True),
 )
