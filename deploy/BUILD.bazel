@@ -200,7 +200,7 @@ sh_binary(
     ],
 )
 
-# manual: checks for static musl binaries, so it only passes with --config=release (not on RBE)
+# checks the multi-arch index and that the binaries are static musl ELFs (Linux hosts only)
 sh_test(
     name = "images_structure_test",
     srcs = ["test_images.sh"],
@@ -216,7 +216,7 @@ sh_test(
         ":test_project_oci_layout",
         "@multitool//tools/jq",
     ],
-    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
 )
 
 sh_test(

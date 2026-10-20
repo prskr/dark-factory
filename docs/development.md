@@ -99,23 +99,36 @@ EOF
 cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 ```
 
-## Bazel: remote execution and release builds
+## Bazel: platforms, cache and images
 
 Day-to-day commands are collected in the [`Justfile`](../Justfile) (`just` lists them; the file also works as a plain command reference).
 
-| Mode | Command | Toolchain | Where it runs |
-|------|---------|-----------|---------------|
-| Local | `bazel build //...` | host toolchains | this machine |
-| Remote (CI, fast feedback) | `bazel test --config=remote //...` | hermetic glibc LLVM (`toolchains_llvm`) | BuildBuddy workers (linux/amd64) |
-| Release | `bazel build --config=release //deploy:...` | `toolchains_musl` (static musl) | the machine running Bazel, no remote |
+Everything builds on the machine that runs Bazel; there is no remote execution (background and how to bring it back: [remote-execution.md](remote-execution.md)). The same commands work on macOS (arm64) and Linux (amd64, arm64).
 
-- `--config=cache` is the remote cache and build event stream without remote execution (`remote` includes it); CI combines it with `--config=release`. `--config=remote-debug` additionally writes `bazel-remote-grpc.log` and `execution_log.binpb.zst` to the workspace root (git-ignored).
-- `--config=remote` needs a BuildBuddy API key. Either export `BUILDBUDDY_API_KEY=<key>` (read by the credential helper `build/buildbuddy_credentials.sh`, useful where no `~/.bazelrc` can be written) or put `build:remote --remote_header=x-buildbuddy-api-key=<key>` in `.bazelrc.user` (CI uses the `BUILDBUDDY_ORG_API_KEY` secret). The variable is read when the Bazel client starts; a cached key is kept for `--credential_helper_cache_duration` (default 30 min).
-- The remote path links against a glibc sysroot, so its binaries are not the static ones that ship. Release artifacts therefore come from `--config=release` (the `release` workflow). Do not combine the two configs.
-- `//deploy:images_structure_test` (static ELF check) and `//contract:buf_lint_test` are tagged `manual`: run them explicitly. The former needs a Linux host.
-- Database tests start their PostgreSQL through testcontainers (see section 3). On the workers they run in a Firecracker VM with `dockerd` (`test.init-dockerd` in `build/platforms/BUILD.bazel`); locally they use your Docker. Anonymous Docker Hub pulls of `postgres:17-alpine` can hit rate limits, then switch the image in `crates/df-test-postgres/src/lib.rs` to a mirror such as `mirror.gcr.io/library/postgres`.
+| Host | Target platform of `bazel build/test //...` | Images (`//deploy:*_image`) |
+|------|---------------------------------------------|------------------------------|
+| Linux amd64/arm64 | `//build/platforms:host_musl`: static musl for the host's cpu (`build:linux` in `.bazelrc`) | amd64 + arm64 static musl |
+| Linux with `--config=linux-<arch>-musl` (CI) | `//build/platforms:linux_<arch>_musl` | amd64 + arm64 static musl, the host arch reuses the test build |
+| macOS arm64 | native macOS | amd64 + arm64 static musl, cross-compiled |
+
+```mermaid
+flowchart LR
+  src[crates/*] -->|"--platforms (host_musl or linux_&lt;arch&gt;_musl)"| tests[tests, static musl]
+  src -->|image_index transition| amd64[linux_amd64_musl]
+  src -->|image_index transition| arm64[linux_arm64_musl]
+  amd64 --> img[OCI index]
+  arm64 --> img
+```
+
+The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` is a different platform label and therefore a separate configuration: on a Linux host the host arch is compiled twice (tests and image). Setting `--config=linux-amd64-musl` (or `linux-arm64-musl`) for the host's arch makes the test build the image's configuration; CI does this. On a Linux arm64 machine, add `build --config=linux-arm64-musl` to `.bazelrc.user` for the same effect.
+
+- Toolchains: Rust musl toolchains and `toolchains_musl` (`musl-gcc`) for Linux targets, registered first in `MODULE.bazel`. Exec tools (build scripts, proc-macros) are built for the host with the host's C compiler (Xcode clang, or `gcc`/`clang` on Linux), which must be installed.
+- Tests only run for the host's arch; the other arch is cross-compiled into the images but not executed.
+- `--config=cache` (optional) enables the BuildBuddy remote cache and build event stream. It needs an API key: export `BUILDBUDDY_API_KEY=<key>` (read by the credential helper `build/buildbuddy_credentials.sh`) or put `build:cache --remote_header=x-buildbuddy-api-key=<key>` in `.bazelrc.user` (CI uses the `BUILDBUDDY_ORG_API_KEY` secret). The variable is read when the Bazel client starts; a cached key is kept for `--credential_helper_cache_duration` (default 30 min). `--config=cache-debug` additionally writes `bazel-remote-grpc.log` and `execution_log.binpb.zst` to the workspace root (git-ignored).
+- Cache hits are shared between machines with the same host OS and arch (exec tools differ otherwise).
+- `//deploy:images_structure_test` (multi-arch index, static ELF check) only runs on Linux hosts and is skipped on macOS (`//...`; when named explicitly, add `--skip_incompatible_explicit_targets`, as `just release-test` does).- Database tests start their PostgreSQL through testcontainers (see section 3) and need a local Docker socket. For Podman, point the tests at its socket, for example `build --test_env=DOCKER_HOST=unix:///run/user/501/podman/podman.sock` in `.bazelrc.user` (use your uid instead of `501`). Anonymous Docker Hub pulls of `postgres:17-alpine` can hit rate limits, then switch the image in `crates/df-test-postgres/src/lib.rs` to a mirror such as `mirror.gcr.io/library/postgres`.
 - Images go to `ghcr.io/prskr/dark-factory/{control-plane,runtime,test-project}`. The tag is `--//deploy:image_tag` (default `dev`); the `release` workflow sets it to the git tag (`v*`) and falls back to `dev` for manual runs from a branch. Locally: `docker login ghcr.io`, then `just release-push v1.2.3`.
-- `.bazelrc.agents` makes `--config=remote` the default for sandboxed agents.
+- `.bazelrc.agents` makes `--config=cache` the default for sandboxed agents.
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 

@@ -16,7 +16,7 @@ filegroup(
 )
 
 # `bazel run //:bazel_env` then `direnv allow`: puts the pinned linters on PATH (see .envrc).
-# manual: needs host-platform (macOS) toolchains, so it cannot be built with remote execution.
+# manual: only used through `bazel run`; building it fetches every pinned tool.
 bazel_env(
     name = "bazel_env",
     tags = ["manual"],

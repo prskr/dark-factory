@@ -6,7 +6,7 @@ This directory contains the OCI container image definitions, the Kubernetes Helm
 
 ### 1.1 Static `x86_64-unknown-linux-musl` & `aarch64-unknown-linux-musl` Cross-Builds
 
-Dark Factory cross-compiles all Linux target binaries (`dark-factory`, `factory-agent`, `fake-acp-agent`) from `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` (RBE worker), and `x86_64-unknown-linux-gnu` to statically linked `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` ELF binaries using Bazel (`rules_rust` `0.73.0` + `toolchains_musl` `0.1.29`), and packages multi-arch (`linux/amd64` + `linux/arm64`) OCI image indexes with `rules_img` (`0.3.23`):
+Dark Factory cross-compiles all Linux target binaries (`dark-factory`, `factory-agent`, `fake-acp-agent`) from `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` (dev VM), and `x86_64-unknown-linux-gnu` (CI runner) to statically linked `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` ELF binaries using Bazel (`rules_rust` `0.73.0` + `toolchains_musl` `0.1.29`), and packages multi-arch (`linux/amd64` + `linux/arm64`) OCI image indexes with `rules_img` (`0.3.23`):
 
 ```bash
 bazel build --config=linux-amd64-musl \
@@ -25,6 +25,7 @@ bazel build --config=linux-arm64-musl \
 1. **C/C++ Cross Toolchain (`toolchains_musl` `0.1.29`)**:
    - `toolchains_musl` (`0.1.29`, required for Bazel 9 compatibility where `CcToolchainConfigInfo` was removed from the global Starlark scope) provides hermetic `x86_64-linux-musl` and `aarch64-linux-musl` C/C++ cross-compilers and sysroots on both `darwin_arm64` and Linux (`aarch64` / `x86_64`).
    - Configured with `extra_target_compatible_with = ["//build/platforms:musl"]` so the musl C toolchain is selected when targeting `//build/platforms:linux_amd64_musl` or `//build/platforms:linux_arm64_musl`.
+   - Registration order matters: the default `*-unknown-linux-gnu` Rust toolchains only constrain cpu + os and also match the musl platforms. `MODULE.bazel` therefore registers the musl C and Rust toolchains before `@rust_toolchains//:all`; otherwise glibc `libstd` is linked by `musl-gcc` (`undefined reference to gnu_get_libc_version`).
    - `rust.toolchain` sets `extra_rustc_flags_triples = {"aarch64-unknown-linux-musl": ["-Ctarget-feature=+crt-static"], "x86_64-unknown-linux-musl": ["-Ctarget-feature=+crt-static"]}` to produce self-contained static-pie ELF binaries suitable for `scratch` and `gcr.io/distroless/static-debian13:nonroot`.
    - *Alternative evaluated*: `@toolchains_llvm` (`16.0.0`) + Debian sysroots targeting `*-unknown-linux-gnu`, as used in sibling repository commit `72fef6eb9644e00f1c9e25bba028f15025cc513f`. While effective for glibc-linked images, `factory-agent` is packaged in a `scratch` image mounted into arbitrary project containers via a Kubernetes image volume at `/opt/factory` (ADR-0024 / design D4) and therefore requires a zero-libc-dependency static binary (`*-unknown-linux-musl`).
 

@@ -25,28 +25,16 @@ platform(
     ],
 )
 
-# BuildBuddy RBE worker (default pool is linux/amd64)
+# Default target platform on Linux hosts (`build:linux` in .bazelrc): the host's cpu with musl, so tests
+# run the same static binaries that go into the images. The exec platform stays the plain (glibc) host.
 platform(
-    name = "linux_amd64_rbe",
-    constraint_values = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-        # tests run on the first execution platform matching the (musl) target platform
-        ":musl",
-    ],
-    exec_properties = {
-        "OSFamily": "Linux",
-        "Arch": "amd64",
-        # the default worker image is too old (glibc < 2.27) for the LLVM binaries
-        "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04:latest",
-        # database tests start PostgreSQL through testcontainers: run them in a Firecracker VM with dockerd
-        "test.workload-isolation-type": "firecracker",
-        "test.init-dockerd": "true",
-    },
+    name = "host_musl",
+    constraint_values = [":musl"],
+    parents = ["@platforms//host"],
 )
 
-# Lets tests for musl targets run on a glibc Linux host (--config=release on a CI runner). The default test
-# toolchain requires the exec platform to carry every target constraint, including `:musl`.
+# Lets tests for musl targets run on a glibc Linux host. The default test toolchain requires the exec
+# platform to carry every target constraint, including `:musl`.
 toolchain(
     name = "musl_test_toolchain",
     exec_compatible_with = ["@platforms//os:linux"],

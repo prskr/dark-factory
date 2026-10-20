@@ -10,9 +10,10 @@ jobs:
   bazel:
     runs-on: ubuntu-latest
     env:
-      # Auth for BuildBuddy remote cache/execution, see docs/development.md
+      # BuildBuddy remote cache, see docs/development.md. The explicit platform (not `host_musl`) matches the
+      # amd64 image's, so tests and images share one build.
       BAZEL_ARGS: >-
-        --config=remote --config=ci
+        --config=cache --config=ci --config=linux-amd64-musl
         --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,19 +33,9 @@ jobs:
             exit 1
           fi
 
+      # Static musl binaries for the runner's arch; the images add the cross-compiled arm64 binaries
       - name: Test
         run: bazel test $BAZEL_ARGS //...
-
-      # Static musl images cannot be built on the RBE workers (glibc toolchain): build on the runner with
-      # the remote cache only, as the release workflow does.
-      - name: Images (static musl)
-        run: >-
-          bazel test --config=release --config=cache --config=ci
-          --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
-          //deploy:images_structure_test
-
-      - name: Buf lint
-        run: bazel test $BAZEL_ARGS //contract:buf_lint_test
 
       - name: Clippy
         run: bazel build $BAZEL_ARGS --config=lint //crates/... //plugins/...

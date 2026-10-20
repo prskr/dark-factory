@@ -3,9 +3,10 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-27.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-28.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
+- Origin of TD-27: removal of remote build execution (2026-10-20).
 
 ## Summary
 
@@ -37,6 +38,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-24 | low   | `df-agent-channel` tests | Lock-wait test is not scoped to its own database |
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
+| TD-27 | medium | Bazel | No remote build execution: container tests cannot run in agent sandboxes |
 
 ## Entries
 
@@ -256,6 +258,14 @@ The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the 
 `stop_requested` and `stopped` do the same `watch` wait but treat a dropped sender differently (never stop vs. stop). `start_runs` only forwards to `start_queued_runs`; `anyhow_free` is an alias module.
 
 **Fix:** One shared helper with the dropped-sender behavior stated in its doc; inline the wrapper and the alias.
+
+### TD-27. No remote build execution: container tests cannot run in agent sandboxes
+
+`.bazelrc`, `.bazelrc.agents`, `MODULE.bazel`, `build/platforms/BUILD.bazel`
+
+RBE was removed in favor of local static musl builds with an optional remote cache. Agent sandboxes have no container socket, so `df-test-postgres` based tests only run in CI and on developer machines. ADR-0023, `design/agent-run.md`, `design/egress.md` and `product/context.md` still assume RBE runs them.
+
+**Fix:** Self-hosted RBE workers with a controlled image and an exec C toolchain that does not depend on the client, see [remote-execution.md](remote-execution.md) §3.
 
 ## Accepted decisions
 
