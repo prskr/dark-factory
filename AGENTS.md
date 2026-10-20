@@ -22,7 +22,7 @@ When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` li
 
 ## Containers and integration tests in a sandbox
 
-- There is NO local container socket in the sandbox. Do not try to start Docker/Podman or install one; tests that need containers (for example PostgreSQL for `#[sqlx::test]`) cannot run locally there.
+- There is NO local container socket in the sandbox. Do not try to start Docker/Podman or install one; tests that need containers (for example the PostgreSQL started by `df-test-postgres`) cannot run locally there.
 - The Bazel remote build executor DOES have a working container socket, so integration tests work when they run through Bazel: `bazel --bazelrc=.bazelrc.agents test //<path>/...`.
 - If you need to find something out about the container environment or reproduce a problem that only shows up with containers, write the experiment as a test and run it on the remote executor via Bazel. Delete the experiment afterwards, or turn it into a proper test.
 
@@ -91,7 +91,7 @@ cargo fmt --all
 # Unit tests of one crate
 cargo test -p factory-agent
 
-# Whole workspace; database tests need DATABASE_URL (see docs/development.md)
+# Whole workspace; database tests start PostgreSQL through testcontainers (needs a Docker socket)
 cargo test --workspace
 
 # Everything, including container-backed tests, on the remote executor
@@ -146,7 +146,7 @@ Always prefer returning a `Result` over panicking. `unwrap()`, `expect()`, index
 - Write the failing test first, then the implementation.
 - Use the standard assertion macros (`assert!`, `assert_eq!`, `assert_ne!`, `matches!`) and return `Result<()>` from tests that use `?` instead of unwrapping. `unwrap()`/`expect()` are fine in tests. Don't hand-write `if … { panic!(…) }` guards.
 - Use `#[tokio::test]` for async tests and `tempfile` for files and directories. Never write to fixed paths.
-- Database tests use `#[sqlx::test]`. They need a container and therefore run on the remote executor in a sandbox.
+- Database tests use `df_test_postgres::{migrated_pool, empty_pool, server}` (dev-dependency crate `df-test-postgres`) instead of `#[sqlx::test]`. They start a PostgreSQL container through testcontainers and therefore run on the remote executor in a sandbox.
 - Avoid timing-based tests (`sleep` to wait for an effect). Wait on the condition, use a channel, or use `tokio::time::pause()`.
 - When a bug is fixed, add a test that fails without the fix.
 

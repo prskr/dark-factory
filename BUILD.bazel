@@ -16,8 +16,10 @@ filegroup(
 )
 
 # `bazel run //:bazel_env` then `direnv allow`: puts the pinned linters on PATH (see .envrc).
+# manual: needs host-platform (macOS) toolchains, so it cannot be built with remote execution.
 bazel_env(
     name = "bazel_env",
+    tags = ["manual"],
     tools = {
         "buf": "@rules_buf_toolchains//:buf",
         "buildifier": "@buildifier_prebuilt//:buildifier",
@@ -28,6 +30,7 @@ bazel_env(
         "hadolint": TOOLS["hadolint"],
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],
+        "jq": TOOLS["jq"],
         "kingfisher": TOOLS["kingfisher"],
         "lefthook": TOOLS["lefthook"],
         "kube-linter": TOOLS["kube-linter"],

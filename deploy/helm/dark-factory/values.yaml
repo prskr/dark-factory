@@ -8,15 +8,15 @@ image:
   pullPolicy: IfNotPresent
   pullSecrets: []
   controlPlane:
-    repository: harbor.home.icb4dc0.de/dark-factory/control-plane
+    repository: ghcr.io/prskr/dark-factory/control-plane
     tag: "0.1.0"
     digest: ""
   runtime:
-    repository: harbor.home.icb4dc0.de/dark-factory/runtime
+    repository: ghcr.io/prskr/dark-factory/runtime
     tag: "0.1.0"
     digest: ""
   testProject:
-    repository: harbor.home.icb4dc0.de/dark-factory/test-project
+    repository: ghcr.io/prskr/dark-factory/test-project
     tag: "0.1.0"
     digest: ""
 

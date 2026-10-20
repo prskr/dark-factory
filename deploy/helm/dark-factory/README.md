@@ -20,13 +20,13 @@ Every key in `values.yaml` is documented below:
 | `instanceName` | `string` | `"dark-factory"` | Logical Dark Factory instance identifier written to `/etc/dark-factory/config.yaml`. |
 | `image.pullPolicy` | `string` | `"IfNotPresent"` | Image pull policy (`Always`, `IfNotPresent`, `Never`) for control plane, gateway, and migrate pods. |
 | `image.pullSecrets` | `list` | `[]` | List of image pull secret references (`[{ name: "..." }]`). |
-| `image.controlPlane.repository` | `string` | `"harbor.home.icb4dc0.de/dark-factory/control-plane"` | OCI repository for the control plane (`dark-factory`) image. |
+| `image.controlPlane.repository` | `string` | `"ghcr.io/prskr/dark-factory/control-plane"` | OCI repository for the control plane (`dark-factory`) image. |
 | `image.controlPlane.tag` | `string` | `"0.1.0"` | Tag used for the control plane image when `digest` is empty. |
 | `image.controlPlane.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.controlPlane.tag`. |
-| `image.runtime.repository` | `string` | `"harbor.home.icb4dc0.de/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image volume. |
+| `image.runtime.repository` | `string` | `"ghcr.io/prskr/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image volume. |
 | `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
-| `image.testProject.repository` | `string` | `"harbor.home.icb4dc0.de/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. |
+| `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. |
 | `image.testProject.tag` | `string` | `"0.1.0"` | Tag used for the test project image when `digest` is empty. |
 | `image.testProject.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.testProject.tag`. |
 | `database.host` | `string` | `"postgres.default.svc"` | PostgreSQL server hostname. |

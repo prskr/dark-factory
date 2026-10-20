@@ -14,7 +14,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 
 ## 2. Local PostgreSQL Container
 
-Start a local PostgreSQL 17 container on port `5432`:
+Tests do not need this: they start their own PostgreSQL (section 3). The container below is for `sqlx` tooling (`cargo sqlx prepare`, `migrate run`) and running `dark-factory` by hand. Start a local PostgreSQL 17 container on port `5432`:
 
 ```bash
 docker run -d \
@@ -26,7 +26,7 @@ docker run -d \
   postgres:17-alpine
 ```
 
-Export `DATABASE_URL` for `sqlx` and `#[sqlx::test]`:
+Export `DATABASE_URL` for the `sqlx` tooling:
 
 ```bash
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/dark_factory"
@@ -40,11 +40,13 @@ cargo sqlx migrate run --source crates/df-db/migrations
 
 ## 3. Running Tests and Coverage
 
-With `DATABASE_URL` exported:
+Database tests need a Docker socket but no `DATABASE_URL`:
 
 ```bash
 cargo test --workspace
 ```
+
+The `df-test-postgres` crate (a dev-dependency, never linked into a binary) starts one `postgres:17-alpine` container on first use and creates a database per test: `df_test_postgres::migrated_pool(&df_db::MIGRATOR)`. testcontainers has no reaper and does not drop statics at process exit, so the container is marked reusable: all test binaries on the machine share it and it keeps running after the tests. `migrated_pool` migrates a template database once per migration set and clones it per test; templates (`df_tpl_<hash>`) stay in the container. Test databases older than 15 minutes (the creation time is in the UUIDv7 of the name) are dropped when a test binary starts. The container name carries the image tag and a config revision (see `crates/df-test-postgres/src/lib.rs`); remove old ones with `docker ps -a --filter name=df-test-postgres` and `docker rm -f`.
 
 To measure line coverage across `df-core` and `df-db`:
 
@@ -97,9 +99,27 @@ EOF
 cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 ```
 
+## Bazel: remote execution and release builds
+
+Day-to-day commands are collected in the [`Justfile`](../Justfile) (`just` lists them; the file also works as a plain command reference).
+
+| Mode | Command | Toolchain | Where it runs |
+|------|---------|-----------|---------------|
+| Local | `bazel build //...` | host toolchains | this machine |
+| Remote (CI, fast feedback) | `bazel test --config=remote //...` | hermetic glibc LLVM (`toolchains_llvm`) | BuildBuddy workers (linux/amd64) |
+| Release | `bazel build --config=release //deploy:...` | `toolchains_musl` (static musl) | the machine running Bazel, no remote |
+
+- `--config=cache` is the remote cache and build event stream without remote execution (`remote` includes it); CI combines it with `--config=release`. `--config=remote-debug` additionally writes `bazel-remote-grpc.log` and `execution_log.binpb.zst` to the workspace root (git-ignored).
+- `--config=remote` needs a BuildBuddy API key: `build:remote --remote_header=x-buildbuddy-api-key=<key>` in `.bazelrc.user` (CI uses the `BUILDBUDDY_ORG_API_KEY` secret).
+- The remote path links against a glibc sysroot, so its binaries are not the static ones that ship. Release artifacts therefore come from `--config=release` (the `release` workflow). Do not combine the two configs.
+- `//deploy:images_structure_test` (static ELF check) and `//contract:buf_lint_test` are tagged `manual`: run them explicitly. The former needs a Linux host.
+- Database tests start their PostgreSQL through testcontainers (see section 3). On the workers they run in a Firecracker VM with `dockerd` (`test.init-dockerd` in `build/platforms/BUILD.bazel`); locally they use your Docker. Anonymous Docker Hub pulls of `postgres:17-alpine` can hit rate limits, then switch the image in `crates/df-test-postgres/src/lib.rs` to a mirror such as `mirror.gcr.io/library/postgres`.
+- Images go to `ghcr.io/prskr/dark-factory/{control-plane,runtime,test-project}`. The tag is `--//deploy:image_tag` (default `dev`); the `release` workflow sets it to the git tag (`v*`) and falls back to `dev` for manual runs from a branch. Locally: `docker login ghcr.io`, then `just release-push v1.2.3`.
+- `.bazelrc.agents` makes `--config=remote` the default for sandboxed agents.
+
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `tailwindcss` and `yq` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `tailwindcss` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine.
 
 | Task | Command |

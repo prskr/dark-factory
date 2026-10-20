@@ -76,7 +76,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 12] = [
+const TOOLS: [GithubTool; 13] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -196,12 +196,21 @@ const TOOLS: [GithubTool; 12] = [
         },
     },
     GithubTool {
+        name: "jq",
+        repo: "jqlang/jq",
+        asset: |_, p| {
+            let os = p.os;
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            (format!("jq-{os}-{arch}"), String::new())
+        },
+    },
+    GithubTool {
         name: "tailwindcss",
         repo: "tailwindlabs/tailwindcss",
         asset: |_, p| {
             let cpu = if p.cpu == "x86_64" { "x64" } else { p.cpu };
-            let suffix = if p.os == "linux" { "-musl" } else { "" };
-            (format!("tailwindcss-{}-{cpu}{suffix}", p.os), String::new())
+            // glibc build: the musl one needs a musl loader the RBE workers lack
+            (format!("tailwindcss-{}-{cpu}", p.os), String::new())
         },
     },
 ];
@@ -496,16 +505,28 @@ mod tests {
     }
 
     #[test]
+    fn jq_asset_names() {
+        let names: Vec<_> = PLATFORMS
+            .iter()
+            .map(|&p| (tool("jq").asset)("1.8.2", p).0)
+            .collect();
+        assert_eq!(
+            names,
+            ["jq-linux-amd64", "jq-linux-arm64", "jq-macos-amd64", "jq-macos-arm64"]
+        );
+    }
+
+    #[test]
     fn tailwindcss_asset_names() {
         let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[0]);
         assert_eq!(
             (name.as_str(), file.as_str()),
-            ("tailwindcss-linux-x64-musl", "")
+            ("tailwindcss-linux-x64", "")
         );
         let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[1]);
         assert_eq!(
             (name.as_str(), file.as_str()),
-            ("tailwindcss-linux-arm64-musl", "")
+            ("tailwindcss-linux-arm64", "")
         );
         let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[2]);
         assert_eq!(
@@ -522,8 +543,8 @@ mod tests {
     #[test]
     fn tailwindcss_is_a_bare_file() {
         let names = [
-            "tailwindcss-linux-x64-musl",
-            "tailwindcss-linux-arm64-musl",
+            "tailwindcss-linux-x64",
+            "tailwindcss-linux-arm64",
             "tailwindcss-macos-x64",
             "tailwindcss-macos-arm64",
         ];

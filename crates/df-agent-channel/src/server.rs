@@ -372,7 +372,6 @@ pub async fn authenticate(
 mod tests {
     use super::*;
     use crate::testing::Env;
-    use sqlx::PgPool;
 
     /// Signals through a channel when dropped.
     struct DropSignal(Option<tokio::sync::oneshot::Sender<()>>);
@@ -413,8 +412,9 @@ mod tests {
         assert_ne!(loaded(&reloader), before);
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn sessions_end_with_the_service_that_owns_them(pool: PgPool) {
+    #[tokio::test]
+    async fn sessions_end_with_the_service_that_owns_them() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool).await;
         let service = AgentService::new(env.ctx.clone());
         let (tx, ended) = tokio::sync::oneshot::channel();

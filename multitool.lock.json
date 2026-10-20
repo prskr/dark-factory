@@ -176,6 +176,38 @@
       }
     ]
   },
+  "jq": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-arm64"
+      },
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "e94b266e3c26690550006abe63152b782280f4e14374accdf04cbde844f00bc0",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-amd64"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64"
+      }
+    ]
+  },
   "kingfisher": {
     "binaries": [
       {
@@ -183,32 +215,32 @@
         "file": "kingfisher",
         "kind": "archive",
         "os": "linux",
-        "sha256": "5209e9d260b93ae0cf467690c71e5f272469d9324cf2915a36c68405c2edf202",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-linux-x64.tgz"
+        "sha256": "45fc2e12d64dddc17f1f3143d7c0e5dddbc2079b92ec420c20be1a57a8e4829a",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.14.0/kingfisher-linux-x64.tgz"
       },
       {
         "cpu": "arm64",
         "file": "kingfisher",
         "kind": "archive",
         "os": "linux",
-        "sha256": "00088ab409e44f9370e5edfea653f03b83ea1927863fbcae296b77e773105077",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-linux-arm64.tgz"
+        "sha256": "3b04c3a339c9bb5f4ce6796e6cfa977cdea2c7ddc0b709ac61f24fd803e196d5",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.14.0/kingfisher-linux-arm64.tgz"
       },
       {
         "cpu": "x86_64",
         "file": "kingfisher",
         "kind": "archive",
         "os": "macos",
-        "sha256": "5ce19ddfc904ec80e96c3f12672f1a53232b4a02aa02697824b1a71a4cfa8028",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-darwin-x64.tgz"
+        "sha256": "0f31c55ddcb9e10509f96a05f5ed1506f8a52e2ccc2927e2175c04dbc1a21c30",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.14.0/kingfisher-darwin-x64.tgz"
       },
       {
         "cpu": "arm64",
         "file": "kingfisher",
         "kind": "archive",
         "os": "macos",
-        "sha256": "caed7302e3d233bd177a3c865ca4b869c024c0fdc01fa4576a91f16409e3ce36",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.13.0/kingfisher-darwin-arm64.tgz"
+        "sha256": "df6710130fac7314a6479e3ac7b2b092f8aa3a2bef131fbd307fa3dd8d7d9471",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.14.0/kingfisher-darwin-arm64.tgz"
       }
     ]
   },
@@ -354,15 +386,15 @@
         "cpu": "x86_64",
         "kind": "file",
         "os": "linux",
-        "sha256": "a04d34ceacc8f52cbe8920ad846cdeb61d3d0021dba32db0d1f77c9d9fad7a6c",
-        "url": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-x64-musl"
+        "sha256": "dc61b3ac6b8c9ca874c0cc4c57b2409791a64c5540404ca5f5367360babc313a",
+        "url": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-x64"
       },
       {
         "cpu": "arm64",
         "kind": "file",
         "os": "linux",
-        "sha256": "71ea4be79c9de9827545682df3e040053fb535d37c71ed2cfdedf9385a0868e0",
-        "url": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-arm64-musl"
+        "sha256": "55fd0b241214eff3de1e8ee4f22796662f2d2e7a49bcfca7477cfd0bac398195",
+        "url": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-arm64"
       },
       {
         "cpu": "x86_64",

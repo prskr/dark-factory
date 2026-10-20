@@ -5,6 +5,12 @@ build --verbose_failures
 build --@rules_rust//rust/settings:extra_exec_rustc_flags=-Cstrip=none
 build --@rules_img//img/settings:shallow_oci_layout=i_know_what_i_am_doing
 
+# macOS: layering_check fails on the SDK's libc++ module map (e.g. abseil: "does not depend on a module
+# exporting 'utility'") when building C++ tools locally.
+build --enable_platform_specific_config
+build:macos --features=-layering_check
+build:macos --host_features=-layering_check
+
 test --test_output=errors
 test --test_summary=terse
 
@@ -19,12 +25,38 @@ build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
 build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2
 
-# Remote execution (ARM64 RBE worker)
-build:remote --remote_executor=grpcs://nativelink.home.icb4dc0.de
-build:remote --extra_execution_platforms=//build/platforms:linux_arm64_rbe
-build:remote --host_platform=//build/platforms:linux_arm64_rbe
-build:remote --remote_download_minimal
-build:remote --experimental_remote_cache_eviction_retries=5
+# Release artifacts: static musl binaries. Do not combine with --config=remote: the RBE workers use the
+# glibc LLVM toolchain, and the musl toolchain must win for the musl target platform.
+build:release --platforms=//build/platforms:linux_amd64_musl
+build:release --extra_toolchains=@musl_toolchains_hub//:all
+# On Linux exec platforms the default `x86_64-unknown-linux-gnu` Rust toolchain (cpu+os only) also matches
+# the musl platform and is registered first: links glibc libstd with musl-gcc. Prefer the musl ones.
+build:release --extra_toolchains=@rust_toolchains//:rust_linux_x86_64__x86_64-unknown-linux-musl__stable
+build:release --extra_toolchains=@rust_toolchains//:rust_linux_aarch64__aarch64-unknown-linux-musl__stable
+build:release --extra_toolchains=//build/platforms:musl_test_toolchain
+
+# BuildBuddy remote cache and build event stream, no remote execution (CI adds it to --config=release)
+build:cache --bes_results_url=https://app.buildbuddy.io/invocation/
+build:cache --bes_backend=grpcs://remote.buildbuddy.io
+build:cache --build_metadata=REPO_URL=https://github.com/prskr/dark-factory.git
+build:cache --remote_cache=grpcs://remote.buildbuddy.io
+build:cache --remote_cache_compression
+build:cache --experimental_remote_cache_chunking
+
+# Remote execution on BuildBuddy (linux/amd64 workers)
+build:remote --config=cache
+build:remote --remote_executor=grpcs://remote.buildbuddy.io
+build:remote --noremote_upload_local_results # Uploads logs & artifacts without writing to cache
+build:remote --remote_timeout=10m
+build:remote --jobs=50
+build:remote --extra_execution_platforms=//build/platforms:linux_amd64_rbe
+build:remote --platforms=//build/platforms:linux_amd64_musl
+
+# Debugging remote builds: gRPC and execution logs in the workspace root (git-ignored)
+build:remote-debug --remote_grpc_log=bazel-remote-grpc.log
+build:remote-debug --execution_log_compact_file=execution_log.binpb.zst
+
+build:ci --build_metadata=ROLE=CI
 
 try-import %workspace%/.bazelrc.local
 try-import %workspace%/.bazelrc.user

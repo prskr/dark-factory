@@ -122,10 +122,10 @@ where
 
 // --- 1. Agent port and identity -------------------------------------------------------------
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn client_with_a_certificate_of_the_instance_ca_completes_the_handshake(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn client_with_a_certificate_of_the_instance_ca_completes_the_handshake() -> anyhow::Result<()>
+{
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let mut runtime = h.connect().await?;
     let ack = runtime.hello().await?;
@@ -135,8 +135,9 @@ async fn client_with_a_certificate_of_the_instance_ca_completes_the_handshake(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn tls_handshake_fails_without_a_client_certificate(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn tls_handshake_fails_without_a_client_certificate() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     // TLS 1.3 reports a rejected client certificate on first use of the connection.
     let outcome = match h.server.channel(&h.pki, None).await {
@@ -150,10 +151,9 @@ async fn tls_handshake_fails_without_a_client_certificate(pool: PgPool) -> anyho
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn tls_handshake_fails_with_a_certificate_from_another_ca(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn tls_handshake_fails_with_a_certificate_from_another_ca() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let rogue = TestPki::rogue_client(POD_SAN).map_err(anyhow::Error::from_boxed)?;
     let outcome = match h.server.channel(&h.pki, Some(&rogue)).await {
@@ -167,8 +167,9 @@ async fn tls_handshake_fails_with_a_certificate_from_another_ca(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn message_over_16_mib_fails_with_resource_exhausted(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn message_over_16_mib_fails_with_resource_exhausted() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let (mut runtime, _) = h.handshake().await?;
     let huge = "x".repeat(20 * 1024 * 1024);
@@ -178,8 +179,9 @@ async fn message_over_16_mib_fails_with_resource_exhausted(pool: PgPool) -> anyh
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn valid_certificate_from_another_ip_is_unauthenticated(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn valid_certificate_from_another_ip_is_unauthenticated() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool).await;
     let run_id = env.insert_run(env.task.id, 1, "connecting").await;
     // The provider only knows the pod at another address: a stolen key used elsewhere.
@@ -202,8 +204,9 @@ async fn valid_certificate_from_another_ip_is_unauthenticated(pool: PgPool) -> a
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn pod_of_a_finished_run_is_unauthenticated(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn pod_of_a_finished_run_is_unauthenticated() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     sqlx::query("UPDATE runs SET state = 'succeeded' WHERE id = $1")
         .bind(h.run_id.as_uuid())
@@ -219,10 +222,10 @@ async fn pod_of_a_finished_run_is_unauthenticated(pool: PgPool) -> anyhow::Resul
 
 // --- 2. Protocol session --------------------------------------------------------------------
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let (_runtime, bodies) = h.handshake().await?;
 
@@ -252,10 +255,9 @@ async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn a_first_message_other_than_hello_is_a_failed_precondition(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn a_first_message_other_than_hello_is_a_failed_precondition() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let mut runtime = h.connect().await?;
     runtime.send(agent_text("too early")).await;
@@ -266,10 +268,9 @@ async fn a_first_message_other_than_hello_is_a_failed_precondition(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut first, _) = h.handshake().await?;
     for i in 1..=7 {
@@ -303,8 +304,9 @@ async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn a_sequence_gap_closes_the_stream_with_data_loss(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn a_sequence_gap_closes_the_stream_with_data_loss() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, _) = h.handshake().await?;
     for i in 1..=10 {
@@ -326,10 +328,10 @@ async fn a_sequence_gap_closes_the_stream_with_data_loss(pool: PgPool) -> anyhow
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts() -> anyhow::Result<()>
+{
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let (first, bodies_a) = h.handshake().await?;
     drop(first);
@@ -349,10 +351,10 @@ async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
     let control_message::Body::Prompt(assignment) = &bodies[3] else {
@@ -403,10 +405,9 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn cancel_is_sent_when_the_wall_clock_budget_and_grace_are_over(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn cancel_is_sent_when_the_wall_clock_budget_and_grace_are_over() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool).await;
     let mut config = ChannelConfig::default();
     config.runs.max_wall_clock_seconds = 0;
@@ -425,10 +426,9 @@ async fn cancel_is_sent_when_the_wall_clock_budget_and_grace_are_over(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn a_message_with_an_unknown_body_keeps_its_place_in_the_sequence(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn a_message_with_an_unknown_body_keeps_its_place_in_the_sequence() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, _) = h.handshake().await?;
     // seq 1 carries a body variant this version does not know (decoded as no body).
@@ -447,8 +447,9 @@ async fn a_message_with_an_unknown_body_keeps_its_place_in_the_sequence(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn replayed_events_do_not_move_their_blobs_again(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn replayed_events_do_not_move_their_blobs_again() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     use df_proto::transcript::v1::{BlobData, ImageContent, blob_data};
     let h = Harness::start(pool.clone()).await?;
     let image = agent_message::Body::TranscriptEvent(Event {
@@ -494,8 +495,9 @@ async fn replayed_events_do_not_move_their_blobs_again(pool: PgPool) -> anyhow::
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn rotated_tls_material_is_served_without_a_restart(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn rotated_tls_material_is_served_without_a_restart() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let mut before = h.connect().await?;
     before.hello().await?;
@@ -525,8 +527,9 @@ async fn rotated_tls_material_is_served_without_a_restart(pool: PgPool) -> anyho
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn shutdown_does_not_wait_for_open_streams(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn shutdown_does_not_wait_for_open_streams() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut h = Harness::start(pool).await?;
     let mut runtime = h.connect().await?;
     runtime.hello().await?;
@@ -554,8 +557,9 @@ async fn task_status(pool: &PgPool, h: &Harness) -> String {
         .unwrap()
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn reported_phases_drive_the_run_state(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn reported_phases_drive_the_run_state() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, _) = h.handshake().await?;
     // Hello moved the run out of `connecting`.
@@ -572,10 +576,8 @@ async fn reported_phases_drive_the_run_state(pool: PgPool) -> anyhow::Result<()>
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn run_report_maps_every_outcome_to_run_state_and_task_status(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn run_report_maps_every_outcome_to_run_state_and_task_status() -> anyhow::Result<()> {
     let table = [
         (
             WireOutcome::Completed,
@@ -615,7 +617,7 @@ async fn run_report_maps_every_outcome_to_run_state_and_task_status(
         ),
     ];
     for (wire, state, outcome, status) in table {
-        let pool = fresh_database(&pool).await?;
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let h = Harness::start(pool.clone()).await?;
         let (mut runtime, _) = h.handshake().await?;
         // The assignment prompt is confirmed, so nothing is pending at run end.
@@ -654,19 +656,9 @@ async fn run_report_maps_every_outcome_to_run_state_and_task_status(
     Ok(())
 }
 
-/// A pristine database per table row: `#[sqlx::test]` hands out one pool, so rows reset the data.
-async fn fresh_database(pool: &PgPool) -> anyhow::Result<PgPool> {
-    sqlx::query(
-        "TRUNCATE users, credential_refs, projects, personas, tasks, runs, task_messages,
-                  transcript_events, tool_calls, audit_log RESTART IDENTITY CASCADE",
-    )
-    .execute(pool)
-    .await?;
-    Ok(pool.clone())
-}
-
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn message_queued_while_finalizing_requeues_the_task(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn message_queued_while_finalizing_requeues_the_task() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
     let control_message::Body::Prompt(assignment) = &bodies[3] else {
@@ -692,10 +684,9 @@ async fn message_queued_while_finalizing_requeues_the_task(pool: PgPool) -> anyh
 
 // --- 5. Tools and credentials over the stream -----------------------------------------------
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn tool_call_and_credential_requests_are_answered_on_the_stream(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn tool_call_and_credential_requests_are_answered_on_the_stream() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, _) = h.handshake().await?;
     let call_id = uuid::Uuid::now_v7().to_string();
@@ -747,10 +738,9 @@ async fn tool_call_and_credential_requests_are_answered_on_the_stream(
     Ok(())
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn missing_harness_secret_fails_the_run_naming_the_reference(
-    pool: PgPool,
-) -> anyhow::Result<()> {
+#[tokio::test]
+async fn missing_harness_secret_fails_the_run_naming_the_reference() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     h.env.secrets.insert_error(
         "claude",
@@ -791,8 +781,9 @@ impl std::io::Write for LogCapture {
     }
 }
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn secret_values_never_appear_in_logs(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn secret_values_never_appear_in_logs() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let logs = LogCapture::default();
     let writer = logs.clone();
     let _guard = tracing::subscriber::set_default(
@@ -845,8 +836,9 @@ async fn secret_values_never_appear_in_logs(pool: PgPool) -> anyhow::Result<()> 
 
 // --- 6. End to end --------------------------------------------------------------------------
 
-#[sqlx::test(migrator = "df_db::MIGRATOR")]
-async fn task_to_follow_up_run_end_to_end(pool: PgPool) -> anyhow::Result<()> {
+#[tokio::test]
+async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     use df_agent_channel::Scheduler;
     use df_core::SandboxEvent;
     use df_core::testing::ForgeCall;

@@ -16,7 +16,7 @@ shift 6
 
 CHART_DIR="$(dirname "$CHART_FILE")"
 
-REGISTRY="${DARK_FACTORY_REGISTRY:-harbor.home.icb4dc0.de/dark-factory}"
+REGISTRY="${DARK_FACTORY_REGISTRY:-ghcr.io/prskr/dark-factory}"
 RELEASE="${DARK_FACTORY_RELEASE:-dark-factory}"
 NAMESPACE="${DARK_FACTORY_NAMESPACE:-dark-factory-dev}"
 

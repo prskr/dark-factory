@@ -1689,7 +1689,7 @@ async fn test_scenario_clone_from_local_https_test_server_using_credential_helpe
     // 1. Initialize bare git repository in git_root
     std::fs::create_dir_all(&git_root).expect("create git_root");
     let out = tokio::process::Command::new("git")
-        .args(["init", "--bare", repo_dir.to_str().unwrap()])
+        .args(["init", "--bare", "-b", "main", repo_dir.to_str().unwrap()])
         .output()
         .await
         .expect("git init bare");
@@ -4549,8 +4549,9 @@ fn test_determine_run_outcome_priority() {
 
 fn setup_test_remote_repo(temp_dir: &std::path::Path) -> std::path::PathBuf {
     let upstream = temp_dir.join("upstream.git");
+    // explicit branch: without `init.defaultBranch` HEAD would point to the never pushed `master`
     let status = std::process::Command::new("git")
-        .args(["init", "--bare", upstream.to_str().unwrap()])
+        .args(["init", "--bare", "-b", "main", upstream.to_str().unwrap()])
         .status()
         .expect("git init bare");
     assert!(status.success());

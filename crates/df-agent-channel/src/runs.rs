@@ -483,8 +483,9 @@ mod tests {
     use super::*;
     use crate::testing::Env;
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn message_queued_while_the_run_ends_is_not_stranded(pool: PgPool) {
+    #[tokio::test]
+    async fn message_queued_while_the_run_ends_is_not_stranded() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "running").await;
         sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE task_id = $1")

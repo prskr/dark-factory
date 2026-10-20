@@ -506,8 +506,9 @@ mod tests {
         assert_eq!(truncate_utf8("abc".into(), 10), "abc");
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn assign_for_the_first_run_of_df_1(pool: PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run_id = env.insert_run(env.task.id, 1, "connecting").await;
         let run = get_run(&pool, run_id).await?.expect("run");
@@ -538,8 +539,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn follow_up_run_carries_session_id_and_summary(pool: PgPool) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn follow_up_run_carries_session_id_and_summary() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run1 = env.insert_run(env.task.id, 1, "running").await;
         sqlx::query("UPDATE runs SET state = 'succeeded', harness_session_id = 'S' WHERE id = $1")
@@ -559,10 +561,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrator = "df_db::MIGRATOR")]
-    async fn summary_merges_agent_chunks_and_keeps_the_last_messages(
-        pool: PgPool,
-    ) -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn summary_merges_agent_chunks_and_keeps_the_last_messages() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let env = Env::new(pool.clone()).await;
         let run = env.insert_run(env.task.id, 1, "running").await;
         for (seq, (kind, payload)) in [

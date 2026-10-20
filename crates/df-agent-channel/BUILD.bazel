@@ -50,9 +50,6 @@ rust_test(
     crate = ":df_agent_channel_test_util",
     # `crate` does not pass on the library's features.
     crate_features = ["test-util"],
-    env = {
-        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
-    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -61,6 +58,7 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-test-postgres:df_test_postgres",
     ],
 )
 
@@ -68,9 +66,6 @@ rust_test(
     name = "agent_port_test",
     srcs = ["tests/agent_port.rs"],
     edition = "2024",
-    env = {
-        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
-    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -83,5 +78,6 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-test-postgres:df_test_postgres",
     ],
 )

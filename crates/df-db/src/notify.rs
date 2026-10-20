@@ -277,8 +277,9 @@ impl Drop for Notifier {
 mod tests {
     use super::*;
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn notification_published_on_one_connection_reaches_subscriber(pool: PgPool) {
+    #[tokio::test]
+    async fn notification_published_on_one_connection_reaches_subscriber() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let notifier = Notifier::start(&pool).await.expect("start notifier");
         let mut rx1 = notifier.subscribe();
         let mut rx2 = notifier.subscribe();
@@ -319,8 +320,9 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "./migrations")]
-    async fn notifier_recovers_after_backend_termination_and_emits_reconnected(pool: PgPool) {
+    #[tokio::test]
+    async fn notifier_recovers_after_backend_termination_and_emits_reconnected() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let notifier = Notifier::start(&pool).await.expect("start notifier");
         let mut rx = notifier.subscribe();
 

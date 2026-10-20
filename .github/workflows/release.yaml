@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io/prskr/dark-factory/*
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Static musl binaries: built on the runner, not on the RBE workers (see docs/development.md)
+      - name: Build images
+        run: bazel build --config=release //deploy:control_plane_oci_layout //deploy:runtime_oci_layout //deploy:test_project_oci_layout
+
+      - name: Verify images
+        run: bazel test --config=release //deploy:images_structure_test
+
+      # Version tag for release tags (v1.2.3), `dev` for manual runs from a branch
+      - name: Push images
+        env:
+          IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+        run: bazel run --config=release --//deploy:image_tag="$IMAGE_TAG" //deploy:push_images

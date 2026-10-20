@@ -1,0 +1,31 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+# Dev-dependency of test targets only: never add this to the deps of a library or binary.
+package(default_visibility = ["//crates:__subpackages__"])
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "df_test_postgres",
+    srcs = ["src/lib.rs"],
+    aliases = aliases(),
+    crate_name = "df_test_postgres",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "df_test_postgres_test",
+    compile_data = glob(["migrations/*.sql"]),
+    crate = ":df_test_postgres",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    rustc_env = {
+        "SQLX_OFFLINE": "true",
+    },
+    deps = all_crate_deps(normal_dev = True),
+)
