@@ -46,6 +46,8 @@ pub struct InstanceConfig {
     #[serde(default)]
     pub sandbox: SandboxSectionConfig,
     #[serde(default)]
+    pub cluster_targets: ClusterTargetsConfig,
+    #[serde(default)]
     pub agent: AgentConfig,
     #[serde(default)]
     pub harness: HarnessConfig,
@@ -171,21 +173,114 @@ impl Default for GatewayConfig {
     }
 }
 
-/// Sandbox namespace and baseline provisioning section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Delivery mechanism for the factory agent runtime binaries into the sandbox.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SandboxSectionConfig {
-    #[serde(default = "default_sandbox_namespace")]
-    pub namespace: String,
-    #[serde(default = "default_instance_namespace")]
-    pub instance_namespace: String,
+pub enum RuntimeDelivery {
+    /// OCI image volume mounted at `/opt/factory` (read-only).
+    #[default]
+    ImageVolume,
+    /// Init container copying binaries into an `emptyDir` at `/opt/factory`.
+    InitContainer,
 }
 
-impl Default for SandboxSectionConfig {
+/// Namespaces in which sandboxes may be granted egress to cluster Services. Mirrors the chart's
+/// `clusterTargets` value and therefore the RBAC the control plane has: it watches Services and
+/// EndpointSlices exactly there.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ClusterTargetsConfig {
+    /// The control plane may read Services in every namespace (ClusterRole).
+    pub any_namespace: bool,
+    /// Namespaces it may read when `any_namespace` is `false`.
+    pub namespaces: Vec<String>,
+}
+
+/// The `sandbox` configuration section: provisioning settings plus the (optional) addresses of
+/// the control plane and gateway. Both parts are flattened into one YAML table.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxSectionConfig {
+    #[serde(flatten)]
+    pub provisioning: SandboxProvisioningConfig,
+    #[serde(flatten)]
+    pub endpoints: SandboxEndpointsConfig,
+}
+
+/// Where sandboxes run and how they are provisioned. Handed to the Kubernetes provider as is.
+///
+/// This is the single place for provisioning defaults: every key missing from the YAML takes
+/// its value from [`Default`]. `storageClass` and `runtimeClassName` default to `None` (empty
+/// string counts as unset) and then fall back to the cluster's default StorageClass and runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SandboxProvisioningConfig {
+    /// Namespace holding sandboxes and task PVCs.
+    pub namespace: String,
+    /// Namespace of the control plane release (Leases, Services, Secrets).
+    pub instance_namespace: String,
+    pub service_account_name: String,
+    #[serde(deserialize_with = "empty_string_is_none")]
+    pub storage_class: Option<String>,
+    pub pvc_size: String,
+    #[serde(deserialize_with = "empty_string_is_none")]
+    pub runtime_class_name: Option<String>,
+    pub issuer_name: String,
+    pub issuer_kind: String,
+    pub issuer_group: String,
+    pub certificate_duration: String,
+    pub certificate_renew_before: String,
+    pub runtime_image: String,
+    pub runtime_delivery: RuntimeDelivery,
+    pub cluster_domain: String,
+}
+
+/// Optional overrides for the addresses sandboxes use to reach the control plane and the
+/// gateway. They are only read at startup to resolve the final values, which then live in the
+/// Kubernetes provider's configuration and nowhere else.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SandboxEndpointsConfig {
+    /// Fixed control plane ClusterIP; resolved from the Service when unset.
+    pub control_plane_ip: Option<std::net::IpAddr>,
+    /// Fixed gateway ClusterIP; resolved from the Service when unset.
+    pub gateway_ip: Option<std::net::IpAddr>,
+    /// Service name used to look up the control plane ClusterIP. Without it, `dark-factory`
+    /// tries `<instanceName>-control-plane` and `dark-factory-control-plane`.
+    pub control_plane_service_name: Option<String>,
+    /// Service name used to look up the gateway ClusterIP. Without it, `dark-factory` tries
+    /// `<instanceName>-gateway`, `<instanceName>-egress-gateway` and `dark-factory-gateway`.
+    pub gateway_service_name: Option<String>,
+    /// TLS server name of the control plane agent endpoint; defaults to
+    /// `<instanceName>-control-plane`.
+    pub control_plane_tls_server_name: Option<String>,
+}
+
+fn empty_string_is_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.filter(|s| !s.trim().is_empty()))
+}
+
+impl Default for SandboxProvisioningConfig {
     fn default() -> Self {
         Self {
             namespace: default_sandbox_namespace(),
             instance_namespace: default_instance_namespace(),
+            service_account_name: "dark-factory-sandbox".to_string(),
+            storage_class: None,
+            pvc_size: "20Gi".to_string(),
+            runtime_class_name: None,
+            issuer_name: "dark-factory-ca-issuer".to_string(),
+            issuer_kind: "ClusterIssuer".to_string(),
+            issuer_group: "cert-manager.io".to_string(),
+            certificate_duration: "6h".to_string(),
+            certificate_renew_before: "2h".to_string(),
+            runtime_image: "ghcr.io/prskr/dark-factory/runtime:0.1.0".to_string(),
+            runtime_delivery: RuntimeDelivery::default(),
+            cluster_domain: "cluster.local".to_string(),
         }
     }
 }
@@ -418,6 +513,71 @@ sandbox:
   namespace: dark-factory-sandboxes
   instanceNamespace: dark-factory
 "#;
+
+    #[test]
+    fn cluster_targets_default_to_no_namespaces() {
+        let cfg: ClusterTargetsConfig = serde_saphyr::from_str("namespaces: [a, b]").unwrap();
+        assert!(!cfg.any_namespace);
+        assert_eq!(cfg.namespaces, ["a", "b"]);
+        assert_eq!(ClusterTargetsConfig::default().namespaces.len(), 0);
+    }
+
+    #[test]
+    fn sandbox_section_defaults_leave_runtime_class_and_storage_class_unset() {
+        let section: SandboxSectionConfig = serde_saphyr::from_str("namespace: sb").unwrap();
+        let p = &section.provisioning;
+        assert_eq!(p.namespace, "sb");
+        assert_eq!(p.storage_class, None);
+        assert_eq!(p.runtime_class_name, None);
+        assert_eq!(p.pvc_size, "20Gi");
+        assert_eq!(p.issuer_kind, "ClusterIssuer");
+        assert_eq!(p.runtime_delivery, RuntimeDelivery::ImageVolume);
+        assert_eq!(section.endpoints, SandboxEndpointsConfig::default());
+        assert_eq!(
+            section.provisioning,
+            SandboxProvisioningConfig {
+                namespace: "sb".into(),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn sandbox_section_empty_strings_mean_unset() {
+        let section: SandboxSectionConfig =
+            serde_saphyr::from_str("storageClass: \"\"\nruntimeClassName: \"  \"").unwrap();
+        assert_eq!(section.provisioning.storage_class, None);
+        assert_eq!(section.provisioning.runtime_class_name, None);
+
+        let section: SandboxSectionConfig =
+            serde_saphyr::from_str("storageClass: fast\nruntimeClassName: kata").unwrap();
+        assert_eq!(section.provisioning.storage_class.as_deref(), Some("fast"));
+        assert_eq!(
+            section.provisioning.runtime_class_name.as_deref(),
+            Some("kata")
+        );
+    }
+
+    #[test]
+    fn sandbox_section_reads_provisioning_and_endpoint_keys_from_one_table() {
+        let section: SandboxSectionConfig = serde_saphyr::from_str(
+            "namespace: sb\ncontrolPlaneIp: 10.0.0.1\ngatewayServiceName: gw\ncontrolPlaneTlsServerName: cp.local",
+        )
+        .unwrap();
+        assert_eq!(section.provisioning.namespace, "sb");
+        assert_eq!(
+            section.endpoints.control_plane_ip,
+            Some("10.0.0.1".parse().unwrap())
+        );
+        assert_eq!(
+            section.endpoints.gateway_service_name.as_deref(),
+            Some("gw")
+        );
+        assert_eq!(
+            section.endpoints.control_plane_tls_server_name.as_deref(),
+            Some("cp.local")
+        );
+    }
 
     #[test]
     fn loads_valid_instance_config_fixture_and_reads_secret_file() {

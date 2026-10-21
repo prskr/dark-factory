@@ -6,7 +6,7 @@ Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031)
 - `migrate` pre-install/pre-upgrade hook `Job`
 - Least-privilege Kubernetes RBAC (`design/deployment.md` §3)
 - Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota`, `LimitRange`, and tokenless `ServiceAccount`
-- Private CA `Issuer` (or reference to an existing issuer) and mTLS `Certificate`s for control plane and gateway
+- Private CA behind a `ClusterIssuer` (or reference to an existing `ClusterIssuer`) and mTLS `Certificate`s for control plane and gateway; sandbox pods request their client certificates from the same issuer
 - Instance namespace `NetworkPolicy` objects (`design/deployment.md` §5)
 
 ## Values Reference
@@ -51,7 +51,19 @@ Every key in `values.yaml` is documented below:
 | `oidc.clientSecretKey` | `string` | `"client-secret"` | Key within `oidc.existingSecret` holding the OIDC client secret. |
 | `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. |
-| `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` name for sandbox pods (e.g., `"kata"`). |
+| `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. |
+| `sandboxNamespace.storageClass` | `string` | `""` | StorageClass of task PVCs. Empty uses the cluster's default StorageClass. |
+| `sandboxNamespace.pvcSize` | `string` | `"20Gi"` | Storage request of task PVCs. |
+| `sandboxNamespace.issuerName` | `string` | `""` | cert-manager issuer for sandbox client certificates. Empty uses the chart's issuer (see `tls.ca`). Must be a `ClusterIssuer`. |
+| `sandboxNamespace.issuerKind` | `string` | `""` | Kind of that issuer. Empty uses the chart's issuer kind. |
+| `sandboxNamespace.issuerGroup` | `string` | `"cert-manager.io"` | API group of that issuer. |
+| `sandboxNamespace.certificateDuration` | `string` | `"6h"` | Lifetime of sandbox client certificates. |
+| `sandboxNamespace.certificateRenewBefore` | `string` | `"2h"` | Renewal window of sandbox client certificates. |
+| `sandboxNamespace.runtimeImage` | `string` | `"ghcr.io/prskr/dark-factory/runtime:0.1.0"` | OCI reference of the agent runtime image mounted into sandboxes. |
+| `sandboxNamespace.runtimeDelivery` | `string` | `"imageVolume"` | `imageVolume` or `initContainer`. |
+| `sandboxNamespace.clusterDomain` | `string` | `"cluster.local"` | Cluster DNS domain used for Service FQDN host aliases. |
+| `sandboxNamespace.controlPlaneIp` | `string` | `""` | Static control plane ClusterIP; empty resolves the Service at startup. |
+| `sandboxNamespace.gatewayIp` | `string` | `""` | Static gateway ClusterIP; empty resolves the Service at startup. |
 | `sandboxNamespace.serviceAccountName` | `string` | `"dark-factory-sandbox"` | Name of the zero-privilege `ServiceAccount` (`automountServiceAccountToken: false`) in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.pods` | `string` | `"20"` | Hard pod count quota in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.requestsCpu` | `string` | `"16"` | Hard total CPU requests quota in the sandbox namespace. |
@@ -72,10 +84,9 @@ Every key in `values.yaml` is documented below:
 | `controlPlane.ports.http` | `int` | `8080` | Control plane UI and health HTTP port (`/healthz`, `/readyz`). |
 | `controlPlane.ports.agent` | `int` | `9443` | Control plane agent mTLS gRPC port. |
 | `controlPlane.ports.internalGrpc` | `int` | `9444` | Control plane internal gRPC port (`PolicyWatch`, mTLS). |
-| `controlPlane.resources.requests.cpu` | `string` | `"100m"` | Control plane CPU request. |
+| `controlPlane.resources.requests.cpu` | `string` | `"50m"` | Control plane CPU request. |
 | `controlPlane.resources.requests.memory` | `string` | `"128Mi"` | Control plane memory request. |
-| `controlPlane.resources.limits.cpu` | `string` | `"1000m"` | Control plane CPU limit. |
-| `controlPlane.resources.limits.memory` | `string` | `"512Mi"` | Control plane memory limit. |
+| `controlPlane.resources.limits.memory` | `string` | `"512Mi"` | Control plane memory limit. No CPU limit is set by default. |
 | `gateway.replicas` | `int` | `2` | Number of egress gateway pod replicas (minimum `2`). |
 | `gateway.serviceAccountName` | `string` | `""` | Optional override for the gateway `ServiceAccount` name (`automountServiceAccountToken: false`). |
 | `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget`. |
@@ -84,16 +95,38 @@ Every key in `values.yaml` is documented below:
 | `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`). |
 | `gateway.resources.requests.cpu` | `string` | `"100m"` | Gateway CPU request. |
 | `gateway.resources.requests.memory` | `string` | `"128Mi"` | Gateway memory request. |
-| `gateway.resources.limits.cpu` | `string` | `"1000m"` | Gateway CPU limit. |
-| `gateway.resources.limits.memory` | `string` | `"512Mi"` | Gateway memory limit. |
-| `tls.ca.create` | `bool` | `true` | Create a self-signed bootstrap `Issuer`, private CA `Certificate`, and CA `Issuer` in the instance namespace. |
-| `tls.ca.existingIssuer.name` | `string` | `""` | Existing cert-manager issuer name used when `tls.ca.create` is `false`. |
-| `tls.ca.existingIssuer.kind` | `string` | `"Issuer"` | Existing cert-manager issuer kind (`"Issuer"` or `"ClusterIssuer"`). |
+| `gateway.resources.limits.memory` | `string` | `"512Mi"` | Gateway memory limit. No CPU limit is set by default. |
+| `tls.ca.create` | `bool` | `true` | Create a private CA and a `ClusterIssuer` for it. Control plane, gateway and sandbox certificates are all issued by it, so they share one CA. See [TLS issuer](#tls-issuer). |
+| `tls.ca.clusterResourceNamespace` | `string` | `"cert-manager"` | cert-manager's cluster resource namespace. The CA `Certificate` and its self-signed bootstrap `Issuer` are created here, because a CA `ClusterIssuer` reads its key pair from this namespace. |
+| `tls.ca.existingIssuer.name` | `string` | `""` | Existing cert-manager issuer used when `tls.ca.create` is `false`. |
+| `tls.ca.existingIssuer.kind` | `string` | `"ClusterIssuer"` | Kind of the existing issuer. Sandboxes need a `ClusterIssuer`; with `"Issuer"` you must also set `sandboxNamespace.issuerName` and `sandboxNamespace.issuerKind: ClusterIssuer` to a `ClusterIssuer` that trusts the same CA, otherwise the chart refuses to render. |
 | `tls.duration` | `string` | `"2160h"` | Certificate lifetime for control plane and gateway mTLS certificates. |
 | `tls.renewBefore` | `string` | `"360h"` | Renewal window before expiry for control plane and gateway mTLS certificates. |
 | `networkPolicy.enabled` | `bool` | `true` | Render instance namespace `NetworkPolicy` resources restricting control plane and gateway ingress. |
 | `networkPolicy.ingressController.namespaceSelector` | `object` | `{"kubernetes.io/metadata.name": "ingress-nginx"}` | Namespace label selector allowed to reach the control plane UI port (`8080`). |
 | `networkPolicy.ingressController.podSelector` | `object` | `{}` | Optional pod label selector within the ingress controller namespace allowed to reach the UI port. |
+
+## Cluster targets
+
+`clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs.
+
+## TLS issuer
+
+A CA `ClusterIssuer` reads its key pair `Secret` from cert-manager's cluster resource namespace (`tls.ca.clusterResourceNamespace`), not from the release namespace. With `tls.ca.create: true` the chart therefore creates:
+
+| Object | Namespace | Name |
+|---|---|---|
+| `Issuer` (self-signed bootstrap) | `tls.ca.clusterResourceNamespace` | `<release-namespace>-<fullname>-selfsigned-issuer` |
+| `Certificate` (CA, `isCA: true`) | `tls.ca.clusterResourceNamespace` | `<release-namespace>-<fullname>-ca` |
+| `ClusterIssuer` | cluster-scoped | `<release-namespace>-<fullname>-ca-issuer` |
+
+The release namespace is part of the names so that releases with the same name in different namespaces do not collide.
+
+**Why the CA is not in the release namespace.** A CA `ClusterIssuer` can only read its `Secret` from cert-manager's cluster resource namespace (`--cluster-resource-namespace`, default `cert-manager`). Sandboxes need a `ClusterIssuer`: their CSI `CertificateRequest`s are created in the sandbox namespace, which must hold no `Secret`s, so a namespaced `Issuer` cannot serve them. Sandbox and control plane certificates must come from the same CA, so the CA lives in the cluster resource namespace. Setting `tls.ca.clusterResourceNamespace` to the release namespace only works if cert-manager runs with `--cluster-resource-namespace=<release namespace>`.
+
+One CA signs everything. The control plane trusts sandbox client certificates through the `ca.crt` of its own certificate, so sandboxes must use the same CA. Sandbox certificates are requested by the cert-manager CSI driver from the sandbox namespace, where only a `ClusterIssuer` can be referenced; the sandbox namespace itself holds no `Secret`.
+
+Installing the chart with `tls.ca.create: true` needs permission to create cert-manager `Issuer`s and `Certificate`s in `tls.ca.clusterResourceNamespace`. Without it, set `tls.ca.create: false` and point `tls.ca.existingIssuer` at a `ClusterIssuer` that already exists.
 
 ## PostgreSQL Role Setup (`owner` & `app`)
 

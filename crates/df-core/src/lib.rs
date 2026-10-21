@@ -8,7 +8,10 @@ pub mod seams;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 
-pub use config::{ConfigError, DatabaseConfig, InstanceConfig};
+pub use config::{
+    ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, RuntimeDelivery,
+    SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+};
 pub use domain::{ParseEnumError, Principal, RunOutcome, RunState, TaskStatus};
 pub use ids::{
     CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RunId, TaskId, ToolCallId,

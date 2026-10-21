@@ -24,9 +24,10 @@ data:
       proxyPort: {{ .Values.gateway.ports.proxy }}
       internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
       healthPort: {{ .Values.gateway.ports.health }}
-    sandbox:
-      namespace: {{ .Values.sandboxNamespace.name | quote }}
-      instanceNamespace: {{ .Release.Namespace | quote }}
+    {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
+    clusterTargets:
+      anyNamespace: {{ .Values.clusterTargets.anyNamespace }}
+      namespaces: {{ .Values.clusterTargets.namespaces | toJson }}
     agent:
       tls:
         certFile: /etc/dark-factory/tls/tls.crt
@@ -70,6 +71,4 @@ data:
       proxyPort: {{ .Values.gateway.ports.proxy }}
       internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
       healthPort: {{ .Values.gateway.ports.health }}
-    sandbox:
-      namespace: {{ .Values.sandboxNamespace.name | quote }}
-      instanceNamespace: {{ .Release.Namespace | quote }}
+    {{- include "dark-factory.sandboxConfig" . | nindent 4 }}

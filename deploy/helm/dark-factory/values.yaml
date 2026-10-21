@@ -53,8 +53,24 @@ oidc:
 sandboxNamespace:
   create: true
   name: dark-factory-sandboxes
+  # Empty: the cluster's default runtime. Set to e.g. "kata" for microVM isolation.
   runtimeClassName: ''
   serviceAccountName: dark-factory-sandbox
+  # Empty: the cluster's default StorageClass.
+  storageClass: ''
+  pvcSize: '20Gi'
+  # Issuer for sandbox client certificates; empty follows the chart's issuer (`tls.ca`).
+  # Must be a ClusterIssuer: sandbox certificates are requested from the sandbox namespace.
+  issuerName: ''
+  issuerKind: ''
+  issuerGroup: 'cert-manager.io'
+  certificateDuration: '6h'
+  certificateRenewBefore: '2h'
+  runtimeImage: 'ghcr.io/prskr/dark-factory/runtime:0.1.0'
+  runtimeDelivery: 'imageVolume'
+  clusterDomain: 'cluster.local'
+  controlPlaneIp: ''
+  gatewayIp: ''
   resourceQuota:
     pods: '20'
     requestsCpu: '16'
@@ -108,10 +124,20 @@ gateway:
 
 tls:
   ca:
+    # Create a private CA and a ClusterIssuer for it. The CA Certificate and its bootstrap Issuer
+    # are created in `clusterResourceNamespace`, because a CA ClusterIssuer reads its key pair
+    # from there. The installing user needs permission to create cert-manager resources in it.
     create: true
+    # cert-manager's cluster resource namespace (`--cluster-resource-namespace`, default
+    # `cert-manager`). Not the release namespace: a CA ClusterIssuer can only read its Secret
+    # from here, and sandboxes need a ClusterIssuer (the sandbox namespace holds no Secrets and
+    # their certificate requests are created there). Setting this to the release namespace only
+    # works if cert-manager runs with `--cluster-resource-namespace=<release namespace>`.
+    clusterResourceNamespace: cert-manager
+    # Used when `create` is false. Sandboxes need a ClusterIssuer.
     existingIssuer:
       name: ''
-      kind: Issuer
+      kind: ClusterIssuer
   duration: 2160h
   renewBefore: 360h
 

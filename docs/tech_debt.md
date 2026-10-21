@@ -3,10 +3,11 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-28.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-37.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
+- Origin of TD-28 to TD-36: code review of `iter1-sandbox-provisioning` (`df-k8s`, 2026-10-21). The `TD-n (Rn-Nm)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -39,6 +40,15 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
 | TD-27 | medium | Bazel | No remote build execution: container tests cannot run in agent sandboxes |
+| TD-28 | medium | `df-k8s` provider | A transient resolution error at provision time leaves the run without the target's host alias |
+| TD-29 | low   | `df-k8s` provider | A named target port without a ready endpoint skips the target until endpoints appear |
+| TD-30 | low   | `df-db`, `df-k8s` | Nothing publishes `egress_policy`; DB changes reach policies only through the 30 s resync |
+| TD-31 | medium | `df-k8s` events | Runtime image-volume pull failures produce no `Gone` event |
+| TD-32 | low   | `df-k8s` events | Watcher and resolver state is lost across a control-plane restart or leader change |
+| TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions |
+| TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
+| TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
+| TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
 
 ## Entries
 
@@ -266,6 +276,78 @@ The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the 
 RBE was removed in favor of local static musl builds with an optional remote cache. Agent sandboxes have no container socket, so `df-test-postgres` based tests only run in CI and on developer machines. ADR-0023, `design/agent-run.md`, `design/egress.md` and `product/context.md` still assume RBE runs them.
 
 **Fix:** Self-hosted RBE workers with a controlled image and an exec C toolchain that does not depend on the client, see [remote-execution.md](remote-execution.md) §3.
+
+### TD-28 (R9-N1). Transient resolution error at provision time drops a target for the whole run
+
+`crates/df-k8s/src/provider.rs` (`ClusterTargetResolver::resolve`, `Transient` branch without a cached entry)
+
+If a cluster target cannot be resolved for a transient reason (timeout, 5xx, connection error) and there is no last good resolution yet, the rule is skipped. During provisioning that means the pod starts without the target's `hostAliases` entry and `NO_PROXY` entry. `hostAliases` cannot change after the pod starts, so the run cannot reach the service by name, even after the reconcile pass adds the NetworkPolicy rule. The failure is closed but only logged as a warning. This matters for the first run of a project after a control-plane restart, when the cache is empty.
+
+**Fix:** Let `provision` fail with a retryable error when a target resolves `Transient` without a cached entry, so the run is retried instead of starting degraded. The reconcile path keeps skipping the rule.
+
+### TD-29 (R9-N2). Named target port without a ready endpoint is skipped
+
+`crates/df-k8s/src/provider.rs` (named `targetPort` lookup in the EndpointSlices, classified `Transient`)
+
+A Service whose `targetPort` is a name resolves only through a ready EndpointSlice port. While the target's pods are not ready, the resolution is transient; without a cached entry the rule is skipped. The EndpointSlice watch triggers a new pass when endpoints appear, so access returns. A run provisioned in that window has the TD-28 problem.
+
+**Fix:** Covered by the TD-28 fix for provisioning. For reconcile, the current behavior is acceptable.
+
+### TD-30 (R9-N3). No writer for the `egress_policy` notification
+
+`crates/df-db/src/notify.rs` (`Notification::EgressPolicy`), `crates/df-db/migrations/20261017000001_initial_schema.sql` (only `egress_policy_version_seq`), `crates/dark-factory/src/main.rs` (notify subscriber)
+
+The reconcile loop listens for `EgressPolicy`, but nothing sends it: there is no trigger and no `NOTIFY` on allowlist changes. A changed cluster-service entry reaches running policies only through the 30 s drift resync, which is still within the spec's 30 s bound.
+
+**Fix:** Send the notification when allowlist entries change. This belongs to `iter1-egress-gateway` (the allowlist writer); delete this entry there.
+
+### TD-31 (R5-N5). Runtime image-volume pull failure produces no `Gone`
+
+`crates/df-k8s/src/provider.rs` (`map_pod_event`)
+
+With `runtimeDelivery: imageVolume`, a runtime image that cannot be pulled keeps the pod in `ContainerCreating`. The failure is not in the container or init-container statuses, so no `Gone` event is emitted. The run waits until the connect timeout (10 min). The init-container delivery is handled.
+
+**Fix:** Watch the pod's Events (reason `Failed`/`ErrImagePull` for the image volume), or treat a pod that stays in `ContainerCreating` beyond a limit as `Gone` with a reason.
+
+### TD-32 (R5-N10). State lost across a restart or leader change
+
+`crates/df-k8s/src/provider.rs` (`EventTracker`, `ClusterTargetResolver` last-good cache), `crates/df-agent-channel/src/scheduler.rs` (no startup resync)
+
+The event tracker knows only objects seen by the current process. A pod or Sandbox that vanished while the control plane was down gets no `Gone`; the run ends through the connect timeout or the hard stop. The resolver's last-good cache also starts empty after a restart or on a new leader, so a transient error drops a rule that a long-running leader would have kept. Documented in `crates/df-k8s/README.md`.
+
+**Fix:** At startup (and on becoming leader), reconcile the active runs from the database against the Sandbox store and end runs whose Sandbox is missing.
+
+### TD-33 (R5-N18). Mixed `.sqlx` metadata format
+
+`.sqlx/`
+
+Only `query-3aad8b60….json` has the `origin` fields of sqlx-cli 0.9.0; the other files come from an older version. Both work.
+
+**Fix:** Regenerate all metadata with one pinned sqlx-cli version (`docs/development.md`, "Updating `sqlx` Offline Metadata").
+
+### TD-34. Runtime image tag written twice
+
+`crates/df-core/src/config.rs` (default `runtime_image`), `deploy/helm/dark-factory/values.yaml` (`sandboxNamespace.runtimeImage`)
+
+The tag (`0.1.0`) is hard-coded in both. The chart always renders its value, so the df-core default only applies outside the chart. A release bump must change both.
+
+**Fix:** Derive one from the other at build time (for example the chart's `appVersion`), or drop the df-core default and make the value required.
+
+### TD-35. Default issuer name does not match the chart
+
+`crates/df-core/src/config.rs` (default `issuer_name: "dark-factory-ca-issuer"`), `deploy/helm/dark-factory/templates/certs.yaml` (`<release-ns>-<fullname>-ca-issuer`)
+
+The chart always sets the issuer name, so deployments are not affected. Running the binary without the chart, or tests built on `Default::default()`, reference a ClusterIssuer that does not exist; the sandbox's csi volume then never mounts.
+
+**Fix:** Make `issuer_name` required (no default), or document that it must match the ClusterIssuer the chart creates.
+
+### TD-36. Live tests never reach a running sandbox
+
+`crates/df-k8s/src/provider.rs` (`test_provider_live_cluster_integration`), `crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_reverts_manual_edit_and_adds_new_target`)
+
+`live_config()` (`crates/df-k8s/src/test_support.rs`) delivers `alpine:latest` as the runtime image, which has no `/opt/factory/factory-agent`, so the container cannot start. Only `test_reconciliation_live_cluster` overrides it with `runtime:dev`, and it checks the policy only. None of the live tests asserts `Running` or a `Started` event. The pod-start path is only covered by unit tests with a seeded store.
+
+**Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
 
 ## Accepted decisions
 

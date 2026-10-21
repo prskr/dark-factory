@@ -106,16 +106,83 @@ Gateway ServiceAccount name
 {{- end }}
 
 {{/*
+Cluster-scoped name base: release namespace and fullname, so releases with the same name in
+different namespaces do not collide on cluster-scoped objects or in the cert-manager namespace.
+*/}}
+{{- define "dark-factory.ca.base" -}}
+{{- printf "%s-%s" .Release.Namespace (include "dark-factory.fullname" .) | trunc 40 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Name of the issuer that signs all certificates (control plane, gateway, sandboxes)
+*/}}
+{{- define "dark-factory.issuer.name" -}}
+{{- if .Values.tls.ca.create }}
+{{- printf "%s-ca-issuer" (include "dark-factory.ca.base" .) }}
+{{- else }}
+{{- .Values.tls.ca.existingIssuer.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+Kind of the issuer that signs all certificates. The chart-created CA is always a ClusterIssuer:
+sandbox certificates are requested from the sandbox namespace and can only use a ClusterIssuer.
+*/}}
+{{- define "dark-factory.issuer.kind" -}}
+{{- if .Values.tls.ca.create }}ClusterIssuer{{- else }}{{ .Values.tls.ca.existingIssuer.kind | default "ClusterIssuer" }}{{- end }}
+{{- end }}
+
+{{/*
 Certificate Issuer reference
 */}}
 {{- define "dark-factory.issuerRef" -}}
-{{- if .Values.tls.ca.create }}
-name: {{ include "dark-factory.fullname" . }}-ca-issuer
-kind: Issuer
-group: cert-manager.io
-{{- else }}
-name: {{ .Values.tls.ca.existingIssuer.name }}
-kind: {{ .Values.tls.ca.existingIssuer.kind | default "Issuer" }}
+name: {{ include "dark-factory.issuer.name" . }}
+kind: {{ include "dark-factory.issuer.kind" . }}
 group: cert-manager.io
 {{- end }}
+
+{{/*
+Kind of the issuer for sandbox client certificates. Sandbox certificates are requested from the
+sandbox namespace, where only a ClusterIssuer can be referenced, so anything else is refused.
+*/}}
+{{- define "dark-factory.sandbox.issuerKind" -}}
+{{- $kind := .Values.sandboxNamespace.issuerKind | default (include "dark-factory.issuer.kind" .) }}
+{{- if ne $kind "ClusterIssuer" }}
+{{- fail (printf "sandbox certificates need a ClusterIssuer but the issuer kind is %q: set sandboxNamespace.issuerName and sandboxNamespace.issuerKind=ClusterIssuer (or use tls.ca.existingIssuer.kind=ClusterIssuer)" $kind) }}
+{{- end }}
+{{- $kind }}
+{{- end }}
+
+{{/*
+The `sandbox:` section of the instance configuration (shared by the config and migrate ConfigMaps).
+*/}}
+{{- define "dark-factory.sandboxConfig" -}}
+sandbox:
+  namespace: {{ .Values.sandboxNamespace.name | quote }}
+  instanceNamespace: {{ .Release.Namespace | quote }}
+  serviceAccountName: {{ .Values.sandboxNamespace.serviceAccountName | quote }}
+  {{- if hasKey .Values.sandboxNamespace "storageClass" }}
+  storageClass: {{ .Values.sandboxNamespace.storageClass | quote }}
+  {{- end }}
+  pvcSize: {{ .Values.sandboxNamespace.pvcSize | quote }}
+  {{- if hasKey .Values.sandboxNamespace "runtimeClassName" }}
+  runtimeClassName: {{ .Values.sandboxNamespace.runtimeClassName | quote }}
+  {{- end }}
+  issuerName: {{ .Values.sandboxNamespace.issuerName | default (include "dark-factory.issuer.name" .) | quote }}
+  issuerKind: {{ include "dark-factory.sandbox.issuerKind" . | quote }}
+  issuerGroup: {{ .Values.sandboxNamespace.issuerGroup | quote }}
+  certificateDuration: {{ .Values.sandboxNamespace.certificateDuration | quote }}
+  certificateRenewBefore: {{ .Values.sandboxNamespace.certificateRenewBefore | quote }}
+  runtimeImage: {{ .Values.sandboxNamespace.runtimeImage | quote }}
+  runtimeDelivery: {{ .Values.sandboxNamespace.runtimeDelivery | quote }}
+  clusterDomain: {{ .Values.sandboxNamespace.clusterDomain | quote }}
+  controlPlaneServiceName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
+  gatewayServiceName: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}
+  controlPlaneTlsServerName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
+  {{- if .Values.sandboxNamespace.controlPlaneIp }}
+  controlPlaneIp: {{ .Values.sandboxNamespace.controlPlaneIp | quote }}
+  {{- end }}
+  {{- if .Values.sandboxNamespace.gatewayIp }}
+  gatewayIp: {{ .Values.sandboxNamespace.gatewayIp | quote }}
+  {{- end }}
 {{- end }}

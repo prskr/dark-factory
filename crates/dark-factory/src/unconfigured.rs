@@ -1,43 +1,13 @@
-//! Placeholders for the sandbox provider, forge client and secret store until their real
-//! implementations (`iter1-sandbox-provisioning`, `iter1-integration-plugins`) are wired in.
-//! Every operation fails with an explanatory error, so queued tasks end as `provisioning_failed`
-//! instead of waiting forever.
+//! Placeholder forge client until `iter1-integration-plugins` is wired in. Every operation fails
+//! with an explanatory error, so queued tasks end as `provisioning_failed` instead of waiting
+//! forever. Test-only placeholders for the sandbox provider and secret store are in
+//! [`sandbox_placeholders`].
 
 use async_trait::async_trait;
 use df_core::{
-    Comment, CredentialRef, ForgeClient, IntegrationError, Issue, NewPullRequest, PeerIdentity,
-    ProjectId, ProviderError, PullRequest, PullRequestUpdate, RunId, RunSandboxSpec, SandboxEvent,
-    SandboxProvider, SecretError, SecretStore, TaskVolumeSpec,
+    Comment, ForgeClient, IntegrationError, Issue, NewPullRequest, ProjectId, PullRequest,
+    PullRequestUpdate,
 };
-use futures::stream::{self, BoxStream, StreamExt};
-use secrecy::SecretString;
-
-const NOT_CONFIGURED: &str = "no sandbox provider is configured in this build";
-
-pub struct UnconfiguredSandboxProvider;
-
-#[async_trait]
-impl SandboxProvider for UnconfiguredSandboxProvider {
-    async fn ensure_task_volume(&self, _task: &TaskVolumeSpec) -> Result<(), ProviderError> {
-        Err(ProviderError::Backend(NOT_CONFIGURED.into()))
-    }
-
-    async fn provision(&self, _spec: &RunSandboxSpec) -> Result<(), ProviderError> {
-        Err(ProviderError::Backend(NOT_CONFIGURED.into()))
-    }
-
-    async fn teardown(&self, _run_id: RunId) -> Result<(), ProviderError> {
-        Ok(())
-    }
-
-    async fn resolve_identity(&self, _peer: &PeerIdentity) -> Option<RunId> {
-        None
-    }
-
-    fn events(&self) -> BoxStream<'static, SandboxEvent> {
-        stream::pending().boxed()
-    }
-}
 
 pub struct UnconfiguredForgeClient;
 
@@ -89,13 +59,53 @@ impl ForgeClient for UnconfiguredForgeClient {
     }
 }
 
-pub struct UnconfiguredSecretStore;
+/// Sandbox provider and secret store that fail every operation, for tests of the control plane
+/// that do not talk to a cluster.
+#[cfg(test)]
+pub mod sandbox_placeholders {
+    use async_trait::async_trait;
+    use df_core::{
+        CredentialRef, PeerIdentity, ProviderError, RunId, RunSandboxSpec, SandboxEvent,
+        SandboxProvider, SecretError, SecretStore, TaskVolumeSpec,
+    };
+    use futures::stream::{self, BoxStream, StreamExt};
+    use secrecy::SecretString;
 
-#[async_trait]
-impl SecretStore for UnconfiguredSecretStore {
-    async fn get(&self, _r: &CredentialRef) -> Result<SecretString, SecretError> {
-        Err(SecretError::Backend(
-            "no secret store is configured in this build".into(),
-        ))
+    const NOT_CONFIGURED: &str = "no sandbox provider is configured in this build";
+
+    pub struct UnconfiguredSandboxProvider;
+
+    #[async_trait]
+    impl SandboxProvider for UnconfiguredSandboxProvider {
+        async fn ensure_task_volume(&self, _task: &TaskVolumeSpec) -> Result<(), ProviderError> {
+            Err(ProviderError::Backend(NOT_CONFIGURED.into()))
+        }
+
+        async fn provision(&self, _spec: &RunSandboxSpec) -> Result<(), ProviderError> {
+            Err(ProviderError::Backend(NOT_CONFIGURED.into()))
+        }
+
+        async fn teardown(&self, _run_id: RunId) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn resolve_identity(&self, _peer: &PeerIdentity) -> Option<RunId> {
+            None
+        }
+
+        fn events(&self) -> BoxStream<'static, SandboxEvent> {
+            stream::pending().boxed()
+        }
+    }
+
+    pub struct UnconfiguredSecretStore;
+
+    #[async_trait]
+    impl SecretStore for UnconfiguredSecretStore {
+        async fn get(&self, _r: &CredentialRef) -> Result<SecretString, SecretError> {
+            Err(SecretError::Backend(
+                "no secret store is configured in this build".into(),
+            ))
+        }
     }
 }

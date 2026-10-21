@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.namespace AS \"namespace!\", e.service AS \"service!\", e.ports, e.allow_dns\n           FROM egress_allowlist e\n           LEFT JOIN projects p ON e.project_id = p.id\n           WHERE e.kind = 'cluster-service'\n             AND (e.scope = 'instance' OR (e.scope = 'project' AND p.key = $1))\n           ORDER BY e.namespace, e.service",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "namespace!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "namespace"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "service!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "service"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ports",
+        "type_info": "Int4Array",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "ports"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "allow_dns",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "allow_dns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3aad8b60d9cc870ef26b51f8912109961663f8062c49a563796985cd9aee0ee9"
+}

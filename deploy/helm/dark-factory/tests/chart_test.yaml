@@ -109,7 +109,7 @@ tests:
         - forgejo
     asserts:
       - hasDocuments:
-          count: 10
+          count: 12
       - isKind:
           of: ServiceAccount
         documentIndex: 1
@@ -136,16 +136,44 @@ tests:
           content:
             apiGroups: ["cilium.io"]
             resources: ["ciliumnetworkpolicies"]
-            verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+            verbs: ["create", "get", "list", "watch", "patch", "delete"]
         documentIndex: 2
+      - notContains:
+          path: rules
+          content:
+            apiGroups: ["discovery.k8s.io"]
+            resources: ["endpointslices"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 4
       - equal:
           path: metadata.namespace
           value: nativelink
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["services"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["discovery.k8s.io"]
+            resources: ["endpointslices"]
+            verbs: ["get", "list", "watch"]
         documentIndex: 6
       - equal:
           path: metadata.namespace
           value: forgejo
         documentIndex: 8
+      - isKind:
+          of: ClusterRole
+        documentIndex: 10
+      - equal:
+          path: rules[0].resourceNames
+          value: ["dark-factory-sandboxes"]
+        documentIndex: 10
 
   - it: renders release-prefixed ClusterRole when clusterTargets.anyNamespace is true
     template: rbac.yaml
@@ -155,13 +183,20 @@ tests:
       clusterTargets.anyNamespace: true
     asserts:
       - hasDocuments:
-          count: 8
+          count: 10
       - isKind:
           of: ClusterRole
         documentIndex: 6
       - equal:
           path: metadata.name
           value: inst-a-dark-factory-cluster-targets-reader
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["services"]
+            verbs: ["get", "list", "watch"]
         documentIndex: 6
 
   - it: creates sandbox namespace objects when sandboxNamespace.create is true
@@ -273,7 +308,7 @@ tests:
           value: 9444
         documentIndex: 1
 
-  - it: renders self-signed CA chain and issues control plane and gateway Certificates from it
+  - it: renders the CA in the cert-manager namespace behind a ClusterIssuer and issues all Certificates from it
     template: certs.yaml
     release:
       name: df
@@ -283,6 +318,10 @@ tests:
       - isKind:
           of: Issuer
         documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: cert-manager
+        documentIndex: 0
       - isNotNull:
           path: spec.selfSigned
         documentIndex: 0
@@ -290,25 +329,36 @@ tests:
           of: Certificate
         documentIndex: 1
       - equal:
+          path: metadata.namespace
+          value: cert-manager
+        documentIndex: 1
+      - equal:
           path: spec.isCA
           value: true
         documentIndex: 1
       - equal:
           path: spec.secretName
-          value: df-dark-factory-ca-key-pair
+          value: NAMESPACE-df-dark-factory-ca-key-pair
         documentIndex: 1
       - isKind:
-          of: Issuer
+          of: ClusterIssuer
+        documentIndex: 2
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: NAMESPACE-df-dark-factory-ca-issuer
         documentIndex: 2
       - equal:
           path: spec.ca.secretName
-          value: df-dark-factory-ca-key-pair
+          value: NAMESPACE-df-dark-factory-ca-key-pair
         documentIndex: 2
       - equal:
           path: spec.issuerRef
           value:
-            name: df-dark-factory-ca-issuer
-            kind: Issuer
+            name: NAMESPACE-df-dark-factory-ca-issuer
+            kind: ClusterIssuer
             group: cert-manager.io
         documentIndex: 3
       - equal:
@@ -321,7 +371,11 @@ tests:
         documentIndex: 3
       - equal:
           path: spec.issuerRef.name
-          value: df-dark-factory-ca-issuer
+          value: NAMESPACE-df-dark-factory-ca-issuer
+        documentIndex: 4
+      - equal:
+          path: spec.issuerRef.kind
+          value: ClusterIssuer
         documentIndex: 4
       - equal:
           path: spec.secretName
@@ -331,6 +385,79 @@ tests:
           path: spec.dnsNames
           content: "*.df-dark-factory-gateway-headless.NAMESPACE.svc.cluster.local"
         documentIndex: 4
+
+  - it: places the CA in a configurable cluster resource namespace
+    template: certs.yaml
+    set:
+      tls.ca.clusterResourceNamespace: certs
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: certs
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: certs
+        documentIndex: 1
+
+  - it: points sandbox certificates at the same issuer the chart renders
+    template: configmap.yaml
+    release:
+      name: df
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'issuerName: "NAMESPACE-df-dark-factory-ca-issuer"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'issuerKind: "ClusterIssuer"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'anyNamespace: false'
+        documentIndex: 0
+
+  - it: refuses a namespaced Issuer for sandbox certificates
+    template: gateway-deployment.yaml
+    set:
+      tls.ca.create: false
+      tls.ca.existingIssuer.name: homelab-ca
+      tls.ca.existingIssuer.kind: Issuer
+    asserts:
+      - failedTemplate:
+          errorPattern: sandbox certificates need a ClusterIssuer
+
+  - it: accepts a namespaced Issuer for the control plane when sandboxes get a ClusterIssuer
+    template: configmap.yaml
+    set:
+      tls.ca.create: false
+      tls.ca.existingIssuer.name: homelab-ca
+      tls.ca.existingIssuer.kind: Issuer
+      sandboxNamespace.issuerName: sandbox-ca
+      sandboxNamespace.issuerKind: ClusterIssuer
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'issuerName: "sandbox-ca"'
+        documentIndex: 0
+
+  - it: points sandbox certificates at an existing issuer when tls.ca.create is false
+    template: configmap.yaml
+    set:
+      tls.ca.create: false
+      tls.ca.existingIssuer.name: homelab-ca
+      tls.ca.existingIssuer.kind: ClusterIssuer
+      clusterTargets.namespaces: [forgejo, nativelink]
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'issuerName: "homelab-ca"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'namespaces: \["forgejo","nativelink"\]'
+        documentIndex: 0
 
   - it: issues Certificates from an existing issuer when tls.ca.create is false
     template: certs.yaml
