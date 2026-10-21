@@ -68,6 +68,8 @@ After shutdown, the connection manager tries to reconnect for 10 s, and `main` w
 
 **Fix:** This needs a protocol decision. Either the control plane works out the outcome of a run whose pod exited without a RunReport (for example by reading `/data/runtime/outbox` at the next run, or by treating the run as FAILED/retryable), or the flush window becomes configurable and longer. Record the decision in `design/agent-run.md`.
 
+**Decision (2026-10-21):** the runtime keeps flushing for up to 10 minutes after finalize, and a pod that exits without a report ends `sandbox_lost` and is resumed automatically. Implemented by `openspec/changes/iter2-run-resilience` (design D5).
+
 ### TD-3 (R64). Diverged workspace pushes and reports on every turn
 
 `crates/factory-agent/src/runner.rs` (`initial_last_pushed_sha`), `crates/factory-agent/src/workspace.rs` (`push_after_turn`)
@@ -204,6 +206,8 @@ Tool-call handlers call the forge without a timeout, while forge work after a `P
 If a replica stops (rollout beyond the 10 s drain, crash) between `start_queued_runs` and `provider.provision`, the run stays `pending`/`provisioning` without a sandbox. After `connectTimeoutSeconds` (10 min) it ends as `connect_timeout` and the task becomes `failed`; the user has to queue a message to retry.
 
 **Fix:** On each tick, re-provision runs that have been `pending` longer than a short threshold and have no sandbox (provider calls must be idempotent, which `ensure_task_volume`/`provision` are meant to be), or end them as `provisioning_failed` with the task re-queued.
+
+**Decision (2026-10-21):** re-provisioned by the scheduler tick. Implemented by `openspec/changes/iter2-run-resilience` (design D4).
 
 ### TD-19. Runtime-checked SQL outside `df-db`
 

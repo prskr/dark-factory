@@ -10,7 +10,7 @@
 - [ ] 2.2 Implement the `CONNECT` path with SNI peek, own resolution and private-range blocking (design D3); verify "domain fronting" and "allowed name resolves internally" with a local TLS echo server and a stub resolver
 - [ ] 2.3 Implement plain HTTP forwarding and tunnel tracking with abort on host removal; verify "port 80 not allowed" and "host removed mid-run"
 - [ ] 2.4 Implement flow events, the ring buffer and the `Tail` server with filters (design D4); verify "buffer full" and "tail with denied-only filter"
-- [ ] 2.5 Implement `dark-factory gateway` (proxy on 3128, `Tail` on 9444 with mTLS, `PolicyWatch` client with reconnect and last-snapshot retention, health on 8080); verify the "gateway starts before the control plane" and "control plane restart" scenarios in an in-process test
+- [ ] 2.5 Implement `dark-factory gateway` (proxy on 3128, `Tail` on 9444 with mTLS, `PolicyWatch` client with reconnect and last-snapshot retention, health and readiness on 8080, ready only after the first snapshot; readiness probe in the chart); verify the "gateway starts before the control plane", "readiness follows the snapshot" and "control plane restart" scenarios in an in-process test
 
 ## 3. Control-plane side
 

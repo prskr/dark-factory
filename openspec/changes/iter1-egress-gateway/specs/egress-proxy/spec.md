@@ -14,11 +14,15 @@ The proxy SHALL identify the run by the connection's source pod IP using the san
 - **THEN** every request is answered with 403 and logged as `unknown-source`
 
 ### Requirement: Fail closed
-Until a gateway pod has received its first policy snapshot, it SHALL deny every request.
+Until a gateway pod has received its first policy snapshot, it SHALL deny every request and SHALL report not ready on its health endpoint, so that the Service sends it no sandbox traffic during rollouts.
 
 #### Scenario: Gateway starts before the control plane
 - **WHEN** a sandbox sends `CONNECT` to a gateway pod without a snapshot
 - **THEN** the request is denied with 503
+
+#### Scenario: Readiness follows the snapshot
+- **WHEN** a new gateway pod starts during a rollout
+- **THEN** its readiness probe fails until the first snapshot arrived and succeeds afterwards
 
 ### Requirement: CONNECT allowlist
 `CONNECT host:port` SHALL be allowed only if an `http-host` entry of the run (instance or project scope) matches the host exactly or as `*.suffix`, and the port (default 443). Otherwise it SHALL be answered with 403 and logged as `not-allowlisted`.

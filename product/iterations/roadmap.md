@@ -31,7 +31,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 
 - Session logging, log format and per-component levels (`agent-session-logging`).
 - OpenTelemetry metrics and optional tracing (`otel-metrics-and-tracing`).
-- Medium tech debt: TD-1 (git timeouts), TD-2 (shutdown flush window), TD-8 (teardown in the scheduler loop), TD-17 (tool-call timeouts and drain budgets), TD-18 (interrupted provisioning is not retried).
+- Medium tech debt: TD-1 (git timeouts), TD-8 (teardown in the scheduler loop), TD-17 (tool-call timeouts and drain budgets). TD-2 (shutdown flush window) and TD-18 (interrupted provisioning) moved to `iter2-run-resilience`.
 
 ## 2 — Closed Git boundary + human in the loop
 
@@ -39,6 +39,9 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Questions and approval requests (ADR-0038):** `ask_question` and `request_approval` factory tools, `AwaitingInput`, pending-requests inbox (phone and desktop), audit entries. Initial approval types: `push-check-exception` and `network-access`.
 - **Egress from approvals ([`design/egress.md`](../../design/egress.md) §8):** task-scoped allowlist entries; allow a denied host from the live log; denied hosts raise a `network-access` request automatically.
 - **Cancel button** for tasks and runs.
+- **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
+- **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
+- **Gateway readiness and Git retries:** gateway pods are ready only after the first policy snapshot; the runtime retries transient Git failures (folded into `iter1-egress-gateway` and `iter2-git-proxy`).
 
 Dependency: approval-gated push checks need the `push-check-exception` approval, so both ship together.
 
@@ -50,6 +53,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
 - **Tasks starting from existing branches** and PR modes other than "create draft PR" (ADR-0025).
+- **Anthropic pass-through in the gateway:** removes the subscription token from sandboxes (ADR-0010 accepted risk). Same shape as the Git proxy: pod-IP identity, bearer swap, streaming. Depends on the `ANTHROPIC_BASE_URL` result of the iteration-1 Claude spike.
 
 Dependency: "PR merged" dependencies and review routing need the webhooks of ADR-0015.
 

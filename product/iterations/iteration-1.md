@@ -101,7 +101,7 @@ Deviations from the original plan, approved on 2026-10-16 (details in `contract/
 - Image volumes on the cluster's Kubernetes version with Talos' containerd **and** Kata.
 - cert-manager csi-driver volumes inside Kata sandboxes.
 - agent-sandbox `Sandbox` pod template passes through image volumes, CSI volumes, PVCs and runtime class as needed.
-- Claude ACP adapter: headless use with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load` support, and whether it reports token usage (fallback: Claude Code's session JSONL).
+- Claude ACP adapter: headless use with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load` support, and whether it reports token usage (fallback: Claude Code's session JSONL). Also: whether it works with `ANTHROPIC_BASE_URL` pointing at a pass-through proxy and a placeholder value in `CLAUDE_CODE_OAUTH_TOKEN`, the proxy swapping the bearer token (`claude setup-token` yields a long-lived static bearer, not a refresh token). This is the prerequisite for moving the subscription token into the gateway ([`roadmap.md`](roadmap.md), iteration 3).
 - Forgejo's draft/WIP PR mechanism via API.
 - Bazel: crates with C/asm build scripts in the cross build (prefer the `ring` crypto provider for rustls over `aws-lc-rs`), `sqlx` offline mode, `migrations/` and `rust-embed` assets as compile data, protoc for tonic/prost.
 - Wasmtime release providing WASI 0.2.12 (the contracts pin it; Wasmtime 46 ships it).
