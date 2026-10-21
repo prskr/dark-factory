@@ -1,6 +1,6 @@
 # ADR-0026: Chats per persona and project, task dependencies, project context
 
-- **Status:** Accepted (planned for iteration 2)
+- **Status:** Accepted (planned for iteration 3)
 - **Date:** 2026-10-16
 - **Related:** [ADR-0016](0016-runs-and-triggers.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md)
 

@@ -5,6 +5,7 @@
 > Related documents:
 > - [`design/agent-run.md`](../design/agent-run.md) — identity, sandbox/storage lifecycle, workspace handling, credentials, MCP proxying, failure modes of a single agent run.
 > - [`product/iterations/iteration-1.md`](iterations/iteration-1.md) — scope, contracts and milestones of the first iteration.
+> - [`product/iterations/roadmap.md`](iterations/roadmap.md) — grouping of planned features into iterations.
 > - [`contract/`](../contract/README.md) — protobuf, WIT and tool contracts.
 > - [`design/tech-stack.md`](../design/tech-stack.md) — the whole stack in one place.
 > - [`design/adr/`](../design/adr/README.md) — Architecture Decision Records.
@@ -151,7 +152,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0023](../design/adr/0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](../design/adr/0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
 | [ADR-0025](../design/adr/0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033) |
-| [ADR-0026](../design/adr/0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 2) |
+| [ADR-0026](../design/adr/0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3) |
 | [ADR-0027](../design/adr/0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](../design/adr/0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
 | [ADR-0029](../design/adr/0029-egress-gateway-and-generated-network-policies.md) | Egress gateway and generated network policies | Accepted |
@@ -159,18 +160,32 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0031](../design/adr/0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](../design/adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](../design/adr/0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
-| [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 2) |
+| [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 3) |
 | [ADR-0035](../design/adr/0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](../design/adr/0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
 | [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039) |
 | [ADR-0039](../design/adr/0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
-| [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned after iteration 2) |
+| [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 5) |
 
 ## 9. Future options
 
-### F1 — Git smart-HTTP proxy in the gateway (planned option)
-The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. The gateway identifies the sandbox, injects the forge credential, streams `upload-pack`/`receive-pack`, and enforces that pushes only touch the task's branch (rewrites per the project's branch rewrite policy, ADR-0033) and `factory/wip/<key>`, and scans every pushed pack for secrets (Kingfisher or similar) — the single secret-scanning point. Removes the last forge token and the forge egress rule from sandboxes and gives an audit log of every push. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11. The same pass-through point runs further push checks (server-side hooks): commit identity, signature verification, protected paths (e.g. CI workflows), size/file-type limits and linear history, plus project-specific checks as `push-check` WASI plugins (`design/agent-run.md` §11).
+### F1 — Git smart-HTTP proxy in the gateway (core planned for iteration 2)
+The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11.
+
+- **Iteration 2** ([`iteration-2.md`](iterations/iteration-2.md)):
+  - the gateway identifies the sandbox, injects the forge credential and streams `upload-pack`/`receive-pack`;
+  - pushes may only touch the task's branch (fast-forward only) and `factory/wip/<key>`;
+  - every pushed pack is scanned for secrets (Kingfisher or similar), the single secret-scanning point;
+  - built-in push checks (server-side hooks): commit identity, protected paths (e.g. CI workflows), size limits and linear history;
+  - an audit record of every push.
+
+  This removes the last forge token and the forge egress rule from sandboxes.
+- **Later:**
+  - branch rewrites on the task branch per the project's branch rewrite policy (ADR-0033; with the task tree, iteration 3 or later);
+  - signature verification (with F7);
+  - file-type limits;
+  - project-specific checks as `push-check` WASI plugins (backlog, [`roadmap.md`](iterations/roadmap.md)).
 
 ### F2 — MCP tools as WASI components, placed by capability (idea, 2026-10-16)
 Because the harness only sees tools through Dark Factory's MCP servers, custom tools can be WASI components implementing one shared WIT `tool` world (describe tools with JSON schemas, handle calls), and run in one of three places:
