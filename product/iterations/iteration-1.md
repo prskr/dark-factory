@@ -111,7 +111,7 @@ Deviations from the original plan, approved on 2026-10-16 (details in `contract/
 ## 8. Interview record (2026-10-16)
 | # | Question | Answer |
 |---|---|---|
-| 1 | End-to-end scenario | As in §2. Typical later workflow: CEO chat per project creating dependent tasks (iteration 2). Draft PR opened automatically, agent only rephrases/comments. |
+| 1 | End-to-end scenario | As in §2. Typical later workflow: CEO chat per project creating dependent tasks (`blocked_by`) in iteration 3 (see [`roadmap.md`](roadmap.md)). Draft PR opened automatically, agent only rephrases/comments. |
 | 2 | WASI plugins in iteration 1 | Yes — minimal plugin world to prove the plugin system. |
 | 3 | Human auth in iteration 1 | OIDC from day one, Keycloak. |
 | 4 | Harness delivery | Baked into the project image; adapter path configurable. |

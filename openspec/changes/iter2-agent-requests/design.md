@@ -42,6 +42,7 @@ A partial unique index on `(task_id, kind, coalesce(approval_type,''), fingerpri
 
 ### D2 — Approval type registry
 ```rust
+#[async_trait::async_trait] // boxes the future so the trait stays dyn-compatible
 pub trait ApprovalType: Send + Sync {
     fn name(&self) -> &'static str;
     fn validate(&self, task: &Task, payload: &serde_json::Value) -> Result<(), RequestError>;
@@ -51,7 +52,7 @@ pub trait ApprovalType: Send + Sync {
     fn describe(&self, req: &Request) -> String;         // text for UI card and decision message
 }
 ```
-Types are registered at start-up in a `BTreeMap<&str, Arc<dyn ApprovalType>>`. A raise with an unknown type is rejected. `Scope` is a closed enum (`Run`, `Task`, `Project`, `Instance`). A type offers a subset of it. Tests register a fake type.
+`async fn` in a trait is not dyn-compatible. `async-trait` (already a workspace dependency, used in `df-core` and `df-agent-channel`) turns `apply` into a boxed `Send` future, and every implementation uses the same attribute. Types are registered at start-up in a `BTreeMap<&str, Arc<dyn ApprovalType>>`. A raise with an unknown type is rejected. `Scope` is a closed enum (`Run`, `Task`, `Project`, `Instance`). A type offers a subset of it. Tests register a fake type.
 
 ### D3 — Decision transaction
 Lock the request row (`FOR UPDATE`) and check `state = 'pending'` (otherwise "already decided"). Then, for an approval, `apply`. Then update the state and decision, write the audit entry, queue the `request.decided` message through the existing queued-message function (which sets the task to `queued` if no run is active), and publish `request_changed` and `task_message_queued` after commit. If `apply` fails, the whole transaction rolls back.

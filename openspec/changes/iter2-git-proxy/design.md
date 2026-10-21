@@ -38,7 +38,7 @@ message PushRecord {
   string push_id = 1;           // UUIDv7, idempotency key
   string run_id = 2; string gateway_pod = 3;
   repeated RefUpdate refs = 4;  // name, old_sha, new_sha, verdict, reason
-  PushVerdict verdict = 5;      // ACCEPTED | REJECTED | UPSTREAM_FAILED
+  PushVerdict verdict = 5;      // FORWARDING | ACCEPTED | REJECTED | UPSTREAM_FAILED
   uint64 bytes = 6; google.protobuf.Duration duration = 7;
 }
 ```
@@ -72,9 +72,13 @@ One rejected command rejects the whole push, so the forge never sees a partially
 - After an accepted push, the original spooled body is forwarded to upstream `git-receive-pack`, and the upstream response is relayed. The mirror is not updated after the push; the next push's fetch picks the change up.
 
 ### D6 — Push records
-The control plane's `RecordPush` writes `git_pushes` (one row per push, with the ref updates as JSONB) and an audit entry `git.push` with the agent actor of the run, in one transaction. Retries with the same `push_id` are no-ops. The gateway calls it after deciding and, for accepted pushes, after the upstream answered. If it fails, the gateway retries with backoff for up to 5 s. For a push that was not yet forwarded, it then rejects with `df:audit-unavailable`. For a push that upstream already accepted, the record is kept in a small in-memory retry queue and the push is not undone.
+The control plane's `RecordPush` upserts `git_pushes` by `push_id` (one row per push, with the ref updates as JSONB) and writes an audit entry `git.push` with the agent actor of the run, in one transaction. The verdict only moves forward: `FORWARDING → ACCEPTED | UPSTREAM_FAILED`. `REJECTED`, `ACCEPTED` and `UPSTREAM_FAILED` are final. A call that repeats the stored verdict is a no-op, and a call that would move the verdict backwards is ignored. Retries are therefore idempotent.
 
-*ponytail:* the post-upstream record can be lost if the gateway pod dies within the retry window. The runtime's `PushReport` still records the push on the run. Make the queue durable if this ever matters.
+1. **Rejected push:** one call with `REJECTED`, then `report-status` to the client.
+2. **Push that passed all rules and checks:** first a call with `FORWARDING`. Only after it was stored does the gateway forward the body upstream, so no upstream side effect happens without a durable record. If this call fails after retries with backoff for up to 5 s, the push is rejected with `df:audit-unavailable` and nothing reaches upstream.
+3. **After the upstream answered:** a second call with `ACCEPTED` or `UPSTREAM_FAILED`, then the upstream response is relayed. If this call fails, the gateway keeps it in a small in-memory retry queue and still relays the upstream response; the push is not undone.
+
+*ponytail:* if the gateway pod dies before the final call succeeds, the record stays `FORWARDING`. The control plane's timeout scan marks such records older than 10 minutes as `UNKNOWN`. The record still proves that the push was attempted, and the runtime's `PushReport` shows the result on the run. Make the queue durable if this ever matters.
 
 ### D7 — Snapshot building
 The snapshot query joins active runs with their project's repository URL and forge credential reference. Credentials are resolved through `SecretStore` while the snapshot is built. Besides notifications, the snapshot is rebuilt every 60 s, so rotated Secrets reach gateways without a Secret watch.

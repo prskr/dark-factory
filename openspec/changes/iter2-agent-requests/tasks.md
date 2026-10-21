@@ -14,7 +14,7 @@
 ## 3. Tool and run orchestration
 
 - [ ] 3.1 Implement the `ask_question` handler and switch runs to tool set v2. Verify the "non-blocking question", "blocking question" and "tools listed" scenarios
-- [ ] 3.2 Add `run.keepAlive` to instance configuration and `Assign`, the `awaiting_input` run state and the `blocked` outcome mapping. Verify the "default window", "awaiting input reported" and "blocked run" scenarios, and document `run.keepAlive` in the operator configuration reference
+- [ ] 3.2 Add `run.keepAlive` to instance configuration and `Assign`, the `awaiting_input` run state and the `blocked` outcome mapping. Verify the "default window", "awaiting input reported", "blocked run is terminal", "blocked run" and "completed with an undelivered message" scenarios, and document `run.keepAlive` in the operator configuration reference
 
 ## 4. Runtime
 

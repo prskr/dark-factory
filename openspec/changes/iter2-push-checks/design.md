@@ -39,9 +39,9 @@ fn check_push(view: &PushView, policy: &PushPolicy, identity: &Identity,
 ### D3 — Secret scanning
 Spike 1.1 decides between:
 - (a) the `kingfisher` crate as a library, if it exposes a scanner API over byte slices;
-- (b) Kingfisher's rule files (Apache-2.0), vendored under `crates/df-gateway/rules/` and compiled once into a `regex::RegexSet` plus per-rule `Regex` for locating matches.
+- (b) Kingfisher's rule files (Apache-2.0), vendored under `crates/df-gateway/rules/` and compiled once into a `regex::bytes::RegexSet` plus per-rule `regex::bytes::Regex` for locating matches.
 
-Option (a) is preferred if it adds no large dependency tree. Masking keeps the first 4 characters and replaces the rest with `*` (at most 12 shown). Binary blobs (NUL in the first 8 KiB) are skipped.
+Option (a) is preferred if it adds no large dependency tree. Either way, every added blob is scanned as bytes, including binary ones: there is no NUL-byte heuristic, because keys in binary files (keystores, archives, compiled config) or after an early NUL must still be found. The line number is counted over `\n` bytes. Masking keeps the first 4 characters and replaces the rest with `*`, showing at most 12 characters in total. Non-UTF-8 match bytes are shown as `\xNN` escapes before masking.
 
 ### D4 — Policy storage and distribution
 - `project_push_policies(project_id PK, protected_globs text[], protected_mode, secret_mode, size_mode, max_blob_bytes, linear_history, updated_at)`. A missing row means the defaults from the spec.
@@ -50,7 +50,7 @@ Option (a) is preferred if it adds no large dependency tree. Masking keeps the f
 - Globs use `globset` with `literal_separator(true)` and are validated when saved.
 
 ### D5 — Control plane reactions to push records
-In the `RecordPush` transaction:
+In the `RecordPush` transaction, reacting only to final verdicts (`REJECTED`, `ACCEPTED`; never to `FORWARDING`):
 - `verdict = REJECTED` with `approval_requested` → raise `push-check-exception` (payload: the findings with check, path, line, masked preview and fingerprint). Merging uses the sorted fingerprint set.
 - Rejected by checks on the task branch → queue `push.rejected` unless an undelivered one exists or `tasks.push_rejections_since_accept >= 3`; increment the counter.
 - Accepted task-branch push → reset the counter and close pending `push-check-exception` requests (`push-accepted`).
@@ -58,11 +58,20 @@ In the `RecordPush` transaction:
 The approval type (`ApprovalType` from `iter2-agent-requests`) offers scope `Task` only. `apply` inserts one exception per finding fingerprint and publishes `egress_policy`.
 
 ### D6 — Runtime mapping
-The runtime already parses `git push --porcelain` output per ref. A `!` line whose reason starts with `df:secret-scan` maps to `REJECTED_SECRET_DETECTED`, any other `df:` reason to `REJECTED_BY_CHECK`. "Last pushed commit" is updated only on success, so the next turn retries.
+The runtime already parses `git push --porcelain` output per ref. A `!` line maps by its reason prefix:
+
+| Reason | Status |
+|---|---|
+| `df:secret-scan` | `REJECTED_SECRET_DETECTED` |
+| `df:identity`, `df:protected-path`, `df:blob-too-large`, `df:merge-commit`, `df:push-too-large` | `REJECTED_BY_CHECK` |
+| `df:non-fast-forward` (ref rule) | `REJECTED_NON_FAST_FORWARD`, like a forge-side non-fast-forward |
+| `df:audit-unavailable`, `df:ref-not-allowed`, unknown `df:` reasons | `FAILED` |
+
+The reason text is always the detail. "Last pushed commit" is updated only on success, so the next turn retries.
 
 ## Risks / Trade-offs
 
 - [False positives block a task] → secret findings are approval-gated per finding by default.
 - [An approved secret exception lets a real secret reach the forge] → the card shows the masked match, rule, path and line. Approving is an explicit, audited human decision for exactly that finding.
-- [Large pushes make checks slow] → commit walk bound, size header before reading blobs, binary skip. Pushes happen once per turn.
+- [Large pushes make checks slow, also because binary blobs are scanned] → the push size limit (256 MiB) bounds the scanned bytes, the commit walk is bounded, and the regex set runs once per blob. Pushes happen once per turn.
 - [Agent loops on rejections] → feedback capped at 3 consecutive messages; budgets still apply.

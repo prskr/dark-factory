@@ -170,8 +170,22 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 
 ## 9. Future options
 
-### F1 — Git smart-HTTP proxy in the gateway (planned for iteration 2)
-The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. The gateway identifies the sandbox, injects the forge credential, streams `upload-pack`/`receive-pack`, and enforces that pushes only touch the task's branch (rewrites per the project's branch rewrite policy, ADR-0033) and `factory/wip/<key>`, and scans every pushed pack for secrets (Kingfisher or similar) — the single secret-scanning point. Removes the last forge token and the forge egress rule from sandboxes and gives an audit log of every push. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11. The same pass-through point runs further push checks (server-side hooks): commit identity, signature verification, protected paths (e.g. CI workflows), size/file-type limits and linear history, plus project-specific checks as `push-check` WASI plugins (`design/agent-run.md` §11).
+### F1 — Git smart-HTTP proxy in the gateway (core planned for iteration 2)
+The sandbox's Git remote points to the gateway Deployment (ADR-0029) instead of the forge. v1 is designed so only the remote URL in `Assign` changes. Details: `design/agent-run.md` §11.
+
+- **Iteration 2** ([`iteration-2.md`](iterations/iteration-2.md)):
+  - the gateway identifies the sandbox, injects the forge credential and streams `upload-pack`/`receive-pack`;
+  - pushes may only touch the task's branch (fast-forward only) and `factory/wip/<key>`;
+  - every pushed pack is scanned for secrets (Kingfisher or similar), the single secret-scanning point;
+  - built-in push checks (server-side hooks): commit identity, protected paths (e.g. CI workflows), size limits and linear history;
+  - an audit record of every push.
+
+  This removes the last forge token and the forge egress rule from sandboxes.
+- **Later:**
+  - branch rewrites on the task branch per the project's branch rewrite policy (ADR-0033; with the task tree, iteration 3 or later);
+  - signature verification (with F7);
+  - file-type limits;
+  - project-specific checks as `push-check` WASI plugins (backlog, [`roadmap.md`](iterations/roadmap.md)).
 
 ### F2 — MCP tools as WASI components, placed by capability (idea, 2026-10-16)
 Because the harness only sees tools through Dark Factory's MCP servers, custom tools can be WASI components implementing one shared WIT `tool` world (describe tools with JSON schemas, handle calls), and run in one of three places:

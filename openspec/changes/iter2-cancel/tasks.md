@@ -7,8 +7,8 @@
 ## 2. Control plane
 
 - [ ] 2.1 Implement stopping a run (design D1) for connected and unconnected runs. Verify "stop a running run" with the fake ACP agent and "stop while provisioning" with a fake `SandboxProvider`
-- [ ] 2.2 Add the stop timeout to the timeout scan and the run-end mapping exception. Verify "runtime hangs" (`tokio::time::pause`) and "stopped with an undelivered message"
-- [ ] 2.3 Implement cancelling and reopening a task (design D2). Verify "cancel a running task", "cancel a completed task", "reopen" and "cancelled with a pending approval" (container-backed; CI)
+- [ ] 2.2 Add the stop timeout to the timeout scan and the run-end mapping exception. Verify "runtime hangs" (`tokio::time::pause`), "stopped with an undelivered message" and "completed with an undelivered message"
+- [ ] 2.3 Implement cancelling and reopening a task (design D2). Verify "cancel a running task", "cancel a completed task", "reopen", "reopen before the stopped run ended" (also as "reopened while the stopped run finalizes" in `specs/run-orchestration/spec.md`) and "cancelled with a pending approval" (container-backed; CI)
 
 ## 3. UI
 

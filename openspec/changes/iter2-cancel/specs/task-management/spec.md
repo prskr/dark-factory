@@ -32,3 +32,7 @@ Queueing a message on a cancelled task SHALL set it to `queued`. Discarded messa
 #### Scenario: Reopen
 - **WHEN** a board member queues "please continue after all" on cancelled task `DF-9`
 - **THEN** `DF-9` becomes `queued` and the next run receives only the new message
+
+#### Scenario: Reopen before the stopped run ended
+- **WHEN** a message is queued on cancelled task `DF-9` while its stopped run is still finalizing
+- **THEN** `DF-9` stays `queued` when that run's `RunReport` arrives, and a new run starts with the message after the old run ended

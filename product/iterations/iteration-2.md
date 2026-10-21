@@ -17,11 +17,11 @@ Prerequisites: iteration 1 and iteration 1.1 are done ([`roadmap.md`](roadmap.md
 
 1. A board member creates task `DF-7`. The sandbox has no forge token and no egress entry for the forge. The runtime clones `https://<gateway>/git/DF-7.git` through the Git proxy.
 2. The agent commits a file containing an API key. The runtime's push is rejected (`remote rejected (df:secret-scan …)`). The board member sees a `push-check-exception` request with the masked finding. The agent receives the rejection as a message, removes the key and rewrites its unpushed commits. The next push passes, and the request is closed as obsolete.
-3. The agent edits `.forgejo/workflows/ci.yml` (protected path, mode `approval`). The push is rejected and a `push-check-exception` request appears in the inbox. The agent ends its turn with a blocking question. The board member approves both on a phone. The decision arrives as a message, and the next push passes.
+3. The agent edits `.forgejo/workflows/ci.yml` (protected path, mode `approval`). The push is rejected, and a `push-check-exception` request appears in the inbox. The agent asks a blocking question ("The CI change needs approval; continue with it?") and ends its turn. On a phone, the board member takes two separate actions: they answer the question, and they approve the `push-check-exception` request. Both decisions arrive as messages, and only then does the next push pass.
 4. The agent needs `pypi.org`. The proxy denies it, and a `network-access` request appears with the denied host. The board member approves it for the task. The agent's retry succeeds about a second later, without a restart.
 5. The board member stops the running run (the task becomes `waiting`), then cancels another task (status `cancelled`). Its pending requests are closed.
 
-Automated with the fake ACP agent (`iter1-demo-e2e` is extended); steps 2–4 also once by hand with Claude Code.
+Automated with the fake ACP agent (`iter1-demo-e2e` is extended). Steps 2–4 are also run once manually with Claude Code.
 
 ## 3. Changes
 

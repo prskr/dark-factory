@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Run phases
-The run state SHALL follow `pending → provisioning → connecting → preparing → running ⇄ awaiting_input → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages.
+The run state SHALL follow `pending → provisioning → connecting → preparing → running ⇄ awaiting_input → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages. The terminal state records how the run ended technically; the outcome (`completed`, `end_turn`, `blocked`, `rate_limited`, …) is stored separately, so a `blocked` run ends in state `succeeded` with outcome `blocked`.
 
 #### Scenario: Phase reported
 - **WHEN** the runtime reports `RUN_PHASE_RUNNING`
@@ -12,6 +12,10 @@ The run state SHALL follow `pending → provisioning → connecting → preparin
 #### Scenario: Awaiting input reported
 - **WHEN** the runtime reports `RUN_PHASE_AWAITING_INPUT`
 - **THEN** the run state becomes `awaiting_input` and the task detail shows that the run waits for an answer
+
+#### Scenario: Blocked run is terminal
+- **WHEN** a run in state `finalizing` reports `RUN_OUTCOME_BLOCKED`
+- **THEN** the run state becomes `succeeded` with outcome `blocked` and no further phase changes are accepted for it
 
 ### Requirement: Run end maps to task status
 On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`completed`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead.
@@ -27,6 +31,10 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 #### Scenario: Blocked run
 - **WHEN** a run reports `RUN_OUTCOME_BLOCKED`
 - **THEN** the task becomes `blocked` and no new run starts until a message is queued
+
+#### Scenario: Completed with an undelivered message
+- **WHEN** a human queues a message during the turn in which the agent calls `complete_task`
+- **THEN** the run ends `completed`, the PR is marked ready, and the task becomes `queued` so the next run addresses the message
 
 ## ADDED Requirements
 

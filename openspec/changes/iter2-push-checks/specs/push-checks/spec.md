@@ -14,11 +14,15 @@ Checks SHALL run before forwarding, on the commits a push adds (reachable from a
 - **THEN** only the agent's rebased commits are checked
 
 ### Requirement: Secret scan
-The proxy SHALL scan the content of blobs added by checked commits with the secret rule set, without contacting any service to validate findings. A finding SHALL record rule, path, line and a masked preview, and SHALL NOT store or log the matched value.
+The proxy SHALL scan the full content of every blob added by checked commits, binary blobs included, with the secret rule set, without contacting any service to validate findings. A finding SHALL record rule, path, line and a masked preview, and SHALL NOT store or log the matched value.
 
 #### Scenario: API key committed
 - **WHEN** a pushed commit adds `config.py` containing a GitHub token
 - **THEN** the push is rejected with reason `df:secret-scan` naming the rule, path and line, and the record contains only the masked preview
+
+#### Scenario: Key in a binary file
+- **WHEN** a pushed blob starts with NUL bytes and contains a private key after them
+- **THEN** the push is rejected with `df:secret-scan`
 
 ### Requirement: Commit identity
 Each checked commit's author and committer email SHALL equal the instance's commit identity; otherwise the push SHALL be rejected with `df:identity`. This check SHALL NOT be configurable.

@@ -9,7 +9,7 @@
 
 - [ ] 2.1 Build `PushView` from mirror + quarantine (design D1). Verify with tests on fixture repositories: "rebased onto a new base" (only the agent's commits), renames, root commits and the 10,000-commit bound
 - [ ] 2.2 Implement `check_push` test-first (design D2) with a fake secret matcher. Verify the identity, protected path (both scenarios), size, linear history, WIP and "mixed findings" scenarios of `specs/push-checks/spec.md` as unit tests
-- [ ] 2.3 Implement the secret matcher (design D3) with masking. Verify the "API key committed" scenario and that the logged and recorded output never contains the matched value
+- [ ] 2.3 Implement the secret matcher (design D3) with masking. Verify the "API key committed" and "key in a binary file" scenarios and that the logged and recorded output never contains the matched value
 - [ ] 2.4 Wire `check_push` into the `PushChecks` hook with exceptions from the snapshot and `report-status` reasons. Verify "exception approved" and "exception doesn't cover new changes" end to end against the local upstream from `iter2-git-proxy`'s tests, and keep `cargo llvm-cov -p df-gateway` ≥ 70 %
 
 ## 3. Control plane
@@ -20,7 +20,7 @@
 
 ## 4. Runtime
 
-- [ ] 4.1 Map `df:` rejections to the new push statuses and retry after the next turn (design D6). Verify both scenarios of `specs/workspace-lifecycle/spec.md` with a fake remote that rejects once
+- [ ] 4.1 Map `df:` rejections to the new push statuses and retry after the next turn (design D6). Verify every scenario of `specs/workspace-lifecycle/spec.md` (check, non-fast-forward and audit-unavailable reasons) with a fake remote that rejects once
 
 ## 5. Integration
 

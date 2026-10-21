@@ -69,11 +69,19 @@ The proxy SHALL reject a push whose request body exceeds the configured maximum 
 - **THEN** the push is rejected and nothing reaches upstream
 
 ### Requirement: Every push is recorded
-For every push attempt, the proxy SHALL report a record to the control plane before answering the client: run, task, ref updates with old and new SHA, verdict, reasons, bytes and duration. If no record can be stored within 5 seconds, the push SHALL be rejected with `df:audit-unavailable`.
+For every push attempt, the proxy SHALL store a record (run, task, ref updates with old and new SHA, verdict, reasons, bytes, duration) with the control plane before answering the client. A push to forward SHALL be recorded as `forwarding` before anything reaches upstream, then updated to its final verdict. If the record cannot be stored within 5 seconds, the push SHALL be rejected with `df:audit-unavailable`.
 
 #### Scenario: Accepted push recorded
 - **WHEN** the task branch of `DF-7` is pushed successfully
 - **THEN** a push record with verdict `accepted` and an audit entry `git.push` exist for run R
+
+#### Scenario: Recorded before forwarding
+- **WHEN** a push passes all rules and checks
+- **THEN** its record exists with verdict `forwarding` before the proxy sends the first byte to upstream
+
+#### Scenario: Retried record
+- **WHEN** the gateway sends the same final verdict for a push twice
+- **THEN** one record and one audit entry exist for that push
 
 #### Scenario: Control plane unreachable
 - **WHEN** no control plane replica answers the record within 5 seconds
