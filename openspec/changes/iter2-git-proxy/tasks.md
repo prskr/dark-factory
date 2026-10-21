@@ -17,7 +17,7 @@
 - [ ] 3.2 Implement fetch forwarding with credential injection and header filtering (design D3). Verify blobless clone and protocol v2 against a local upstream (`git http-backend` behind a test HTTP server), and verify with a captured upstream request that a client `Authorization` header is replaced
 - [ ] 3.3 Implement spool, mirror and quarantine with the no-op `PushChecks` (design D5), including the size limit. Verify an accepted fast-forward push, a rejected non-fast-forward push, the "oversized push" scenario, and that concurrent pushes to two tasks of one repository both succeed
 - [ ] 3.4 Implement the two-phase push records with retry and fail-closed behaviour (design D6). Verify "accepted push recorded", "recorded before forwarding" (the fake upstream asserts that the record exists when the first byte arrives) and "control plane unreachable" with a fake `GatewayGit` server that delays or fails
-- [ ] 3.5 Map upstream failures (design D3). Verify the "forge down" scenario and that a 401 from upstream reaches the client as 502 without a challenge
+- [ ] 3.5 Map upstream failures (design D3). Verify the "forge down" scenario (503) and "forge rejects the credential" (401 from upstream reaches the client as 502 without a challenge)
 - [ ] 3.6 Document the Git endpoint settings (port, host name, mirror directory, max push size) in `crates/df-gateway/README.md` and verify `cargo llvm-cov -p df-gateway` stays at ≥ 70 % line coverage
 
 ## 4. Control plane
@@ -28,7 +28,7 @@
 
 ## 5. Runtime and sandbox wiring
 
-- [ ] 5.1 Remove the credential helper from `factory-agent` and change the generated `.git/config` (design D8). Verify the git-hardening scenarios "planted configuration", "proxy certificate trusted" (test CA) and "no credential prompt"; update `crates/factory-agent/docs/configuration.md`. Add the retry of transient Git failures (`specs/workspace-lifecycle/spec.md`); verify "gateway rollout during clone", "rejected push is not retried" and "response lost after the ref update" against a stub server
+- [ ] 5.1 Remove the credential helper from `factory-agent` and change the generated `.git/config` (design D8). Verify the git-hardening scenarios "planted configuration", "proxy certificate trusted" (test CA) and "no credential prompt"; update `crates/factory-agent/docs/configuration.md`. Add the retry of transient Git failures (`specs/workspace-lifecycle/spec.md`); verify "gateway rollout during clone", "forge unavailable during push", "credential rejected upstream", "rejected push is not retried" and "response lost after the ref update" against a stub server
 - [ ] 5.2 Add `hostAliases`, `NO_PROXY` and the network policy rule for the gateway Git port in `df-k8s`. Verify with pod spec and policy rendering tests for the "clone without DNS" scenario
 - [ ] 5.3 Chart: Git port on the gateway Service and container, certificate DNS names, mirror `emptyDir`, max push size value, gateway ingress from the sandbox namespace on the Git port. Verify with helm unit tests for the `helm-deployment` scenarios and update the chart README
 

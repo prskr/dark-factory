@@ -52,7 +52,7 @@ The agent contract only marks `CredentialRequest`/`CredentialGrant` as deprecate
 ### D3 — Forwarding
 - hyper server with rustls (gateway certificate) on 8443. A hyper client builds upstream requests to `<upstream_url>/info/refs?service=…` and `<upstream_url>/git-upload-pack|git-receive-pack`.
 - Forwarded request headers: `Content-Type`, `Content-Encoding`, `Accept`, `Git-Protocol`, `User-Agent`. Everything else, `Authorization` in particular, is dropped. The proxy adds `Authorization: Basic <username:password>`.
-- Response bodies are streamed back unchanged. Upstream status codes are passed through, except 401/403, which become 502 with a fixed message, so that the client never sees an authentication challenge for the forge.
+- Response bodies are streamed back unchanged. Upstream status codes are passed through, except 401/403, which become 502 with a fixed message, so that the client never sees an authentication challenge for the forge. A connection failure or timeout towards the upstream becomes 503, the same status as "no snapshot yet", so that the runtime can retry exactly the 503 cases and nothing else.
 - The upstream must be HTTPS, and redirects are not followed.
 
 ### D4 — Ref rules

@@ -88,8 +88,12 @@ For every push attempt, the proxy SHALL store a record (run, task, ref updates w
 - **THEN** the push is rejected with `df:audit-unavailable` and nothing reaches upstream
 
 ### Requirement: Upstream failures are reported, not hidden
-When the upstream forge is unreachable or rejects a forwarded push, the proxy SHALL relay the upstream response or answer 502, and SHALL record the push with verdict `upstream-failed`.
+When the upstream forge is unreachable or times out, the proxy SHALL answer 503. When the upstream answers 401 or 403 to the proxy's credential, it SHALL answer 502 with a fixed message. Every other upstream response SHALL be relayed unchanged. A forwarded push that ends in either failure SHALL be recorded with verdict `upstream-failed`. 503 is the only status the proxy uses for conditions that are expected to clear by themselves (no snapshot yet, upstream unreachable).
 
 #### Scenario: Forge down
 - **WHEN** Forgejo is unreachable during a push
-- **THEN** `git push` fails and the push record has verdict `upstream-failed`
+- **THEN** the proxy answers 503, `git push` fails and the push record has verdict `upstream-failed`
+
+#### Scenario: Forge rejects the credential
+- **WHEN** Forgejo answers 401 to the proxy's forwarded push
+- **THEN** the proxy answers 502 without an authentication challenge and the push record has verdict `upstream-failed`
