@@ -18,7 +18,7 @@
 
 ## 3. Run metrics in the control plane
 
-- [ ] 3.1 Write failing tests with an in-memory metric reader: each instrument in the "Run metrics from the agent channel" table is recorded once per persisted message; replayed messages and rolled-back transactions record nothing (container-backed)
+- [ ] 3.1 Write failing tests with an in-memory metric reader: each instrument of the "Run and turn instruments", "Tool, push and runtime instruments" and "Connection instruments" requirements is recorded once per persisted message; replayed messages and rolled-back transactions record nothing (container-backed)
 - [ ] 3.2 Implement metric effects in `persist_batch`, recorded after commit; connection and reconnect counters in the session handler (design D4)
 - [ ] 3.3 Write failing tests for `BoundedLabel` (truncation, 32-value cap, `other`) and duration rejection; implement (design D5)
 - [ ] 3.4 Add the `agent.session` and `agent.persist_batch` spans and the `http.request` span for the HTTP listener

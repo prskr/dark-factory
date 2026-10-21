@@ -5,11 +5,7 @@ Defines how Dark Factory components select their log format and level, how a san
 ## ADDED Requirements
 
 ### Requirement: Log format selection
-The control plane, gateway, migrate command and sandbox runtime SHALL read the log format from `DF_LOG_FORMAT`. Accepted values are `text` and `json`; the default is `text`. With `text` each event SHALL be one human-readable line (timestamp, level, target, message, fields). With `json` each event SHALL be exactly one JSON object per line containing at least the timestamp, level, target, message and all event fields. An unknown value SHALL make the process exit with a non-zero status and an error naming the variable before any other work starts.
-
-#### Scenario: JSON format
-- **WHEN** a component starts with `DF_LOG_FORMAT=json`
-- **THEN** every line it writes to stdout is a parseable JSON object with `timestamp`, `level` and `fields.message`
+The control plane, gateway, migrate command and sandbox runtime SHALL read the log format from `DF_LOG_FORMAT`. Accepted values are `text` and `json`; the default is `text`. An unknown value SHALL make the process exit with a non-zero status and an error naming the variable before any other work starts.
 
 #### Scenario: Default format
 - **WHEN** a component starts without `DF_LOG_FORMAT`
@@ -18,6 +14,13 @@ The control plane, gateway, migrate command and sandbox runtime SHALL read the l
 #### Scenario: Invalid format
 - **WHEN** a component starts with `DF_LOG_FORMAT=logfmt`
 - **THEN** it exits with a non-zero status and reports that `DF_LOG_FORMAT` must be `text` or `json`
+
+### Requirement: Log line shape
+With `text` each event SHALL be one human-readable line (timestamp, level, target, message, fields). With `json` each event SHALL be exactly one JSON object per line containing at least the timestamp, level, target, message and all event fields.
+
+#### Scenario: JSON format
+- **WHEN** a component starts with `DF_LOG_FORMAT=json`
+- **THEN** every line it writes to stdout is a parseable JSON object with `timestamp`, `level` and `fields.message`
 
 ### Requirement: Per-component log level
 Each component SHALL read its log level from `RUST_LOG` in `EnvFilter` directive syntax (for example `info` or `info,factory_agent=debug`). When `RUST_LOG` is unset or empty each component SHALL log at `info`. The control plane, gateway and sandbox runtime SHALL be configurable independently of each other.
@@ -45,29 +48,45 @@ When the control plane creates a sandbox it SHALL set `DF_LOG_FORMAT` in the san
 - **WHEN** the instance config sets `sandbox.logLevel: debug` and the control plane creates a sandbox
 - **THEN** the sandbox runtime's environment contains `RUST_LOG=debug`
 
-### Requirement: Session lifecycle events
+### Requirement: Run lifecycle events
 The sandbox runtime SHALL write an INFO event for each of the following, with the listed fields:
 
 | Event | Fields |
 |-------|--------|
 | run assigned | `run_id`, `task_key` |
-| harness started | harness command (program name only) |
+| harness started | harness program name only |
 | harness session ready | `session_id`, `resumed` |
-| prompt received | `prompt_id` |
-| turn started | `turn_id`, number of prompts |
-| user message delivered | `turn_id`, `prompt_id` |
-| tool call | `turn_id`, `tool_call_id`, `title`, `kind`, `origin`, `input` |
-| tool call status changed | `turn_id`, `tool_call_id`, `status` |
-| plan updated | `turn_id`, number of entries |
-| turn ended | `turn_id`, `stop_reason`, output tokens, `detail` when set |
 | push report | `ref`, `status`, `sha` |
 | run finished | `outcome`, `detail` |
 
-Notices SHALL be logged with `code` and `message` at WARN for warning and error notices and at INFO otherwise. Agent message chunks and agent thought chunks SHALL be logged at DEBUG only, with `turn_id`, `message_id` and their text.
+#### Scenario: Run start and end
+- **WHEN** a run is assigned, its harness starts and the run finishes
+- **THEN** the pod log contains, in order: run assigned, harness started, harness session ready, run finished
 
-#### Scenario: Following a run at the default level
-- **WHEN** a run executes one turn in which the harness calls one tool and ends the turn
-- **THEN** the pod log contains, in order: run assigned, harness started, harness session ready, turn started, user message delivered, tool call, tool call status changed, turn ended, run finished
+### Requirement: Turn events
+The sandbox runtime SHALL write an INFO event for each of the following, with the listed fields:
+
+| Event | Fields |
+|-------|--------|
+| prompt received | `prompt_id` |
+| turn started | `turn_id`, number of prompts |
+| user message delivered | `turn_id`, `prompt_id` |
+| plan updated | `turn_id`, number of entries |
+| turn ended | `turn_id`, `stop_reason`, output tokens, `detail` when set |
+
+#### Scenario: One turn
+- **WHEN** a run executes one turn for one prompt
+- **THEN** the pod log contains, in order: prompt received, turn started, user message delivered, turn ended
+
+### Requirement: Tool call events
+The sandbox runtime SHALL write an INFO event `tool call` with `turn_id`, `tool_call_id`, `title`, `kind`, `origin` and `input` when the harness reports a tool call, and an INFO event `tool call status changed` with `turn_id`, `tool_call_id` and `status` for each tool call update that sets a status.
+
+#### Scenario: Tool call at the default level
+- **WHEN** the harness calls one tool that completes, and the sandbox runs at `info`
+- **THEN** the pod log contains a tool call event followed by a tool call status changed event with status `completed`
+
+### Requirement: Notices and message chunks
+Notices SHALL be logged with `code` and `message` at WARN for warning and error notices and at INFO otherwise. Agent message chunks and agent thought chunks SHALL be logged at DEBUG only, with `turn_id`, `message_id` and their text.
 
 #### Scenario: Message chunks hidden at INFO
 - **WHEN** the harness streams agent message chunks and the sandbox runs at `info`

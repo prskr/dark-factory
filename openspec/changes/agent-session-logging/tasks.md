@@ -13,7 +13,7 @@
 - [ ] 2.2 Write failing tests for `log_outbound()`: tool call at INFO with `title`, `kind`, `origin`, `input`; 10 KiB input cut to ≤ 512 bytes with `input_truncated=true`; raw output never present; tool call update with status at INFO and without status at DEBUG; message and thought chunks only at DEBUG; turn started/ended, user message, plan, notice (WARN for warning/error), push report and run report fields per `specs/logging/spec.md`
 - [ ] 2.3 Implement `log_outbound()` in `runner.rs` and call it from `send_body()` (design D1); add a UTF-8-safe truncation helper (reuse the boundary logic of `transcript::truncate_raw_io`)
 - [ ] 2.4 Add the call-site events: run assigned (`main.rs`, after `Assign`), prompt received (`main.rs` before `Assign` and the inbound task in `run_session()`), harness started (after spawn, program name only), harness session ready (after `setup_session()`, `session_id`, `resumed`)
-- [ ] 2.5 Extend an existing end-to-end runner test with the fake ACP agent (one turn, one tool call) to capture logs and assert the event order from the "Following a run at the default level" scenario
+- [ ] 2.5 Extend an existing end-to-end runner test with the fake ACP agent (one turn, one tool call) to capture logs and assert the event order from the "Run start and end", "One turn" and "Tool call at the default level" scenarios
 - [ ] 2.6 Verify no credentials, prompt content or tool output are logged: grep the captured output of 2.5 for the test's credential and prompt strings
 
 ## 3. Helm chart
