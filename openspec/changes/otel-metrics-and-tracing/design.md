@@ -1,0 +1,117 @@
+## Context
+
+- No metrics or traces exist. `design/tech-stack.md` / ADR-0003 settle on `tracing` + OpenTelemetry.
+- `dark-factory` is one binary for control plane (`serve`), gateway (`gateway`) and `migrate`. After `agent-session-logging` its subscriber is set up in `init_tracing(format)` after `Cli::parse()`.
+- The control plane HTTP endpoint is a hand-rolled placeholder (`serve_http_health`); `axum` is in `Cargo.lock` through `tonic`'s `router` feature.
+- The agent channel (`df-agent-channel/src/session.rs`, `persist_batch`) drops already persisted sequence numbers and applies each new message inside one transaction. This gives an exactly-once hook for metrics.
+- Sandboxes are untrusted and network-restricted (`run-network-policy`); their only path to the control plane is the mTLS agent channel with the durable outbox.
+- Instance NetworkPolicies (`templates/netpol.yaml`) restrict ingress only.
+
+## Goals / Non-Goals
+
+**Goals:**
+- Prometheus scraping works with default values; OTLP is opt-in; tracing is opt-in.
+- Standard `OTEL_*` variables, no custom configuration surface besides Helm values that render them.
+- No OTel dependency, no new egress and no data loss for the sandbox runtime.
+
+**Non-Goals:**
+- Logs over OTLP (stdout logs from `agent-session-logging` stay the log path).
+- Spans in the sandbox runtime and trace context propagation over the agent channel or between gateway and control plane.
+- Dashboards and alert rules (can follow as a separate chart artifact).
+- A gauge of runs per state (each replica would report the same database count; needs leader-only reporting — later).
+- Metrics for `migrate`.
+
+## Decisions
+
+### D1: Libraries use the OTel API, the binary owns the SDK
+
+`df-agent-channel` and the gateway code take instruments from `opentelemetry::global::meter("<crate>")`. `crates/dark-factory/src/telemetry.rs` builds the `SdkMeterProvider` / `SdkTracerProvider`, registers them globally and returns a guard that flushes on shutdown. Without a provider (tests, `none`) the global meter is a no-op.
+
+Alternative: pass a `Metrics` struct through constructors. Rejected: touches every constructor for an optional concern; the global API is the documented OTel pattern for libraries.
+
+### D2: Exporters from standard env vars
+
+`OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` are parsed by `telemetry.rs` (the Rust SDK does not auto-configure exporters from them). Defaults deviate from the OTel spec on purpose: metrics `prometheus` (spec: `otlp`) and traces `none` (spec: `otlp`), because a homelab without a collector must not log export errors forever. The OTLP builders resolve `OTEL_EXPORTER_OTLP_*` themselves (0.33 behavior: schemeless endpoints default to `https`, `OTEL_EXPORTER_OTLP_INSECURE` for plaintext). Both `grpc` (tonic, already a dependency) and `http/protobuf` are enabled; `http/protobuf` uses `reqwest` with rustls if `cargo deny` accepts it, otherwise only `grpc` is offered and the schema enum shrinks.
+
+Alternative: a `telemetry:` section in the instance config. Rejected: telemetry must be installed together with the subscriber before the config file is read, and the standard variables are what collector documentation tells operators to set.
+
+### D3: Prometheus via `opentelemetry-prometheus`, served by `axum`
+
+`opentelemetry-prometheus` (released in lockstep with the SDK, 0.33.1) provides a reader with a `prometheus::Registry`; a small `axum` router serves `GET /metrics` on its own listener and port. Instrument names follow OTel conventions (`df.agent.turns`); the exporter renders them as `df_agent_turns_total`.
+
+Alternatives: OTLP-only and let Prometheus ingest OTLP (`--web.enable-otlp-receiver`) — rejected as the default because many homelab Prometheus installs (kube-prometheus-stack) don't enable it. Hand-written text exposition — rejected, more code to maintain than the exporter crate.
+
+### D4: Agent metrics are derived and relayed, not exported by the runtime
+
+`persist_batch` collects "metric effects" alongside its existing `Effects` while it applies messages, and records them after `tx.commit()`. Replayed and rolled-back messages therefore never count. A batch that fails is retried by the runtime, and the metrics are recorded on the attempt that commits. Turn duration, prepare, push, harness start and finalize durations cannot be derived reliably (no timestamps on `PhaseChanged`, replay skews arrival times), so the runtime measures them and sends `RuntimeTiming` (new `AgentMessage.body` field 17):
+
+```proto
+message RuntimeTiming {
+  RuntimeOperation operation = 1;
+  uint64 duration_ms = 2;
+  bool ok = 3;
+}
+enum RuntimeOperation {
+  RUNTIME_OPERATION_UNSPECIFIED = 0;
+  RUNTIME_OPERATION_WORKSPACE_PREPARE = 1;
+  RUNTIME_OPERATION_HARNESS_START = 2;
+  RUNTIME_OPERATION_TURN = 3;
+  RUNTIME_OPERATION_PUSH = 4;
+  RUNTIME_OPERATION_FINALIZE = 5;
+}
+```
+
+The control plane does not store `RuntimeTiming` in the database; it only advances `last_persisted_seq` and records the histogram after commit.
+
+Alternative: OTLP from the sandbox to a collector — rejected (decided with the user): needs an egress exception reachable by agent code, and in-memory buffers lose data when the pod ends.
+
+Tool calls are counted on the first `ToolCallUpdate` (or `ToolCall`) with status `completed`/`failed`. To know which calls were already counted across batches without new state, the control plane checks the stored transcript projection for the previous status of that `tool_call_id` inside the same transaction (`transcript::insert` already resolves the call). If that turns out to require a new query per update, counting on the terminal status of each update is acceptable, because ACP sends the terminal status once.
+
+### D5: Cardinality guard
+
+A small `BoundedLabel` (mutex-protected `HashSet<String>`, capacity 32, values truncated to 64 bytes) maps model ids; everything else uses `as_str_name()` of the protobuf enum. `project` comes from the database, not from the sandbox.
+
+### D6: Tracing layer
+
+With `OTEL_TRACES_EXPORTER=otlp`, `init_tracing` adds a `tracing_opentelemetry` layer (filtered by the same `RUST_LOG`) to the existing fmt layer. New spans: `http.request` (method, route, status), `agent.session` (run id as span attribute — allowed on spans, not on metrics), `agent.persist_batch` (message count), `gateway.connect` (decision; no host for denied connections). The sampler is built from `OTEL_TRACES_SAMPLER`/`_ARG` if the SDK does not read them itself.
+
+### D7: Helm
+
+```yaml
+telemetry:
+  metrics:
+    exporters: [prometheus]      # prometheus, otlp; [] = off
+    port: 9464
+    serviceMonitor: { enabled: false, labels: {}, interval: "" }
+  traces:
+    enabled: false
+    sampler: parentbased_always_on
+    samplerArg: ""
+  otlp:
+    endpoint: ""
+    protocol: grpc               # grpc | http/protobuf
+    insecure: false
+    headersSecret: ""            # Secret with key `headers` -> OTEL_EXPORTER_OTLP_HEADERS
+networkPolicy:
+  metricsScraper:
+    namespaceSelector: {}        # empty = no scraper ingress rule
+    podSelector: {}
+```
+
+Settings are shared by control plane and gateway; `OTEL_SERVICE_NAME` is set per component by the templates. Per-component overrides can be added when someone needs them.
+
+## Risks / Trade-offs
+
+- [`opentelemetry-prometheus` depends on the `prometheus` crate (and `protobuf`)] → Check `cargo deny` and `cargo xtask outdated` first (task 1.1). Fallback: OTLP-only plus the documented Prometheus OTLP receiver.
+- [OTel Rust API churn between 0.x releases] → All OTel crates are pinned to one release line in `[workspace.dependencies]`; usage is concentrated in `telemetry.rs`.
+- [Metrics recorded after commit are lost if the process crashes between commit and record] → Accepted: counters reset on restart anyway; the database stays the source of truth.
+- [Unauthenticated `/metrics`] → Separate port, never exposed through the ingress, NetworkPolicy allows only the configured scraper; metrics carry no run ids or hosts.
+- [Gateway instruments depend on `iter1-egress-gateway`] → Gateway exporter setup lands independently; instruments are added in the proxy once that change is merged.
+
+## Migration Plan
+
+Additive. Older runtimes don't send `RuntimeTiming`; older control planes ignore it (sequence preserved, see `agent-channel` spec). Rollback: revert images; the extra env vars and the `metrics` port are unused by older binaries.
+
+## Open Questions
+
+- Exact histogram bucket boundaries for `df.run.duration` and `df.agent.runtime.duration` (minutes to hours vs. milliseconds to seconds). Decided during implementation with the SDK's view API; does not affect the specs.
