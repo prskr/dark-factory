@@ -27,6 +27,7 @@ In iteration 1 the sandbox reaches the forge directly. A credential helper hands
 - `helm-deployment`: the gateway serves the Git port (Service, certificate SAN, network policy, mirror volume).
 - `egress-policy-distribution` (introduced by `iter1-egress-gateway`): the snapshot carries Git routes and forge credentials.
 - `run-network-policy` (introduced by `iter1-sandbox-provisioning`): sandboxes reach the gateway's Git port by name.
+- `workspace-lifecycle`: the runtime retries Git network operations that fail transiently (gateway rollouts, control plane restarts behind the proxy).
 
 ## Impact
 

@@ -10,6 +10,7 @@ Remove the last forge credential from sandboxes and let humans make the decision
 - Agents ask questions and request approvals through factory tools. Humans answer from one inbox, on a phone or a desktop, and the control plane applies approved actions itself.
 - Denied egress hosts can be allowed from the live log or through an approval, without restarting the run.
 - Humans can stop a run or cancel a task.
+- Tasks recover from rate limits, lost sandboxes and control plane restarts without a human, so batches run through the night. Task volumes are reclaimed and can be reset.
 
 Prerequisites: iteration 1 and iteration 1.1 are done ([`roadmap.md`](roadmap.md)).
 
@@ -32,6 +33,8 @@ flowchart LR
   AR --> EA[iter2-egress-approvals]
   CA[iter2-cancel]
   AR -. closes pending requests .-> CA
+  CA --> RR[iter2-run-resilience]
+  CA --> TV[iter2-task-volume-lifecycle]
 ```
 
 | Change | Scope |
@@ -41,8 +44,10 @@ flowchart LR
 | `iter2-push-checks` | Quarantine and checks for pushes: secret scan, commit identity, protected paths, size limits, linear history. Per-project push policy, approval-gated checks raising `push-check-exception`, rejection feedback to the agent. |
 | `iter2-egress-approvals` | Task-scoped allowlist entries, "allow" action in the egress log, `network-access` approvals (raised automatically on denials or by the agent). |
 | `iter2-cancel` | Stop a run, cancel a task (new `cancelled` status), with UI actions. |
+| `iter2-run-resilience` | Resume times for tasks: automatic resume after rate limits (at the retry time) and, bounded, after `sandbox_lost`, `connect_timeout` and `provisioning_failed`; concurrency limit; capacity rejections wait; re-provisioning of interrupted runs (TD-18); final report flush window of 10 minutes (TD-2). |
+| `iter2-task-volume-lifecycle` | Deleting task volumes: retention after close and idle TTL, "reset workspace" action. |
 
-Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`.
+Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`. `iter2-run-resilience` and `iter2-task-volume-lifecycle` are archived after `iter2-cancel` (they build on `cancelled` and the run-end mapping) and can be implemented any time; `iter2-run-resilience` first, it has the larger effect on unattended use.
 
 ## 4. Decisions taken for this iteration
 
@@ -58,6 +63,11 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | 8 | Questions in iteration 2 are addressed to humans only. Questions to a parent task's agent come with the task tree (iteration 3). | — |
 | 9 | Only `board-member` decides requests (`approval:decide` maps to it). The full permission model stays in iteration 4. | — |
 | 10 | A cancelled task can be reopened by queueing a message (like `failed`). | Terminal `cancelled`: needs an extra "reopen" action. |
+| 11 | Tasks resume automatically after rate limits and, up to `runs.maxAutoResumes` consecutive times, after infrastructure failures (`sandbox_lost`, `connect_timeout`, `provisioning_failed`). `failed` runs (harness crash) stay for a human. | Resume everything: a crash loop spends subscription usage all night. Resume nothing: every blip stops the batch. |
+| 12 | `runs.maxConcurrent` (default 4) caps active runs per instance; quota rejections re-queue the task without counting as a resume. | Fail the task on a quota rejection (today). |
+| 13 | The runtime keeps flushing its final report for up to 10 minutes after finalize (TD-2). A pod that exits without a report ends `sandbox_lost` and is resumed. | Control plane reconstructs the outcome from the outbox on the volume at the next run: more code, same result. |
+| 14 | Task volumes are deleted 7 days after `completed`/`cancelled` and after 30 days idle; "reset workspace" deletes on demand. | Keep volumes forever (today): storage grows per task. |
+| 15 | Gateway pods report not ready until their first policy snapshot; the runtime retries transient Git failures. | Accept failed clones during gateway rollouts. |
 
 ## 5. Contract changes (all additive)
 

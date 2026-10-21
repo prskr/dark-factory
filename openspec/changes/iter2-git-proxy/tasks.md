@@ -28,7 +28,7 @@
 
 ## 5. Runtime and sandbox wiring
 
-- [ ] 5.1 Remove the credential helper from `factory-agent` and change the generated `.git/config` (design D8). Verify the git-hardening scenarios "planted configuration", "proxy certificate trusted" (test CA) and "no credential prompt"; update `crates/factory-agent/docs/configuration.md`
+- [ ] 5.1 Remove the credential helper from `factory-agent` and change the generated `.git/config` (design D8). Verify the git-hardening scenarios "planted configuration", "proxy certificate trusted" (test CA) and "no credential prompt"; update `crates/factory-agent/docs/configuration.md`. Add the retry of transient Git failures (`specs/workspace-lifecycle/spec.md`); verify "gateway rollout during clone" and "rejected push is not retried" against a stub server
 - [ ] 5.2 Add `hostAliases`, `NO_PROXY` and the network policy rule for the gateway Git port in `df-k8s`. Verify with pod spec and policy rendering tests for the "clone without DNS" scenario
 - [ ] 5.3 Chart: Git port on the gateway Service and container, certificate DNS names, mirror `emptyDir`, max push size value, gateway ingress from the sandbox namespace on the Git port. Verify with helm unit tests for the `helm-deployment` scenarios and update the chart README
 
