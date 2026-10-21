@@ -60,7 +60,7 @@ The slice deliberately exercises the riskiest parts early: the agent protocol, t
 - **Fake ACP agent** for tests: a scripted agent built on the `agent-client-protocol` crate that emits predictable updates, tool calls and commits, so end-to-end tests run without Claude and without consuming the subscription.
 
 ## 4. Out of scope (later iterations)
-- CEO chat per (persona, project), task dependencies (`blocked_by`), project context document → iteration 2 candidates.
+- CEO chat per (persona, project), task dependencies (`blocked_by`), project context document → iteration 3 (see [`roadmap.md`](roadmap.md)).
 - Webhooks and event routing (ADR-0015).
 - Delegation and the task tree (ADR-0034), multiple personas working together, routines, typed approval requests and `AwaitingInput` (ADR-0038; iteration 1 has plain-text questions at the end of a turn only).
 - Full-harness mode and the inference gateway.
