@@ -8,7 +8,7 @@ Each run needs a cold-started, isolated sandbox with the task's volume, the runt
 
 - Spikes: image volumes with Talos containerd + Kata, csi-driver volumes in Kata, agent-sandbox pod template passthrough, NetworkPolicy enforcement and pod source IPs with Kata.
 - kopium-generated types for the pinned agent-sandbox `Sandbox` CRD.
-- `SandboxProvider` implementation in `df-k8s`: task PVC (`factory-workspace` StorageClass, size from config), one `Sandbox` per run (project image, runtime image volume at `/opt/factory`, csi-driver certificate, PVC at `/data`, tmpfs at `/run/factory`, runtime class, restricted security context, no SA token, labels, proxy and control-plane env, `hostAliases`), teardown, identity resolution from a pod informer, sandbox events.
+- `SandboxProvider` implementation in `df-k8s`: task PVC (StorageClass and size from config; cluster default StorageClass when unset), one `Sandbox` per run (project image, runtime image volume at `/opt/factory`, csi-driver certificate, PVC at `/data`, tmpfs at `/run/factory`, optional runtime class (e.g. `kata`; cluster default runtime when unset), restricted security context, no SA token, labels, proxy and control-plane env, `hostAliases`), teardown, identity resolution from a pod informer, sandbox events.
 - Generated per-run `NetworkPolicy` (Kubernetes mode) owned by the Sandbox, rendered from the database's cluster targets and re-rendered by the leader on changes and drift.
 - `SecretStore` implementation reading referenced Secrets in the instance namespace.
 - Startup check of the sandbox namespace and permissions (`SelfSubjectAccessReview`).

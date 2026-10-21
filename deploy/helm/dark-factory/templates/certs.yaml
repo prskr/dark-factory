@@ -1,9 +1,13 @@
 {{- if .Values.tls.ca.create }}
+{{- /*
+A CA ClusterIssuer reads its key pair from the cert-manager cluster resource namespace, not from
+the release namespace, so the self-signed bootstrap Issuer and the CA Certificate live there.
+*/}}
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: {{ include "dark-factory.fullname" . }}-selfsigned-issuer
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "dark-factory.ca.base" . }}-selfsigned-issuer
+  namespace: {{ .Values.tls.ca.clusterResourceNamespace }}
   labels:
     {{- include "dark-factory.labels" . | nindent 4 }}
 spec:
@@ -12,32 +16,31 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: {{ include "dark-factory.fullname" . }}-ca
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "dark-factory.ca.base" . }}-ca
+  namespace: {{ .Values.tls.ca.clusterResourceNamespace }}
   labels:
     {{- include "dark-factory.labels" . | nindent 4 }}
 spec:
   isCA: true
-  commonName: {{ include "dark-factory.fullname" . }}-ca
-  secretName: {{ include "dark-factory.fullname" . }}-ca-key-pair
+  commonName: {{ include "dark-factory.ca.base" . }}-ca
+  secretName: {{ include "dark-factory.ca.base" . }}-ca-key-pair
   privateKey:
     algorithm: ECDSA
     size: 256
   issuerRef:
-    name: {{ include "dark-factory.fullname" . }}-selfsigned-issuer
+    name: {{ include "dark-factory.ca.base" . }}-selfsigned-issuer
     kind: Issuer
     group: cert-manager.io
 ---
 apiVersion: cert-manager.io/v1
-kind: Issuer
+kind: ClusterIssuer
 metadata:
-  name: {{ include "dark-factory.fullname" . }}-ca-issuer
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "dark-factory.ca.base" . }}-ca-issuer
   labels:
     {{- include "dark-factory.labels" . | nindent 4 }}
 spec:
   ca:
-    secretName: {{ include "dark-factory.fullname" . }}-ca-key-pair
+    secretName: {{ include "dark-factory.ca.base" . }}-ca-key-pair
 {{- end }}
 ---
 apiVersion: cert-manager.io/v1

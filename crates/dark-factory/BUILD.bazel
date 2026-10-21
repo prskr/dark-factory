@@ -15,6 +15,7 @@ rust_binary(
         "//crates/df-agent-channel:df_agent_channel",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-k8s:df_k8s",
         "//crates/df-web:df_web",
     ],
 )
@@ -38,6 +39,7 @@ rust_test(
         "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-k8s:df_k8s",
         "//crates/df-test-postgres:df_test_postgres",
         "//crates/df-web:df_web",
     ],

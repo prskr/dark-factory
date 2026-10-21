@@ -171,6 +171,7 @@ crate.from_cargo(
         "//crates/dark-factory:Cargo.toml",
         "//crates/df-core:Cargo.toml",
         "//crates/df-db:Cargo.toml",
+        "//crates/df-k8s:Cargo.toml",
         "//crates/df-proto:Cargo.toml",
         "//crates/df-web:Cargo.toml",
         "//crates/factory-agent:Cargo.toml",

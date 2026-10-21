@@ -1,0 +1,20 @@
+---
+source: crates/df-k8s/src/render.rs
+expression: pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: dark-factory
+    dark-factory.io/instance: test-instance
+    dark-factory.io/task-key: DF-1
+  name: task-df-1
+  namespace: dark-factory-dev-sandboxes
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: factory-workspace

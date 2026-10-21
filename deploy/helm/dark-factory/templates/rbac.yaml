@@ -32,21 +32,18 @@ rules:
     verbs: ["create", "get", "list", "watch", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   {{- if eq .Values.enforcement.mode "cilium" }}
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   {{- end }}
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -78,11 +75,8 @@ rules:
     resources: ["leases"]
     verbs: ["get", "create", "update"]
   - apiGroups: [""]
-    resources: ["secrets"]
+    resources: ["secrets", "services"]
     verbs: ["get"]
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -169,3 +163,32 @@ subjects:
     namespace: {{ $.Release.Namespace }}
 {{- end }}
 {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-sandbox-namespace-reader
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [{{ .Values.sandboxNamespace.name | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-sandbox-namespace-reader
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "dark-factory.fullname" . }}-sandbox-namespace-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

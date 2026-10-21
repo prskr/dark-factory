@@ -1,0 +1,49 @@
+---
+source: crates/df-k8s/src/render.rs
+expression: netpol_baseline
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: dark-factory
+    dark-factory.io/instance: test-instance
+    dark-factory.io/run-id: 00000000-0000-0000-0000-000000000001
+    dark-factory.io/task-key: DF-1
+  name: run-df-1-1
+  namespace: dark-factory-dev-sandboxes
+  ownerReferences:
+    - apiVersion: agents.x-k8s.io/v1beta1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Sandbox
+      name: run-df-1-1
+      uid: test-uid-123
+spec:
+  egress:
+    - ports:
+        - port: 9443
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dark-factory-dev
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: control-plane
+    - ports:
+        - port: 3128
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dark-factory-dev
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+  podSelector:
+    matchLabels:
+      dark-factory.io/run-id: 00000000-0000-0000-0000-000000000001
+  policyTypes:
+    - Ingress
+    - Egress
