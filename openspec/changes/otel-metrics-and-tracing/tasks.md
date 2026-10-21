@@ -2,7 +2,7 @@
 
 ## 1. Dependencies and telemetry setup (after `agent-session-logging`)
 
-- [ ] 1.1 Add `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp` (`grpc-tonic`, and `http-proto` + rustls if `cargo deny` passes), `opentelemetry-prometheus`, `tracing-opentelemetry` and `axum` to `[workspace.dependencies]` with minimal features; verify `cargo deny check`, `cargo xtask outdated` and the Bazel lock files (design D2, D3, risks)
+- [ ] 1.1 Add `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp` (`grpc-tonic` with `tls-ring` and `tls-roots` for TLS to the collector, and `http-proto` + rustls if `cargo deny` passes), `opentelemetry-prometheus`, `tracing-opentelemetry` and `axum` to `[workspace.dependencies]` with minimal features; verify `cargo deny check`, `cargo xtask outdated` and the Bazel lock files (design D2, D3, risks)
 - [ ] 1.2 Write failing tests for parsing `OTEL_METRICS_EXPORTER` / `OTEL_TRACES_EXPORTER` (defaults, lists, `none`, unknown value) as a pure function over the values
 - [ ] 1.3 Implement `crates/dark-factory/src/telemetry.rs`: providers, resource (`service.name` per subcommand, `service.version`, `service.instance.id`, `OTEL_RESOURCE_ATTRIBUTES`), global registration, shutdown guard bounded by `SHUTDOWN_GRACE` (design D1, D2)
 - [ ] 1.4 Serve `GET /metrics` with `axum` on `OTEL_EXPORTER_PROMETHEUS_HOST:PORT`; test that a recorded counter appears in the response (design D3)

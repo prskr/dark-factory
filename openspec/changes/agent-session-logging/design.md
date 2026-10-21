@@ -33,7 +33,7 @@ Tool call status changes: a `ToolCallUpdate` with `status` set is logged at INFO
 
 Both binaries get a global clap argument `--log-format` with `env = "DF_LOG_FORMAT"`, `value_enum` (`text`, `json`), default `text`. Clap rejects invalid values with an error naming the env var before any work starts, which satisfies the spec. `dark-factory` moves `init_tracing()` after `Cli::parse()`.
 
-Level stays `RUST_LOG` with `EnvFilter` syntax; fallback `info` in both binaries (`EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))`).
+Level stays `RUST_LOG` with `EnvFilter` syntax. Both binaries resolve it the same way: unset or empty (after trimming) → `info`; a non-empty value that `EnvFilter::try_new` rejects → `info`, plus a WARN naming `RUST_LOG` once the subscriber is installed; any other value is used as is.
 
 Subscriber setup branches on the format and calls `.json()` for JSON (with `flatten_event(false)`, the default, so the message is under `fields.message`). Text keeps the current formatter.
 
@@ -46,7 +46,7 @@ Alternatives: a format key in the instance config YAML — rejected, logging is 
 ### D4: Sandbox propagation
 
 - Format: the control plane forwards its own parsed `LogFormat` (the value it initialized tracing with) into the sandbox env. The agent therefore follows the control plane even outside Helm.
-- Level: new instance config field `sandbox.logLevel` (`SandboxSectionConfig`, default `"info"`), forwarded verbatim as `RUST_LOG`. The control plane does not validate the directive syntax; an invalid directive is reported by the agent's `EnvFilter` (which ignores invalid directives).
+- Level: new instance config field `sandbox.logLevel` (`SandboxSectionConfig`, default `"info"`), forwarded verbatim as `RUST_LOG`. The control plane does not validate the directive syntax; an invalid value makes the agent fall back to `info` with a WARN (D2).
 - The format value is passed to the `SandboxProvider` together with the existing sandbox config. The exact plumbing depends on the `SandboxProvider` API from `iter1-sandbox-provisioning` and is decided when that change has landed.
 
 ### D5: Helm values

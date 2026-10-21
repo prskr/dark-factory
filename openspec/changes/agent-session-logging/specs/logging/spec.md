@@ -23,11 +23,15 @@ With `text` each event SHALL be one human-readable line (timestamp, level, targe
 - **THEN** every line it writes to stdout is a parseable JSON object with `timestamp`, `level` and `fields.message`
 
 ### Requirement: Per-component log level
-Each component SHALL read its log level from `RUST_LOG` in `EnvFilter` directive syntax (for example `info` or `info,factory_agent=debug`). When `RUST_LOG` is unset or empty each component SHALL log at `info`. The control plane, gateway and sandbox runtime SHALL be configurable independently of each other.
+Each component SHALL read its log level from `RUST_LOG` in `EnvFilter` directive syntax (for example `info` or `info,factory_agent=debug`). When `RUST_LOG` is unset, empty or invalid each component SHALL log at `info`; an invalid value SHALL additionally produce a WARN naming `RUST_LOG`. The control plane, gateway and sandbox runtime SHALL be configurable independently of each other.
 
 #### Scenario: Sandbox runtime default level
 - **WHEN** the sandbox runtime starts without `RUST_LOG`
 - **THEN** INFO events are written and DEBUG events are not
+
+#### Scenario: Invalid level
+- **WHEN** a component starts with `RUST_LOG=factory_agent=loud`
+- **THEN** it logs at `info` and writes a WARN naming `RUST_LOG`
 
 #### Scenario: Independent levels
 - **WHEN** the control plane runs with `RUST_LOG=debug` and the configured sandbox log level is `info`

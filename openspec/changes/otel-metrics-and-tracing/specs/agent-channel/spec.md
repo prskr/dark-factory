@@ -12,7 +12,7 @@ The runtime SHALL send an `AgentMessage` with a `RuntimeTiming` body (`operation
 
 #### Scenario: Timing survives a reconnect
 - **WHEN** the runtime sends a `RuntimeTiming` for a turn while the stream is down and reconnects later
-- **THEN** the message is replayed from the outbox and persisted once
+- **THEN** the message is replayed from the outbox and acknowledged once
 
 #### Scenario: Older control plane
 - **WHEN** a runtime sends `RuntimeTiming` to a control plane built before the message existed

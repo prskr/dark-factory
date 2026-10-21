@@ -3,7 +3,7 @@
 - No metrics or traces exist. `design/tech-stack.md` / ADR-0003 settle on `tracing` + OpenTelemetry.
 - `dark-factory` is one binary for control plane (`serve`), gateway (`gateway`) and `migrate`. After `agent-session-logging` its subscriber is set up in `init_tracing(format)` after `Cli::parse()`.
 - The control plane HTTP endpoint is a hand-rolled placeholder (`serve_http_health`); `axum` is in `Cargo.lock` through `tonic`'s `router` feature.
-- The agent channel (`df-agent-channel/src/session.rs`, `persist_batch`) drops already persisted sequence numbers and applies each new message inside one transaction. This gives an exactly-once hook for metrics.
+- The agent channel (`df-agent-channel/src/session.rs`, `persist_batch`) drops already persisted sequence numbers and applies each new message inside one transaction. This gives an at-most-once hook for metrics.
 - Sandboxes are untrusted and network-restricted (`run-network-policy`); their only path to the control plane is the mTLS agent channel with the durable outbox.
 - Instance NetworkPolicies (`templates/netpol.yaml`) restrict ingress only.
 
@@ -12,7 +12,8 @@
 **Goals:**
 - Prometheus scraping works with default values; OTLP is opt-in; tracing is opt-in.
 - Standard `OTEL_*` variables, no custom configuration surface besides Helm values that render them.
-- No OTel dependency, no new egress and no data loss for the sandbox runtime.
+- No OTel dependency and no new egress for the sandbox runtime; its messages reach the control plane reliably through the outbox.
+- Metric recording on the control plane is best-effort (at most once per message); the database, not the metrics, is the record of what happened.
 
 **Non-Goals:**
 - Logs over OTLP (stdout logs from `agent-session-logging` stay the log path).
@@ -31,7 +32,7 @@ Alternative: pass a `Metrics` struct through constructors. Rejected: touches eve
 
 ### D2: Exporters from standard env vars
 
-`OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` are parsed by `telemetry.rs` (the Rust SDK does not auto-configure exporters from them). Defaults deviate from the OTel spec on purpose: metrics `prometheus` (spec: `otlp`) and traces `none` (spec: `otlp`), because a homelab without a collector must not log export errors forever. The OTLP builders resolve `OTEL_EXPORTER_OTLP_*` themselves (0.33 behavior: schemeless endpoints default to `https`, `OTEL_EXPORTER_OTLP_INSECURE` for plaintext). Both `grpc` (tonic, already a dependency) and `http/protobuf` are enabled; `http/protobuf` uses `reqwest` with rustls if `cargo deny` accepts it, otherwise only `grpc` is offered and the schema enum shrinks.
+`OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` are parsed by `telemetry.rs` (the Rust SDK does not auto-configure exporters from them). Defaults deviate from the OTel spec on purpose: metrics `prometheus` (spec: `otlp`) and traces `none` (spec: `otlp`), because a homelab without a collector must not log export errors forever. The OTLP builders resolve `OTEL_EXPORTER_OTLP_*` themselves (0.33 behavior: schemeless endpoints default to `https`, `OTEL_EXPORTER_OTLP_INSECURE` for plaintext). Both `grpc` (tonic, already a dependency; TLS through `tls-ring` with the native root store via `tls-roots`, which the distroless static base image provides and which honours a mounted private CA) and `http/protobuf` are enabled; `http/protobuf` uses `reqwest` with rustls if `cargo deny` accepts it, otherwise only `grpc` is offered and the schema enum shrinks.
 
 Alternative: a `telemetry:` section in the instance config. Rejected: telemetry must be installed together with the subscriber before the config file is read, and the standard variables are what collector documentation tells operators to set.
 
@@ -61,7 +62,7 @@ enum RuntimeOperation {
 }
 ```
 
-The control plane does not store `RuntimeTiming` in the database; it only advances `last_persisted_seq` and records the histogram after commit.
+The control plane does not store `RuntimeTiming` in the database; it only advances `last_persisted_seq` and records the histogram after commit. `RuntimeTiming` metrics are best-effort: if the control plane process stops between commit and recording, the sequence is already acknowledged, the runtime does not resend the message and the observation is lost. Persisting timings or a durable export path was rejected; a lost histogram sample on a control plane crash does not justify a table or a second delivery path.
 
 Alternative: OTLP from the sandbox to a collector — rejected (decided with the user): needs an egress exception reachable by agent code, and in-memory buffers lose data when the pod ends.
 
@@ -91,7 +92,7 @@ telemetry:
     endpoint: ""
     protocol: grpc               # grpc | http/protobuf
     insecure: false
-    headersSecret: ""            # Secret with key `headers` -> OTEL_EXPORTER_OTLP_HEADERS
+    headersSecret: ""            # Secret with key `headers` -> OTEL_EXPORTER_OTLP_HEADERS (HTTP headers or gRPC metadata)
 networkPolicy:
   metricsScraper:
     namespaceSelector: {}        # empty = no scraper ingress rule
@@ -104,7 +105,7 @@ Settings are shared by control plane and gateway; `OTEL_SERVICE_NAME` is set per
 
 - [`opentelemetry-prometheus` depends on the `prometheus` crate (and `protobuf`)] → Check `cargo deny` and `cargo xtask outdated` first (task 1.1). Fallback: OTLP-only plus the documented Prometheus OTLP receiver.
 - [OTel Rust API churn between 0.x releases] → All OTel crates are pinned to one release line in `[workspace.dependencies]`; usage is concentrated in `telemetry.rs`.
-- [Metrics recorded after commit are lost if the process crashes between commit and record] → Accepted: counters reset on restart anyway; the database stays the source of truth.
+- [Metrics recorded after commit are lost if the process crashes between commit and record] → Accepted as best-effort: counters reset on restart anyway. The database stays the source of truth for runs, turns, tool calls, tokens and pushes; `RuntimeTiming` is not stored, so those samples are lost in that window without a way to recover them.
 - [Unauthenticated `/metrics`] → Separate port, never exposed through the ingress, NetworkPolicy allows only the configured scraper; metrics carry no run ids or hosts.
 - [Gateway instruments depend on `iter1-egress-gateway`] → Gateway exporter setup lands independently; instruments are added in the proxy once that change is merged.
 

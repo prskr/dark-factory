@@ -58,8 +58,8 @@ Every exported metric and span SHALL carry `service.name` (`dark-factory-control
 - **WHEN** two control plane replicas export metrics
 - **THEN** their series differ by `service.instance.id`
 
-### Requirement: Exactly-once run metrics
-The control plane SHALL record run metrics from agent messages exactly once per control plane process: only after the transaction that persists the message commits, and never for a message dropped as already persisted. All run metric instruments SHALL carry `project` (the project key from the database).
+### Requirement: Best-effort run metrics
+The control plane SHALL record run metrics from agent messages at most once per message: only after the transaction that persists the message commits, and never for a message dropped as already persisted. Recording is best-effort: observations not yet recorded when a control plane process stops are lost and SHALL NOT be requested again from the runtime. All run metric instruments SHALL carry `project` (the project key from the database).
 
 #### Scenario: Replayed batch
 - **WHEN** a runtime reconnects and replays a `TurnEnded` event that was already persisted
@@ -68,6 +68,10 @@ The control plane SHALL record run metrics from agent messages exactly once per 
 #### Scenario: Failed transaction
 - **WHEN** persisting a batch containing a `RunReport` fails and the transaction rolls back
 - **THEN** `df.runs.ended` is unchanged until the batch is persisted on a later attempt
+
+#### Scenario: Control plane stops after commit
+- **WHEN** a control plane process stops after committing a batch with a `RuntimeTiming` but before recording it
+- **THEN** the sequence stays acknowledged, the runtime does not resend the message and the sample is missing from `df.agent.runtime.duration`
 
 ### Requirement: Run and turn instruments
 The control plane SHALL record:
