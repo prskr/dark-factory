@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Runs start for queued tasks
-The control plane SHALL start a run for every due task, within 5 seconds of the task becoming due, on any replica, without ever starting two concurrent runs for one task. A task is due when its status is `queued` or `rate_limited`, it has no non-terminal run and its resume time is unset or in the past. At most `runs.maxConcurrent` runs (default 4) SHALL be non-terminal at a time; further due tasks SHALL wait, oldest resume time first. Starting a run SHALL clear the task's resume time.
+A task is due when its status is `queued` or `rate_limited`, it has no non-terminal run and its resume time is unset or in the past. At most `runs.maxConcurrent` runs (default 4) SHALL be non-terminal at a time, counted across all replicas. While a slot is free, the control plane SHALL start a run for a due task within 5 seconds of it becoming due or of the slot becoming free, on any replica, without ever starting two concurrent runs for one task. Due tasks beyond the limit SHALL keep their status until a slot frees and SHALL then start oldest resume time first. Starting a run SHALL clear the task's resume time.
 
 #### Scenario: New task
 - **WHEN** task `DF-1` is created
@@ -11,6 +11,10 @@ The control plane SHALL start a run for every due task, within 5 seconds of the 
 
 #### Scenario: Two replicas
 - **WHEN** two control plane replicas see the same queued task at the same time
+- **THEN** exactly one run is created
+
+#### Scenario: Two replicas, one slot
+- **WHEN** `runs.maxConcurrent` is 1 and two replicas tick at the same time with `DF-1` and `DF-2` both due
 - **THEN** exactly one run is created
 
 #### Scenario: Due rate-limited task

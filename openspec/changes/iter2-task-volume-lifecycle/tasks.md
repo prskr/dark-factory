@@ -7,7 +7,7 @@
 
 ## 2. Retention
 
-- [ ] 2.1 Implement the hourly retention scan on the leader with `volumes.retainAfterClose` and `volumes.idleTtl` (design D1). Verify "closed task after the grace period", "idle task", "active run is skipped" and "scan runs once per hour" with `df_test_postgres`, a fake provider and `tokio::time::pause()` (container-backed; CI)
+- [ ] 2.1 Implement the hourly retention scan on the leader with `volumes.retainAfterClose` and `volumes.idleTtl` (design D1). Verify "closed task after the grace period", "idle task", "active run is skipped", "scan runs once per hour" and "run start during deletion" (a scheduler tick while the scan holds the row lock creates no run until the deletion committed) with `df_test_postgres`, a fake provider and `tokio::time::pause()` (container-backed; CI)
 
 ## 3. Reset action
 

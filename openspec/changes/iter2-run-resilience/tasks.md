@@ -6,13 +6,13 @@
 
 ## 2. Scheduler
 
-- [ ] 2.1 Implement the scheduler query with resume times, ordering and the concurrency limit (design D1, D6) and the instance settings `runs.maxConcurrent`, `runs.maxAutoResumes`. Verify "due rate-limited task", "not yet due", "limit reached" and "oldest first" with `df_test_postgres` and a fake `SandboxProvider` (container-backed; CI)
+- [ ] 2.1 Implement the scheduler query with resume times, ordering and the concurrency limit (design D1, D6) and the instance settings `runs.maxConcurrent`, `runs.maxAutoResumes`. Verify "due rate-limited task", "not yet due", "limit reached", "oldest first" and "two replicas, one slot" (two replicas tick concurrently on two different due tasks with `runs.maxConcurrent` 1: one run) with `df_test_postgres` and a fake `SandboxProvider` (container-backed; CI)
 - [ ] 2.2 Implement re-provisioning of stale runs (design D4). Verify "provisioning interrupted" with a fake provider that records calls and `tokio::time::pause()`; delete TD-18 from `docs/tech_debt.md`
 
 ## 3. Run end
 
 - [ ] 3.1 Implement the run-end mapping of design D2 for `RunReport` outcomes and for the control plane's own outcomes. Verify "rate limit sets the resume time", "unknown retry time", "sandbox lost is resumed", "resume cap reached" and "report resets the counter"
-- [ ] 3.2 Add `ProviderError::Capacity` and its mapping in `df-k8s` (design D3). Verify "quota exceeded" with a mocked API server response and the run-end mapping with a fake provider
+- [ ] 3.2 Add `ProviderError::Capacity` and its mapping in `df-k8s` (design D3). Verify "quota exceeded" with a mocked 403 `Status` (`reason: Forbidden`, message containing `exceeded quota`), that a 403 `Forbidden` without quota text ends `provisioning_failed` without detail `capacity`, and the run-end mapping with a fake provider
 
 ## 4. Runtime
 

@@ -35,7 +35,7 @@ Queueing a human message clears `resume_at` and sets `auto_resumes = 0` (the exi
 The run itself ends as today (state and outcome unchanged), so the run list shows every attempt.
 
 ### D3 — Capacity rejections
-`ProviderError` gets a `Capacity` variant. `df-k8s` maps a 403 from the API server whose status reason names a quota (`exceeded quota`) and a Sandbox rejected for the same reason to it. Pods that are unschedulable are not covered; they end `connect_timeout` and are resumed by D2.
+`ProviderError` gets a `Capacity` variant. `df-k8s` maps a 403 from the API server whose `Status.reason` is `Forbidden` and whose `Status.message` or status causes name a quota (`exceeded quota`) to it, for the PVC as well as for the Sandbox. Any other `Forbidden` response stays an ordinary provisioning failure. Pods that are unschedulable are not covered; they end `connect_timeout` and are resumed by D2.
 
 ### D4 — Re-provisioning (TD-18)
 On each tick the scheduler selects runs in `pending` or `provisioning` older than 1 minute and calls `ensure_task_volume` and `provision` again. Both are idempotent (an existing PVC or Sandbox is fine). A run that already has a Sandbox is left alone, so the only cost is one `GET` per stale run per tick.
@@ -44,7 +44,7 @@ On each tick the scheduler selects runs in `pending` or `provisioning` older tha
 After finalize the runtime keeps the connection manager running until the outbox is empty, bounded by 10 minutes (`FINAL_REPORT_FLUSH`), then exits regardless. Reconnects use the existing backoff. The control plane's wall-clock enforcement is unchanged: a runtime that waits past the budget plus grace is torn down and the run ends `sandbox_lost`, which D2 resumes. `terminationGracePeriodSeconds` is not involved: the pod is not being terminated while it waits, the control plane deletes the Sandbox only after the report arrived.
 
 ### D6 — Concurrency limit
-`runs.maxConcurrent` (default 4) is checked in the scheduler query (D1), under the same advisory lock that prevents two replicas from starting runs for the same task. Runs in `awaiting_input` count as active. Per-credential limits (F6) plug into the same query later.
+`runs.maxConcurrent` (default 4) is checked in the scheduler query (D1). Counting non-terminal runs, selecting due tasks and inserting runs happen in one transaction under an instance-wide transaction advisory lock (`pg_try_advisory_xact_lock`; a replica that doesn't get it skips the tick), so two replicas can't both fill the last slot with runs for different tasks. The per-task `FOR UPDATE SKIP LOCKED` and the partial unique index stay as the per-task guard. Runs in `awaiting_input` count as active. Per-credential limits (F6) plug into the same query later.
 
 ## Risks / Trade-offs
 
