@@ -5,6 +5,7 @@ load("@rules_img//img:multi_deploy.bzl", "multi_deploy")
 load("@rules_img//img:push.bzl", "image_push")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build:optimized.bzl", "optimized")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -13,11 +14,17 @@ LINUX_MUSL_PLATFORMS = [
     "//build/platforms:linux_arm64_musl",
 ]
 
+# The shipped component is an optimized build (~0.3 MB instead of ~6.9 MB) even without `-c opt`.
+optimized(
+    name = "forgejo_plugin",
+    src = "//plugins/forgejo",
+)
+
 image_layer(
     name = "control_plane_layer",
     srcs = {
         "/dark-factory": "//crates/dark-factory:dark-factory",
-        "/plugins/forgejo.wasm": "//plugins/forgejo:forgejo",
+        "/plugins/forgejo.wasm": ":forgejo_plugin",
     },
     file_metadata = {
         "/dark-factory": file_metadata(mode = "0755"),

@@ -41,6 +41,17 @@ Each plugin call SHALL be bounded by a configurable timeout (default 30 s) and m
 - **WHEN** a plugin call doesn't return within the timeout
 - **THEN** the call fails, the instance is discarded and the next call uses a fresh instance
 
+### Requirement: Load from a file path
+The host SHALL load each plugin component from its configured file path at startup and SHALL NOT download, unpack or cache components itself. A missing or invalid component SHALL fail startup with a message naming the plugin and the path. Loading SHALL log the component size and the load duration (everything after the file read).
+
+#### Scenario: Missing component
+- **WHEN** `plugins.forgejo.path` points to a file that does not exist
+- **THEN** `serve` exits at startup with an error naming `forgejo` and the path
+
+#### Scenario: Load is measured
+- **WHEN** the Forgejo component loads
+- **THEN** an info event carries the plugin name, the size in bytes and the load duration (`compile_ms`, everything after the file read)
+
 ### Requirement: Capability detection
 At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`.
 

@@ -79,6 +79,10 @@ for arch in amd64 arm64; do
   grep -qxE '\./plugins/forgejo\.wasm|plugins/forgejo\.wasm' <<<"$cp_entries"
   extract_local_layers_for_arch "$CONTROL_PLANE_IMAGE_DIR" "$arch" "$WORK_DIR/cp-$arch"
   verify_static_elf "$WORK_DIR/cp-$arch/dark-factory" "$expected_elf_arch"
+  # the optimized build; a fastbuild component is ~6.9 MB
+  plugin="$WORK_DIR/cp-$arch/plugins/forgejo.wasm"
+  [[ "$(wc -c <"$plugin")" -lt 1048576 ]]
+  [[ "$(head -c 4 "$plugin" | od -An -tx1 | tr -d ' ')" == "0061736d" ]]
 
   echo "=== 3. Verifying runtime_image ($arch, scratch) structure and static ELF ==="
   rt_manifest_digest="$(jq -r --arg arch "$arch" '.manifests[] | select(.platform.architecture == $arch) | .digest | sub("^sha256:"; "")' "$RUNTIME_IMAGE_DIR/index.json")"

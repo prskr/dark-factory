@@ -1,0 +1,71 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "df_plugins",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["//contract:wit_integrations"],
+    crate_name = "df_plugins",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+    ],
+)
+
+alias(
+    name = "df-plugins",
+    actual = ":df_plugins",
+)
+
+rust_test(
+    name = "df_plugins_test",
+    crate = ":df_plugins",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True) + [
+        "//crates/df-core:df_core",
+    ],
+)
+
+# Integration tests run the plugin components built by Bazel (without the variables they build
+# them with cargo).
+[
+    rust_test(
+        name = "df_plugins_%s_test" % name,
+        srcs = ["tests/%s.rs" % name] + glob(["tests/common/**/*.rs"]),
+        crate_root = "tests/%s.rs" % name,
+        data = [
+            "//plugins/forgejo",
+            "//plugins/test-probe",
+        ],
+        edition = "2024",
+        env = {
+            "FORGEJO_PLUGIN_WASM": "$(rootpath //plugins/forgejo)",
+            "TEST_PROBE_WASM": "$(rootpath //plugins/test-probe)",
+        },
+        proc_macro_deps = all_crate_deps(
+            proc_macro = True,
+            proc_macro_dev = True,
+        ),
+        deps = all_crate_deps(
+            normal = True,
+            normal_dev = True,
+        ) + [
+            ":df_plugins",
+            "//crates/df-core:df_core",
+        ],
+    )
+    for name in [
+        "forgejo",
+        "load",
+        "sandbox",
+    ]
+]

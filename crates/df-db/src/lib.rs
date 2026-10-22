@@ -8,6 +8,7 @@ pub mod egress;
 pub mod migrate;
 pub mod notify;
 pub mod pool;
+pub mod projects;
 pub mod tasks;
 
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
@@ -16,6 +17,7 @@ pub use egress::{ClusterServiceRule, list_cluster_services};
 pub use migrate::run_migrate;
 pub use notify::{Notification, Notifier, publish};
 pub use pool::{DbError, build_connect_options, connect_pool, validate_sql_identifier};
+pub use projects::{ForgeTarget, forge_target};
 pub use sqlx::PgPool;
 pub use tasks::{
     NewTask, TaskMessageRow, TaskRow, create_task, format_assignment_prompt, get_task,

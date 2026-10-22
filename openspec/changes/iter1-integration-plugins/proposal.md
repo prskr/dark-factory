@@ -24,5 +24,5 @@ None.
 
 - New crate `df-plugins`, new plugin crate `plugins/forgejo` (target `wasm32-wasip2`).
 - Implements `ForgeClient` from `iter1-foundation`; uses `SecretStore` (fake until `iter1-sandbox-provisioning` lands).
-- The control plane image ships the component at `/plugins/forgejo.wasm` (`iter1-build-and-deploy`); plugin distribution as OCI artifacts (ADR-0018) is deferred.
+- The control plane image ships the component at `/plugins/forgejo.wasm` (`iter1-build-and-deploy`); the control plane only reads the component from a configured path. Plugin distribution as OCI images via image volumes (ADR-0018, amended) follows in `iter2-plugin-distribution`.
 - New dependencies: wasmtime, wasmtime-wasi, wasmtime-wasi-http, wasmtime-wasi-config (host); wit-bindgen plus a small `wasi:http` client (e.g. `wstd`, decided in design D4) and serde_json (guest).

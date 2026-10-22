@@ -53,6 +53,9 @@ pub struct InstanceConfig {
     pub harness: HarnessConfig,
     #[serde(default)]
     pub runs: RunsConfig,
+    /// Integration plugins by name (`forgejo`, ...).
+    #[serde(default)]
+    pub plugins: BTreeMap<String, PluginConfig>,
 }
 
 impl InstanceConfig {
@@ -395,6 +398,35 @@ impl Default for RunsConfig {
     }
 }
 
+/// One integration plugin: its component, per-call limits and free-form settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PluginConfig {
+    /// Path of the compiled component.
+    pub path: PathBuf,
+    /// Upper bound of a single plugin call, retries excluded.
+    #[serde(default = "default_plugin_call_timeout")]
+    pub call_timeout_seconds: u64,
+    /// Linear memory limit of a plugin instance.
+    #[serde(default = "default_plugin_memory_mib")]
+    pub memory_mib: u64,
+    /// Non-secret settings the plugin reads through `wasi:config/store`. The host does not
+    /// interpret them; the plugin documents its keys. `base-url` is set by the host and wins.
+    #[serde(default)]
+    pub settings: BTreeMap<String, String>,
+}
+
+impl PluginConfig {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            call_timeout_seconds: default_plugin_call_timeout(),
+            memory_mib: default_plugin_memory_mib(),
+            settings: BTreeMap::new(),
+        }
+    }
+}
+
 /// Reads a secret from a file, trimming a single trailing `\r\n` or `\n`.
 pub fn read_secret_file(path: &Path) -> Result<SecretString, ConfigError> {
     let raw = fs::read_to_string(path).map_err(|source| ConfigError::SecretFile {
@@ -422,6 +454,14 @@ fn default_commit_email() -> String {
 
 fn default_adapter_command() -> Vec<String> {
     vec!["/opt/harness/bin/claude-agent-acp".to_string()]
+}
+
+fn default_plugin_call_timeout() -> u64 {
+    30
+}
+
+fn default_plugin_memory_mib() -> u64 {
+    64
 }
 
 fn default_max_wall_clock() -> u64 {
@@ -513,6 +553,25 @@ sandbox:
   namespace: dark-factory-sandboxes
   instanceNamespace: dark-factory
 "#;
+
+    #[test]
+    fn plugins_are_a_map_with_free_form_settings() {
+        let yaml = format!(
+            "{VALID_FIXTURE}plugins:\n  forgejo:\n    path: /p.wasm\n    callTimeoutSeconds: 5\n    settings:\n      wip-prefixes: 'WIP:'\n  other:\n    path: /o.wasm\n"
+        );
+        let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+        let forgejo = &cfg.plugins["forgejo"];
+        assert_eq!(forgejo.path, PathBuf::from("/p.wasm"));
+        assert_eq!((forgejo.call_timeout_seconds, forgejo.memory_mib), (5, 64));
+        assert_eq!(forgejo.settings["wip-prefixes"], "WIP:");
+        assert!(cfg.plugins["other"].settings.is_empty());
+        assert!(
+            InstanceConfig::from_yaml_str(VALID_FIXTURE)
+                .unwrap()
+                .plugins
+                .is_empty()
+        );
+    }
 
     #[test]
     fn cluster_targets_default_to_no_namespaces() {
