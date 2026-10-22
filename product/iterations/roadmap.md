@@ -93,4 +93,5 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 | Separate UIDs for runtime and harness | [`design/agent-run.md`](../../design/agent-run.md) §17 |
 | LSP support | context §4.2 |
 | Cloud VM sandboxes (idea, conflicts with current non-goals) | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
+| Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | `crates/df-web/src/auth/store.rs` |
 | Remaining low-severity tech debt | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
