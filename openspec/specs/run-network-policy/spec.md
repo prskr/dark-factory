@@ -14,7 +14,25 @@ Sandbox pods SHALL get `HTTPS_PROXY`/`HTTP_PROXY` (and lower-case variants) poin
 - **THEN** it reaches the control plane and the proxy using IP addresses from its environment
 
 ### Requirement: Cluster targets reachable by name
-For each `cluster-service` entry applying to the run (instance and project scope), the pod SHALL get, for a non-headless Service, `hostAliases` mapping both `<svc>.<ns>.svc.<cluster-domain>` and `<svc>.<ns>.svc` to the Service's ClusterIP. A headless Service with `allowDns` SHALL get no `hostAliases` and relies on DNS. A headless Service without `allowDns` SHALL be rejected. The `hostAliases` point to the ClusterIP while the policy allows the backing pods or endpoint addresses, so this relies on egress policy being evaluated after Service translation (kube-proxy DNAT or the CNI's own service handling); any CNI enforcing upstream `NetworkPolicy` that does so is supported, Cilium included (`design/egress.md` §5, ADR-0029).
+For each `cluster-service` entry applying to the run (instance and project scope) whose Service is not headless, the pod SHALL get `hostAliases` mapping both `<svc>.<ns>.svc.<cluster-domain>` and `<svc>.<ns>.svc` to the Service's ClusterIP.
+
+#### Scenario: NativeLink target
+- **WHEN** project `DF` has target `nativelink/scheduler` ports `[50051]`
+- **THEN** the pod resolves `scheduler.nativelink.svc.cluster.local` via `/etc/hosts` to the Service's ClusterIP
+
+### Requirement: Headless cluster targets
+A headless Service with `allowDns` SHALL get no `hostAliases` and relies on DNS. A headless Service without `allowDns` SHALL be rejected.
+
+#### Scenario: Headless target with DNS
+- **WHEN** a target is a headless Service with `allowDns`
+- **THEN** the pod gets no `hostAliases` for it and the policy allows kube-dns on port 53
+
+#### Scenario: Headless target without DNS
+- **WHEN** a target is a headless Service without `allowDns`
+- **THEN** the target is rejected
+
+### Requirement: Policy evaluated after Service translation
+The `hostAliases` point to the ClusterIP while the policy allows the backing pods or endpoint addresses, so egress policy SHALL be evaluated after Service translation (kube-proxy DNAT or the CNI's own service handling). Any CNI enforcing upstream `NetworkPolicy` that does so is supported, Cilium included (`design/egress.md` §5, ADR-0029).
 
 #### Scenario: ClusterIP of a target
 - **WHEN** the sandbox connects to the ClusterIP of an allowed target on an allowed port
@@ -22,16 +40,15 @@ For each `cluster-service` entry applying to the run (instance and project scope
 - **WHEN** it connects to the ClusterIP of a Service that is not a target
 - **THEN** the connection fails
 
-#### Scenario: NativeLink target
-- **WHEN** project `DF` has target `nativelink/scheduler` ports `[50051]`
-- **THEN** the pod resolves `scheduler.nativelink.svc.cluster.local` via `/etc/hosts` to the Service's ClusterIP
-
 ### Requirement: Generated per-run policy
-For each run the control plane SHALL create a `NetworkPolicy` selecting only that run's pod, owned by its Sandbox, with no ingress and egress only to: control plane pods on the agent port; gateway pods on the proxy port; each cluster target on the Service's target ports: for a Service with a selector, its pods (namespace selector plus the Service's selector); for a selector-less Service, its EndpointSlice addresses as `/32` (`/128` for IPv6) `ipBlock` rules; kube-dns on port 53 only if a target sets `allowDns`.
+For each run the control plane SHALL create a `NetworkPolicy` selecting only that run's pod, owned by its Sandbox, with no ingress and egress only to: control plane pods on the agent port; gateway pods on the proxy port; each cluster target; kube-dns on port 53 only if a target sets `allowDns`.
 
 #### Scenario: Internet blocked
 - **WHEN** the sandbox opens a direct TCP connection to 1.1.1.1:443
 - **THEN** the connection fails
+
+### Requirement: Cluster target egress rules
+The per-run policy SHALL allow each cluster target on the Service's target ports: for a Service with a selector, its pods (namespace selector plus the Service's selector); for a selector-less Service, its EndpointSlice addresses as `/32` (`/128` for IPv6) `ipBlock` rules.
 
 #### Scenario: Target port mapping
 - **WHEN** Service port 50051 maps to target port 8080

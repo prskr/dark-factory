@@ -18,11 +18,18 @@ The control plane SHALL create one ReadWriteOnce PVC per task named `task-<key l
 - **THEN** no new PVC is created and the same PVC is mounted
 
 ### Requirement: Sandbox per run
-The control plane SHALL create one `Sandbox` per run in the sandbox namespace with: the project image; entrypoint `/opt/factory/factory-agent run`; the runtime image as a read-only image volume at `/opt/factory`; the task PVC at `/data`; a memory-backed volume at `/run/factory`; a cert-manager csi-driver volume with the per-pod URI SAN; the configured runtime class (no `runtimeClassName`, i.e. the cluster's default runtime, when none is configured); labels for instance, run, task, project and persona.
+The control plane SHALL create one `Sandbox` per run in the sandbox namespace with: the project image; entrypoint `/opt/factory/factory-agent run`; the runtime image as a read-only image volume at `/opt/factory`; the task PVC at `/data`; a memory-backed volume at `/run/factory`; a cert-manager csi-driver volume with the per-pod URI SAN; labels for instance, run, task, project and persona.
 
 #### Scenario: Sandbox spec
+- **WHEN** run 1 of `DF-1` is provisioned
+- **THEN** its pod has volumes `/opt/factory` (image, read-only), `/data` (PVC `task-df-1`), `/run/factory` (memory) and the csi certificate, and label `dark-factory.io/run-id` with the run id
+
+### Requirement: Sandbox runtime class
+Sandbox pods SHALL use the configured runtime class. When none is configured (unset or empty), they SHALL have no `runtimeClassName` and run with the cluster's default runtime.
+
+#### Scenario: Runtime class configured
 - **WHEN** run 1 of `DF-1` is provisioned with runtime class `kata` configured
-- **THEN** its pod has runtime class `kata`, volumes `/opt/factory` (image, read-only), `/data` (PVC `task-df-1`), `/run/factory` (memory) and the csi certificate, and label `dark-factory.io/run-id` with the run id
+- **THEN** its pod has runtime class `kata`
 
 #### Scenario: No runtime class configured
 - **WHEN** run 1 of `DF-1` is provisioned and no runtime class is configured (unset or empty)
