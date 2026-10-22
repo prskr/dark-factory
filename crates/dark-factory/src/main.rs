@@ -386,6 +386,7 @@ where
         .await?;
 
     let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
+    let web = web_router(&cfg, &pool, &notifier)?;
     let ctx = ChannelContext {
         notifier,
         pool,
@@ -412,10 +413,7 @@ where
     };
 
     let mut listeners = JoinSet::new();
-    listeners.spawn(until_stopped(
-        stop_rx.clone(),
-        serve_http_health(http_listener, http_port),
-    ));
+    listeners.spawn(until_stopped(stop_rx.clone(), serve_ui(http_listener, web)));
     let agent_ctx = ctx.clone();
     let agent_stop = stop_rx.clone();
     listeners.spawn(async move {
@@ -602,6 +600,31 @@ where
     }
 }
 
+/// The router of the UI port: the full UI if `auth` is configured, otherwise only health checks
+/// and assets.
+fn web_router(
+    cfg: &InstanceConfig,
+    pool: &PgPool,
+    notifier: &Arc<df_db::Notifier>,
+) -> anyhow::Result<axum::Router> {
+    let Some(auth) = &cfg.auth else {
+        tracing::warn!("`auth` is not configured; the web UI is disabled");
+        return Ok(df_web::base_router(pool.clone()));
+    };
+    let oidc = df_web::auth::OidcClient::new(auth).context("invalid `auth` configuration")?;
+    Ok(df_web::router(df_web::WebState {
+        pool: pool.clone(),
+        notifier: notifier.clone(),
+        oidc: Arc::new(oidc),
+    }))
+}
+
+async fn serve_ui(listener: TcpListener, router: axum::Router) {
+    if let Err(err) = axum::serve(listener, router).await {
+        error!(error = %err, "UI listener failed");
+    }
+}
+
 async fn serve_http_health(listener: TcpListener, port: u16) {
     loop {
         let (mut stream, _) = match listener.accept().await {
@@ -760,6 +783,55 @@ mod tests {
         let resp = std::str::from_utf8(&buf[..n]).unwrap();
         assert!(resp.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
         assert!(resp.contains("Egress proxy not initialized"));
+    }
+
+    async fn ui_response(router: axum::Router, request: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(serve_ui(listener, router));
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(request.as_bytes()).await.unwrap();
+        let mut buf = vec![0_u8; 4096];
+        let n = client.read(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf[..n]).to_lowercase()
+    }
+
+    #[tokio::test]
+    async fn ui_port_requires_login_when_auth_is_configured() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("oidc-secret"), "s3cret\n")?;
+        let mut cfg = serve_config(&pool, dir.path(), None);
+        cfg.auth = Some(df_core::AuthConfig {
+            issuer_url: "https://idp.example.org/realms/df".into(),
+            client_id: "dark-factory".into(),
+            client_secret_file: dir.path().join("oidc-secret"),
+            public_url: "https://factory.example.org".into(),
+            roles_claim: "roles".into(),
+        });
+        let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
+        let router = web_router(&cfg, &pool, &notifier)?;
+
+        let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        assert!(tasks.starts_with("http/1.1 303"), "{tasks}");
+        assert!(tasks.contains("location: /login?next=%2ftasks"), "{tasks}");
+        let health = ui_response(router, "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        assert!(health.starts_with("http/1.1 200"), "{health}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ui_is_disabled_without_auth_but_health_stays_up() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let dir = tempfile::tempdir()?;
+        let cfg = serve_config(&pool, dir.path(), None);
+        let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
+        let router = web_router(&cfg, &pool, &notifier)?;
+        let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
+        let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        assert!(ready.starts_with("http/1.1 200"), "{ready}");
+        Ok(())
     }
 
     #[tokio::test]

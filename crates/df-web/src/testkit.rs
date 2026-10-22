@@ -1,0 +1,480 @@
+//! Test support: an app on a test database, a mock OIDC provider and request helpers.
+
+use std::sync::{Arc, Mutex};
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, Response, header};
+use df_core::AuthConfig;
+use http_body_util::BodyExt;
+use openidconnect::core::{
+    CoreGenderClaim, CoreJsonWebKeySet, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
+    CoreRsaPrivateSigningKey,
+};
+use openidconnect::{
+    AdditionalClaims, Audience, EndUserName, IdToken, IdTokenClaims, IssuerUrl, JsonWebKeyId,
+    Nonce, PrivateSigningKey, StandardClaims, SubjectIdentifier,
+};
+use rsa::pkcs1::EncodeRsaPrivateKey;
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use tower::ServiceExt;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, Request as MockRequest, Respond, ResponseTemplate};
+
+use crate::auth::OidcClient;
+use crate::{WebState, router};
+
+pub(crate) const CLIENT_ID: &str = "dark-factory";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RolesClaim {
+    roles: Vec<String>,
+}
+impl AdditionalClaims for RolesClaim {}
+
+type TestIdToken = IdToken<
+    RolesClaim,
+    CoreGenderClaim,
+    CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm,
+>;
+type TestClaims = IdTokenClaims<RolesClaim, CoreGenderClaim>;
+
+/// What the mock provider answers with; tests change it between requests.
+#[derive(Debug, Clone)]
+pub(crate) struct IdpState {
+    pub nonce: Option<String>,
+    pub roles: Vec<String>,
+    pub refresh_fails: bool,
+    pub code_verifier: Option<String>,
+}
+
+pub(crate) struct Idp {
+    pub server: MockServer,
+    pub state: Arc<Mutex<IdpState>>,
+}
+
+struct TokenResponder {
+    issuer: String,
+    key: CoreRsaPrivateSigningKey,
+    state: Arc<Mutex<IdpState>>,
+}
+
+impl TokenResponder {
+    fn id_token(&self, nonce: Option<String>, roles: Vec<String>) -> String {
+        let name = EndUserName::new("Peter Test".to_string());
+        let mut claims = TestClaims::new(
+            IssuerUrl::new(self.issuer.clone()).unwrap(),
+            vec![Audience::new(CLIENT_ID.to_string())],
+            chrono::Utc::now() + chrono::Duration::hours(1),
+            chrono::Utc::now(),
+            StandardClaims::new(SubjectIdentifier::new("sub-1".to_string()))
+                .set_name(Some(name.into())),
+            RolesClaim { roles },
+        );
+        if let Some(nonce) = nonce {
+            claims = claims.set_nonce(Some(Nonce::new(nonce)));
+        }
+        TestIdToken::new(
+            claims,
+            &self.key,
+            CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+            None,
+            None,
+        )
+        .unwrap()
+        .to_string()
+    }
+}
+
+impl Respond for TokenResponder {
+    fn respond(&self, request: &MockRequest) -> ResponseTemplate {
+        let form: Vec<(String, String)> = openidconnect::url::form_urlencoded::parse(&request.body)
+            .into_owned()
+            .collect();
+        let field = |name: &str| form.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+        let mut state = self.state.lock().unwrap();
+        let (id_token, refresh) = match field("grant_type").as_deref() {
+            Some("authorization_code") if field("code").as_deref() == Some("good-code") => {
+                state.code_verifier = field("code_verifier");
+                (
+                    self.id_token(state.nonce.clone(), state.roles.clone()),
+                    "refresh-1",
+                )
+            }
+            Some("refresh_token") if !state.refresh_fails => {
+                (self.id_token(None, state.roles.clone()), "refresh-2")
+            }
+            _ => {
+                return ResponseTemplate::new(400)
+                    .set_body_json(serde_json::json!({"error": "invalid_grant"}));
+            }
+        };
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "access",
+            "token_type": "Bearer",
+            "expires_in": 300,
+            "refresh_token": refresh,
+            "id_token": id_token,
+        }))
+    }
+}
+
+impl Idp {
+    pub async fn start() -> Self {
+        let server = MockServer::start().await;
+        let issuer = server.uri();
+        let pem = {
+            let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+            key.to_pkcs1_pem(rsa::pkcs8::LineEnding::LF)
+                .unwrap()
+                .to_string()
+        };
+        let key =
+            CoreRsaPrivateSigningKey::from_pem(&pem, Some(JsonWebKeyId::new("k1".into()))).unwrap();
+        let jwks = CoreJsonWebKeySet::new(vec![key.as_verification_key()]);
+        Mock::given(method("GET"))
+            .and(path("/.well-known/openid-configuration"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "issuer": issuer,
+                "authorization_endpoint": format!("{issuer}/auth"),
+                "token_endpoint": format!("{issuer}/token"),
+                "jwks_uri": format!("{issuer}/jwks"),
+                "end_session_endpoint": format!("{issuer}/logout"),
+                "response_types_supported": ["code"],
+                "subject_types_supported": ["public"],
+                "id_token_signing_alg_values_supported": ["RS256"],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::to_value(&jwks).unwrap()),
+            )
+            .mount(&server)
+            .await;
+        let state = Arc::new(Mutex::new(IdpState {
+            nonce: None,
+            roles: vec!["board-member".into()],
+            refresh_fails: false,
+            code_verifier: None,
+        }));
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(TokenResponder {
+                issuer,
+                key,
+                state: state.clone(),
+            })
+            .mount(&server)
+            .await;
+        Self { server, state }
+    }
+
+    pub fn set(&self, f: impl FnOnce(&mut IdpState)) {
+        f(&mut self.state.lock().unwrap());
+    }
+}
+
+pub(crate) struct TestApp {
+    pub router: Router,
+    pub pool: PgPool,
+    pub idp: Idp,
+    _dir: tempfile::TempDir,
+}
+
+impl TestApp {
+    pub async fn new() -> Self {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let idp = Idp::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let secret_file = dir.path().join("secret");
+        std::fs::write(&secret_file, "s3cret\n").unwrap();
+        let cfg = AuthConfig {
+            issuer_url: idp.server.uri(),
+            client_id: CLIENT_ID.into(),
+            client_secret_file: secret_file,
+            public_url: "https://factory.test".into(),
+            roles_claim: "roles".into(),
+        };
+        let state = WebState {
+            notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
+            oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
+            pool: pool.clone(),
+        };
+        Self {
+            router: router(state),
+            pool,
+            idp,
+            _dir: dir,
+        }
+    }
+
+    /// A logged-in `board-member` session: the `Cookie` header value.
+    pub async fn login(&self) -> String {
+        crate::auth::testing::seed_session(&self.pool, &["board-member"], 3600, Some("refresh-0"))
+            .await
+            .0
+    }
+
+    pub async fn send(&self, request: Request<Body>) -> Response<Body> {
+        self.router.clone().oneshot(request).await.unwrap()
+    }
+
+    pub async fn get(&self, uri: &str, cookie: &str) -> Response<Body> {
+        self.send(
+            Request::get(uri)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+    }
+
+    /// A form post as htmx sends it (with the `HX-Request` header).
+    pub async fn post(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
+        self.send(post_request(uri, body, cookie, true)).await
+    }
+}
+
+pub(crate) fn post_request(uri: &str, body: &str, cookie: &str, htmx: bool) -> Request<Body> {
+    let mut request = Request::post(uri)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::COOKIE, cookie);
+    if htmx {
+        request = request.header("HX-Request", "true");
+    }
+    request.body(Body::from(body.to_string())).unwrap()
+}
+
+pub(crate) async fn text(response: Response<Body>) -> String {
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+pub(crate) fn header_str<'a>(response: &'a Response<Body>, name: &str) -> &'a str {
+    response
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+}
+
+/// Url-encodes `key=value` pairs.
+pub(crate) fn form(pairs: &[(&str, &str)]) -> String {
+    openidconnect::url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(pairs)
+        .finish()
+}
+
+/// A project and a persona to create tasks with.
+pub(crate) struct Seed {
+    pub project: uuid::Uuid,
+    pub persona: uuid::Uuid,
+}
+
+pub(crate) fn actor() -> (df_core::Principal, Vec<String>) {
+    (
+        df_core::Principal::human(df_core::UserId::new(), "Peter"),
+        vec!["board-member".to_string()],
+    )
+}
+
+pub(crate) async fn seed(pool: &PgPool) -> Seed {
+    use df_db::catalog::{Actor, PersonaInput, ProjectInput, save_persona, save_project};
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let project = save_project(
+        pool,
+        actor,
+        None,
+        &ProjectInput {
+            key: "DF".into(),
+            name: "Dark Factory".into(),
+            repo_url: "https://git.example.org/peter/dark-factory.git".into(),
+            issue_tracker_url: None,
+            image: "img:latest".into(),
+            base_branch: "main".into(),
+            forge_credential_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let persona = save_persona(
+        pool,
+        actor,
+        None,
+        &PersonaInput {
+            name: "Linus".into(),
+            system_prompt: "Be Linus.".into(),
+            harness: "claude-code".into(),
+            adapter_command: vec![],
+            model: None,
+            harness_credential_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    Seed {
+        project: project.id,
+        persona: persona.id,
+    }
+}
+
+pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::TaskRow {
+    df_db::create_task(
+        pool,
+        df_db::NewTask {
+            project_id: df_core::ProjectId::from_uuid(seed.project),
+            persona_id: df_core::PersonaId::from_uuid(seed.persona),
+            title: title.into(),
+            description: String::new(),
+            issue_number: None,
+            created_by: None,
+        },
+    )
+    .await
+    .unwrap()
+    .0
+}
+
+pub(crate) async fn insert_run(
+    pool: &PgPool,
+    task: df_core::TaskId,
+    number: i64,
+    state: &str,
+) -> uuid::Uuid {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO runs (id, task_id, number, state) VALUES ($1, $2, $3, $4)")
+        .bind(id)
+        .bind(task.as_uuid())
+        .bind(number)
+        .bind(state)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
+/// Stores a transcript event (`kind` is the snake_case name of the event's oneof field) and
+/// publishes the notification the writer publishes. Returns the event id.
+pub(crate) async fn add_event(
+    pool: &PgPool,
+    task: df_core::TaskId,
+    run: uuid::Uuid,
+    seq: i64,
+    turn: &str,
+    body: serde_json::Value,
+) -> i64 {
+    let (name, _) = body.as_object().unwrap().iter().next().unwrap();
+    let kind: String = name
+        .chars()
+        .flat_map(|c| {
+            if c.is_ascii_uppercase() {
+                vec!['_', c.to_ascii_lowercase()]
+            } else {
+                vec![c]
+            }
+        })
+        .collect();
+    let mut payload = serde_json::json!({"schemaVersion": 1, "turnId": turn});
+    payload
+        .as_object_mut()
+        .unwrap()
+        .extend(body.as_object().unwrap().clone());
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
+         VALUES ($1, $2, $3, now(), $4, $5) RETURNING id",
+    )
+    .bind(task.as_uuid())
+    .bind(run)
+    .bind(seq)
+    .bind(kind)
+    .bind(payload)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    df_db::publish(
+        pool,
+        &df_db::Notification::TranscriptEvent { task_id: task, id },
+    )
+    .await
+    .unwrap();
+    id
+}
+
+pub(crate) fn chunk(message: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({"agentMessageChunk": {"messageId": message, "content": {"text": {"text": text}}}})
+}
+
+/// One server-sent event.
+#[derive(Debug)]
+pub(crate) struct Frame {
+    pub id: Option<String>,
+    pub data: String,
+}
+
+/// Reads the events of an SSE response.
+pub(crate) struct SseReader {
+    body: axum::body::BodyDataStream,
+    buf: String,
+}
+
+impl SseReader {
+    pub fn new(response: Response<Body>) -> Self {
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        Self {
+            body: response.into_body().into_data_stream(),
+            buf: String::new(),
+        }
+    }
+
+    /// The next event; panics if none arrives within `timeout`.
+    pub async fn next_within(&mut self, timeout: std::time::Duration) -> Frame {
+        use futures::StreamExt;
+        tokio::time::timeout(timeout, async {
+            loop {
+                while let Some(end) = self.buf.find("\n\n") {
+                    let raw: String = self.buf.drain(..end + 2).collect();
+                    let mut frame = Frame {
+                        id: None,
+                        data: String::new(),
+                    };
+                    let mut has_data = false;
+                    for line in raw.lines() {
+                        if let Some(id) = line.strip_prefix("id: ") {
+                            frame.id = Some(id.to_string());
+                        } else if let Some(data) = line.strip_prefix("data: ") {
+                            if has_data {
+                                frame.data.push('\n');
+                            }
+                            frame.data.push_str(data);
+                            has_data = true;
+                        }
+                    }
+                    if has_data {
+                        return frame;
+                    }
+                }
+                let chunk = self
+                    .body
+                    .next()
+                    .await
+                    .expect("stream ended")
+                    .expect("body error");
+                self.buf.push_str(&String::from_utf8_lossy(&chunk));
+            }
+        })
+        .await
+        .expect("timed out waiting for an event")
+    }
+
+    pub async fn next(&mut self) -> Frame {
+        self.next_within(std::time::Duration::from_secs(5)).await
+    }
+}

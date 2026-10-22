@@ -1,6 +1,12 @@
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # Marvin attack on RSA private-key operations; no fixed `rsa` release exists. Production only
+    # verifies OIDC ID-token signatures with the provider's public keys (`openidconnect`); private
+    # keys are used only by df-web's test OIDC provider. Revisit when `openidconnect` moves to a
+    # fixed `rsa` (0.10).
+    { id = "RUSTSEC-2023-0071", reason = "rsa: only public-key verification in production" },
+]
 
 [licenses]
 version = 2

@@ -2,6 +2,10 @@
 extend-exclude = [
     # Vendored WASI WIT definitions.
     "contract/wit/integrations/deps/**",
+    # Vendored minified htmx and Alpine.
+    "crates/df-web/assets/vendor/**",
+    # Generated Tailwind output.
+    "crates/df-web/assets/app.css",
 ]
 
 [default]

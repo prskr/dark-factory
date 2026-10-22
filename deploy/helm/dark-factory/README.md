@@ -49,6 +49,8 @@ Every key in `values.yaml` is documented below:
 | `oidc.clientId` | `string` | `"dark-factory"` | OIDC relying-party client ID. |
 | `oidc.existingSecret` | `string` | `"dark-factory-oidc"` | Name of the Secret in the instance namespace containing the OIDC client secret. |
 | `oidc.clientSecretKey` | `string` | `"client-secret"` | Key within `oidc.existingSecret` holding the OIDC client secret. |
+| `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/keycloak.md`. |
+| `oidc.rolesClaim` | `string` | `"roles"` | Token claim with the flat role list; the UI requires the role `board-member`. |
 | `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. |
 | `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. |

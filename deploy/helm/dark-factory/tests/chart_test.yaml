@@ -400,6 +400,37 @@ tests:
           value: certs
         documentIndex: 1
 
+  - it: renders no auth section until oidc.publicUrl is set
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'auth:'
+        documentIndex: 0
+
+  - it: configures the web UI login when oidc.publicUrl is set
+    template: configmap.yaml
+    set:
+      oidc.publicUrl: https://factory.example.org
+      oidc.rolesClaim: groups
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'publicUrl: "https://factory.example.org"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'clientSecretFile: /run/secrets/oidc/client-secret'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'rolesClaim: "groups"'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: 'auth:'
+        documentIndex: 1
+
   - it: points sandbox certificates at the same issuer the chart renders
     template: configmap.yaml
     release:

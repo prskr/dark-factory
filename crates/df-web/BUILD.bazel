@@ -51,7 +51,12 @@ rust_library(
     crate_name = "df_web",
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = all_crate_deps(normal = True) + [":build_script"],
+    deps = all_crate_deps(normal = True) + [
+        ":build_script",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
 )
 
 alias(
@@ -62,9 +67,20 @@ alias(
 rust_test(
     name = "df_web_test",
     crate = ":df_web",
+    data = glob(["src/**/snapshots/*.snap"]),
+    env = {
+        "INSTA_UPDATE": "no",
+        "INSTA_WORKSPACE_ROOT": ".",
+    },
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
     ),
-    deps = all_crate_deps(normal_dev = True) + [":build_script"],
+    deps = all_crate_deps(normal_dev = True) + [
+        ":build_script",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+        "//crates/df-test-postgres:df_test_postgres",
+    ],
 )

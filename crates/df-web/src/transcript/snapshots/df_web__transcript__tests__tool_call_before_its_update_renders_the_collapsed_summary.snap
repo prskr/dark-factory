@@ -1,0 +1,33 @@
+---
+source: crates/df-web/src/transcript/tests.rs
+expression: render_all(&folder)
+---
+<div id="transcript" class="flex min-w-0 flex-col gap-3">
+<div id="ev-2" data-prompt-id="p1" class="min-w-0 self-end rounded-lg bg-sky-900 px-3 py-2 md:max-w-[80%]">
+<div class="text-xs text-sky-300">Peter</div>
+<div class="whitespace-pre-wrap break-words">please fix &lt;b&gt;login&lt;/b&gt;</div>
+</div>
+<details id="thought-th1" class="text-slate-400">
+<summary class="flex min-h-11 cursor-pointer items-center text-sm">Thinking</summary>
+<div class="whitespace-pre-wrap break-words text-sm">hmm</div>
+</details>
+<div id="msg-m1" class="min-w-0 break-words">
+<div class="whitespace-pre-wrap">Looking at **the code**</div>
+</div>
+<details id="ev-6" class="rounded border border-slate-800 bg-slate-900">
+<summary class="flex min-h-11 cursor-pointer items-center gap-2 px-3 text-sm">
+<span class="min-w-0 flex-1 truncate">Run tests</span>
+<span class="text-xs text-slate-400">execute</span>
+<span class="text-xs text-slate-400">in_progress</span>
+</summary>
+<div class="space-y-2 px-3 pb-3 text-sm">
+<div class="font-mono text-xs text-slate-400">src/lib.rs:3</div>
+<div>
+<div class="text-xs text-slate-400">Input</div>
+<pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs">
+<code>{&quot;cmd&quot;:&quot;cargo test&quot;}</code>
+</pre>
+</div>
+</div>
+</details>
+</div>
