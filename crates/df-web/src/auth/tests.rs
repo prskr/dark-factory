@@ -308,9 +308,42 @@ async fn logout_deletes_the_session_and_redirects_to_the_provider() {
 #[tokio::test]
 async fn login_next_must_be_a_local_path() {
     let app = TestApp::new().await;
-    let (cookie, authorize) = start_login(&app, "%2F%2Fevil.example").await;
+    // Browsers drop tabs and newlines from URLs, which would turn `/\t/evil` into `//evil`.
+    for next in [
+        "%2F%2Fevil.example",
+        "%2F%09%2Fevil.example",
+        "%2F%0A%2Fevil.example",
+    ] {
+        let (cookie, authorize) = start_login(&app, next).await;
+        app.idp
+            .set(|s| s.nonce = Some(query_param(&authorize, "nonce")));
+        let state = query_param(&authorize, "state");
+        let callback = app
+            .get(
+                &format!("/auth/callback?code=good-code&state={state}"),
+                &cookie,
+            )
+            .await;
+        assert_eq!(header_str(&callback, "location"), "/", "{next}");
+    }
+}
+
+#[tokio::test]
+async fn login_fails_when_the_session_id_cannot_be_replaced() {
+    let app = TestApp::new().await;
+    let (cookie, authorize) = start_login(&app, "%2F").await;
     app.idp
         .set(|s| s.nonce = Some(query_param(&authorize, "nonce")));
+    // Replacing the id deletes the old row; make exactly that fail.
+    sqlx::raw_sql(
+        "CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS
+             $$ BEGIN RAISE EXCEPTION 'store unavailable'; END $$;
+         CREATE TRIGGER refuse_delete BEFORE DELETE ON web_sessions
+             FOR EACH ROW EXECUTE FUNCTION refuse_delete();",
+    )
+    .execute(&app.pool)
+    .await
+    .unwrap();
     let state = query_param(&authorize, "state");
     let callback = app
         .get(
@@ -318,7 +351,14 @@ async fn login_next_must_be_a_local_path() {
             &cookie,
         )
         .await;
-    assert_eq!(header_str(&callback, "location"), "/");
+
+    assert_eq!(callback.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let logged_in: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM web_sessions WHERE data ? 'user'")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(logged_in, 0);
 }
 
 #[tokio::test]
