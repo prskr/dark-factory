@@ -231,9 +231,10 @@ pub async fn callback(
         refresh_token: identity.refresh_token,
         expires_at: identity.expires_at,
     };
-    // A new session id after login prevents session fixation.
+    // A new session id after login prevents session fixation; never log in under the old one.
     if let Err(error) = session.cycle_id().await {
         tracing::error!(%error, "cycling the session id failed");
+        return error_page(StatusCode::INTERNAL_SERVER_ERROR, "Error", "Login failed.");
     }
     if let Err(error) = session.insert(SESSION_USER, &user).await {
         tracing::error!(%error, "saving the session failed");
@@ -367,10 +368,18 @@ fn now_unix() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-/// Only local paths are valid return targets.
+/// Only local paths are valid return targets. Control characters are refused because browsers
+/// drop tabs and newlines from URLs, which turns `/\t/host` into `//host`.
 fn sanitize_next(next: Option<&str>) -> String {
     match next {
-        Some(n) if n.starts_with('/') && !n.starts_with("//") && !n.starts_with("/\\") => n.into(),
+        Some(n)
+            if n.starts_with('/')
+                && !n.starts_with("//")
+                && !n.starts_with("/\\")
+                && !n.chars().any(char::is_control) =>
+        {
+            n.into()
+        }
         _ => "/".into(),
     }
 }
