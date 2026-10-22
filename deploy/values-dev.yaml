@@ -73,7 +73,6 @@ clusterTargets:
 networkPolicy:
   enabled: true
   ingressController:
-    namespaceSelector:
-      kubernetes.io/metadata.name: kube-system
-    podSelector:
-      app.kubernetes.io/name: cilium-envoy
+    # Cilium Gateway API: Envoy reaches the UI with the reserved identity `ingress`, which no
+    # selector can match.
+    allowAll: true

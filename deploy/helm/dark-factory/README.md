@@ -104,8 +104,12 @@ Every key in `values.yaml` is documented below:
 | `tls.ca.existingIssuer.kind` | `string` | `"ClusterIssuer"` | Kind of the existing issuer. Sandboxes need a `ClusterIssuer`; with `"Issuer"` you must also set `sandboxNamespace.issuerName` and `sandboxNamespace.issuerKind: ClusterIssuer` to a `ClusterIssuer` that trusts the same CA, otherwise the chart refuses to render. |
 | `tls.duration` | `string` | `"2160h"` | Certificate lifetime for control plane and gateway mTLS certificates. |
 | `tls.renewBefore` | `string` | `"360h"` | Renewal window before expiry for control plane and gateway mTLS certificates. |
+| `httpRoute.enabled` | `bool` | `false` | Render a Gateway API `HTTPRoute` (`gateway.networking.k8s.io/v1`) that sends all paths to the control plane UI port. Needs the Gateway API CRDs and an existing `Gateway`. Set `oidc.publicUrl` to the route's URL and allow the Gateway in `networkPolicy.ingressController` (with Cilium: `allowAll: true`). |
+| `httpRoute.parentRefs` | `array` | `[]` | `parentRefs` of the route, e.g. `[{name: public, namespace: gateway-system}]`. At least one is required when `httpRoute.enabled` is `true`. |
+| `httpRoute.hostnames` | `array` | `[]` | Hostnames the route matches. Empty: every hostname of the Gateway listener. |
 | `networkPolicy.enabled` | `bool` | `true` | Render instance namespace `NetworkPolicy` resources restricting control plane and gateway ingress. |
-| `networkPolicy.ingressController.namespaceSelector` | `object` | `{"kubernetes.io/metadata.name": "ingress-nginx"}` | Namespace label selector allowed to reach the control plane UI port (`8080`). |
+| `networkPolicy.ingressController.allowAll` | `bool` | `false` | Render the UI port rule without `from`, so every source can reach it; `namespaceSelector` and `podSelector` are then ignored. Needed when the ingress proxy's traffic carries no pod identity, e.g. Cilium Gateway API or Ingress, whose Envoy connects with the reserved identity `ingress`. The agent and internal gRPC ports stay restricted. The UI requires a login on every route except `/healthz`, `/readyz` and `/assets/*`. |
+| `networkPolicy.ingressController.namespaceSelector` | `object` | `{"kubernetes.io/metadata.name": "ingress-nginx"}` | Namespace label selector allowed to reach the control plane UI port (`8080`). Point it at the Gateway's namespace when you use `httpRoute`. |
 | `networkPolicy.ingressController.podSelector` | `object` | `{}` | Optional pod label selector within the ingress controller namespace allowed to reach the UI port. |
 
 ## Cluster targets

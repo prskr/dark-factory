@@ -13,6 +13,7 @@
     "controlPlane",
     "gateway",
     "tls",
+    "httpRoute",
     "networkPolicy"
   ],
   "properties": {
@@ -214,6 +215,24 @@
         "renewBefore": { "type": "string" }
       }
     },
+    "httpRoute": {
+      "type": "object",
+      "required": ["enabled", "parentRefs", "hostnames"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "hostnames": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "if": { "properties": { "enabled": { "const": true } } },
+      "then": { "properties": { "parentRefs": { "minItems": 1 } } }
+    },
     "networkPolicy": {
       "type": "object",
       "required": ["enabled", "ingressController"],
@@ -222,6 +241,7 @@
         "ingressController": {
           "type": "object",
           "properties": {
+            "allowAll": { "type": "boolean" },
             "namespaceSelector": { "type": "object" },
             "podSelector": { "type": "object" }
           }

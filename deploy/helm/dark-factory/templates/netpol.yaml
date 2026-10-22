@@ -28,6 +28,10 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.controlPlane.ports.internalGrpc }}
+    {{- if .Values.networkPolicy.ingressController.allowAll }}
+    {{- /* No `from`: every source, including identities no selector can name (Cilium reserved:ingress). */}}
+    - ports:
+    {{- else }}
     - from:
         - namespaceSelector:
             matchLabels:
@@ -38,6 +42,7 @@ spec:
               {{- toYaml .Values.networkPolicy.ingressController.podSelector | nindent 14 }}
           {{- end }}
       ports:
+    {{- end }}
         - protocol: TCP
           port: {{ .Values.controlPlane.ports.http }}
 ---

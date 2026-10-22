@@ -147,9 +147,22 @@ tls:
   duration: 2160h
   renewBefore: 360h
 
+# Gateway API HTTPRoute to the control plane UI. Requires the Gateway API CRDs and an existing
+# Gateway. Also set oidc.publicUrl to the route's URL and allow the Gateway's namespace in
+# networkPolicy.ingressController.
+httpRoute:
+  enabled: false
+  # Gateways to attach to, e.g. [{name: public, namespace: gateway-system}]. Required when enabled.
+  parentRefs: []
+  # Hostnames the route matches; empty: all hostnames of the listener.
+  hostnames: []
+
 networkPolicy:
   enabled: true
   ingressController:
+    # Allow every source to reach the UI port; the selectors below are then ignored. Needed when
+    # the proxy's traffic has no pod identity, e.g. Cilium Gateway API/Ingress (reserved:ingress).
+    allowAll: false
     namespaceSelector:
       kubernetes.io/metadata.name: ingress-nginx
     podSelector: {}
