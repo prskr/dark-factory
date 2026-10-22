@@ -1,0 +1,131 @@
+//! Test-only plugin that misbehaves on request. `issues.get(number)` selects the behaviour; the
+//! host tests in `crates/df-plugins/tests` build it for `wasm32-wasip2`.
+
+wit_bindgen::generate!({
+    path: "../../contract/wit/integrations",
+    world: "forge",
+    generate_all,
+});
+
+use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
+use exports::darkfactory::integrations::issues::{
+    Comment, Guest as IssuesGuest, Issue, IssueState,
+};
+use exports::darkfactory::integrations::pull_requests::{
+    Guest as PullRequestsGuest, NewPullRequest, PullRequest, PullRequestUpdate,
+};
+
+pub struct Probe;
+
+/// Number of environment variables the plugin sees.
+pub const ENVIRONMENT: u64 = 1;
+/// Spins forever.
+pub const LOOP: u64 = 2;
+/// Allocates far more memory than any sane limit.
+pub const ALLOCATE: u64 = 3;
+/// Writes a line to stderr.
+pub const STDERR: u64 = 4;
+/// `GET <base-url>/echo` with its own `Authorization: Bearer fake`; the body is the status code.
+pub const OWN_AUTHORIZATION: u64 = 5;
+/// `GET http://<repo owner>/`, the owner standing in for a `host:port`; fails with `transport` if
+/// the host denies it.
+pub const OTHER_HOST: u64 = 6;
+
+/// Minimal blocking `GET` over `wasi:http`; returns the status code.
+fn get(base_url: &str, path: &str, authorization: Option<&str>) -> Result<u16, Error> {
+    use wasi::http::outgoing_handler;
+    use wasi::http::types::{Fields, Method, OutgoingRequest, Scheme};
+
+    let transport =
+        |what: &str, e: &dyn std::fmt::Debug| Error::Transport(format!("{what}: {e:?}"));
+    let (scheme, authority) = base_url
+        .split_once("://")
+        .ok_or_else(|| Error::Config(format!("invalid URL {base_url}")))?;
+    let headers = Fields::new();
+    if let Some(value) = authorization {
+        headers
+            .append("authorization", value.as_bytes())
+            .map_err(|e| transport("header", &e))?;
+    }
+    let request = OutgoingRequest::new(headers);
+    request
+        .set_method(&Method::Get)
+        .and(request.set_scheme(Some(&match scheme {
+            "https" => Scheme::Https,
+            "http" => Scheme::Http,
+            other => Scheme::Other(other.to_string()),
+        })))
+        .and(request.set_authority(Some(authority)))
+        .and(request.set_path_with_query(Some(path)))
+        .map_err(|()| Error::Internal("invalid request target".to_string()))?;
+    let future = outgoing_handler::handle(request, None).map_err(|e| transport("send", &e))?;
+    future.subscribe().block();
+    let response = future
+        .get()
+        .and_then(Result::ok)
+        .ok_or_else(|| Error::Internal("response future not ready".to_string()))?
+        .map_err(|e| transport("response", &e))?;
+    Ok(response.status())
+}
+
+impl IssuesGuest for Probe {
+    fn get(id: IssueRef) -> Result<Issue, Error> {
+        let body = match id.number {
+            ENVIRONMENT => format!("env={}", std::env::vars().count()),
+            LOOP => loop {
+                std::hint::black_box(());
+            },
+            ALLOCATE => {
+                let mut big = vec![1u8; 512 * 1024 * 1024];
+                big[0] = 2;
+                format!("allocated {}", big.len())
+            }
+            STDERR => {
+                eprintln!("hello from stderr");
+                String::new()
+            }
+            OWN_AUTHORIZATION => {
+                let base_url = wasi::config::store::get("base-url")
+                    .ok()
+                    .flatten()
+                    .ok_or_else(|| Error::Config("`base-url` is not configured".to_string()))?;
+                get(&base_url, "/echo", Some("Bearer fake"))?.to_string()
+            }
+            OTHER_HOST => get(&format!("http://{}", id.repo.owner), "/", None)?.to_string(),
+            _ => String::new(),
+        };
+        Ok(Issue {
+            id,
+            url: String::new(),
+            title: String::new(),
+            body,
+            state: IssueState::Open,
+            labels: Vec::new(),
+        })
+    }
+
+    fn add_comment(_id: IssueRef, _body: String) -> Result<Comment, Error> {
+        Err(Error::Internal("not supported by the probe".to_string()))
+    }
+}
+
+impl PullRequestsGuest for Probe {
+    fn create(_request: NewPullRequest) -> Result<PullRequest, Error> {
+        Err(Error::Internal("not supported by the probe".to_string()))
+    }
+
+    fn find_open(_: RepoRef, _: String, _: String) -> Result<Option<PullRequest>, Error> {
+        Ok(None)
+    }
+
+    fn get(_: PullRequestRef) -> Result<PullRequest, Error> {
+        Err(Error::Internal("not supported by the probe".to_string()))
+    }
+
+    fn update(_: PullRequestRef, _: PullRequestUpdate) -> Result<PullRequest, Error> {
+        Err(Error::Internal("not supported by the probe".to_string()))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+export!(Probe);

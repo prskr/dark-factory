@@ -108,6 +108,8 @@ Every key in `values.yaml` is documented below:
 
 ## Cluster targets
 
+The chart does not render the control plane's `plugins` section: the image ships the Forgejo plugin at `/plugins/forgejo.wasm`, which is the default (reference: `crates/df-plugins/docs/configuration.md`).
+
 `clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs.
 
 ## TLS issuer

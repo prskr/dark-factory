@@ -16,6 +16,7 @@ rust_binary(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-k8s:df_k8s",
+        "//crates/df-plugins:df_plugins",
         "//crates/df-web:df_web",
     ],
 )
@@ -27,7 +28,9 @@ rust_test(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     crate_root = "src/main.rs",
+    data = ["//plugins/forgejo"],
     edition = "2024",
+    env = {"FORGEJO_PLUGIN_WASM": "$(rootpath //plugins/forgejo)"},
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -40,6 +43,7 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-k8s:df_k8s",
+        "//crates/df-plugins:df_plugins",
         "//crates/df-test-postgres:df_test_postgres",
         "//crates/df-web:df_web",
     ],

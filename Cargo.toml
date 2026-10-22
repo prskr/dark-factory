@@ -25,6 +25,7 @@ df-agent-channel = { path = "crates/df-agent-channel" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
 df-k8s = { path = "crates/df-k8s" }
+df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }
 df-test-postgres = { path = "crates/df-test-postgres" }
 df-web = { path = "crates/df-web" }
@@ -76,6 +77,11 @@ tower-test = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["v7", "serde"] }
+wasmtime = { version = "50", default-features = false, features = ["component-model", "async", "cranelift", "runtime", "std", "parallel-compilation", "wat"] }
+wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
+wasmtime-wasi-config = "50"
+wasmtime-wasi-http = { version = "50", default-features = false, features = ["p2", "default-send-request"] }
+wiremock = "0.6"
 wit-bindgen = "0.63"
 x509-parser = "0.18"
 

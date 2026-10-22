@@ -3,11 +3,12 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-37.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-41.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
 - Origin of TD-28 to TD-36: code review of `iter1-sandbox-provisioning` (`df-k8s`, 2026-10-21). The `TD-n (Rn-Nm)` headings give the IDs used in that review.
+- Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -49,6 +50,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
 | TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
 | TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
+| TD-38 | low    | `df-plugins` forge client | Every `ForgeClient` method repeats resolve → retry → run → error mapping |
+| TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
+| TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
 
 ## Entries
 
@@ -352,6 +356,30 @@ The chart always sets the issuer name, so deployments are not affected. Running 
 `live_config()` (`crates/df-k8s/src/test_support.rs`) delivers `alpine:latest` as the runtime image, which has no `/opt/factory/factory-agent`, so the container cannot start. Only `test_reconciliation_live_cluster` overrides it with `runtime:dev`, and it checks the policy only. None of the live tests asserts `Running` or a `Started` event. The pod-start path is only covered by unit tests with a seeded store.
 
 **Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
+
+### TD-38 (S7). Duplicated call pipeline in `PluginForgeClient`
+
+`crates/df-plugins/src/forge.rs` (`impl ForgeClient for PluginForgeClient`)
+
+All five methods repeat `resolve` → `with_retries` → `host.run` → `convert::…` / `convert::from_error`. A new method or capability (an issue tracker plugin) copies it again, and a change to retries or error mapping must touch every copy.
+
+**Fix:** One private `call(project, |plugin, store| …)` helper that does resolve, retry, run and error mapping; the methods only build the guest call and convert the result.
+
+### TD-39 (R2-P1). Shipped plugin component is not validated by a test
+
+`deploy/test_images.sh`, `deploy/BUILD.bazel` (`forgejo_plugin`)
+
+The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins/forgejo.wasm`. `wasm-tools validate` ran once by hand (2026-10-22: 338 KB, valid). `wasm-tools` is not in the Bazel multitool. A broken opt transition or toolchain change only shows when `serve` loads the component.
+
+**Fix:** Add `wasm-tools` to multitool and run `wasm-tools validate` (optionally check the exports) in the image test.
+
+### TD-40 (R2-S2). Import allow-list duplicates `plugin-base`
+
+`crates/df-plugins/src/host.rs` (`ALLOWED_IMPORTS`), `contract/wit/integrations/integrations.wit` (world `plugin-base`)
+
+The host lists the allowed interfaces by hand. When `plugin-base` gains an import and the list is not updated, components built against the contract are refused at load.
+
+**Fix:** A test that resolves world `plugin-base` (for example with `wit-parser`, or a component built against it) and asserts that every import is in `ALLOWED_IMPORTS`.
 
 ## Accepted decisions
 

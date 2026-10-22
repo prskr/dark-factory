@@ -28,6 +28,7 @@ use tokio::task::JoinSet;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+mod forge;
 mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
@@ -83,7 +84,7 @@ async fn main() -> ExitCode {
         Command::Serve => match run_serve_command(&cli.config).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                error!(error = %err, "control plane server failed");
+                error!(error = format!("{err:#}"), "control plane server failed");
                 ExitCode::from(1)
             }
         },
@@ -93,14 +94,14 @@ async fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(err) => {
-                error!(error = %err, "database migration failed");
+                error!(error = format!("{err:#}"), "database migration failed");
                 ExitCode::from(1)
             }
         },
         Command::Gateway => match run_gateway_command(&cli.config).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                error!(error = %err, "egress gateway failed");
+                error!(error = format!("{err:#}"), "egress gateway failed");
                 ExitCode::from(1)
             }
         },
@@ -362,6 +363,15 @@ where
         .as_ref()
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
     let tls = df_agent_channel::TlsReloader::load(tls).await?;
+    // One forge plugin is supported for now and `serve` refuses to start without it. With several
+    // plugins this becomes: fail only if no forge plugin could be loaded. Loaded before the
+    // database connection, so a missing component fails fast without a database.
+    let forgejo = cfg
+        .plugins
+        .get("forgejo")
+        .cloned()
+        .unwrap_or_else(|| df_core::PluginConfig::new("/plugins/forgejo.wasm"));
+    let forge_host = forge::load_forge_plugin("forgejo", &forgejo)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 
@@ -375,11 +385,12 @@ where
         .start(&cfg, &pool, &notifier, stop_rx.clone())
         .await?;
 
+    let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
     let ctx = ChannelContext {
         notifier,
         pool,
         provider,
-        forge: Arc::new(unconfigured::UnconfiguredForgeClient),
+        forge,
         secrets,
         config: Arc::new(ChannelConfig::from(&cfg)),
     };
@@ -828,6 +839,24 @@ mod tests {
         assert!(done_rx.await.is_ok(), "the listener was aborted");
     }
 
+    /// The prebuilt Forgejo component: `FORGEJO_PLUGIN_WASM` (set by Bazel), else the output of
+    /// `cargo build --target wasm32-wasip2 -p forgejo-plugin`. Tests don't build it themselves, see
+    /// `docs/development.md`.
+    fn forgejo_component() -> PathBuf {
+        let path = std::env::var_os("FORGEJO_PLUGIN_WASM")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../target/wasm32-wasip2/debug/forgejo_plugin.wasm")
+            });
+        assert!(
+            path.exists(),
+            "missing {}: run `cargo build --target wasm32-wasip2 -p forgejo-plugin` first",
+            path.display()
+        );
+        path
+    }
+
     fn serve_config(
         pool: &sqlx::PgPool,
         dir: &std::path::Path,
@@ -836,8 +865,10 @@ mod tests {
         let options = pool.connect_options();
         std::fs::write(dir.join("db-password"), "postgres\n").unwrap();
         let tls = tls.unwrap_or_default();
+        let plugin = forgejo_component();
         let yaml = format!(
-            "database:\n  host: {}\n  port: {}\n  database: {}\n  user: {}\n  passwordFile: {}/db-password\n  schema: public\n{tls}",
+            "plugins:\n  forgejo:\n    path: {}\ndatabase:\n  host: {}\n  port: {}\n  database: {}\n  user: {}\n  passwordFile: {}/db-password\n  schema: public\n{tls}",
+            plugin.display(),
             options.get_host(),
             options.get_port(),
             options.get_database().unwrap(),

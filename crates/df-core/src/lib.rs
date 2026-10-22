@@ -9,8 +9,8 @@ pub mod seams;
 pub mod testing;
 
 pub use config::{
-    ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, RuntimeDelivery,
-    SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+    ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, PluginConfig,
+    RuntimeDelivery, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
 };
 pub use domain::{ParseEnumError, Principal, RunOutcome, RunState, TaskStatus};
 pub use ids::{

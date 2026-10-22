@@ -54,6 +54,12 @@ To measure line coverage across `df-core` and `df-db`:
 cargo llvm-cov --workspace
 ```
 
+Tests of `df-plugins` and `dark-factory` use prebuilt WebAssembly plugin components and do not build them. Build them first (Bazel sets `FORGEJO_PLUGIN_WASM` / `TEST_PROBE_WASM` itself):
+
+```bash
+cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
+```
+
 ## 4. Updating `sqlx` Offline Metadata
 
 All compile-time checked queries in `df-db` have their metadata checked into `.sqlx/` so the workspace builds without a live database (e.g. in Bazel and CI).

@@ -1,4 +1,8 @@
 //! Forgejo WASI integration plugin implementing `darkfactory:integrations/forge@0.1.0`.
+//!
+//! The Forgejo logic ([`Forgejo`]) is generic over a [`Transport`] so it can be unit-tested natively;
+//! the component wires it to `wasi:http` ([`wasi_transport`]). Credentials are never handled here:
+//! the host injects `Authorization` into every outgoing request.
 
 wit_bindgen::generate!({
     path: "../../contract/wit/integrations",
@@ -6,99 +10,86 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+mod api;
+mod draft;
+mod error;
+mod wasi_transport;
+
 use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
-use exports::darkfactory::integrations::issues::{
-    Comment, Guest as IssuesGuest, Issue, IssueState,
-};
+use exports::darkfactory::integrations::issues::{Comment, Guest as IssuesGuest, Issue};
 use exports::darkfactory::integrations::pull_requests::{
-    Guest as PullRequestsGuest, NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
+    Guest as PullRequestsGuest, NewPullRequest, PullRequest, PullRequestUpdate,
 };
+
+pub use api::{Forgejo, Method, Request, Response, Transport};
 
 pub struct ForgejoPlugin;
 
 impl PullRequestsGuest for ForgejoPlugin {
     fn create(request: NewPullRequest) -> Result<PullRequest, Error> {
-        Ok(PullRequest {
-            id: PullRequestRef {
-                repo: request.repo,
-                number: 1,
-            },
-            url: String::from("https://forgejo.invalid/pr/1"),
-            head: request.head,
-            base: request.base,
-            title: request.title,
-            body: request.body,
-            draft: request.draft,
-            state: PullRequestState::Open,
-            head_sha: String::from("0000000000000000000000000000000000000000"),
-        })
+        instance()?.create(request)
     }
 
-    fn find_open(
-        _repo: RepoRef,
-        _head: String,
-        _base: String,
-    ) -> Result<Option<PullRequest>, Error> {
-        Ok(None)
+    fn find_open(repo: RepoRef, head: String, base: String) -> Result<Option<PullRequest>, Error> {
+        instance()?.find_open(&repo, &head, &base)
     }
 
     fn get(id: PullRequestRef) -> Result<PullRequest, Error> {
-        Err(Error::NotFound(format!(
-            "pull request #{} not found",
-            id.number
-        )))
+        instance()?.get(&id)
     }
 
-    fn update(id: PullRequestRef, _changes: PullRequestUpdate) -> Result<PullRequest, Error> {
-        Err(Error::NotFound(format!(
-            "pull request #{} not found",
-            id.number
-        )))
+    fn update(id: PullRequestRef, changes: PullRequestUpdate) -> Result<PullRequest, Error> {
+        instance()?.update(&id, changes)
     }
 }
 
 impl IssuesGuest for ForgejoPlugin {
     fn get(id: IssueRef) -> Result<Issue, Error> {
-        Ok(Issue {
-            id,
-            url: String::from("https://forgejo.invalid/issues/1"),
-            title: String::from("placeholder"),
-            body: String::new(),
-            state: IssueState::Open,
-            labels: Vec::new(),
-        })
+        instance()?.get_issue(&id)
     }
 
-    fn add_comment(_id: IssueRef, _body: String) -> Result<Comment, Error> {
-        Ok(Comment {
-            id: String::from("1"),
-            url: String::from("https://forgejo.invalid/issues/1#issuecomment-1"),
-        })
+    fn add_comment(id: IssueRef, body: String) -> Result<Comment, Error> {
+        instance()?.add_comment(&id, &body)
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-export!(ForgejoPlugin);
+/// Reads configuration through `wasi:config/store` and talks to Forgejo over `wasi:http`.
+fn instance() -> Result<Forgejo<wasi_transport::WasiTransport>, Error> {
+    forgejo(config("base-url")?, config("wip-prefixes")?)
+}
+
+fn forgejo(
+    base_url: Option<String>,
+    wip_prefixes: Option<String>,
+) -> Result<Forgejo<wasi_transport::WasiTransport>, Error> {
+    let base_url =
+        base_url.ok_or_else(|| Error::Config("`base-url` is not configured".to_string()))?;
+    let prefixes = wip_prefixes.unwrap_or_else(|| draft::DEFAULT_PREFIXES.to_string());
+    Ok(Forgejo::new(
+        wasi_transport::WasiTransport::new(&base_url)?,
+        draft::parse_prefixes(&prefixes),
+    ))
+}
+
+fn config(key: &str) -> Result<Option<String>, Error> {
+    wasi::config::store::get(key).map_err(|e| Error::Config(format!("reading `{key}`: {e:?}")))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn creates_placeholder_pull_request() {
-        let pr = ForgejoPlugin::create(NewPullRequest {
-            repo: RepoRef {
-                owner: "prskr".to_string(),
-                name: "dark-factory".to_string(),
-            },
-            head: "factory/task/DF-1".to_string(),
-            base: "main".to_string(),
-            title: "Add feature".to_string(),
-            body: "Body".to_string(),
-            draft: true,
-        })
-        .expect("create should succeed");
-        assert_eq!(pr.id.number, 1);
-        assert!(pr.draft);
+    fn missing_base_url_is_a_config_error() {
+        assert!(matches!(forgejo(None, None), Err(Error::Config(m)) if m.contains("base-url")));
+    }
+
+    #[test]
+    fn base_url_with_a_path_is_a_config_error() {
+        let url = Some("https://git.example.org/forgejo".to_string());
+        assert!(matches!(forgejo(url, None), Err(Error::Config(_))));
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+export!(ForgejoPlugin);
