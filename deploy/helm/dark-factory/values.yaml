@@ -72,7 +72,6 @@ sandboxNamespace:
   issuerGroup: 'cert-manager.io'
   certificateDuration: '6h'
   certificateRenewBefore: '2h'
-  runtimeImage: 'ghcr.io/prskr/dark-factory/runtime:0.1.0'
   runtimeDelivery: 'imageVolume'
   clusterDomain: 'cluster.local'
   controlPlaneIp: ''

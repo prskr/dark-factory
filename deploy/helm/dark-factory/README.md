@@ -23,8 +23,8 @@ Every key in `values.yaml` is documented below:
 | `image.controlPlane.repository` | `string` | `"ghcr.io/prskr/dark-factory/control-plane"` | OCI repository for the control plane (`dark-factory`) image. |
 | `image.controlPlane.tag` | `string` | `"0.1.0"` | Tag used for the control plane image when `digest` is empty. |
 | `image.controlPlane.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.controlPlane.tag`. |
-| `image.runtime.repository` | `string` | `"ghcr.io/prskr/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image volume. |
-| `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty. |
+| `image.runtime.repository` | `string` | `"ghcr.io/prskr/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image that sandboxes mount (control plane config `sandbox.runtimeImage`). |
+| `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
 | `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. |
 | `image.testProject.tag` | `string` | `"0.1.0"` | Tag used for the test project image when `digest` is empty. |
@@ -61,7 +61,6 @@ Every key in `values.yaml` is documented below:
 | `sandboxNamespace.issuerGroup` | `string` | `"cert-manager.io"` | API group of that issuer. |
 | `sandboxNamespace.certificateDuration` | `string` | `"6h"` | Lifetime of sandbox client certificates. |
 | `sandboxNamespace.certificateRenewBefore` | `string` | `"2h"` | Renewal window of sandbox client certificates. |
-| `sandboxNamespace.runtimeImage` | `string` | `"ghcr.io/prskr/dark-factory/runtime:0.1.0"` | OCI reference of the agent runtime image mounted into sandboxes. |
 | `sandboxNamespace.runtimeDelivery` | `string` | `"imageVolume"` | `imageVolume` or `initContainer`. |
 | `sandboxNamespace.clusterDomain` | `string` | `"cluster.local"` | Cluster DNS domain used for Service FQDN host aliases. |
 | `sandboxNamespace.controlPlaneIp` | `string` | `""` | Static control plane ClusterIP; empty resolves the Service at startup. |

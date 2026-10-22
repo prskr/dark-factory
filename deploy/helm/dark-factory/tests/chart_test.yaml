@@ -566,3 +566,25 @@ tests:
       - exists:
           path: spec.ingress[1].from
         documentIndex: 0
+
+  - it: passes image.runtime as the sandbox runtime image to the control plane
+    template: configmap.yaml
+    set:
+      image.runtime.repository: registry.example.org/runtime
+      image.runtime.tag: dev
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeImage: "registry.example.org/runtime:dev"'
+        documentIndex: 0
+
+  - it: prefers image.runtime.digest over the tag for the sandbox runtime image
+    template: configmap.yaml
+    set:
+      image.runtime.tag: dev
+      image.runtime.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+        documentIndex: 0
