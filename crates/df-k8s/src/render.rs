@@ -206,8 +206,9 @@ pub fn render_sandbox(
             value: Some(no_proxy_str),
             ..Default::default()
         },
+        // Names and meaning: crates/factory-agent/docs/configuration.md.
         SandboxPodTemplateSpecContainersEnv {
-            name: "DARK_FACTORY_AGENT_ENDPOINT".to_string(),
+            name: "DF_CONTROL_PLANE_ADDR".to_string(),
             value: Some(format!(
                 "{}:{}",
                 config.control_plane_ip, config.control_plane_port
@@ -215,13 +216,8 @@ pub fn render_sandbox(
             ..Default::default()
         },
         SandboxPodTemplateSpecContainersEnv {
-            name: "DARK_FACTORY_TLS_SERVER_NAME".to_string(),
+            name: "DF_CONTROL_PLANE_SERVER_NAME".to_string(),
             value: Some(config.control_plane_tls_server_name.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "DARK_FACTORY_RUN_ID".to_string(),
-            value: Some(spec.run_id.to_string()),
             ..Default::default()
         },
     ];
@@ -962,8 +958,10 @@ mod tests {
             env.iter().any(|e| e.name == "HTTP_PROXY"
                 && e.value.as_deref() == Some("http://10.105.68.86:3128"))
         );
-        assert!(env.iter().any(|e| e.name == "DARK_FACTORY_AGENT_ENDPOINT"
+        assert!(env.iter().any(|e| e.name == "DF_CONTROL_PLANE_ADDR"
             && e.value.as_deref() == Some("10.103.178.202:9443")));
+        assert!(env.iter().any(|e| e.name == "DF_CONTROL_PLANE_SERVER_NAME"
+            && e.value.as_deref() == Some("dark-factory-control-plane.dark-factory-dev.svc")));
         assert!(env.iter().any(|e| {
             e.name == "NO_PROXY"
                 && e.value
@@ -971,6 +969,53 @@ mod tests {
                     .unwrap()
                     .contains("scheduler.nativelink.svc")
         }));
+    }
+
+    /// The variable table of the runtime's configuration reference; `factory-agent` checks that
+    /// it matches what the runtime reads.
+    const AGENT_CONFIGURATION: &str = include_str!("../../factory-agent/docs/configuration.md");
+
+    /// Returns `(name, required)` for every `DF_*` row of the reference's variable table.
+    fn documented_agent_variables() -> Vec<(&'static str, bool)> {
+        AGENT_CONFIGURATION
+            .lines()
+            .filter_map(|line| {
+                let mut cells = line.split('|').map(str::trim).skip(1);
+                let name = cells.next()?.trim_matches('`');
+                name.starts_with("DF_")
+                    .then(|| Some((name, cells.next()? == "yes")))
+                    .flatten()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sandbox_sets_the_variables_the_runtime_requires() {
+        let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
+        let env = sandbox.spec.pod_template.spec.containers[0]
+            .env
+            .clone()
+            .unwrap();
+        let documented = documented_agent_variables();
+        assert!(
+            documented.iter().any(|(_, required)| *required),
+            "no required variable found in the runtime's configuration reference"
+        );
+
+        for (name, _) in documented.iter().filter(|(_, required)| *required) {
+            assert!(
+                env.iter()
+                    .any(|e| e.name == *name && e.value.as_deref().is_some_and(|v| !v.is_empty())),
+                "sandbox does not set {name}, which factory-agent requires"
+            );
+        }
+        for e in env.iter().filter(|e| e.name.starts_with("DF_")) {
+            assert!(
+                documented.iter().any(|(name, _)| *name == e.name),
+                "sandbox sets {}, which factory-agent does not read",
+                e.name
+            );
+        }
     }
 
     #[test]

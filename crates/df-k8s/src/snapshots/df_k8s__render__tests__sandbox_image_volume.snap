@@ -44,12 +44,10 @@ spec:
               value: "10.103.178.202,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
             - name: no_proxy
               value: "10.103.178.202,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
-            - name: DARK_FACTORY_AGENT_ENDPOINT
+            - name: DF_CONTROL_PLANE_ADDR
               value: "10.103.178.202:9443"
-            - name: DARK_FACTORY_TLS_SERVER_NAME
+            - name: DF_CONTROL_PLANE_SERVER_NAME
               value: dark-factory-control-plane.dark-factory-dev.svc
-            - name: DARK_FACTORY_RUN_ID
-              value: 00000000-0000-0000-0000-000000000001
           image: "test-project:latest"
           name: agent
           securityContext:
