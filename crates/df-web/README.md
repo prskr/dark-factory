@@ -65,7 +65,7 @@ binary (`TAILWIND_BIN` or `PATH`); `build.rs` regenerates it when the binary is 
 always does. Regenerate the committed file after changing classes:
 
 ```bash
-tailwindcss -i crates/df-web/styles/input.css -o crates/df-web/assets/app.css
+tailwindcss -i crates/df-web/styles/input.css -o crates/df-web/assets/app.css --minify
 ```
 
 Alpine attributes with `@` are not valid in maud; use `x-on:click`. Attribute names with `.`

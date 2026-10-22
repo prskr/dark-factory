@@ -26,7 +26,7 @@ genrule(
     cmd = """
         TMP=$$(mktemp -d)
         trap 'rm -rf "$$TMP"' EXIT
-        TMPDIR="$$TMP" $(execpath :tailwindcss) --input $(location styles/input.css) --output $@
+        TMPDIR="$$TMP" $(execpath :tailwindcss) --input $(location styles/input.css) --output $@ --minify
     """,
     tools = [":tailwindcss"],
 )

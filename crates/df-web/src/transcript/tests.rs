@@ -262,6 +262,6 @@ fn a_long_code_line_stays_inside_a_block_that_scrolls_horizontally() {
     assert!(pre[..pre.find("</pre>").unwrap()].contains(&long));
     // ... and the stylesheet makes exactly that block scroll.
     let css = crate::assets::app_css().expect("app.css is embedded");
-    let rule = &css[css.find(".md-body pre {").expect("pre rule")..];
-    assert!(rule[..rule.find('}').unwrap()].contains("overflow-x: auto"));
+    let rule = &css[css.find(".md-body pre{").expect("pre rule")..];
+    assert!(rule[..rule.find('}').unwrap()].contains("overflow-x:auto"));
 }
