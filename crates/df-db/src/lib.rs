@@ -4,12 +4,15 @@ use sqlx::migrate::Migrator;
 
 pub mod audit;
 pub mod blobs;
+pub mod catalog;
 pub mod egress;
 pub mod migrate;
 pub mod notify;
 pub mod pool;
 pub mod projects;
+pub mod task_views;
 pub mod tasks;
+pub mod users;
 
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
 pub use blobs::{BlobRow, PgBlobStore, sha256_hex};

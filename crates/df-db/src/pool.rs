@@ -23,6 +23,9 @@ pub enum DbError {
     Json(#[from] serde_json::Error),
     #[error("not found: {0}")]
     NotFound(String),
+    /// The change violates a uniqueness or immutability rule.
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("permission or role management error: {0}")]
     RoleManagement(String),
 }

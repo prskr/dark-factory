@@ -41,6 +41,9 @@ pub struct InstanceConfig {
     pub database: DatabaseConfig,
     #[serde(default)]
     pub server: ServerConfig,
+    /// OIDC login of the web UI. Without it `serve` mounts only health checks and assets.
+    #[serde(default)]
+    pub auth: Option<AuthConfig>,
     #[serde(default)]
     pub gateway: GatewayConfig,
     #[serde(default)]
@@ -151,6 +154,30 @@ impl Default for ServerConfig {
             agent_port: default_agent_port(),
             internal_grpc_port: default_internal_grpc_port(),
         }
+    }
+}
+
+/// OIDC client settings of the web UI (`docs/keycloak.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthConfig {
+    /// Issuer URL; `/.well-known/openid-configuration` is discovered below it.
+    pub issuer_url: String,
+    pub client_id: String,
+    /// File holding the client secret (confidential client).
+    pub client_secret_file: PathBuf,
+    /// Externally visible base URL of the UI, e.g. `https://factory.example.org`. The OIDC
+    /// redirect URI is `<publicUrl>/auth/callback`.
+    pub public_url: String,
+    /// Name of the top-level token claim holding a flat list of roles.
+    #[serde(default = "default_roles_claim")]
+    pub roles_claim: String,
+}
+
+impl AuthConfig {
+    /// Reads the client secret from `client_secret_file`.
+    pub fn read_client_secret(&self) -> Result<SecretString, ConfigError> {
+        read_secret_file(&self.client_secret_file)
     }
 }
 
@@ -496,6 +523,10 @@ fn default_app_role() -> String {
     "dark_factory_app".to_string()
 }
 
+fn default_roles_claim() -> String {
+    "roles".to_string()
+}
+
 fn default_http_port() -> u16 {
     8080
 }
@@ -553,6 +584,22 @@ sandbox:
   namespace: dark-factory-sandboxes
   instanceNamespace: dark-factory
 "#;
+
+    #[test]
+    fn auth_is_optional_and_roles_claim_defaults_to_roles() {
+        assert!(
+            InstanceConfig::from_yaml_str(VALID_FIXTURE)
+                .unwrap()
+                .auth
+                .is_none()
+        );
+        let yaml = format!(
+            "{VALID_FIXTURE}auth:\n  issuerUrl: https://kc.example.org/realms/df\n  clientId: dark-factory\n  clientSecretFile: /run/secrets/oidc/secret\n  publicUrl: https://factory.example.org\n"
+        );
+        let auth = InstanceConfig::from_yaml_str(&yaml).unwrap().auth.unwrap();
+        assert_eq!(auth.roles_claim, "roles");
+        assert_eq!(auth.client_id, "dark-factory");
+    }
 
     #[test]
     fn plugins_are_a_map_with_free_form_settings() {

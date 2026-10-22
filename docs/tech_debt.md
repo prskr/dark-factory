@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-42.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-44.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -11,6 +11,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-37: planning of `iter2-plugin-distribution` (2026-10-22), which found that the init-container runtime delivery of `iter1-sandbox-provisioning` (ADR-0030) cannot work with the `scratch` runtime image.
 - Origin of TD-41: external review of the `run-network-policy` spec (2026-10-22).
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -57,6 +58,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
 | TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP |
+| TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros |
+| TD-43 | low    | `df-web` transcript | Code blocks are rendered without syntax highlighting (syntect, design D3) |
 
 ## Entries
 
@@ -402,6 +405,26 @@ The host lists the allowed interfaces by hand. When `plugin-base` gains an impor
 **Matters when:** a new CNI, an eBPF kube-proxy replacement or a CNI upgrade is rolled out.
 
 **Fix:** Add a live test with a pod in the sandbox namespace, a target Service and a second non-target Service: connecting to the target's ClusterIP succeeds, to the other fails.
+
+### TD-42 (S1). Web UI SQL is runtime-checked
+
+`crates/df-db/src/{users,catalog,task_views}.rs`, `crates/df-web/src/auth/store.rs`
+
+The queries added for the web UI use `sqlx::query_as` / `query_scalar` instead of `query!` / `query_as!`, so `.sqlx/` does not cover them. `catalog.rs` builds its project queries with the `select_project!` string macro, which the sqlx macros cannot take. A schema change that breaks one of these queries surfaces only in the container-backed tests or at runtime.
+
+**Matters when:** a migration renames or retypes a column these queries read.
+
+**Fix:** Write the queries as literal `query_as!` calls (inline the `select_project!` variants), regenerate `.sqlx/`. The session store may stay runtime-checked (it picks its SQL at runtime).
+
+### TD-43 (P7). No code highlighting in the transcript
+
+`crates/df-web/src/transcript/mod.rs` (Markdown rendering)
+
+Design D3 and the proposal name syntect classes for code blocks; the implementation renders Markdown with comrak only, so code blocks are unhighlighted. No spec requirement depends on it.
+
+**Matters when:** users read longer diffs or code in the transcript on a phone.
+
+**Fix:** Run comrak with a syntect adapter emitting CSS classes, add the theme to `styles/input.css`; or remove syntect from design D3 via `/opsx:update`.
 
 ## Accepted decisions
 

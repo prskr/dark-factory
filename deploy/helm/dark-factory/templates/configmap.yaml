@@ -25,6 +25,14 @@ data:
       internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
       healthPort: {{ .Values.gateway.ports.health }}
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
+    {{- if .Values.oidc.publicUrl }}
+    auth:
+      issuerUrl: {{ .Values.oidc.issuerUrl | quote }}
+      clientId: {{ .Values.oidc.clientId | quote }}
+      clientSecretFile: /run/secrets/oidc/client-secret
+      publicUrl: {{ .Values.oidc.publicUrl | quote }}
+      rolesClaim: {{ .Values.oidc.rolesClaim | quote }}
+    {{- end }}
     clusterTargets:
       anyNamespace: {{ .Values.clusterTargets.anyNamespace }}
       namespaces: {{ .Values.clusterTargets.namespaces | toJson }}

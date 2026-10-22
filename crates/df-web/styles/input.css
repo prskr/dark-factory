@@ -1,2 +1,36 @@
 @import "tailwindcss";
 @source "../src";
+
+/* Rendered Markdown of finished agent messages. Wide blocks scroll inside their own box so the
+   page itself never scrolls horizontally. */
+@layer components {
+  .md-body {
+    overflow-wrap: anywhere;
+  }
+  .md-body > * + * {
+    @apply mt-3;
+  }
+  .md-body h1,
+  .md-body h2,
+  .md-body h3 {
+    @apply font-semibold;
+  }
+  .md-body ul {
+    @apply list-disc pl-5;
+  }
+  .md-body ol {
+    @apply list-decimal pl-5;
+  }
+  .md-body a {
+    @apply text-sky-400 underline;
+  }
+  .md-body pre {
+    @apply overflow-x-auto rounded bg-slate-900 p-2 text-xs;
+  }
+  .md-body code {
+    @apply font-mono text-[0.9em];
+  }
+  .md-body table {
+    @apply block overflow-x-auto;
+  }
+}

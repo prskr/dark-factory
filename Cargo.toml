@@ -18,9 +18,12 @@ all = { level = "warn", priority = -1 }
 agent-client-protocol = { version = "3.4.0", features = ["stdio"] }
 anyhow = "1"
 async-trait = "0.1"
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "query", "tokio"] }
+base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
+comrak = { version = "0.57", default-features = false }
 df-agent-channel = { path = "crates/df-agent-channel" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
@@ -34,9 +37,11 @@ hex = "0.4"
 http = "1"
 http-body-util = "0.1"
 insta = { version = "1.49", features = ["yaml"] }
-jsonschema = { version = "0.59", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 k8s-openapi = { version = "0.28", default-features = false, features = ["v1_36"] }
 kube = { version = "4.2", default-features = false, features = ["client", "runtime", "derive", "rustls-tls"] }
+maud = { version = "0.27", features = ["axum"] }
+openidconnect = "4"
 pbjson = "0.9"
 pbjson-build = "0.9"
 pbjson-types = "0.9"
@@ -46,6 +51,7 @@ prost-types = "0.14"
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 regex = "1"
 rmcp = { version = "3.5.1", default-features = false, features = ["client", "server", "transport-async-rw"] }
+rsa = { version = "0.9", features = ["pem"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 secrecy = { version = "0.10", features = ["serde"] }
@@ -73,9 +79,12 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "router", "tls-ring"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
+tower = { version = "0.5", features = ["util"] }
+tower-sessions = { version = "0.15", default-features = false, features = ["axum-core"] }
 tower-test = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 wasmtime = { version = "50", default-features = false, features = ["component-model", "async", "cranelift", "runtime", "std", "parallel-compilation", "wat"] }
 wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }

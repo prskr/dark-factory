@@ -35,8 +35,10 @@ database:
     manageAppRole: false
 
 oidc:
-  issuerUrl: https://id.home.icb4dc0.de/realms/dark-factory
-  clientId: dark-factory
+  issuerUrl: https://auth.icb4dc0.de/realms/apps
+  publicUrl: https://df-dev.home.icb4dc0.de
+  rolesClaim: roles
+  clientId: 21e178d6-4756-4bf4-ad79-d3f23c029837
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
 
@@ -67,3 +69,11 @@ clusterTargets:
   namespaces:
     - nativelink
     - forgejo
+
+networkPolicy:
+  enabled: true
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector:
+      app.kubernetes.io/name: cilium-envoy

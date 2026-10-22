@@ -29,7 +29,7 @@ pre-commit:
       run: build/with_tools.sh hadolint {staged_files}
 
     typos:
-      run: build/with_tools.sh typos {staged_files}
+      run: build/with_tools.sh typos --force-exclude {staged_files}
 
     cargo-machete:
       glob: ['Cargo.toml', '*.rs']

@@ -49,6 +49,12 @@ oidc:
   clientId: dark-factory
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
+  # Externally visible base URL of the UI, e.g. https://factory.example.org. The redirect URI
+  # registered in the OIDC provider is <publicUrl>/auth/callback. Empty: no `auth` section is
+  # rendered: `serve` logs a warning and mounts only /healthz, /readyz and /assets/* (no web UI).
+  publicUrl: ''
+  # Token claim holding a flat list of roles; the UI requires `board-member` in it.
+  rolesClaim: roles
 
 sandboxNamespace:
   create: true
