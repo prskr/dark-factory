@@ -89,7 +89,6 @@
         "issuerGroup": { "type": "string" },
         "certificateDuration": { "type": "string" },
         "certificateRenewBefore": { "type": "string" },
-        "runtimeImage": { "type": "string" },
         "runtimeDelivery": { "type": "string", "enum": ["imageVolume", "initContainer"] },
         "clusterDomain": { "type": "string" },
         "controlPlaneIp": { "type": "string" },

@@ -342,7 +342,7 @@ Only `query-3aad8b60….json` has the `origin` fields of sqlx-cli 0.9.0; the oth
 
 ### TD-34. Runtime image tag written twice
 
-`crates/df-core/src/config.rs` (default `runtime_image`), `deploy/helm/dark-factory/values.yaml` (`sandboxNamespace.runtimeImage`)
+`crates/df-core/src/config.rs` (default `runtime_image`), `deploy/helm/dark-factory/values.yaml` (`image.runtime.tag`)
 
 The tag (`0.1.0`) is hard-coded in both. The chart always renders its value, so the df-core default only applies outside the chart. A release bump must change both.
 

@@ -173,7 +173,7 @@ sandbox:
   issuerGroup: {{ .Values.sandboxNamespace.issuerGroup | quote }}
   certificateDuration: {{ .Values.sandboxNamespace.certificateDuration | quote }}
   certificateRenewBefore: {{ .Values.sandboxNamespace.certificateRenewBefore | quote }}
-  runtimeImage: {{ .Values.sandboxNamespace.runtimeImage | quote }}
+  runtimeImage: {{ include "dark-factory.runtime.image" . | quote }}
   runtimeDelivery: {{ .Values.sandboxNamespace.runtimeDelivery | quote }}
   clusterDomain: {{ .Values.sandboxNamespace.clusterDomain | quote }}
   controlPlaneServiceName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
