@@ -329,3 +329,29 @@ async fn streams_require_login() {
     let response = f.app.get("/tasks/DF-1/events", "").await;
     assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
 }
+
+#[tokio::test]
+async fn streams_end_when_the_session_token_is_due_for_refresh() {
+    let f = fixture().await;
+    for uri in ["/tasks/DF-1/events?after=0", "/tasks/events"] {
+        // Due for refresh one second from now (REFRESH_SKEW is 30 s).
+        let (cookie, _) = crate::auth::testing::seed_session(
+            &f.app.pool,
+            &["board-member"],
+            31,
+            Some("refresh-0"),
+        )
+        .await;
+        let mut sse = SseReader::new(f.app.get(uri, &cookie).await);
+        sse.next().await;
+        // The reconnect passes the auth middleware again, which refreshes the token and roles.
+        assert!(
+            sse.ends_within(Duration::from_secs(5)).await,
+            "{uri} stayed open"
+        );
+    }
+    // A fresh session keeps its stream open.
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    sse.next().await;
+    assert!(!sse.ends_within(Duration::from_secs(2)).await);
+}

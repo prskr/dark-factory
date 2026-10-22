@@ -4,10 +4,14 @@
 //! messages carry the global id of the last event they contain; on reconnect the client sends it as
 //! `Last-Event-ID` (the spike in `README.md` shows htmx 4 does), and the first connect of a page
 //! passes the id it was rendered with as `?after=`.
+//!
+//! Streams end when the session's token is due for refresh: the reconnect passes the auth
+//! middleware again, so a removed role or an ended session also ends live updates.
 
 use std::convert::Infallible;
 use std::time::Duration;
 
+use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -15,11 +19,13 @@ use axum::response::{IntoResponse, Response};
 use df_core::TaskId;
 use df_db::Notification;
 use df_db::task_views::StoredEvent;
+use futures::StreamExt;
 use maud::{Markup, html};
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::WebState;
+use crate::auth::CurrentUser;
 use crate::task_pages::{head_region, load_detail, pending_region, runs_region, task_rows};
 use crate::transcript::{Change, Folder, ItemKind, render_item};
 use crate::ui::{internal_error, not_found};
@@ -40,6 +46,7 @@ pub struct AfterQuery {
 /// `GET /tasks/{key}/events`.
 pub async fn task_events(
     State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
     Path(key): Path<String>,
     headers: HeaderMap,
     Query(query): Query<AfterQuery>,
@@ -61,12 +68,13 @@ pub async fn task_events(
         regions: [String::new(), String::new(), String::new()],
         settle: None,
     };
-    Sse::new(futures::stream::unfold(stream, |mut s| async move {
+    let events = futures::stream::unfold(stream, |mut s| async move {
         let event = s.next_event().await?;
         Some((Ok::<_, Infallible>(event), s))
-    }))
-    .keep_alive(KeepAlive::default())
-    .into_response()
+    });
+    Sse::new(events.take_until(tokio::time::sleep(user.until_refresh())))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 struct DetailStream {
@@ -251,7 +259,10 @@ impl DetailStream {
 }
 
 /// `GET /tasks/events`: re-renders the list rows when a task changes.
-pub async fn task_list_events(State(state): State<WebState>) -> Response {
+pub async fn task_list_events(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+) -> Response {
     struct ListStream {
         state: WebState,
         rx: broadcast::Receiver<Notification>,
@@ -264,7 +275,7 @@ pub async fn task_list_events(State(state): State<WebState>) -> Response {
         last: String::new(),
         first: true,
     };
-    Sse::new(futures::stream::unfold(stream, |mut s| async move {
+    let events = futures::stream::unfold(stream, |mut s| async move {
         loop {
             if !std::mem::take(&mut s.first) {
                 // Wait for a change, then let a burst of changes settle.
@@ -292,9 +303,10 @@ pub async fn task_list_events(State(state): State<WebState>) -> Response {
                 return Some((Ok::<_, Infallible>(Event::default().data(body)), s));
             }
         }
-    }))
-    .keep_alive(KeepAlive::default())
-    .into_response()
+    });
+    Sse::new(events.take_until(tokio::time::sleep(user.until_refresh())))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 /// Wraps `inner` in a partial that htmx swaps into `target`.

@@ -1,13 +1,14 @@
 //! PostgreSQL-backed `tower-sessions` store (table `web_sessions`, migration in `df-db`).
 //!
 //! Sessions survive a restart of the control plane. Expired rows are removed whenever a new
-//! session is created.
+//! session is created. [`PgSessionStore::lock`] serializes changes to one session across requests
+//! and replicas.
 
 use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use tower_sessions::cookie::time::OffsetDateTime;
 use tower_sessions::session::{Id, Record};
 use tower_sessions::session_store::{Error, Result, SessionStore};
@@ -21,6 +22,32 @@ pub struct PgSessionStore {
 impl PgSessionStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Locks the row of a live session and returns the value stored under `key` (JSON `null` if
+    /// absent); `None` if the session does not exist or has expired. Other `lock` calls on the same
+    /// session wait until the returned guard is saved or dropped.
+    pub async fn lock(
+        &self,
+        id: &Id,
+        key: &str,
+    ) -> Result<Option<(LockedSession, serde_json::Value)>> {
+        let mut tx = self.pool.begin().await.map_err(backend)?;
+        let id = id.to_string();
+        let value: Option<Option<serde_json::Value>> = sqlx::query_scalar(
+            "SELECT data -> $2 FROM web_sessions WHERE id = $1 AND expires_at > now() FOR UPDATE",
+        )
+        .bind(&id)
+        .bind(key)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(backend)?;
+        Ok(value.map(|value| {
+            (
+                LockedSession { tx, id },
+                value.unwrap_or(serde_json::Value::Null),
+            )
+        }))
     }
 
     async fn insert(&self, record: &Record, overwrite: bool) -> Result<u64> {
@@ -42,6 +69,26 @@ impl PgSessionStore {
             .await
             .map_err(backend)?;
         Ok(result.rows_affected())
+    }
+}
+
+/// A session row locked by [`PgSessionStore::lock`]. Dropping it releases the lock unchanged.
+pub struct LockedSession {
+    tx: Transaction<'static, Postgres>,
+    id: String,
+}
+
+impl LockedSession {
+    /// Stores `value` under `key` and releases the lock.
+    pub async fn save(mut self, key: &str, value: &serde_json::Value) -> Result<()> {
+        sqlx::query("UPDATE web_sessions SET data = jsonb_set(data, ARRAY[$2], $3) WHERE id = $1")
+            .bind(&self.id)
+            .bind(key)
+            .bind(value)
+            .execute(&mut *self.tx)
+            .await
+            .map_err(backend)?;
+        self.tx.commit().await.map_err(backend)
     }
 }
 
