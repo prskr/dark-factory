@@ -42,6 +42,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
 - **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
 - **Plugin distribution (`iter2-plugin-distribution`, ADR-0018):** plugins as OCI images mounted into the control plane via image volumes; the control plane image no longer bundles plugins.
+- **Several forges side by side (`iter2-multi-forge`):** each project goes to the forge plugin that claims the host of its repository URL (no plugin per project); per-plugin API URL and `Authorization` scheme; a broken plugin no longer stops the control plane.
 - **Gateway readiness and Git retries:** gateway pods are ready only after the first policy snapshot; the runtime retries transient Git failures (folded into `iter1-egress-gateway` and `iter2-git-proxy`).
 
 Dependency: approval-gated push checks need the `push-check-exception` approval, so both ship together.
