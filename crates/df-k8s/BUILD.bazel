@@ -24,6 +24,8 @@ alias(
 
 rust_test(
     name = "df_k8s_test",
+    # render.rs tests check the sandbox env against the runtime's configuration reference.
+    compile_data = ["//crates/factory-agent:docs/configuration.md"],
     crate = ":df_k8s",
     data = glob(["src/snapshots/*.snap"]),
     env = {

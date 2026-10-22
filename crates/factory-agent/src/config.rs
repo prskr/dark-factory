@@ -60,3 +60,31 @@ impl RuntimeConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// df-k8s checks the sandbox pod against this table, so it must match what `from_env` reads.
+    const REFERENCE: &str = include_str!("../docs/configuration.md");
+
+    fn documented(name: &str) -> Option<bool> {
+        REFERENCE.lines().find_map(|line| {
+            let mut cells = line.split('|').map(str::trim).skip(1);
+            (cells.next()? == format!("`{name}`")).then(|| cells.next() == Some("yes"))
+        })
+    }
+
+    #[test]
+    fn configuration_reference_lists_every_variable_with_its_required_flag() {
+        for (name, required) in [
+            (ENV_CONTROL_PLANE_ADDR, true),
+            (ENV_CONTROL_PLANE_SERVER_NAME, true),
+            (ENV_TLS_DIR, false),
+            (ENV_DATA_DIR, false),
+            (ENV_RUN_DIR, false),
+        ] {
+            assert_eq!(documented(name), Some(required), "{name}");
+        }
+    }
+}

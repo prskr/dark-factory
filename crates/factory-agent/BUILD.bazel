@@ -6,6 +6,7 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "Cargo.toml",
+    "docs/configuration.md",
     "image/gitconfig",
 ])
 
@@ -26,6 +27,7 @@ rust_binary(
 
 rust_test(
     name = "factory_agent_test",
+    compile_data = ["docs/configuration.md"],
     crate = ":factory-agent",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
