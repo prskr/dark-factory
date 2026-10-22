@@ -72,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(&input_css)
         .arg("-o")
         .arg(&app_css_out)
+        .arg("--minify")
         .status();
 
     match status {

@@ -1,4 +1,5 @@
-@import "tailwindcss";
+/* `source(none)`: only scan `src`, not the working directory (in Bazel the whole execroot). */
+@import "tailwindcss" source(none);
 @source "../src";
 
 /* Rendered Markdown of finished agent messages. Wide blocks scroll inside their own box so the
