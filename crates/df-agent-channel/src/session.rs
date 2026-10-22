@@ -431,6 +431,13 @@ async fn persist_batch(
             .bind(rc.run.id.as_uuid())
             .fetch_one(&mut *tx)
             .await?;
+    // Event ids are the task-wide cursor of the web UI's live transcript, so they must become
+    // visible in id order. The run lock alone allows another run of the same task (a lost run's
+    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task.
+    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(rc.task.id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
     let start = u64::try_from(stored)
         .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))?;
     let mut last = start;
@@ -635,6 +642,62 @@ mod tests {
                 .calls()
                 .contains(&SandboxCall::Teardown(run_id))
         );
+    }
+
+    #[tokio::test]
+    async fn transcript_writes_wait_for_the_task_lock() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.running_run().await;
+        let row = get_run(&pool, run_id).await.unwrap().unwrap();
+        let rc = load_run_context(&pool, row).await.unwrap();
+
+        // A late batch of another run of the same task (e.g. a run marked lost while its sandbox
+        // still sends) has taken an event id but not committed yet. If this run's batch committed
+        // first, a reader already past its id would never see the other one.
+        let earlier = env.insert_run(env.task.id, 2, "failed").await;
+        let mut other = pool.begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
+             VALUES ($1, $2, 1, now(), 'agent_message_chunk', '{}')",
+        )
+        .bind(env.task.id.as_uuid())
+        .bind(earlier.as_uuid())
+        .execute(&mut *other)
+        .await
+        .unwrap();
+        let ctx = env.ctx.clone();
+        let write =
+            tokio::spawn(async move { persist_batch(&ctx, &rc, vec![msg(1, text_event())]).await });
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the batch did not wait for the task lock");
+        assert!(!write.is_finished());
+
+        other.commit().await.unwrap();
+        write.await.unwrap().unwrap();
+        let ids: Vec<(i64, uuid::Uuid)> =
+            sqlx::query_as("SELECT id, run_id FROM transcript_events ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let runs: Vec<_> = ids.iter().map(|(_, run)| *run).collect();
+        assert_eq!(runs, [earlier.as_uuid(), run_id.as_uuid()]);
     }
 
     #[tokio::test]
