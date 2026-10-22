@@ -10,6 +10,7 @@ templates:
   - gateway-deployment.yaml
   - gateway-service.yaml
   - netpol.yaml
+  - httproute.yaml
 tests:
   - it: renders standard release config ConfigMap and pre-install/pre-upgrade migrate-config ConfigMap
     template: configmap.yaml
@@ -507,3 +508,61 @@ tests:
             name: homelab-ca
             kind: ClusterIssuer
             group: cert-manager.io
+
+  - it: renders no HTTPRoute by default
+    template: httproute.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: routes the configured hostnames to the control plane UI port
+    template: httproute.yaml
+    release:
+      name: df
+      namespace: factory
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs:
+        - name: public
+          namespace: gateway-system
+      httpRoute.hostnames:
+        - factory.example.org
+    asserts:
+      - isKind:
+          of: HTTPRoute
+      - equal:
+          path: metadata.namespace
+          value: factory
+      - equal:
+          path: spec.parentRefs
+          value:
+            - name: public
+              namespace: gateway-system
+      - equal:
+          path: spec.hostnames
+          value:
+            - factory.example.org
+      - equal:
+          path: spec.rules[0].backendRefs
+          value:
+            - name: df-dark-factory-control-plane
+              port: 8080
+
+  - it: opens the UI port to every source when networkPolicy.ingressController.allowAll is set
+    template: netpol.yaml
+    set:
+      networkPolicy.ingressController.allowAll: true
+    asserts:
+      - notExists:
+          path: spec.ingress[2].from
+        documentIndex: 0
+      - equal:
+          path: spec.ingress[2].ports[0].port
+          value: 8080
+        documentIndex: 0
+      - exists:
+          path: spec.ingress[0].from
+        documentIndex: 0
+      - exists:
+          path: spec.ingress[1].from
+        documentIndex: 0
