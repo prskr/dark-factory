@@ -41,6 +41,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Cancel button** for tasks and runs.
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
 - **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
+- **Plugin distribution (`iter2-plugin-distribution`, ADR-0018):** plugins as OCI images mounted into the control plane via image volumes; the control plane image no longer bundles plugins.
 - **Gateway readiness and Git retries:** gateway pods are ready only after the first policy snapshot; the runtime retries transient Git failures (folded into `iter1-egress-gateway` and `iter2-git-proxy`).
 
 Dependency: approval-gated push checks need the `push-check-exception` approval, so both ship together.
@@ -87,7 +88,6 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 | `push-check` WASI plugins | [`design/agent-run.md`](../../design/agent-run.md) §11 |
 | Declarative configuration import | F4 |
 | Commit signing without keys in the sandbox | F7 |
-| Plugin distribution as OCI artifacts | ADR-0018 |
 | Cilium mode, DNS server in the gateway | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
 | Separate UIDs for runtime and harness | [`design/agent-run.md`](../../design/agent-run.md) §17 |
 | LSP support | context §4.2 |

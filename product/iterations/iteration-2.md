@@ -35,6 +35,7 @@ flowchart LR
   AR -. closes pending requests .-> CA
   CA --> RR[iter2-run-resilience]
   CA --> TV[iter2-task-volume-lifecycle]
+  PD[iter2-plugin-distribution]
 ```
 
 | Change | Scope |
@@ -46,8 +47,9 @@ flowchart LR
 | `iter2-cancel` | Stop a run, cancel a task (new `cancelled` status), with UI actions. |
 | `iter2-run-resilience` | Resume times for tasks: automatic resume after rate limits (at the retry time) and, bounded, after `sandbox_lost`, `connect_timeout` and `provisioning_failed`; concurrency limit; capacity rejections wait; re-provisioning of interrupted runs (TD-18); final report flush window of 10 minutes (TD-2). |
 | `iter2-task-volume-lifecycle` | Deleting task volumes: retention after close and idle TTL, "reset workspace" action. |
+| `iter2-plugin-distribution` | Plugins as OCI images (ADR-0018), mounted into the control plane as image volumes; the control plane image no longer bundles plugins. |
 
-Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`. `iter2-run-resilience` and `iter2-task-volume-lifecycle` are archived after `iter2-cancel` (they build on `cancelled` and the run-end mapping) and can be implemented any time; `iter2-run-resilience` first, it has the larger effect on unattended use.
+Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`. `iter2-run-resilience` and `iter2-task-volume-lifecycle` are archived after `iter2-cancel` (they build on `cancelled` and the run-end mapping) and can be implemented any time; `iter2-run-resilience` first, it has the larger effect on unattended use. `iter2-plugin-distribution` is independent and should land early, before more plugins exist.
 
 ## 4. Decisions taken for this iteration
 
@@ -68,6 +70,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | 13 | The runtime keeps flushing its final report for up to 10 minutes after finalize (TD-2). A pod that exits without a report ends `sandbox_lost` and is resumed. | Control plane reconstructs the outcome from the outbox on the volume at the next run: more code, same result. |
 | 14 | Task volumes are deleted 7 days after `completed`/`cancelled` and after 30 days idle; "reset workspace" deletes on demand. | Keep volumes forever (today): storage grows per task. |
 | 15 | Gateway pods report not ready until their first policy snapshot; the runtime retries transient Git failures. | Accept failed clones during gateway rollouts. |
+| 16 | Plugins are OCI images mounted as image volumes; the control plane never fetches plugins and needs no storage for them. No init-container fallback; clusters without image volumes build a custom control plane image. | `.tar.gz` URL or OCI pull in the control plane: fetch, verification and cache code, and shared storage or a StatefulSet for HA. |
 
 ## 5. Contract changes (all additive)
 

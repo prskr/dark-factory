@@ -22,8 +22,9 @@ When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` li
 
 ## Containers and integration tests in a sandbox
 
-- There is NO container socket in the sandbox. Do not try to start Docker/Podman or install one; tests that need containers (for example the PostgreSQL started by `df-test-postgres`) cannot run there and fail. CI runs them.
-- Run the tests that do not need containers, for example `bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...` or `cargo test -p <crate> --lib`, and state in your report which container-backed tests you could not run.
+- Some environments have a container socket (often Podman, for example `$XDG_RUNTIME_DIR/podman/podman.sock`), sandboxes usually don't. Probe before skipping container-backed tests: `curl -sf --max-time 3 --unix-socket <socket> http://d/_ping`. If one answers, run the tests with `DOCKER_HOST=unix://<socket>`.
+- Never start or install Docker/Podman. Without a socket, tests that need containers (for example the PostgreSQL started by `df-test-postgres`) fail; CI runs them.
+- Without a socket, run the tests that do not need containers, for example `bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...` or `cargo test -p <crate> --lib`, and state in your report which container-backed tests you could not run.
 
 ## Plain `cargo` builds
 
