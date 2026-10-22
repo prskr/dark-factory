@@ -48,6 +48,12 @@ pub(crate) struct IdpState {
     pub roles: Vec<String>,
     pub refresh_fails: bool,
     pub code_verifier: Option<String>,
+    /// Like Keycloak's "Revoke Refresh Token": every refresh token works once.
+    pub rotate_refresh_tokens: bool,
+    pub used_refresh_tokens: Vec<String>,
+    pub refresh_calls: usize,
+    /// Latency of the token endpoint, so that concurrent requests overlap.
+    pub token_delay: std::time::Duration,
 }
 
 pub(crate) struct Idp {
@@ -100,24 +106,34 @@ impl Respond for TokenResponder {
                 state.code_verifier = field("code_verifier");
                 (
                     self.id_token(state.nonce.clone(), state.roles.clone()),
-                    "refresh-1",
+                    "refresh-1".to_string(),
                 )
             }
             Some("refresh_token") if !state.refresh_fails => {
-                (self.id_token(None, state.roles.clone()), "refresh-2")
+                state.refresh_calls += 1;
+                let presented = field("refresh_token").unwrap_or_default();
+                if state.rotate_refresh_tokens && state.used_refresh_tokens.contains(&presented) {
+                    return ResponseTemplate::new(400)
+                        .set_body_json(serde_json::json!({"error": "invalid_grant"}));
+                }
+                state.used_refresh_tokens.push(presented);
+                let refresh = format!("refresh-{}", state.refresh_calls + 1);
+                (self.id_token(None, state.roles.clone()), refresh)
             }
             _ => {
                 return ResponseTemplate::new(400)
                     .set_body_json(serde_json::json!({"error": "invalid_grant"}));
             }
         };
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "access_token": "access",
-            "token_type": "Bearer",
-            "expires_in": 300,
-            "refresh_token": refresh,
-            "id_token": id_token,
-        }))
+        ResponseTemplate::new(200)
+            .set_delay(state.token_delay)
+            .set_body_json(serde_json::json!({
+                "access_token": "access",
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "refresh_token": refresh,
+                "id_token": id_token,
+            }))
     }
 }
 
@@ -160,6 +176,10 @@ impl Idp {
             roles: vec!["board-member".into()],
             refresh_fails: false,
             code_verifier: None,
+            rotate_refresh_tokens: false,
+            used_refresh_tokens: Vec::new(),
+            refresh_calls: 0,
+            token_delay: std::time::Duration::ZERO,
         }));
         Mock::given(method("POST"))
             .and(path("/token"))
@@ -476,5 +496,13 @@ impl SseReader {
 
     pub async fn next(&mut self) -> Frame {
         self.next_within(std::time::Duration::from_secs(5)).await
+    }
+
+    /// Whether the server ends the stream within `timeout`; events before the end are skipped.
+    pub async fn ends_within(&mut self, timeout: std::time::Duration) -> bool {
+        use futures::StreamExt;
+        tokio::time::timeout(timeout, async { while self.body.next().await.is_some() {} })
+            .await
+            .is_ok()
     }
 }

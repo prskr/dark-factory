@@ -67,7 +67,10 @@ kubectl -n dark-factory create secret generic dark-factory-oidc \
 
 Roles are read at every login and every token refresh; they are never stored as the source of truth.
 A role removed in Keycloak takes effect when the access token expires (default 5 minutes) and is
-refreshed.
+refreshed. Live views (task list, task detail) reconnect at that point, so they stop as well.
+
+*Revoke Refresh Token* (refresh token rotation) is supported: the control plane refreshes each
+session once, even when several requests arrive with an expired token at the same time.
 
 ## 3. Configure the control plane
 

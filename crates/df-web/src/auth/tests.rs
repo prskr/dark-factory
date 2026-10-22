@@ -234,6 +234,26 @@ async fn refresh_keeps_a_board_member_logged_in_and_failure_ends_the_session() {
 }
 
 #[tokio::test]
+async fn concurrent_requests_refresh_an_expired_session_once() {
+    let app = TestApp::new().await;
+    let (cookie, _) =
+        crate::auth::testing::seed_session(&app.pool, &["board-member"], -10, Some("refresh-0"))
+            .await;
+    app.idp.set(|s| {
+        s.rotate_refresh_tokens = true;
+        s.token_delay = std::time::Duration::from_millis(200);
+    });
+
+    let responses = futures::future::join_all((0..4).map(|_| app.get("/tasks", &cookie))).await;
+    for response in &responses {
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    assert_eq!(app.idp.state.lock().unwrap().refresh_calls, 1);
+    // The session holds the rotated token, so it stays usable.
+    assert_eq!(app.get("/tasks", &cookie).await.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn htmx_requests_without_a_session_are_told_to_log_in() {
     let app = TestApp::new().await;
     let response = app.send(post_request("/tasks", "", "", true)).await;

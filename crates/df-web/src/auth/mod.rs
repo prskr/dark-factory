@@ -41,6 +41,13 @@ struct SessionUser {
     expires_at: i64,
 }
 
+impl SessionUser {
+    /// The token expires within [`REFRESH_SKEW`]; the next request refreshes it.
+    fn token_expiring(&self) -> bool {
+        self.expires_at - REFRESH_SKEW <= now_unix()
+    }
+}
+
 impl std::fmt::Debug for SessionUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionUser")
@@ -57,11 +64,19 @@ pub struct CurrentUser {
     pub id: UserId,
     pub display_name: String,
     pub roles: Vec<String>,
+    /// Unix time at which the session's token is due for refresh.
+    refresh_at: i64,
 }
 
 impl CurrentUser {
     pub fn principal(&self) -> Principal {
         Principal::human(self.id, self.display_name.clone())
+    }
+
+    /// Time until the next request must pass this middleware again to refresh the token and
+    /// re-check the roles. Long-lived responses (SSE) end then.
+    pub fn until_refresh(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(u64::try_from(self.refresh_at - now_unix()).unwrap_or(0))
     }
 }
 
@@ -92,8 +107,8 @@ pub async fn require_board_member(
     let Some(mut user) = load_user(&session).await else {
         return login_redirect(&request);
     };
-    if user.expires_at - REFRESH_SKEW <= now_unix() {
-        match refresh_user(&state, &session, user).await {
+    if user.token_expiring() {
+        match refresh_user(&state, &session).await {
             Some(refreshed) => user = refreshed,
             None => return login_redirect(&request),
         }
@@ -109,6 +124,7 @@ pub async fn require_board_member(
         id: user.user_id,
         display_name: user.display_name,
         roles: user.roles,
+        refresh_at: user.expires_at - REFRESH_SKEW,
     });
     next.run(request).await
 }
@@ -257,11 +273,32 @@ async fn load_user(session: &Session) -> Option<SessionUser> {
 }
 
 /// Refreshes the tokens and roles; on failure the session is destroyed.
-async fn refresh_user(
-    state: &WebState,
-    session: &Session,
-    user: SessionUser,
-) -> Option<SessionUser> {
+///
+/// Holds the session's row lock during the refresh: concurrent requests of the same session wait
+/// and then use the refreshed tokens instead of presenting the old refresh token again, which a
+/// provider that rotates refresh tokens rejects.
+// ponytail: the lock holds a pool connection for up to the OIDC client timeout (10 s); fine for a
+// handful of users, use an advisory lock or a single-flight map if the pool runs dry.
+async fn refresh_user(state: &WebState, session: &Session) -> Option<SessionUser> {
+    let id = session.id()?;
+    let (lock, stored) = match PgSessionStore::new(state.pool.clone())
+        .lock(&id, SESSION_USER)
+        .await
+    {
+        Ok(Some(locked)) => locked,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::warn!(%error, "locking the session failed");
+            return None;
+        }
+    };
+    let user: SessionUser = serde_json::from_value(stored)
+        .inspect_err(|error| tracing::warn!(%error, "reading the session failed"))
+        .ok()?;
+    if !user.token_expiring() {
+        // Another request refreshed while this one waited for the lock.
+        return Some(user);
+    }
     let refreshed = match &user.refresh_token {
         Some(token) => state.oidc.refresh(token).await,
         None => Err(OidcError::Token("no refresh token".into())),
@@ -275,6 +312,14 @@ async fn refresh_user(
                 expires_at: identity.expires_at,
                 ..user
             };
+            let value = serde_json::to_value(&user)
+                .inspect_err(|error| tracing::warn!(%error, "encoding the session failed"))
+                .ok()?;
+            lock.save(SESSION_USER, &value)
+                .await
+                .inspect_err(|error| tracing::warn!(%error, "saving the session failed"))
+                .ok()?;
+            // Also marks the session modified, which extends its inactivity expiry.
             session
                 .insert(SESSION_USER, &user)
                 .await
@@ -284,6 +329,8 @@ async fn refresh_user(
         }
         Err(error) => {
             tracing::info!(%error, "token refresh failed; ending the session");
+            // Release the row first: deleting it would wait for this lock.
+            drop(lock);
             if let Err(error) = session.flush().await {
                 tracing::warn!(%error, "deleting the session failed");
             }
