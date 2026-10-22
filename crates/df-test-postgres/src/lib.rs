@@ -22,8 +22,9 @@
 //! template is named after the versions and checksums of the migrations, so changed migrations get
 //! a new template. Old templates stay until the container is removed.
 //!
-//! Limitation: when two processes start the container at the same time, one fails to create it
-//! (name conflict) and retries once; the retry finds the container of the other.
+//! When several test binaries start at the same time on a machine without the container, one
+//! creates it and the others fail with a name conflict until it is running. They retry for up to
+//! [`CONNECT_TIMEOUT`] and then find the container of the winner.
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -59,6 +60,7 @@ const CLONE_STRATEGY: &str = "FILE_COPY";
 /// Databases older than this are dropped when a test binary starts.
 const STALE_AFTER: Duration = Duration::from_secs(15 * 60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+const START_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 static SERVER: OnceCell<TestServer> = OnceCell::const_new();
 
@@ -106,17 +108,37 @@ fn template_name(migrator: &Migrator) -> String {
     format!("{TEMPLATE_PREFIX}{:016x}", hasher.finish())
 }
 
-impl TestServer {
-    /// Starts (or finds) the container; retries once because of the start race described in the module docs.
-    async fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let server = match Self::start_container().await {
-            Ok(server) => server,
+/// Calls `attempt` until it succeeds or `timeout` has passed, pausing `pause` in between. Returns
+/// the first error if it never succeeds (a later one is usually a consequence of it).
+async fn retry_for<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
+    timeout: Duration,
+    pause: Duration,
+    mut attempt: impl FnMut() -> F,
+) -> Result<T, E> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut first_error = None;
+    loop {
+        match attempt().await {
+            Ok(value) => return Ok(value),
             Err(e) => {
-                // No tracing subscriber in tests; keep the first error, the retry may fail differently.
-                eprintln!("starting the PostgreSQL container failed, retrying once: {e}");
-                Self::start_container().await?
+                // No tracing subscriber in tests.
+                eprintln!("starting the PostgreSQL container failed, retrying: {e}");
+                first_error.get_or_insert(e);
+                if let Some(first) =
+                    first_error.take_if(|_| tokio::time::Instant::now() >= deadline)
+                {
+                    return Err(first);
+                }
+                tokio::time::sleep(pause).await;
             }
-        };
+        }
+    }
+}
+
+impl TestServer {
+    /// Starts (or finds) the container; retries because of the start race described in the module docs.
+    async fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let server = retry_for(CONNECT_TIMEOUT, START_RETRY_PAUSE, Self::start_container).await?;
         server.wait_until_ready().await?;
         drop_stale_databases(&server.admin_pool(1).await).await;
         Ok(server)
@@ -341,6 +363,35 @@ mod tests {
             .bind(name)
             .fetch_one(pool)
             .await
+    }
+
+    #[tokio::test]
+    async fn retry_for_succeeds_after_failures_and_keeps_the_first_error_when_giving_up()
+    -> Result<(), String> {
+        let mut calls = 0;
+        let value = retry_for(Duration::from_secs(5), Duration::from_millis(1), || {
+            calls += 1;
+            let n = calls;
+            async move {
+                if n < 3 {
+                    Err(format!("error {n}"))
+                } else {
+                    Ok(n)
+                }
+            }
+        })
+        .await?;
+        assert_eq!(value, 3);
+
+        let err = retry_for(Duration::from_millis(20), Duration::from_millis(5), || {
+            calls += 1;
+            let n = calls;
+            async move { Err::<(), _>(format!("error {n}")) }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err, "error 4");
+        Ok(())
     }
 
     #[tokio::test]
