@@ -50,6 +50,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
 | TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
 | TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
+| TD-37 | medium | `df-k8s` render | `runtimeDelivery: initContainer` runs `sh` in the `scratch` runtime image |
 | TD-38 | low    | `df-plugins` forge client | Every `ForgeClient` method repeats resolve → retry → run → error mapping |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
@@ -356,6 +357,14 @@ The chart always sets the issuer name, so deployments are not affected. Running 
 `live_config()` (`crates/df-k8s/src/test_support.rs`) delivers `alpine:latest` as the runtime image, which has no `/opt/factory/factory-agent`, so the container cannot start. Only `test_reconciliation_live_cluster` overrides it with `runtime:dev`, and it checks the policy only. None of the live tests asserts `Running` or a `Started` event. The pod-start path is only covered by unit tests with a seeded store.
 
 **Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
+
+### TD-37. Init-container runtime delivery needs a shell the runtime image lacks
+
+`crates/df-k8s/src/render.rs` (`install-runtime` init container), `deploy/BUILD.bazel` (`runtime_manifest`)
+
+With `sandboxNamespace.runtimeDelivery: initContainer`, the init container runs `sh -c "cp -a /opt/factory/* /target/"` in the runtime image. That image has no base (`scratch`) and contains only `factory-agent`, `hooks-empty/` and `gitconfig` (`build-pipeline` spec), so there is no `sh` and no `cp`. The init container should fail to start, and the run should end `provisioning_failed` or by connect timeout. This is not tested on a cluster: the unit test only checks the rendered spec, and the live tests use `alpine` (TD-36). The paths also do not match: the runtime image puts its files at `/` (for example `/factory-agent`), not under `/opt/factory`.
+
+**Fix:** Let `factory-agent` copy itself and its support files (a subcommand such as `factory-agent install <dir>`), and run that as the init container command. This keeps the image `scratch`. Alternatively, drop the fallback and require image volumes (ADR-0030 already lists them). Add a live test for the chosen option.
 
 ### TD-38 (S7). Duplicated call pipeline in `PluginForgeClient`
 
