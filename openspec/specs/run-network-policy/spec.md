@@ -14,7 +14,13 @@ Sandbox pods SHALL get `HTTPS_PROXY`/`HTTP_PROXY` (and lower-case variants) poin
 - **THEN** it reaches the control plane and the proxy using IP addresses from its environment
 
 ### Requirement: Cluster targets reachable by name
-For each `cluster-service` entry applying to the run (instance and project scope), the pod SHALL get, for a non-headless Service, `hostAliases` mapping both `<svc>.<ns>.svc.<cluster-domain>` and `<svc>.<ns>.svc` to the Service's ClusterIP. A headless Service with `allowDns` SHALL get no `hostAliases` and relies on DNS. A headless Service without `allowDns` SHALL be rejected.
+For each `cluster-service` entry applying to the run (instance and project scope), the pod SHALL get, for a non-headless Service, `hostAliases` mapping both `<svc>.<ns>.svc.<cluster-domain>` and `<svc>.<ns>.svc` to the Service's ClusterIP. A headless Service with `allowDns` SHALL get no `hostAliases` and relies on DNS. A headless Service without `allowDns` SHALL be rejected. The `hostAliases` point to the ClusterIP while the policy allows the backing pods or endpoint addresses, so this relies on egress policy being evaluated after Service translation (kube-proxy DNAT or the CNI's own service handling); any CNI enforcing upstream `NetworkPolicy` that does so is supported, Cilium included (`design/egress.md` §5, ADR-0029).
+
+#### Scenario: ClusterIP of a target
+- **WHEN** the sandbox connects to the ClusterIP of an allowed target on an allowed port
+- **THEN** the connection succeeds
+- **WHEN** it connects to the ClusterIP of a Service that is not a target
+- **THEN** the connection fails
 
 #### Scenario: NativeLink target
 - **WHEN** project `DF` has target `nativelink/scheduler` ports `[50051]`

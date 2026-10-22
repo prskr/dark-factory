@@ -3,11 +3,13 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-41.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-42.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
 - Origin of TD-28 to TD-36: code review of `iter1-sandbox-provisioning` (`df-k8s`, 2026-10-21). The `TD-n (Rn-Nm)` headings give the IDs used in that review.
+- Origin of TD-37: planning of `iter2-plugin-distribution` (2026-10-22), which found that the init-container runtime delivery of `iter1-sandbox-provisioning` (ADR-0030) cannot work with the `scratch` runtime image.
+- Origin of TD-41: external review of the `run-network-policy` spec (2026-10-22).
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
@@ -54,6 +56,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-38 | low    | `df-plugins` forge client | Every `ForgeClient` method repeats resolve → retry → run → error mapping |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
+| TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP |
 
 ## Entries
 
@@ -389,6 +392,16 @@ The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins
 The host lists the allowed interfaces by hand. When `plugin-base` gains an import and the list is not updated, components built against the contract are refused at load.
 
 **Fix:** A test that resolves world `plugin-base` (for example with `wit-parser`, or a component built against it) and asserts that every import is in `ALLOWED_IMPORTS`.
+
+### TD-41. ClusterIP reachability of cluster targets is untested
+
+`crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_*`), `crates/df-k8s/src/render.rs`
+
+`hostAliases` map target names to the Service's ClusterIP, while the generated `NetworkPolicy` allows the backing pods (selector) or endpoint addresses (`/32` `ipBlock`). That only works if the CNI evaluates egress policy after Service translation. The live tests compare the rendered policy with the expected one, but none opens a connection from a sandbox pod to an allowed and to a non-allowed ClusterIP.
+
+**Matters when:** a new CNI, an eBPF kube-proxy replacement or a CNI upgrade is rolled out.
+
+**Fix:** Add a live test with a pod in the sandbox namespace, a target Service and a second non-target Service: connecting to the target's ClusterIP succeeds, to the other fails.
 
 ## Accepted decisions
 

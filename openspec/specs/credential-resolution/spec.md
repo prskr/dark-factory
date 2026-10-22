@@ -17,6 +17,10 @@ The control plane SHALL read the referenced key of the referenced Secret in the 
 - **WHEN** the Secret exists but lacks the referenced key
 - **THEN** resolution fails with an error naming Secret and key, without any value
 
+#### Scenario: Backend failure
+- **WHEN** reading the Secret fails in the backend (API error, timeout, forbidden)
+- **THEN** resolution stops with an error that contains no value and does not fall back to a previously resolved value
+
 ### Requirement: Secret values never logged
 Resolved values SHALL be wrapped so that debug and display output redact them.
 
