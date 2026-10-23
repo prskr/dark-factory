@@ -17,6 +17,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           bazelisk-cache: true
+          repository-cache: true
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

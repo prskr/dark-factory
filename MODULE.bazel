@@ -230,6 +230,13 @@ pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
 pull(
     name = "distroless_static_debian13_nonroot",
     digest = "sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3",
+    # Bazel downloader: blobs land in the repository cache (sha256-addressed) and are not fetched again.
+    downloader = "bazel",
+    # Only the platforms the images are built for; every child manifest counts as a registry pull.
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
     registry = "gcr.io",
     repository = "distroless/static-debian13",
 )
@@ -237,6 +244,11 @@ pull(
 pull(
     name = "debian_trixie_git",
     digest = "sha256:4241005cb2c47ea99750627baeb06714f6fde7f01a69ce451d85f8dccf0f5691",
-    registry = "public.ecr.aws",
-    repository = "docker/library/buildpack-deps",
+    downloader = "bazel",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+    registry = "mirror.gcr.io",
+    repository = "library/buildpack-deps",
 )
