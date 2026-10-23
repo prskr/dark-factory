@@ -1,8 +1,8 @@
 # ADR-0034: Task hierarchy, subtask branches and merging
 
-- **Status:** Accepted (planned for iteration 3)
+- **Status:** Accepted (planned for iteration 3, amended by ADR-0041)
 - **Date:** 2026-10-17
-- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md)
+- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md)
 
 ## Context
 
