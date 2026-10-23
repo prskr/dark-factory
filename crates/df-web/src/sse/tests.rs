@@ -130,7 +130,7 @@ async fn reconnect_without_new_events_only_refreshes_the_regions() {
     let mut sse = f.events(&format!("/tasks/DF-1/events?after={e1}")).await;
     let frame = sse.next().await;
     assert_eq!(frame.id, None);
-    for region in ["#task-head", "#runs", "#pending"] {
+    for region in ["#task-head", "#task-details", "#runs", "#pending"] {
         assert!(
             frame.data.contains(&format!("hx-target=\"{region}\"")),
             "{region}"
@@ -219,7 +219,7 @@ async fn pull_request_link_and_pending_messages_update_live() {
     .unwrap();
     // Well below POLL, so only the notification can have triggered the update.
     let frame = sse.next_within(LIVE).await;
-    assert!(frame.data.contains(r##"hx-target="#task-head""##));
+    assert!(frame.data.contains(r##"hx-target="#task-details""##));
     assert!(
         frame
             .data
@@ -314,6 +314,74 @@ async fn task_list_stream_shows_status_changes_within_two_seconds() {
         "{}",
         frame.data
     );
+}
+
+#[tokio::test]
+async fn filtered_list_stream_drops_a_task_that_leaves_the_filter() {
+    let f = fixture().await;
+    let mut active = f.events("/tasks/events").await;
+    let first = active.next().await;
+    assert!(first.data.contains("id=\"row-DF-1\""), "{}", first.data);
+    let mut done = f.events("/tasks/events?status=done").await;
+    assert!(!done.next().await.data.contains("row-DF-1"));
+
+    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::Completed)
+        .await
+        .unwrap();
+
+    // Well below POLL: only the notification can have triggered the updates.
+    let left = active.next_within(LIVE).await;
+    assert!(
+        left.data.contains(r##"hx-target="#task-rows""##) && !left.data.contains("row-DF-1"),
+        "{}",
+        left.data
+    );
+    let joined = done.next_within(LIVE).await;
+    assert!(joined.data.contains("id=\"row-DF-1\""), "{}", joined.data);
+}
+
+#[tokio::test]
+async fn renaming_a_task_updates_the_list_live_in_regular_style() {
+    let f = fixture().await;
+    sqlx::query("UPDATE tasks SET title_source = 'placeholder'")
+        .execute(&f.app.pool)
+        .await
+        .unwrap();
+    let mut sse = f.events("/tasks/events").await;
+    let first = sse.next().await;
+    assert!(
+        first.data.contains("italic text-muted\">t<"),
+        "{}",
+        first.data
+    );
+
+    let response = f
+        .app
+        .post(
+            "/tasks/DF-1/title",
+            &crate::testkit::form(&[("title", "Stop duplicate nightly backups")]),
+            &f.cookie,
+        )
+        .await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(frame.data.contains(r##"hx-target="#task-rows""##));
+    assert!(
+        frame.data.contains(">Stop duplicate nightly backups<"),
+        "{}",
+        frame.data
+    );
+    assert!(!frame.data.contains("italic"), "{}", frame.data);
+}
+
+#[tokio::test]
+async fn project_filtered_list_stream_only_shows_that_project() {
+    let f = fixture().await;
+    let mut other = f.events("/tasks/events?project=NOPE").await;
+    assert!(!other.next().await.data.contains("row-DF-1"));
+    let mut own = f.events("/tasks/events?project=DF").await;
+    assert!(own.next().await.data.contains("row-DF-1"));
 }
 
 #[tokio::test]

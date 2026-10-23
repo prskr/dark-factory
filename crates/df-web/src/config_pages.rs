@@ -17,11 +17,13 @@ use uuid::Uuid;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::layout::{Nav, layout};
-use crate::ui::{
-    FormErrors, form_error, htmx_redirect, internal_error, invalid, not_found, select_field,
+use crate::components::forms::INPUT_CLASS;
+use crate::components::{
+    ButtonKind, FormErrors, form_error, link_button, page_header, scroll_box, select_field,
     submit_button, text_field, textarea_field,
 };
+use crate::layout::{Nav, layout};
+use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 
 /// Harness every persona uses in iteration 1.
 const HARNESS: &str = "claude-code";
@@ -259,7 +261,7 @@ fn credential_form(
             (text_field("Secret name", "secret_name", &values.secret_name, errors,
                 Some("Name of the Kubernetes Secret. The value itself is never entered here.")))
             (text_field("Key", "secret_key", &values.secret_key, errors, Some("Key within the Secret.")))
-            (submit_button(submit))
+            (submit_button(ButtonKind::Primary, submit))
         }
     }
 }
@@ -275,12 +277,12 @@ async fn credentials_list(State(state): State<WebState>) -> Response {
         "/credentials/new",
         "New credential reference",
         html! {
-            table class="w-full text-left text-sm" {
-                thead { tr class="text-slate-400" { th class="py-2" { "Name" } th { "Secret" } th { "Key" } } }
+            table class="w-full min-w-max text-left text-sm" {
+                thead { tr class="text-faint" { th class="py-2" { "Name" } th { "Secret" } th { "Key" } } }
                 tbody {
                     @for c in &refs {
-                        tr class="border-t border-slate-800" {
-                            td class="py-2" { a class="text-sky-400" href={"/credentials/" (c.id)} { (c.name) } }
+                        tr class="border-t border-line" {
+                            td class="py-2" { a class="text-accent-text underline" href={"/credentials/" (c.id)} { (c.name) } }
                             td { (c.secret_name) } td { (c.secret_key) }
                         }
                     }
@@ -418,7 +420,7 @@ fn project_form(
             (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
             (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
                 &values.forge_credential_id, Some("None"), errors))
-            (submit_button(submit))
+            (submit_button(ButtonKind::Primary, submit))
         }
     }
 }
@@ -441,12 +443,12 @@ async fn projects_list(State(state): State<WebState>) -> Response {
         "/projects/new",
         "New project",
         html! {
-            table class="w-full text-left text-sm" {
-                thead { tr class="text-slate-400" { th class="py-2" { "Key" } th { "Name" } th { "Repository" } } }
+            table class="w-full min-w-max text-left text-sm" {
+                thead { tr class="text-faint" { th class="py-2" { "Key" } th { "Name" } th { "Repository" } } }
                 tbody {
                     @for p in &projects {
-                        tr class="border-t border-slate-800" {
-                            td class="py-2" { a class="text-sky-400" href={"/projects/" (p.key)} { (p.key) } }
+                        tr class="border-t border-line" {
+                            td class="py-2" { a class="text-accent-text underline" href={"/projects/" (p.key)} { (p.key) } }
                             td { (p.name) } td class="break-all" { (p.repo_url) }
                         }
                     }
@@ -605,8 +607,8 @@ fn persona_form(
             (text_field("Name", "name", &values.name, errors, None))
             (textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors))
             div class="space-y-1" {
-                label class="block text-sm font-medium text-slate-300" for="harness" { "Harness" }
-                select id="harness" name="harness" class="min-h-11 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2" {
+                label class="block text-sm font-medium text-muted" for="harness" { "Harness" }
+                select id="harness" name="harness" class=(INPUT_CLASS) {
                     option value=(HARNESS) selected { (HARNESS) }
                 }
             }
@@ -615,7 +617,7 @@ fn persona_form(
             (text_field("Model", "model", &values.model, errors, Some("Optional.")))
             (select_field("Harness credential", "harness_credential_id", &credential_options(credentials),
                 &values.harness_credential_id, Some("None"), errors))
-            (submit_button(submit))
+            (submit_button(ButtonKind::Primary, submit))
         }
     }
 }
@@ -631,12 +633,12 @@ async fn personas_list(State(state): State<WebState>) -> Response {
         "/personas/new",
         "New persona",
         html! {
-            table class="w-full text-left text-sm" {
-                thead { tr class="text-slate-400" { th class="py-2" { "Name" } th { "Harness" } th { "Model" } } }
+            table class="w-full min-w-max text-left text-sm" {
+                thead { tr class="text-faint" { th class="py-2" { "Name" } th { "Harness" } th { "Model" } } }
                 tbody {
                     @for p in &personas {
-                        tr class="border-t border-slate-800" {
-                            td class="py-2" { a class="text-sky-400" href={"/personas/" (p.id)} { (p.name) } }
+                        tr class="border-t border-line" {
+                            td class="py-2" { a class="text-accent-text underline" href={"/personas/" (p.id)} { (p.name) } }
                             td { (p.harness) } td { (p.model.as_deref().unwrap_or("default")) }
                         }
                     }
@@ -754,11 +756,8 @@ fn page(title: &str, nav: Nav, new_href: &str, new_label: &str, table: Markup) -
         title,
         nav,
         html! {
-            div class="mb-4 flex items-center justify-between gap-3" {
-                h1 class="text-xl font-semibold" { (title) }
-                a href=(new_href) class="min-h-11 rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white" { (new_label) }
-            }
-            div class="overflow-x-auto" { (table) }
+            (page_header(title, link_button(ButtonKind::Primary, new_href, new_label)))
+            (scroll_box(table))
         },
     ))
 }

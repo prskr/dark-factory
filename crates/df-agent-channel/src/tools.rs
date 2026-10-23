@@ -1,11 +1,11 @@
-//! Factory tools v1: validation, scoping, exactly-once execution and the four handlers
+//! Factory tools v1: validation, scoping, exactly-once execution and the handlers
 //! (`specs/factory-tools/spec.md`, design D6).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use df_core::{IntegrationError, Principal, PullRequestUpdate};
-use df_db::{NewAuditEntry, Notification, publish, write_audit_entry};
+use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanitize_title};
+use df_db::{NewAuditEntry, Notification, publish, set_task_title, write_audit_entry};
 use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use jsonschema::Validator;
@@ -318,6 +318,17 @@ async fn run_handler(
             tx.commit().await?;
             Ok(Outcome::ok("Progress recorded."))
         }
+        "set_task_title" => {
+            let Some(title) = text("title").as_deref().and_then(sanitize_title) else {
+                return Ok(Outcome::error("the title is empty"));
+            };
+            let changed = set_task_title(&ctx.pool, task_id, &title, TitleSource::Agent).await?;
+            Ok(Outcome::ok(if changed {
+                "Title set."
+            } else {
+                "The task already has a title; it is kept."
+            }))
+        }
         "complete_task" => {
             let mut tx = ctx.pool.begin().await?;
             sqlx::query(
@@ -390,7 +401,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 4);
+        assert_eq!(VALIDATORS.len(), 5);
     }
 
     #[tokio::test]
@@ -679,6 +690,112 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(line, "tests pass");
+    }
+
+    async fn title_of(pool: &PgPool, rc: &RunContext) -> (String, String) {
+        sqlx::query_as("SELECT title, title_source FROM tasks WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn make_placeholder(pool: &PgPool, rc: &RunContext) {
+        sqlx::query("UPDATE tasks SET title_source = 'placeholder' WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_task_title_sets_a_sanitized_agent_title_once() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        make_placeholder(&pool, &rc).await;
+        let mut events = env.ctx.notifier.subscribe();
+
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call(
+                "set_task_title",
+                serde_json::json!({"title": "Stop duplicate\nnightly backups"}),
+            ),
+        )
+        .await;
+
+        assert!(!res.is_error);
+        assert_eq!(
+            title_of(&pool, &rc).await,
+            ("Stop duplicate nightly backups".into(), "agent".into())
+        );
+        let changed = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            changed,
+            Notification::TaskChanged {
+                task_id: rc.task.id
+            }
+        );
+
+        let again = execute(
+            &env.ctx,
+            &rc,
+            call("set_task_title", serde_json::json!({"title": "Other"})),
+        )
+        .await;
+        assert!(!again.is_error);
+        assert!(message(&again).contains("kept"));
+        assert_eq!(
+            title_of(&pool, &rc).await.0,
+            "Stop duplicate nightly backups"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_task_title_keeps_the_title_of_a_person() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call(
+                "set_task_title",
+                serde_json::json!({"title": "Agent title"}),
+            ),
+        )
+        .await;
+
+        assert!(!res.is_error);
+        assert!(message(&res).contains("kept"));
+        assert_eq!(
+            title_of(&pool, &rc).await,
+            ("Fix login".into(), "user".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn set_task_title_rejects_a_blank_title() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        make_placeholder(&pool, &rc).await;
+
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call("set_task_title", serde_json::json!({"title": " \n "})),
+        )
+        .await;
+
+        assert!(res.is_error);
+        assert_eq!(
+            title_of(&pool, &rc).await,
+            ("Fix login".into(), "placeholder".into())
+        );
     }
 
     #[tokio::test]

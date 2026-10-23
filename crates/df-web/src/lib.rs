@@ -6,14 +6,15 @@
 
 pub mod assets;
 pub mod auth;
+pub mod components;
 mod config_pages;
 pub mod layout;
+mod responses;
 mod sse;
 mod task_pages;
 #[cfg(test)]
 mod testkit;
 pub mod transcript;
-mod ui;
 
 pub use assets::{app_css, get_asset};
 pub use layout::{Nav, layout};

@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-44.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-45.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -12,6 +12,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-41: external review of the `run-network-policy` spec (2026-10-22).
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-44: code review of `ui-redesign` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -60,6 +61,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP |
 | TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros |
 | TD-43 | low    | `df-web` transcript | Code blocks are rendered without syntax highlighting (syntect, design D3) |
+| TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested |
 
 ## Entries
 
@@ -425,6 +427,16 @@ Design D3 and the proposal name syntect classes for code blocks; the implementat
 **Matters when:** users read longer diffs or code in the transcript on a phone.
 
 **Fix:** Run comrak with a syntect adapter emitting CSS classes, add the theme to `styles/input.css`; or remove syntect from design D3 via `/opsx:update`.
+
+### TD-44 (C5). Contrast ratios are not tested
+
+`crates/df-web/styles/input.css` (color tokens)
+
+The web-ui-shell spec requires a text contrast of at least 4.5:1 (3:1 for text of 24 px and larger) in both themes. The ratios are only listed in `docs/design-system.md`; no test computes them from the tokens, so a token change can break the requirement unnoticed.
+
+**Matters when:** a color token is changed or a theme is added.
+
+**Fix:** Add a unit test that parses the foreground/background token pairs for light and dark from `styles/input.css` and asserts each contrast ratio is at least 4.5:1 (3:1 for large text).
 
 ## Accepted decisions
 

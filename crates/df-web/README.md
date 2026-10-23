@@ -4,6 +4,9 @@ Server-rendered web UI of the control plane: maud templates, htmx 4 and Alpine (
 `assets/vendor/`), Tailwind (standalone binary, `build.rs` / Bazel genrule). Design: ADR-0004,
 ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 
+**Design system:** tokens, components, patterns and the review checklist for new views are in
+[`docs/design-system.md`](../../docs/design-system.md). Components live in `src/components/`.
+
 ## Routes
 
 | Route | Purpose |
@@ -11,8 +14,10 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `GET /healthz`, `GET /readyz` | Liveness, readiness (database ping). No login. |
 | `GET /assets/*` | Embedded assets, content-hashed URLs, `Cache-Control: immutable`. No login. |
 | `GET /login`, `GET /auth/callback`, `POST /logout` | OIDC login (`docs/keycloak.md`). |
-| `/tasks`, `/tasks/new`, `/tasks/{key}`, `POST /tasks/{key}/messages` | Task list, creation, detail, message input. |
-| `GET /tasks/events`, `GET /tasks/{key}/events` | SSE streams for the list and the detail page. |
+| `/tasks?status=&project=`, `/tasks/{key}` | Task workspace: list with filters, transcript, details (one template). |
+| `GET /tasks/compose?project=`, `POST /tasks` | New-task composer (dialog), creation. |
+| `POST /tasks/{key}/title`, `POST /tasks/{key}/messages` | Rename, message input. |
+| `GET /tasks/events?status=&project=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
 | `/projects`, `/personas`, `/credentials` (`/new`, `/{key or id}`) | Configuration forms. |
 
 Everything except health, assets and login requires the role `board-member`. Non-GET requests need
@@ -27,7 +32,7 @@ Each SSE message is a bundle of `<hx-partial hx-target=... hx-swap=...>` element
 | --- | --- |
 | New transcript item | `#transcript`, `beforeend` |
 | Item changed (growing agent message, tool call status, turn end) | `#<dom id>`, `outerMorph` |
-| Head (status, PR and issue links), runs, pending messages | `#task-head`, `#runs`, `#pending`, `outerMorph` |
+| Head (title, status), details (status line, PR and issue links, project, persona, branch), runs, pending messages | `#task-head`, `#task-details`, `#runs`, `#pending`, `outerMorph` |
 | Task list | `#task-rows`, `outerMorph` |
 
 Transcript messages carry the id of the last event they contain as the SSE `id`. Agent chunks that

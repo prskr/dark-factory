@@ -533,7 +533,7 @@ mod tests {
             crate::NewTask {
                 project_id: df_core::ProjectId::from_uuid(p.id),
                 persona_id: df_core::PersonaId::from_uuid(persona.id),
-                title: "t".into(),
+                title: Some("t".into()),
                 description: String::new(),
                 issue_number: None,
                 created_by: None,

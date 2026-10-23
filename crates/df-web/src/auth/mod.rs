@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
 use crate::WebState;
+use crate::components::{ButtonKind, action_class, link_button};
 use crate::layout::{Nav, layout};
-use crate::ui::htmx_redirect;
+use crate::responses::htmx_redirect;
 
 /// Role every page and action requires.
 pub const REQUIRED_ROLE: &str = "board-member";
@@ -134,10 +135,10 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
     let body: Markup = html! {
         section class="mx-auto max-w-md py-10 text-center" {
             h1 class="text-2xl font-semibold" { (status.as_u16()) " " (title) }
-            p class="mt-3 text-slate-300" { (message) }
+            p class="mt-3 text-muted" { (message) }
             div class="mt-6 flex justify-center gap-3" {
-                a href="/" class="min-h-11 rounded bg-slate-800 px-4 py-2" { "Home" }
-                button type="button" class="min-h-11 rounded bg-slate-800 px-4 py-2" hx-post="/logout" { "Log out" }
+                (link_button(ButtonKind::Secondary, "/", "Home"))
+                button type="button" class=(action_class(ButtonKind::Secondary)) hx-post="/logout" { "Log out" }
             }
         }
     };

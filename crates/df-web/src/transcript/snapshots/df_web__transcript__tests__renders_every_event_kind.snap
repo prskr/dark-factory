@@ -3,11 +3,11 @@ source: crates/df-web/src/transcript/tests.rs
 expression: render_all(&fold(&every_kind()))
 ---
 <div id="transcript" class="flex min-w-0 flex-col gap-3">
-<div id="ev-2" data-prompt-id="p1" class="min-w-0 self-end rounded-lg bg-sky-900 px-3 py-2 md:max-w-[80%]">
-<div class="text-xs text-sky-300">Peter</div>
+<div id="ev-2" data-prompt-id="p1" class="min-w-0 self-end rounded-2xl bg-accent-soft px-3 py-2 md:max-w-[80%]">
+<div class="text-xs text-accent-text">Peter</div>
 <div class="whitespace-pre-wrap break-words">please fix &lt;b&gt;login&lt;/b&gt;</div>
 </div>
-<details id="thought-th1" class="text-slate-400">
+<details id="thought-th1" class="text-faint">
 <summary class="flex min-h-11 cursor-pointer items-center text-sm">Thinking</summary>
 <div class="whitespace-pre-wrap break-words text-sm">hmm</div>
 </details>
@@ -17,29 +17,29 @@ expression: render_all(&fold(&every_kind()))
 </p>
 </div>
 </div>
-<details id="ev-6" class="rounded border border-slate-800 bg-slate-900">
+<details id="ev-6" class="rounded-lg border border-line bg-sunk">
 <summary class="flex min-h-11 cursor-pointer items-center gap-2 px-3 text-sm">
-<span class="min-w-0 flex-1 truncate">Run tests</span>
-<span class="text-xs text-slate-400">execute</span>
-<span class="text-xs text-emerald-400">completed</span>
+<span class="min-w-0 flex-1 truncate font-mono text-xs">Run tests</span>
+<span class="text-xs text-faint">execute</span>
+<span class="text-xs text-status-completed-fg">completed</span>
 </summary>
 <div class="space-y-2 px-3 pb-3 text-sm">
-<div class="font-mono text-xs text-slate-400">src/lib.rs:3</div>
+<div class="font-mono text-xs text-faint">src/lib.rs:3</div>
 <div>
-<div class="text-xs text-slate-400">Input</div>
-<pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs">
+<div class="text-xs text-faint">Input</div>
+<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
 <code>{&quot;cmd&quot;:&quot;cargo test&quot;}</code>
 </pre>
 </div>
 <div>
-<div class="text-xs text-slate-400">Output</div>
-<pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs">
+<div class="text-xs text-faint">Output</div>
+<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
 <code>ok &lt;script&gt;x&lt;/script&gt;</code>
 </pre>
 </div>
 <div>
-<div class="text-xs text-slate-400">a.rs</div>
-<pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs">
+<div class="text-xs text-faint">a.rs</div>
+<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
 <code>-old
 -line
 +new
@@ -47,25 +47,25 @@ expression: render_all(&fold(&every_kind()))
 </pre>
 </div>
 <div>
-<div class="text-xs text-slate-400">Result</div>
-<pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs">
+<div class="text-xs text-faint">Result</div>
+<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
 <code>{&quot;exit&quot;:0}</code>
 </pre>
 </div>
-<div class="text-xs text-amber-400">Truncated</div>
+<div class="text-xs text-status-waiting-fg">Truncated</div>
 </div>
 </details>
-<div id="ev-8" class="rounded border border-slate-800 p-3">
-<div class="mb-1 text-xs uppercase text-slate-400">Plan</div>
+<div id="ev-8" class="rounded-lg border border-line p-3">
+<div class="mb-1 text-xs uppercase text-faint">Plan</div>
 <ul class="space-y-1 text-sm">
 <li>
-<span class="mr-2 text-slate-400">[completed]</span>write test</li>
+<span class="mr-2 text-faint">[completed]</span>write test</li>
 <li>
-<span class="mr-2 text-slate-400">[in progress]</span>fix</li>
+<span class="mr-2 text-faint">[in progress]</span>fix</li>
 </ul>
 </div>
-<div id="ev-9" class="rounded border px-3 py-2 text-sm border-amber-700 bg-amber-950 text-amber-200">
+<div id="ev-9" class="rounded-lg px-3 py-2 text-sm bg-status-waiting-bg text-status-waiting-fg">
 <span class="mr-2 font-mono text-xs">workspace.diverged</span>branch diverged</div>
-<div id="ev-10" class="border-t border-slate-800 pt-2 text-xs text-slate-400">Turn ended: end_turn - done<div>opus: 10 in, 5 out, 2 cache read, 1 cache write</div>
+<div id="ev-10" class="border-t border-line pt-2 font-mono text-xs text-faint">Turn ended: end_turn - done<div>opus: 10 in, 5 out, 2 cache read, 1 cache write</div>
 </div>
 </div>

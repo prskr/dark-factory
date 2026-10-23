@@ -26,9 +26,12 @@ use tokio::sync::broadcast;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::task_pages::{head_region, load_detail, pending_region, runs_region, task_rows};
+use crate::responses::{internal_error, not_found};
+use crate::task_pages::{
+    Filters, ListQuery, details_region, head_region, load_detail, pending_region, runs_region,
+    task_rows,
+};
 use crate::transcript::{Change, Folder, ItemKind, render_item};
-use crate::ui::{internal_error, not_found};
 
 /// Chunks of one message that arrive within this window are sent as one update.
 const COALESCE: Duration = Duration::from_millis(150);
@@ -65,7 +68,7 @@ pub async fn task_events(
         cursor: 0,
         folder: Folder::default(),
         check_regions: true,
-        regions: [String::new(), String::new(), String::new()],
+        regions: [String::new(), String::new(), String::new(), String::new()],
         settle: None,
     };
     let events = futures::stream::unfold(stream, |mut s| async move {
@@ -88,8 +91,8 @@ struct DetailStream {
     folder: Folder,
     /// Re-render head, runs and pending list at the next opportunity.
     check_regions: bool,
-    /// Last sent markup of head, runs and pending list.
-    regions: [String; 3],
+    /// Last sent markup of head, details, runs and pending list.
+    regions: [String; 4],
     /// Pause before the next read to coalesce chunks.
     settle: Option<Duration>,
 }
@@ -201,13 +204,14 @@ impl DetailStream {
             )
         });
         let rendered = [
-            head_region(&data.task),
+            head_region(&data.task, None),
+            details_region(&data.task),
             runs_region(&data.runs),
             pending_region(&data.pending, None),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(
-            ["#task-head", "#runs", "#pending"]
+            ["#task-head", "#task-details", "#runs", "#pending"]
                 .into_iter()
                 .zip(rendered),
         ) {
@@ -258,20 +262,24 @@ impl DetailStream {
     }
 }
 
-/// `GET /tasks/events`: re-renders the list rows when a task changes.
+/// `GET /tasks/events?status=..&project=..`: re-renders the rows of the filtered list when a task
+/// changes, so a task that no longer matches the filter leaves it.
 pub async fn task_list_events(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    Query(query): Query<ListQuery>,
 ) -> Response {
     struct ListStream {
         state: WebState,
         rx: broadcast::Receiver<Notification>,
+        filters: Filters,
         last: String,
         first: bool,
     }
     let stream = ListStream {
         rx: state.notifier.subscribe(),
         state,
+        filters: query.filters(),
         last: String::new(),
         first: true,
     };
@@ -288,14 +296,15 @@ pub async fn task_list_events(
                     Ok(Err(broadcast::error::RecvError::Lagged(_))) | Err(_) => {}
                 }
             }
-            let items = match df_db::task_views::list_task_items(&s.state.pool).await {
-                Ok(items) => items,
-                Err(error) => {
-                    tracing::warn!(%error, "task list stream failed");
-                    return None;
-                }
-            };
-            let html = task_rows(&items).into_string();
+            let items =
+                match df_db::task_views::list_task_items(&s.state.pool, &s.filters.to_db()).await {
+                    Ok(items) => items,
+                    Err(error) => {
+                        tracing::warn!(%error, "task list stream failed");
+                        return None;
+                    }
+                };
+            let html = task_rows(&items, None, &s.filters).into_string();
             if html != s.last {
                 let body = partial("#task-rows", "outerMorph", &maud::PreEscaped(html.clone()))
                     .into_string();

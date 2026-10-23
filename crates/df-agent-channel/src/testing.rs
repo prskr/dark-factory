@@ -352,7 +352,7 @@ impl Env {
             NewTask {
                 project_id,
                 persona_id,
-                title: "Fix login".into(),
+                title: Some("Fix login".into()),
                 description: "Validate the OIDC state.".into(),
                 issue_number: Some(42),
                 created_by: None,

@@ -452,7 +452,7 @@ mod tests {
     use crate::testing::Env;
 
     #[test]
-    fn embedded_tools_are_exactly_the_four_factory_tools() {
+    fn embedded_tools_are_exactly_the_factory_tools() {
         let names: Vec<_> = tool_descriptors().into_iter().map(|t| t.name).collect();
         assert_eq!(
             names,
@@ -460,6 +460,7 @@ mod tests {
                 "update_pull_request",
                 "comment_on_issue",
                 "report_progress",
+                "set_task_title",
                 "complete_task"
             ]
         );
@@ -520,7 +521,7 @@ mod tests {
         assert_eq!(workspace.task_branch, "factory/task/DF-1");
         assert_eq!(workspace.wip_branch, "factory/wip/DF-1");
         assert_eq!(workspace.base_branch, "main");
-        assert_eq!(assign.tools.len(), 4);
+        assert_eq!(assign.tools.len(), 5);
         assert_eq!(assign.task.expect("task").task_key, "DF-1");
         assert!(assign.continuation.is_none());
         let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {

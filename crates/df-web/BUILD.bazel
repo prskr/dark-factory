@@ -66,6 +66,10 @@ alias(
 
 rust_test(
     name = "df_web_test",
+    compile_data = [
+        "styles/input.css",
+        "//docs:design-system.md",
+    ],
     crate = ":df_web",
     data = glob(["src/**/snapshots/*.snap"]),
     env = {

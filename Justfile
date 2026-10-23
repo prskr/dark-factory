@@ -4,6 +4,19 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Container CLI for `db`: docker if installed, else podman. Override with CONTAINER_CLI.
+container := env("CONTAINER_CLI", `command -v docker >/dev/null 2>&1 && echo docker || echo podman`)
+
+# Socket for testcontainers: DOCKER_HOST if set, else the rootless Podman socket if it exists, else
+# empty (testcontainers then uses /var/run/docker.sock).
+docker_host := env("DOCKER_HOST", `s="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"; [ -S "$s" ] && echo "unix://$s" || true`)
+
+# Environment prefix for cargo test runs: exports DOCKER_HOST only when a socket was found.
+docker_env := if docker_host == "" { "" } else { "DOCKER_HOST=" + docker_host }
+
+# Bazel flags that let sandboxed tests reach that socket.
+bazel_test_socket := if docker_host == "" { "" } else { "--test_env=DOCKER_HOST=" + docker_host + if docker_host =~ "^unix://" { " --sandbox_writable_path=" + parent_directory(trim_start_match(docker_host, "unix://")) } else { "" } }
+
 default:
     @just --list
 
@@ -14,28 +27,37 @@ tools:
     bazel run //:bazel_env
     LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install
 
-# Start a local PostgreSQL 17 container for `sqlx` tooling and manual runs (tests start their own)
+# Local PostgreSQL 17 on :5432 for `sqlx-prepare`, `migrate` and running dark-factory by hand. Tests do not use it.
 db:
-    docker start dark-factory-pg 2>/dev/null || docker run -d --name dark-factory-pg \
+    {{container}} start dark-factory-pg 2>/dev/null || {{container}} run -d --name dark-factory-pg \
         -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=dark_factory \
-        -p 5432:5432 postgres:17-alpine
+        -p 5432:5432 docker.io/library/postgres:17-alpine
 
 # Stop and remove the local PostgreSQL container
 db-rm:
-    docker rm -f dark-factory-pg
+    {{container}} rm -f dark-factory-pg
 
-# --- Cargo (local, tests need a Docker socket) ---------------------------------------------------
+# Remove the shared test PostgreSQL containers that testcontainers keeps running between test runs
+test-db-rm:
+    {{container}} ps -aq --filter name=df-test-postgres | xargs -r {{container}} rm -f
+
+# --- Cargo (local; database tests need a Docker or Podman socket) ---------------------------------
 
 build:
     cargo build --workspace
 
-# Run all tests (or the ones matching FILTER); a shared `df-test-postgres` container is started on demand
-test *FILTER:
-    cargo test --workspace {{FILTER}}
+# Build the WebAssembly plugin components the df-plugins and dark-factory tests load. Uses rustup's
+# cargo: the `cargo` from .bazel_env only has the host's standard library, not wasm32-wasip2.
+plugins:
+    RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
+
+# Run all tests (or the ones matching FILTER); database tests share one `df-test-postgres` container
+test *FILTER: plugins
+    {{docker_env}} cargo test --workspace {{FILTER}}
 
 # Line coverage across the workspace
-coverage:
-    cargo llvm-cov --workspace
+coverage: plugins
+    {{docker_env}} cargo llvm-cov --workspace
 
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings
@@ -64,9 +86,9 @@ sqlx-prepare:
 bazel-build:
     bazel build //...
 
-# Run all tests; DB tests use the local Docker
-bazel-test:
-    bazel test //...
+# Run all tests (or TARGETS); database tests reach the Docker or Podman socket from the sandbox
+bazel-test *TARGETS="//...":
+    bazel test {{bazel_test_socket}} {{TARGETS}}
 
 # Clippy and rustfmt through Bazel (pinned, hermetic)
 bazel-lint:

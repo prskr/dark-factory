@@ -80,6 +80,29 @@
       }
     },
     {
+      "name": "set_task_title",
+      "title": "Set task title",
+      "description": "Give this task a short title (at most 80 characters, plain text) that says what it is about. Call it once, at the start. If a person or an earlier call already set a title, the call changes nothing and says so.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plain text, at most 80 characters; line breaks become spaces."
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "complete_task",
       "title": "Complete task",
       "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: end your turn with the question instead.",

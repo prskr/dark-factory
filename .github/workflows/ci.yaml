@@ -7,6 +7,14 @@ on:
       - "product/**"
       - "design/**"
       - "openspec/**"
+  # Runs on main save the caches (Bazelisk, repository cache) that every pull request can restore;
+  # caches saved by a pull request are only visible to that pull request.
+  push:
+    branches: [main]
+    paths-ignore:
+      - "product/**"
+      - "design/**"
+      - "openspec/**"
 
 permissions:
   contents: read
@@ -28,6 +36,8 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           bazelisk-cache: true
+          # Base image manifests (see docs/development.md): avoids registry rate limits on every run
+          repository-cache: true
 
       # testcontainers belongs in dev-dependencies only (crate `df-test-postgres`)
       - name: No testcontainers in the production binary
