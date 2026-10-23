@@ -13,6 +13,8 @@ use df_proto::transcript::v1::{
 };
 use maud::{Markup, PreEscaped, html};
 
+use crate::components::transcript as c;
+
 /// A rendered element of the transcript.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
@@ -486,111 +488,72 @@ pub fn render_item(item: &Item) -> Markup {
             prompt_id,
             author,
             text,
-        } => html! {
-            div id=(id) data-prompt-id=(prompt_id) class="min-w-0 self-end rounded-lg bg-sky-900 px-3 py-2 md:max-w-[80%]" {
-                div class="text-xs text-sky-300" { (author) }
-                div class="whitespace-pre-wrap break-words" { (text) }
-            }
-        },
-        ItemKind::Agent { text, complete } => html! {
-            div id=(id) class="min-w-0 break-words" {
-                @if *complete {
-                    div class="md-body" { (markdown(text)) }
-                } @else {
-                    div class="whitespace-pre-wrap" { (text) }
-                }
-            }
-        },
-        ItemKind::Thought { text } => html! {
-            details id=(id) class="text-slate-400" {
-                summary class="flex min-h-11 cursor-pointer items-center text-sm" { "Thinking" }
-                div class="whitespace-pre-wrap break-words text-sm" { (text) }
-            }
-        },
+        } => c::user_message(id, prompt_id, author, text),
+        ItemKind::Agent { text, complete } => {
+            let body = if *complete {
+                markdown(text)
+            } else {
+                html! { (text) }
+            };
+            c::agent_message(id, body, *complete)
+        }
+        ItemKind::Thought { text } => c::thought(id, text),
         ItemKind::Tool(tool) => render_tool(id, tool),
-        ItemKind::Plan(entries) => html! {
-            div id=(id) class="rounded border border-slate-800 p-3" {
-                div class="mb-1 text-xs uppercase text-slate-400" { "Plan" }
-                ul class="space-y-1 text-sm" {
-                    @for entry in entries {
-                        li { span class="mr-2 text-slate-400" { "[" (entry.status) "]" } (entry.content) }
-                    }
-                }
-            }
-        },
+        ItemKind::Plan(entries) => {
+            let entries: Vec<(String, String)> = entries
+                .iter()
+                .map(|e| (e.status.clone(), e.content.clone()))
+                .collect();
+            c::plan(id, &entries)
+        }
         ItemKind::TurnEnd {
             stop_reason,
             detail,
             usage,
-        } => html! {
-            div id=(id) class="border-t border-slate-800 pt-2 text-xs text-slate-400" {
-                "Turn ended: " (stop_reason)
-                @if !detail.is_empty() { " - " (detail) }
-                @for u in usage {
-                    div { (u.model) ": " (u.input) " in, " (u.output) " out, "
-                        (u.cache_read) " cache read, " (u.cache_write) " cache write" }
-                }
-            }
-        },
+        } => {
+            let lines: Vec<String> = usage
+                .iter()
+                .map(|u| {
+                    format!(
+                        "{}: {} in, {} out, {} cache read, {} cache write",
+                        u.model, u.input, u.output, u.cache_read, u.cache_write
+                    )
+                })
+                .collect();
+            c::turn_end(id, stop_reason, detail, &lines)
+        }
         ItemKind::Notice {
             level,
             code,
             message,
-        } => {
-            let class = match level.as_str() {
-                "error" => "border-red-700 bg-red-950 text-red-200",
-                "warning" => "border-amber-700 bg-amber-950 text-amber-200",
-                _ => "border-slate-700 bg-slate-900 text-slate-300",
-            };
-            html! {
-                div id=(id) class={"rounded border px-3 py-2 text-sm " (class)} {
-                    span class="mr-2 font-mono text-xs" { (code) }
-                    (message)
-                }
-            }
-        }
-        ItemKind::Unreadable => html! {
-            div id=(id) class="text-sm text-slate-500" { "Unreadable transcript event" }
-        },
+        } => c::notice(id, level, code, message),
+        ItemKind::Unreadable => c::unreadable(id),
     }
 }
 
 fn render_tool(id: &str, tool: &ToolItem) -> Markup {
-    let status_class = match tool.status.as_str() {
-        "completed" => "text-emerald-400",
-        "failed" => "text-red-400",
-        _ => "text-slate-400",
-    };
-    html! {
-        details id=(id) class="rounded border border-slate-800 bg-slate-900" {
-            summary class="flex min-h-11 cursor-pointer items-center gap-2 px-3 text-sm" {
-                span class="min-w-0 flex-1 truncate" { (tool.title) }
-                span class="text-xs text-slate-400" { (tool.kind) }
-                span class={"text-xs " (status_class)} { (tool.status) }
-            }
-            div class="space-y-2 px-3 pb-3 text-sm" {
-                @for location in &tool.locations { div class="font-mono text-xs text-slate-400" { (location) } }
-                @if !tool.raw_input.is_empty() { (code_block("Input", &tool.raw_input)) }
-                @for content in &tool.content {
-                    @match content {
-                        ToolContent::Text(text) => (code_block("Output", text)),
-                        ToolContent::Diff { path, old, new } => (code_block(path, &diff_text(old.as_deref(), new))),
-                    }
-                }
-                @if !tool.raw_output.is_empty() { (code_block("Result", &tool.raw_output)) }
-                @if tool.truncated { div class="text-xs text-amber-400" { "Truncated" } }
-            }
-        }
+    let mut blocks: Vec<(String, String)> = Vec::new();
+    if !tool.raw_input.is_empty() {
+        blocks.push(("Input".into(), tool.raw_input.clone()));
     }
-}
-
-fn code_block(label: &str, text: &str) -> Markup {
-    html! {
-        div {
-            div class="text-xs text-slate-400" { (label) }
-            pre class="overflow-x-auto rounded bg-slate-950 p-2 text-xs" { code { (text) } }
-        }
+    for content in &tool.content {
+        blocks.push(match content {
+            ToolContent::Text(text) => ("Output".into(), text.clone()),
+            ToolContent::Diff { path, old, new } => (path.clone(), diff_text(old.as_deref(), new)),
+        });
     }
+    if !tool.raw_output.is_empty() {
+        blocks.push(("Result".into(), tool.raw_output.clone()));
+    }
+    c::tool_row(&c::ToolRow {
+        id,
+        title: &tool.title,
+        kind: &tool.kind,
+        status: &tool.status,
+        locations: &tool.locations,
+        blocks: &blocks,
+        truncated: tool.truncated,
+    })
 }
 
 fn diff_text(old: Option<&str>, new: &str) -> String {

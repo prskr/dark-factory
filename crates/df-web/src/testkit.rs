@@ -352,7 +352,7 @@ pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::
         df_db::NewTask {
             project_id: df_core::ProjectId::from_uuid(seed.project),
             persona_id: df_core::PersonaId::from_uuid(seed.persona),
-            title: title.into(),
+            title: Some(title.into()),
             description: String::new(),
             issue_number: None,
             created_by: None,

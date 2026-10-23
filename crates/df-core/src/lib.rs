@@ -7,12 +7,13 @@ pub mod keys;
 pub mod seams;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
+pub mod title;
 
 pub use config::{
     AuthConfig, ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, PluginConfig,
     RuntimeDelivery, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
 };
-pub use domain::{ParseEnumError, Principal, RunOutcome, RunState, TaskStatus};
+pub use domain::{ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, TaskStatus};
 pub use ids::{
     CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RunId, TaskId, ToolCallId,
     UserId,
@@ -23,4 +24,7 @@ pub use seams::{
     NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState,
     PullRequestUpdate, RateLimit, RepoRef, RunSandboxSpec, SandboxEvent, SandboxProvider,
     SecretError, SecretStore, TaskVolumeSpec, UpstreamError,
+};
+pub use title::{
+    FALLBACK_TITLE, TITLE_MAX_CHARS, TitleSource, placeholder_title, sanitize_title, title_too_long,
 };

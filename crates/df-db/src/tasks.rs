@@ -2,13 +2,15 @@
 
 use chrono::{DateTime, Utc};
 use df_core::{
-    PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId, TaskId, TaskKey, TaskStatus,
-    UserId,
+    FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId, TITLE_MAX_CHARS,
+    TaskId, TaskKey, TaskStatus, TitleSource, UserId, placeholder_title, sanitize_title,
+    title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 
@@ -17,7 +19,8 @@ use crate::pool::DbError;
 pub struct NewTask {
     pub project_id: ProjectId,
     pub persona_id: PersonaId,
-    pub title: String,
+    /// Title given by the creator; without one the first sentence of the description is used.
+    pub title: Option<String>,
     pub description: String,
     pub issue_number: Option<i64>,
     pub created_by: Option<UserId>,
@@ -31,6 +34,7 @@ pub struct TaskRow {
     pub number: u64,
     pub key: TaskKey,
     pub title: String,
+    pub title_source: TitleSource,
     pub description: String,
     pub persona_id: PersonaId,
     pub issue_number: Option<i64>,
@@ -59,12 +63,15 @@ pub struct TaskMessageRow {
     pub delivered_at: Option<DateTime<Utc>>,
 }
 
-/// Formats the initial assignment prompt text from a task's title and description.
-pub fn format_assignment_prompt(title: &str, description: &str) -> Vec<ContentBlock> {
-    let text = if description.trim().is_empty() {
-        format!("# {title}")
-    } else {
-        format!("# {title}\n\n{description}")
+/// Formats the initial assignment prompt text. `title` is the title given by a person; without
+/// one the prompt asks the persona to set a title with `set_task_title`.
+pub fn format_assignment_prompt(title: Option<&str>, description: &str) -> Vec<ContentBlock> {
+    let description = description.trim();
+    let text = match title {
+        Some(title) if description.is_empty() => format!("# {title}"),
+        Some(title) => format!("# {title}\n\n{description}"),
+        None if description.is_empty() => ask_for_title(),
+        None => format!("{description}\n\n{}", ask_for_title()),
     };
     vec![ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text })),
@@ -103,6 +110,14 @@ pub async fn create_task(
     let task_key =
         TaskKey::new(project_key, number).map_err(|e| DbError::InvalidData(e.to_string()))?;
 
+    let user_title = input.title.as_deref().and_then(sanitize_title);
+    let (title, title_source) = match &user_title {
+        Some(title) => (title.clone(), TitleSource::User),
+        None => (
+            placeholder_title(&input.description).unwrap_or_else(|| FALLBACK_TITLE.to_string()),
+            TitleSource::Placeholder,
+        ),
+    };
     let task_id = TaskId::new();
     let status = TaskStatus::Queued;
     let key_str = task_key.to_string();
@@ -111,12 +126,12 @@ pub async fn create_task(
     let row = sqlx::query!(
         r#"
         INSERT INTO tasks (
-            id, project_id, number, key, title, description,
+            id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, created_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING
-            id, project_id, number, key, title, description,
+            id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
             diverged, harness_session_id, created_by, created_at, updated_at
@@ -125,7 +140,8 @@ pub async fn create_task(
         input.project_id.as_uuid(),
         project_alloc.allocated_number,
         key_str,
-        input.title,
+        title,
+        title_source.as_str(),
         input.description,
         input.persona_id.as_uuid(),
         input.issue_number,
@@ -137,7 +153,7 @@ pub async fn create_task(
 
     let prompt_id = PromptId::new();
     let author = Principal::system("task.assigned");
-    let content = format_assignment_prompt(&row.title, &row.description);
+    let content = format_assignment_prompt(user_title.as_deref(), &row.description);
     let author_json = serde_json::to_value(&author)?;
     let content_json = serde_json::to_value(&content)?;
 
@@ -166,6 +182,7 @@ pub async fn create_task(
         number,
         key: task_key,
         title: row.title,
+        title_source,
         description: row.description,
         persona_id: PersonaId::from_uuid(row.persona_id),
         issue_number: row.issue_number,
@@ -293,7 +310,7 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
     let row = sqlx::query!(
         r#"
         SELECT
-            id, project_id, number, key, title, description,
+            id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
             diverged, harness_session_id, created_by, created_at, updated_at
@@ -327,6 +344,10 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             number,
             key,
             title: r.title,
+            title_source: r
+                .title_source
+                .parse()
+                .map_err(|e: df_core::ParseEnumError| DbError::InvalidData(e.to_string()))?,
             description: r.description,
             persona_id: PersonaId::from_uuid(r.persona_id),
             issue_number: r.issue_number,
@@ -412,6 +433,91 @@ pub async fn update_task_status(
     Ok(())
 }
 
+/// Sets a task's title to the sanitized `title` if `source` may replace the current title's
+/// source (`TitleSource::may_replace`; the rule lives in the `WHERE` so concurrent writers cannot
+/// violate it). Returns whether the title changed and publishes `task_changed` if it did.
+pub async fn set_task_title(
+    pool: &PgPool,
+    task_id: TaskId,
+    title: &str,
+    source: TitleSource,
+) -> Result<bool, DbError> {
+    let mut tx = pool.begin().await?;
+    let changed = set_title_in(&mut tx, task_id, title, source).await?;
+    tx.commit().await?;
+    Ok(changed)
+}
+
+/// A board member renames a task: the title is stored with source `user`, the change is audited
+/// as `task.rename` with the old and new title and `task_changed` is published.
+pub async fn rename_task(
+    pool: &PgPool,
+    task_id: TaskId,
+    actor: Principal,
+    title: &str,
+) -> Result<(), DbError> {
+    if title_too_long(title) {
+        return Err(DbError::InvalidData(format!(
+            "title is longer than {TITLE_MAX_CHARS} characters"
+        )));
+    }
+    let mut tx = pool.begin().await?;
+    let old: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
+    set_title_in(&mut tx, task_id, title, TitleSource::User).await?;
+    let new = sanitize_title(title).unwrap_or_default();
+    let entry = NewAuditEntry::new(
+        actor,
+        Vec::new(),
+        "task.rename",
+        "task",
+        task_id.to_string(),
+    )
+    .with_details(&serde_json::json!({ "old_title": old, "new_title": new }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Asks a persona to name a task that has no title from a person.
+fn ask_for_title() -> String {
+    format!(
+        "Before you start, call the `set_task_title` tool with a short title (at most {TITLE_MAX_CHARS} characters) for this task."
+    )
+}
+
+async fn set_title_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    title: &str,
+    source: TitleSource,
+) -> Result<bool, DbError> {
+    let title = sanitize_title(title).ok_or_else(|| DbError::InvalidData("empty title".into()))?;
+    let changed = sqlx::query(
+        "UPDATE tasks SET title = $2, title_source = $3, updated_at = now()
+         WHERE id = $1 AND CASE $3
+             WHEN 'user' THEN TRUE
+             WHEN 'generated' THEN title_source IN ('placeholder', 'agent')
+             WHEN 'agent' THEN title_source = 'placeholder'
+             ELSE FALSE
+         END",
+    )
+    .bind(task_id.as_uuid())
+    .bind(&title)
+    .bind(source.as_str())
+    .execute(&mut **tx)
+    .await?
+    .rows_affected()
+        > 0;
+    if changed {
+        publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,7 +578,7 @@ mod tests {
             NewTask {
                 project_id,
                 persona_id,
-                title: "Fix login".into(),
+                title: Some("Fix login".into()),
                 description: "Ensure OIDC callback validates state.".into(),
                 issue_number: Some(42),
                 created_by: None,
@@ -514,7 +620,7 @@ mod tests {
                     NewTask {
                         project_id,
                         persona_id,
-                        title: format!("Concurrent task {i}"),
+                        title: Some(format!("Concurrent task {i}")),
                         description: String::new(),
                         issue_number: None,
                         created_by: None,
@@ -556,7 +662,7 @@ mod tests {
             NewTask {
                 project_id,
                 persona_id,
-                title: "Initial work".into(),
+                title: Some("Initial work".into()),
                 description: "Desc".into(),
                 issue_number: None,
                 created_by: None,
@@ -677,7 +783,7 @@ mod tests {
             NewTask {
                 project_id,
                 persona_id,
-                title: "Check constraints".into(),
+                title: Some("Check constraints".into()),
                 description: String::new(),
                 issue_number: None,
                 created_by: None,
@@ -712,5 +818,204 @@ mod tests {
             second_active.is_err(),
             "partial unique index should reject second active run on same task"
         );
+    }
+
+    fn new_task(project_id: ProjectId, persona_id: PersonaId, title: Option<&str>) -> NewTask {
+        NewTask {
+            project_id,
+            persona_id,
+            title: title.map(str::to_string),
+            description: "The nightly backup job sometimes runs twice. It started last week."
+                .into(),
+            issue_number: None,
+            created_by: None,
+        }
+    }
+
+    fn prompt_text(msg: &TaskMessageRow) -> String {
+        match &msg.content[0].kind {
+            Some(content_block::Kind::Text(t)) => t.text.clone(),
+            other => panic!("unexpected content {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn task_without_title_gets_a_placeholder_and_asks_for_a_title() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+
+        let (task, msg) = create_task(&pool, new_task(project_id, persona_id, None))
+            .await
+            .unwrap();
+
+        assert_eq!(task.title, "The nightly backup job sometimes runs twice.");
+        assert_eq!(task.title_source, TitleSource::Placeholder);
+        let text = prompt_text(&msg);
+        assert!(text.contains("The nightly backup job sometimes runs twice. It started"));
+        assert!(text.contains("set_task_title"));
+    }
+
+    #[tokio::test]
+    async fn task_with_title_keeps_it_and_the_old_prompt() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+
+        let (task, msg) = create_task(&pool, new_task(project_id, persona_id, Some("Fix backups")))
+            .await
+            .unwrap();
+
+        assert_eq!(task.title, "Fix backups");
+        assert_eq!(task.title_source, TitleSource::User);
+        let text = prompt_text(&msg);
+        assert!(text.starts_with("# Fix backups\n\n"));
+        assert!(!text.contains("set_task_title"));
+        assert_eq!(get_task(&pool, task.id).await.unwrap().unwrap(), task);
+    }
+
+    #[tokio::test]
+    async fn title_precedence_holds_for_every_source_pair() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+
+        for current in TitleSource::ALL {
+            for new in TitleSource::ALL {
+                let (task, _) = create_task(&pool, new_task(project_id, persona_id, None))
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE tasks SET title = 'current', title_source = $2 WHERE id = $1")
+                    .bind(task.id.as_uuid())
+                    .bind(current.as_str())
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+
+                let changed = set_task_title(&pool, task.id, "new", *new).await.unwrap();
+
+                let stored = get_task(&pool, task.id).await.unwrap().unwrap();
+                assert_eq!(changed, new.may_replace(*current), "{new} over {current}");
+                if changed {
+                    assert_eq!((stored.title.as_str(), stored.title_source), ("new", *new));
+                } else {
+                    assert_eq!(
+                        (stored.title.as_str(), stored.title_source),
+                        ("current", *current)
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_title_is_sanitized_and_empty_is_rejected() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+        let (task, _) = create_task(&pool, new_task(project_id, persona_id, None))
+            .await
+            .unwrap();
+
+        assert!(
+            set_task_title(&pool, task.id, " \n ", TitleSource::Agent)
+                .await
+                .is_err()
+        );
+        set_task_title(
+            &pool,
+            task.id,
+            "Fix login\n\nand logout",
+            TitleSource::Agent,
+        )
+        .await
+        .unwrap();
+
+        let stored = get_task(&pool, task.id).await.unwrap().unwrap();
+        assert_eq!(stored.title, "Fix login and logout");
+    }
+
+    #[tokio::test]
+    async fn rename_rejects_a_title_over_the_limit() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+        let (task, _) = create_task(&pool, new_task(project_id, persona_id, Some("Keep")))
+            .await
+            .unwrap();
+
+        let long = "x".repeat(TITLE_MAX_CHARS + 1);
+        let result = rename_task(
+            &pool,
+            task.id,
+            Principal::human(UserId::new(), "Ada"),
+            &long,
+        )
+        .await;
+
+        assert!(matches!(result, Err(DbError::InvalidData(_))));
+        assert_eq!(
+            get_task(&pool, task.id).await.unwrap().unwrap().title,
+            "Keep"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_locks_the_title_and_is_audited() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+        let (task, _) = create_task(&pool, new_task(project_id, persona_id, None))
+            .await
+            .unwrap();
+        let notifier = Notifier::start(&pool).await.unwrap();
+        let mut events = notifier.subscribe();
+
+        rename_task(
+            &pool,
+            task.id,
+            Principal::human(UserId::new(), "Ada"),
+            "Stop duplicate nightly backups",
+        )
+        .await
+        .unwrap();
+        let agent_changed = set_task_title(&pool, task.id, "Agent title", TitleSource::Agent)
+            .await
+            .unwrap();
+
+        let stored = get_task(&pool, task.id).await.unwrap().unwrap();
+        assert_eq!(stored.title, "Stop duplicate nightly backups");
+        assert_eq!(stored.title_source, TitleSource::User);
+        assert!(!agent_changed);
+        let (action, details): (String, serde_json::Value) = sqlx::query_as(
+            "SELECT action, details FROM audit_log WHERE resource_id = $1 AND action = 'task.rename'",
+        )
+        .bind(task.id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(action, "task.rename");
+        assert_eq!(
+            details["old_title"],
+            "The nightly backup job sometimes runs twice."
+        );
+        assert_eq!(details["new_title"], "Stop duplicate nightly backups");
+        let changed = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(changed, Notification::TaskChanged { task_id: task.id });
     }
 }

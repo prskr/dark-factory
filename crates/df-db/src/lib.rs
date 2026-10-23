@@ -24,7 +24,8 @@ pub use projects::{ForgeTarget, forge_target};
 pub use sqlx::PgPool;
 pub use tasks::{
     NewTask, TaskMessageRow, TaskRow, create_task, format_assignment_prompt, get_task,
-    list_undelivered_messages, mark_prompt_delivered, queue_message, update_task_status,
+    list_undelivered_messages, mark_prompt_delivered, queue_message, rename_task, set_task_title,
+    update_task_status,
 };
 
 /// Embedded database migrations from `crates/df-db/migrations`.

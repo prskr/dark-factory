@@ -359,7 +359,7 @@ mod tests {
             df_db::NewTask {
                 project_id: env.project_id,
                 persona_id: env.persona_id,
-                title: "Other".into(),
+                title: Some("Other".into()),
                 description: String::new(),
                 issue_number: None,
                 created_by: None,

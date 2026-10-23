@@ -53,6 +53,7 @@ fn content_type(path: &str) -> &'static str {
         Some("css") => "text/css; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
         Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
         Some("json") => "application/json",
         _ => "application/octet-stream",
     }
@@ -109,9 +110,9 @@ mod tests {
     fn stylesheet_contains_only_classes_from_the_sources() {
         // Tailwind's automatic source detection scans the working directory, which in a Bazel
         // sandbox is the whole execroot (~90 KB of CSS). Minified with `@source "../src"` only,
-        // the stylesheet is about 14 KB.
+        // the stylesheet is about 25 KB.
         let css = app_css().expect("app.css is embedded");
-        assert!(css.len() < 20_000, "app.css is {} bytes", css.len());
+        assert!(css.len() < 45_000, "app.css is {} bytes", css.len());
     }
 
     #[test]
@@ -121,8 +122,8 @@ mod tests {
             ".min-h-11",
             ".inline-flex",
             ".hidden",
-            "md\\:flex",
-            "md\\:hidden",
+            "lg\\:flex",
+            "lg\\:hidden",
             ".md-body",
             ".overflow-x-auto",
         ] {
@@ -130,6 +131,58 @@ mod tests {
                 css.contains(rule),
                 "app.css lacks `{rule}`; regenerate assets/app.css with tailwindcss"
             );
+        }
+    }
+
+    #[test]
+    fn stylesheet_defines_the_tokens_for_both_themes() {
+        let css = app_css().expect("app.css is embedded");
+        assert!(css.contains("--app:#fafaf9"), "light tokens");
+        let dark = css
+            .find("@media (prefers-color-scheme:dark)")
+            .expect("dark theme block");
+        assert!(css[dark..].contains("--app:#0c0a09"), "dark tokens");
+        for utility in [
+            ".bg-app",
+            ".bg-panel",
+            ".text-ink",
+            ".border-line",
+            ".bg-accent",
+        ] {
+            assert!(css.contains(utility), "{utility}");
+        }
+    }
+
+    #[test]
+    fn transcript_on_a_phone_hides_the_bottom_bar() {
+        let css = app_css().expect("app.css is embedded");
+        assert!(
+            css.contains("body[data-view=task] .bottombar"),
+            "message input takes its place"
+        );
+        assert!(css.contains("focus-visible"), "visible focus ring");
+    }
+
+    #[test]
+    fn stylesheet_refers_to_the_control_plane_only() {
+        let css = app_css().expect("app.css is embedded");
+        assert!(!css.contains("url(http") && !css.contains("@import"));
+        assert!(css.contains("url(/assets/fonts/inter-latin-wght-normal.woff2)"));
+    }
+
+    #[tokio::test]
+    async fn fonts_are_served_with_long_cache_headers_and_their_licences_are_embedded() {
+        for font in [
+            "fonts/inter-latin-wght-normal.woff2",
+            "fonts/jetbrains-mono-latin-wght-normal.woff2",
+        ] {
+            let response = get_path(&format!("/assets/{font}")).await;
+            assert_eq!(response.status(), StatusCode::OK, "{font}");
+            assert_eq!(response.headers()[header::CACHE_CONTROL], CACHE_CONTROL);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "font/woff2");
+        }
+        for licence in ["fonts/LICENSE-Inter.txt", "fonts/LICENSE-JetBrainsMono.txt"] {
+            assert!(get_asset(licence).is_some(), "{licence}");
         }
     }
 

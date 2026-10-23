@@ -2,6 +2,193 @@
 @import "tailwindcss" source(none);
 @source "../src";
 
+/* Fonts are self-hosted (`assets/fonts`); `docs/design-system.md` describes the tokens below. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("/assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+/* Semantic tokens, light theme. Components use the utilities generated from `@theme` below and
+   never a raw palette color, so the dark theme only has to redefine these variables. */
+:root {
+  color-scheme: light;
+  --app: #fafaf9;
+  --panel: #ffffff;
+  --sunk: #f5f5f4;
+  --line: #e7e5e4;
+  --line-strong: #a8a29e;
+  --ink: #1c1917;
+  --muted: #57534e;
+  --faint: #6b6560;
+  --accent: #00ff41;
+  --on-accent: #0c0a09;
+  --accent-text: #00691a;
+  --accent-soft: #dcfce7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --rail: #1c1917;
+  --rail-ink: #d6d3d1;
+  --rail-hover: #292524;
+  --status-running-bg: #e0f2fe;
+  --status-running-fg: #075985;
+  --status-waiting-bg: #fef3c7;
+  --status-waiting-fg: #92400e;
+  --status-queued-bg: #f5f5f4;
+  --status-queued-fg: #44403c;
+  --status-completed-bg: #dcfce7;
+  --status-completed-fg: #166534;
+  --status-failed-bg: #fee2e2;
+  --status-failed-fg: #991b1b;
+  --status-limited-bg: #ffedd5;
+  --status-limited-fg: #9a3412;
+}
+
+/* Dark theme: chosen by the browser before the first paint, no script involved. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --app: #0c0a09;
+    --panel: #1c1917;
+    --sunk: #292524;
+    --line: #2e2a27;
+    --line-strong: #57534e;
+    --ink: #f5f5f4;
+    --muted: #d6d3d1;
+    --faint: #a8a29e;
+    --accent-text: #5cff8a;
+    --accent-soft: #052e16;
+    --danger: #fca5a5;
+    --danger-soft: #450a0a;
+    --rail: #000000;
+    --rail-hover: #1c1917;
+    --status-running-bg: #082f49;
+    --status-running-fg: #7dd3fc;
+    --status-waiting-bg: #451a03;
+    --status-waiting-fg: #fcd34d;
+    --status-queued-bg: #292524;
+    --status-queued-fg: #d6d3d1;
+    --status-completed-bg: #052e16;
+    --status-completed-fg: #86efac;
+    --status-failed-bg: #450a0a;
+    --status-failed-fg: #fca5a5;
+    --status-limited-bg: #431407;
+    --status-limited-fg: #fdba74;
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-sunk: var(--sunk);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-rail: var(--rail);
+  --color-rail-ink: var(--rail-ink);
+  --color-rail-hover: var(--rail-hover);
+  --color-status-running-bg: var(--status-running-bg);
+  --color-status-running-fg: var(--status-running-fg);
+  --color-status-waiting-bg: var(--status-waiting-bg);
+  --color-status-waiting-fg: var(--status-waiting-fg);
+  --color-status-queued-bg: var(--status-queued-bg);
+  --color-status-queued-fg: var(--status-queued-fg);
+  --color-status-completed-bg: var(--status-completed-bg);
+  --color-status-completed-fg: var(--status-completed-fg);
+  --color-status-failed-bg: var(--status-failed-bg);
+  --color-status-failed-fg: var(--status-failed-fg);
+  --color-status-limited-bg: var(--status-limited-bg);
+  --color-status-limited-fg: var(--status-limited-fg);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--app);
+    color: var(--ink);
+  }
+  /* Visible keyboard focus everywhere. */
+  :focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+  }
+  [x-cloak] {
+    display: none !important;
+  }
+}
+
+/* Three-column task workspace (design D4). `body[data-view]` says which screen a phone shows. */
+@layer components {
+  .ws {
+    @apply flex h-[calc(100dvh-4rem)] min-w-0 lg:h-dvh;
+  }
+  body[data-view="task"] .ws {
+    @apply h-dvh;
+  }
+  #ws-detail {
+    display: contents;
+  }
+  .ws-list {
+    @apply hidden min-w-0 flex-1 flex-col border-r border-line bg-panel lg:flex lg:w-80 lg:flex-none xl:w-96;
+  }
+  .ws-main {
+    @apply hidden min-w-0 flex-1 flex-col bg-app lg:flex;
+  }
+  body[data-view="list"] .ws-list,
+  body[data-view="task"] .ws-main {
+    @apply flex;
+  }
+
+  /* Details: bottom sheet on phones, slide-over from 1024 px, a column from 1280 px. */
+  .ws-details {
+    @apply invisible fixed inset-x-0 bottom-0 z-40 max-h-[80dvh] translate-y-full overflow-y-auto rounded-t-xl border-t border-line bg-panel;
+  }
+  .ws-details[data-open="true"] {
+    @apply visible translate-y-0;
+  }
+  @media (min-width: 1024px) {
+    .ws-details {
+      @apply inset-y-0 right-0 left-auto max-h-none w-88 translate-x-full translate-y-0 rounded-none border-t-0 border-l;
+    }
+    .ws-details[data-open="true"] {
+      @apply translate-x-0;
+    }
+  }
+  @media (min-width: 1280px) {
+    .ws-details {
+      @apply visible static z-auto w-80 flex-none translate-x-0 border-l;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ws-details {
+      transition: transform 0.2s ease, visibility 0.2s;
+    }
+  }
+  /* Phones show no bottom bar while a transcript is open; its message input takes the place. */
+  body[data-view="task"] .bottombar {
+    @apply hidden;
+  }
+}
+
 /* Rendered Markdown of finished agent messages. Wide blocks scroll inside their own box so the
    page itself never scrolls horizontally. */
 @layer components {
@@ -23,10 +210,10 @@
     @apply list-decimal pl-5;
   }
   .md-body a {
-    @apply text-sky-400 underline;
+    @apply text-accent-text underline;
   }
   .md-body pre {
-    @apply overflow-x-auto rounded bg-slate-900 p-2 text-xs;
+    @apply overflow-x-auto rounded bg-sunk p-2 font-mono text-xs;
   }
   .md-body code {
     @apply font-mono text-[0.9em];

@@ -16,6 +16,17 @@ pub struct ParseEnumError {
     pub value: String,
 }
 
+/// Coarse grouping of task statuses used by the task list filters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatusGroup {
+    /// Queued, running or rate limited: the work is moving without a human.
+    Active,
+    /// Waiting or limit reached: a human has to act.
+    Waiting,
+    /// Completed or failed.
+    Done,
+}
+
 /// Shared task status vocabulary (`tasks.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +41,14 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    pub const fn group(&self) -> StatusGroup {
+        match self {
+            Self::Queued | Self::Running | Self::RateLimited => StatusGroup::Active,
+            Self::Waiting | Self::LimitReached => StatusGroup::Waiting,
+            Self::Completed | Self::Failed => StatusGroup::Done,
+        }
+    }
+
     pub const ALL: &'static [Self] = &[
         Self::Queued,
         Self::Running,
@@ -139,6 +158,14 @@ impl RunState {
 impl fmt::Display for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl TryFrom<String> for RunState {
+    type Error = ParseEnumError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
@@ -323,6 +350,24 @@ mod tests {
         }
 
         assert!(TaskStatus::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn every_status_has_a_group() {
+        use StatusGroup::*;
+        let expected = [
+            (TaskStatus::Queued, Active),
+            (TaskStatus::Running, Active),
+            (TaskStatus::RateLimited, Active),
+            (TaskStatus::Waiting, Waiting),
+            (TaskStatus::LimitReached, Waiting),
+            (TaskStatus::Completed, Done),
+            (TaskStatus::Failed, Done),
+        ];
+        assert_eq!(expected.len(), TaskStatus::ALL.len());
+        for (status, group) in expected {
+            assert_eq!(status.group(), group, "{status}");
+        }
     }
 
     #[test]

@@ -59,6 +59,7 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 ### Factory tools
 - `update_pull_request` works before the PR exists: values are stored and applied when the control plane opens the draft PR after the first push.
 - `report_progress` sets the task's status line; mirroring it to the issue is project policy, separate from the explicit `comment_on_issue`.
+- `set_task_title` sets the task's title with source `agent`; it changes nothing when a person or an earlier call already set a title.
 - `complete_task` ends the run after the current turn; the control plane marks the PR ready for review.
 
 ## Planned additive changes (no new major version needed)

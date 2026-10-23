@@ -243,7 +243,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
             .await
             .unwrap();
     assert_eq!(command, ["claude-code-acp", "--flag"]);
-    let new_task_page = text(app.get("/tasks/new", &cookie).await).await;
+    let new_task_page = text(app.get("/tasks/compose", &cookie).await).await;
     assert!(new_task_page.contains("Torvalds") && new_task_page.contains("Linus"));
 
     let edited = form(&[
@@ -292,4 +292,29 @@ async fn unknown_resources_are_404() {
             "{path}"
         );
     }
+}
+
+#[tokio::test]
+async fn configuration_tables_scroll_inside_their_own_box_and_the_page_has_no_phone_menu_entry() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let created = app
+        .post(
+            "/projects",
+            &project_form("DF", "https://forge.example.test/o/r.git"),
+            &cookie,
+        )
+        .await;
+    assert_eq!(header_str(&created, "hx-redirect"), "/projects");
+
+    let html = text(app.get("/projects", &cookie).await).await;
+    // The table sits in a box that scrolls horizontally, so the page itself does not.
+    let box_at = html
+        .find("<div class=\"overflow-x-auto\"><table")
+        .expect("scroll box");
+    assert!(box_at < html.find("</table>").unwrap());
+    // The configuration page is the current section of the rail but not in the phone's bottom bar.
+    let bar = &html[html.find("id=\"mobile-menu\"").unwrap()..];
+    let bar = &bar[..bar.find("</nav>").unwrap()];
+    assert!(!bar.contains("/projects") && bar.contains("/tasks"));
 }
