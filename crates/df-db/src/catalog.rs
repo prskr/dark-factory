@@ -50,7 +50,7 @@ pub struct ProjectRecord {
     pub image: String,
     pub base_branch: String,
     pub forge_credential_id: Option<Uuid>,
-    /// Whether tasks exist; the key is immutable then.
+    /// Whether tasks exist.
     pub has_tasks: bool,
 }
 
@@ -226,8 +226,8 @@ pub async fn save_credential_ref(
     Ok(row.into())
 }
 
-/// Creates or updates a project and audits the change. Changing the key of a project that has
-/// tasks is a [`DbError::Conflict`].
+/// Creates or updates a project and audits the change. Changing the key of an existing project
+/// is a [`DbError::Conflict`].
 pub async fn save_project(
     pool: &PgPool,
     actor: Actor<'_>,
@@ -251,12 +251,12 @@ pub async fn save_project(
         }
         None => None,
     };
+    // The key is set at creation and never changes: task keys (DF-1) and branches derive from it.
     if let Some(b) = &before
-        && b.has_tasks
         && b.key != input.key
     {
         return Err(DbError::Conflict(
-            "the key cannot change once the project has tasks".into(),
+            "the key cannot change after creation".into(),
         ));
     }
     let row_id: Uuid = match &before {
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_key_is_immutable_once_tasks_exist() {
+    async fn project_key_is_immutable_after_creation() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let (principal, roles) = actor();
         let actor = Actor {
@@ -519,11 +519,14 @@ mod tests {
             .await
             .unwrap();
         assert!(!p.has_tasks);
-        // Without tasks the key may change.
-        let renamed = save_project(&pool, actor, Some(p.id), &project("DFX", None))
-            .await
-            .unwrap();
-        assert_eq!(renamed.key, "DFX");
+        // The key never changes after creation, with or without tasks.
+        let renamed = save_project(&pool, actor, Some(p.id), &project("DFX", None)).await;
+        assert!(matches!(renamed, Err(DbError::Conflict(_))), "{renamed:?}");
+        assert!(get_project_by_key(&pool, "DFX").await.unwrap().is_none());
+        assert_eq!(
+            get_project_by_key(&pool, "DF").await.unwrap().unwrap().id,
+            p.id
+        );
 
         let persona = save_persona(&pool, actor, None, &persona("p"))
             .await
@@ -547,12 +550,12 @@ mod tests {
             matches!(rejected, Err(DbError::Conflict(_))),
             "{rejected:?}"
         );
-        let same_key = save_project(&pool, actor, Some(p.id), &project("DFX", None))
+        let same_key = save_project(&pool, actor, Some(p.id), &project("DF", None))
             .await
             .unwrap();
         assert!(same_key.has_tasks);
         assert_eq!(
-            get_project_by_key(&pool, "DFX").await.unwrap().unwrap().id,
+            get_project_by_key(&pool, "DF").await.unwrap().unwrap().id,
             p.id
         );
     }

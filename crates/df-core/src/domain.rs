@@ -27,6 +27,49 @@ pub enum StatusGroup {
     Done,
 }
 
+/// The sets of statuses the task list, its live updates and the project counters select: the
+/// coarse [`StatusGroup`]s plus two narrower sets that only links select (`queued`, `running`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatusSet {
+    /// Queued, running, rate limited.
+    Active,
+    /// Waiting, limit reached.
+    Waiting,
+    /// Completed, failed.
+    Done,
+    /// Queued only.
+    Queued,
+    /// Running and rate limited: the agent is working or about to continue on its own.
+    Running,
+}
+
+impl StatusSet {
+    /// The statuses of the set.
+    pub const fn statuses(self) -> &'static [TaskStatus] {
+        match self {
+            Self::Active => &[
+                TaskStatus::Queued,
+                TaskStatus::Running,
+                TaskStatus::RateLimited,
+            ],
+            Self::Waiting => &[TaskStatus::Waiting, TaskStatus::LimitReached],
+            Self::Done => &[TaskStatus::Completed, TaskStatus::Failed],
+            Self::Queued => &[TaskStatus::Queued],
+            Self::Running => &[TaskStatus::Running, TaskStatus::RateLimited],
+        }
+    }
+}
+
+impl From<StatusGroup> for StatusSet {
+    fn from(group: StatusGroup) -> Self {
+        match group {
+            StatusGroup::Active => Self::Active,
+            StatusGroup::Waiting => Self::Waiting,
+            StatusGroup::Done => Self::Done,
+        }
+    }
+}
+
 /// Shared task status vocabulary (`tasks.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -350,6 +393,28 @@ mod tests {
         }
 
         assert!(TaskStatus::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn status_sets_select_the_statuses_of_the_filters_and_counters() {
+        use TaskStatus::*;
+        assert_eq!(StatusSet::Queued.statuses(), [Queued]);
+        assert_eq!(StatusSet::Running.statuses(), [Running, RateLimited]);
+        assert_eq!(StatusSet::Waiting.statuses(), [Waiting, LimitReached]);
+        assert_eq!(StatusSet::Done.statuses(), [Completed, Failed]);
+        // The groups are made of the statuses `TaskStatus::group` assigns to them.
+        for group in [StatusGroup::Active, StatusGroup::Waiting, StatusGroup::Done] {
+            let set = StatusSet::from(group);
+            let by_group: Vec<_> = TaskStatus::ALL
+                .iter()
+                .filter(|s| s.group() == group)
+                .collect();
+            assert_eq!(set.statuses().len(), by_group.len(), "{group:?}");
+            assert!(
+                set.statuses().iter().all(|s| s.group() == group),
+                "{group:?}"
+            );
+        }
     }
 
     #[test]

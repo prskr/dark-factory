@@ -17,8 +17,11 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `/tasks?status=&project=`, `/tasks/{key}` | Task workspace: list with filters, transcript, details (one template). |
 | `GET /tasks/compose?project=`, `POST /tasks` | New-task composer (dialog), creation. |
 | `POST /tasks/{key}/title`, `POST /tasks/{key}/messages` | Rename, message input. |
+| `PATCH /tasks/{key}/messages/{id}`, `DELETE /tasks/{key}/messages/{id}` | Edit or remove a queued message the agent has not received (409 after forwarding, 422 for an empty text). |
 | `GET /tasks/events?status=&project=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
-| `/projects`, `/personas`, `/credentials` (`/new`, `/{key or id}`) | Configuration forms. |
+| `/projects`, `/personas`, `/credentials` | Configuration lists (`POST` creates). |
+| `GET .../new`, `GET .../{key or id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. |
+| `GET /projects/forge?repo_url=&issue_tracker_url=` | Forge icons and hint of the project form (htmx partials). |
 
 Everything except health, assets and login requires the role `board-member`. Non-GET requests need
 the `HX-Request: true` header (CSRF guard). `base_router(pool)` serves only health and assets;
@@ -32,7 +35,7 @@ Each SSE message is a bundle of `<hx-partial hx-target=... hx-swap=...>` element
 | --- | --- |
 | New transcript item | `#transcript`, `beforeend` |
 | Item changed (growing agent message, tool call status, turn end) | `#<dom id>`, `outerMorph` |
-| Head (title, status), details (status line, PR and issue links, project, persona, branch), runs, pending messages | `#task-head`, `#task-details`, `#runs`, `#pending`, `outerMorph` |
+| Head (title, status), details (status line, PR and issue links, project, persona, branch, collapsed strip), runs, queued message stack | `#task-head`, `#task-details`, `#runs`, `#pending`, `outerMorph` |
 | Task list | `#task-rows`, `outerMorph` |
 
 Transcript messages carry the id of the last event they contain as the SSE `id`. Agent chunks that

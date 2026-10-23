@@ -14,7 +14,8 @@ use df_proto::agent::v1::{
     credential_grant, credential_request,
 };
 use df_proto::transcript::v1::{
-    AgentMessageChunk, ContentBlock, Event, TextContent, UserMessage, content_block, event,
+    AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
+    event,
 };
 use sqlx::PgPool;
 use tonic::Code;
@@ -361,7 +362,8 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
         anyhow::bail!("no prompt")
     };
 
-    // The assignment prompt is confirmed by the transcript, then a follow-up is queued.
+    // The assignment prompt is confirmed by the transcript and its turn ends, then a follow-up
+    // is queued.
     runtime
         .send(agent_message::Body::TranscriptEvent(Event {
             schema_version: 1,
@@ -374,7 +376,15 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
             })),
         }))
         .await;
-    runtime.recv_until(|m| m.ack == 1).await?;
+    runtime
+        .send(agent_message::Body::TranscriptEvent(Event {
+            schema_version: 1,
+            occurred_at: None,
+            turn_id: "t1".into(),
+            kind: Some(event::Kind::TurnEnded(TurnEnded::default())),
+        }))
+        .await;
+    runtime.recv_until(|m| m.ack == 2).await?;
     df_db::queue_message(
         &pool,
         h.env.task.id,

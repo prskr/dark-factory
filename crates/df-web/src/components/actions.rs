@@ -32,6 +32,13 @@ pub fn action_class(kind: ButtonKind) -> &'static str {
 /// Classes of a square icon-only control. It needs an `aria-label`.
 pub const ICON_BUTTON_CLASS: &str = "inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-sunk hover:text-ink lg:size-9";
 
+/// Classes of the round accent action of a message box or card (Send, Create task): an icon in a
+/// 44 px circle. It needs an `aria-label`.
+pub const ROUND_ACTION_CLASS: &str = "inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:brightness-95";
+
+/// The pill variant of [`ROUND_ACTION_CLASS`] for an action with a word (Save).
+pub const ROUND_PILL_CLASS: &str = "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-on-accent hover:brightness-95";
+
 /// A `type=button` button.
 pub fn button(kind: ButtonKind, label: &str) -> Markup {
     html! { button type="button" class=(action_class(kind)) { (label) } }
@@ -73,6 +80,20 @@ mod tests {
                 .into_string()
                 .contains("type=\"button\"")
         );
+    }
+
+    #[test]
+    fn round_actions_are_touch_sized_accent_fills() {
+        assert!(
+            ROUND_ACTION_CLASS.contains("size-11") && ROUND_ACTION_CLASS.contains("rounded-full")
+        );
+        assert!(ROUND_PILL_CLASS.contains("min-h-11") && ROUND_PILL_CLASS.contains("rounded-full"));
+        for class in [ROUND_ACTION_CLASS, ROUND_PILL_CLASS] {
+            assert!(
+                class.contains("bg-accent") && class.contains("text-on-accent"),
+                "{class}"
+            );
+        }
     }
 
     #[test]

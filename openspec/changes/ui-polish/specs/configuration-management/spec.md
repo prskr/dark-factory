@@ -51,7 +51,7 @@ The persona list SHALL show each persona as a card with its name, harness, model
 - **THEN** its card shows "Linus", "Claude Code · opus", the first lines of its prompt and `anthropic-api`
 
 ### Requirement: Configuration forms as modals
-Creating and editing a project, persona or credential reference SHALL happen in a modal over the corresponding list (a full-height sheet below 1024 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving SHALL close the modal and update the list without a full page load.
+Creating and editing a project, persona or credential reference SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving SHALL close the modal and update the list without a full page load.
 
 #### Scenario: Validation error in the modal
 - **WHEN** a credential reference is submitted without a key
@@ -69,11 +69,36 @@ When there are no projects, personas or credential references, the corresponding
 - **THEN** it shows "No projects yet", an explanation, a New project button and a link to credential references
 
 ### Requirement: Configuration pages on phones
-Project, persona and credential pages SHALL be reachable on any screen. Below 1024 px, the navigation SHALL include Projects but not Personas or Credentials.
+Project, persona and credential pages SHALL be reachable on any screen. Below 768 px, the navigation SHALL include Projects but not Personas or Credentials.
 
 #### Scenario: Phone navigation
 - **WHEN** the UI is opened at 390 px width
 - **THEN** the navigation shows Tasks and Projects but not Personas or Credentials
+
+## MODIFIED Requirements
+
+### Requirement: Projects
+Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, base branch and forge credential reference. The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only.
+
+#### Scenario: Create a project
+- **WHEN** a board member submits name "Dark Factory", key `DF`, repo `https://git.example.org/peter/dark-factory.git`, image, base `main` and a forge credential
+- **THEN** the project is stored and appears in the project list
+
+#### Scenario: Non-HTTPS repository
+- **WHEN** the repository URL uses `ssh://` or `http://`
+- **THEN** the form shows a validation error and nothing is stored
+
+#### Scenario: Key in the edit form
+- **WHEN** a board member opens the edit form of project `DF`, with or without tasks
+- **THEN** the key is shown read-only
+
+#### Scenario: Changing the key of a used project
+- **WHEN** a board member edits the key of a project that has tasks
+- **THEN** the change is rejected with a validation error
+
+#### Scenario: Changing the key of an unused project
+- **WHEN** an edit request for project `DF`, which has no tasks, carries a different key
+- **THEN** the change is rejected with a validation error and nothing is stored
 
 ## REMOVED Requirements
 

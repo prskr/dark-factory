@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tasks SET status = 'waiting', updated_at = now()\n        WHERE id = $1 AND status = 'queued'\n          AND NOT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a2706d0d0147dad0d7237116044f5fa5617ae63083c67eaae069b1389bb9f55b"
+}

@@ -45,6 +45,8 @@ pub struct WebState {
     pub pool: PgPool,
     pub notifier: Arc<Notifier>,
     pub oidc: Arc<auth::OidcClient>,
+    /// The forge integration this instance runs, if any; projects show it by icon and name.
+    pub forge: Option<df_core::ForgeKind>,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.

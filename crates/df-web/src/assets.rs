@@ -106,6 +106,20 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn logo_is_served_as_svg_with_cache_headers_and_matches_the_rail_icon() {
+        let response = get_path("/assets/logo.svg").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], CACHE_CONTROL);
+        let file = get_asset("logo.svg").expect("logo embedded");
+        let svg = std::str::from_utf8(&file.data).unwrap();
+        let rail_logo = crate::components::logo("x").into_string();
+        let paths =
+            &rail_logo[rail_logo.find("<path").unwrap()..rail_logo.rfind("</svg>").unwrap()];
+        assert!(svg.contains(paths), "logo.svg and Icon::Logo differ");
+    }
+
     #[test]
     fn stylesheet_contains_only_classes_from_the_sources() {
         // Tailwind's automatic source detection scans the working directory, which in a Bazel
@@ -122,8 +136,8 @@ mod tests {
             ".min-h-11",
             ".inline-flex",
             ".hidden",
-            "lg\\:flex",
-            "lg\\:hidden",
+            "md\\:flex",
+            "md\\:hidden",
             ".md-body",
             ".overflow-x-auto",
         ] {
@@ -157,7 +171,7 @@ mod tests {
     fn transcript_on_a_phone_hides_the_bottom_bar() {
         let css = app_css().expect("app.css is embedded");
         assert!(
-            css.contains("body[data-view=task] .bottombar"),
+            css.contains(r"\[body\[data-view\=task\]_\&\]\:hidden"),
             "message input takes its place"
         );
         assert!(css.contains("focus-visible"), "visible focus ring");

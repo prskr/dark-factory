@@ -31,6 +31,7 @@ Both pass with protoc 29.3 and wasm-tools 1.245.0. The factory tool file is plai
 - **Control plane → agent is idempotent, not sequenced.** Commands are keyed (`run_id`, `prompt_id`, `call_id`, `request_id`) and rebuilt from the database after every reconnect. This keeps the control plane stateless per connection, so a reconnect can land on any replica.
 - **Request/response pairs** (tool calls, Git credentials): after a reconnect the runtime re-sends pending requests with the same id; the control plane answers from its stored result. Tool calls are persisted anyway for the audit log, so retries never execute twice.
 - **Prompt delivery is confirmed by the transcript.** The `UserMessage` event carrying a `prompt_id` marks the queued message as delivered. A prompt that arrives while the runtime is finalizing stays undelivered and triggers the next run.
+- **Queued messages reach the runtime between turns.** The control plane sends a queued prompt when the run starts and after each persisted `TurnEnded`, and marks it as forwarded (`task_messages.forwarded_at`). A prompt queued while a turn is open (a persisted `TurnStarted` without a later `TurnEnded`) stays held back, so a board member can still edit or remove it. A forwarded prompt that is not yet delivered is sent again after a reconnect with the same `prompt_id`.
 
 ### Agent protocol: tool calls are typed, not raw MCP frames
 Recorded as ADR-0027 (*Accepted*). ADR-0007 mentioned `McpFrame`s. The draft uses typed `ToolCallRequest`/`ToolCallResult` instead:

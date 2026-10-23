@@ -1,3 +1,4 @@
+use chrono::TimeZone;
 use serde_json::{Value, json};
 
 use super::*;
@@ -8,9 +9,24 @@ fn stored(id: i64, turn: &str, kind: Value) -> StoredEvent {
         .as_object_mut()
         .unwrap()
         .extend(kind.as_object().unwrap().clone());
+    stored_in_run(
+        id,
+        1,
+        Some(serde_json::from_value(event).expect("fixture decodes")),
+    )
+}
+
+fn at(minute: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 10, 23, 10, minute, 0).unwrap()
+}
+
+fn stored_in_run(id: i64, run: i64, event: Option<df_proto::transcript::v1::Event>) -> StoredEvent {
     StoredEvent {
         id,
-        event: Some(serde_json::from_value(event).expect("fixture decodes")),
+        event,
+        occurred_at: at(u32::try_from(id).unwrap()),
+        run_number: run,
+        run_started_at: at(0),
     }
 }
 
@@ -107,22 +123,18 @@ fn chunks_of_one_message_share_one_element_that_grows() {
     let mut folder = Folder::default();
     let first = folder.apply(&chunk(1, "t", "m1", "Hi"));
     let second = folder.apply(&chunk(2, "t", "m1", " there"));
-    assert_eq!(
-        first,
-        [Change {
-            index: 0,
-            added: true
-        }]
-    );
+    // The run divider comes first.
+    let added = |index| Change { index, added: true };
+    assert_eq!(first, [added(0), added(1)]);
     assert_eq!(
         second,
         [Change {
-            index: 0,
+            index: 1,
             added: false
         }]
     );
-    assert_eq!(folder.items().len(), 1);
-    let html = render_item(&folder.items()[0]).into_string();
+    assert_eq!(folder.items().len(), 2);
+    let html = render_item(&folder.items()[1]).into_string();
     assert!(
         html.contains(r#"id="msg-m1""#) && html.contains("Hi there"),
         "{html}"
@@ -137,7 +149,7 @@ fn turn_end_completes_agent_messages_and_renders_markdown() {
         chunk(2, "u", "m2", "**other**"),
     ]);
     assert!(
-        render_item(&folder.items()[0])
+        render_item(&folder.items()[1])
             .into_string()
             .contains("**bold**")
     );
@@ -150,16 +162,16 @@ fn turn_end_completes_agent_messages_and_renders_markdown() {
     assert_eq!(
         changes[0],
         Change {
-            index: 0,
+            index: 1,
             added: false
         }
     );
     assert!(changes[1].added);
-    let done = render_item(&folder.items()[0]).into_string();
+    let done = render_item(&folder.items()[1]).into_string();
     assert!(done.contains("<strong>bold</strong>"), "{done}");
     // Another turn's message is untouched.
     assert!(
-        render_item(&folder.items()[1])
+        render_item(&folder.items()[2])
             .into_string()
             .contains("**other**")
     );
@@ -173,13 +185,13 @@ fn html_in_agent_output_is_shown_literally() {
         "m1",
         "<script>alert(1)</script> and [x](javascript:alert(2))",
     )]);
-    let streaming = render_item(&folder.items()[0]).into_string();
+    let streaming = render_item(&folder.items()[1]).into_string();
     folder.apply(&stored(
         2,
         "t",
         json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
     ));
-    let complete = render_item(&folder.items()[0]).into_string();
+    let complete = render_item(&folder.items()[1]).into_string();
     for html in [&streaming, &complete] {
         assert!(!html.contains("<script>"), "{html}");
         assert!(
@@ -207,13 +219,8 @@ fn update_of_an_unknown_tool_call_creates_it() {
         "t",
         json!({"toolCallUpdate": {"toolCallId": "x", "title": "late"}}),
     ));
-    assert_eq!(
-        changes,
-        [Change {
-            index: 0,
-            added: true
-        }]
-    );
+    let added = |index| Change { index, added: true };
+    assert_eq!(changes, [added(0), added(1)]);
 }
 
 #[test]
@@ -225,7 +232,7 @@ fn plan_updates_replace_the_plan_of_the_turn() {
     assert_eq!(
         changes,
         [Change {
-            index: 0,
+            index: 1,
             added: false
         }]
     );
@@ -234,7 +241,7 @@ fn plan_updates_replace_the_plan_of_the_turn() {
 
 #[test]
 fn undecodable_events_render_a_placeholder() {
-    let folder = fold(&[StoredEvent { id: 3, event: None }]);
+    let folder = fold(&[stored_in_run(3, 1, None)]);
     assert!(render_all(&folder).contains("Unreadable transcript event"));
     assert_eq!(folder.last_id(), 3);
 }
@@ -242,7 +249,7 @@ fn undecodable_events_render_a_placeholder() {
 #[test]
 fn runtime_ids_cannot_break_out_of_dom_ids() {
     let folder = fold(&[chunk(1, "t", "a b\"#<", "x")]);
-    assert_eq!(folder.items()[0].dom_id, "msg-a_b___");
+    assert_eq!(folder.items()[1].dom_id, "msg-a_b___");
 }
 
 #[test]
@@ -264,4 +271,97 @@ fn a_long_code_line_stays_inside_a_block_that_scrolls_horizontally() {
     let css = crate::assets::app_css().expect("app.css is embedded");
     let rule = &css[css.find(".md-body pre{").expect("pre rule")..];
     assert!(rule[..rule.find('}').unwrap()].contains("overflow-x:auto"));
+}
+
+#[test]
+fn each_run_starts_with_a_divider_before_its_first_item() {
+    let in_run = |_id: i64, run: i64, event: StoredEvent| StoredEvent {
+        run_number: run,
+        run_started_at: at(u32::try_from(run).unwrap() * 10),
+        ..event
+    };
+    let mut folder = Folder::default();
+    // TurnStarted produces no item: the divider waits for the first one.
+    let started = folder.apply(&in_run(1, 1, stored(1, "t1", json!({"turnStarted": {}}))));
+    assert!(started.is_empty());
+    folder.apply(&in_run(2, 1, chunk(2, "t1", "m1", "one")));
+    folder.apply(&in_run(3, 1, chunk(3, "t1", "m1", " more")));
+    let second = folder.apply(&in_run(4, 2, chunk(4, "t2", "m2", "two")));
+
+    let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
+    assert_eq!(ids, ["run-1", "msg-m1", "run-2", "msg-m2"]);
+    assert_eq!(
+        second
+            .iter()
+            .map(|c| (c.index, c.added))
+            .collect::<Vec<_>>(),
+        [(2, true), (3, true)]
+    );
+    let divider = render_item(&folder.items()[2]).into_string();
+    assert!(
+        divider.contains("Run #2 started") && divider.contains("10:20"),
+        "{divider}"
+    );
+}
+
+#[test]
+fn agent_items_carry_the_persona_name_and_the_time_of_their_first_event() {
+    let mut folder = Folder::new("Linus");
+    folder.apply(&chunk(7, "t", "m1", "Hi"));
+    folder.apply(&chunk(9, "t", "m1", " there"));
+    let item = &folder.items()[1];
+    assert_eq!(item.author, "Linus");
+    assert_eq!(item.at, at(7));
+    let html = render_item(item).into_string();
+    assert!(
+        html.contains("Linus · <time") && html.contains(">10:07<"),
+        "{html}"
+    );
+    // Without a name the bubble says "Agent".
+    let mut anonymous = Folder::default();
+    anonymous.apply(&chunk(1, "t", "m1", "Hi"));
+    assert!(
+        render_item(&anonymous.items()[1])
+            .into_string()
+            .contains("Agent · <time")
+    );
+}
+
+#[test]
+fn tool_calls_sit_between_agent_messages_as_agent_items() {
+    let mut folder = Folder::new("Linus");
+    for event in every_kind().iter().take(7) {
+        folder.apply(event);
+    }
+    let html = render_all(&folder);
+    // Messages and the tool row are `agent`, the board member's message `human`: CSS groups them.
+    assert_eq!(html.matches("data-author=\"agent\"").count(), 3, "{html}");
+    assert_eq!(html.matches("data-author=\"human\"").count(), 1);
+}
+
+#[test]
+fn agent_writes_twice_with_a_collapsed_tool_row_between_and_css_that_hides_the_first_avatar() {
+    let mut folder = Folder::new("Linus");
+    folder.apply(&chunk(1, "t", "m1", "first"));
+    folder.apply(&stored(
+        2,
+        "t",
+        json!({"toolCall": {"toolCallId": "c1", "title": "Run tests", "kind": "TOOL_KIND_EXECUTE"}}),
+    ));
+    folder.apply(&chunk(3, "t", "m2", "second"));
+
+    let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
+    assert_eq!(ids, ["run-1", "msg-m1", "ev-2", "msg-m2"]);
+    let tool = render_item(&folder.items()[2]).into_string();
+    assert!(
+        tool.starts_with("<details ") && !tool.contains(" open"),
+        "{tool}"
+    );
+    for message in [1, 3] {
+        let html = render_item(&folder.items()[message]).into_string();
+        assert!(html.contains("data-author=\"agent\"") && html.contains("class=\"avatar "));
+    }
+    // The stylesheet hides an avatar when the next item is by the same author.
+    let css = crate::assets::app_css().expect("app.css is embedded");
+    assert!(css.contains(":has(+[data-author=agent]) .avatar"), "{css}");
 }

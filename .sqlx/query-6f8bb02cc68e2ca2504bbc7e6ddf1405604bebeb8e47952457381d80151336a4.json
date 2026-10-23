@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n               forwarded_at\n        FROM task_messages\n        WHERE task_id = $1 AND delivered_at IS NULL\n        ORDER BY queued_at ASC, id ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "author",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "queued_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "queued_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "delivered_run_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "delivered_run_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "delivered_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "delivered_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "forwarded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "forwarded_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6f8bb02cc68e2ca2504bbc7e6ddf1405604bebeb8e47952457381d80151336a4"
+}

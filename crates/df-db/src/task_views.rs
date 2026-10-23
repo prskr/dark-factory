@@ -1,7 +1,7 @@
 //! Read models of the web UI: task list, task detail, runs with token usage and the transcript.
 
 use chrono::{DateTime, Utc};
-use df_core::{RunState, StatusGroup, TaskId, TaskStatus, TitleSource};
+use df_core::{RunState, StatusSet, TaskId, TitleSource};
 use df_proto::transcript::v1::Event;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -29,8 +29,8 @@ pub struct TaskListItem {
 /// Which tasks the list shows; the default is all of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskFilter {
-    /// Only tasks whose status is in this group.
-    pub group: Option<StatusGroup>,
+    /// Only tasks whose status is in this set.
+    pub group: Option<StatusSet>,
     /// Only tasks of the project with this key.
     pub project_key: Option<String>,
 }
@@ -64,6 +64,10 @@ pub struct TaskDetail {
     pub repo_url: String,
     pub issue_tracker_url: Option<String>,
     pub persona_name: String,
+    /// Harness of the persona, for example `claude-code`.
+    pub persona_harness: String,
+    /// Model of the persona; `None` means the instance default.
+    pub persona_model: Option<String>,
     pub issue_number: Option<i64>,
     pub status: String,
     pub status_line: String,
@@ -122,6 +126,11 @@ pub struct StoredEvent {
     /// Task-wide, increasing id; the SSE event id.
     pub id: i64,
     pub event: Option<Event>,
+    /// When the runtime recorded the event.
+    pub occurred_at: DateTime<Utc>,
+    /// Number of the run that produced the event and when that run started.
+    pub run_number: i64,
+    pub run_started_at: DateTime<Utc>,
 }
 
 /// The tasks matching `filter`, newest first.
@@ -149,7 +158,7 @@ pub async fn list_task_items(
 /// All projects by name with their number of tasks in `group` (all tasks without a group).
 pub async fn list_project_filter_items(
     pool: &PgPool,
-    group: Option<StatusGroup>,
+    group: Option<StatusSet>,
 ) -> Result<Vec<ProjectFilterItem>, DbError> {
     let statuses = group.map(statuses_of);
     Ok(sqlx::query_as(
@@ -171,7 +180,7 @@ macro_rules! select_task_detail {
         concat!(
             "SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
                 p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-                t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title
+                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title
              FROM tasks t
              JOIN projects p ON p.id = t.project_id
              JOIN personas ps ON ps.id = t.persona_id ",
@@ -242,6 +251,15 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
         .collect())
 }
 
+#[derive(FromRow)]
+struct TranscriptRow {
+    id: i64,
+    payload: serde_json::Value,
+    occurred_at: DateTime<Utc>,
+    number: i64,
+    started_at: DateTime<Utc>,
+}
+
 /// Transcript rows of a task with `id > after`, in id order, at most `limit`.
 pub async fn transcript_after(
     pool: &PgPool,
@@ -249,9 +267,10 @@ pub async fn transcript_after(
     after: i64,
     limit: i64,
 ) -> Result<Vec<StoredEvent>, DbError> {
-    let rows: Vec<(i64, serde_json::Value)> = sqlx::query_as(
-        "SELECT id, payload FROM transcript_events
-         WHERE task_id = $1 AND id > $2 ORDER BY id LIMIT $3",
+    let rows: Vec<TranscriptRow> = sqlx::query_as(
+        "SELECT e.id, e.payload, e.occurred_at, r.number, r.started_at
+         FROM transcript_events e JOIN runs r ON r.id = e.run_id
+         WHERE e.task_id = $1 AND e.id > $2 ORDER BY e.id LIMIT $3",
     )
     .bind(task_id.as_uuid())
     .bind(after)
@@ -260,26 +279,51 @@ pub async fn transcript_after(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, payload)| {
-            let event = serde_json::from_value(payload)
-                .inspect_err(|error| tracing::warn!(%error, id, "undecodable transcript event"))
+        .map(|row| {
+            let event = serde_json::from_value(row.payload)
+                .inspect_err(
+                    |error| tracing::warn!(%error, id = row.id, "undecodable transcript event"),
+                )
                 .ok();
-            StoredEvent { id, event }
+            StoredEvent {
+                id: row.id,
+                event,
+                occurred_at: row.occurred_at,
+                run_number: row.number,
+                run_started_at: row.started_at,
+            }
         })
         .collect())
 }
 
-fn statuses_of(group: StatusGroup) -> Vec<String> {
-    TaskStatus::ALL
+fn statuses_of(set: StatusSet) -> Vec<String> {
+    set.statuses()
         .iter()
-        .filter(|s| s.group() == group)
         .map(|s| s.as_str().to_string())
         .collect()
+}
+
+/// Number of tasks of a project in each status that has any.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct ProjectStatusCount {
+    pub project_id: Uuid,
+    pub status: String,
+    pub count: i64,
+}
+
+/// Tasks per project and status in one grouped query; the UI folds them into its columns.
+pub async fn project_status_counts(pool: &PgPool) -> Result<Vec<ProjectStatusCount>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT project_id, status, count(*) AS count FROM tasks GROUP BY project_id, status",
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use df_core::TaskStatus;
 
     async fn seed(pool: &PgPool) -> (TaskId, Uuid) {
         let project = Uuid::now_v7();
@@ -416,10 +460,10 @@ mod tests {
             project_key: project.map(str::to_string),
         };
 
-        let active = list_task_items(&pool, &by(Some(StatusGroup::Active), None))
+        let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
             .await
             .unwrap();
-        let done = list_task_items(&pool, &by(Some(StatusGroup::Done), None))
+        let done = list_task_items(&pool, &by(Some(StatusSet::Done), None))
             .await
             .unwrap();
         let web = list_task_items(&pool, &by(None, Some("WEB")))
@@ -434,15 +478,15 @@ mod tests {
         crate::update_task_status(&pool, task, TaskStatus::Completed)
             .await
             .unwrap();
-        let active = list_task_items(&pool, &by(Some(StatusGroup::Active), None))
+        let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
             .await
             .unwrap();
-        let done = list_task_items(&pool, &by(Some(StatusGroup::Done), None))
+        let done = list_task_items(&pool, &by(Some(StatusSet::Done), None))
             .await
             .unwrap();
         assert_eq!((active.len(), done.len()), (0, 1));
 
-        let counts = list_project_filter_items(&pool, Some(StatusGroup::Done))
+        let counts = list_project_filter_items(&pool, Some(StatusSet::Done))
             .await
             .unwrap();
         let counts: Vec<_> = counts
@@ -452,5 +496,30 @@ mod tests {
         assert_eq!(counts, [("DF", 1), ("WEB", 0)]);
         let all = list_project_filter_items(&pool, None).await.unwrap();
         assert_eq!(all[0].task_count, 1);
+    }
+
+    #[tokio::test]
+    async fn narrower_sets_and_counts_per_project_and_status() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, _) = seed(&pool).await;
+        let by = |set| TaskFilter {
+            group: Some(set),
+            project_key: None,
+        };
+        crate::update_task_status(&pool, task, TaskStatus::RateLimited)
+            .await
+            .unwrap();
+        let running = list_task_items(&pool, &by(StatusSet::Running))
+            .await
+            .unwrap();
+        let queued = list_task_items(&pool, &by(StatusSet::Queued))
+            .await
+            .unwrap();
+        assert_eq!((running.len(), queued.len()), (1, 0));
+
+        let counts = project_status_counts(&pool).await.unwrap();
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts[0].status, "rate_limited");
+        assert_eq!(counts[0].count, 1);
     }
 }

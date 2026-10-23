@@ -38,6 +38,29 @@ impl Fixture {
         SseReader::new(self.app.get(uri, &self.cookie).await)
     }
 
+    /// Queues a message of a board member.
+    async fn queue(&self, text: &str) -> df_core::PromptId {
+        let content = vec![df_proto::transcript::v1::ContentBlock {
+            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
+                df_proto::transcript::v1::TextContent { text: text.into() },
+            )),
+        }];
+        let (actor, _) = crate::testkit::actor();
+        df_db::queue_message(&self.app.pool, self.task, actor, content)
+            .await
+            .unwrap()
+            .id
+    }
+
+    async fn human_messages(&self) -> Vec<df_db::TaskMessageRow> {
+        let all = df_db::list_undelivered_messages(&self.app.pool, self.task)
+            .await
+            .unwrap();
+        all.into_iter()
+            .filter(|m| matches!(m.author, df_core::Principal::Human { .. }))
+            .collect()
+    }
+
     async fn add(&self, seq: i64, turn: &str, body: serde_json::Value) -> i64 {
         add_event(&self.app.pool, self.task, self.run, seq, turn, body).await
     }
@@ -202,10 +225,11 @@ async fn message_is_rerendered_as_markdown_when_the_turn_ends() {
 #[tokio::test]
 async fn pull_request_link_and_pending_messages_update_live() {
     let f = fixture().await;
+    f.queue("go on").await;
     let mut sse = f.events("/tasks/DF-1/events?after=0").await;
     let first = sse.next().await;
     assert!(!first.data.contains("PR #"));
-    assert!(first.data.contains("Pending"), "{}", first.data);
+    assert!(first.data.contains("go on"), "{}", first.data);
 
     sqlx::query("UPDATE tasks SET pr_number = 5, pr_url = 'https://git.example.org/o/r/pulls/5'")
         .execute(&f.app.pool)
@@ -229,15 +253,69 @@ async fn pull_request_link_and_pending_messages_update_live() {
 
     // A message leaves the pending list as soon as the transcript shows it, even before
     // `delivered_at` is committed (nothing is published for that).
-    let queued = df_db::list_undelivered_messages(&f.app.pool, f.task)
+    let queued = f.human_messages().await;
+    assert_eq!(queued.len(), 1);
+    f.add(1, "t1", json!({"userMessage": {"promptId": queued[0].id.to_string(), "content": [{"text": {"text": "go on"}}]}})).await;
+    let frame = sse.next().await;
+    // The message is in the transcript now and left the stack.
+    assert!(frame.data.contains("id=\"ev-"), "{}", frame.data);
+    let stack = &frame.data[frame.data.find(r##"hx-target="#pending""##).expect("stack")..];
+    assert!(!stack.contains("Queued"), "{stack}");
+}
+
+#[tokio::test]
+async fn editing_and_removing_a_queued_message_rerenders_the_stack() {
+    let f = fixture().await;
+    let message = f.queue("first").await;
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    assert!(sse.next().await.data.contains("first"));
+
+    let (actor, _) = crate::testkit::actor();
+    df_db::edit_queued_message(&f.app.pool, f.task, message, "second", actor.clone())
         .await
         .unwrap();
-    assert_eq!(queued.len(), 1);
-    f.add(1, "t1", json!({"userMessage": {"promptId": queued[0].id.to_string(), "content": [{"text": {"text": "go"}}]}})).await;
-    let frame = sse.next().await;
-    assert!(frame.data.contains("id=\"ev-"), "{}", frame.data);
+    let edited = sse.next_within(LIVE).await;
     assert!(
-        frame.data.contains(r##"hx-target="#pending""##) && !frame.data.contains("Pending"),
+        edited.data.contains(r##"hx-target="#pending""##) && edited.data.contains("second"),
+        "{}",
+        edited.data
+    );
+
+    df_db::remove_queued_message(&f.app.pool, f.task, message, actor)
+        .await
+        .unwrap();
+    let removed = sse.next_within(LIVE).await;
+    assert!(
+        removed.data.contains(r##"hx-target="#pending""##) && !removed.data.contains("second"),
+        "{}",
+        removed.data
+    );
+}
+
+#[tokio::test]
+async fn the_live_stack_follows_the_task_status_for_forwarded_messages() {
+    let f = fixture().await;
+    f.queue("go on").await;
+    df_db::claim_held_back_messages(&f.app.pool, f.task)
+        .await
+        .unwrap();
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    let first = sse.next().await;
+    assert!(
+        first.data.contains("waiting for delivery"),
+        "{}",
+        first.data
+    );
+
+    // The task ends with the message still undelivered: the stack says so without a reload.
+    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::Failed)
+        .await
+        .unwrap();
+    let frame = sse.next_within(LIVE).await;
+    let stack = &frame.data[frame.data.find(r##"hx-target="#pending""##).expect("stack")..];
+    assert!(
+        stack.contains("not delivered, sent with the next run")
+            && !stack.contains("waiting for delivery"),
         "{}",
         frame.data
     );
@@ -382,6 +460,24 @@ async fn project_filtered_list_stream_only_shows_that_project() {
     assert!(!other.next().await.data.contains("row-DF-1"));
     let mut own = f.events("/tasks/events?project=DF").await;
     assert!(own.next().await.data.contains("row-DF-1"));
+}
+
+#[tokio::test]
+async fn narrower_status_filter_of_the_list_stream_follows_status_changes() {
+    let f = fixture().await;
+    let mut queued = f.events("/tasks/events?status=queued").await;
+    let mut running = f.events("/tasks/events?status=running").await;
+    assert!(queued.next().await.data.contains("row-DF-1"));
+    assert!(!running.next().await.data.contains("row-DF-1"));
+
+    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::RateLimited)
+        .await
+        .unwrap();
+
+    let left = queued.next_within(LIVE).await;
+    assert!(!left.data.contains("row-DF-1"), "{}", left.data);
+    let joined = running.next_within(LIVE).await;
+    assert!(joined.data.contains("row-DF-1"), "{}", joined.data);
 }
 
 #[tokio::test]

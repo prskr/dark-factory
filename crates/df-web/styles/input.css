@@ -36,6 +36,10 @@
   --accent-soft: #dcfce7;
   --danger: #b91c1c;
   --danger-soft: #fee2e2;
+  --bubble-me: #e7e5e4;
+  --bubble-agent: #1c1917;
+  --on-bubble-agent: #fafaf9;
+  --code-on-agent: #44403c;
   --rail: #1c1917;
   --rail-ink: #d6d3d1;
   --rail-hover: #292524;
@@ -69,6 +73,10 @@
     --accent-soft: #052e16;
     --danger: #fca5a5;
     --danger-soft: #450a0a;
+    --bubble-me: #44403c;
+    --bubble-agent: #e7e5e4;
+    --on-bubble-agent: #1c1917;
+    --code-on-agent: #d6d3d1;
     --rail: #000000;
     --rail-hover: #1c1917;
     --status-running-bg: #082f49;
@@ -103,6 +111,10 @@
   --color-accent-soft: var(--accent-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-bubble-me: var(--bubble-me);
+  --color-bubble-agent: var(--bubble-agent);
+  --color-on-bubble-agent: var(--on-bubble-agent);
+  --color-code-on-agent: var(--code-on-agent);
   --color-rail: var(--rail);
   --color-rail-ink: var(--rail-ink);
   --color-rail-hover: var(--rail-hover);
@@ -143,7 +155,7 @@
 /* Three-column task workspace (design D4). `body[data-view]` says which screen a phone shows. */
 @layer components {
   .ws {
-    @apply flex h-[calc(100dvh-4rem)] min-w-0 lg:h-dvh;
+    @apply flex h-[calc(100dvh-4rem)] min-w-0 md:h-dvh;
   }
   body[data-view="task"] .ws {
     @apply h-dvh;
@@ -152,26 +164,39 @@
     display: contents;
   }
   .ws-list {
-    @apply hidden min-w-0 flex-1 flex-col border-r border-line bg-panel lg:flex lg:w-80 lg:flex-none xl:w-96;
+    @apply hidden min-w-0 flex-1 flex-col border-r border-line bg-panel md:flex md:w-80 md:flex-none xl:w-96;
   }
   .ws-main {
-    @apply hidden min-w-0 flex-1 flex-col bg-app lg:flex;
+    @apply hidden min-w-0 flex-1 flex-col bg-app md:flex;
   }
   body[data-view="list"] .ws-list,
   body[data-view="task"] .ws-main {
     @apply flex;
   }
 
-  /* Details: bottom sheet on phones, slide-over from 1024 px, a column from 1280 px. */
+  /* Details: bottom sheet on phones, slide-over from 768 px, a column from 1280 px. */
   .ws-details {
-    @apply invisible fixed inset-x-0 bottom-0 z-40 max-h-[80dvh] translate-y-full overflow-y-auto rounded-t-xl border-t border-line bg-panel;
+    @apply invisible fixed inset-x-0 bottom-0 z-40 translate-y-full overflow-y-auto rounded-t-[18px] border-t border-line bg-panel;
+  }
+  /* The phone sheet opens at half height; the handle drags it to full height or closes it. */
+  @media (max-width: 767px) {
+    /* A column: handle and head stay in view, only the body scrolls. */
+    .ws-details {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      height: 50dvh;
+    }
+    .ws-details[data-size="full"] {
+      height: 90dvh;
+    }
   }
   .ws-details[data-open="true"] {
     @apply visible translate-y-0;
   }
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     .ws-details {
-      @apply inset-y-0 right-0 left-auto max-h-none w-88 translate-x-full translate-y-0 rounded-none border-t-0 border-l;
+      @apply inset-y-0 right-0 left-auto h-auto max-h-none w-88 translate-x-full translate-y-0 rounded-none border-t-0 border-l;
     }
     .ws-details[data-open="true"] {
       @apply translate-x-0;
@@ -182,14 +207,47 @@
       @apply visible static z-auto w-80 flex-none translate-x-0 border-l;
     }
   }
-  @media (prefers-reduced-motion: no-preference) {
-    .ws-details {
-      transition: transform 0.2s ease, visibility 0.2s;
+  .ws-details-head {
+    @apply flex h-16 shrink-0 items-center justify-between border-b border-line pr-3 pl-5;
+  }
+  /* The strip the details collapse to is only shown in the column layout. */
+  .ws-strip {
+    display: none;
+  }
+  @media (min-width: 1280px) {
+    .ws[data-collapsed="true"] .ws-details {
+      @apply w-16;
+    }
+    .ws[data-collapsed="true"] .ws-details-head,
+    .ws[data-collapsed="true"] .ws-details-full {
+      display: none;
+    }
+    .ws[data-collapsed="true"] .ws-strip {
+      display: flex;
     }
   }
-  /* Phones show no bottom bar while a transcript is open; its message input takes the place. */
-  body[data-view="task"] .bottombar {
-    @apply hidden;
+  @media (prefers-reduced-motion: no-preference) {
+    .ws-details {
+      transition: transform 0.2s ease, visibility 0.2s, height 0.2s ease;
+    }
+    /* While the handle is dragged the sheet follows the finger. */
+    .ws-details[data-dragging="true"] {
+      transition: none;
+    }
+  }
+ 
+  /* Phones show no bottom bar while a transcript is open (its message input takes the place):
+     the `[body[data-view=task]_&]:hidden` variant on the bar itself, because a rule in this layer
+     would lose against the bar's `flex` utility. */
+}
+
+/* Conversation: a message shows its avatar only when the next item is not by the same author, so
+   live appends regroup without re-rendering earlier items. Tool rows count as agent. Without
+   `:has()` every message keeps its avatar. */
+@layer components {
+  [data-author="human"]:has(+ [data-author="human"]) .avatar,
+  [data-author="agent"]:has(+ [data-author="agent"]) .avatar {
+    visibility: hidden;
   }
 }
 
@@ -213,14 +271,22 @@
   .md-body ol {
     @apply list-decimal pl-5;
   }
+  /* Agent bubbles are dark in the light theme and light in the dark one: links keep the bubble's
+     text color and code uses `code-on-agent`. */
   .md-body a {
-    @apply text-accent-text underline;
+    @apply underline;
   }
   .md-body pre {
-    @apply overflow-x-auto rounded bg-sunk p-2 font-mono text-xs;
+    @apply overflow-x-auto rounded bg-code-on-agent p-2 font-mono text-xs;
   }
   .md-body code {
     @apply font-mono text-[0.9em];
+  }
+  .md-body :not(pre) > code {
+    @apply rounded bg-code-on-agent px-1 py-0.5;
+  }
+  .md-body pre code {
+    @apply p-0;
   }
   .md-body table {
     @apply block overflow-x-auto;

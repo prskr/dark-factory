@@ -37,6 +37,9 @@ impl FormErrors {
 /// Classes of text inputs, selects and textareas; 16 px text so phones do not zoom on focus.
 pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-base text-ink placeholder:text-faint lg:min-h-10";
 
+/// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
+const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-2 font-mono text-base text-muted lg:min-h-10";
+
 /// A labelled control with an optional hint and the field's error.
 pub fn field(
     label: &str,
@@ -79,6 +82,27 @@ pub fn text_field(
         hint,
         html! {
             input id=(name) name=(name) type="text" value=(value) class=(INPUT_CLASS)
+                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)];
+        },
+    )
+}
+
+/// A single-line value that cannot be changed (for example a project key after creation). It is
+/// still submitted and carries its hint and error like any field.
+pub fn readonly_field(
+    label: &str,
+    name: &str,
+    value: &str,
+    errors: &FormErrors,
+    hint: Option<&str>,
+) -> Markup {
+    field(
+        label,
+        name,
+        errors,
+        hint,
+        html! {
+            input id=(name) name=(name) type="text" value=(value) readonly class=(READONLY_INPUT_CLASS)
                 aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)];
         },
     )
@@ -155,7 +179,7 @@ pub fn search_menu(button_label: &str, items: &[MenuItem]) -> Markup {
     html! {
         div class="relative" x-data="{ open: false, q: '' }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
             button type="button" aria-haspopup="true" ":aria-expanded"="open" "x-on:click"="open = !open"
-                class="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-panel px-3 text-sm text-muted hover:bg-sunk lg:min-h-8" {
+                class="inline-flex min-h-11 items-center gap-1 rounded-[10px] border border-line bg-panel px-3 text-sm text-muted hover:bg-sunk lg:min-h-8" {
                 (button_label) (icon(Icon::ChevronDown))
             }
             div x-show="open" x-cloak
@@ -213,6 +237,25 @@ mod tests {
     }
 
     #[test]
+    fn a_readonly_field_is_muted_submitted_and_linked_to_its_error() {
+        let mut errors = FormErrors::default();
+        errors.add("key", "Fixed.");
+        let html =
+            readonly_field("Key", "key", "DF", &errors, Some("Never changes.")).into_string();
+        assert!(
+            html.contains(" readonly")
+                && html.contains("name=\"key\"")
+                && html.contains("value=\"DF\""),
+            "{html}"
+        );
+        assert!(html.contains("bg-sunk") && html.contains("text-muted"));
+        assert!(
+            html.contains("aria-invalid=\"true\"")
+                && html.contains("aria-describedby=\"key-hint key-error\"")
+        );
+    }
+
+    #[test]
     fn controls_reference_their_hint_and_error() {
         let mut errors = FormErrors::default();
         errors.add("name", "Name is required.");
@@ -252,6 +295,17 @@ mod tests {
             select_field("L", "n", &options, "b", None, &FormErrors::default()).into_string();
         assert!(html.contains("<option value=\"b\" selected>"), "{html}");
         assert!(!html.contains("<option value=\"a\" selected>"));
+    }
+
+    #[test]
+    fn the_menu_trigger_is_a_rounded_rectangle() {
+        let html = search_menu("All projects", &[]).into_string();
+        let trigger = &html[html.find("<button").unwrap()..];
+        let trigger = &trigger[..trigger.find('>').unwrap()];
+        assert!(
+            trigger.contains("rounded-[10px]") && !trigger.contains("rounded-full"),
+            "{trigger}"
+        );
     }
 
     #[test]

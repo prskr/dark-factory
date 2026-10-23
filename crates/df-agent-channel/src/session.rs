@@ -104,11 +104,13 @@ where
         last_persisted_seq: rc.run.last_persisted_seq,
         capabilities: CAPABILITIES.iter().map(ToString::to_string).collect(),
     };
+    let busy = busy_on_connect(&ctx.pool, rc.run.id, rc.task.id).await?;
     let mut session = Session {
         ctx,
         rc: Arc::new(rc),
         out,
         sent_prompts: HashSet::new(),
+        busy,
         tasks: JoinSet::new(),
         ended: false,
     };
@@ -124,6 +126,9 @@ struct Session {
     rc: Arc<RunContext>,
     out: Outbound,
     sent_prompts: HashSet<String>,
+    /// The runtime is in a turn: persisted `TurnStarted` without a later `TurnEnded`. Queued
+    /// messages are held back meanwhile (design D1 of `ui-polish`).
+    busy: bool,
     /// Tool call and credential handlers; awaited when the stream ends (see [`Session::drain`]).
     tasks: JoinSet<()>,
     /// Set once this session persisted the run's `RunReport`.
@@ -142,6 +147,10 @@ struct Effects {
 struct Persisted {
     ack: Option<u64>,
     effects: Effects,
+    /// Turn state after the batch if it persisted a turn event.
+    busy: Option<bool>,
+    /// The batch persisted a `TurnEnded`.
+    turn_ended: bool,
     /// `(expected, got)` if the batch contained a sequence gap.
     gap: Option<(u64, u64)>,
 }
@@ -282,20 +291,26 @@ impl Session {
         self.out.send(Ok(msg)).await.is_ok()
     }
 
-    /// Sends prompts not sent on this stream yet. `false` ends the session: the peer is gone or
-    /// the run ended, so a prompt must stay queued for the next run.
+    /// Sends prompts not sent on this stream yet: forwarded ones that are still undelivered and,
+    /// between turns, the held-back ones (which this marks as forwarded). `false` ends the
+    /// session: the peer is gone or the run ended, so a prompt must stay queued for the next run.
     async fn send_new_prompts(&mut self) -> Result<bool, ChannelError> {
         if !self.active().await? {
             return Ok(false);
         }
-        for prompt in pending_prompts(&self.ctx.pool, self.rc.task.id).await? {
-            if self.sent_prompts.insert(prompt.prompt_id.clone())
-                && !self
-                    .send(control(control_message::Body::Prompt(prompt)))
-                    .await
+        for prompt in pending_prompts(&self.ctx.pool, self.rc.task.id, self.busy).await? {
+            if !self.sent_prompts.insert(prompt.prompt_id.clone()) {
+                continue;
+            }
+            if !self
+                .send(control(control_message::Body::Prompt(prompt)))
+                .await
             {
                 return Ok(false);
             }
+            // The runtime starts a turn for it: hold back new messages until the persisted
+            // `TurnEnded` clears this, not only once `TurnStarted` is persisted.
+            self.busy = true;
         }
         Ok(true)
     }
@@ -313,6 +328,12 @@ impl Session {
         }
         // The messages before a gap are committed and acked: their effects must still happen.
         self.run_effects(persisted.effects, active).await;
+        if let Some(busy) = persisted.busy {
+            self.busy = busy;
+        }
+        if persisted.turn_ended && !self.ended && !self.send_new_prompts().await? {
+            return Ok(false);
+        }
         if let Some((expected, got)) = persisted.gap {
             return Err(Status::data_loss(format!(
                 "sequence gap: expected {expected}, got {got}"
@@ -444,6 +465,8 @@ async fn persist_batch(
     let mut effects = Effects::default();
     let mut gap = None;
     let mut newest_event = None;
+    let mut busy = None;
+    let mut turn_ended = false;
 
     for msg in batch {
         if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= last {
@@ -479,6 +502,14 @@ async fn persist_batch(
                         transcript::insert(&mut tx, rc.task.id, rc.run.id, event).await?
                 {
                     newest_event = newest_event.max(Some(id));
+                    match event.kind {
+                        "turn_started" => busy = Some(true),
+                        "turn_ended" => {
+                            busy = Some(false);
+                            turn_ended = true;
+                        }
+                        _ => {}
+                    }
                 }
             }
             agent_message::Body::ToolCallRequest(call) => effects.tool_calls.push(call),
@@ -517,8 +548,33 @@ async fn persist_batch(
     Ok(Persisted {
         ack: (last > start).then_some(last),
         effects,
+        busy,
+        turn_ended,
         gap,
     })
+}
+
+/// Whether the run's last persisted turn event is a `TurnStarted`.
+/// Whether a new stream starts busy: a turn is open, or a prompt was forwarded but not confirmed
+/// yet (the runtime starts a turn for it, its `TurnStarted` may not be persisted).
+async fn busy_on_connect(
+    pool: &sqlx::PgPool,
+    run_id: df_core::RunId,
+    task_id: df_core::TaskId,
+) -> Result<bool, ChannelError> {
+    Ok(turn_open(pool, run_id).await? || !pending_prompts(pool, task_id, true).await?.is_empty())
+}
+
+async fn turn_open(pool: &sqlx::PgPool, run_id: df_core::RunId) -> Result<bool, ChannelError> {
+    let last: Option<String> = sqlx::query_scalar(
+        "SELECT kind FROM transcript_events
+         WHERE run_id = $1 AND kind IN ('turn_started', 'turn_ended')
+         ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(run_id.as_uuid())
+    .fetch_optional(pool)
+    .await?;
+    Ok(last.as_deref() == Some("turn_started"))
 }
 
 fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
@@ -746,6 +802,7 @@ mod tests {
             rc: Arc::new(rc),
             out: tx,
             sent_prompts: HashSet::new(),
+            busy: false,
             tasks: JoinSet::new(),
             ended: false,
         };
@@ -920,5 +977,199 @@ mod tests {
         let (mut session, mut rx) = session_for(&env, run_id).await;
         assert!(!session.send_new_prompts().await.unwrap());
         assert!(rx.try_recv().is_err());
+    }
+    fn turn_event(kind: wire::event::Kind) -> agent_message::Body {
+        agent_message::Body::TranscriptEvent(wire::Event {
+            schema_version: 1,
+            occurred_at: None,
+            turn_id: "t".into(),
+            kind: Some(kind),
+        })
+    }
+
+    fn turn_started() -> agent_message::Body {
+        turn_event(wire::event::Kind::TurnStarted(wire::TurnStarted::default()))
+    }
+
+    fn turn_ended() -> agent_message::Body {
+        turn_event(wire::event::Kind::TurnEnded(wire::TurnEnded::default()))
+    }
+
+    /// Queues a board member's message and returns its prompt id.
+    async fn queue_human(env: &Env, text: &str) -> String {
+        let content = vec![wire::ContentBlock {
+            kind: Some(wire::content_block::Kind::Text(wire::TextContent {
+                text: text.into(),
+            })),
+        }];
+        let author = df_core::Principal::human(df_core::UserId::new(), "Ada");
+        df_db::queue_message(&env.ctx.pool, env.task.id, author, content)
+            .await
+            .unwrap()
+            .id
+            .to_string()
+    }
+
+    fn sent_prompt_ids(rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>) -> Vec<String> {
+        let mut ids = Vec::new();
+        while let Ok(Ok(control)) = rx.try_recv() {
+            if let Some(control_message::Body::Prompt(p)) = control.body {
+                ids.push(p.prompt_id);
+            }
+        }
+        ids
+    }
+
+    async fn forwarded(env: &Env, prompt_id: &str) -> bool {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT forwarded_at IS NOT NULL FROM task_messages WHERE id = $1::uuid",
+        )
+        .bind(prompt_id)
+        .fetch_one(&env.ctx.pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn busy_follows_the_persisted_turn_events_of_the_run() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.running_run().await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        assert!(!turn_open(&pool, run_id).await.unwrap());
+        assert!(session.send_new_prompts().await.unwrap());
+        sent_prompt_ids(&mut rx);
+
+        session
+            .handle_batch(vec![msg(1, turn_started())])
+            .await
+            .unwrap();
+        // A reconnect during the turn derives the same state.
+        assert!(session.busy);
+        assert!(turn_open(&pool, run_id).await.unwrap());
+
+        session
+            .handle_batch(vec![msg(2, turn_ended())])
+            .await
+            .unwrap();
+        assert!(!session.busy);
+        assert!(!turn_open(&pool, run_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_message_queued_during_a_turn_is_sent_when_the_turn_ends() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+        let run_id = env.running_run().await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        assert!(session.send_new_prompts().await.unwrap());
+        let assignment = sent_prompt_ids(&mut rx);
+        assert_eq!(assignment.len(), 1);
+        session
+            .handle_batch(vec![msg(1, turn_started())])
+            .await
+            .unwrap();
+
+        let queued = queue_human(&env, "also check logout").await;
+        assert!(session.send_new_prompts().await.unwrap());
+        assert!(sent_prompt_ids(&mut rx).is_empty());
+        assert!(!forwarded(&env, &queued).await);
+
+        session
+            .handle_batch(vec![msg(2, turn_ended())])
+            .await
+            .unwrap();
+        assert_eq!(sent_prompt_ids(&mut rx), vec![queued.clone()]);
+        assert!(forwarded(&env, &queued).await);
+    }
+
+    #[tokio::test]
+    async fn a_message_queued_before_the_turn_start_is_persisted_is_held_back() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+        let run_id = env.running_run().await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        assert!(session.send_new_prompts().await.unwrap());
+        sent_prompt_ids(&mut rx);
+
+        // The runtime is in the turn for the assignment, its `TurnStarted` not persisted yet.
+        let queued = queue_human(&env, "quick follow-up").await;
+        assert!(session.send_new_prompts().await.unwrap());
+
+        assert!(sent_prompt_ids(&mut rx).is_empty());
+        assert!(!forwarded(&env, &queued).await);
+    }
+
+    #[tokio::test]
+    async fn a_message_on_an_idle_run_is_forwarded_at_once() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+        let run_id = env.running_run().await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        assert!(session.send_new_prompts().await.unwrap());
+        sent_prompt_ids(&mut rx);
+        let batch = vec![msg(1, turn_started()), msg(2, turn_ended())];
+        session.handle_batch(batch).await.unwrap();
+
+        let queued = queue_human(&env, "next").await;
+        assert!(session.send_new_prompts().await.unwrap());
+
+        assert_eq!(sent_prompt_ids(&mut rx), vec![queued.clone()]);
+        assert!(forwarded(&env, &queued).await);
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_undelivered_message_is_sent_again_on_reconnect() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+        let run_id = env.running_run().await;
+        let (mut first, mut first_rx) = session_for(&env, run_id).await;
+        assert!(first.send_new_prompts().await.unwrap());
+        let sent = sent_prompt_ids(&mut first_rx);
+
+        // The new stream is busy (turn open) yet repeats what was forwarded before.
+        let (mut second, mut second_rx) = session_for(&env, run_id).await;
+        second.busy = true;
+        assert!(second.send_new_prompts().await.unwrap());
+
+        assert_eq!(sent_prompt_ids(&mut second_rx), sent);
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_before_the_turn_start_is_persisted_keeps_new_messages_held_back() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.running_run().await;
+        let (mut first, mut first_rx) = session_for(&env, run_id).await;
+        assert!(first.send_new_prompts().await.unwrap());
+        let sent = sent_prompt_ids(&mut first_rx);
+        drop(first);
+        let queued = queue_human(&env, "quick follow-up").await;
+
+        // The runtime is in the turn for the assignment; no `TurnStarted` persisted.
+        let (mut second, mut second_rx) = session_for(&env, run_id).await;
+        second.busy = busy_on_connect(&pool, run_id, env.task.id).await.unwrap();
+        assert!(second.send_new_prompts().await.unwrap());
+
+        assert_eq!(sent_prompt_ids(&mut second_rx), sent);
+        assert!(!forwarded(&env, &queued).await);
+    }
+
+    #[tokio::test]
+    async fn a_run_that_ends_during_a_turn_keeps_the_message_held_back() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.running_run().await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        assert!(session.send_new_prompts().await.unwrap());
+        sent_prompt_ids(&mut rx);
+        let batch = vec![msg(1, turn_started()), msg(2, report(WireOutcome::EndTurn))];
+        session.handle_batch(batch).await.unwrap();
+        let queued = queue_human(&env, "too late").await;
+
+        assert!(!session.send_new_prompts().await.unwrap());
+
+        assert!(sent_prompt_ids(&mut rx).is_empty());
+        assert!(!forwarded(&env, &queued).await);
     }
 }

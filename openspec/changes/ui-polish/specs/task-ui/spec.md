@@ -66,8 +66,23 @@ The task detail page SHALL have a message input that queues a message on the tas
 - **WHEN** the board member sends "also add a test for X" on a `waiting` task
 - **THEN** the message appears in the queued message stack and the task status becomes `queued`
 
+### Requirement: Task workspace layout
+At 1280 px and more, a task's page SHALL show the task list, the transcript with the message input and the task details side by side. From 768 to 1279 px the task list and the transcript SHALL be side by side and the details SHALL open as a panel over the transcript. Below 768 px the task list and the transcript SHALL be separate screens, with the details in a bottom sheet. Selecting a task SHALL NOT reload the task list.
+
+#### Scenario: Selecting another task on desktop
+- **WHEN** a board member clicks DF-11 in the list while DF-12 is open at 1440 px width
+- **THEN** the transcript and details of DF-11 replace those of DF-12, the list keeps its scroll position and the URL becomes `/tasks/DF-11`
+
+#### Scenario: Split-screen window
+- **WHEN** a task is opened at 900 px width
+- **THEN** the task list and the transcript are shown side by side, and the details button opens the details as a panel over the transcript
+
+#### Scenario: Details on a phone
+- **WHEN** the details button of DF-12 is tapped at 390 px width
+- **THEN** a bottom sheet with status line, links, project, persona, branch and runs opens over the transcript
+
 ### Requirement: Task list filters
-The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. From 1024 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 1024 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
+The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. From 768 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 768 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
 
 #### Scenario: Filter by project
 - **WHEN** the board member picks "Website" in the project menu

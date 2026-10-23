@@ -14,7 +14,7 @@ The UI SHALL show the Dark Factory logo (the factory mark) at the top of the nav
 - **THEN** its first element is the logo with the accessible name "Dark Factory" and a link to `/tasks`
 
 ### Requirement: Phone profile menu
-Below 1024 px, the task list and the Projects screen SHALL show the signed-in board member's avatar at the top right. Activating it SHALL open a menu with the member's name, role and a log-out action.
+Below 768 px, the task list and the Projects screen SHALL show the signed-in board member's avatar at the top right. Activating it SHALL open a menu with the member's name, role and a log-out action.
 
 #### Scenario: Log out on a phone
 - **WHEN** a board member taps the avatar at 390 px width and chooses Log out
@@ -23,7 +23,7 @@ Below 1024 px, the task list and the Projects screen SHALL show the signed-in bo
 ## MODIFIED Requirements
 
 ### Requirement: Desktop navigation rail
-At widths of 1024 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Tasks, Projects, Personas and Credentials, and a log-out action. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
+At widths of 768 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Tasks, Projects, Personas and Credentials, and a log-out action. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
 
 #### Scenario: Rail on the task page
 - **WHEN** a board member opens `/tasks` at 1440 px width
@@ -33,8 +33,12 @@ At widths of 1024 px and more, every authenticated page SHALL show a navigation 
 - **WHEN** the rail is rendered
 - **THEN** no section name is shown as visible text, and each section link has its name as accessible name and title
 
+#### Scenario: Rail in a split-screen window
+- **WHEN** a board member opens `/tasks` at 900 px width
+- **THEN** the rail is shown and no bottom bar
+
 ### Requirement: Phone bottom bar
-Below 1024 px, every authenticated page SHALL show a bottom bar with Tasks, a create action and Projects instead of the rail. The create action SHALL create what the current screen lists: a project on the Projects screen, a task everywhere else. The bottom bar SHALL NOT appear while a task's transcript is shown; its message input takes the place.
+Below 768 px, every authenticated page SHALL show a bottom bar with Tasks, a create action and Projects instead of the rail. The create action SHALL create what the current screen lists: a project on the Projects screen, a task everywhere else. The bottom bar SHALL NOT appear while a task's transcript is shown; its message input takes the place.
 
 #### Scenario: Task list on a phone
 - **WHEN** the task list is opened at 390 px width

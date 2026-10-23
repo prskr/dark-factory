@@ -66,7 +66,7 @@ pub async fn task_events(
         state,
         start,
         cursor: 0,
-        folder: Folder::default(),
+        folder: Folder::new(task.persona_name.clone()),
         check_regions: true,
         regions: [String::new(), String::new(), String::new(), String::new()],
         settle: None,
@@ -206,8 +206,8 @@ impl DetailStream {
         let rendered = [
             head_region(&data.task, None),
             details_region(&data.task),
-            runs_region(&data.runs),
-            pending_region(&data.pending, None),
+            runs_region(&data.runs, data.task.persona_model.as_deref()),
+            pending_region(&data.task.key, &data.task.status, &data.pending, None),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(
@@ -241,6 +241,7 @@ impl DetailStream {
                     Notification::TaskChanged { task_id }
                     | Notification::RunChanged { task_id, .. }
                     | Notification::TaskMessageQueued { task_id }
+                    | Notification::TaskMessageChanged { task_id }
                         if task_id == self.task_id =>
                     {
                         self.check_regions = true;

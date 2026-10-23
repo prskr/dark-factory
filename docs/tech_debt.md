@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-45.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-48.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -13,6 +13,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-44: code review of `ui-redesign` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-45 to TD-47: code review of `ui-polish` (`df-web`, `df-agent-channel`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -62,6 +63,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros |
 | TD-43 | low    | `df-web` transcript | Code blocks are rendered without syntax highlighting (syntect, design D3) |
 | TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested |
+| TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings |
+| TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
+| TD-47 | low   | `df-web` components | Message box and composer "+" use one-off class strings |
 
 ## Entries
 
@@ -437,6 +441,36 @@ The web-ui-shell spec requires a text contrast of at least 4.5:1 (3:1 for text o
 **Matters when:** a color token is changed or a theme is added.
 
 **Fix:** Add a unit test that parses the foreground/background token pairs for light and dark from `styles/input.css` and asserts each contrast ratio is at least 4.5:1 (3:1 for large text).
+
+### TD-45 (S5). Turn state read with raw SQL in the channel crate
+
+`crates/df-agent-channel/src/session.rs` (`turn_open`, `persist_batch`)
+
+`turn_open` queries `transcript_events` directly instead of going through `df-db`, and the event kinds `"turn_started"` / `"turn_ended"` are string literals in both the Rust code and the SQL.
+
+**Matters when:** the transcript schema or the event kind names change; the hold-back then breaks without a compile error.
+
+**Fix:** Move `turn_open` into `df-db` next to the transcript queries and name the kinds once (constants or an enum shared by both sites).
+
+### TD-46 (S8, S35). Task statuses enumerated in parallel and compared as strings
+
+`crates/df-web/src/config_pages.rs` (`Counts::columns`, `ProjectStatusCount.status`), `crates/df-web/src/task_pages/view.rs` (`queued_state`)
+
+Statuses are listed separately in `StatusSet`, `StatusFilter` and `Counts`; `ProjectStatusCount.status` and `TaskDetail.status` are `String`s matched against literals such as `"failed" | "completed"`.
+
+**Matters when:** a status is added or renamed; a missed site fails silently.
+
+**Fix:** Parse statuses into `df_core::TaskStatus` at the DB boundary and derive the count columns from `StatusFilter` (label, `as_str`, group).
+
+### TD-47 (S20). Message box and composer "+" use one-off classes
+
+`crates/df-web/src/task_pages/view.rs` (message textarea, "Link issue" `+` button)
+
+Both use hand-written class strings instead of a documented component; `docs/design-system.md` names the "Message input" pattern but no component for it.
+
+**Matters when:** the message box or the composer is reused or restyled; the copies drift apart.
+
+**Fix:** Add named components or constants in `components/`, each with a unit test, and document them in `docs/design-system.md`.
 
 ## Accepted decisions
 
