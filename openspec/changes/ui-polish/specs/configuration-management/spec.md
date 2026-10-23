@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Project overview with task counts
-The project list SHALL show per project its key, name, forge, repository, base branch and the number of its tasks per status group: Queued (queued), Running (running, rate limited), Waiting (waiting, limit reached) and Done (completed, failed). Each count SHALL link to the task list filtered by that project and status group.
+The project list SHALL show per project its key, name, forge, repository, base branch and the number of its tasks per status group: Queued (queued), Running (running, rate limited), Waiting (waiting, limit reached) and Done (completed, failed). Each count SHALL link to the task list filtered by that project and exactly the statuses the count includes.
 
 #### Scenario: Counts of a project
 - **WHEN** project `DF` has one queued, two running, one rate-limited, one limit-reached and three failed tasks
@@ -13,12 +13,20 @@ The project list SHALL show per project its key, name, forge, repository, base b
 - **WHEN** a board member follows the Waiting count of `DF`
 - **THEN** the task list opens with `project=DF` and `status=waiting`
 
+#### Scenario: Running count as link
+- **WHEN** a board member follows the Running count of `DF`
+- **THEN** the task list opens with `project=DF` and `status=running` and lists only running and rate-limited tasks of `DF`
+
 ### Requirement: Forge of a project
 The UI SHALL show for each project the forge integration that serves it, by icon and name, and a generic Git icon when no forge integration serves it. The forge SHALL be determined by the instance's configured forge integration, not guessed from the repository host.
 
 #### Scenario: Project served by the forgejo integration
-- **WHEN** the instance configures the `forgejo` integration and lists project `DF`
+- **WHEN** the instance configures the `forgejo` integration and project `DF` has a forge credential
 - **THEN** the row of `DF` shows the Forgejo icon with the name "Forgejo"
+
+#### Scenario: Project without forge credential
+- **WHEN** the instance configures the `forgejo` integration and project `WEB` has no forge credential
+- **THEN** the row of `WEB` shows the generic Git icon
 
 #### Scenario: No forge integration
 - **WHEN** the instance configures no forge integration

@@ -2,7 +2,7 @@
 
 ## 1. Queued messages in the database
 
-- [ ] 1.1 Add the migration for `task_messages.forwarded_at` (nullable) and a `df-db` claim function that marks held-back undelivered messages of a task as forwarded in queue order and returns them; verify a `df-db` test that a second claim returns nothing and that delivered messages are never claimed, and regenerate `.sqlx/`
+- [ ] 1.1 Add the migration for `task_messages.forwarded_at` (nullable, set to `now()` for rows undelivered at migration time, design Migration Plan) and a `df-db` claim function that marks held-back undelivered messages of a task as forwarded in queue order and returns them; verify a `df-db` test that a second claim returns nothing, that delivered messages are never claimed and that a message undelivered before the migration is not editable, and regenerate `.sqlx/`
 - [ ] 1.2 Add `edit_queued_message` and `remove_queued_message` (design D2: one conditional write each, human authors only, audit `message.edit` / `message.remove`, `task_message_changed` notification, removal returns a `queued` task with no undelivered message left to `waiting` in the same transaction) test-first; verify `df-db` tests for the `task-management` scenarios "Edit before forwarding", "Edit after forwarding", "Remove before forwarding", "Assignment prompt", "Empty edit", "Last message of a waiting task removed" and "Other messages still queued"
 
 ## 2. Forwarding between turns
@@ -38,8 +38,9 @@
 
 ## 6. Configuration pages
 
-- [ ] 6.1 Add `df-db::project_status_counts` and render the project table with forge, key, name, repository, branch and the Queued / Running / Waiting / Done counts as links (design D6), muted zeros, and a compact list with the counts below 1024 px; verify the scenarios "Counts of a project" and "Count as link" and that the page has no horizontal scroll markup at 390 px ("Projects table on a phone")
-- [ ] 6.2 Pass the configured forge integration from `dark-factory` into `WebState` and add `ForgeKind` with icons (Forgejo, GitHub, generic Git, generic issue; licence note for the Forgejo mark); verify the scenarios "Project served by the forgejo integration" and "No forge integration"
+- [ ] 6.0 Add the URL-only status filters `queued` and `running` to the task list and `/tasks/events` (design D6); verify the `task-ui` scenario "Narrower filter from a link" including the live update
+- [ ] 6.1 Add `df-db::project_status_counts` and render the project table with forge, key, name, repository, branch and the Queued / Running / Waiting / Done counts as links (design D6), muted zeros, and a compact list with the counts below 1024 px; verify the scenarios "Counts of a project", "Count as link" and "Running count as link" and that the page has no horizontal scroll markup at 390 px ("Projects table on a phone")
+- [ ] 6.2 Pass the configured forge integration from `dark-factory` into `WebState` and add `ForgeKind` with icons (Forgejo, GitHub, generic Git, generic issue; licence note for the Forgejo mark); verify the scenarios "Project served by the forgejo integration", "Project without forge credential" and "No forge integration"
 - [ ] 6.3 Add the forge feedback fragment for the project form (design D5, `keyup changed delay:300ms`, icon inside the Repository URL and Issue tracker URL fields, `aria-live` hint); verify the scenarios "Typing a repository URL" and "Not an HTTPS repository" in handler tests
 - [ ] 6.4 Render personas as cards (initial, name, harness · model or "default", three-line prompt excerpt, credential, edit button); verify the scenario "Persona card"
 - [ ] 6.5 Turn the project, persona and credential forms into modal fragments (design D7: one `<dialog>`, fragment routes, 422 inside the modal, success re-renders the list and closes the modal, non-htmx GET redirects to the list, full-height sheet below 1024 px) and remove the full-page form routes; verify the scenarios "Validation error in the modal" and "Saved project", the existing create/edit/audit scenarios of `configuration-management`, and that the removed routes no longer render pages

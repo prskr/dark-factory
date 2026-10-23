@@ -67,7 +67,7 @@ The task detail page SHALL have a message input that queues a message on the tas
 - **THEN** the message appears in the queued message stack and the task status becomes `queued`
 
 ### Requirement: Task list filters
-The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. From 1024 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 1024 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter. Filters SHALL be part of the URL and SHALL also apply to live updates.
+The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. From 1024 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 1024 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
 
 #### Scenario: Filter by project
 - **WHEN** the board member picks "Website" in the project menu
@@ -80,6 +80,10 @@ The task list SHALL filter by status group (Active = queued, running, rate limit
 #### Scenario: Live update respects filters
 - **WHEN** the list shows Active tasks and a listed task becomes `completed`
 - **THEN** the task leaves the list without a reload
+
+#### Scenario: Narrower filter from a link
+- **WHEN** `/tasks?status=queued` is opened
+- **THEN** only queued tasks are listed, live updates keep that filter, and no status chip is marked current
 
 #### Scenario: Project filter on a phone
 - **WHEN** a board member opens the task list of project `DF` from the Projects screen at 390 px width

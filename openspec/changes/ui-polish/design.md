@@ -54,7 +54,7 @@ Transcript items get `data-author="human|agent"`; tool rows count as `agent`. Ea
 *Alternative:* guessing by host (`github.com` → GitHub) — contradicts the decision that the integration decides, and is wrong for self-hosted instances.
 
 ### D6 — Project counts in one grouped query
-`df-db::project_status_counts()` returns `(project_id, status, count)` from `SELECT project_id, status, count(*) FROM tasks GROUP BY 1, 2`; `df-web` folds it into the four columns. Links: Waiting → `status=waiting`, Done → `status=done`, Queued and Running → `status=active` (the list has no narrower group; the count says what it contains).
+`df-db::project_status_counts()` returns `(project_id, status, count)` from `SELECT project_id, status, count(*) FROM tasks GROUP BY 1, 2`; `df-web` folds it into the four columns. Links: Queued → `status=queued`, Running → `status=running`, Waiting → `status=waiting`, Done → `status=done`. `queued` and `running` are new URL-only values of the list's status filter (no chip, all chips unselected), defined next to the status groups in `df-core` so the list query and `/tasks/events` share them.
 
 ### D7 — Configuration forms as htmx modals
 A single `<dialog id="modal">` in the configuration page shell. Create and edit buttons `hx-get` the form fragment (`/projects/new`, `/projects/{key}/edit`, same for personas and credentials) into it and open it; the existing `POST` handlers stay. On 422 they return the form fragment with errors (the modal stays open); on success they return the updated list region with `HX-Retarget: #config-list` and `HX-Trigger: modal-close`. A direct, non-htmx `GET` of a fragment route redirects to the list. Below 1024 px the dialog is styled as a full-height sheet (same component as the details sheet). Escape and the backdrop close the dialog.
@@ -77,4 +77,4 @@ Alpine state `detailsCollapsed` on the workspace, initialised from `localStorage
 
 ## Migration Plan
 
-One migration adds `task_messages.forwarded_at` (nullable, no backfill). Undelivered messages at upgrade time count as not forwarded and are forwarded again at the next idle point; the runtime deduplicates by prompt id. Rollback: the old control plane ignores the column.
+One migration adds `task_messages.forwarded_at` (nullable) and sets it to `now()` for every row that is undelivered at upgrade time: the old control plane may already have forwarded them, so they must not become editable. They are re-sent on the next session (D1 step 1) and the runtime deduplicates by prompt id. Messages queued after the upgrade start held back. Rollback: the old control plane ignores the column.
