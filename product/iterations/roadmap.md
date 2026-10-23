@@ -50,7 +50,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 ## 3 — Team workflow
 
 - **Chats per (persona, project), `blocked_by` dependencies, project context document (ADR-0026).** Chats start with a simple summary-based compaction; plugin-based compaction (F3) stays in the backlog.
-- **Task tree, subtask branches and merging (ADR-0034)**, incl. `pull-requests.merge` and branch creation in the integrations package.
+- **Task tree, subtask branches and merging (ADR-0034)**, incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Sub-tasks with a progress bar and the sub-tasks with their status), and task rows with sub-tasks get a done/total chip (design canvas, "Later" row).
 - **Branch rewrites, fan-out and merge triggers (ADR-0033).**
 - **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
@@ -72,7 +72,7 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 
 - Audit log view, cost and "what if" views (ADR-0021), dashboard-wide live status.
 - Full-text search across tasks and transcripts.
-- Artifacts per task.
+- Artifacts per task, shown in a details tab as cards with a preview, title, time and type (design canvas, "Later" row).
 - **Workspace changes view (F8)**, reading from the Git proxy's mirror.
 - **Agent memory (ADR-0040)**, explicit memories with full-text search first.
 - Installable web app with push notifications (ADR-0035).
@@ -94,5 +94,6 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 | LSP support | context §4.2 |
 | Cloud VM sandboxes (idea, conflicts with current non-goals) | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
 | Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | `crates/df-web/src/auth/store.rs` |
-| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; own API key in a Secret, ADR on model credentials in the control plane; provider API OpenAI-compatible, optionally also Anthropic, never Anthropic only | `openspec/changes/ui-redesign/design.md` (D7) |
+| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; own API key in a Secret, ADR on model credentials in the control plane; provider API OpenAI-compatible, optionally also Anthropic, never Anthropic only | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7) |
+| Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. Decided: the control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | design canvas, "Later" row |
 | Remaining low-severity tech debt | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
