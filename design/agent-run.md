@@ -108,13 +108,14 @@ States: `Pending → Provisioning → Connecting → Preparing → Running ⇄ A
 - Control plane → `Assign { run_id, task, workspace, harness, tools, budgets, continuation }`, followed by harness credentials and the queued prompts. Budgets cover wall-clock time, tokens and turns; both runtime and control plane enforce them.
 
 ### 6.2 Prepare workspace
-Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. Tasks starting from existing branches (ADR-0025) are not covered here yet. `<base>` is the project's default branch or, for subtasks with `subtask_base: parent-branch`, the parent's task branch (ADR-0034); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
+Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. Tasks starting from existing branches (ADR-0025) are not covered here yet. `<base>` is the project's default branch, for subtasks with `subtask_base: parent-branch` the parent's task branch (ADR-0034), or for tasks with a `base_task` that task's branch (ADR-0041); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
 
 ```
 if /data/repo/.git does not exist:
     git clone --filter=blob:none --no-checkout <repo_url> /data/repo
     write runtime-owned .git/config (§7)
-    if origin has factory/task/<key>:  git checkout -B factory/task/<key> origin/factory/task/<key>
+    if origin has factory/task/<key> with own commits (not an ancestor of origin/<base>):
+                                       git checkout -B factory/task/<key> origin/factory/task/<key>
     else:                              git checkout -B factory/task/<key> origin/<base>
     if origin has factory/wip/<key>:   restore WIP files into the worktree
                                        (git restore --source=<wip> --worktree -- .)
@@ -127,6 +128,8 @@ else:
         remote ahead  → git merge --ff-only
         diverged      → don't resolve automatically; record "diverged" in run context
                         (agent instruction or human decision, per project policy)
+    if the task branch has no own commits (ancestor of origin/<base>):
+        git merge --ff-only origin/<base>   # follow the base (ADR-0041); on failure leave it as is
 no git clean — preserving caches is the purpose of the PVC
 ```
 
