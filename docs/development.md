@@ -14,7 +14,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 
 ## 2. Local PostgreSQL Container
 
-Tests do not need this: they start their own PostgreSQL (section 3). The container below is for `sqlx` tooling (`cargo sqlx prepare`, `migrate run`) and running `dark-factory` by hand. Start a local PostgreSQL 17 container on port `5432`:
+Tests do not need this: they start their own PostgreSQL (section 3). The container below is for `sqlx` tooling (`cargo sqlx prepare`, `migrate run`) and running `dark-factory` by hand. `just db` starts it (with `docker`, or `podman` when Docker is not installed; `CONTAINER_CLI` overrides) and `just db-rm` removes it. By hand, start a local PostgreSQL 17 container on port `5432`:
 
 ```bash
 docker run -d \
@@ -46,6 +46,8 @@ Database tests need a Docker socket but no `DATABASE_URL`:
 cargo test --workspace
 ```
 
+`just test [FILTER]` does the same and also builds the plugin components first (see the end of this section). It sets `DOCKER_HOST` to the rootless Podman socket (`$XDG_RUNTIME_DIR/podman/podman.sock`) when that socket exists and `DOCKER_HOST` is unset; `just bazel-test [TARGETS]` passes the same socket into the Bazel sandbox (`--test_env=DOCKER_HOST=…`, `--sandbox_writable_path=…`). `just test-db-rm` removes the shared `df-test-postgres` containers.
+
 The `df-test-postgres` crate (a dev-dependency, never linked into a binary) starts one `postgres:17-alpine` container on first use and creates a database per test: `df_test_postgres::migrated_pool(&df_db::MIGRATOR)`. testcontainers has no reaper and does not drop statics at process exit, so the container is marked reusable: all test binaries on the machine share it and it keeps running after the tests. `migrated_pool` migrates a template database once per migration set and clones it per test; templates (`df_tpl_<hash>`) stay in the container. Test databases older than 15 minutes (the creation time is in the UUIDv7 of the name) are dropped when a test binary starts. The container name carries the image tag and a config revision (see `crates/df-test-postgres/src/lib.rs`); remove old ones with `docker ps -a --filter name=df-test-postgres` and `docker rm -f`.
 
 To measure line coverage across `df-core` and `df-db`:
@@ -59,6 +61,8 @@ Tests of `df-plugins` and `dark-factory` use prebuilt WebAssembly plugin compone
 ```bash
 cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
 ```
+
+With direnv, `cargo` and `rustc` on `PATH` are the Bazel-managed wrappers from `.bazel_env/bin`, which only have the host's standard library. Build the plugins with rustup's toolchain instead, as `just plugins` does: `RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin`.
 
 ## 4. Updating `sqlx` Offline Metadata
 

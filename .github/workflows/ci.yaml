@@ -7,6 +7,14 @@ on:
       - "product/**"
       - "design/**"
       - "openspec/**"
+  # Runs on main save the caches (Bazelisk, repository cache) that every pull request can restore;
+  # caches saved by a pull request are only visible to that pull request.
+  push:
+    branches: [main]
+    paths-ignore:
+      - "product/**"
+      - "design/**"
+      - "openspec/**"
 
 permissions:
   contents: read
