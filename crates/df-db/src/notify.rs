@@ -5,6 +5,7 @@
 //! - `run_changed` `{run_id, task_id}`
 //! - `transcript_event` `{task_id, id}`
 //! - `task_message_queued` `{task_id}`
+//! - `task_message_changed` `{task_id}` (a queued message was edited or removed)
 //! - `egress_policy` `{}`
 
 use std::time::Duration;
@@ -23,6 +24,7 @@ pub const CHANNEL_TASK_CHANGED: &str = "task_changed";
 pub const CHANNEL_RUN_CHANGED: &str = "run_changed";
 pub const CHANNEL_TRANSCRIPT_EVENT: &str = "transcript_event";
 pub const CHANNEL_TASK_MESSAGE_QUEUED: &str = "task_message_queued";
+pub const CHANNEL_TASK_MESSAGE_CHANGED: &str = "task_message_changed";
 pub const CHANNEL_EGRESS_POLICY: &str = "egress_policy";
 
 pub const ALL_CHANNELS: &[&str] = &[
@@ -30,6 +32,7 @@ pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_RUN_CHANGED,
     CHANNEL_TRANSCRIPT_EVENT,
     CHANNEL_TASK_MESSAGE_QUEUED,
+    CHANNEL_TASK_MESSAGE_CHANGED,
     CHANNEL_EGRESS_POLICY,
 ];
 
@@ -48,6 +51,9 @@ pub enum Notification {
         id: i64,
     },
     TaskMessageQueued {
+        task_id: TaskId,
+    },
+    TaskMessageChanged {
         task_id: TaskId,
     },
     EgressPolicy,
@@ -85,6 +91,7 @@ impl Notification {
             Self::RunChanged { .. } => Some(CHANNEL_RUN_CHANGED),
             Self::TranscriptEvent { .. } => Some(CHANNEL_TRANSCRIPT_EVENT),
             Self::TaskMessageQueued { .. } => Some(CHANNEL_TASK_MESSAGE_QUEUED),
+            Self::TaskMessageChanged { .. } => Some(CHANNEL_TASK_MESSAGE_CHANGED),
             Self::EgressPolicy => Some(CHANNEL_EGRESS_POLICY),
             Self::Reconnected => None,
         }
@@ -93,7 +100,9 @@ impl Notification {
     /// Serializes the notification payload to JSON.
     pub fn to_payload_json(&self) -> Result<String, serde_json::Error> {
         match *self {
-            Self::TaskChanged { task_id } | Self::TaskMessageQueued { task_id } => {
+            Self::TaskChanged { task_id }
+            | Self::TaskMessageQueued { task_id }
+            | Self::TaskMessageChanged { task_id } => {
                 serde_json::to_string(&TaskIdPayload { task_id })
             }
             Self::RunChanged { run_id, task_id } => {
@@ -136,6 +145,10 @@ impl Notification {
             CHANNEL_TASK_MESSAGE_QUEUED => {
                 let p: TaskIdPayload = serde_json::from_str(payload)?;
                 Ok(Self::TaskMessageQueued { task_id: p.task_id })
+            }
+            CHANNEL_TASK_MESSAGE_CHANGED => {
+                let p: TaskIdPayload = serde_json::from_str(payload)?;
+                Ok(Self::TaskMessageChanged { task_id: p.task_id })
             }
             CHANNEL_EGRESS_POLICY => {
                 let _: EmptyPayload = serde_json::from_str(payload)?;
@@ -298,6 +311,7 @@ mod tests {
             Notification::RunChanged { run_id, task_id },
             Notification::TranscriptEvent { task_id, id: 42 },
             Notification::TaskMessageQueued { task_id },
+            Notification::TaskMessageChanged { task_id },
             Notification::EgressPolicy,
         ];
 

@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod domain;
+pub mod forge;
 pub mod ids;
 pub mod keys;
 pub mod seams;
@@ -13,7 +14,10 @@ pub use config::{
     AuthConfig, ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, PluginConfig,
     RuntimeDelivery, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
 };
-pub use domain::{ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, TaskStatus};
+pub use domain::{
+    ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus,
+};
+pub use forge::ForgeKind;
 pub use ids::{
     CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RunId, TaskId, ToolCallId,
     UserId,

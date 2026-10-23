@@ -33,6 +33,8 @@ mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
+/// Name of the forge integration plugin (`plugins.forgejo`); the only one supported for now.
+const FORGE_PLUGIN: &str = "forgejo";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -368,10 +370,10 @@ where
     // database connection, so a missing component fails fast without a database.
     let forgejo = cfg
         .plugins
-        .get("forgejo")
+        .get(FORGE_PLUGIN)
         .cloned()
         .unwrap_or_else(|| df_core::PluginConfig::new("/plugins/forgejo.wasm"));
-    let forge_host = forge::load_forge_plugin("forgejo", &forgejo)?;
+    let forge_host = forge::load_forge_plugin(FORGE_PLUGIN, &forgejo)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 
@@ -386,7 +388,12 @@ where
         .await?;
 
     let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
-    let web = web_router(&cfg, &pool, &notifier)?;
+    let web = web_router(
+        &cfg,
+        &pool,
+        &notifier,
+        Some(df_core::ForgeKind::from_plugin(FORGE_PLUGIN)),
+    )?;
     let ctx = ChannelContext {
         notifier,
         pool,
@@ -606,6 +613,7 @@ fn web_router(
     cfg: &InstanceConfig,
     pool: &PgPool,
     notifier: &Arc<df_db::Notifier>,
+    forge: Option<df_core::ForgeKind>,
 ) -> anyhow::Result<axum::Router> {
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
@@ -616,6 +624,7 @@ fn web_router(
         pool: pool.clone(),
         notifier: notifier.clone(),
         oidc: Arc::new(oidc),
+        forge,
     }))
 }
 
@@ -810,7 +819,7 @@ mod tests {
             roles_claim: "roles".into(),
         });
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier)?;
+        let router = web_router(&cfg, &pool, &notifier, None)?;
 
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 303"), "{tasks}");
@@ -826,7 +835,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let cfg = serve_config(&pool, dir.path(), None);
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier)?;
+        let router = web_router(&cfg, &pool, &notifier, None)?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
         let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;

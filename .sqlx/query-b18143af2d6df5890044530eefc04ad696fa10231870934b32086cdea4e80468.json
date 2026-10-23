@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM task_messages\n        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL\n          AND author->>'kind' = 'human'\n        RETURNING content\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "content"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b18143af2d6df5890044530eefc04ad696fa10231870934b32086cdea4e80468"
+}

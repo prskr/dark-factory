@@ -353,7 +353,7 @@ fn login_redirect(request: &Request) -> Response {
     Redirect::to(&format!("/login?next={}", urlencode(target))).into_response()
 }
 
-fn is_htmx(headers: &HeaderMap) -> bool {
+pub(crate) fn is_htmx(headers: &HeaderMap) -> bool {
     headers
         .get("hx-request")
         .is_some_and(|v| v.as_bytes() == b"true")

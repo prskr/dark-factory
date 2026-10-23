@@ -9,6 +9,7 @@ use df_core::{
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
@@ -61,6 +62,17 @@ pub struct TaskMessageRow {
     pub queued_at: DateTime<Utc>,
     pub delivered_run_id: Option<RunId>,
     pub delivered_at: Option<DateTime<Utc>>,
+    /// Set when the message was handed to the run's runtime; held-back messages are `None`.
+    pub forwarded_at: Option<DateTime<Utc>>,
+}
+
+impl TaskMessageRow {
+    /// Whether a board member may still edit or remove the message.
+    pub fn is_editable(&self) -> bool {
+        self.delivered_at.is_none()
+            && self.forwarded_at.is_none()
+            && matches!(self.author, Principal::Human { .. })
+    }
 }
 
 /// Formats the initial assignment prompt text. `title` is the title given by a person; without
@@ -207,6 +219,7 @@ pub async fn create_task(
         queued_at: msg_row.queued_at,
         delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
         delivered_at: msg_row.delivered_at,
+        forwarded_at: None,
     };
 
     Ok((task_row, message_row))
@@ -279,6 +292,7 @@ pub async fn queue_message(
         queued_at: msg_row.queued_at,
         delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
         delivered_at: msg_row.delivered_at,
+        forwarded_at: None,
     })
 }
 
@@ -370,14 +384,45 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
     .transpose()
 }
 
+/// A `task_messages` row as the queries return it.
+struct MessageRecord {
+    id: Uuid,
+    task_id: Uuid,
+    author: serde_json::Value,
+    content: serde_json::Value,
+    queued_at: DateTime<Utc>,
+    delivered_run_id: Option<Uuid>,
+    delivered_at: Option<DateTime<Utc>>,
+    forwarded_at: Option<DateTime<Utc>>,
+}
+
+impl TryFrom<MessageRecord> for TaskMessageRow {
+    type Error = DbError;
+
+    fn try_from(r: MessageRecord) -> Result<Self, DbError> {
+        Ok(Self {
+            id: PromptId::from_uuid(r.id),
+            task_id: TaskId::from_uuid(r.task_id),
+            author: serde_json::from_value(r.author)?,
+            content: serde_json::from_value(r.content)?,
+            queued_at: r.queued_at,
+            delivered_run_id: r.delivered_run_id.map(RunId::from_uuid),
+            delivered_at: r.delivered_at,
+            forwarded_at: r.forwarded_at,
+        })
+    }
+}
+
 /// Lists all undelivered prompts for `task_id` in queue order.
 pub async fn list_undelivered_messages(
     pool: &PgPool,
     task_id: TaskId,
 ) -> Result<Vec<TaskMessageRow>, DbError> {
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        MessageRecord,
         r#"
-        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at
+        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
+               forwarded_at
         FROM task_messages
         WHERE task_id = $1 AND delivered_at IS NULL
         ORDER BY queued_at ASC, id ASC
@@ -386,22 +431,164 @@ pub async fn list_undelivered_messages(
     )
     .fetch_all(pool)
     .await?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
 
-    rows.into_iter()
-        .map(|r| {
-            let author: Principal = serde_json::from_value(r.author)?;
-            let content: Vec<ContentBlock> = serde_json::from_value(r.content)?;
-            Ok(TaskMessageRow {
-                id: PromptId::from_uuid(r.id),
-                task_id: TaskId::from_uuid(r.task_id),
-                author,
-                content,
-                queued_at: r.queued_at,
-                delivered_run_id: r.delivered_run_id.map(RunId::from_uuid),
-                delivered_at: r.delivered_at,
-            })
+/// Marks the held-back undelivered messages of `task_id` as forwarded and returns them in queue
+/// order. Contends with [`edit_queued_message`] and [`remove_queued_message`] on the row, so a
+/// message is either claimed or edited, never both.
+pub async fn claim_held_back_messages(
+    pool: &PgPool,
+    task_id: TaskId,
+) -> Result<Vec<TaskMessageRow>, DbError> {
+    let rows = sqlx::query_as!(
+        MessageRecord,
+        r#"
+        UPDATE task_messages SET forwarded_at = now()
+        WHERE task_id = $1 AND delivered_at IS NULL AND forwarded_at IS NULL
+        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
+                  forwarded_at
+        "#,
+        task_id.as_uuid()
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut messages = rows
+        .into_iter()
+        .map(TryInto::try_into)
+        .collect::<Result<Vec<TaskMessageRow>, _>>()?;
+    messages.sort_by_key(|m| (m.queued_at, m.id.as_uuid()));
+    Ok(messages)
+}
+
+/// Replaces the text of a queued message that is still held back (human author, neither
+/// forwarded nor delivered; the same rule as [`TaskMessageRow::is_editable`]). The prompt id and
+/// queue position stay. Audited as `message.edit`.
+pub async fn edit_queued_message(
+    pool: &PgPool,
+    task_id: TaskId,
+    prompt_id: PromptId,
+    text: &str,
+    actor: Principal,
+) -> Result<(), DbError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(DbError::InvalidData("message is empty".into()));
+    }
+    let mut tx = pool.begin().await?;
+    let old = sqlx::query_scalar!(
+        r#"
+        SELECT content FROM task_messages
+        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
+          AND author->>'kind' = 'human'
+        FOR UPDATE
+        "#,
+        prompt_id.as_uuid(),
+        task_id.as_uuid()
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(not_editable)?;
+    let new = serde_json::to_value(vec![ContentBlock {
+        kind: Some(content_block::Kind::Text(TextContent { text: text.into() })),
+    }])?;
+    sqlx::query!(
+        "UPDATE task_messages SET content = $2 WHERE id = $1",
+        prompt_id.as_uuid(),
+        new
+    )
+    .execute(&mut *tx)
+    .await?;
+    let entry = NewAuditEntry::new(
+        actor,
+        Vec::new(),
+        "message.edit",
+        "task_message",
+        prompt_id.to_string(),
+    )
+    .with_details(&serde_json::json!({
+        "task_id": task_id,
+        "old_text": plain_text(old)?,
+        "new_text": text,
+    }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    publish(&mut *tx, &Notification::TaskMessageChanged { task_id }).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Deletes a queued message that is still held back (the rule of [`edit_queued_message`]). A
+/// `queued` task left without undelivered message returns to `waiting`. Audited as
+/// `message.remove`.
+pub async fn remove_queued_message(
+    pool: &PgPool,
+    task_id: TaskId,
+    prompt_id: PromptId,
+    actor: Principal,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    // Same lock order as `queue_message`: every later statement sees a message it committed.
+    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
+    let old = sqlx::query_scalar!(
+        r#"
+        DELETE FROM task_messages
+        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
+          AND author->>'kind' = 'human'
+        RETURNING content
+        "#,
+        prompt_id.as_uuid(),
+        task_id.as_uuid()
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(not_editable)?;
+    let back_to_waiting = sqlx::query!(
+        r#"
+        UPDATE tasks SET status = 'waiting', updated_at = now()
+        WHERE id = $1 AND status = 'queued'
+          AND NOT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL)
+        "#,
+        task_id.as_uuid()
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+    let entry = NewAuditEntry::new(
+        actor,
+        Vec::new(),
+        "message.remove",
+        "task_message",
+        prompt_id.to_string(),
+    )
+    .with_details(&serde_json::json!({ "task_id": task_id, "text": plain_text(old)? }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    publish(&mut *tx, &Notification::TaskMessageChanged { task_id }).await?;
+    if back_to_waiting {
+        publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+fn not_editable() -> DbError {
+    DbError::Conflict("the message was already received or cannot be changed".into())
+}
+
+/// Concatenated text blocks of stored message content, for audit details.
+fn plain_text(content: serde_json::Value) -> Result<String, DbError> {
+    let blocks: Vec<ContentBlock> = serde_json::from_value(content)?;
+    Ok(blocks
+        .iter()
+        .filter_map(|b| match &b.kind {
+            Some(content_block::Kind::Text(t)) => Some(t.text.as_str()),
+            _ => None,
         })
-        .collect()
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 /// Updates a task's status (`tasks.status`) and publishes `task_changed` in the same transaction.
@@ -1017,5 +1204,357 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(changed, Notification::TaskChanged { task_id: task.id });
+    }
+    async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
+        let run_id = RunId::new();
+        sqlx::query(
+            "INSERT INTO runs (id, task_id, number, state)
+             SELECT $1, $2, COALESCE(max(number), 0) + 1, 'succeeded' FROM runs WHERE task_id = $2",
+        )
+        .bind(run_id.as_uuid())
+        .bind(task.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+        run_id
+    }
+
+    fn text(t: &str) -> Vec<ContentBlock> {
+        vec![ContentBlock {
+            kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
+        }]
+    }
+
+    fn human() -> Principal {
+        Principal::human(UserId::new(), "Ada")
+    }
+
+    /// A `waiting` task with one human message queued (status `queued`).
+    async fn task_with_queued_message(pool: &PgPool) -> (TaskRow, TaskMessageRow) {
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(pool, &key, "Linus").await.unwrap();
+        let (task, assignment) = create_task(pool, new_task(project_id, persona_id, Some("T")))
+            .await
+            .unwrap();
+        mark_prompt_delivered(pool, assignment.id, insert_run(pool, task.id).await)
+            .await
+            .unwrap();
+        update_task_status(pool, task.id, TaskStatus::Waiting)
+            .await
+            .unwrap();
+        let msg = queue_message(pool, task.id, human(), text("first"))
+            .await
+            .unwrap();
+        (task, msg)
+    }
+
+    async fn status_of(pool: &PgPool, task: TaskId) -> TaskStatus {
+        get_task(pool, task).await.unwrap().unwrap().status
+    }
+
+    async fn audit_count(pool: &PgPool, action: &str) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
+            .bind(action)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn claim_marks_held_back_messages_forwarded_once_in_queue_order() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, first) = task_with_queued_message(&pool).await;
+        let second = queue_message(&pool, task.id, human(), text("second"))
+            .await
+            .unwrap();
+
+        let claimed = claim_held_back_messages(&pool, task.id).await.unwrap();
+        let ids: Vec<_> = claimed.iter().map(|m| m.id).collect();
+        let again = claim_held_back_messages(&pool, task.id).await.unwrap();
+
+        assert_eq!(ids, vec![first.id, second.id]);
+        assert!(claimed.iter().all(|m| m.forwarded_at.is_some()));
+        assert!(again.is_empty());
+        // Forwarded messages stay undelivered until their event is persisted.
+        assert_eq!(
+            list_undelivered_messages(&pool, task.id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_skips_delivered_messages() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        mark_prompt_delivered(&pool, msg.id, insert_run(&pool, task.id).await)
+            .await
+            .unwrap();
+
+        assert!(
+            claim_held_back_messages(&pool, task.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn message_undelivered_before_the_migration_is_not_editable() {
+        let pool = df_test_postgres::empty_pool().await;
+        let before = crate::MIGRATOR
+            .iter()
+            .map(|m| m.version)
+            .rev()
+            .nth(1)
+            .unwrap();
+        crate::MIGRATOR.run_to(before, &pool).await.unwrap();
+        let (task, msg) = task_with_queued_message_pre_migration(&pool).await;
+
+        crate::MIGRATOR.run(&pool).await.unwrap();
+
+        let err = edit_queued_message(&pool, task, msg, "new", human()).await;
+        assert!(matches!(err, Err(DbError::Conflict(_))));
+    }
+
+    /// Same as [`task_with_queued_message`] for a schema without `forwarded_at`.
+    async fn task_with_queued_message_pre_migration(pool: &PgPool) -> (TaskId, PromptId) {
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(pool, &key, "Linus").await.unwrap();
+        let (task, _) = create_task(pool, new_task(project_id, persona_id, Some("T")))
+            .await
+            .unwrap();
+        let msg = queue_message(pool, task.id, human(), text("old"))
+            .await
+            .unwrap();
+        (task.id, msg.id)
+    }
+
+    #[tokio::test]
+    async fn edit_replaces_text_keeps_id_and_audits() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        let notifier = Notifier::start(&pool).await.unwrap();
+        let mut events = notifier.subscribe();
+
+        edit_queued_message(&pool, task.id, msg.id, "also check logout", human())
+            .await
+            .unwrap();
+
+        let stored = list_undelivered_messages(&pool, task.id).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, msg.id);
+        assert_eq!(stored[0].queued_at, msg.queued_at);
+        assert_eq!(prompt_text(&stored[0]), "also check logout");
+        assert_eq!(audit_count(&pool, "message.edit").await, 1);
+        let details: serde_json::Value =
+            sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'message.edit'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(details["old_text"], "first");
+        assert_eq!(details["new_text"], "also check logout");
+        let changed = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            changed,
+            Notification::TaskMessageChanged { task_id: task.id }
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_and_remove_are_refused_after_forwarding() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        claim_held_back_messages(&pool, task.id).await.unwrap();
+
+        let edit = edit_queued_message(&pool, task.id, msg.id, "late", human()).await;
+        let remove = remove_queued_message(&pool, task.id, msg.id, human()).await;
+
+        assert!(matches!(edit, Err(DbError::Conflict(_))));
+        assert!(matches!(remove, Err(DbError::Conflict(_))));
+        let stored = list_undelivered_messages(&pool, task.id).await.unwrap();
+        assert_eq!(prompt_text(&stored[0]), "first");
+        assert_eq!(audit_count(&pool, "message.edit").await, 0);
+    }
+
+    #[tokio::test]
+    async fn empty_edit_is_refused() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+
+        let err = edit_queued_message(&pool, task.id, msg.id, "  \n ", human()).await;
+
+        assert!(matches!(err, Err(DbError::InvalidData(_))));
+        let stored = list_undelivered_messages(&pool, task.id).await.unwrap();
+        assert_eq!(prompt_text(&stored[0]), "first");
+    }
+
+    #[tokio::test]
+    async fn assignment_prompt_cannot_be_removed() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(&pool, &key, "Linus")
+            .await
+            .unwrap();
+        let (task, assignment) = create_task(&pool, new_task(project_id, persona_id, Some("T")))
+            .await
+            .unwrap();
+
+        let err = remove_queued_message(&pool, task.id, assignment.id, human()).await;
+
+        assert!(matches!(err, Err(DbError::Conflict(_))));
+        assert_eq!(
+            list_undelivered_messages(&pool, task.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_deletes_the_message_and_audits() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        queue_message(&pool, task.id, human(), text("second"))
+            .await
+            .unwrap();
+
+        remove_queued_message(&pool, task.id, msg.id, human())
+            .await
+            .unwrap();
+
+        let left = list_undelivered_messages(&pool, task.id).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(prompt_text(&left[0]), "second");
+        assert_eq!(audit_count(&pool, "message.remove").await, 1);
+        // Other messages still queued.
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn removing_the_last_message_returns_the_task_to_waiting() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+
+        remove_queued_message(&pool, task.id, msg.id, human())
+            .await
+            .unwrap();
+
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Waiting);
+    }
+
+    #[tokio::test]
+    async fn removing_a_message_while_another_is_queued_keeps_the_task_queued() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, msg) = task_with_queued_message(&pool).await;
+        // A concurrent `queue_message`: it holds the task row lock, its message not committed yet.
+        let mut queueing = pool.begin().await.unwrap();
+        sqlx::query("UPDATE tasks SET updated_at = now() WHERE id = $1")
+            .bind(task.id.as_uuid())
+            .execute(&mut *queueing)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO task_messages (id, task_id, author, content) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(PromptId::new().as_uuid())
+        .bind(task.id.as_uuid())
+        .bind(serde_json::to_value(human()).unwrap())
+        .bind(serde_json::to_value(text("second")).unwrap())
+        .execute(&mut *queueing)
+        .await
+        .unwrap();
+
+        let remove = tokio::spawn({
+            let pool = pool.clone();
+            async move { remove_queued_message(&pool, task.id, msg.id, human()).await }
+        });
+        // Wait until the removal waits for the row lock, then let the queueing commit.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        queueing.commit().await.unwrap();
+        remove.await.unwrap().unwrap();
+
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn sql_and_rust_agree_on_which_messages_are_editable() {
+        // Edit and remove each get fresh rows, so they cannot interfere.
+        for remove in [false, true] {
+            let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+            let (task, held) = task_with_queued_message(&pool).await;
+            let forwarded = queue_message(&pool, task.id, human(), text("forwarded"))
+                .await
+                .unwrap();
+            sqlx::query("UPDATE task_messages SET forwarded_at = now() WHERE id = $1")
+                .bind(forwarded.id.as_uuid())
+                .execute(&pool)
+                .await
+                .unwrap();
+            let delivered = queue_message(&pool, task.id, human(), text("delivered"))
+                .await
+                .unwrap();
+            let run = insert_run(&pool, task.id).await;
+            mark_prompt_delivered(&pool, delivered.id, run)
+                .await
+                .unwrap();
+            let system = queue_message(&pool, task.id, Principal::system("x"), text("system"))
+                .await
+                .unwrap();
+
+            for (message, editable) in [
+                (held, true),
+                (forwarded, false),
+                (delivered, false),
+                (system, false),
+            ] {
+                let row: TaskMessageRow = sqlx::query_as!(
+                    MessageRecord,
+                    r#"SELECT id, task_id, author, content, queued_at, delivered_run_id,
+                              delivered_at, forwarded_at
+                       FROM task_messages WHERE id = $1"#,
+                    message.id.as_uuid()
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+                assert_eq!(row.is_editable(), editable, "rust: {row:?}");
+                let result = if remove {
+                    remove_queued_message(&pool, task.id, message.id, human()).await
+                } else {
+                    edit_queued_message(&pool, task.id, message.id, "x", human()).await
+                };
+                assert_eq!(
+                    result.is_ok(),
+                    editable,
+                    "sql (remove: {remove}): {message:?}"
+                );
+            }
+        }
     }
 }

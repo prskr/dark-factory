@@ -70,8 +70,12 @@ If prompts are still undelivered when a run ends with an outcome other than `fai
   `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>`; `SandboxProvider::resolve_identity` maps SAN and
   peer IP to a run. Terminal runs are rejected with `UNAUTHENTICATED`.
 - Handshake: `Hello` first (else `FAILED_PRECONDITION`), then `HelloAck`, `HarnessCredentials`,
-  `Assign`, every undelivered `Prompt`. `HarnessCredentials` precede `Assign` because the runtime
-  ignores credentials that arrive later.
+  `Assign`, then the prompts: undelivered prompts that are already forwarded
+  (`task_messages.forwarded_at` set) are sent again, held-back ones are claimed (marked forwarded)
+  and sent only while no turn is open (no persisted `TurnStarted` without a later `TurnEnded`).
+  After a persisted `TurnEnded` the held-back prompts are sent. See "Queued messages reach the
+  runtime between turns" in [`contract/README.md`](../../../contract/README.md).
+  `HarnessCredentials` precede `Assign` because the runtime ignores credentials that arrive later.
 - Timeouts: `enforce_timeouts` ends every overdue run it can; a run that fails to end (or whose
   row cannot be read) is logged and does not stop the others.
 - Ordering and delivery: messages are persisted in batches of up to 50 per transaction, duplicates

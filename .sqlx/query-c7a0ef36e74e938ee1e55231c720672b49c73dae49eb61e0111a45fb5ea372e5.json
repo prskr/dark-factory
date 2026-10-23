@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT content FROM task_messages\n        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL\n          AND author->>'kind' = 'human'\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "content"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c7a0ef36e74e938ee1e55231c720672b49c73dae49eb61e0111a45fb5ea372e5"
+}

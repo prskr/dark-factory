@@ -30,6 +30,18 @@ impl Tone {
         }
     }
 
+    /// Background of a status dot: the foreground token of the tone.
+    pub const fn dot_class(self) -> &'static str {
+        match self {
+            Self::Running => "bg-status-running-fg",
+            Self::Waiting => "bg-status-waiting-fg",
+            Self::Queued => "bg-status-queued-fg",
+            Self::Completed => "bg-status-completed-fg",
+            Self::Failed => "bg-status-failed-fg",
+            Self::Limited => "bg-status-limited-fg",
+        }
+    }
+
     /// Tone of a task status.
     pub const fn of_status(status: TaskStatus) -> Self {
         match status {
@@ -66,6 +78,14 @@ pub fn tone_badge(tone: Tone, label: &str) -> Markup {
 /// The badge of a task status: the status name without underscores in the status's tone.
 pub fn status_badge(status: TaskStatus) -> Markup {
     tone_badge(Tone::of_status(status), &status.as_str().replace('_', " "))
+}
+
+/// A harness by its product name, shown for a persona.
+pub fn harness_label(harness: &str) -> &str {
+    match harness {
+        "claude-code" => "Claude Code",
+        other => other,
+    }
 }
 
 /// A neutral label, for example the project or persona of a task.
@@ -110,6 +130,12 @@ mod tests {
             );
             assert!(html.contains(&format!(">{}<", status.as_str().replace('_', " "))));
         }
+    }
+
+    #[test]
+    fn the_harness_is_shown_by_its_product_name() {
+        assert_eq!(harness_label("claude-code"), "Claude Code");
+        assert_eq!(harness_label("other"), "other");
     }
 
     #[test]

@@ -4,12 +4,13 @@
 mod view;
 
 use axum::extract::{Form, Path, Query, State};
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Extension, Router};
 use df_core::{
-    PersonaId, ProjectId, TITLE_MAX_CHARS, TaskId, TaskKey, sanitize_title, title_too_long,
+    PersonaId, ProjectId, PromptId, TITLE_MAX_CHARS, TaskId, TaskKey, sanitize_title,
+    title_too_long,
 };
 use df_db::NewTask;
 use df_db::task_views::{RunView, TaskDetail};
@@ -19,7 +20,9 @@ use serde::Deserialize;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::FormErrors;
+use crate::components::{
+    ButtonKind, EmptyPanel, EmptySize, FormErrors, Icon, action_class, icon, logo,
+};
 use crate::layout::{View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
@@ -28,7 +31,81 @@ pub use view::{
     Choices, Filters, TaskForm, details_region, head_region, list_column, pending_region,
     runs_region, task_rows,
 };
-use view::{composer_dialog, composer_form, details_column, message_form};
+use view::{composer_dialog, composer_form, details_column, message_area};
+
+/// Alpine state of the task workspace (`x-data` of `.ws`), shared by the list, the transcript and
+/// the details panel.
+///
+/// State:
+/// - `details`: the details panel is open (below 1280 px).
+/// - `collapsed`: the details column is collapsed to its strip (from 1280 px); remembered in
+///   `localStorage['df.details.collapsed']`, read and written in `try/catch`.
+/// - `sheet`: height of the phone details sheet, `'half'` or `'full'`.
+/// - `dragging`: the sheet handle is being dragged (the sheet must not animate then).
+/// - `drag`: `{ y, h, el, moved }` of the running drag; `dragged`: the last pointer sequence moved,
+///   so the click that follows must not toggle the sheet.
+///
+/// Thresholds (named values): `closeBelow` is the share of the viewport height under which a
+/// released sheet closes, `fullAbove` the share over which it becomes full height (otherwise half),
+/// `dragSlop` the pixels a press has to move before it counts as a drag.
+///
+/// Methods: `setCollapsed(value)`, `sheetToggle()` (tap or keyboard on the handle), and the
+/// pointer sequence `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` (pointerup) and
+/// `sheetDragCancel(e)` (pointercancel: no click follows, so `dragged` is reset).
+const WORKSPACE_STATE: &str = r#"{
+  details: false,
+  collapsed: false,
+  sheet: 'half',
+  dragging: false,
+  drag: null,
+  dragged: false,
+  closeBelow: 0.25,
+  fullAbove: 0.7,
+  dragSlop: 4,
+  init() {
+    try { this.collapsed = localStorage.getItem('df.details.collapsed') === '1' } catch (e) {}
+  },
+  setCollapsed(value) {
+    this.collapsed = value
+    try { localStorage.setItem('df.details.collapsed', value ? '1' : '0') } catch (e) {}
+  },
+  sheetToggle() {
+    if (this.dragged) { this.dragged = false; return }
+    this.sheet = this.sheet === 'half' ? 'full' : 'half'
+  },
+  sheetDragStart(e) {
+    const el = e.currentTarget.closest('aside')
+    e.currentTarget.setPointerCapture(e.pointerId)
+    this.drag = { y: e.clientY, h: el.offsetHeight, el, moved: false }
+    this.dragging = true
+  },
+  sheetDragMove(e) {
+    const d = this.drag
+    if (!d) return
+    const dy = e.clientY - d.y
+    if (Math.abs(dy) > this.dragSlop) d.moved = true
+    if (d.moved) d.el.style.height = Math.max(0, d.h - dy) + 'px'
+  },
+  sheetDragEnd(e) {
+    const d = this.drag
+    this.drag = null
+    this.dragging = false
+    if (!d) return
+    d.el.style.height = ''
+    this.dragged = d.moved
+    if (!d.moved) return
+    const share = (d.h - (e.clientY - d.y)) / window.innerHeight
+    if (share < this.closeBelow) { this.details = false; this.sheet = 'half' }
+    else this.sheet = share > this.fullAbove ? 'full' : 'half'
+  },
+  sheetDragCancel(e) {
+    const d = this.drag
+    this.drag = null
+    this.dragging = false
+    this.dragged = false
+    if (d) d.el.style.height = ''
+  },
+}"#;
 
 /// How many transcript rows the detail page renders at once.
 const PAGE_BATCH: i64 = 1000;
@@ -42,6 +119,10 @@ pub fn routes() -> Router<WebState> {
         .route("/tasks/{key}", get(task_detail))
         .route("/tasks/{key}/events", get(sse::task_events))
         .route("/tasks/{key}/messages", post(message_create))
+        .route(
+            "/tasks/{key}/messages/{id}",
+            patch(message_edit).delete(message_remove),
+        )
         .route("/tasks/{key}/title", post(task_rename))
 }
 
@@ -99,7 +180,12 @@ struct Selected {
 }
 
 /// Renders the workspace page; the transcript and details columns exist only for a selected task.
-async fn workspace(state: &WebState, filters: &Filters, selected: Option<Selected>) -> Response {
+async fn workspace(
+    state: &WebState,
+    user: &CurrentUser,
+    filters: &Filters,
+    selected: Option<Selected>,
+) -> Response {
     let filter = filters.to_db();
     let list = df_db::task_views::list_task_items(&state.pool, &filter);
     let projects =
@@ -115,13 +201,25 @@ async fn workspace(state: &WebState, filters: &Filters, selected: Option<Selecte
         None => ("Tasks".to_string(), View::List),
     };
     let body = html! {
-        div class="ws" x-data="{ details: false }" {
-            (list_column(&items, &projects, filters, current))
+        // `collapsed` (the details column of 1280 px and more) is remembered in this browser.
+        div class="ws" ":data-collapsed"="collapsed" "x-on:keydown.escape.window"="details = false"
+            x-data=(WORKSPACE_STATE) {
+            (list_column(&items, &projects, filters, current, &user.display_name))
             div id="ws-detail" {
                 @match &selected {
                     Some(s) => (selected_columns(s)),
                     None => section class="ws-main items-center justify-center" aria-label="Task" {
-                        p class="text-sm text-faint" { "Select a task." }
+                        (EmptyPanel {
+                            size: EmptySize::Workspace,
+                            icon: Some(logo("size-7")),
+                            title: "No task selected",
+                            text: "Pick a task from the list, or describe a new one and a persona starts on it.",
+                            phone_hint: None,
+                            action: html! {
+                                button type="button" hx-get=(compose) hx-target="#composer-slot" hx-swap="innerHTML"
+                                    class={(action_class(ButtonKind::Primary)) " mt-1.5"} { (icon(Icon::Plus)) "New task" }
+                            },
+                        }.render())
                     },
                 }
             }
@@ -139,22 +237,26 @@ fn selected_columns(s: &Selected) -> Markup {
         div x-show="details" x-cloak "x-on:click"="details = false" class="fixed inset-0 z-30 bg-black/40 xl:hidden" {}
         section class="ws-main" aria-label="Task" {
             (head_region(&s.detail, None))
-            div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" {
+            div class="min-h-0 flex-1 overflow-y-auto p-4" {
                 (render_transcript(s.folder.items()))
-                (pending_region(&s.pending, None))
             }
-            (message_form(key))
+            (message_area(key, &s.detail.status, &s.pending))
         }
         (details_column(&s.detail, &s.runs))
     }
 }
 
-async fn task_list(State(state): State<WebState>, Query(query): Query<ListQuery>) -> Response {
-    workspace(&state, &query.filters(), None).await
+async fn task_list(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Query(query): Query<ListQuery>,
+) -> Response {
+    workspace(&state, &user, &query.filters(), None).await
 }
 
 async fn task_detail(
     State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
     Path(key): Path<String>,
     Query(query): Query<ListQuery>,
 ) -> Response {
@@ -163,7 +265,7 @@ async fn task_detail(
         Err(response) => return *response,
     };
     let id = TaskId::from_uuid(task.id);
-    let mut folder = Folder::default();
+    let mut folder = Folder::new(task.persona_name.clone());
     loop {
         let rows = match df_db::task_views::transcript_after(
             &state.pool,
@@ -194,7 +296,7 @@ async fn task_detail(
         pending: data.pending,
         folder,
     };
-    workspace(&state, &query.filters(), Some(selected)).await
+    workspace(&state, &user, &query.filters(), Some(selected)).await
 }
 
 async fn choices(state: &WebState) -> Result<(Choices, Vec<(String, String)>), df_db::DbError> {
@@ -400,18 +502,126 @@ async fn message_create(
             Err(e) => return internal_error(&e),
         }
     };
-    let pending = match df_db::list_undelivered_messages(&state.pool, id).await {
-        Ok(p) => p,
-        Err(e) => return internal_error(&e),
+    let body = match stack(&state, &task, error).await {
+        Ok(body) => body,
+        Err(response) => return *response,
     };
-    let body = pending_region(&pending, error);
     if error.is_some() {
         return invalid(body);
     }
-    let mut response = body.into_response();
+    with_trigger(body, "message-queued")
+}
+
+/// `PATCH /tasks/{key}/messages/{id}`: replaces the text of a queued message that the agent has
+/// not received yet.
+async fn message_edit(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path((key, id)): Path<(String, String)>,
+    Form(form): Form<MessageForm>,
+) -> Response {
+    let (task, prompt) = match queued_target(&state, &key, &id).await {
+        Ok(target) => target,
+        Err(response) => return *response,
+    };
+    let result = df_db::edit_queued_message(
+        &state.pool,
+        TaskId::from_uuid(task.id),
+        prompt,
+        &form.message,
+        user.principal(),
+    )
+    .await;
+    queued_change(&state, &task, result, Some("message-saved")).await
+}
+
+/// `DELETE /tasks/{key}/messages/{id}`: removes a queued message that the agent has not received
+/// yet.
+async fn message_remove(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path((key, id)): Path<(String, String)>,
+) -> Response {
+    let (task, prompt) = match queued_target(&state, &key, &id).await {
+        Ok(target) => target,
+        Err(response) => return *response,
+    };
+    let result = df_db::remove_queued_message(
+        &state.pool,
+        TaskId::from_uuid(task.id),
+        prompt,
+        user.principal(),
+    )
+    .await;
+    queued_change(&state, &task, result, None).await
+}
+
+/// The task and prompt of a request; the error is the response to send.
+async fn queued_target(
+    state: &WebState,
+    key: &str,
+    id: &str,
+) -> Result<(TaskDetail, PromptId), Box<Response>> {
+    let task = task_by_key(state, key).await?;
+    let prompt = id
+        .parse::<PromptId>()
+        .map_err(|_| Box::new(not_found("The message")))?;
+    Ok((task, prompt))
+}
+
+/// Answers an edit or removal with the re-rendered stack: 409 when the agent has the message
+/// already, 422 for an empty text.
+async fn queued_change(
+    state: &WebState,
+    task: &TaskDetail,
+    result: Result<(), df_db::DbError>,
+    saved: Option<&'static str>,
+) -> Response {
+    let (status, error, trigger) = match result {
+        Ok(()) => (StatusCode::OK, None, saved),
+        Err(df_db::DbError::Conflict(_)) => (
+            StatusCode::CONFLICT,
+            Some("The agent has already received this message."),
+            None,
+        ),
+        Err(df_db::DbError::InvalidData(_)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("Write a message first."),
+            None,
+        ),
+        Err(e) => return internal_error(&e),
+    };
+    let body = match stack(state, task, error).await {
+        Ok(body) => body,
+        Err(response) => return *response,
+    };
+    let response = (status, body).into_response();
+    match trigger {
+        Some(name) => with_header(response, name),
+        None => response,
+    }
+}
+
+/// The queued stack of a task as it is now.
+async fn stack(
+    state: &WebState,
+    task: &TaskDetail,
+    error: Option<&str>,
+) -> Result<Markup, Box<Response>> {
+    let pending = df_db::list_undelivered_messages(&state.pool, TaskId::from_uuid(task.id))
+        .await
+        .map_err(|e| Box::new(internal_error(&e)))?;
+    Ok(pending_region(&task.key, &task.status, &pending, error))
+}
+
+fn with_trigger(body: Markup, name: &'static str) -> Response {
+    with_header(body.into_response(), name)
+}
+
+fn with_header(mut response: Response, trigger: &'static str) -> Response {
     response
         .headers_mut()
-        .insert("HX-Trigger", HeaderValue::from_static("message-queued"));
+        .insert("HX-Trigger", HeaderValue::from_static(trigger));
     response
 }
 

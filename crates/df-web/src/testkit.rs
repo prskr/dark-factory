@@ -207,6 +207,10 @@ pub(crate) struct TestApp {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::with_forge(Some(df_core::ForgeKind::Forgejo)).await
+    }
+
+    pub async fn with_forge(forge: Option<df_core::ForgeKind>) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
         let dir = tempfile::tempdir().unwrap();
@@ -223,6 +227,7 @@ impl TestApp {
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
             oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
             pool: pool.clone(),
+            forge,
         };
         Self {
             router: router(state),
@@ -253,9 +258,35 @@ impl TestApp {
         .await
     }
 
+    /// A `GET` as htmx sends it (with the `HX-Request` header), for fragments.
+    pub async fn get_htmx(&self, uri: &str, cookie: &str) -> Response<Body> {
+        self.send(
+            Request::get(uri)
+                .header(header::COOKIE, cookie)
+                .header("HX-Request", "true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+    }
+
     /// A form post as htmx sends it (with the `HX-Request` header).
     pub async fn post(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
         self.send(post_request(uri, body, cookie, true)).await
+    }
+
+    /// A `PATCH` with a form body as htmx sends it.
+    pub async fn patch(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
+        let mut request = post_request(uri, body, cookie, true);
+        *request.method_mut() = axum::http::Method::PATCH;
+        self.send(request).await
+    }
+
+    /// A `DELETE` as htmx sends it.
+    pub async fn delete(&self, uri: &str, cookie: &str) -> Response<Body> {
+        let mut request = post_request(uri, "", cookie, true);
+        *request.method_mut() = axum::http::Method::DELETE;
+        self.send(request).await
     }
 }
 
@@ -505,4 +536,14 @@ impl SseReader {
             .await
             .is_ok()
     }
+}
+
+/// The opening tag of the element at the first occurrence of `marker` (text or attribute): from
+/// the `<` before it to the next `>`.
+pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
+    let at = html
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker}: {html}"));
+    let start = html[..at].rfind('<').unwrap();
+    &html[start..start + html[start..].find('>').unwrap() + 1]
 }

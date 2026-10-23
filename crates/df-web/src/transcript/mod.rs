@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
     ContentBlock, NoticeLevel, PlanEntryStatus, StopReason, ToolCallContent, ToolCallStatus,
@@ -22,6 +23,10 @@ pub struct Item {
     pub dom_id: String,
     turn_id: String,
     pub kind: ItemKind,
+    /// Who wrote the item (board member or the persona), empty for items without an author.
+    pub author: String,
+    /// When the event that created the item was recorded.
+    pub at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +56,11 @@ pub enum ItemKind {
         message: String,
     },
     Unreadable,
+    /// The start of a run; precedes the run's first item.
+    RunStart {
+        number: i64,
+        started_at: DateTime<Utc>,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -111,9 +121,27 @@ pub struct Folder {
     plans: HashMap<String, usize>,
     /// Id of the last event folded.
     last_id: i64,
+    /// Name of the persona, the author of agent items.
+    agent_name: String,
+    /// Run of the last event folded, 0 before the first.
+    run: i64,
+    /// A run that started and has no item yet: its divider goes in front of the next item.
+    run_start: Option<(i64, DateTime<Utc>)>,
+    /// Time of the event being folded.
+    now: DateTime<Utc>,
+    /// Changes of dividers pushed while folding the current event.
+    carry: Vec<Change>,
 }
 
 impl Folder {
+    /// A folder whose agent items are authored by `agent_name`.
+    pub fn new(agent_name: impl Into<String>) -> Self {
+        Self {
+            agent_name: agent_name.into(),
+            ..Self::default()
+        }
+    }
+
     pub fn items(&self) -> &[Item] {
         &self.items
     }
@@ -126,6 +154,19 @@ impl Folder {
     /// Folds one event. Returns the touched items in order.
     pub fn apply(&mut self, stored: &StoredEvent) -> Vec<Change> {
         self.last_id = self.last_id.max(stored.id);
+        self.now = stored.occurred_at;
+        if stored.run_number != self.run {
+            self.run = stored.run_number;
+            self.run_start = Some((stored.run_number, stored.run_started_at));
+        }
+        let changes = self.apply_event(stored);
+        // Dividers pushed on the way come first.
+        let mut all = std::mem::take(&mut self.carry);
+        all.extend(changes);
+        all
+    }
+
+    fn apply_event(&mut self, stored: &StoredEvent) -> Vec<Change> {
         let Some(event) = &stored.event else {
             return vec![self.push(
                 format!("ev-{}", stored.id),
@@ -283,10 +324,32 @@ impl Folder {
     }
 
     fn push(&mut self, dom_id: String, turn_id: String, kind: ItemKind) -> Change {
+        if let Some((number, started_at)) = self.run_start.take() {
+            self.items.push(Item {
+                dom_id: format!("run-{number}"),
+                turn_id: String::new(),
+                kind: ItemKind::RunStart { number, started_at },
+                author: String::new(),
+                at: started_at,
+            });
+            self.carry.push(Change {
+                index: self.items.len() - 1,
+                added: true,
+            });
+        }
+        let author = match &kind {
+            ItemKind::User { author, .. } => author.clone(),
+            ItemKind::Agent { .. } | ItemKind::Thought { .. } | ItemKind::Tool(_) => {
+                self.agent_name.clone()
+            }
+            _ => String::new(),
+        };
         self.items.push(Item {
             dom_id,
             turn_id,
             kind,
+            author,
+            at: self.now,
         });
         Change {
             index: self.items.len() - 1,
@@ -488,15 +551,21 @@ pub fn render_item(item: &Item) -> Markup {
             prompt_id,
             author,
             text,
-        } => c::user_message(id, prompt_id, author, text),
+        } => c::user_message(id, prompt_id, author, item.at, text),
         ItemKind::Agent { text, complete } => {
             let body = if *complete {
                 markdown(text)
             } else {
                 html! { (text) }
             };
-            c::agent_message(id, body, *complete)
+            let author = if item.author.is_empty() {
+                "Agent"
+            } else {
+                &item.author
+            };
+            c::agent_message(id, author, item.at, body, *complete)
         }
+        ItemKind::RunStart { number, started_at } => c::run_divider(id, *number, *started_at),
         ItemKind::Thought { text } => c::thought(id, text),
         ItemKind::Tool(tool) => render_tool(id, tool),
         ItemKind::Plan(entries) => {

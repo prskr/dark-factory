@@ -5,7 +5,9 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use df_core::{CredentialRef, CredentialRefId, PersonaId, Principal, ProjectId, TaskId};
-use df_db::{TaskMessageRow, TaskRow, get_task, list_undelivered_messages};
+use df_db::{
+    TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
+};
 use df_proto::agent::v1::{
     AcpHarness, Assign, Budgets, CommitIdentity, Continuation, Harness, Prompt, TaskRef,
     ToolAnnotations, ToolDescriptor, Workspace, harness,
@@ -392,11 +394,21 @@ fn truncate_utf8(mut s: String, max_bytes: usize) -> String {
     s
 }
 
-/// All prompts of the task not yet confirmed as delivered, oldest first.
-pub async fn pending_prompts(pool: &PgPool, task_id: TaskId) -> Result<Vec<Prompt>, ChannelError> {
+/// The prompts of the task that were forwarded to the runtime and are not yet confirmed as
+/// delivered, oldest first. Unless the runtime is `busy` in a turn, the held-back prompts are
+/// forwarded first (marked in the database), so they are part of the result.
+pub async fn pending_prompts(
+    pool: &PgPool,
+    task_id: TaskId,
+    busy: bool,
+) -> Result<Vec<Prompt>, ChannelError> {
+    if !busy {
+        claim_held_back_messages(pool, task_id).await?;
+    }
     Ok(list_undelivered_messages(pool, task_id)
         .await?
         .into_iter()
+        .filter(|row| row.forwarded_at.is_some())
         .map(prompt_from_row)
         .collect())
 }

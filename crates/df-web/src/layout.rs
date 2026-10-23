@@ -3,7 +3,7 @@
 use maud::{DOCTYPE, Markup, html};
 
 use crate::assets::asset_url;
-use crate::components::{bottom_bar, rail};
+use crate::components::{CreateAction, bottom_bar, rail};
 
 /// The navigation entry a page belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +61,7 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
                 meta name="color-scheme" content="light dark";
                 meta name="htmx-config" content=(HTMX_CONFIG);
                 title { (title) " - Dark Factory" }
+                link rel="icon" type="image/svg+xml" href=(asset_url("logo.svg"));
                 link rel="stylesheet" href=(asset_url("app.css"));
                 link rel="preload" as="font" type="font/woff2" crossorigin
                     href=(asset_url("fonts/inter-latin-wght-normal.woff2"));
@@ -75,14 +76,29 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
                 "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
                     @if nav != Nav::None { (rail(nav, compose_href)) }
-                    main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "mx-auto w-full max-w-5xl px-4 py-4 pb-20 lg:py-6 lg:pb-6" })} {
+                    main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "w-full px-4 py-4 pb-20 md:px-10 md:py-8 md:pb-8" })} {
                         (body)
                     }
                 }
-                @if nav != Nav::None { (bottom_bar(nav, compose_href)) }
+                @if nav != Nav::None { (bottom_bar(nav, &create_action(nav, compose_href))) }
                 div id="composer-slot" {}
             }
         }
+    }
+}
+
+/// What the bottom bar's create action does on this screen: a project on Projects, a task
+/// everywhere else.
+fn create_action(nav: Nav, compose_href: &str) -> CreateAction<'_> {
+    match nav {
+        Nav::Projects => CreateAction {
+            label: "New project",
+            href: "/projects/new",
+        },
+        _ => CreateAction {
+            label: "New task",
+            href: compose_href,
+        },
     }
 }
 
@@ -97,12 +113,12 @@ mod tests {
     }
 
     #[test]
-    fn mobile_menu_lists_tasks_but_no_configuration_pages() {
+    fn mobile_menu_lists_tasks_and_projects_but_no_other_configuration_pages() {
         let page = layout("Tasks", Nav::Tasks, html! { p { "x" } }).into_string();
         let mobile = nav_html(&page, "mobile-menu");
-        assert!(mobile.contains("href=\"/tasks\""));
+        assert!(mobile.contains("href=\"/tasks\"") && mobile.contains("href=\"/projects\""));
         assert!(mobile.contains("min-h-11"), "{mobile}");
-        for hidden in ["/projects", "/personas", "/credentials"] {
+        for hidden in ["/personas", "/credentials", "logout"] {
             assert!(!mobile.contains(hidden), "{hidden} in mobile menu");
         }
         let desktop = nav_html(&page, "desktop-menu");
@@ -121,6 +137,35 @@ mod tests {
             "{desktop}"
         );
         assert!(page.contains("aria-label=\"New task\"") && page.contains("hx-post=\"/logout\""));
+    }
+
+    #[test]
+    fn the_page_declares_the_svg_favicon_and_the_rail_starts_with_the_logo() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        assert!(
+            page.contains("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/assets/logo.svg?v="),
+            "{page}"
+        );
+        let rail_at = page.find("<aside").unwrap();
+        let first_link = &page[rail_at..];
+        let first_link = &first_link[first_link.find("<a ").unwrap()..];
+        assert!(
+            first_link.starts_with("<a href=\"/tasks\" aria-label=\"Dark Factory\""),
+            "{first_link}"
+        );
+    }
+
+    #[test]
+    fn create_action_follows_the_screen() {
+        let projects = layout("P", Nav::Projects, html! {}).into_string();
+        let bar = nav_html(&projects, "mobile-menu");
+        assert!(
+            bar.contains("aria-label=\"New project\"") && bar.contains("hx-get=\"/projects/new\"")
+        );
+        // The rail keeps the new-task action on every page.
+        assert!(projects.contains("aria-label=\"New task\""));
+        let tasks = layout("T", Nav::Tasks, html! {}).into_string();
+        assert!(nav_html(&tasks, "mobile-menu").contains("aria-label=\"New task\""));
     }
 
     #[test]
@@ -171,13 +216,35 @@ mod tests {
     fn task_list_on_a_phone_has_the_bottom_bar_and_no_rail_in_view() {
         let page = layout("T", Nav::Tasks, html! {}).into_string();
         let bar = nav_html(&page, "mobile-menu");
-        assert!(bar.contains("lg:hidden"), "bottom bar only below 1024 px");
-        for label in ["Tasks", "Log out"] {
+        assert!(bar.contains("md:hidden"), "bottom bar only below 768 px");
+        for label in ["Tasks", "Projects"] {
             assert!(bar.contains(label), "{label}");
         }
         assert!(bar.contains("aria-label=\"New task\""));
-        // The rail is hidden below 1024 px.
+        // The rail is hidden below 768 px.
         assert!(page.contains("class=\"sticky top-0 hidden h-dvh"), "{page}");
+    }
+
+    #[test]
+    fn the_bottom_bar_hides_on_the_transcript_screen_with_a_rule_that_beats_its_flex_utility() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        let bar = nav_html(&page, "mobile-menu");
+        // Same layer as `flex`, later in the sheet because it is a variant: it wins.
+        assert!(
+            bar.contains("flex") && bar.contains("[body[data-view=task]_&amp;]:hidden"),
+            "{bar}"
+        );
+        let css = crate::app_css().unwrap();
+        let rule = css.find("body[data-view=task]").map(|at| &css[at..]);
+        let utility = r"\[body\[data-view\=task\]_\&\]\:hidden";
+        let rule_at = css.find(utility).expect("variant rule in app.css");
+        assert!(css[rule_at..].starts_with(utility), "{rule:?}");
+        assert!(
+            css[rule_at..][..200].contains("display:none"),
+            "hidden by the rule"
+        );
+        // After the plain `.flex` utility in the stylesheet, so it overrides it.
+        assert!(css.find(".flex{").unwrap() < rule_at);
     }
 
     #[test]

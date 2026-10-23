@@ -11,20 +11,24 @@ pub mod icons;
 pub mod lists;
 pub mod overlay;
 pub mod shell;
+pub mod table;
 pub mod transcript;
 
 pub use actions::{
-    ButtonKind, ICON_BUTTON_CLASS, action_class, button, link_button, submit_button,
+    ButtonKind, ICON_BUTTON_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS, action_class, button,
+    link_button, submit_button,
 };
-pub use badges::{Tone, chip, filter_chip, status_badge, tone_badge};
+pub use badges::{Tone, chip, filter_chip, harness_label, status_badge, tone_badge};
 pub use forms::{
-    FormErrors, MenuItem, field, field_error, form_error, search_menu, select_field, text_field,
-    textarea_field,
+    FormErrors, MenuItem, field, field_error, form_error, readonly_field, search_menu,
+    select_field, text_field, textarea_field,
 };
-pub use icons::{Icon, icon};
-pub use lists::{definition_list, empty_state, scroll_box, section};
-pub use overlay::{details_panel, dialog};
-pub use shell::{avatar, bottom_bar, page_header, rail};
+pub use icons::{Icon, forge_icon, icon, logo};
+pub use lists::{EmptyPanel, EmptySize, definition_list, empty_panel, empty_state, section};
+pub use overlay::{DialogStyle, details_panel, dialog, dialog_close, dialog_with};
+pub use shell::{CreateAction, avatar, bottom_bar, initials, page_header, profile_menu, rail};
+pub use table::{Cell, data_table, td, th, tr};
+pub use transcript::QueuedState;
 
 #[cfg(test)]
 mod tests {
@@ -85,15 +89,18 @@ mod tests {
             "search_menu",
             "MenuItem",
             "dialog",
+            "dialog_with",
+            "dialog_close",
             "details_panel",
             "section",
             "definition_list",
             "empty_state",
-            "scroll_box",
+            "empty_panel",
             "user_message",
             "agent_message",
             "thought",
-            "pending_message",
+            "queued_message",
+            "run_divider",
             "tool_row",
             "code_block",
             "plan",
@@ -102,9 +109,17 @@ mod tests {
             "unreadable",
             "rail",
             "bottom_bar",
+            "CreateAction",
+            "data_table",
+            "ROUND_ACTION_CLASS",
+            "QueuedState",
+            "profile_menu",
+            "initials",
+            "logo",
             "page_header",
             "avatar",
             "icon",
+            "forge_icon",
         ];
         for name in components {
             assert!(
