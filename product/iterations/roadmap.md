@@ -19,7 +19,7 @@ flowchart LR
 | 1 | Thin vertical slice | [`iteration-1.md`](iteration-1.md) |
 | 1.1 | Operability | `openspec/changes/agent-session-logging`, `openspec/changes/otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | 2 | Closed Git boundary + human in the loop | [`iteration-2.md`](iteration-2.md), F1, ADR-0038 |
-| 3 | Team workflow | ADR-0026, ADR-0034, ADR-0033, ADR-0015, ADR-0016 |
+| 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
 | 4 | Configurable projects and tools | F9, F10, F11, ADR-0011, ADR-0032, ADR-0039 |
 | 5 | Visibility and memory | F8, ADR-0021, ADR-0040 |
 
@@ -50,6 +50,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 ## 3 — Team workflow
 
 - **Chats per (persona, project), `blocked_by` dependencies, project context document (ADR-0026).** Chats start with a simple summary-based compaction; plugin-based compaction (F3) stays in the backlog.
+- **Tasks based on another task's branch (ADR-0041):** `base_task` at task creation, prepare fast-forwards task branches without own commits to their base.
 - **Task tree, subtask branches and merging (ADR-0034)**, incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Sub-tasks with a progress bar and the sub-tasks with their status), and task rows with sub-tasks get a done/total chip (design canvas, "Later" row).
 - **Branch rewrites, fan-out and merge triggers (ADR-0033).**
 - **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
