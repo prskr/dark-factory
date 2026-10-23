@@ -131,6 +131,10 @@
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
   }
+  /* `accent-text` is too dark on the rail (2.5:1 in light); the accent fill reaches 12.8:1. */
+  .bg-rail :focus-visible {
+    outline-color: var(--accent);
+  }
   [x-cloak] {
     display: none !important;
   }

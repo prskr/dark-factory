@@ -603,9 +603,9 @@ async fn list_filters_by_status_group_and_project_and_keeps_them_in_the_urls() {
         assert!(default.contains(&format!(">{label}</a>")), "{label}");
     }
     assert!(default.contains("href=\"/tasks?status=done\""));
+    // Counts follow the status filter: WEB has no active task.
     assert!(
-        default.contains("data-search=\"website web · 2\"")
-            || default.contains("data-search=\"website web"),
+        default.contains("data-search=\"website web · 0\""),
         "{default}"
     );
 

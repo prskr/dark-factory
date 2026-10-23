@@ -161,6 +161,11 @@ mod tests {
             "message input takes its place"
         );
         assert!(css.contains("focus-visible"), "visible focus ring");
+        // The accent-text ring is too dark on the rail (2.5:1); the rail uses the accent fill.
+        assert!(
+            css.contains(".bg-rail :focus-visible{outline-color:var(--accent)}"),
+            "rail focus ring"
+        );
     }
 
     #[test]

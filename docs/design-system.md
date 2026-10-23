@@ -6,7 +6,7 @@ Reference for everything that renders in `crates/df-web`. New views (egress log,
 
 1. **Tokens, not colors.** A component never names a palette color (`bg-slate-900`). It uses a semantic token (`bg-panel`, `text-muted`). Both themes come from the same utilities.
 2. **One primary action per view.** Only the primary action is filled with the accent color. Everything else is secondary or ghost.
-3. **The accent is a fill, not a text color on light surfaces.** `#00ff41` has a contrast of 1.4:1 on white. Text, links and focus rings use `accent-text`.
+3. **The accent is a fill, not a text color on light surfaces.** `#00ff41` has a contrast of 1.4:1 on white. Text, links and focus rings use `accent-text`; on the rail the focus ring uses `accent`, because `accent-text` on `rail` is only 2.5:1.
 4. **Phone first, desktop enhanced.** Controls are at least 44 x 44 px below 1024 px (`min-h-11`), 36 px from there on. No hover-only interactions. No page-level horizontal scrolling; wide content scrolls in its own box.
 5. **Server-rendered, testable.** Components are maud functions. Each has an HTML unit test; pages are asserted as HTML.
 6. **Self-contained.** Fonts, icons, scripts and styles are served by the control plane; no third-party host.
@@ -104,7 +104,7 @@ Do: derive the badge from the status. Don't: invent a color for a new status; ma
 ### Forms
 
 - `FormErrors`: validation errors by field; the empty name is a message for the whole form.
-- `field(label, name, errors, hint, control)`, `text_field`, `textarea_field`, `select_field`: labelled controls with hint and error (`role=alert`). `INPUT_CLASS` is the shared control style.
+- `field(label, name, errors, hint, control)`, `text_field`, `textarea_field`, `select_field`: labelled controls with hint (`<name>-hint`) and error (`<name>-error`, `role=alert`); the control references both with `aria-describedby` and sets `aria-invalid` while the field has an error. `INPUT_CLASS` is the shared control style.
 - `form_error(errors)`: the form-wide message. `field_error(Option<&str>)`: the error of a field or input group.
 - `search_menu(button_label, items)` with `MenuItem { href, label, hint, current }`: a button that opens a list of links with a search field (Alpine; filtering happens in the browser over the rendered entries).
 

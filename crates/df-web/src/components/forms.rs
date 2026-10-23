@@ -49,8 +49,10 @@ pub fn field(
         div class="space-y-1" {
             label for=(name) class="block text-sm font-medium text-muted" { (label) }
             (control)
-            @if let Some(hint) = hint { p class="text-xs text-faint" { (hint) } }
-            (field_error(errors.get(name)))
+            @if let Some(hint) = hint { p id={(name) "-hint"} class="text-xs text-faint" { (hint) } }
+            @if let Some(error) = errors.get(name) {
+                p id={(name) "-error"} class="text-sm text-danger" role="alert" { (error) }
+            }
         }
     }
 }
@@ -75,7 +77,10 @@ pub fn text_field(
         name,
         errors,
         hint,
-        html! { input id=(name) name=(name) type="text" value=(value) class=(INPUT_CLASS); },
+        html! {
+            input id=(name) name=(name) type="text" value=(value) class=(INPUT_CLASS)
+                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)];
+        },
     )
 }
 
@@ -92,7 +97,10 @@ pub fn textarea_field(
         name,
         errors,
         None,
-        html! { textarea id=(name) name=(name) rows=(rows) class=(INPUT_CLASS) { (value) } },
+        html! {
+            textarea id=(name) name=(name) rows=(rows) class=(INPUT_CLASS)
+                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, false, errors)] { (value) }
+        },
     )
 }
 
@@ -111,7 +119,8 @@ pub fn select_field(
         errors,
         None,
         html! {
-            select id=(name) name=(name) class=(INPUT_CLASS) {
+            select id=(name) name=(name) class=(INPUT_CLASS)
+                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, false, errors)] {
                 @if let Some(empty) = empty_label { option value="" selected[selected.is_empty()] { (empty) } }
                 @for (value, text) in options {
                     option value=(value) selected[value == selected] { (text) }
@@ -171,6 +180,23 @@ pub fn search_menu(button_label: &str, items: &[MenuItem]) -> Markup {
     }
 }
 
+/// `aria-invalid` of a control: set while the field has an error.
+fn invalid(name: &str, errors: &FormErrors) -> Option<&'static str> {
+    errors.get(name).map(|_| "true")
+}
+
+/// `aria-describedby` of a control: the ids of its hint and error that [`field`] renders.
+fn described_by(name: &str, has_hint: bool, errors: &FormErrors) -> Option<String> {
+    let ids: Vec<String> = [
+        has_hint.then(|| format!("{name}-hint")),
+        errors.get(name).map(|_| format!("{name}-error")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!ids.is_empty()).then(|| ids.join(" "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +210,36 @@ mod tests {
         assert!(html.contains("value=\"x&lt;y\"") && html.contains("Short."));
         assert!(html.contains("role=\"alert\"") && html.contains("Name is required."));
         assert!(html.contains("min-h-11"));
+    }
+
+    #[test]
+    fn controls_reference_their_hint_and_error() {
+        let mut errors = FormErrors::default();
+        errors.add("name", "Name is required.");
+        let html = text_field("Name", "name", "", &errors, Some("Short.")).into_string();
+        assert!(html.contains("aria-invalid=\"true\""), "{html}");
+        assert!(
+            html.contains("aria-describedby=\"name-hint name-error\""),
+            "{html}"
+        );
+        assert!(html.contains("id=\"name-hint\"") && html.contains("id=\"name-error\""));
+
+        let clean = text_field("Name", "name", "", &FormErrors::default(), None).into_string();
+        assert!(!clean.contains("aria-invalid") && !clean.contains("aria-describedby"));
+
+        let options = vec![("a".to_string(), "A".to_string())];
+        let mut errors = FormErrors::default();
+        errors.add("n", "Pick one.");
+        let select = select_field("L", "n", &options, "a", None, &errors).into_string();
+        assert!(
+            select.contains("aria-describedby=\"n-error\"")
+                && select.contains("aria-invalid=\"true\"")
+        );
+        let area = textarea_field("P", "p", "", 3, &errors).into_string();
+        assert!(
+            !area.contains("aria-invalid"),
+            "error of another field: {area}"
+        );
     }
 
     #[test]

@@ -44,5 +44,5 @@
 
 ## 8. Integration checks
 
-- [x] 8.1 Verify `cargo clippy --all-targets -- -D warnings`, `cargo test -p df-web -p df-db -p df-core -p df-agent-channel`, the Bazel targets of these crates and `cargo llvm-cov -p df-web` ≥ 70 % line coverage
+- [x] 8.1 Verify `cargo clippy --all-targets -- -D warnings`, `cargo test -p df-web -p df-db -p df-core -p df-agent-channel`, the Bazel targets of these crates and `cargo llvm-cov -p df-web` ≥ 70 % line coverage (Bazel: the container-backed `df_web_test` and `df_db_test` cases need the socket; all five targets passed on 2026-10-23 with `--test_env=DOCKER_HOST=unix:///run/user/501/podman/podman.sock --sandbox_writable_path=/run/user/501/podman`)
 - [ ] 8.2 Check desktop (1440 and 1100 px) and phone (390 px) in a real browser in light and dark mode against the mockup: navigation, task switching, filters, composer, rename, details sheet, reconnect after sleep; record the result in the PR description
