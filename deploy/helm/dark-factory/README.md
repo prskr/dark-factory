@@ -51,6 +51,8 @@ Every key in `values.yaml` is documented below:
 | `oidc.clientSecretKey` | `string` | `"client-secret"` | Key within `oidc.existingSecret` holding the OIDC client secret. |
 | `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/keycloak.md`. |
 | `oidc.rolesClaim` | `string` | `"roles"` | Token claim with the flat role list; the UI requires the role `board-member`. |
+| `logging.format` | `text`/`json` | `text` | `DF_LOG_FORMAT` of the control plane, gateway and migrate job (`json`: one JSON object per line). The control plane sets the same format in every sandbox. Other values fail schema validation. |
+| `sandbox.logLevel` | `string` | `info` | Rendered as `sandbox.logLevel` in the instance config; the control plane sets it as `RUST_LOG` of every sandbox. DEBUG adds agent message chunks. |
 | `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. |
 | `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. |
@@ -81,6 +83,7 @@ Every key in `values.yaml` is documented below:
 | `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a release-prefixed read-only `ClusterRole`/`ClusterRoleBinding` for `services` and `endpointslices`. |
 | `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s are created when `anyNamespace` is `false`. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
+| `controlPlane.logLevel` | `string` | `info` | `RUST_LOG` (`EnvFilter` syntax, e.g. `info,df_web=debug`) of the control plane and the migrate job. |
 | `controlPlane.serviceAccountName` | `string` | `""` | Optional override for the control plane `ServiceAccount` name. |
 | `controlPlane.ports.http` | `int` | `8080` | Control plane UI and health HTTP port (`/healthz`, `/readyz`). |
 | `controlPlane.ports.agent` | `int` | `9443` | Control plane agent mTLS gRPC port. |
@@ -95,6 +98,7 @@ Every key in `values.yaml` is documented below:
 | `gateway.ports.internalGrpc` | `int` | `9444` | Gateway internal gRPC port (`Tail`, mTLS). |
 | `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`; ready after the first policy snapshot). |
 | `gateway.bufferSize` | `int` | `10000` | Flow events of the live egress log kept in memory per gateway pod. |
+| `gateway.logLevel` | `string` | `info` | `RUST_LOG` of the gateway. |
 | `gateway.blockedCidrs` | `list` | `[]` | Pod and Service CIDRs the proxy refuses as destinations, on top of the built-in private, loopback, link-local, CGNAT and unique-local ranges. |
 | `gateway.resources.requests.cpu` | `string` | `"100m"` | Gateway CPU request. |
 | `gateway.resources.requests.memory` | `string` | `"128Mi"` | Gateway memory request. |

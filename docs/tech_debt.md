@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-52.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-55.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -16,6 +16,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-45 to TD-47: code review of `ui-polish` (`df-web`, `df-agent-channel`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-49 to TD-50: code review of `iter1-egress-gateway` (`df-gateway`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-51: first cluster run of `iter1-egress-gateway` (2026-10-24).
+- Origin of TD-52 to TD-54: code review of `agent-session-logging` (`factory-agent`, `dark-factory`, `df-k8s`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -71,6 +72,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-49 | low   | `df-gateway` reasons | Flow reasons and rule scopes are scattered string literals |
 | TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
+| TD-52 | medium | `factory-agent` logging | Tool call `input` is logged at INFO and can carry credentials the agent typed |
+| TD-53 | low   | `dark-factory` / `factory-agent` logging | `LogFormat`, filter resolution and `build()` duplicated in both binaries |
+| TD-54 | low   | `df-k8s` config | Sandbox log format stored as `String`, default `"text"` repeated |
 
 ## Entries
 
@@ -506,6 +510,36 @@ The resolver uses `LookupIpStrategy::Ipv4thenIpv6` because the first cluster has
 **Matters when:** the cluster nodes get IPv6 egress and IPv6 should be preferred, or a host's first address is unreachable.
 
 **Fix:** Add a `gateway.ipFamily` setting (`ipv4First` default, `ipv6First`, `ipv4Only`, `ipv6Only`) that maps to the hickory strategy, rendered by the chart and documented in the df-gateway README configuration table. Make the dial try the remaining resolved addresses in order (each under the upstream timeout budget) before it reports `upstream-failed`.
+
+### TD-52 (S1). Tool call input can carry credentials
+
+`crates/factory-agent/src/runner.rs` (`log_outbound`, `ToolCall` arm)
+
+The spec requires the raw tool input (cut to 512 bytes) in the INFO `tool call` event. An agent command such as `curl -H "Authorization: …"` or `git clone https://user:tok@…` puts the token in the pod log at the default level. Accepted as a risk in the `agent-session-logging` design.
+
+**Matters when:** pod logs are shipped to a store with wider access than the sandbox, or an agent handles long-lived credentials.
+
+**Fix:** Spec change first: redact credential-looking patterns (auth headers, userinfo in URLs, `token=`) before logging, or log `input` at DEBUG only. Add a test with a token in the input.
+
+### TD-53 (S4). Logging setup duplicated in both binaries
+
+`crates/dark-factory/src/logging.rs`, `crates/factory-agent/src/logging.rs`
+
+`LogFormat`, `resolve_filter`, `build()`, the test sink and the invalid-level test are copied nearly word for word. The dark-factory tests also hand-build the buffer that factory-agent's `testing::buffer()` provides.
+
+**Matters when:** the log format or level handling changes again; the copies drift.
+
+**Fix:** One small shared module (e.g. a `df-logging` crate without a df-core dependency) used by both binaries, together with TD-54.
+
+### TD-54 (S5). Sandbox log format is a string
+
+`crates/df-k8s/src/config.rs` (`ProvisioningConfig::log_format`, `with_log_format`), `crates/dark-factory/src/main.rs`
+
+The control plane turns its `LogFormat` enum into a string; df-k8s stores any string and repeats the `"text"` default from the clap `default_value`.
+
+**Matters when:** a format is added or renamed; an invalid value only fails inside the sandbox.
+
+**Fix:** Pass the shared `LogFormat` enum (TD-53) to df-k8s and render `as_str()` only where `DF_LOG_FORMAT` is set.
 
 ## Accepted decisions
 

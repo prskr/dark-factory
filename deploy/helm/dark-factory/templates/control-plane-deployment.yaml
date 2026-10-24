@@ -38,6 +38,11 @@ spec:
         - name: control-plane
           image: {{ include "dark-factory.controlPlane.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DF_LOG_FORMAT
+              value: {{ .Values.logging.format | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.controlPlane.logLevel | quote }}
           args:
             - "--config"
             - "/etc/dark-factory/config.yaml"

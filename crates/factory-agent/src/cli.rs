@@ -2,6 +2,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::logging::LogFormat;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "factory-agent",
@@ -9,6 +11,17 @@ use clap::{Parser, Subcommand};
     about = "Dark Factory sandbox runtime"
 )]
 pub struct Cli {
+    /// Log output format.
+    #[arg(
+        long,
+        global = true,
+        env = "DF_LOG_FORMAT",
+        value_name = "DF_LOG_FORMAT",
+        value_enum,
+        default_value = "text"
+    )]
+    pub log_format: LogFormat,
+
     #[command(subcommand)]
     pub command: Command,
 }

@@ -35,6 +35,7 @@ An empty string for `storageClass` or `runtimeClassName` counts as unset.
 | `sandbox.runtimeImage` | no | `ghcr.io/prskr/dark-factory/runtime:0.1.0` | Runtime image delivered to `/opt/factory`. |
 | `sandbox.runtimeDelivery` | no | `imageVolume` | `imageVolume` or `initContainer`. |
 | `sandbox.clusterDomain` | no | `cluster.local` | Cluster DNS domain for Service FQDN host aliases. |
+| `sandbox.logLevel` | no | `info` | `RUST_LOG` directive set in the sandbox runtime's environment. Passed on as is; the runtime falls back to `info` (with a warning) for an invalid value. |
 | `sandbox.controlPlaneIp` | no | resolved | ClusterIP sandboxes use to reach the agent port. Unset: resolved from the control plane Service at startup. |
 | `sandbox.gatewayIp` | no | resolved | ClusterIP of the egress gateway proxy. Unset: resolved from the gateway Service at startup. |
 | `sandbox.controlPlaneServiceName` | no (the chart sets it) | fallback list | Service to resolve the control plane IP from. **Fallback when unset:** tries `<instanceName>-control-plane`, then `dark-factory-control-plane`, in `sandbox.instanceNamespace`. |
@@ -42,6 +43,8 @@ An empty string for `storageClass` or `runtimeClassName` counts as unset.
 | `sandbox.controlPlaneTlsServerName` | no (the chart sets it) | `<instanceName>-control-plane` | Server name sandboxes verify on the agent endpoint. It must be a DNS name of the control plane certificate. |
 | `clusterTargets.anyNamespace` | no | `false` | The control plane may read Services and EndpointSlices in every namespace. |
 | `clusterTargets.namespaces` | no | `[]` | Namespaces it may read when `anyNamespace` is `false`. |
+
+The sandbox also gets `DF_LOG_FORMAT`, set to the control plane's own log format (`text` or `json`), next to `RUST_LOG` from `sandbox.logLevel`. See `docs/logging.md`.
 
 The chart always sets the three name keys from the release's `fullname`; the fallbacks only matter for hand-written configs.
 

@@ -90,7 +90,7 @@ The sandbox runtime SHALL write an INFO event `tool call` with `turn_id`, `tool_
 - **THEN** the pod log contains a tool call event followed by a tool call status changed event with status `completed`
 
 ### Requirement: Notices and message chunks
-Notices SHALL be logged with `code` and `message` at WARN for warning and error notices and at INFO otherwise. Agent message chunks and agent thought chunks SHALL be logged at DEBUG only, with `turn_id`, `message_id` and their text.
+Notices SHALL be logged with `code` and `message` at WARN for warning and error notices and at INFO otherwise. Agent message chunks and agent thought chunks SHALL be logged at DEBUG only, with `turn_id`, `message_id` and their text, cut to at most 512 bytes on a UTF-8 character boundary, with a `text_truncated=true` field when it was cut.
 
 #### Scenario: Message chunks hidden at INFO
 - **WHEN** the harness streams agent message chunks and the sandbox runs at `info`
@@ -101,11 +101,15 @@ Notices SHALL be logged with `code` and `message` at WARN for warning and error 
 - **THEN** each agent message chunk is logged with its `message_id` and text
 
 ### Requirement: Bounded and secret-free session logs
-The tool call `input` field SHALL be the tool's raw input as JSON, cut to at most 512 bytes on a UTF-8 character boundary, with a `input_truncated=true` field when it was cut. Tool raw output, tool content, prompt content, credentials and harness credentials SHALL NOT be logged at any level.
+The tool call `input` field SHALL be the tool's raw input as JSON, cut to at most 512 bytes on a UTF-8 character boundary, with a `input_truncated=true` field when it was cut. Agent message and thought chunk text SHALL be cut the same way (`text_truncated=true`). Tool raw output, tool content, prompt content, credentials and harness credentials SHALL NOT be logged at any level.
 
 #### Scenario: Long tool input
 - **WHEN** the harness reports a tool call whose raw input is 10 KiB
 - **THEN** the logged `input` is at most 512 bytes and `input_truncated` is `true`
+
+#### Scenario: Long chunk text
+- **WHEN** the sandbox runs at DEBUG and the harness streams an agent message chunk whose text is 5 KiB
+- **THEN** the logged `text` is at most 512 bytes and `text_truncated` is `true`
 
 #### Scenario: Tool output not logged
 - **WHEN** a tool call update carries raw output

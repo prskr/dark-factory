@@ -26,9 +26,9 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
 
 mod forge;
+mod logging;
 mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
@@ -53,6 +53,17 @@ pub struct Cli {
     )]
     pub config: PathBuf,
 
+    /// Log output format.
+    #[arg(
+        long,
+        global = true,
+        env = "DF_LOG_FORMAT",
+        value_name = "DF_LOG_FORMAT",
+        value_enum,
+        default_value = "text"
+    )]
+    pub log_format: logging::LogFormat,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -72,29 +83,23 @@ pub enum Command {
     Gateway,
 }
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .init();
-}
-
 #[tokio::main]
 async fn main() -> ExitCode {
     // Ignored on purpose: an already installed provider is fine.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    init_tracing();
     let cli = Cli::parse();
+    logging::init_tracing(cli.log_format);
 
     match cli.command {
-        Command::Serve { no_cluster } => match run_serve_command(&cli.config, no_cluster).await {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(err) => {
-                error!(error = format!("{err:#}"), "control plane server failed");
-                ExitCode::from(1)
+        Command::Serve { no_cluster } => {
+            match run_serve_command(&cli.config, no_cluster, cli.log_format).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    error!(error = format!("{err:#}"), "control plane server failed");
+                    ExitCode::from(1)
+                }
             }
-        },
+        }
         Command::Migrate => match run_migrate_command(&cli.config).await {
             Ok(()) => {
                 info!("database migration completed successfully");
@@ -240,6 +245,8 @@ impl SandboxBackend for UnconfiguredBackend {
 /// Sandboxes as agent-sandbox resources in the connected Kubernetes cluster.
 struct KubernetesBackend {
     client: Client,
+    /// The control plane's own log format, passed on to every sandbox.
+    log_format: logging::LogFormat,
 }
 
 #[async_trait::async_trait]
@@ -252,6 +259,7 @@ impl SandboxBackend for KubernetesBackend {
         stop: watch::Receiver<bool>,
     ) -> anyhow::Result<SandboxWiring> {
         let kube_client = self.client;
+        let log_format = self.log_format;
         verify_startup(
             &kube_client,
             &cfg.sandbox.provisioning.namespace,
@@ -283,7 +291,8 @@ impl SandboxBackend for KubernetesBackend {
                 ip: gw_ip,
                 proxy_port: cfg.gateway.proxy_port,
             },
-        );
+        )
+        .with_log_format(log_format.as_str());
 
         let secrets: Arc<dyn df_core::SecretStore> = Arc::new(K8sSecretStore::new(
             kube_client.clone(),
@@ -400,7 +409,11 @@ async fn run_migrate_command(config_path: &std::path::Path) -> anyhow::Result<()
     Ok(())
 }
 
-async fn run_serve_command(config_path: &std::path::Path, no_cluster: bool) -> anyhow::Result<()> {
+async fn run_serve_command(
+    config_path: &std::path::Path,
+    no_cluster: bool,
+    log_format: logging::LogFormat,
+) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
     let http_listener = bind_listener(cfg.server.http_port).await?;
     let agent_listener = bind_listener(cfg.server.agent_port).await?;
@@ -422,7 +435,7 @@ async fn run_serve_command(config_path: &std::path::Path, no_cluster: bool) -> a
         .context("failed to initialize Kubernetes client")?;
     serve(
         cfg,
-        KubernetesBackend { client },
+        KubernetesBackend { client, log_format },
         http_listener,
         agent_listener,
         internal_listener,
@@ -874,6 +887,21 @@ mod tests {
         assert_eq!(cli.command, Command::Serve { no_cluster: true });
     }
 
+    #[test]
+    fn log_format_defaults_to_text_and_rejects_unknown_values() {
+        let cli = Cli::try_parse_from(["dark-factory", "serve"]).unwrap();
+        assert_eq!(cli.log_format, logging::LogFormat::Text);
+        let cli = Cli::try_parse_from(["dark-factory", "--log-format", "json", "serve"]).unwrap();
+        assert_eq!(cli.log_format, logging::LogFormat::Json);
+        let err = Cli::try_parse_from(["dark-factory", "--log-format", "logfmt", "serve"])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("DF_LOG_FORMAT") && err.contains("text") && err.contains("json"),
+            "{err}"
+        );
+    }
+
     async fn ui_response(router: axum::Router, request: &str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1128,7 +1156,10 @@ mod tests {
         let [http, agent, internal] = bind_three().await?;
         let err = serve(
             cfg,
-            KubernetesBackend { client: sa_client },
+            KubernetesBackend {
+                client: sa_client,
+                log_format: logging::LogFormat::Text,
+            },
             http,
             agent,
             internal,
@@ -1167,7 +1198,10 @@ mod tests {
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let control_plane = tokio::spawn(serve(
             cfg,
-            KubernetesBackend { client: sa_client },
+            KubernetesBackend {
+                client: sa_client,
+                log_format: logging::LogFormat::Text,
+            },
             http,
             agent,
             internal,

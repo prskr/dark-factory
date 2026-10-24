@@ -617,3 +617,91 @@ tests:
           path: data["config.yaml"]
           pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
         documentIndex: 0
+
+  - it: rejects an unknown logging.format
+    template: control-plane-deployment.yaml
+    set:
+      logging.format: logfmt
+    asserts:
+      - failedTemplate: {}
+
+  - it: logs as text at info by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DF_LOG_FORMAT
+            value: text
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RUST_LOG
+            value: info
+
+  - it: sets JSON logging on the control plane, gateway and migrate containers
+    set:
+      logging.format: json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DF_LOG_FORMAT
+            value: json
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DF_LOG_FORMAT
+            value: json
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DF_LOG_FORMAT
+            value: json
+        template: migrate-job.yaml
+
+  - it: sets the gateway log level independently of the control plane
+    set:
+      gateway.logLevel: debug
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RUST_LOG
+            value: debug
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RUST_LOG
+            value: info
+        template: control-plane-deployment.yaml
+
+  - it: sets the control plane log level on the control plane and migrate containers
+    set:
+      controlPlane.logLevel: warn
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RUST_LOG
+            value: warn
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RUST_LOG
+            value: warn
+        template: migrate-job.yaml
+
+  - it: renders the sandbox log level into the instance config
+    template: configmap.yaml
+    set:
+      sandbox.logLevel: debug
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'logLevel: "debug"'
+        documentIndex: 0

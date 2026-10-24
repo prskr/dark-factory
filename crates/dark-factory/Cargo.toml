@@ -33,6 +33,7 @@ tokio-util.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 df-agent-channel = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 sqlx.workspace = true

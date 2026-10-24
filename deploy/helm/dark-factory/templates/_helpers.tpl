@@ -158,6 +158,7 @@ The `sandbox:` section of the instance configuration (shared by the config and m
 */}}
 {{- define "dark-factory.sandboxConfig" -}}
 sandbox:
+  logLevel: {{ .Values.sandbox.logLevel | quote }}
   namespace: {{ .Values.sandboxNamespace.name | quote }}
   instanceNamespace: {{ .Release.Namespace | quote }}
   serviceAccountName: {{ .Values.sandboxNamespace.serviceAccountName | quote }}

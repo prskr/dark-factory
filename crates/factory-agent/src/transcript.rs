@@ -34,15 +34,20 @@ pub const MAX_RAW_IO_BYTES: usize = 64 * 1024;
 ///
 /// Returns `(truncated_str, was_truncated)`.
 pub fn truncate_raw_io(s: &str) -> (String, bool) {
-    if s.len() <= MAX_RAW_IO_BYTES {
-        (s.to_string(), false)
-    } else {
-        let mut end = MAX_RAW_IO_BYTES;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        (s[..end].to_string(), true)
+    let (kept, truncated) = truncate_utf8(s, MAX_RAW_IO_BYTES);
+    (kept.to_string(), truncated)
+}
+
+/// Cuts `s` to at most `max` bytes on a UTF-8 character boundary.
+pub fn truncate_utf8(s: &str, max: usize) -> (&str, bool) {
+    if s.len() <= max {
+        return (s, false);
     }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&s[..end], true)
 }
 
 fn map_status(status: AcpToolCallStatus) -> ToolCallStatus {

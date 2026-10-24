@@ -35,3 +35,11 @@ rust_test(
     ),
     deps = all_crate_deps(normal_dev = True),
 )
+
+rust_test(
+    name = "cli_test",
+    srcs = ["tests/cli.rs"],
+    data = [":factory-agent"],
+    edition = "2024",
+    env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
+)

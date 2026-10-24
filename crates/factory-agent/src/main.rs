@@ -11,6 +11,7 @@ pub mod connection;
 pub mod fs_util;
 pub mod git;
 pub mod harness;
+pub mod logging;
 pub mod mcp;
 pub mod outbox;
 pub mod runner;
@@ -38,7 +39,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => {
-            tracing_subscriber::fmt::init();
+            logging::init_tracing(cli.log_format);
             let config = match config::RuntimeConfig::from_env() {
                 Ok(c) => c,
                 Err(e) => {
@@ -126,6 +127,8 @@ async fn main() -> ExitCode {
                 }
             };
 
+            log_assigned(&assign);
+
             {
                 let mut ob = outbox.lock().await;
                 if ob.run_state().run_id != assign.run_id
@@ -201,4 +204,13 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
     }
+}
+
+/// Logs the run assignment (ids only).
+fn log_assigned(assign: &df_proto::agent::v1::Assign) {
+    tracing::info!(
+        run_id = %assign.run_id,
+        task_key = %assign.task.as_ref().map(|t| t.task_key.as_str()).unwrap_or_default(),
+        "run assigned"
+    );
 }
