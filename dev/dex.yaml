@@ -1,0 +1,38 @@
+# Dex for local development only (compose.yml). Both users log in with the password `password`:
+# admin@example.com has the role `board-member`, viewer@example.com has none (403 page).
+issuer: http://127.0.0.1:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: dark-factory
+    name: Dark Factory (local)
+    # Same value as target/local-dev/oidc-client-secret, written by `just serve-local`.
+    secret: local-dev-secret
+    redirectURIs:
+      - http://127.0.0.1:8080/auth/callback
+    postLogoutRedirectURIs:
+      - http://127.0.0.1:8080/
+
+enablePasswordDB: true
+staticPasswords:
+  # bcrypt hash of "password" (Dex examples/config-dev.yaml)
+  - email: admin@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: admin
+    name: Local Admin
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+    groups:
+      - board-member
+  - email: viewer@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: viewer
+    name: Local Viewer
+    userID: 5f0e2a8c-7f3b-4c1e-9a52-2d6b1f0c9e41

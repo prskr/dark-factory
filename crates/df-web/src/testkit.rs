@@ -230,6 +230,7 @@ impl TestApp {
             client_secret_file: secret_file,
             public_url: "https://factory.test".into(),
             roles_claim: "roles".into(),
+            extra_scopes: Vec::new(),
         };
         let state = WebState {
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),

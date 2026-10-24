@@ -1,0 +1,34 @@
+# Instance configuration for `just serve-local` (dark-factory serve --no-cluster). Paths are relative
+# to the repository root; `just serve-local` writes the files under target/local-dev.
+instanceName: local-dev
+database:
+  host: 127.0.0.1
+  port: 5432
+  database: dark_factory
+  user: postgres
+  passwordFile: target/local-dev/owner-password
+  schema: dark_factory
+  maxConnections: 10
+  migrate:
+    appRole: dark_factory_app
+    manageAppRole: true
+    appPasswordFile: target/local-dev/app-password
+sandbox:
+  namespace: dark-factory-sandboxes
+  instanceNamespace: dark-factory
+agent:
+  # Throwaway self-signed certificate; no sandbox connects locally.
+  tls:
+    certFile: target/local-dev/agent.crt
+    keyFile: target/local-dev/agent.key
+    clientCaFile: target/local-dev/agent.crt
+plugins:
+  forgejo:
+    path: target/wasm32-wasip2/debug/forgejo_plugin.wasm
+auth:
+  issuerUrl: http://127.0.0.1:5556/dex
+  clientId: dark-factory
+  clientSecretFile: target/local-dev/oidc-client-secret
+  publicUrl: http://127.0.0.1:8080
+  rolesClaim: groups
+  extraScopes: [groups, offline_access]

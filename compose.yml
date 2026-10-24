@@ -1,0 +1,20 @@
+# Local services for running dark-factory by hand (`just db`, `just serve-local`), see
+# docs/development.md. Tests do not use them: they start their own PostgreSQL through testcontainers.
+services:
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dark_factory
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  # OIDC provider for the web UI with static users (dev/dex.yaml).
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dev/dex.yaml:/etc/dex/config.yaml:ro,z
+    ports:
+      - "127.0.0.1:5556:5556"

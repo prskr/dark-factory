@@ -89,6 +89,7 @@ pub struct OidcClient {
     redirect: RedirectUrl,
     public_url: String,
     roles_claim: String,
+    extra_scopes: Vec<String>,
     http: reqwest::Client,
 }
 
@@ -114,8 +115,15 @@ impl OidcClient {
                 .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?,
             public_url,
             roles_claim: cfg.roles_claim.clone(),
+            extra_scopes: cfg.extra_scopes.clone(),
             http,
         })
+    }
+
+    /// Whether the session cookie gets the `Secure` flag: always, unless `publicUrl` is plain
+    /// `http://` (local development without TLS).
+    pub fn secure_cookies(&self) -> bool {
+        self.redirect.url().scheme() != "http"
     }
 
     async fn discover(&self) -> Result<ProviderMetadataWithLogout, OidcError> {
@@ -145,6 +153,7 @@ impl OidcClient {
             )
             .add_scope(Scope::new("openid".into()))
             .add_scope(Scope::new("profile".into()))
+            .add_scopes(self.extra_scopes.iter().cloned().map(Scope::new))
             .set_pkce_challenge(challenge)
             .url();
         Ok((
@@ -306,6 +315,57 @@ mod tests {
         assert_eq!(roles_from_payload(&p, "one"), ["solo"]);
         assert!(roles_from_payload(&p, "n").is_empty());
         assert!(roles_from_payload(&p, "missing").is_empty());
+    }
+
+    #[tokio::test]
+    async fn authorize_requests_the_extra_scopes() {
+        let idp = crate::testkit::Idp::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let secret_file = dir.path().join("secret");
+        std::fs::write(&secret_file, "s3cret\n").unwrap();
+        let client = OidcClient::new(&AuthConfig {
+            issuer_url: idp.server.uri(),
+            client_id: "dark-factory".into(),
+            client_secret_file: secret_file,
+            public_url: "https://factory.test".into(),
+            roles_claim: "groups".into(),
+            extra_scopes: vec!["groups".into(), "offline_access".into()],
+        })
+        .unwrap();
+
+        let (url, _) = client.authorize("/tasks").await.unwrap();
+
+        let scope = url
+            .query_pairs()
+            .find(|(k, _)| k == "scope")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        let scopes: Vec<&str> = scope.split(' ').collect();
+        assert!(
+            scopes.ends_with(&["profile", "groups", "offline_access"]),
+            "{scope}"
+        );
+    }
+
+    #[test]
+    fn cookies_are_secure_unless_the_public_url_is_plain_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let secret_file = dir.path().join("secret");
+        std::fs::write(&secret_file, "s3cret\n").unwrap();
+        let client = |public_url: &str| {
+            OidcClient::new(&AuthConfig {
+                issuer_url: "https://idp.test".into(),
+                client_id: "dark-factory".into(),
+                client_secret_file: secret_file.clone(),
+                public_url: public_url.into(),
+                roles_claim: "roles".into(),
+                extra_scopes: Vec::new(),
+            })
+            .unwrap()
+        };
+        assert!(client("https://factory.test").secure_cookies());
+        assert!(client("HTTPS://factory.test").secure_cookies());
+        assert!(!client("http://127.0.0.1:8080").secure_cookies());
     }
 
     #[test]

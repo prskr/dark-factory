@@ -27,15 +27,25 @@ tools:
     bazel run //:bazel_env
     LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install
 
-# Local PostgreSQL 17 on :5432 for `sqlx-prepare`, `migrate` and running dark-factory by hand. Tests do not use it.
+# Local services from compose.yml: PostgreSQL 17 on :5432 and Dex (OIDC) on :5556. Tests do not use them.
 db:
-    {{container}} start dark-factory-pg 2>/dev/null || {{container}} run -d --name dark-factory-pg \
-        -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=dark_factory \
-        -p 5432:5432 docker.io/library/postgres:17-alpine
+    {{container}} compose up -d
+    until {{container}} compose exec postgres pg_isready -q -U postgres 2>/dev/null; do sleep 1; done
 
-# Stop and remove the local PostgreSQL container
+# Stop and remove the local services and their data
 db-rm:
-    {{container}} rm -f dark-factory-pg
+    {{container}} compose down -v
+
+# Run the control plane with the web UI on http://127.0.0.1:8080 without a Kubernetes cluster (login: admin@example.com / password)
+serve-local: db plugins
+    mkdir -p target/local-dev
+    printf 'postgres\n' > target/local-dev/owner-password
+    printf 'app-local-password\n' > target/local-dev/app-password
+    printf 'local-dev-secret\n' > target/local-dev/oidc-client-secret
+    [ -f target/local-dev/agent.crt ] || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+        -days 365 -subj /CN=localhost -keyout target/local-dev/agent.key -out target/local-dev/agent.crt 2>/dev/null
+    cargo run -p dark-factory -- --config dev/config.yaml migrate
+    cargo run -p dark-factory -- --config dev/config.yaml serve --no-cluster
 
 # Remove the shared test PostgreSQL containers that testcontainers keeps running between test runs
 test-db-rm:
