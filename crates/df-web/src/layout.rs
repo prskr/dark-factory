@@ -12,6 +12,10 @@ pub enum Nav {
     Projects,
     Personas,
     Credentials,
+    /// Egress allowlist (desktop only).
+    Allowlist,
+    /// Live egress log (desktop only).
+    EgressLog,
     /// Pages outside the navigation (login errors, 403).
     None,
 }
@@ -118,11 +122,18 @@ mod tests {
         let mobile = nav_html(&page, "mobile-menu");
         assert!(mobile.contains("href=\"/tasks\"") && mobile.contains("href=\"/projects\""));
         assert!(mobile.contains("min-h-11"), "{mobile}");
-        for hidden in ["/personas", "/credentials", "logout"] {
+        for hidden in ["/personas", "/credentials", "/egress", "logout"] {
             assert!(!mobile.contains(hidden), "{hidden} in mobile menu");
         }
         let desktop = nav_html(&page, "desktop-menu");
-        for shown in ["/tasks", "/projects", "/personas", "/credentials"] {
+        for shown in [
+            "/tasks",
+            "/projects",
+            "/personas",
+            "/credentials",
+            "/egress/allowlist",
+            "/egress/log",
+        ] {
             assert!(desktop.contains(shown), "{shown} missing on desktop");
         }
     }

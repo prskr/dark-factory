@@ -1,0 +1,149 @@
+// Dark Factory gateway link, v1 (iter1-egress-gateway design D1).
+//
+// Internal gRPC API between the control plane and the egress gateway pods, both directions on
+// the internal port (9444) with mutual TLS; peers authenticate with certificates issued by the
+// instance CA.
+//
+//   * GatewayPolicy (served by the control plane): the gateway opens PolicyWatch and receives
+//     the sandbox registry and every run's effective allowlist. Every update is a full snapshot.
+//   * GatewayLog (served by each gateway pod): the control plane opens Tail to read the flow
+//     events of the egress proxy, buffered ones first, then live ones.
+//
+// Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
+// gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
+// snapshot while it has none.
+
+syntax = "proto3";
+
+package darkfactory.gateway.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+service GatewayPolicy {
+  // Streams a full snapshot on connect and a new one after every relevant change.
+  rpc PolicyWatch(PolicyWatchRequest) returns (stream PolicyUpdate);
+}
+
+service GatewayLog {
+  // Streams the buffered events matching the filter, then live events until the client leaves.
+  rpc Tail(TailRequest) returns (stream FlowEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Policy
+// ---------------------------------------------------------------------------
+
+message PolicyWatchRequest {
+  // Name of the calling gateway pod, for logs.
+  string gateway_pod = 1;
+}
+
+message PolicyUpdate {
+  uint64 version = 1;
+  Snapshot snapshot = 2;
+}
+
+message Snapshot {
+  repeated SandboxEntry sandboxes = 1;
+}
+
+// An active sandbox: where its traffic comes from and what it may reach.
+message SandboxEntry {
+  string pod_ip = 1;
+  string run_id = 2;
+  string task_key = 3;
+  string project_key = 4;
+  string persona_id = 5;
+  repeated HostRule hosts = 6;
+}
+
+message HostRule {
+  // Hostname or `*.suffix`.
+  string pattern = 1;
+  uint32 port = 2;
+  // `instance` or `project`.
+  string scope = 3;
+  string entry_id = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Flow log
+// ---------------------------------------------------------------------------
+
+message TailRequest {
+  // Only events matching every set field are sent; an empty filter matches all.
+  FlowFilter filter = 1;
+}
+
+message FlowFilter {
+  Verdict verdict = 1;
+  string project_key = 2;
+  string task_key = 3;
+  string persona_id = 4;
+  // Substring of the requested host.
+  string host = 5;
+}
+
+// Which end of a connection an event records. A tunnel or plain HTTP exchange that was carried
+// out records an `OPENED` event once the destination is connected and a `CLOSED` event when it
+// ends. A denied request records only the `CLOSED` event.
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_OPENED = 1;
+  PHASE_CLOSED = 2;
+}
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_ALLOWED = 1;
+  VERDICT_DENIED = 2;
+}
+
+// One proxy request. Two markers carry no request: `gap` tells a viewer that its stream lagged
+// and events were dropped, `backlog_end` follows the last buffered event of a Tail stream (live
+// events come after it).
+message FlowEvent {
+  // When the event was recorded (the opening or the end of the connection).
+  google.protobuf.Timestamp time = 1;
+  string gateway_pod = 2;
+  string source_ip = 3;
+  string run_id = 4;
+  string task_key = 5;
+  string project_key = 6;
+  string persona_id = 7;
+  // `CONNECT` or the HTTP method.
+  string method = 8;
+  string host = 9;
+  uint32 port = 10;
+  string sni = 11;
+  Verdict verdict = 12;
+  // Empty for requests that were carried out. Otherwise:
+  //   `no-snapshot`           the gateway has no policy yet (503)
+  //   `unknown-source`        the source IP is no active sandbox (403), also for a tunnel whose
+  //                           sandbox left the registry
+  //   `ip-literal`            destination is an IP address (403)
+  //   `not-allowlisted`       no entry of the run matches host and port (403)
+  //   `private-destination`   the name resolves to a blocked range (403)
+  //   `sni-mismatch`          the ClientHello has no SNI or another one than the CONNECT host
+  //   `removed-from-allowlist` an open tunnel was closed because its host left the allowlist
+  //   `gateway-shutdown`      an open tunnel was closed because the gateway stopped
+  //   `resolve-failed`        the name did not resolve (502)
+  //   `upstream-failed`       connecting to or talking with the destination failed (502)
+  //   `upstream-timeout`      the destination did not answer in time (502)
+  //   `tunnel-error`          the tunnel ended with an I/O error
+  string reason = 13;
+  // Pattern of the allowlist entry that allowed the request.
+  string matched_rule = 14;
+  uint64 bytes_in = 15;
+  uint64 bytes_out = 16;
+  google.protobuf.Duration duration = 17;
+  // Status of the upstream response of plain HTTP requests, 0 otherwise.
+  uint32 http_status = 18;
+  bool gap = 19;
+  bool backlog_end = 20;
+  Phase phase = 21;
+  // Identifies the request among those of this gateway pod; the opened and the closed event of
+  // one request have the same id. 0 if unset.
+  uint64 flow_id = 22;
+}

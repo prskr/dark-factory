@@ -8,6 +8,7 @@ pub mod assets;
 pub mod auth;
 pub mod components;
 mod config_pages;
+pub mod egress;
 pub mod layout;
 mod responses;
 mod sse;
@@ -47,6 +48,10 @@ pub struct WebState {
     pub oidc: Arc<auth::OidcClient>,
     /// The forge integration this instance runs, if any; projects show it by icon and name.
     pub forge: Option<df_core::ForgeKind>,
+    /// Flow events of the egress gateways; without it the egress log page is unavailable.
+    pub flows: Option<Arc<dyn egress::FlowSource>>,
+    /// Checks `cluster-service` entries against the cluster; without it they cannot be added.
+    pub services: Option<Arc<dyn egress::ServiceLookup>>,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.
@@ -78,6 +83,7 @@ pub fn router(state: WebState) -> Router {
     let pages = Router::new()
         .merge(task_pages::routes())
         .merge(config_pages::routes())
+        .merge(egress::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_board_member,

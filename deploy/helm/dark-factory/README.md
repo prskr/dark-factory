@@ -2,7 +2,7 @@
 
 Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031), including:
 - Control plane `Deployment` and `Service` (`8080` UI/health, `9443` agent mTLS gRPC, `9444` internal `PolicyWatch` mTLS gRPC)
-- Egress gateway `Deployment` (`>= 2` replicas), `PodDisruptionBudget`, `Service` (`3128` proxy), and headless `Service` (`9444` internal `Tail` mTLS gRPC)
+- Egress gateway `Deployment` (`>= 2` replicas), `PodDisruptionBudget`, `Service` (`3128` proxy), and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
 - `migrate` pre-install/pre-upgrade hook `Job`
 - Least-privilege Kubernetes RBAC (`design/deployment.md` §3)
 - Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota`, `LimitRange`, and tokenless `ServiceAccount`
@@ -93,7 +93,9 @@ Every key in `values.yaml` is documented below:
 | `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget`. |
 | `gateway.ports.proxy` | `int` | `3128` | Egress HTTP/CONNECT proxy port for sandboxes. |
 | `gateway.ports.internalGrpc` | `int` | `9444` | Gateway internal gRPC port (`Tail`, mTLS). |
-| `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`). |
+| `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`; ready after the first policy snapshot). |
+| `gateway.bufferSize` | `int` | `10000` | Flow events of the live egress log kept in memory per gateway pod. |
+| `gateway.blockedCidrs` | `list` | `[]` | Pod and Service CIDRs the proxy refuses as destinations, on top of the built-in private, loopback, link-local, CGNAT and unique-local ranges. |
 | `gateway.resources.requests.cpu` | `string` | `"100m"` | Gateway CPU request. |
 | `gateway.resources.requests.memory` | `string` | `"128Mi"` | Gateway memory request. |
 | `gateway.resources.limits.memory` | `string` | `"512Mi"` | Gateway memory limit. No CPU limit is set by default. |
@@ -115,7 +117,7 @@ Every key in `values.yaml` is documented below:
 
 The chart does not render the control plane's `plugins` section: the image ships the Forgejo plugin at `/plugins/forgejo.wasm`, which is the default (reference: `crates/df-plugins/docs/configuration.md`).
 
-`clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs.
+`clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs. The egress allowlist page applies the same restriction when a `cluster-service` entry is saved: Services outside these namespaces are rejected.
 
 ## TLS issuer
 

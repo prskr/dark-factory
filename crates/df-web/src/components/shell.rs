@@ -6,7 +6,7 @@ use maud::{Markup, html};
 use super::icons::{Icon, icon, logo};
 use crate::layout::Nav;
 
-const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 6] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Projects, "/projects", "Projects", Icon::Projects),
     (Nav::Personas, "/personas", "Personas", Icon::Personas),
@@ -16,6 +16,13 @@ const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
         "Credentials",
         Icon::Credentials,
     ),
+    (
+        Nav::Allowlist,
+        "/egress/allowlist",
+        "Egress allowlist",
+        Icon::Shield,
+    ),
+    (Nav::EgressLog, "/egress/log", "Egress log", Icon::Activity),
 ];
 
 /// A round badge with initials.

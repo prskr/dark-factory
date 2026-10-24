@@ -401,6 +401,35 @@ tests:
           value: certs
         documentIndex: 1
 
+  - it: configures the gateway link and flow buffer in the release config
+    template: configmap.yaml
+    release:
+      name: df
+      namespace: dark-factory
+    set:
+      gateway.blockedCidrs: ["10.42.0.0/16"]
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'controlPlaneHost: "df-dark-factory-control-plane"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'identity: "df-dark-factory-gateway"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'headlessService: "df-dark-factory-gateway-headless.dark-factory.svc"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'bufferSize: 10000'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'blockedCidrs: \["10.42.0.0/16"\]'
+        documentIndex: 0
+
   - it: renders no auth section until oidc.publicUrl is set
     template: configmap.yaml
     asserts:

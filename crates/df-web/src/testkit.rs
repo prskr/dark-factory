@@ -211,6 +211,14 @@ impl TestApp {
     }
 
     pub async fn with_forge(forge: Option<df_core::ForgeKind>) -> Self {
+        Self::with_egress(forge, None, None).await
+    }
+
+    pub async fn with_egress(
+        forge: Option<df_core::ForgeKind>,
+        flows: Option<Arc<dyn crate::egress::FlowSource>>,
+        services: Option<Arc<dyn crate::egress::ServiceLookup>>,
+    ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
         let dir = tempfile::tempdir().unwrap();
@@ -228,6 +236,8 @@ impl TestApp {
             oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
             pool: pool.clone(),
             forge,
+            flows,
+            services,
         };
         Self {
             router: router(state),

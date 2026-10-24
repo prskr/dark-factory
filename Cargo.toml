@@ -27,6 +27,7 @@ comrak = { version = "0.57", default-features = false }
 df-agent-channel = { path = "crates/df-agent-channel" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
+df-gateway = { path = "crates/df-gateway" }
 df-k8s = { path = "crates/df-k8s" }
 df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }
@@ -34,8 +35,12 @@ df-test-postgres = { path = "crates/df-test-postgres" }
 df-web = { path = "crates/df-web" }
 futures = "0.3"
 hex = "0.4"
+hickory-resolver = { version = "0.26", default-features = false, features = ["tokio", "system-config"] }
 http = "1"
 http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+ipnet = "2"
 insta = { version = "1.49", features = ["yaml"] }
 jsonschema = { version = "0.60", default-features = false }
 k8s-openapi = { version = "0.28", default-features = false, features = ["v1_36"] }
@@ -73,9 +78,11 @@ static_assertions = "1"
 tempfile = "3"
 testcontainers = { version = "0.28", default-features = false, features = ["reusable-containers"] }
 thiserror = "2"
+tls-parser = "0.12"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "router", "tls-ring"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"

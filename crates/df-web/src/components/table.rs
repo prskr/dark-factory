@@ -43,7 +43,12 @@ pub fn td(cell: Cell, content: Markup) -> Markup {
 
 /// A body row.
 pub fn tr(cells: Markup) -> Markup {
-    html! { tr class="border-t border-line" { (cells) } }
+    tr_with_id(None, cells)
+}
+
+/// A body row with an element id, for rows that a live update replaces.
+pub fn tr_with_id(id: Option<&str>, cells: Markup) -> Markup {
+    html! { tr id=[id] class="border-t border-line" { (cells) } }
 }
 
 /// The table card. `head` holds the [`th`] cells, `rows` the [`tr`] rows. A wide table scrolls

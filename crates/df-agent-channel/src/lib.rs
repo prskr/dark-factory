@@ -27,7 +27,7 @@ pub mod testing;
 
 pub use error::ChannelError;
 pub use scheduler::Scheduler;
-pub use server::{AgentService, TlsError, TlsReloader, serve};
+pub use server::{AgentService, MtlsIncoming, TlsError, TlsReloader, mtls_incoming, serve};
 
 /// The sections of the instance configuration the agent channel reads.
 #[derive(Debug, Clone, Default)]

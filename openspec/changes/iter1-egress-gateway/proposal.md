@@ -7,7 +7,7 @@ Sandboxes have no direct internet access; Claude Code, package registries and Fo
 ## What Changes
 
 - New internal contract `contract/proto/darkfactory/gateway/v1/gateway.proto`: `PolicyWatch` (control plane → gateway, snapshot + updates) and `Tail` (gateway → control plane, live flow events).
-- `dark-factory gateway` mode in `df-gateway`: HTTP `CONNECT` proxy (and plain HTTP for explicit port-80 entries) with per-run `http-host` allowlist, source identification by pod IP, SNI check, own DNS resolution with private/link-local/cluster destination blocking, fail-closed until the first snapshot, in-memory ring buffer of flow events, `Tail` server, mTLS on the internal port.
+- `dark-factory gateway` mode in `df-gateway`: HTTP `CONNECT` proxy (and plain HTTP for explicit port-80 entries) with per-run `http-host` allowlist, source identification by pod IP, SNI check, own DNS resolution with private/link-local/cluster destination blocking, fail-closed until the first snapshot, in-memory ring buffer of flow events (allowed connections logged when they open and when they close), `Tail` server, mTLS on the internal port.
 - Control-plane side: `PolicyWatch` server on the internal port (snapshots built from active runs' pod IPs and instance/project allowlist entries, pushed on `egress_policy`/`run_changed` notifications), `Tail` relay merging all gateway pods into one SSE stream.
 - Desktop-only UI pages: allowlist editor (instance and project scope; `http-host` and `cluster-service` entries, audited) and live egress log with filters and a denied-hosts summary.
 

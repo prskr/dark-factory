@@ -14,7 +14,7 @@ The proxy SHALL identify the run by the connection's source pod IP using the san
 - **THEN** every request is answered with 403 and logged as `unknown-source`
 
 ### Requirement: Fail closed
-Until a gateway pod has received its first policy snapshot, it SHALL deny every request and SHALL report not ready on its health endpoint, so that the Service sends it no sandbox traffic during rollouts.
+Until a gateway pod has received its first policy snapshot, it SHALL deny every request (reason `no-snapshot`) and SHALL report not ready on its health endpoint, so that the Service sends it no sandbox traffic during rollouts.
 
 #### Scenario: Gateway starts before the control plane
 - **WHEN** a sandbox sends `CONNECT` to a gateway pod without a snapshot
@@ -47,15 +47,26 @@ For allowed `CONNECT` tunnels the proxy SHALL read the TLS ClientHello and close
 - **THEN** the tunnel is closed before any data reaches the destination
 
 ### Requirement: No private destinations
-The proxy SHALL resolve hostnames itself and SHALL refuse destinations in private, loopback, link-local, CGNAT and cluster ranges (reason `private-destination`); `CONNECT` to IP literals SHALL be denied.
+The proxy SHALL resolve hostnames itself and SHALL refuse a name if any of its resolved addresses is in a private, loopback, link-local, CGNAT or cluster range (reason `private-destination`); `CONNECT` to IP literals SHALL be denied (reason `ip-literal`).
 
 #### Scenario: Allowed name resolves internally
 - **WHEN** an allowlisted name resolves to 10.0.0.5
 - **THEN** the connection is refused with `private-destination`
 
+#### Scenario: Mixed answer
+- **WHEN** an allowlisted name resolves to a public address and to 10.0.0.5
+- **THEN** the connection is refused with `private-destination`
+
 #### Scenario: IP literal
 - **WHEN** a run sends `CONNECT 1.1.1.1:443`
-- **THEN** the proxy answers 403
+- **THEN** the proxy answers 403 and logs `ip-literal`
+
+### Requirement: Upstream failures
+A name that doesn't resolve SHALL be answered with 502 (`resolve-failed`), a failed connection or exchange with 502 (`upstream-failed`). If the destination doesn't accept the connection and send response headers within 30 s, the proxy SHALL answer 502 (`upstream-timeout`) and close the upstream connection.
+
+#### Scenario: Silent destination
+- **WHEN** an allowed plain HTTP destination accepts the connection but never answers
+- **THEN** the proxy answers 502 after 30 s, logs `upstream-timeout` and closes the upstream connection
 
 ### Requirement: Plain HTTP only when explicit
 Plain HTTP forwarding (`GET http://…`) SHALL be allowed only for entries with port 80 explicitly set.
@@ -65,8 +76,19 @@ Plain HTTP forwarding (`GET http://…`) SHALL be allowed only for entries with 
 - **THEN** the proxy answers 403
 
 ### Requirement: Allowlist changes apply to running sandboxes
-Each new connection SHALL be checked against the latest snapshot. When a host is removed from a run's allowlist, the gateway SHALL close that run's open tunnels to it.
+Each new connection SHALL be checked against the latest snapshot. When a host is removed from a run's allowlist, the gateway SHALL close that run's open tunnels to it (reason `removed-from-allowlist`). When a run leaves the sandbox registry, the gateway SHALL close its open tunnels (reason `unknown-source`).
 
 #### Scenario: Host removed mid-run
 - **WHEN** `registry.npmjs.org` is removed while a run has an open tunnel to it
 - **THEN** the tunnel is closed and the next `CONNECT` is denied
+
+#### Scenario: Run ends with an open tunnel
+- **WHEN** a run's pod IP is removed from the registry while it has an open tunnel
+- **THEN** the tunnel is closed and logged as denied with `unknown-source`
+
+### Requirement: Shutdown
+When a gateway pod stops, it SHALL close open tunnels, answer requests still waiting for the destination with 503 and cut off streaming responses. In-flight requests SHALL get up to 2 s to record their closing event, with reason `gateway-shutdown` and verdict allowed.
+
+#### Scenario: Request waiting at shutdown
+- **WHEN** the gateway stops while a plain HTTP request waits for response headers
+- **THEN** the client gets 503 and exactly one closing event with `gateway-shutdown` is recorded

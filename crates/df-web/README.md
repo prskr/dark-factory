@@ -20,6 +20,8 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `PATCH /tasks/{key}/messages/{id}`, `DELETE /tasks/{key}/messages/{id}` | Edit or remove a queued message the agent has not received (409 after forwarding, 422 for an empty text). |
 | `GET /tasks/events?status=&project=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
 | `/projects`, `/personas`, `/credentials` | Configuration lists (`POST` creates). |
+| `/egress/allowlist` | Egress allowlist (instance and project scope; `POST /egress/allowlist/host` and `/service` add, `DELETE /egress/allowlist/{id}` removes). Cluster services are checked against the cluster when saved, but only in the namespaces of `clusterTargets` (the control plane's RBAC); other namespaces are rejected. Desktop navigation only. |
+| `/egress/log`, `/egress/log/events` | Live egress log (SSE) with filters (`denied`, `project`, `task`, `persona`, `host` query parameters) and a denied-hosts summary. Needs `gateway.headlessService`. Desktop navigation only. |
 | `GET .../new`, `GET .../{key or id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. |
 | `GET /projects/forge?repo_url=&issue_tracker_url=` | Forge icons and hint of the project form (htmx partials). |
 

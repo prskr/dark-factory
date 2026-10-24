@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO egress_allowlist\n                     (id, scope, project_id, kind, namespace, service, ports, allow_dns)\n                 VALUES ($1, $2, $3, 'cluster-service', $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4Array",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9048de40a204384aac60d0f97273d5a92ec691ef3a1b02e51f3449a2fe0e0d3f"
+}

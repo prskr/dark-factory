@@ -36,6 +36,16 @@ proto_library(
     ],
 )
 
+proto_library(
+    name = "gateway_v1_proto",
+    srcs = ["proto/darkfactory/gateway/v1/gateway.proto"],
+    strip_import_prefix = "proto",
+    deps = [
+        "@protobuf//:duration_proto",
+        "@protobuf//:timestamp_proto",
+    ],
+)
+
 # Runs on the machine running Bazel: the buf toolchain is downloaded for that host. Needs a `manual` tag
 # again once tests run with remote execution from macOS clients (docs/remote-execution.md).
 buf_lint_test(
@@ -43,6 +53,7 @@ buf_lint_test(
     config = "proto/buf.yaml",
     targets = [
         ":agent_v1_proto",
+        ":gateway_v1_proto",
         ":transcript_v1_proto",
     ],
 )

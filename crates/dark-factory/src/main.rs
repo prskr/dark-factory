@@ -19,9 +19,9 @@ use df_k8s::{
     K8sSandboxProvider, K8sSecretStore, ProvisioningConfig, ResolvedClusterTarget,
     run_leader_election, run_policy_reconcile_loop, verify_startup, watch_cluster_target_changes,
 };
+use df_web::egress::LookupError;
 use kube::Client;
 use kube::api::Api;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -153,6 +153,48 @@ struct SandboxWiring {
     secrets: Arc<dyn df_core::SecretStore>,
     /// Tasks that end themselves when `stop` is set (see [`SandboxBackend::start`]).
     tasks: Vec<Task>,
+    /// Checks `cluster-service` allowlist entries against the cluster; `None` without a cluster.
+    services: Option<Arc<dyn df_web::egress::ServiceLookup>>,
+}
+
+/// Looks up Services in the cluster the control plane runs in, in the namespaces it may read
+/// (`clusterTargets`).
+struct K8sServices {
+    client: Client,
+    targets: df_core::config::ClusterTargetsConfig,
+}
+
+impl K8sServices {
+    fn check_namespace(&self, namespace: &str) -> Result<(), LookupError> {
+        if self.targets.any_namespace || self.targets.namespaces.iter().any(|n| n == namespace) {
+            Ok(())
+        } else {
+            Err(LookupError::NamespaceNotAllowed(namespace.to_string()))
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl df_web::egress::ServiceLookup for K8sServices {
+    async fn exists(&self, namespace: &str, service: &str) -> Result<bool, LookupError> {
+        self.check_namespace(namespace)?;
+        let api: Api<k8s_openapi::api::core::v1::Service> =
+            Api::namespaced(self.client.clone(), namespace);
+        tokio::time::timeout(K8S_API_TIMEOUT, api.get_opt(service))
+            .await
+            .map_err(|_| LookupError::Timeout)?
+            .map(|found| found.is_some())
+            .map_err(|e| LookupError::Api(e.to_string()))
+    }
+}
+
+/// The live egress log: the relay to the gateway pods.
+struct RelayFlows(df_gateway::control::Relay);
+
+impl df_web::egress::FlowSource for RelayFlows {
+    fn subscribe(&self) -> futures::stream::BoxStream<'static, df_proto::gateway::v1::FlowEvent> {
+        self.0.subscribe()
+    }
 }
 
 /// Where sandboxes come from.
@@ -293,6 +335,11 @@ impl SandboxBackend for KubernetesBackend {
             }
         };
 
+        let services: Arc<dyn df_web::egress::ServiceLookup> = Arc::new(K8sServices {
+            client: kube_client.clone(),
+            targets: cfg.cluster_targets.clone(),
+        });
+
         let reconcile_task = run_policy_reconcile_loop(
             kube_client,
             prov_config,
@@ -305,6 +352,7 @@ impl SandboxBackend for KubernetesBackend {
         Ok(SandboxWiring {
             provider: provider as Arc<dyn df_core::SandboxProvider>,
             secrets,
+            services: Some(services),
             tasks: vec![
                 Box::pin(until_stopped(stop.clone(), kube_watcher_task)),
                 Box::pin(until_stopped(stop.clone(), forwarder_task)),
@@ -359,12 +407,13 @@ where
     B: SandboxBackend,
     F: Future<Output = ()>,
 {
-    let tls = cfg
+    let tls_config = cfg
         .agent
         .tls
         .as_ref()
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
-    let tls = df_agent_channel::TlsReloader::load(tls).await?;
+    let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
+    let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     // One forge plugin is supported for now and `serve` refuses to start without it. With several
     // plugins this becomes: fail only if no forge plugin could be loaded. Loaded before the
     // database connection, so a missing component fails fast without a database.
@@ -383,17 +432,21 @@ where
         provider,
         secrets,
         tasks: sandbox_tasks,
+        services,
     } = backend
         .start(&cfg, &pool, &notifier, stop_rx.clone())
         .await?;
 
     let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
+    let flows = egress_log_relay(&cfg, tls_config);
     let web = web_router(
         &cfg,
         &pool,
         &notifier,
         Some(df_core::ForgeKind::from_plugin(FORGE_PLUGIN)),
+        EgressDeps { flows, services },
     )?;
+    let ctx_policy = (pool.clone(), notifier.clone());
     let ctx = ChannelContext {
         notifier,
         pool,
@@ -432,9 +485,11 @@ where
     });
     let scheduler_stop = stop_rx.clone();
     listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
-    listeners.spawn(until_stopped(
+    listeners.spawn(serve_policy_watch(
+        cfg.gateway.identity_name(&cfg.instance_name),
+        ctx_policy,
+        df_agent_channel::mtls_incoming(internal_listener, internal_tls),
         stop_rx.clone(),
-        accept_discard_loop(internal_listener, internal_port),
     ));
     for task in sandbox_tasks {
         listeners.spawn(task);
@@ -545,33 +600,67 @@ async fn until_stopped(stop: watch::Receiver<bool>, task: impl std::future::Futu
 
 async fn run_gateway_command(config_path: &std::path::Path) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
+    let tls = cfg
+        .agent
+        .tls
+        .clone()
+        .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
     let health_listener = bind_listener(cfg.gateway.health_port).await?;
     let proxy_listener = bind_listener(cfg.gateway.proxy_port).await?;
     let internal_listener = bind_listener(cfg.gateway.internal_grpc_port).await?;
+    let control_plane_name = cfg.gateway.control_plane_name(&cfg.instance_name);
+    // Kubernetes sets HOSTNAME to the pod name.
+    let pod = std::env::var("HOSTNAME").unwrap_or_else(|_| "gateway".to_string());
 
     info!(
         instance = %cfg.instance_name,
+        %pod,
         health_port = cfg.gateway.health_port,
         proxy_port = cfg.gateway.proxy_port,
         internal_grpc_port = cfg.gateway.internal_grpc_port,
         "starting gateway listeners"
     );
 
-    let mut listeners = JoinSet::new();
-    listeners.spawn(serve_http_health(health_listener, cfg.gateway.health_port));
-    listeners.spawn(serve_proxy_stub(proxy_listener, cfg.gateway.proxy_port));
-    listeners.spawn(accept_discard_loop(
+    let settings = df_gateway::gateway::Settings {
+        pod,
+        control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
+        buffer_size: cfg.gateway.buffer_size,
+        blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
+        retry: df_gateway::watch::RETRY_INTERVAL,
+        control_plane_name: Some(control_plane_name.clone()),
+    };
+    let outside = df_gateway::gateway::Outside {
+        connector: Arc::new(df_gateway::link::MtlsConnector::new(
+            tls.clone(),
+            control_plane_name,
+        )),
+        resolver: Arc::new(df_gateway::resolve::SystemResolver::new()?),
+        dialer: Arc::new(df_gateway::proxy::TcpDialer),
+    };
+    let tail = df_agent_channel::mtls_incoming(
         internal_listener,
-        cfg.gateway.internal_grpc_port,
-    ));
+        df_agent_channel::TlsReloader::load(&tls).await?,
+    );
 
-    supervise_listeners(
-        "gateway",
-        listeners,
-        wait_for_shutdown_signal(),
-        Duration::ZERO,
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let signal = shutdown.clone();
+    let signals = tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        info!("received shutdown signal; stopping the gateway");
+        signal.cancel();
+    });
+    let result = df_gateway::gateway::run(
+        settings,
+        tokio::sync::watch::channel(None).0,
+        outside,
+        health_listener,
+        proxy_listener,
+        tail,
+        shutdown,
     )
-    .await
+    .await;
+    signals.abort();
+    Ok(result?)
 }
 
 /// Runs until `shutdown` resolves or a listener exits. After a shutdown the listeners get `grace`
@@ -614,6 +703,7 @@ fn web_router(
     pool: &PgPool,
     notifier: &Arc<df_db::Notifier>,
     forge: Option<df_core::ForgeKind>,
+    egress: EgressDeps,
 ) -> anyhow::Result<axum::Router> {
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
@@ -625,79 +715,66 @@ fn web_router(
         notifier: notifier.clone(),
         oidc: Arc::new(oidc),
         forge,
+        flows: egress.flows,
+        services: egress.services,
     }))
+}
+
+/// What the egress pages need from the outside.
+#[derive(Default)]
+struct EgressDeps {
+    flows: Option<Arc<dyn df_web::egress::FlowSource>>,
+    services: Option<Arc<dyn df_web::egress::ServiceLookup>>,
+}
+
+/// The relay to the gateway pods; none without `gateway.headlessService`.
+fn egress_log_relay(
+    cfg: &InstanceConfig,
+    tls: &df_core::config::AgentTlsConfig,
+) -> Option<Arc<dyn df_web::egress::FlowSource>> {
+    let service = cfg.gateway.headless_service.as_deref()?;
+    let connector = df_gateway::link::MtlsConnector::new(
+        tls.clone(),
+        cfg.gateway.identity_name(&cfg.instance_name),
+    );
+    let directory = df_gateway::control::DnsDirectory::new(
+        service,
+        cfg.gateway.internal_grpc_port,
+        Arc::new(connector),
+    );
+    let relay = df_gateway::control::Relay::new(
+        Arc::new(directory),
+        df_gateway::control::relay::DISCOVERY_INTERVAL,
+    );
+    Some(Arc::new(RelayFlows(relay)))
+}
+
+/// Serves `PolicyWatch` to the gateway pods on the internal port until `stop` is set.
+async fn serve_policy_watch(
+    gateway: String,
+    (pool, notifier): (PgPool, Arc<df_db::Notifier>),
+    incoming: df_agent_channel::MtlsIncoming,
+    stop: watch::Receiver<bool>,
+) {
+    let token = tokio_util::sync::CancellationToken::new();
+    let service = df_gateway::control::PolicyService::new(pool, notifier, token.clone());
+    let cancel = token.clone();
+    let canceller = async move {
+        stopped(stop).await;
+        cancel.cancel();
+    };
+    let (served, ()) = tokio::join!(
+        df_gateway::control::serve_policy(service, incoming, Some(gateway), token),
+        canceller
+    );
+    if let Err(err) = served {
+        error!(error = %err, "policy watch server failed");
+    }
 }
 
 async fn serve_ui(listener: TcpListener, router: axum::Router) {
     if let Err(err) = axum::serve(listener, router).await {
         error!(error = %err, "UI listener failed");
-    }
-}
-
-async fn serve_http_health(listener: TcpListener, port: u16) {
-    loop {
-        let (mut stream, _) = match listener.accept().await {
-            Ok(pair) => pair,
-            Err(err) => {
-                error!(error = %err, port = port, "accept failed on health listener; backing off");
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
-        };
-        tokio::spawn(async move {
-            let mut buf = [0_u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
-            let response = if req.starts_with("GET /assets/app.css ") {
-                let css = df_web::app_css().unwrap_or_default();
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/css; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    css.len(),
-                    css
-                )
-            } else {
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string()
-            };
-            // Best effort: the client may already have disconnected.
-            let _ = stream.write_all(response.as_bytes()).await;
-        });
-    }
-}
-
-async fn serve_proxy_stub(listener: TcpListener, port: u16) {
-    loop {
-        let (mut stream, _) = match listener.accept().await {
-            Ok(pair) => pair,
-            Err(err) => {
-                error!(error = %err, port = port, "accept failed on proxy listener; backing off");
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
-        };
-        tokio::spawn(async move {
-            let mut buf = [0_u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
-            let response = if req.starts_with("CONNECT ") {
-                "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: 29\r\nConnection: close\r\n\r\nEgress proxy not initialized\n"
-            } else {
-                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 29\r\nConnection: close\r\n\r\nEgress proxy not initialized\n"
-            };
-            // Best effort: the client may already have disconnected.
-            let _ = stream.write_all(response.as_bytes()).await;
-        });
-    }
-}
-
-async fn accept_discard_loop(listener: TcpListener, port: u16) {
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => drop(stream),
-            Err(err) => {
-                error!(error = %err, port = port, "accept failed on discard listener; backing off");
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
     }
 }
 
@@ -721,6 +798,7 @@ async fn wait_for_shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
     /// Backend without a cluster: every sandbox operation fails.
@@ -739,8 +817,35 @@ mod tests {
                 provider: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSandboxProvider),
                 secrets: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSecretStore),
                 tasks: Vec::new(),
+                services: None,
             })
         }
+    }
+
+    #[tokio::test]
+    async fn service_lookup_is_limited_to_the_cluster_target_namespaces() {
+        // No request reaches the API for a namespace that is not allowed.
+        let client =
+            Client::try_from(kube::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+        let limited = K8sServices {
+            client: client.clone(),
+            targets: df_core::config::ClusterTargetsConfig {
+                any_namespace: false,
+                namespaces: vec!["nativelink".into()],
+            },
+        };
+        assert!(limited.check_namespace("nativelink").is_ok());
+        let denied =
+            df_web::egress::ServiceLookup::exists(&limited, "kube-system", "kube-dns").await;
+        assert!(matches!(denied, Err(LookupError::NamespaceNotAllowed(ns)) if ns == "kube-system"));
+        let any = K8sServices {
+            client,
+            targets: df_core::config::ClusterTargetsConfig {
+                any_namespace: true,
+                namespaces: vec![],
+            },
+        };
+        assert!(any.check_namespace("anything").is_ok());
     }
 
     #[test]
@@ -748,50 +853,6 @@ mod tests {
         let cli = Cli::try_parse_from(["dark-factory", "-c", "/tmp/cfg.yaml", "serve"]).unwrap();
         assert_eq!(cli.command, Command::Serve);
         assert_eq!(cli.config, PathBuf::from("/tmp/cfg.yaml"));
-    }
-
-    #[tokio::test]
-    async fn proxy_stub_returns_503_for_connect_tunnel() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(serve_proxy_stub(listener, port));
-
-        let mut client = TcpStream::connect(format!("127.0.0.1:{port}"))
-            .await
-            .unwrap();
-        client
-            .write_all(b"CONNECT api.example.com:443 HTTP/1.1\r\nHost: api.example.com:443\r\n\r\n")
-            .await
-            .unwrap();
-
-        let mut buf = [0_u8; 512];
-        let n = client.read(&mut buf).await.unwrap();
-        let resp = std::str::from_utf8(&buf[..n]).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-        assert!(resp.contains("Egress proxy not initialized"));
-    }
-
-    #[tokio::test]
-    async fn proxy_stub_returns_502_for_http_proxy_request() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(serve_proxy_stub(listener, port));
-
-        let mut client = TcpStream::connect(format!("127.0.0.1:{port}"))
-            .await
-            .unwrap();
-        client
-            .write_all(
-                b"GET http://api.example.com/health HTTP/1.1\r\nHost: api.example.com\r\n\r\n",
-            )
-            .await
-            .unwrap();
-
-        let mut buf = [0_u8; 512];
-        let n = client.read(&mut buf).await.unwrap();
-        let resp = std::str::from_utf8(&buf[..n]).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
-        assert!(resp.contains("Egress proxy not initialized"));
     }
 
     async fn ui_response(router: axum::Router, request: &str) -> String {
@@ -819,7 +880,7 @@ mod tests {
             roles_claim: "roles".into(),
         });
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier, None)?;
+        let router = web_router(&cfg, &pool, &notifier, None, EgressDeps::default())?;
 
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 303"), "{tasks}");
@@ -835,47 +896,12 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let cfg = serve_config(&pool, dir.path(), None);
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier, None)?;
+        let router = web_router(&cfg, &pool, &notifier, None, EgressDeps::default())?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
         let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(ready.starts_with("http/1.1 200"), "{ready}");
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn http_health_serves_healthz_and_assets() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(serve_http_health(listener, port));
-
-        // Test /healthz
-        let mut client = TcpStream::connect(format!("127.0.0.1:{port}"))
-            .await
-            .unwrap();
-        client
-            .write_all(b"GET /healthz HTTP/1.1\r\n\r\n")
-            .await
-            .unwrap();
-        let mut buf = [0_u8; 512];
-        let n = client.read(&mut buf).await.unwrap();
-        let resp = std::str::from_utf8(&buf[..n]).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n"));
-        assert!(resp.ends_with("\r\n\r\nok"));
-
-        // Test /assets/app.css
-        let mut client2 = TcpStream::connect(format!("127.0.0.1:{port}"))
-            .await
-            .unwrap();
-        client2
-            .write_all(b"GET /assets/app.css HTTP/1.1\r\n\r\n")
-            .await
-            .unwrap();
-        let mut buf2 = [0_u8; 512];
-        let n2 = client2.read(&mut buf2).await.unwrap();
-        let resp2 = std::str::from_utf8(&buf2[..n2]).unwrap();
-        assert!(resp2.starts_with("HTTP/1.1 200 OK\r\n"));
-        assert!(resp2.contains("Content-Type: text/css"));
     }
 
     #[tokio::test]
