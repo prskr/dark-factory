@@ -2,6 +2,7 @@
 //! fakes of `df-core` and a PostgreSQL database per test.
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use df_agent_channel::testing::{ClientCert, Env, POD_SAN, RuntimeClient, TestPki, TestServer};
@@ -10,8 +11,8 @@ use df_core::{PeerIdentity, RunId, RunOutcome, RunState};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, CredentialRequest, GitCredentialRequest, PhaseChanged, PushReport, PushStatus,
-    PushTarget, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
-    credential_grant, credential_request,
+    PushTarget, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallRequest,
+    agent_message, control_message, credential_grant, credential_request,
 };
 use df_proto::transcript::v1::{
     AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
@@ -30,7 +31,16 @@ struct Harness {
 
 impl Harness {
     async fn start(pool: PgPool) -> anyhow::Result<Self> {
-        let env = Env::new(pool).await;
+        Self::start_with(pool, Arc::default()).await
+    }
+
+    /// Like [`Harness::start`], recording metrics into `metrics`.
+    async fn start_with(
+        pool: PgPool,
+        metrics: Arc<df_agent_channel::Metrics>,
+    ) -> anyhow::Result<Self> {
+        let mut env = Env::new(pool).await;
+        env.ctx.metrics = metrics;
         let run_id = env.running_run().await;
         let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
         let client = pki.pod_client(POD_SAN).map_err(anyhow::Error::from_boxed)?;
@@ -301,6 +311,54 @@ async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch() -> anyhow:
     assert_eq!(
         count(&pool, "SELECT count(*) FROM transcript_events").await,
         9
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_timing_sent_while_the_stream_was_down_is_replayed_and_recorded_once()
+-> anyhow::Result<()> {
+    let probe = df_agent_channel::metrics::probe::Probe::new();
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let metrics = Arc::new(df_agent_channel::Metrics::new(&probe.meter()));
+    let h = Harness::start_with(pool, metrics).await?;
+    // The first stream is gone before the runtime's timing (seq 1) reached the control plane.
+    drop(h.handshake().await?);
+
+    let mut second = h.connect().await?;
+    let ack = second.hello().await?;
+    assert!(
+        matches!(ack.body, Some(control_message::Body::HelloAck(a)) if a.last_persisted_seq == 0)
+    );
+    second
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .await?;
+    let timing = || {
+        agent_message::Body::RuntimeTiming(RuntimeTiming {
+            operation: RuntimeOperation::Turn as i32,
+            duration_ms: 1500,
+            ok: true,
+        })
+    };
+    for _ in 0..2 {
+        second
+            .send_raw(AgentMessage {
+                seq: 1,
+                body: Some(timing()),
+            })
+            .await;
+    }
+    second
+        .send_raw(AgentMessage {
+            seq: 2,
+            body: Some(agent_text("after")),
+        })
+        .await;
+    // A batch is recorded before it is acknowledged.
+    second.recv_until(|m| m.ack == 2).await?;
+    assert_eq!(
+        probe.total("df.agent.runtime.duration", &[("operation", "turn")]),
+        1.0
     );
     Ok(())
 }

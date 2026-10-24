@@ -20,6 +20,7 @@ df-gateway.workspace = true
 df-k8s.workspace = true
 df-plugins.workspace = true
 df-proto.workspace = true
+df-telemetry = { workspace = true, features = ["clap", "http", "otel"] }
 df-web.workspace = true
 futures.workspace = true
 k8s-openapi.workspace = true
@@ -27,7 +28,6 @@ kube.workspace = true
 rustls.workspace = true
 secrecy.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true

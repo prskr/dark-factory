@@ -34,6 +34,12 @@ spec:
       port: {{ .Values.gateway.ports.internalGrpc }}
       targetPort: internal-grpc
       protocol: TCP
+    {{- if include "dark-factory.telemetry.prometheus" . }}
+    - name: metrics
+      port: {{ .Values.telemetry.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -22,18 +22,30 @@ rust_binary(
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_slim",
     ],
 )
 
+# Rebuilt from source (instead of `crate = ":factory-agent"`) so that the tests can use the
+# `test-util` variant of `df-telemetry` without the binary linking it.
 rust_test(
     name = "factory_agent_test",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
     compile_data = ["docs/configuration.md"],
-    crate = ":factory-agent",
+    crate_root = "src/main.rs",
+    edition = "2024",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
     ),
-    deps = all_crate_deps(normal_dev = True),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_slim_test_util",
+    ],
 )
 
 rust_test(

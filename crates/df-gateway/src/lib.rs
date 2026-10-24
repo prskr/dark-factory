@@ -10,6 +10,7 @@ pub mod flow;
 pub mod gateway;
 pub mod health;
 pub mod link;
+pub mod metrics;
 pub mod peer;
 pub mod policy;
 pub mod proxy;

@@ -2,7 +2,7 @@
 
 use clap::{Parser, Subcommand};
 
-use crate::logging::LogFormat;
+use df_telemetry::logging::LogFormat;
 
 #[derive(Debug, Parser)]
 #[command(

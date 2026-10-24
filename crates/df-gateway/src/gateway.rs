@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::flow::FlowLog;
 use crate::link::GrpcConnector;
+use crate::metrics::Metrics;
 use crate::policy::Policy;
 use crate::proxy::{Dialer, Proxy};
 use crate::resolve::{BlockedRanges, Resolver};
@@ -32,6 +33,8 @@ pub struct Settings {
     /// DNS name the control plane's certificate must have to call `Tail`; `None` accepts any
     /// peer the TLS layer let in (tests without TLS).
     pub control_plane_name: Option<String>,
+    /// Instruments of the pod.
+    pub metrics: Arc<Metrics>,
 }
 
 /// The parts of a gateway that talk to the outside world.
@@ -82,6 +85,7 @@ where
         outside.dialer,
         blocked,
         flows.clone(),
+        settings.metrics.clone(),
     ));
 
     let mut parts = JoinSet::new();
@@ -122,6 +126,7 @@ where
             settings.pod,
             policy_tx,
             settings.retry,
+            settings.metrics,
         )
         .await;
         "the policy watch"

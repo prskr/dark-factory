@@ -395,6 +395,7 @@ impl Env {
             forge: Arc::new(forge.clone()),
             secrets: Arc::new(secrets.clone()),
             config: Arc::new(ChannelConfig::default()),
+            metrics: Arc::default(),
         };
         Self {
             ctx,

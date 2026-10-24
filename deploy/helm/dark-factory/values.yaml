@@ -61,6 +61,37 @@ logging:
   # its own format on to every sandbox.
   format: text
 
+telemetry:
+  metrics:
+    # prometheus (scrape endpoint on `port`), otlp (push); [] disables metrics. Applies to the
+    # control plane and gateway.
+    exporters: [prometheus]
+    port: 9464
+    serviceMonitor:
+      # Requires the prometheus-operator CRDs and `prometheus` in `exporters`. With the NetworkPolicy
+      # on, also set `networkPolicy.metricsScraper.namespaceSelector` (the render fails otherwise).
+      enabled: false
+      # Labels the Prometheus instance selects ServiceMonitors by, e.g. {release: prometheus}.
+      labels: {}
+      # Scrape interval; empty: the Prometheus default.
+      interval: ''
+  traces:
+    # Export spans over OTLP; needs `otlp.endpoint`.
+    enabled: false
+    # OTEL_TRACES_SAMPLER and OTEL_TRACES_SAMPLER_ARG (empty: unset).
+    sampler: parentbased_always_on
+    samplerArg: ''
+  otlp:
+    # OTEL_EXPORTER_OTLP_ENDPOINT; required with the otlp exporter or enabled traces.
+    endpoint: ''
+    # gRPC only.
+    protocol: grpc
+    # Plaintext connection (OTEL_EXPORTER_OTLP_INSECURE).
+    insecure: false
+    # Secret in the release namespace with key `headers` (e.g. `authorization=Bearer ...`),
+    # exported as OTEL_EXPORTER_OTLP_HEADERS.
+    headersSecret: ''
+
 sandbox:
   # RUST_LOG (EnvFilter syntax) of the sandbox runtime; rendered as sandbox.logLevel in the
   # instance config.
@@ -183,4 +214,12 @@ networkPolicy:
     allowAll: false
     namespaceSelector:
       kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+  # Allow this scraper to reach the metrics port of the control plane and the gateway. Empty
+  # namespaceSelector: no rule. Selecting the sandbox namespace
+  # (`kubernetes.io/metadata.name: <sandboxNamespace.name>`) fails the render: sandboxes must never
+  # reach the metrics port. Only that label is checked; other labels shared with the sandbox
+  # namespace are not (its default-deny egress still blocks sandboxes).
+  metricsScraper:
+    namespaceSelector: {}
     podSelector: {}

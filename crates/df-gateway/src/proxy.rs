@@ -25,9 +25,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 
 use crate::count::{Counted, Direction, Metered, Traffic};
 use crate::flow::{FlowLog, duration_proto, timestamp_now};
+use crate::metrics::{Decision, Metrics};
 use crate::policy::{self, Policy, Sandbox, normalize_host};
 use crate::resolve::{BlockedRanges, Resolver};
 use crate::sni;
@@ -77,6 +79,7 @@ pub struct Proxy {
     dialer: Arc<dyn Dialer>,
     blocked: BlockedRanges,
     flows: Arc<FlowLog>,
+    metrics: Arc<Metrics>,
     tunnels: Arc<Tunnels>,
     /// Last flow id handed out.
     last_flow: AtomicU64,
@@ -113,6 +116,7 @@ impl Proxy {
         dialer: Arc<dyn Dialer>,
         blocked: BlockedRanges,
         flows: Arc<FlowLog>,
+        metrics: Arc<Metrics>,
     ) -> Self {
         Self {
             pod: pod.into(),
@@ -121,6 +125,7 @@ impl Proxy {
             dialer,
             blocked,
             flows,
+            metrics,
             tunnels: Arc::default(),
             // Ids must not repeat when the container restarts under the same pod name: start at
             // the current time (microseconds).
@@ -224,11 +229,22 @@ impl Proxy {
         request: Request<Incoming>,
         root: CancellationToken,
     ) -> Response<ResponseBody> {
-        if request.method() == Method::CONNECT {
-            self.connect(peer, request, root).await
-        } else {
-            self.forward(peer, request, root).await
+        // `decision` (and `host` if allowed) are set when the request ends.
+        let span = tracing::info_span!(
+            "gateway.connect",
+            method = %request.method(),
+            decision = tracing::field::Empty,
+            host = tracing::field::Empty,
+        );
+        async move {
+            if request.method() == Method::CONNECT {
+                self.connect(peer, request, root).await
+            } else {
+                self.forward(peer, request, root).await
+            }
         }
+        .instrument(span)
+        .await
     }
 
     /// The steps both kinds of request start with: the policy decision, the flow event and the
@@ -244,7 +260,15 @@ impl Proxy {
         let policy = self.policy.borrow().clone();
         let decision = policy::decide(policy.as_deref(), peer, request);
         let flow_id = self.last_flow.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut flow = Flow::start(&self.pod, flow_id, peer, decision.sandbox, method, target);
+        let mut flow = Flow::start(
+            &self.pod,
+            flow_id,
+            peer,
+            decision.sandbox,
+            method,
+            target,
+            self.metrics.clone(),
+        );
         let rule = match decision.verdict {
             Ok(rule) => rule,
             Err(denial) => {
@@ -561,6 +585,11 @@ struct Admitted {
 struct Flow {
     event: FlowEvent,
     started: Instant,
+    metrics: Arc<Metrics>,
+    /// The `gateway.connect` span of the request; closed once the flow is finished.
+    span: tracing::Span,
+    /// Connected to the destination (counted in `df.gateway.active_connections`).
+    open: bool,
 }
 
 impl Flow {
@@ -571,6 +600,7 @@ impl Flow {
         sandbox: Option<&Sandbox>,
         method: &str,
         target: &Target,
+        metrics: Arc<Metrics>,
     ) -> Self {
         let sandbox = sandbox
             .cloned()
@@ -591,11 +621,16 @@ impl Flow {
                 ..Default::default()
             },
             started: Instant::now(),
+            metrics,
+            span: tracing::Span::current(),
+            open: false,
         }
     }
 
     /// Records that the destination is connected (the request is allowed and under way).
-    fn opened(&self, flows: &FlowLog) {
+    fn opened(&mut self, flows: &FlowLog) {
+        self.open = true;
+        self.metrics.opened();
         let mut event = self.event.clone();
         event.phase = Phase::Opened.into();
         event.verdict = Verdict::Allowed.into();
@@ -606,6 +641,17 @@ impl Flow {
 
     fn finish(self, flows: &FlowLog, verdict: Verdict) {
         let mut event = self.event;
+        self.metrics.closed(
+            self.open,
+            verdict,
+            &event.reason,
+            event.bytes_out,
+            event.bytes_in,
+        );
+        self.span.record("decision", Decision::of(verdict).as_str());
+        if verdict != Verdict::Denied {
+            self.span.record("host", event.host.as_str());
+        }
         event.phase = Phase::Closed.into();
         event.time = Some(timestamp_now());
         event.verdict = verdict.into();

@@ -10,6 +10,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 
 use crate::link::{GrpcConnector, LinkError};
+use crate::metrics::Metrics;
 use crate::policy::Policy;
 
 /// Pause before the next attempt to reach a control plane replica.
@@ -34,10 +35,11 @@ pub async fn run(
     pod: String,
     policy: watch::Sender<Option<Arc<Policy>>>,
     retry: Duration,
+    metrics: Arc<Metrics>,
 ) {
     loop {
         // A session only ever ends with an error.
-        let Err(error) = session(&*connector, &control_plane, &pod, &policy).await;
+        let Err(error) = session(&*connector, &control_plane, &pod, &policy, &metrics).await;
         tracing::warn!(%error, %control_plane, "policy watch ended; reconnecting");
         tokio::time::sleep(retry).await;
     }
@@ -48,6 +50,7 @@ async fn session(
     control_plane: &str,
     pod: &str,
     policy: &watch::Sender<Option<Arc<Policy>>>,
+    metrics: &Metrics,
 ) -> Result<Infallible, WatchError> {
     let mut client = GatewayPolicyClient::new(connector.connect(control_plane).await?);
     let mut updates = client
@@ -64,6 +67,7 @@ async fn session(
         let current = policy.borrow().as_ref().map(|p| p.version);
         if first || current.is_none_or(|version| update.version > version) {
             tracing::debug!(version = update.version, "policy snapshot applied");
+            metrics.policy_applied(update.version);
             policy.send_replace(Some(Arc::new(Policy::from_update(update))));
         }
         first = false;

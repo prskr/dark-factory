@@ -52,6 +52,18 @@ Every key in `values.yaml` is documented below:
 | `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/keycloak.md`. |
 | `oidc.rolesClaim` | `string` | `"roles"` | Token claim with the flat role list; the UI requires the role `board-member`. |
 | `logging.format` | `text`/`json` | `text` | `DF_LOG_FORMAT` of the control plane, gateway and migrate job (`json`: one JSON object per line). The control plane sets the same format in every sandbox. Other values fail schema validation. |
+| `telemetry.metrics.exporters` | `list` | `[prometheus]` | `OTEL_METRICS_EXPORTER` of the control plane and gateway: `prometheus` (scrape endpoint on `telemetry.metrics.port`), `otlp` (push), both, or `[]` (no metrics). `otlp` needs `telemetry.otlp.endpoint`. |
+| `telemetry.metrics.port` | `int` | `9464` | Port of `GET /metrics` (`OTEL_EXPORTER_PROMETHEUS_PORT`); exposed as container and Service port `metrics` when `prometheus` is an exporter. |
+| `telemetry.metrics.serviceMonitor.enabled` | `bool` | `false` | Render one prometheus-operator `ServiceMonitor` for the control plane and one for the gateway. Needs the CRDs and `prometheus` in `telemetry.metrics.exporters`. Fails the render while `networkPolicy.metricsScraper.namespaceSelector` is empty and the NetworkPolicy is on. |
+| `telemetry.metrics.serviceMonitor.labels` | `object` | `{}` | Extra labels of the `ServiceMonitor`s, e.g. `release: prometheus` for kube-prometheus-stack. |
+| `telemetry.metrics.serviceMonitor.interval` | `string` | `''` | Scrape interval, e.g. `30s`. Empty: the Prometheus default. |
+| `telemetry.traces.enabled` | `bool` | `false` | Export spans of the control plane and gateway over OTLP (`OTEL_TRACES_EXPORTER=otlp`); otherwise `none`. Needs `telemetry.otlp.endpoint`. |
+| `telemetry.traces.sampler` | `string` | `parentbased_always_on` | `OTEL_TRACES_SAMPLER`, only rendered with enabled traces. |
+| `telemetry.traces.samplerArg` | `string` | `''` | `OTEL_TRACES_SAMPLER_ARG`, e.g. `0.1` with `traceidratio`. Empty: not set. |
+| `telemetry.otlp.endpoint` | `string` | `''` | `OTEL_EXPORTER_OTLP_ENDPOINT`. A value without scheme uses `https`. Required with the `otlp` metrics exporter or enabled traces (schema validation fails otherwise). |
+| `telemetry.otlp.protocol` | `grpc` | `grpc` | `OTEL_EXPORTER_OTLP_PROTOCOL`. Only gRPC is supported. |
+| `telemetry.otlp.insecure` | `bool` | `false` | `OTEL_EXPORTER_OTLP_INSECURE`: connect without TLS. |
+| `telemetry.otlp.headersSecret` | `string` | `''` | Name of an existing Secret in the release namespace whose key `headers` becomes `OTEL_EXPORTER_OTLP_HEADERS` (gRPC metadata, e.g. `authorization=Bearer ...`). |
 | `sandbox.logLevel` | `string` | `info` | Rendered as `sandbox.logLevel` in the instance config; the control plane sets it as `RUST_LOG` of every sandbox. DEBUG adds agent message chunks. |
 | `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. |
@@ -116,6 +128,46 @@ Every key in `values.yaml` is documented below:
 | `networkPolicy.ingressController.allowAll` | `bool` | `false` | Render the UI port rule without `from`, so every source can reach it; `namespaceSelector` and `podSelector` are then ignored. Needed when the ingress proxy's traffic carries no pod identity, e.g. Cilium Gateway API or Ingress, whose Envoy connects with the reserved identity `ingress`. The agent and internal gRPC ports stay restricted. The UI requires a login on every route except `/healthz`, `/readyz` and `/assets/*`. |
 | `networkPolicy.ingressController.namespaceSelector` | `object` | `{"kubernetes.io/metadata.name": "ingress-nginx"}` | Namespace label selector allowed to reach the control plane UI port (`8080`). Point it at the Gateway's namespace when you use `httpRoute`. |
 | `networkPolicy.ingressController.podSelector` | `object` | `{}` | Optional pod label selector within the ingress controller namespace allowed to reach the UI port. |
+| `networkPolicy.metricsScraper.namespaceSelector` | `object` | `{}` | Namespace label selector allowed to reach the metrics port of the control plane and gateway. Empty: no rule, nobody can scrape. Selecting the sandbox namespace (`kubernetes.io/metadata.name: <sandboxNamespace.name>`) fails the render; only that label is checked, other labels the sandbox namespace shares with the selector are not (its default-deny egress still blocks sandboxes). |
+| `networkPolicy.metricsScraper.podSelector` | `object` | `{}` | Optional pod label selector within that namespace. |
+
+## Telemetry
+
+The control plane and gateway export OpenTelemetry metrics (and optionally traces); the sandbox runtime does not. Instruments and attributes are listed in [`docs/telemetry.md`](../../../docs/telemetry.md).
+
+### Scrape with kube-prometheus-stack
+
+Metrics are served on port `9464` by default. Select the chart's `ServiceMonitor`s with the label your Prometheus uses and allow its namespace through the NetworkPolicy:
+
+```yaml
+telemetry:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      labels:
+        release: kube-prometheus-stack
+networkPolicy:
+  metricsScraper:
+    namespaceSelector:
+      kubernetes.io/metadata.name: monitoring
+```
+
+### Push to an OTel Collector
+
+Push metrics and spans over gRPC OTLP; keep or drop the scrape endpoint with `exporters`:
+
+```yaml
+telemetry:
+  metrics:
+    exporters: [otlp]        # no metrics port is exposed
+  traces:
+    enabled: true
+    sampler: parentbased_traceidratio
+    samplerArg: '0.1'
+  otlp:
+    endpoint: https://otel-collector.observability.svc:4317
+    headersSecret: otel-auth # Secret with key `headers`
+```
 
 ## Cluster targets
 

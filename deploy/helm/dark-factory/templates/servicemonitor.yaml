@@ -1,0 +1,30 @@
+{{- if and .Values.telemetry.metrics.serviceMonitor.enabled (include "dark-factory.telemetry.prometheus" .) }}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.metricsScraper.namespaceSelector) }}
+{{- fail "telemetry.metrics.serviceMonitor.enabled requires networkPolicy.metricsScraper.namespaceSelector (the namespace Prometheus runs in): without it the NetworkPolicy blocks the scrape" }}
+{{- end }}
+{{- range $component := list "control-plane" "gateway" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dark-factory.fullname" $ }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+    {{- with $.Values.telemetry.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "dark-factory.name" $ }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+  endpoints:
+    - port: metrics
+      {{- with $.Values.telemetry.metrics.serviceMonitor.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
+{{- end }}

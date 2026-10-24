@@ -18,7 +18,7 @@ all = { level = "warn", priority = -1 }
 agent-client-protocol = { version = "3.4.0", features = ["stdio"] }
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.8", default-features = false, features = ["form", "http1", "query", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "matched-path", "query", "tokio"] }
 base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
@@ -31,6 +31,7 @@ df-gateway = { path = "crates/df-gateway" }
 df-k8s = { path = "crates/df-k8s" }
 df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }
+df-telemetry = { path = "crates/df-telemetry" }
 df-test-postgres = { path = "crates/df-test-postgres" }
 df-web = { path = "crates/df-web" }
 futures = "0.3"
@@ -47,9 +48,14 @@ k8s-openapi = { version = "0.28", default-features = false, features = ["v1_36"]
 kube = { version = "4.2", default-features = false, features = ["client", "runtime", "derive", "rustls-tls"] }
 maud = { version = "0.27", features = ["axum"] }
 openidconnect = "4"
+opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "trace", "internal-logs"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "tls-ring", "tls-roots", "metrics", "trace"] }
+opentelemetry-prometheus = { version = "0.33", default-features = false, features = ["internal-logs"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics", "trace", "internal-logs"] }
 pbjson = "0.9"
 pbjson-build = "0.9"
 pbjson-types = "0.9"
+prometheus = { version = "0.14", default-features = false }
 prost = "0.14"
 prost-build = "0.14"
 prost-types = "0.14"
@@ -91,6 +97,7 @@ tower-http = { version = "0.7", default-features = false, features = ["compressi
 tower-sessions = { version = "0.15", default-features = false, features = ["axum-core"] }
 tower-test = "0.4"
 tracing = "0.1"
+tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }

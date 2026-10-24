@@ -14,6 +14,7 @@ pub mod assign;
 pub mod credentials;
 pub mod error;
 pub mod identity;
+pub mod metrics;
 pub mod pr;
 pub mod runs;
 pub mod scheduler;
@@ -26,6 +27,7 @@ pub mod transcript;
 pub mod testing;
 
 pub use error::ChannelError;
+pub use metrics::Metrics;
 pub use scheduler::Scheduler;
 pub use server::{AgentService, MtlsIncoming, TlsError, TlsReloader, mtls_incoming, serve};
 
@@ -56,4 +58,5 @@ pub struct ChannelContext {
     pub forge: Arc<dyn ForgeClient>,
     pub secrets: Arc<dyn SecretStore>,
     pub config: Arc<ChannelConfig>,
+    pub metrics: Arc<metrics::Metrics>,
 }

@@ -48,6 +48,7 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 
 - `crates/dark-factory` – the main binary (control plane, `migrate` command)
 - `crates/df-core`, `crates/df-db`, `crates/df-proto`, `crates/df-web` – domain logic, PostgreSQL storage (`sqlx`, migrations), generated protobuf/gRPC types, web UI
+- `crates/df-telemetry` – logging setup (`LogFormat`, `RUST_LOG`) shared by the binaries; features `clap` (`ValueEnum`), `http` (request span middleware), `otel` (OpenTelemetry; control plane and gateway only), `test-util` (log capture)
 - `crates/factory-agent` – the sandbox runtime that runs a coding harness over ACP and talks to the control plane (see `crates/factory-agent/docs/`)
 - `crates/fake-acp-agent` – scripted ACP agent used in tests
 - `contract/` – protobuf and WIT contracts; `plugins/forgejo` – WASM plugin

@@ -11,6 +11,7 @@ templates:
   - gateway-service.yaml
   - netpol.yaml
   - httproute.yaml
+  - servicemonitor.yaml
 tests:
   - it: renders standard release config ConfigMap and pre-install/pre-upgrade migrate-config ConfigMap
     template: configmap.yaml
@@ -705,3 +706,308 @@ tests:
           path: data["config.yaml"]
           pattern: 'logLevel: "debug"'
         documentIndex: 0
+
+  - it: rejects enabled traces without an OTLP endpoint
+    template: control-plane-deployment.yaml
+    set:
+      telemetry.traces.enabled: true
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects an otlp metrics exporter without an OTLP endpoint
+    template: control-plane-deployment.yaml
+    set:
+      telemetry.metrics.exporters: [otlp]
+    asserts:
+      - failedTemplate: {}
+
+  - it: renders Prometheus metrics and no tracing by default
+    set:
+      fullnameOverride: df
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: prometheus
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: prometheus
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_EXPORTER
+            value: none
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_EXPORTER
+            value: none
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_PROMETHEUS_PORT
+            value: "9464"
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_SERVICE_NAME
+            value: dark-factory-control-plane
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_SERVICE_NAME
+            value: dark-factory-gateway
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+            protocol: TCP
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+            protocol: TCP
+        template: gateway-deployment.yaml
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name == "OTEL_EXPORTER_OTLP_ENDPOINT")]
+        template: control-plane-deployment.yaml
+
+  - it: exposes the metrics port on the control plane and gateway Services
+    set:
+      telemetry.metrics.port: 9100
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            port: 9100
+            targetPort: metrics
+            protocol: TCP
+        template: control-plane-service.yaml
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            port: 9100
+            targetPort: metrics
+            protocol: TCP
+        template: gateway-service.yaml
+        documentIndex: 1
+
+  - it: reads OTLP auth headers from a Secret and exposes no metrics port with only the otlp exporter
+    set:
+      telemetry.metrics.exporters: [otlp]
+      telemetry.otlp.endpoint: https://otel.example.org:4317
+      telemetry.otlp.headersSecret: otel-auth
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: otlp
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://otel.example.org:4317
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                name: otel-auth
+                key: headers
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                name: otel-auth
+                key: headers
+        template: gateway-deployment.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+            protocol: TCP
+        template: control-plane-deployment.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+            protocol: TCP
+        template: gateway-deployment.yaml
+      - notContains:
+          path: spec.ports
+          content:
+            name: metrics
+            port: 9464
+            targetPort: metrics
+            protocol: TCP
+        template: control-plane-service.yaml
+
+  - it: enables tracing with the sampler and the OTLP settings
+    set:
+      telemetry.traces.enabled: true
+      telemetry.traces.sampler: traceidratio
+      telemetry.traces.samplerArg: "0.1"
+      telemetry.otlp.endpoint: otel.example.org:4317
+      telemetry.otlp.insecure: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_EXPORTER
+            value: otlp
+        template: control-plane-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_SAMPLER
+            value: traceidratio
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_SAMPLER_ARG
+            value: "0.1"
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_INSECURE
+            value: "true"
+        template: control-plane-deployment.yaml
+
+  - it: renders no ServiceMonitor by default
+    template: servicemonitor.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a ServiceMonitor per component with the configured labels and interval
+    template: servicemonitor.yaml
+    set:
+      telemetry.metrics.serviceMonitor.enabled: true
+      telemetry.metrics.serviceMonitor.labels:
+        release: prometheus
+      telemetry.metrics.serviceMonitor.interval: 30s
+      networkPolicy.metricsScraper.namespaceSelector:
+        kubernetes.io/metadata.name: monitoring
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ServiceMonitor
+      - equal:
+          path: metadata.labels.release
+          value: prometheus
+      - equal:
+          path: spec.endpoints[0].port
+          value: metrics
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 30s
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: control-plane
+        documentIndex: 0
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: gateway
+        documentIndex: 1
+
+  - it: renders no ServiceMonitor when Prometheus is not an exporter
+    template: servicemonitor.yaml
+    set:
+      telemetry.metrics.serviceMonitor.enabled: true
+      telemetry.metrics.exporters: []
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: allows the metrics scraper to reach the metrics port of the control plane and gateway
+    template: netpol.yaml
+    set:
+      networkPolicy.metricsScraper.namespaceSelector:
+        kubernetes.io/metadata.name: monitoring
+    asserts:
+      - contains:
+          path: spec.ingress
+          content:
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+            ports:
+              - protocol: TCP
+                port: 9464
+        documentIndex: 0
+      - contains:
+          path: spec.ingress
+          content:
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+            ports:
+              - protocol: TCP
+                port: 9464
+        documentIndex: 1
+
+  - it: adds no scraper ingress rule without a scraper namespace selector
+    template: netpol.yaml
+    asserts:
+      - notContains:
+          path: spec.ingress
+          content:
+            ports:
+              - protocol: TCP
+                port: 9464
+        any: true
+
+  - it: refuses a metrics scraper in the sandbox namespace
+    template: netpol.yaml
+    set:
+      networkPolicy.metricsScraper.namespaceSelector:
+        kubernetes.io/metadata.name: dark-factory-sandboxes
+    asserts:
+      - failedTemplate:
+          errorPattern: must not select the sandbox namespace
+
+  - it: refuses a ServiceMonitor without a scraper namespace selector
+    template: servicemonitor.yaml
+    set:
+      telemetry.metrics.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: serviceMonitor.enabled requires networkPolicy.metricsScraper.namespaceSelector
+
+  - it: accepts a ServiceMonitor without a selector when the NetworkPolicy is off
+    template: servicemonitor.yaml
+    set:
+      telemetry.metrics.serviceMonitor.enabled: true
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2

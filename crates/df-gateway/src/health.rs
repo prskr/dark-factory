@@ -21,4 +21,5 @@ pub fn router(policy: PolicyReceiver) -> Router {
                 }
             }),
         )
+        .layer(axum::middleware::from_fn(df_telemetry::http::request_span))
 }

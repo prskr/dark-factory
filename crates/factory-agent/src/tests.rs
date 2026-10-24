@@ -13,7 +13,7 @@ use crate::test_harness::{MockControlPlane, TestPki};
 
 #[test]
 fn log_format_defaults_to_text_and_rejects_unknown_values() {
-    use crate::logging::LogFormat;
+    use df_telemetry::logging::LogFormat;
     let cli = Cli::try_parse_from(["factory-agent", "run"]).unwrap();
     assert_eq!(cli.log_format, LogFormat::Text);
     let cli = Cli::try_parse_from(["factory-agent", "--log-format", "json", "run"]).unwrap();
@@ -32,7 +32,7 @@ fn log_format_defaults_to_text_and_rejects_unknown_values() {
 #[test]
 fn log_assigned_and_prompt_received_fields() {
     use df_proto::agent::v1::{Assign, Prompt};
-    let (out, _guard) = crate::logging::testing::capture("info");
+    let (out, _guard) = df_telemetry::testing::capture("info");
     crate::log_assigned(&Assign {
         run_id: "r1".into(),
         task: Some(df_proto::agent::v1::TaskRef {
@@ -101,7 +101,7 @@ fn event_body(
 
 /// Logs `body` through `log_outbound` at `filter` and returns the parsed JSON lines.
 fn logged(filter: &str, body: &df_proto::agent::v1::agent_message::Body) -> Vec<serde_json::Value> {
-    let (out, _guard) = crate::logging::testing::capture(filter);
+    let (out, _guard) = df_telemetry::testing::capture(filter);
     crate::runner::log_outbound(body);
     out.text()
         .lines()
@@ -5052,6 +5052,184 @@ sessions:
 }
 
 #[tokio::test]
+async fn test_run_sends_runtime_timings_in_sequence_with_other_messages() {
+    use crate::git::Git;
+    use crate::outbox::Outbox;
+    use crate::runner::{RunDriverParams, run_session};
+    use df_proto::agent::v1::{
+        Assign, Harness, Prompt, RuntimeOperation, Workspace, agent_message,
+    };
+    use tokio::sync::mpsc;
+
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fake_bin = root.join("target/debug/fake-acp-agent");
+    let mcp_bin = root.join("target/debug/factory-agent");
+    if !fake_bin.exists() || !mcp_bin.exists() {
+        eprintln!("Skipping integration test: binaries not present");
+        return;
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let upstream = setup_test_remote_repo(temp.path());
+    let script_file = temp.path().join("script.yaml");
+    std::fs::write(
+        &script_file,
+        r#"
+sessions:
+  new:
+    - - shell: "echo x >> f.txt && git add f.txt && git config user.name 'Agent Bot' && git config user.email 'bot@example.com' && git config commit.gpgsign false && git commit --no-gpg-sign -m 'work'"
+      - end: end_turn
+    - - say: "second turn"
+      - end: end_turn
+"#,
+    )
+    .unwrap();
+
+    let repo_dir = temp.path().join("repo");
+    let runtime_dir = temp.path().join("runtime");
+    let hooks_path = temp.path().join("hooks-empty");
+    std::fs::create_dir_all(&hooks_path).unwrap();
+    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
+        Outbox::open(&runtime_dir, "run-timing", 10 * 1024 * 1024, 64 * 1024).unwrap(),
+    ));
+    let assign = Assign {
+        run_id: "run-timing".to_string(),
+        task: None,
+        workspace: Some(Workspace {
+            repo_url: upstream.to_str().unwrap().to_string(),
+            base_branch: "main".to_string(),
+            task_branch: "factory/task/DF-1".to_string(),
+            wip_branch: "factory/wip/DF-1".to_string(),
+            commit_identity: None,
+            git_hooks: Vec::new(),
+            git_config: Vec::new(),
+        }),
+        harness: Some(Harness {
+            kind: Some(df_proto::agent::v1::harness::Kind::Acp(
+                df_proto::agent::v1::AcpHarness {
+                    command: vec![
+                        fake_bin.to_string_lossy().to_string(),
+                        "--script".to_string(),
+                        script_file.to_string_lossy().to_string(),
+                    ],
+                    env: std::collections::HashMap::new(),
+                    model: None,
+                    settings_json: String::new(),
+                },
+            )),
+            system_prompt: String::new(),
+        }),
+        tools: Vec::new(),
+        budgets: None,
+        continuation: None,
+    };
+    let initial_prompts = vec![Prompt {
+        prompt_id: "prompt-1".to_string(),
+        author: None,
+        content: vec![df_proto::transcript::v1::ContentBlock {
+            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
+                df_proto::transcript::v1::TextContent {
+                    text: "Start working".to_string(),
+                },
+            )),
+        }],
+        queued_at: None,
+    }];
+    let (inbound_tx, inbound_rx) = mpsc::channel(100);
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    // Mock control plane: queues the second turn's prompt during the first turn and keeps
+    // everything the runtime sends.
+    let collector = tokio::spawn(async move {
+        let mut bodies = Vec::new();
+        let mut turns = 0;
+        while let Some(msg) = outbound_rx.recv().await {
+            if let Some(agent_message::Body::TranscriptEvent(ev)) = &msg.body
+                && let Some(df_proto::transcript::v1::event::Kind::TurnStarted(_)) = &ev.kind
+            {
+                turns += 1;
+                if turns == 1 {
+                    let prompt = Prompt {
+                        prompt_id: "prompt-2".to_string(),
+                        author: None,
+                        content: vec![],
+                        queued_at: None,
+                    };
+                    inbound_tx
+                        .send(df_proto::agent::v1::ControlMessage {
+                            ack: 0,
+                            body: Some(df_proto::agent::v1::control_message::Body::Prompt(prompt)),
+                        })
+                        .await
+                        .expect("the run still reads its inbox");
+                }
+            }
+            bodies.push(msg.body);
+        }
+        bodies
+    });
+    let params = RunDriverParams {
+        assign,
+        credentials: None,
+        initial_prompts,
+        repo_dir: repo_dir.clone(),
+        home_dir: temp.path().join("home"),
+        runtime_dir,
+        hooks_path,
+        mcp_command: mcp_bin,
+        runtime_sock_path: temp.path().join("runtime.sock"),
+        git: Git::new(&repo_dir).allow_protocols(["file", "https"]),
+        outbox,
+        inbound_rx,
+        outbound_tx,
+        git_credentials: None,
+        cancel_requested: false,
+    };
+    run_session(params)
+        .await
+        .expect("run_session should succeed");
+
+    let bodies = collector.await.unwrap();
+    let timings: Vec<_> = bodies
+        .iter()
+        .flatten()
+        .filter_map(|b| match b {
+            agent_message::Body::RuntimeTiming(t) => Some((t.operation(), t.ok)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        timings,
+        [
+            (RuntimeOperation::WorkspacePrepare, true),
+            (RuntimeOperation::HarnessStart, true),
+            (RuntimeOperation::Turn, true),
+            (RuntimeOperation::Push, true),
+            (RuntimeOperation::Turn, true),
+            (RuntimeOperation::Finalize, true),
+        ]
+    );
+    // Finalize is measured before the report that ends the run.
+    let last = bodies.iter().flatten().last();
+    assert!(matches!(last, Some(agent_message::Body::RunReport(_))));
+    let position = |wanted: RuntimeOperation| {
+        bodies.iter().flatten().position(
+            |b| matches!(b, agent_message::Body::RuntimeTiming(t) if t.operation() == wanted),
+        )
+    };
+    let turn_ended = bodies.iter().flatten().position(|b| {
+        matches!(b, agent_message::Body::TranscriptEvent(e)
+            if matches!(e.kind, Some(df_proto::transcript::v1::event::Kind::TurnEnded(_))))
+    });
+    assert!(position(RuntimeOperation::Turn) < turn_ended);
+    // The push is measured after the turn it follows and reported next to its `PushReport`.
+    let push_report = bodies
+        .iter()
+        .flatten()
+        .position(|b| matches!(b, agent_message::Body::PushReport(_)));
+    assert!(push_report.is_some());
+}
+
+#[tokio::test]
 async fn test_scenario_outcome_complete_task_called() {
     use crate::git::Git;
     use crate::outbox::Outbox;
@@ -5062,7 +5240,7 @@ async fn test_scenario_outcome_complete_task_called() {
     };
     use tokio::sync::mpsc;
 
-    let (logs, _log_guard) = crate::logging::testing::capture("info");
+    let (logs, _log_guard) = df_telemetry::testing::capture("info");
 
     let fake_bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

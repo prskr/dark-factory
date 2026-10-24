@@ -17,6 +17,7 @@ use df_proto::agent::v1::{
     AgentMessage, Assign, Cancel, ControlMessage, CredentialRequest, HarnessCredentials, HelloAck,
     PushReport, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
 };
+use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, watch};
@@ -25,6 +26,7 @@ use tonic::Status;
 
 use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts};
 use crate::error::ChannelError;
+use crate::metrics::Observation;
 use crate::runs::{
     EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, mark_connected, set_run_state_tx,
 };
@@ -47,6 +49,7 @@ const MAX_TIMER: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 type Outbound = mpsc::Sender<Result<ControlMessage, Status>>;
 
 /// Serves one authenticated stream until the runtime or the control plane closes it.
+#[tracing::instrument(name = "agent.session", skip_all, fields(run_id = %run.id))]
 pub async fn run<S>(
     ctx: ChannelContext,
     run: RunRow,
@@ -80,6 +83,10 @@ where
         .filter(|r| !r.state.is_terminal())
         .ok_or_else(|| Status::unauthenticated("run is not active"))?;
     let mut rc = load_run_context(&ctx.pool, run).await?;
+    // A run that connected before has had a stream.
+    let _connection = ctx
+        .metrics
+        .connection(&rc.project.key, rc.run.connected_at.is_some());
 
     let credentials = match credentials::harness_credentials(&ctx, &rc).await {
         Ok(c) => c,
@@ -153,6 +160,8 @@ struct Persisted {
     turn_ended: bool,
     /// `(expected, got)` if the batch contained a sequence gap.
     gap: Option<(u64, u64)>,
+    /// What the committed messages say happened; recorded as metrics by the session.
+    observations: Vec<Observation>,
 }
 
 impl Session {
@@ -321,6 +330,10 @@ impl Session {
         // refuse the tool calls that precede it.
         let active = self.active().await?;
         let persisted = persist_batch(&self.ctx, &self.rc, batch).await?;
+        // The batch is committed; replayed messages produced no observation.
+        self.ctx
+            .metrics
+            .record(&self.rc.project.key, &persisted.observations);
         if let Some(ack) = persisted.ack
             && !self.send(ControlMessage { ack, body: None }).await
         {
@@ -420,6 +433,7 @@ fn control(body: control_message::Body) -> ControlMessage {
 
 /// Stores a batch in one transaction: drops already persisted messages, stops at a gap, applies
 /// the rest in order and advances `last_persisted_seq`.
+#[tracing::instrument(name = "agent.persist_batch", skip_all, fields(messages = batch.len()))]
 async fn persist_batch(
     ctx: &ChannelContext,
     rc: &RunContext,
@@ -463,6 +477,7 @@ async fn persist_batch(
         .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))?;
     let mut last = start;
     let mut effects = Effects::default();
+    let mut observations = Vec::new();
     let mut gap = None;
     let mut newest_event = None;
     let mut busy = None;
@@ -496,12 +511,13 @@ async fn persist_batch(
                     set_run_state_tx(&mut tx, rc.run.id, state, None).await?;
                 }
             }
-            agent_message::Body::TranscriptEvent(_) => {
+            agent_message::Body::TranscriptEvent(raw) => {
                 if let Some(event) = prepared.get(&msg.seq)
                     && let Some(id) =
                         transcript::insert(&mut tx, rc.task.id, rc.run.id, event).await?
                 {
                     newest_event = newest_event.max(Some(id));
+                    observations.extend(observe_event(&mut tx, rc, &raw).await?);
                     match event.kind {
                         "turn_started" => busy = Some(true),
                         "turn_ended" => {
@@ -514,9 +530,29 @@ async fn persist_batch(
             }
             agent_message::Body::ToolCallRequest(call) => effects.tool_calls.push(call),
             agent_message::Body::CredentialRequest(request) => effects.credentials.push(request),
-            agent_message::Body::PushReport(push) => effects.pushes.push(push),
+            agent_message::Body::PushReport(push) => {
+                observations.push(Observation::Push {
+                    target: push.target(),
+                    status: push.status(),
+                });
+                effects.pushes.push(push);
+            }
+            agent_message::Body::RuntimeTiming(timing) => {
+                // Not stored: it only takes its place in the sequence.
+                observations.push(Observation::Runtime {
+                    operation: timing.operation(),
+                    duration: Duration::from_millis(timing.duration_ms),
+                    ok: timing.ok,
+                });
+            }
             agent_message::Body::RunReport(report) => {
                 if let Some(ended) = end_run_tx(&mut tx, &run_end(rc, &report)).await? {
+                    observations.push(Observation::RunEnded {
+                        outcome: report.outcome(),
+                        duration: (Utc::now() - rc.run.started_at)
+                            .to_std()
+                            .unwrap_or_default(),
+                    });
                     effects.run_end = Some((report, ended));
                 }
             }
@@ -551,6 +587,70 @@ async fn persist_batch(
         busy,
         turn_ended,
         gap,
+        observations,
+    })
+}
+
+/// The observations a newly stored transcript event stands for: ended turns and tool calls that
+/// reached a terminal status.
+async fn observe_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rc: &RunContext,
+    event: &Event,
+) -> Result<Option<Observation>, ChannelError> {
+    let terminal = |status| matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed);
+    Ok(match &event.kind {
+        Some(event::Kind::TurnEnded(ended)) => Some(Observation::Turn {
+            stop_reason: ended.stop_reason(),
+            usage: ended.usage.clone(),
+        }),
+        Some(event::Kind::ToolCall(call)) if terminal(call.status()) => {
+            Some(Observation::ToolCall {
+                kind: call.kind(),
+                origin: call.origin(),
+                status: call.status(),
+            })
+        }
+        Some(event::Kind::ToolCallUpdate(update)) if update.status.is_some() => {
+            let status = update.status();
+            if !terminal(status) {
+                return Ok(None);
+            }
+            // An update names neither origin nor (usually) kind: take them from the call.
+            let (kind, origin) = stored_tool_call(tx, rc, &update.tool_call_id)
+                .await?
+                .unwrap_or_default();
+            Some(Observation::ToolCall {
+                kind: update.kind.map_or(kind, |_| update.kind()),
+                origin,
+                status,
+            })
+        }
+        _ => None,
+    })
+}
+
+/// Kind and origin of the stored `ToolCall` event of `tool_call_id` in this run.
+async fn stored_tool_call(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rc: &RunContext,
+    tool_call_id: &str,
+) -> Result<Option<(ToolKind, ToolOrigin)>, ChannelError> {
+    let payload: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT payload FROM transcript_events
+         WHERE run_id = $1 AND kind = 'tool_call' AND payload -> 'toolCall' ->> 'toolCallId' = $2
+         ORDER BY seq LIMIT 1",
+    )
+    .bind(rc.run.id.as_uuid())
+    .bind(tool_call_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(event) = payload.and_then(|p| serde_json::from_value::<Event>(p).ok()) else {
+        return Ok(None);
+    };
+    Ok(match event.kind {
+        Some(event::Kind::ToolCall(call)) => Some((call.kind(), call.origin())),
+        _ => None,
     })
 }
 
@@ -611,8 +711,10 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::probe::Probe;
     use crate::testing::Env;
     use df_core::testing::SandboxCall;
+    use df_proto::agent::v1::{PushStatus, PushTarget, RuntimeOperation, RuntimeTiming};
     use df_proto::transcript::v1 as wire;
 
     fn msg(seq: u64, body: agent_message::Body) -> AgentMessage {
@@ -1171,5 +1273,203 @@ mod tests {
 
         assert!(sent_prompt_ids(&mut rx).is_empty());
         assert!(!forwarded(&env, &queued).await);
+    }
+
+    // --- metrics (`specs/telemetry/spec.md`) ---
+
+    /// An environment whose channel records into the returned probe.
+    async fn metrics_env() -> (Env, Probe) {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool).await;
+        let probe = Probe::new();
+        env.ctx.metrics = Arc::new(crate::Metrics::new(&probe.meter()));
+        (env, probe)
+    }
+
+    fn timing(operation: RuntimeOperation, duration_ms: u64) -> agent_message::Body {
+        agent_message::Body::RuntimeTiming(RuntimeTiming {
+            operation: operation as i32,
+            duration_ms,
+            ok: true,
+        })
+    }
+
+    fn turn_ended_with_usage() -> agent_message::Body {
+        turn_event(wire::event::Kind::TurnEnded(wire::TurnEnded {
+            stop_reason: wire::StopReason::EndTurn as i32,
+            usage: vec![wire::Usage {
+                model_id: "claude-sonnet-5-5".into(),
+                input_tokens: 100,
+                output_tokens: 20,
+                ..wire::Usage::default()
+            }],
+            ..wire::TurnEnded::default()
+        }))
+    }
+
+    fn tool_call(status: wire::ToolCallStatus) -> agent_message::Body {
+        turn_event(wire::event::Kind::ToolCall(wire::ToolCall {
+            tool_call_id: "call-1".into(),
+            kind: wire::ToolKind::Execute as i32,
+            origin: wire::ToolOrigin::Harness as i32,
+            status: status as i32,
+            ..wire::ToolCall::default()
+        }))
+    }
+
+    fn tool_call_update(status: wire::ToolCallStatus) -> agent_message::Body {
+        turn_event(wire::event::Kind::ToolCallUpdate(wire::ToolCallUpdate {
+            tool_call_id: "call-1".into(),
+            status: Some(status as i32),
+            ..wire::ToolCallUpdate::default()
+        }))
+    }
+
+    fn push_report() -> agent_message::Body {
+        agent_message::Body::PushReport(PushReport {
+            target: PushTarget::TaskBranch as i32,
+            status: PushStatus::Ok as i32,
+            ..PushReport::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn a_runtime_timing_takes_its_place_in_the_sequence_without_a_row() {
+        let (env, probe) = metrics_env().await;
+        let run_id = env.running_run().await;
+
+        run_session(
+            &env,
+            run_id,
+            vec![
+                hello(),
+                msg(1, timing(RuntimeOperation::Turn, 1500)),
+                msg(2, text_event()),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let run = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
+        assert_eq!(run.last_persisted_seq, 2);
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM transcript_events")
+            .fetch_one(&env.ctx.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "only the text event is stored");
+        assert_eq!(
+            probe.total(
+                "df.agent.runtime.duration",
+                &[("operation", "turn"), ("project", "DF")]
+            ),
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn every_persisted_message_is_recorded_once() {
+        let (env, probe) = metrics_env().await;
+        let run_id = env.running_run().await;
+        let (mut session, _rx) = session_for(&env, run_id).await;
+        let batch = vec![
+            msg(1, tool_call(wire::ToolCallStatus::InProgress)),
+            msg(2, tool_call_update(wire::ToolCallStatus::Completed)),
+            msg(3, turn_ended_with_usage()),
+            msg(4, push_report()),
+            msg(5, timing(RuntimeOperation::Push, 40)),
+            msg(6, report(WireOutcome::Completed)),
+        ];
+
+        session.handle_batch(batch.clone()).await.unwrap();
+        // A reconnect replays the batch.
+        session.handle_batch(batch).await.unwrap();
+
+        let project = ("project", "DF");
+        let call = [
+            ("kind", "execute"),
+            ("origin", "harness"),
+            ("status", "completed"),
+            project,
+        ];
+        assert_eq!(probe.total("df.agent.tool_calls", &[]), 1.0);
+        assert_eq!(probe.total("df.agent.tool_calls", &call), 1.0);
+        assert_eq!(
+            probe.total("df.agent.turns", &[("stop_reason", "end_turn"), project]),
+            1.0
+        );
+        assert_eq!(
+            probe.total("df.agent.tokens", &[("token_type", "input"), project]),
+            100.0
+        );
+        assert_eq!(
+            probe.total("df.agent.tokens", &[("token_type", "output"), project]),
+            20.0
+        );
+        assert_eq!(
+            probe.total(
+                "df.agent.pushes",
+                &[("target", "task_branch"), ("status", "ok"), project]
+            ),
+            1.0
+        );
+        assert_eq!(
+            probe.total("df.agent.runtime.duration", &[("operation", "push")]),
+            1.0
+        );
+        assert_eq!(
+            probe.total("df.runs.ended", &[("outcome", "completed"), project]),
+            1.0
+        );
+        assert_eq!(
+            probe.total("df.run.duration", &[("outcome", "completed")]),
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rolled_back_batch_records_nothing_until_it_is_persisted() {
+        let (env, probe) = metrics_env().await;
+        let run_id = env.running_run().await;
+        let (mut session, _rx) = session_for(&env, run_id).await;
+        // The last statement of every batch fails, after the messages were applied.
+        sqlx::raw_sql(
+            "CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS
+               $$ BEGIN RAISE EXCEPTION 'refused'; END $$;
+             CREATE TRIGGER refuse BEFORE UPDATE OF last_persisted_seq ON runs
+               FOR EACH ROW EXECUTE FUNCTION refuse();",
+        )
+        .execute(&env.ctx.pool)
+        .await
+        .unwrap();
+        let batch = vec![msg(1, report(WireOutcome::Completed))];
+
+        assert!(session.handle_batch(batch.clone()).await.is_err());
+        assert_eq!(probe.total("df.runs.ended", &[]), 0.0);
+
+        sqlx::raw_sql("DROP TRIGGER refuse ON runs")
+            .execute(&env.ctx.pool)
+            .await
+            .unwrap();
+        session.handle_batch(batch).await.unwrap();
+        assert_eq!(
+            probe.total("df.runs.ended", &[("outcome", "completed")]),
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn streams_are_counted_and_reconnects_noticed() {
+        let (env, probe) = metrics_env().await;
+        let run_id = env.running_run().await;
+
+        run_session(&env, run_id, vec![hello()]).await.unwrap();
+        assert_eq!(probe.total("df.agent.reconnects", &[]), 0.0);
+        run_session(&env, run_id, vec![hello()]).await.unwrap();
+
+        assert_eq!(
+            probe.total("df.agent.reconnects", &[("project", "DF")]),
+            1.0
+        );
+        assert_eq!(probe.total("df.agent.connections", &[]), 0.0);
     }
 }

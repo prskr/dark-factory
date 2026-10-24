@@ -1,18 +1,19 @@
-//! Log format and level selection (`DF_LOG_FORMAT`, `RUST_LOG`).
-//!
-//! The same setup lives in `factory-agent` (`crates/factory-agent/src/logging.rs`); the sandbox
-//! binary does not depend on `df-core`, so the ~30 lines are duplicated on purpose.
+//! Log format and level selection (`DF_LOG_FORMAT`, `RUST_LOG`) shared by all binaries.
 
-use clap::ValueEnum;
 use tracing::Subscriber;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::{EnvFilter, Layer, Registry};
 
 /// Level used when `RUST_LOG` is unset, empty or invalid.
 const DEFAULT_LEVEL: &str = "info";
 
+/// An extra layer on the base registry, e.g. the OpenTelemetry span exporter.
+pub type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync>;
+
 /// Output format of log events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum LogFormat {
     /// Human-readable lines.
     Text,
@@ -30,21 +31,32 @@ impl LogFormat {
     }
 }
 
-/// Installs the global subscriber, writing to stdout.
-pub fn init_tracing(format: LogFormat) {
+/// Installs the global subscriber, writing to stdout. `extra` sees every span and event that
+/// passes `RUST_LOG`.
+pub fn init_tracing(format: LogFormat, extra: Option<BoxedLayer>) {
     let raw = std::env::var("RUST_LOG").ok();
     // Fails only when a subscriber is already installed, which is fine.
-    let _ = tracing::dispatcher::set_global_default(build(format, raw.as_deref(), std::io::stdout));
+    let _ = tracing::dispatcher::set_global_default(build(
+        format,
+        raw.as_deref(),
+        std::io::stdout,
+        extra,
+    ));
 }
 
 /// Builds the dispatcher for the `RUST_LOG` value `raw`. An invalid value falls back to `info`
 /// and is reported as a WARN through the new dispatcher.
-fn build<W>(format: LogFormat, raw: Option<&str>, writer: W) -> tracing::Dispatch
+pub(crate) fn build<W>(
+    format: LogFormat,
+    raw: Option<&str>,
+    writer: W,
+    extra: Option<BoxedLayer>,
+) -> tracing::Dispatch
 where
     W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
     let (filter, invalid) = resolve_filter(raw);
-    let dispatch = tracing::Dispatch::new(subscriber(format, filter, writer));
+    let dispatch = tracing::Dispatch::new(subscriber(format, filter, writer, extra));
     if let Some(value) = invalid {
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::warn!(RUST_LOG = %value, "invalid RUST_LOG, falling back to info");
@@ -64,51 +76,41 @@ fn resolve_filter(raw: Option<&str>) -> (EnvFilter, Option<String>) {
     }
 }
 
-fn subscriber<W>(
+pub(crate) fn subscriber<W>(
     format: LogFormat,
     filter: EnvFilter,
     writer: W,
+    extra: Option<BoxedLayer>,
 ) -> Box<dyn Subscriber + Send + Sync>
 where
     W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let fmt = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_writer(writer);
+    let base = tracing_subscriber::registry().with(extra).with(filter);
     match format {
-        LogFormat::Text => Box::new(builder.finish()),
-        LogFormat::Json => Box::new(builder.json().finish()),
+        LogFormat::Text => Box::new(base.with(fmt)),
+        LogFormat::Json => Box::new(base.with(fmt.json())),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use super::*;
+    use crate::testing::{buffer, capture};
 
-    struct Sink(Arc<Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Sink {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().expect("capture lock").extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+    #[test]
+    fn format_names_are_the_env_values() {
+        assert_eq!(LogFormat::Text.as_str(), "text");
+        assert_eq!(LogFormat::Json.as_str(), "json");
     }
 
     #[test]
     fn json_event_has_timestamp_level_and_message() -> anyhow::Result<()> {
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        let writer = Arc::clone(&buf);
-        let sub = subscriber(LogFormat::Json, EnvFilter::new("info"), move || {
-            Sink(Arc::clone(&writer))
-        });
-        tracing::subscriber::with_default(sub, || tracing::info!(run_id = "r1", "hello"));
-        let line = String::from_utf8(buf.lock().expect("capture lock").clone())?;
+        let (out, _guard) = capture("info");
+        tracing::info!(run_id = "r1", "hello");
+        let line = out.text();
         let v: serde_json::Value = serde_json::from_str(line.trim())?;
         assert!(v["timestamp"].is_string());
         assert_eq!(v["level"], "INFO");
@@ -130,16 +132,13 @@ mod tests {
 
     #[test]
     fn invalid_level_logs_at_info_and_warns_naming_rust_log() -> anyhow::Result<()> {
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        let writer = Arc::clone(&buf);
-        let dispatch = build(LogFormat::Json, Some("dark_factory=loud"), move || {
-            Sink(Arc::clone(&writer))
-        });
+        let (out, writer) = buffer();
+        let dispatch = build(LogFormat::Json, Some("dark_factory=loud"), writer, None);
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::info!("visible");
             tracing::debug!("hidden");
         });
-        let text = String::from_utf8(buf.lock().expect("capture lock").clone())?;
+        let text = out.text();
         let lines: Vec<serde_json::Value> = text
             .lines()
             .map(serde_json::from_str)
@@ -149,5 +148,20 @@ mod tests {
         assert!(lines[0]["fields"].get("RUST_LOG").is_some());
         assert_eq!(lines[1]["fields"]["message"], "visible");
         Ok(())
+    }
+
+    #[test]
+    fn default_level_writes_info_but_not_debug() {
+        let (out, writer) = buffer();
+        let dispatch = build(LogFormat::Json, None, writer, None);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!("visible");
+            tracing::debug!("hidden");
+        });
+        let text = out.text();
+        assert!(
+            text.contains("visible") && !text.contains("hidden"),
+            "{text}"
+        );
     }
 }
