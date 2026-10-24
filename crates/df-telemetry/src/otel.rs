@@ -158,7 +158,9 @@ pub struct Settings {
     pub traces: bool,
     pub sampling: Sampling,
     pub prometheus: SocketAddr,
-    service_name: String,
+    /// `OTEL_SERVICE_NAME`, when set.
+    service_name: Option<String>,
+    component_name: &'static str,
 }
 
 impl Settings {
@@ -202,9 +204,8 @@ impl Settings {
                 lookup("OTEL_TRACES_SAMPLER_ARG").as_deref(),
             )?,
             prometheus: SocketAddr::new(host, port),
-            service_name: lookup("OTEL_SERVICE_NAME")
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| component.service_name().to_string()),
+            service_name: lookup("OTEL_SERVICE_NAME").filter(|v| !v.trim().is_empty()),
+            component_name: component.service_name(),
         })
     }
 }
@@ -222,7 +223,11 @@ impl Telemetry {
     /// meter provider; the span layer is handed out by [`Telemetry::trace_layer`].
     pub async fn start(component: Component) -> Result<Self> {
         let settings = Settings::from_lookup(component, |key| std::env::var(key).ok())?;
-        let telemetry = Self::start_with(&settings, resource(&settings, &instance_id())).await?;
+        let telemetry = Self::start_with(
+            &settings,
+            resource(&settings, &instance_id(), &env_resource()),
+        )
+        .await?;
         if let Some(meters) = &telemetry.meters {
             opentelemetry::global::set_meter_provider(meters.clone());
         }
@@ -439,17 +444,34 @@ fn check_protocol(var: &'static str, raw: Option<&str>) -> Result<()> {
     }
 }
 
-/// `service.name` (`OTEL_SERVICE_NAME` wins), `service.version`, `service.instance.id` and the
-/// attributes of `OTEL_RESOURCE_ATTRIBUTES`.
-fn resource(settings: &Settings, instance_id: &str) -> Resource {
+/// The attributes of `OTEL_RESOURCE_ATTRIBUTES`.
+fn env_resource() -> Resource {
     Resource::builder_empty()
         .with_detector(Box::new(EnvResourceDetector::new()))
+        .build()
+}
+
+/// Resource precedence, lowest first: the defaults (component `service.name`, `service.version`,
+/// `service.instance.id` = `instance_id`), the `from_env` attributes (`OTEL_RESOURCE_ATTRIBUTES`),
+/// `OTEL_SERVICE_NAME` for `service.name`.
+fn resource(settings: &Settings, instance_id: &str, from_env: &Resource) -> Resource {
+    let copy = |r: &Resource| {
+        r.iter()
+            .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+            .collect::<Vec<_>>()
+    };
+    let builder = Resource::builder_empty()
         .with_attributes([
-            KeyValue::new("service.name", settings.service_name.clone()),
+            KeyValue::new("service.name", settings.component_name),
             KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
             KeyValue::new("service.instance.id", instance_id.to_string()),
         ])
-        .build()
+        .with_attributes(copy(from_env));
+    match &settings.service_name {
+        Some(name) => builder.with_service_name(name.clone()),
+        None => builder,
+    }
+    .build()
 }
 
 /// The pod name (Kubernetes sets `HOSTNAME` to it), else the host name.
@@ -531,7 +553,7 @@ mod tests {
         assert!(!s.traces);
         assert_eq!(s.sampling, Sampling::default());
         assert_eq!(s.prometheus, "0.0.0.0:9464".parse()?);
-        assert_eq!(s.service_name, "dark-factory-gateway");
+        assert_eq!(s.service_name, None);
         Ok(())
     }
 
@@ -543,7 +565,7 @@ mod tests {
             ("OTEL_SERVICE_NAME", "custom"),
         ])?;
         assert_eq!(s.prometheus, "127.0.0.1:9999".parse()?);
-        assert_eq!(s.service_name, "custom");
+        assert_eq!(s.service_name.as_deref(), Some("custom"));
         let err = settings(&[("OTEL_EXPORTER_PROMETHEUS_PORT", "x")]).unwrap_err();
         assert!(format!("{err:#}").contains("OTEL_EXPORTER_PROMETHEUS_PORT"));
         Ok(())
@@ -629,19 +651,51 @@ mod tests {
         Ok(())
     }
 
+    fn attrs(settings: &Settings, from_env: &[(&'static str, &'static str)]) -> Resource {
+        let from_env = Resource::builder_empty()
+            .with_attributes(from_env.iter().map(|(k, v)| KeyValue::new(*k, *v)))
+            .build();
+        resource(settings, "pod-1", &from_env)
+    }
+
+    fn get(r: &Resource, k: &str) -> Option<String> {
+        r.get(&opentelemetry::Key::new(k.to_string()))
+            .map(|v| v.to_string())
+    }
+
     #[test]
     fn resource_carries_service_attributes() -> Result<()> {
-        let r = resource(&settings(&[])?, "pod-1");
-        let get = |k: &str| {
-            r.get(&opentelemetry::Key::new(k.to_string()))
-                .map(|v| v.to_string())
-        };
-        assert_eq!(get("service.name").as_deref(), Some("dark-factory-gateway"));
-        assert_eq!(get("service.instance.id").as_deref(), Some("pod-1"));
+        let r = attrs(&settings(&[])?, &[]);
         assert_eq!(
-            get("service.version").as_deref(),
+            get(&r, "service.name").as_deref(),
+            Some("dark-factory-gateway")
+        );
+        assert_eq!(get(&r, "service.instance.id").as_deref(), Some("pod-1"));
+        assert_eq!(
+            get(&r, "service.version").as_deref(),
             Some(env!("CARGO_PKG_VERSION"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn resource_attributes_override_the_defaults() -> Result<()> {
+        let r = attrs(
+            &settings(&[])?,
+            &[("service.name", "custom"), ("service.instance.id", "pod-7")],
+        );
+        assert_eq!(get(&r, "service.name").as_deref(), Some("custom"));
+        assert_eq!(get(&r, "service.instance.id").as_deref(), Some("pod-7"));
+        Ok(())
+    }
+
+    #[test]
+    fn otel_service_name_beats_resource_attributes() -> Result<()> {
+        let r = attrs(
+            &settings(&[("OTEL_SERVICE_NAME", "named")])?,
+            &[("service.name", "custom")],
+        );
+        assert_eq!(get(&r, "service.name").as_deref(), Some("named"));
         Ok(())
     }
 
@@ -661,7 +715,11 @@ mod tests {
     async fn metrics_endpoint_serves_recorded_counters() -> Result<()> {
         let mut s = settings(&[("OTEL_EXPORTER_PROMETHEUS_HOST", "127.0.0.1")])?;
         s.prometheus.set_port(0);
-        let telemetry = Telemetry::start_with(&s, resource(&s, "test-pod")).await?;
+        let telemetry = Telemetry::start_with(
+            &s,
+            resource(&s, "test-pod", &Resource::builder_empty().build()),
+        )
+        .await?;
         let addr = telemetry.metrics_addr().context("no metrics server")?;
         let meters = telemetry.meters.clone().context("no meter provider")?;
         meters
@@ -692,7 +750,9 @@ mod tests {
     #[tokio::test]
     async fn disabled_metrics_open_no_port_and_install_no_layer() -> Result<()> {
         let s = settings(&[("OTEL_METRICS_EXPORTER", "none")])?;
-        let telemetry = Telemetry::start_with(&s, resource(&s, "test")).await?;
+        let telemetry =
+            Telemetry::start_with(&s, resource(&s, "test", &Resource::builder_empty().build()))
+                .await?;
         assert!(telemetry.server.is_none() && telemetry.meters.is_none());
         assert!(telemetry.trace_layer().is_none());
         Ok(())
@@ -706,7 +766,9 @@ mod tests {
             ("OTEL_EXPORTER_PROMETHEUS_HOST", "127.0.0.1"),
         ])?;
         s.prometheus.set_port(0);
-        let telemetry = Telemetry::start_with(&s, resource(&s, "test")).await?;
+        let telemetry =
+            Telemetry::start_with(&s, resource(&s, "test", &Resource::builder_empty().build()))
+                .await?;
         let addr = telemetry.metrics_addr().context("no metrics server")?;
         let meters = telemetry.meters.clone().context("no meter provider")?;
         meters
@@ -846,7 +908,9 @@ mod tests {
     #[tokio::test]
     async fn shutdown_returns_within_the_grace_period() -> Result<()> {
         let s = settings(&[("OTEL_METRICS_EXPORTER", "none")])?;
-        let telemetry = Telemetry::start_with(&s, resource(&s, "test")).await?;
+        let telemetry =
+            Telemetry::start_with(&s, resource(&s, "test", &Resource::builder_empty().build()))
+                .await?;
         tokio::time::timeout(
             Duration::from_secs(5),
             telemetry.shutdown(Duration::from_secs(1)),
