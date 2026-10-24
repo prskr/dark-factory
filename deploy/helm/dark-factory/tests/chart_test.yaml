@@ -721,6 +721,13 @@ tests:
     asserts:
       - failedTemplate: {}
 
+  - it: rejects an OTLP protocol other than grpc
+    template: control-plane-deployment.yaml
+    set:
+      telemetry.otlp.protocol: http/protobuf
+    asserts:
+      - failedTemplate: {}
+
   - it: renders Prometheus metrics and no tracing by default
     set:
       fullnameOverride: df
