@@ -89,6 +89,7 @@ pub struct OidcClient {
     redirect: RedirectUrl,
     public_url: String,
     roles_claim: String,
+    extra_scopes: Vec<String>,
     http: reqwest::Client,
 }
 
@@ -99,6 +100,13 @@ impl OidcClient {
             .read_client_secret()
             .map_err(|e| OidcError::Config(e.to_string()))?;
         let public_url = cfg.public_url.trim_end_matches('/').to_string();
+        let redirect = RedirectUrl::new(format!("{public_url}/auth/callback"))
+            .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?;
+        if redirect.url().scheme() == "http" && !is_loopback(redirect.url()) {
+            return Err(OidcError::Config(
+                "publicUrl: plain http is only allowed on loopback (local development)".into(),
+            ));
+        }
         // Following redirects would open the token requests to SSRF.
         let http = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
@@ -110,12 +118,18 @@ impl OidcClient {
                 .map_err(|e| OidcError::Config(format!("issuerUrl: {e}")))?,
             client_id: ClientId::new(cfg.client_id.clone()),
             secret: ClientSecret::new(secret.expose_secret().to_string()),
-            redirect: RedirectUrl::new(format!("{public_url}/auth/callback"))
-                .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?,
+            redirect,
             public_url,
             roles_claim: cfg.roles_claim.clone(),
+            extra_scopes: cfg.extra_scopes.clone(),
             http,
         })
+    }
+
+    /// Whether the session cookie gets the `Secure` flag: always, unless `publicUrl` is plain
+    /// `http://` on loopback (local development without TLS; [`Self::new`] refuses it elsewhere).
+    pub fn secure_cookies(&self) -> bool {
+        self.redirect.url().scheme() != "http"
     }
 
     async fn discover(&self) -> Result<ProviderMetadataWithLogout, OidcError> {
@@ -143,8 +157,9 @@ impl OidcClient {
                 CsrfToken::new_random,
                 Nonce::new_random,
             )
-            .add_scope(Scope::new("openid".into()))
+            // `authorize_url` always requests `openid` itself.
             .add_scope(Scope::new("profile".into()))
+            .add_scopes(self.extra_scopes.iter().cloned().map(Scope::new))
             .set_pkce_challenge(challenge)
             .url();
         Ok((
@@ -288,6 +303,16 @@ fn roles_from_payload(
     }
 }
 
+/// Whether the URL points at this machine (`localhost`, `127.0.0.0/8` or `::1`).
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(openidconnect::url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(openidconnect::url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(openidconnect::url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +331,65 @@ mod tests {
         assert_eq!(roles_from_payload(&p, "one"), ["solo"]);
         assert!(roles_from_payload(&p, "n").is_empty());
         assert!(roles_from_payload(&p, "missing").is_empty());
+    }
+
+    #[tokio::test]
+    async fn authorize_requests_the_extra_scopes() {
+        let idp = crate::testkit::Idp::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let secret_file = dir.path().join("secret");
+        std::fs::write(&secret_file, "s3cret\n").unwrap();
+        let client = OidcClient::new(&AuthConfig {
+            issuer_url: idp.server.uri(),
+            client_id: "dark-factory".into(),
+            client_secret_file: secret_file,
+            public_url: "https://factory.test".into(),
+            roles_claim: "groups".into(),
+            extra_scopes: vec!["groups".into(), "offline_access".into()],
+        })
+        .unwrap();
+
+        let (url, _) = client.authorize("/tasks").await.unwrap();
+
+        let scope = url
+            .query_pairs()
+            .find(|(k, _)| k == "scope")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        assert_eq!(scope, "openid profile groups offline_access");
+    }
+
+    #[test]
+    fn cookies_are_secure_unless_the_public_url_is_plain_http_on_loopback() {
+        let dir = tempfile::tempdir().unwrap();
+        let secret_file = dir.path().join("secret");
+        std::fs::write(&secret_file, "s3cret\n").unwrap();
+        let client = |public_url: &str| {
+            OidcClient::new(&AuthConfig {
+                issuer_url: "https://idp.test".into(),
+                client_id: "dark-factory".into(),
+                client_secret_file: secret_file.clone(),
+                public_url: public_url.into(),
+                roles_claim: "roles".into(),
+                extra_scopes: Vec::new(),
+            })
+        };
+        assert!(client("https://factory.test").unwrap().secure_cookies());
+        assert!(client("HTTPS://factory.test").unwrap().secure_cookies());
+        for local in [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+            "http://[::1]:8080",
+        ] {
+            assert!(!client(local).unwrap().secure_cookies(), "{local}");
+        }
+        // Anywhere else the session cookie would travel in cleartext.
+        let remote = client("http://factory.lan");
+        assert!(
+            matches!(&remote, Err(OidcError::Config(msg)) if msg.contains("publicUrl")),
+            "{:?}",
+            remote.err()
+        );
     }
 
     #[test]

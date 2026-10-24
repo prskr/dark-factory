@@ -90,7 +90,7 @@ pub fn router(state: WebState) -> Router {
         ));
     let sessions = SessionManagerLayer::new(auth::PgSessionStore::new(state.pool.clone()))
         .with_name(SESSION_COOKIE)
-        .with_secure(true)
+        .with_secure(state.oidc.secure_cookies())
         .with_http_only(true)
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(SESSION_INACTIVITY));

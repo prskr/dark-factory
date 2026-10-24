@@ -10,20 +10,29 @@ This guide covers setting up a local development environment for Dark Factory, r
   - `cargo-deny` (`cargo deny check`)
   - `sqlx-cli` (`cargo sqlx migrate`, `cargo sqlx prepare`)
   - `cargo-llvm-cov` (`cargo llvm-cov --workspace`)
-- **Docker / OrbStack**: for running a local PostgreSQL 17 instance with LZ4 support.
+- **Docker / OrbStack or Podman** with compose (`docker compose`, or `podman compose` with `podman-compose`): for the local services in [`compose.yml`](../compose.yml).
+- **OpenSSL**: `just serve-local` generates a throwaway agent certificate with it.
 
-## 2. Local PostgreSQL Container
+## 2. Local Services (PostgreSQL and Dex)
 
-Tests do not need this: they start their own PostgreSQL (section 3). The container below is for `sqlx` tooling (`cargo sqlx prepare`, `migrate run`) and running `dark-factory` by hand. `just db` starts it (with `docker`, or `podman` when Docker is not installed; `CONTAINER_CLI` overrides) and `just db-rm` removes it. By hand, start a local PostgreSQL 17 container on port `5432`:
+Tests do not need these: they start their own PostgreSQL (section 3). [`compose.yml`](../compose.yml) runs the services for `sqlx` tooling (`cargo sqlx prepare`, `migrate run`) and running `dark-factory` by hand:
+
+| Service | Address | Purpose |
+| --- | --- | --- |
+| `postgres` | `127.0.0.1:5432` | PostgreSQL 17, user and password `postgres`, database `dark_factory` |
+| `dex` | `http://127.0.0.1:5556/dex` | OIDC provider for the web UI, static users from [`dev/dex.yaml`](../dev/dex.yaml) |
+
+Earlier versions of this guide started PostgreSQL as a standalone container named `dark-factory-pg`. It still holds port `5432` and blocks `just db`; `just db-rm` does not remove it. Remove it first (export data you want to keep with `docker exec dark-factory-pg pg_dump -U postgres dark_factory > dump.sql`):
 
 ```bash
-docker run -d \
-  --name dark-factory-pg \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=dark_factory \
-  -p 5432:5432 \
-  postgres:17-alpine
+docker rm -f dark-factory-pg
+```
+
+`just db` starts both and waits up to 60 s for PostgreSQL (with `docker`, or `podman` when Docker is not installed; `CONTAINER_CLI` overrides). `just db-rm` removes them and their data. Without `just`:
+
+```bash
+docker compose up -d
+docker compose down -v
 ```
 
 Export `DATABASE_URL` for the `sqlx` tooling:
@@ -107,6 +116,50 @@ database:
 EOF
 
 cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
+```
+
+## 6. Running the Web UI Locally
+
+`just serve-local` runs the control plane against the compose services without a Kubernetes cluster:
+
+1. starts the compose services (`just db`) and builds the plugin components (`just plugins`),
+2. writes the password files, the OIDC client secret and a self-signed agent certificate to `target/local-dev/`,
+3. runs `migrate` and `serve --no-cluster` with [`dev/config.yaml`](../dev/config.yaml).
+
+Open <http://127.0.0.1:8080> and log in at Dex:
+
+| User | Password | Result |
+| --- | --- | --- |
+| `admin@example.com` | `password` | Member of the group `board-member`: full UI |
+| `viewer@example.com` | `password` | No role: `403` page |
+
+Limits of `serve --no-cluster` (local development only):
+
+- Every sandbox operation fails, so starting a run fails. Tasks, projects, personas, credentials and `host` allowlist entries can be created and edited.
+- Egress allowlist: adding a `cluster-service` entry fails ("Services cannot be checked"), because there is no Kubernetes API to look the Service up.
+- Egress log (`/egress/log`) answers `503 Egress log unavailable`: without `gateway.headlessService` and gateway pods there is nothing to stream.
+- The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
+
+Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is refused on any other host; with an `https://` URL the cookie always carries `Secure`.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant C as dark-factory :8080
+    participant D as Dex :5556
+    participant P as PostgreSQL :5432
+    B->>C: GET /tasks
+    C-->>B: 303 /login?next=/tasks
+    B->>C: GET /login?next=/tasks
+    C->>D: GET /.well-known/openid-configuration
+    C-->>B: 303 Dex /auth (scope openid profile groups offline_access)
+    B->>D: log in (admin@example.com)
+    D-->>B: 302 /auth/callback?code
+    B->>C: GET /auth/callback
+    C->>D: POST /token
+    D-->>C: ID token (groups: [board-member])
+    C->>P: store session
+    C-->>B: 303 /tasks + df_session cookie
 ```
 
 ## Bazel: platforms, cache and images

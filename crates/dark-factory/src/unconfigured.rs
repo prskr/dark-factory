@@ -1,7 +1,6 @@
-//! Test-only placeholders for the sandbox provider and secret store that fail every operation, for
-//! tests of the control plane that do not talk to a cluster.
+//! Placeholders for the sandbox provider and secret store that fail every operation, for
+//! `serve --no-cluster` and tests of the control plane that do not talk to a cluster.
 
-#[cfg(test)]
 pub mod sandbox_placeholders {
     use async_trait::async_trait;
     use df_core::{

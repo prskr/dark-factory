@@ -172,6 +172,9 @@ pub struct AuthConfig {
     /// Name of the top-level token claim holding a flat list of roles.
     #[serde(default = "default_roles_claim")]
     pub roles_claim: String,
+    /// Scopes requested in addition to `openid` and `profile`, e.g. `groups` for Dex.
+    #[serde(default)]
+    pub extra_scopes: Vec<String>,
 }
 
 impl AuthConfig {
@@ -644,6 +647,16 @@ sandbox:
         let auth = InstanceConfig::from_yaml_str(&yaml).unwrap().auth.unwrap();
         assert_eq!(auth.roles_claim, "roles");
         assert_eq!(auth.client_id, "dark-factory");
+        assert!(auth.extra_scopes.is_empty());
+    }
+
+    #[test]
+    fn auth_extra_scopes_are_a_list() {
+        let yaml = format!(
+            "{VALID_FIXTURE}auth:\n  issuerUrl: http://127.0.0.1:5556/dex\n  clientId: dark-factory\n  clientSecretFile: /s\n  publicUrl: http://127.0.0.1:8080\n  extraScopes: [groups, offline_access]\n"
+        );
+        let auth = InstanceConfig::from_yaml_str(&yaml).unwrap().auth.unwrap();
+        assert_eq!(auth.extra_scopes, ["groups", "offline_access"]);
     }
 
     #[test]

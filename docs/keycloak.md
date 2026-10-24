@@ -93,8 +93,9 @@ The chart renders the `auth` section of `config.yaml`:
 | `auth.issuerUrl` | yes | | Issuer; `/.well-known/openid-configuration` is discovered below it on every login, callback and refresh. |
 | `auth.clientId` | yes | | OIDC client ID. |
 | `auth.clientSecretFile` | yes | | File with the client secret (the chart mounts it at `/run/secrets/oidc/client-secret`). |
-| `auth.publicUrl` | yes | | Externally visible base URL; the redirect URI is `<publicUrl>/auth/callback`, the post-logout redirect `<publicUrl>/`. |
+| `auth.publicUrl` | yes | | Externally visible base URL; the redirect URI is `<publicUrl>/auth/callback`, the post-logout redirect `<publicUrl>/`. Must be `https://`; plain `http://` is accepted only on loopback (`localhost`, `127.0.0.0/8`, `::1`) for local development, and then the session cookie is sent without `Secure`. `serve` refuses any other `http://` URL. |
 | `auth.rolesClaim` | no | `roles` | Top-level ID token claim with the role list. |
+| `auth.extraScopes` | no | `[]` | Scopes requested in addition to `openid` and `profile`, e.g. `[groups]` for Dex (`docs/development.md`, section 6). Not set by the chart. |
 
 Without an `auth` section `dark-factory serve` logs a warning, serves only `/healthz`, `/readyz` and
 `/assets/*`, and the UI is unavailable.

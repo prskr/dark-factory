@@ -60,7 +60,12 @@ pub struct Cli {
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 pub enum Command {
     /// Run the Dark Factory control plane server.
-    Serve,
+    Serve {
+        /// Local development only: run without a Kubernetes cluster. The UI works; every sandbox
+        /// operation (starting a run) fails.
+        #[arg(long)]
+        no_cluster: bool,
+    },
     /// Apply embedded PostgreSQL migrations, optional application role management, and grants.
     Migrate,
     /// Run the Dark Factory sandbox egress gateway.
@@ -83,7 +88,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Serve => match run_serve_command(&cli.config).await {
+        Command::Serve { no_cluster } => match run_serve_command(&cli.config, no_cluster).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 error!(error = format!("{err:#}"), "control plane server failed");
@@ -209,6 +214,27 @@ trait SandboxBackend {
         notifier: &df_db::Notifier,
         stop: watch::Receiver<bool>,
     ) -> anyhow::Result<SandboxWiring>;
+}
+
+/// Backend without a cluster (`serve --no-cluster`, tests): every sandbox operation fails.
+struct UnconfiguredBackend;
+
+#[async_trait::async_trait]
+impl SandboxBackend for UnconfiguredBackend {
+    async fn start(
+        self,
+        _cfg: &InstanceConfig,
+        _pool: &PgPool,
+        _notifier: &df_db::Notifier,
+        _stop: watch::Receiver<bool>,
+    ) -> anyhow::Result<SandboxWiring> {
+        Ok(SandboxWiring {
+            provider: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSandboxProvider),
+            secrets: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSecretStore),
+            tasks: Vec::new(),
+            services: None,
+        })
+    }
 }
 
 /// Sandboxes as agent-sandbox resources in the connected Kubernetes cluster.
@@ -374,11 +400,23 @@ async fn run_migrate_command(config_path: &std::path::Path) -> anyhow::Result<()
     Ok(())
 }
 
-async fn run_serve_command(config_path: &std::path::Path) -> anyhow::Result<()> {
+async fn run_serve_command(config_path: &std::path::Path, no_cluster: bool) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
     let http_listener = bind_listener(cfg.server.http_port).await?;
     let agent_listener = bind_listener(cfg.server.agent_port).await?;
     let internal_listener = bind_listener(cfg.server.internal_grpc_port).await?;
+    if no_cluster {
+        tracing::warn!("running without a Kubernetes cluster; sandbox operations fail");
+        return serve(
+            cfg,
+            UnconfiguredBackend,
+            http_listener,
+            agent_listener,
+            internal_listener,
+            wait_for_shutdown_signal(),
+        )
+        .await;
+    }
     let client = Client::try_default()
         .await
         .context("failed to initialize Kubernetes client")?;
@@ -801,27 +839,6 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    /// Backend without a cluster: every sandbox operation fails.
-    struct UnconfiguredBackend;
-
-    #[async_trait::async_trait]
-    impl SandboxBackend for UnconfiguredBackend {
-        async fn start(
-            self,
-            _cfg: &InstanceConfig,
-            _pool: &PgPool,
-            _notifier: &df_db::Notifier,
-            _stop: watch::Receiver<bool>,
-        ) -> anyhow::Result<SandboxWiring> {
-            Ok(SandboxWiring {
-                provider: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSandboxProvider),
-                secrets: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSecretStore),
-                tasks: Vec::new(),
-                services: None,
-            })
-        }
-    }
-
     #[tokio::test]
     async fn service_lookup_is_limited_to_the_cluster_target_namespaces() {
         // No request reaches the API for a namespace that is not allowed.
@@ -851,8 +868,10 @@ mod tests {
     #[test]
     fn parses_subcommands() {
         let cli = Cli::try_parse_from(["dark-factory", "-c", "/tmp/cfg.yaml", "serve"]).unwrap();
-        assert_eq!(cli.command, Command::Serve);
+        assert_eq!(cli.command, Command::Serve { no_cluster: false });
         assert_eq!(cli.config, PathBuf::from("/tmp/cfg.yaml"));
+        let cli = Cli::try_parse_from(["dark-factory", "serve", "--no-cluster"]).unwrap();
+        assert_eq!(cli.command, Command::Serve { no_cluster: true });
     }
 
     async fn ui_response(router: axum::Router, request: &str) -> String {
@@ -878,6 +897,7 @@ mod tests {
             client_secret_file: dir.path().join("oidc-secret"),
             public_url: "https://factory.example.org".into(),
             roles_claim: "roles".into(),
+            extra_scopes: Vec::new(),
         });
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
         let router = web_router(&cfg, &pool, &notifier, None, EgressDeps::default())?;
