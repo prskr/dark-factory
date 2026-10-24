@@ -1,6 +1,6 @@
 //! Test support: an app on a test database, a mock OIDC provider and request helpers.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::Router;
 use axum::body::Body;
@@ -26,6 +26,15 @@ use crate::auth::OidcClient;
 use crate::{WebState, router};
 
 pub(crate) const CLIENT_ID: &str = "dark-factory";
+
+/// Signing key of every mock provider, as PKCS#1 PEM. Generated once per test process: a 2048-bit
+/// key takes seconds in an unoptimized build, and most tests start a provider.
+static SIGNING_KEY_PEM: LazyLock<String> = LazyLock::new(|| {
+    let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+    key.to_pkcs1_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string()
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RolesClaim {
@@ -141,14 +150,11 @@ impl Idp {
     pub async fn start() -> Self {
         let server = MockServer::start().await;
         let issuer = server.uri();
-        let pem = {
-            let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
-            key.to_pkcs1_pem(rsa::pkcs8::LineEnding::LF)
-                .unwrap()
-                .to_string()
-        };
-        let key =
-            CoreRsaPrivateSigningKey::from_pem(&pem, Some(JsonWebKeyId::new("k1".into()))).unwrap();
+        let key = CoreRsaPrivateSigningKey::from_pem(
+            &SIGNING_KEY_PEM,
+            Some(JsonWebKeyId::new("k1".into())),
+        )
+        .unwrap();
         let jwks = CoreJsonWebKeySet::new(vec![key.as_verification_key()]);
         Mock::given(method("GET"))
             .and(path("/.well-known/openid-configuration"))
