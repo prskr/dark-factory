@@ -56,6 +56,16 @@ oidc:
   # Token claim holding a flat list of roles; the UI requires `board-member` in it.
   rolesClaim: roles
 
+logging:
+  # text | json. Applies to the control plane, gateway and migrate job; the control plane passes
+  # its own format on to every sandbox.
+  format: text
+
+sandbox:
+  # RUST_LOG (EnvFilter syntax) of the sandbox runtime; rendered as sandbox.logLevel in the
+  # instance config.
+  logLevel: info
+
 sandboxNamespace:
   create: true
   name: dark-factory-sandboxes
@@ -99,6 +109,8 @@ clusterTargets:
 
 controlPlane:
   replicas: 1
+  # RUST_LOG (EnvFilter syntax) of the control plane and the migrate job.
+  logLevel: info
   serviceAccountName: ''
   ports:
     http: 8080
@@ -113,6 +125,8 @@ controlPlane:
 
 gateway:
   replicas: 2
+  # RUST_LOG (EnvFilter syntax) of the gateway.
+  logLevel: info
   serviceAccountName: ''
   pdb:
     minAvailable: 1

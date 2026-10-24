@@ -48,6 +48,10 @@ spec:
               value: "10.103.178.202:9443"
             - name: DF_CONTROL_PLANE_SERVER_NAME
               value: dark-factory-control-plane.dark-factory-dev.svc
+            - name: DF_LOG_FORMAT
+              value: text
+            - name: RUST_LOG
+              value: info
           image: "test-project:latest"
           name: agent
           securityContext:

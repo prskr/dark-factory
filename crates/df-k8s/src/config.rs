@@ -42,6 +42,8 @@ pub struct ProvisioningConfig {
     pub gateway_ip: IpAddr,
     /// Port of the gateway egress proxy.
     pub gateway_proxy_port: u16,
+    /// Log format (`text` or `json`) the sandbox runtime is started with: the control plane's own.
+    pub log_format: String,
 }
 
 impl ProvisioningConfig {
@@ -60,7 +62,14 @@ impl ProvisioningConfig {
             control_plane_tls_server_name: control_plane.tls_server_name,
             gateway_ip: gateway.ip,
             gateway_proxy_port: gateway.proxy_port,
+            log_format: "text".to_string(),
         }
+    }
+
+    /// Sets the log format passed to sandboxes (`DF_LOG_FORMAT`).
+    pub fn with_log_format(mut self, log_format: &str) -> Self {
+        self.log_format = log_format.to_string();
+        self
     }
 }
 

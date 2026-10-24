@@ -7,6 +7,8 @@
     "image",
     "database",
     "oidc",
+    "logging",
+    "sandbox",
     "sandboxNamespace",
     "enforcement",
     "clusterTargets",
@@ -73,6 +75,20 @@
         "clientSecretKey": { "type": "string", "minLength": 1 },
         "publicUrl": { "type": "string" },
         "rolesClaim": { "type": "string", "minLength": 1 }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "required": ["format"],
+      "properties": {
+        "format": { "enum": ["text", "json"] }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "required": ["logLevel"],
+      "properties": {
+        "logLevel": { "type": "string" }
       }
     },
     "sandboxNamespace": {
@@ -153,6 +169,7 @@
       "required": ["replicas", "ports", "resources"],
       "properties": {
         "replicas": { "type": "integer", "minimum": 1 },
+        "logLevel": { "type": "string" },
         "serviceAccountName": { "type": "string" },
         "ports": {
           "type": "object",
@@ -171,6 +188,7 @@
       "required": ["replicas", "pdb", "ports", "resources"],
       "properties": {
         "replicas": { "type": "integer", "minimum": 2 },
+        "logLevel": { "type": "string" },
         "serviceAccountName": { "type": "string" },
         "pdb": {
           "type": "object",

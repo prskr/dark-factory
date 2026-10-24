@@ -27,6 +27,7 @@ pub(crate) fn live_config() -> ProvisioningConfig {
             runtime_image: "alpine:latest".to_string(),
             runtime_delivery: RuntimeDelivery::ImageVolume,
             cluster_domain: "cluster.local".to_string(),
+            log_level: "info".to_string(),
         },
         ControlPlaneEndpoint {
             ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),

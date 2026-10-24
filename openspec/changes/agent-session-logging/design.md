@@ -23,7 +23,7 @@
 
 ### D1: Log `send_body()` traffic, not ACP notifications
 
-A function `log_outbound(&agent_message::Body)` in `runner.rs` is called from `send_body()` and matches on the body / transcript event kind. All events listed in the spec except "run assigned", "harness started", "harness session ready" and "prompt received" pass through it; those four are single `info!` calls at their call sites (`main.rs` after `Assign`, `run_session()` after spawn, after `setup_session()`, in the inbound task).
+A function `log_outbound(&agent_message::Body)` in `runner.rs` is called from `send_body()` and matches on the body / transcript event kind. All events listed in the spec except "run assigned", "harness started", "harness session ready" and "prompt received" pass through it; those four are single `info!` calls at their call sites (`main.rs` after `Assign`, `run_session()` after spawn, after `setup_session()`, and for prompt received at the start of `run_session()` for initial prompts and in the inbound task for prompts that arrive during the run).
 
 Alternative: log in the ACP `on_receive_notification` handler. Rejected: it misses runtime-generated events (`TurnStarted`, `UserMessage`, `TurnEnded`, notices, reports) and would log ACP shapes instead of the already-translated transcript fields.
 
@@ -67,7 +67,7 @@ sandbox:
 ## Risks / Trade-offs
 
 - [Tool input can contain sensitive data the agent typed, e.g. a token pasted into a `curl` command] → Input is cut to 512 bytes; output, content and prompts are never logged. Operators who cannot accept this set `sandbox.logLevel` to `warn` (loses all session events) — acceptable until a per-field opt-out is requested.
-- [INFO default in sandboxes increases pod log volume] → One line per tool call / turn event; chunks stay at DEBUG.
+- [INFO default in sandboxes increases pod log volume] → One line per tool call / turn event; chunks stay at DEBUG and are cut to 512 bytes.
 - [Merge conflict with `iter1-sandbox-provisioning` on `SandboxSectionConfig` and the chart] → Tasks touching those land after that change is merged; the runtime and control plane format work can land before.
 - [`DF_LOG_FORMAT=json` changes stdout of `dark-factory migrate` and CLI errors printed via `tracing`] → Clap usage errors still go to stderr as plain text; only log events change.
 

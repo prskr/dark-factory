@@ -32,7 +32,9 @@ use crate::harness::{
 };
 use crate::outbox::Outbox;
 use crate::runtime_socket::{RuntimeHandler, RuntimeSocketServer};
-use crate::transcript::{TranscriptTranslator, acp_to_proto_stop_reason, notice_event};
+use crate::transcript::{
+    TranscriptTranslator, acp_to_proto_stop_reason, notice_event, truncate_utf8,
+};
 use crate::usage::SessionLogTracker;
 use crate::workspace::{FinalizeParams, finalize_workspace, push_after_turn};
 
@@ -56,12 +58,117 @@ impl<T> Drop for AbortOnDrop<T> {
 /// Sends a message without a seq (the outbox assigns it). A closed channel means the connection
 /// manager is gone, which the run can't act on, so the result is ignored.
 async fn send_body(outbound_tx: &mpsc::Sender<AgentMessage>, body: agent_message::Body) {
+    log_outbound(&body);
     let _ = outbound_tx
         .send(AgentMessage {
             seq: 0,
             body: Some(body),
         })
         .await;
+}
+
+/// Maximum bytes of a variable-size field in the log: a tool call's raw input or a chunk's text.
+pub(crate) const LOG_FIELD_MAX_BYTES: usize = 512;
+
+/// Logs that a prompt reached the runtime (id only, never the content).
+pub(crate) fn log_prompt_received(p: &df_proto::agent::v1::Prompt) {
+    tracing::info!(prompt_id = %p.prompt_id, "prompt received");
+}
+
+/// Writes the session log event for an outbound message (see `specs/logging/spec.md`).
+///
+/// Never logs tool output, tool content, prompt content or credentials; chunk text is DEBUG only.
+pub(crate) fn log_outbound(body: &agent_message::Body) {
+    use df_proto::transcript::v1::event::Kind;
+    match body {
+        agent_message::Body::TranscriptEvent(ev) => {
+            let turn_id = ev.turn_id.as_str();
+            match &ev.kind {
+                Some(Kind::TurnStarted(t)) => {
+                    tracing::info!(turn_id, prompts = t.prompt_ids.len(), "turn started");
+                }
+                Some(Kind::UserMessage(m)) => {
+                    tracing::info!(turn_id, prompt_id = %m.prompt_id, "user message delivered");
+                }
+                Some(Kind::AgentMessageChunk(c)) => {
+                    let (text, cut) = chunk_text(&c.content);
+                    tracing::debug!(
+                        turn_id,
+                        message_id = %c.message_id,
+                        text,
+                        text_truncated = cut.then_some(true),
+                        "agent message chunk"
+                    );
+                }
+                Some(Kind::AgentThoughtChunk(c)) => {
+                    let (text, cut) = chunk_text(&c.content);
+                    tracing::debug!(
+                        turn_id,
+                        message_id = %c.message_id,
+                        text,
+                        text_truncated = cut.then_some(true),
+                        "agent thought chunk"
+                    );
+                }
+                Some(Kind::ToolCall(c)) => {
+                    let (input, cut) = truncate_utf8(&c.raw_input_json, LOG_FIELD_MAX_BYTES);
+                    tracing::info!(
+                        turn_id,
+                        tool_call_id = %c.tool_call_id,
+                        title = %c.title,
+                        kind = ?c.kind(),
+                        origin = ?c.origin(),
+                        input,
+                        input_truncated = cut.then_some(true),
+                        "tool call"
+                    );
+                }
+                Some(Kind::ToolCallUpdate(u)) if u.status.is_some() => {
+                    tracing::info!(turn_id, tool_call_id = %u.tool_call_id, status = ?u.status(), "tool call status changed");
+                }
+                Some(Kind::ToolCallUpdate(u)) => {
+                    tracing::debug!(turn_id, tool_call_id = %u.tool_call_id, "tool call updated");
+                }
+                Some(Kind::Plan(p)) => {
+                    tracing::info!(turn_id, entries = p.entries.len(), "plan updated");
+                }
+                Some(Kind::TurnEnded(t)) => {
+                    let output_tokens: u64 = t.usage.iter().map(|u| u.output_tokens).sum();
+                    tracing::info!(
+                        turn_id,
+                        stop_reason = ?t.stop_reason(),
+                        output_tokens,
+                        detail = (!t.detail.is_empty()).then_some(t.detail.as_str()),
+                        "turn ended"
+                    );
+                }
+                Some(Kind::Notice(n)) => match n.level() {
+                    NoticeLevel::Warning | NoticeLevel::Error => {
+                        tracing::warn!(code = %n.code, message = %n.message, "notice");
+                    }
+                    _ => tracing::info!(code = %n.code, message = %n.message, "notice"),
+                },
+                None => {}
+            }
+        }
+        agent_message::Body::PushReport(r) => {
+            tracing::info!(r#ref = %r.r#ref, status = ?r.status(), sha = %r.sha, "push report");
+        }
+        agent_message::Body::RunReport(r) => {
+            tracing::info!(outcome = ?r.outcome(), detail = %r.detail, "run finished");
+        }
+        _ => {}
+    }
+}
+
+/// The text of a chunk cut to [`LOG_FIELD_MAX_BYTES`] and whether it was cut; empty for
+/// non-text content.
+fn chunk_text(block: &Option<df_proto::transcript::v1::ContentBlock>) -> (&str, bool) {
+    use df_proto::transcript::v1::content_block;
+    match block.as_ref().and_then(|b| b.kind.as_ref()) {
+        Some(content_block::Kind::Text(t)) => truncate_utf8(&t.text, LOG_FIELD_MAX_BYTES),
+        _ => ("", false),
+    }
 }
 
 /// Helper to emit a notice transcript event to outbound channel (Finding 28).
@@ -412,6 +519,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
 
     let prompt_queue = Arc::new(Mutex::new(PromptQueue::new()));
     for p in params.initial_prompts {
+        log_prompt_received(&p);
         prompt_queue.lock().await.push(p);
     }
 
@@ -472,6 +580,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         while let Some(msg) = inbound_rx.recv().await {
             match msg.body {
                 Some(control_message::Body::Prompt(p)) => {
+                    log_prompt_received(&p);
                     prompt_queue_inbound.lock().await.push(p);
                 }
                 Some(control_message::Body::Cancel(c)) => {
@@ -614,6 +723,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
             .await);
         }
     };
+    tracing::info!(harness = %harness_cmd, "harness started");
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill().await;
         return Ok(fail_run(
@@ -742,6 +852,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
             .await?;
 
             let final_session_id = setup_res.session_id.clone();
+            tracing::info!(session_id = %final_session_id, resumed = setup_res.is_resumed, "harness session ready");
             let loop_notices = setup_res.notices.clone();
             for n in &setup_res.notices {
                 emit_notice(&outbound_tx_turn, n.clone()).await;

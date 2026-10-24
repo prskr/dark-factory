@@ -307,6 +307,9 @@ pub struct SandboxProvisioningConfig {
     pub runtime_image: String,
     pub runtime_delivery: RuntimeDelivery,
     pub cluster_domain: String,
+    /// `RUST_LOG` directive of the sandbox runtime. Passed on as is; an invalid value makes the
+    /// runtime fall back to `info`.
+    pub log_level: String,
 }
 
 /// Optional overrides for the addresses sandboxes use to reach the control plane and the
@@ -355,6 +358,7 @@ impl Default for SandboxProvisioningConfig {
             runtime_image: "ghcr.io/prskr/dark-factory/runtime:0.1.0".to_string(),
             runtime_delivery: RuntimeDelivery::default(),
             cluster_domain: "cluster.local".to_string(),
+            log_level: "info".to_string(),
         }
     }
 }
@@ -704,6 +708,15 @@ sandbox:
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn sandbox_log_level_defaults_to_info_and_reads_explicit_value() {
+        let section: SandboxSectionConfig = serde_saphyr::from_str("namespace: sb").unwrap();
+        assert_eq!(section.provisioning.log_level, "info");
+        let section: SandboxSectionConfig =
+            serde_saphyr::from_str("logLevel: info,factory_agent=debug").unwrap();
+        assert_eq!(section.provisioning.log_level, "info,factory_agent=debug");
     }
 
     #[test]

@@ -220,6 +220,16 @@ pub fn render_sandbox(
             value: Some(config.control_plane_tls_server_name.clone()),
             ..Default::default()
         },
+        SandboxPodTemplateSpecContainersEnv {
+            name: "DF_LOG_FORMAT".to_string(),
+            value: Some(config.log_format.clone()),
+            ..Default::default()
+        },
+        SandboxPodTemplateSpecContainersEnv {
+            name: "RUST_LOG".to_string(),
+            value: Some(config.sandbox.log_level.clone()),
+            ..Default::default()
+        },
     ];
 
     let volume_mounts = vec![
@@ -684,6 +694,7 @@ mod tests {
                 runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
                 runtime_delivery: RuntimeDelivery::ImageVolume,
                 cluster_domain: "cluster.local".to_string(),
+                log_level: "info".to_string(),
             },
             control_plane_ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),
             control_plane_port: 9443,
@@ -691,6 +702,7 @@ mod tests {
                 .to_string(),
             gateway_ip: IpAddr::V4(Ipv4Addr::new(10, 105, 68, 86)),
             gateway_proxy_port: 3128,
+            log_format: "text".to_string(),
         }
     }
 
@@ -987,6 +999,34 @@ mod tests {
                     .flatten()
             })
             .collect()
+    }
+
+    fn sandbox_env(config: &ProvisioningConfig, name: &str) -> Option<String> {
+        let sandbox = render_sandbox(&test_spec(), &[], config).unwrap();
+        sandbox.spec.pod_template.spec.containers[0]
+            .env
+            .iter()
+            .flatten()
+            .find(|e| e.name == name)
+            .and_then(|e| e.value.clone())
+    }
+
+    #[test]
+    fn sandbox_inherits_the_control_plane_log_format() {
+        let json = test_config().with_log_format("json");
+        assert_eq!(sandbox_env(&json, "DF_LOG_FORMAT").as_deref(), Some("json"));
+        assert_eq!(
+            sandbox_env(&test_config(), "DF_LOG_FORMAT").as_deref(),
+            Some("text")
+        );
+    }
+
+    #[test]
+    fn sandbox_log_level_comes_from_the_sandbox_config() {
+        let mut config = test_config();
+        assert_eq!(sandbox_env(&config, "RUST_LOG").as_deref(), Some("info"));
+        config.sandbox.log_level = "debug".to_string();
+        assert_eq!(sandbox_env(&config, "RUST_LOG").as_deref(), Some("debug"));
     }
 
     #[test]

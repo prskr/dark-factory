@@ -1230,6 +1230,7 @@ dependencies = [
  "kube",
  "rustls",
  "secrecy",
+ "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
