@@ -120,6 +120,11 @@ gateway:
     proxy: 3128
     internalGrpc: 9444
     health: 8080
+  # Flow events of the live egress log kept in memory per gateway pod.
+  bufferSize: 10000
+  # Pod and Service CIDRs of the cluster that the proxy must never connect to, on top of the
+  # built-in private, loopback, link-local, CGNAT and unique-local ranges.
+  blockedCidrs: []
   resources:
     requests:
       cpu: 100m

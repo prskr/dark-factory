@@ -18,7 +18,7 @@ Board members SHALL list, add and remove entries at instance or project scope of
 - **THEN** runs of `DF` may connect to `static.crates.io` and runs of other projects may not
 
 ### Requirement: Entry validation
-Hostnames SHALL be valid DNS names or a single leading `*.` wildcard; IP literals and bare `*` SHALL be rejected. Cluster-service entries SHALL name an existing Service at save time.
+Hostnames SHALL be valid DNS names or a single leading `*.` wildcard; IP literals and bare `*` SHALL be rejected. Cluster-service entries SHALL name an existing Service at save time, in a namespace the instance's `clusterTargets` allow (the control plane's RBAC); other namespaces SHALL be rejected without a cluster lookup.
 
 #### Scenario: IP literal
 - **WHEN** a board member enters `10.0.0.5` as `http-host`
@@ -26,6 +26,10 @@ Hostnames SHALL be valid DNS names or a single leading `*.` wildcard; IP literal
 
 #### Scenario: Unknown Service
 - **WHEN** a cluster-service entry names `nativelink/schedular` which doesn't exist
+- **THEN** the form shows a validation error
+
+#### Scenario: Namespace outside the cluster targets
+- **WHEN** a cluster-service entry names `kube-system/kube-dns` and `kube-system` is not a cluster target namespace
 - **THEN** the form shows a validation error
 
 ### Requirement: Changes are audited and announced

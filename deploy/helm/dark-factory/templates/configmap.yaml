@@ -24,6 +24,11 @@ data:
       proxyPort: {{ .Values.gateway.ports.proxy }}
       internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
       healthPort: {{ .Values.gateway.ports.health }}
+      controlPlaneHost: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
+      identity: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}
+      headlessService: {{ printf "%s-gateway-headless.%s.svc" (include "dark-factory.fullname" .) .Release.Namespace | quote }}
+      bufferSize: {{ .Values.gateway.bufferSize }}
+      blockedCidrs: {{ .Values.gateway.blockedCidrs | toJson }}
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
     {{- if .Values.oidc.publicUrl }}
     auth:

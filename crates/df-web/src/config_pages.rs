@@ -248,12 +248,12 @@ fn conflict(errors: &mut FormErrors, field: &'static str, error: DbError) -> Opt
 // ---------------------------------------------------------------------------------------------
 
 /// A form as modal over its list. `form` carries the `#form` the submit swaps.
-fn modal(title: &str, form: Markup) -> Response {
+pub(crate) fn modal(title: &str, form: Markup) -> Response {
     dialog_with("modal", title, DialogStyle::Form, form).into_response()
 }
 
 /// Answer of a successful save: the updated list replaces the old one and the modal closes.
-fn saved(list: Markup) -> Response {
+pub(crate) fn saved(list: Markup) -> Response {
     let mut response = list.into_response();
     let headers = response.headers_mut();
     headers.insert("HX-Retarget", HeaderValue::from_static("#config-list"));
@@ -263,19 +263,19 @@ fn saved(list: Markup) -> Response {
 }
 
 /// A button that opens a form fragment as modal.
-fn open_modal(href: &str, label: &str, class: &str, content: Markup) -> Markup {
+pub(crate) fn open_modal(href: &str, label: &str, class: &str, content: Markup) -> Markup {
     html! {
         button type="button" hx-get=(href) hx-target="#composer-slot" hx-swap="innerHTML" aria-label=(label) title=[(!label.is_empty()).then_some(label)] class=(class) { (content) }
     }
 }
 
 /// An edit button of a list entry.
-fn edit_button(href: &str, label: &str) -> Markup {
+pub(crate) fn edit_button(href: &str, label: &str) -> Markup {
     open_modal(href, label, ICON_BUTTON_CLASS, icon(Icon::Pencil))
 }
 
 /// The primary create button of a list page.
-fn create_button(href: &str, label: &str) -> Markup {
+pub(crate) fn create_button(href: &str, label: &str) -> Markup {
     open_modal(
         href,
         "",
@@ -285,13 +285,13 @@ fn create_button(href: &str, label: &str) -> Markup {
 }
 
 /// A list page around its live region (`#config-list`), at the full width of the content area.
-fn list_page(title: &str, nav: Nav, region: Markup) -> Response {
+pub(crate) fn list_page(title: &str, nav: Nav, region: Markup) -> Response {
     layout(title, nav, region).into_response()
 }
 
 /// Header of a list: title with the number of entries, the create button and, on phones, the
 /// profile menu of `user`. Part of the live region, so a save updates the count.
-fn list_header(title: &str, count: usize, create: Markup, user: Option<&str>) -> Markup {
+pub(crate) fn list_header(title: &str, count: usize, create: Markup, user: Option<&str>) -> Markup {
     page_header(
         title,
         Some(count),
@@ -305,17 +305,17 @@ fn list_header(title: &str, count: usize, create: Markup, user: Option<&str>) ->
 }
 
 /// The rows of a modal form: one column on phones, two from 768 px.
-fn form_grid(fields: Markup) -> Markup {
+pub(crate) fn form_grid(fields: Markup) -> Markup {
     html! { div class="grid grid-cols-1 gap-4 md:grid-cols-2" { (fields) } }
 }
 
 /// A field that takes the whole row of a [`form_grid`].
-fn full_row(field: Markup) -> Markup {
+pub(crate) fn full_row(field: Markup) -> Markup {
     html! { div class="md:col-span-2" { (field) } }
 }
 
 /// Bottom right of a modal form: Cancel (closes the dialog) and the primary action.
-fn form_footer(submit_label: &str) -> Markup {
+pub(crate) fn form_footer(submit_label: &str) -> Markup {
     html! {
         div class="mt-5 flex justify-end gap-2 border-t border-line pt-3" {
             button type="button" "x-on:click"="$el.closest('dialog').close()" class=(action_class(ButtonKind::Secondary)) { "Cancel" }

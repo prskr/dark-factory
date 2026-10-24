@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-48.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-52.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -14,6 +14,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-44: code review of `ui-redesign` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-45 to TD-47: code review of `ui-polish` (`df-web`, `df-agent-channel`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-49 to TD-50: code review of `iter1-egress-gateway` (`df-gateway`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-51: first cluster run of `iter1-egress-gateway` (2026-10-24).
 
 ## Summary
 
@@ -66,6 +68,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings |
 | TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
 | TD-47 | low   | `df-web` components | Message box and composer "+" use one-off class strings |
+| TD-49 | low   | `df-gateway` reasons | Flow reasons and rule scopes are scattered string literals |
+| TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
+| TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
 
 ## Entries
 
@@ -471,6 +476,36 @@ Both use hand-written class strings instead of a documented component; `docs/des
 **Matters when:** the message box or the composer is reused or restyled; the copies drift apart.
 
 **Fix:** Add named components or constants in `components/`, each with a unit test, and document them in `docs/design-system.md`.
+
+### TD-49 (S13). Flow reasons and rule scopes are scattered string literals
+
+`crates/df-gateway/src/proxy.rs` (reasons such as `upstream-failed`, `private-destination`, `sni-mismatch`, `removed-from-allowlist`, `gateway-shutdown`), `crates/df-gateway/src/control/snapshot.rs` and `crates/df-db/src/egress.rs` (`"project"` / `"instance"` scope)
+
+`Denial::reason()` covers only the policy denials; the other reasons are literals at their call sites, and the HTTP status is picked by comparing reason strings (S25). The scope is derived with the same `if project_id.is_some()` in two crates.
+
+**Matters when:** a reason is added or renamed; the proto comment, the README table and the UI filters drift without a compile error.
+
+**Fix:** One `FlowReason` enum (reason string, verdict, status) in `df-gateway` and a `Scope` enum in `df-db`.
+
+### TD-50 (S27). Proxy shutdown tests wait on the origin without a timeout
+
+`crates/df-gateway/src/proxy/tests.rs` (`listener.accept()` and the request-head read loop in `stopping_the_proxy_cuts_off_a_streaming_response_and_records_why`; the `accept` calls near lines 646 and 692)
+
+The client-side reads are bounded by 5 s, the origin-side waits are not.
+
+**Matters when:** the proxy stops forwarding after a regression; the tests hang instead of failing.
+
+**Fix:** Wrap each origin-side wait in `tokio::time::timeout(Duration::from_secs(5), …)` like the client reads.
+
+### TD-51. IP family preference is fixed to IPv4 first
+
+`crates/df-gateway/src/resolve.rs` (`SystemResolver::new`)
+
+The resolver uses `LookupIpStrategy::Ipv4thenIpv6` because the first cluster has no IPv6 egress. A dual-stack cluster can't prefer IPv6, and the proxy dials only the first resolved address, with no fallback to the other family.
+
+**Matters when:** the cluster nodes get IPv6 egress and IPv6 should be preferred, or a host's first address is unreachable.
+
+**Fix:** Add a `gateway.ipFamily` setting (`ipv4First` default, `ipv6First`, `ipv4Only`, `ipv6Only`) that maps to the hickory strategy, rendered by the chart and documented in the df-gateway README configuration table. Make the dial try the remaining resolved addresses in order (each under the upstream timeout budget) before it reports `upstream-failed`.
 
 ## Accepted decisions
 

@@ -200,8 +200,7 @@ pub async fn serve(
     tls: TlsReloader,
     shutdown: impl Future<Output = ()>,
 ) -> Result<(), tonic::transport::Error> {
-    let (accepted, incoming) = mpsc::channel(ACCEPTED_BACKLOG);
-    let acceptor = tokio::spawn(accept_loop(listener, Arc::new(tls), accepted));
+    let incoming = mtls_incoming(listener, tls);
     let service = AgentService::new(ctx);
     let owner = service.clone();
     // Graceful shutdown waits for open streams, which the sessions keep open: end them first.
@@ -210,7 +209,7 @@ pub async fn serve(
         shutdown.await;
         owner.stop_sessions().await;
     };
-    let result = Server::builder()
+    Server::builder()
         .http2_keepalive_interval(Some(KEEPALIVE_INTERVAL))
         .http2_keepalive_timeout(Some(KEEPALIVE_TIMEOUT))
         .add_service(
@@ -218,10 +217,41 @@ pub async fn serve(
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
-        .serve_with_incoming_shutdown(ReceiverStream::new(incoming), shutdown)
-        .await;
-    acceptor.abort();
-    result
+        .serve_with_incoming_shutdown(incoming, shutdown)
+        .await
+}
+
+/// Connections of `listener` with completed mutual TLS handshakes, as input of a tonic server.
+/// Accepting stops when the stream is dropped.
+pub fn mtls_incoming(listener: TcpListener, tls: TlsReloader) -> MtlsIncoming {
+    let (accepted, incoming) = mpsc::channel(ACCEPTED_BACKLOG);
+    MtlsIncoming {
+        incoming: ReceiverStream::new(incoming),
+        acceptor: tokio::spawn(accept_loop(listener, Arc::new(tls), accepted)),
+    }
+}
+
+/// See [`mtls_incoming`].
+pub struct MtlsIncoming {
+    incoming: ReceiverStream<Result<TlsStream<TcpStream>, std::io::Error>>,
+    acceptor: tokio::task::JoinHandle<()>,
+}
+
+impl futures::Stream for MtlsIncoming {
+    type Item = Result<TlsStream<TcpStream>, std::io::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.incoming).poll_next(cx)
+    }
+}
+
+impl Drop for MtlsIncoming {
+    fn drop(&mut self) {
+        self.acceptor.abort();
+    }
 }
 
 /// Accepts TCP connections and completes their TLS handshakes concurrently, each bounded by
@@ -241,7 +271,7 @@ async fn accept_loop(
         let (tcp, remote) = match listener.accept().await {
             Ok(pair) => pair,
             Err(e) => {
-                tracing::warn!(error = %e, "accept failed on the agent port; backing off");
+                tracing::warn!(error = %e, "accept failed on an mTLS port; backing off");
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }

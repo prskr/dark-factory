@@ -6,6 +6,7 @@ Contracts for iteration 1 (milestone 2 in [`product/iterations/iteration-1.md`](
 |---|---|---|
 | Transcript schema | `proto/darkfactory/transcript/v1/transcript.proto` | `darkfactory.transcript.v1`, `schema_version = 1` |
 | Agent protocol | `proto/darkfactory/agent/v1/agent.proto` | `darkfactory.agent.v1` |
+| Gateway link | `proto/darkfactory/gateway/v1/gateway.proto` | `darkfactory.gateway.v1` |
 | Integration plugins (WIT) | `wit/integrations/integrations.wit` | `darkfactory:integrations@0.1.0` |
 | Factory MCP tools | `mcp/factory-tools.v1.json` | 1 |
 
@@ -15,7 +16,8 @@ Contracts for iteration 1 (milestone 2 in [`product/iterations/iteration-1.md`](
 
 ```sh
 protoc -I proto --descriptor_set_out=/dev/null --include_imports \
-  proto/darkfactory/transcript/v1/transcript.proto proto/darkfactory/agent/v1/agent.proto
+  proto/darkfactory/transcript/v1/transcript.proto proto/darkfactory/agent/v1/agent.proto \
+  proto/darkfactory/gateway/v1/gateway.proto
 
 wasm-tools component wit wit/integrations            # 1.227 fails on WASI 0.2.12; 1.245 works
 wasm-tools component embed --dummy --world forge wit/integrations -o forge.core.wasm
@@ -63,6 +65,11 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 - `set_task_title` sets the task's title with source `agent`; it changes nothing when a person or an earlier call already set a title.
 - `complete_task` ends the run after the current turn; the control plane marks the PR ready for review.
 
+### Gateway link
+- `GatewayPolicy.PolicyWatch` is served by the control plane and called by every gateway pod; `GatewayLog.Tail` is served by every gateway pod and called by the control plane. Both use the internal port (9444) with mTLS and certificates from the instance CA.
+- Every `PolicyUpdate` is a full snapshot (sandbox registry with each run's effective `http-host` allowlist). `version` comes from a database sequence, so it is monotonic across control plane replicas. A gateway enforces its last snapshot while it is disconnected.
+- `FlowEvent` is ephemeral: gateway pods keep it in a ring buffer, nothing is persisted. A lagging `Tail` stream receives an event with `gap = true` where events were dropped.
+
 ## Planned additive changes (no new major version needed)
 - `Assign`: skills bundle, project context document (ADR-0026), keep-alive window for `AwaitingInput`, workspace lifecycle hooks (phase, name, command or script, timeout, failure policy — F9).
 - `ControlMessage`: `ToolsChanged` for lazy tool loading (`load_server`); `SnapshotWorkspace` for an immediate WIP snapshot (F8).
@@ -73,7 +80,7 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 - Transcript: a hook execution event (phase, name, exit code, duration, output tail) for lifecycle hooks (F9).
 - Artifacts, agent-side WASI tools (F2), `Assign.harness` for the built-in loop (inference endpoint URL, model), the gateway MCP endpoint for the harness configuration (ADR-0032).
 
-Not planned: inference messages. Inference goes through the gateway's OpenAI-compatible endpoint, not the agent protocol (ADR-0007, ADR-0029). The gateway's own link to the control plane will be a separate contract (`darkfactory.gateway.v1`).
+Not planned: inference messages. Inference goes through the gateway's OpenAI-compatible endpoint, not the agent protocol (ADR-0007, ADR-0029). The gateway's own link to the control plane is a separate contract, `darkfactory.gateway.v1` (see below).
 
 ## Open points
 1. Transcript ordering across runs: `seq` is per run; the UI's SSE event id would be `(run, seq)` or a global id assigned by the control plane.

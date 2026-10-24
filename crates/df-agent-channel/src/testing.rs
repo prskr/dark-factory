@@ -109,6 +109,32 @@ impl TestPki {
         client_cert(&Issuer::new(params, key), uri_san)
     }
 
+    /// Like [`Self::write_agent_tls`], but the certificate is for `dns_name` and also valid for
+    /// client authentication: the identity of a peer that is both client and server (gateway,
+    /// control plane).
+    pub fn write_peer_tls(
+        &self,
+        dir: &std::path::Path,
+        dns_name: &str,
+    ) -> anyhow_free::Result<df_core::config::AgentTlsConfig> {
+        let mut params = CertificateParams::new(vec![dns_name.to_string()])?;
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ];
+        let key = KeyPair::generate()?;
+        let cert = params.signed_by(&key, &self.issuer)?;
+        let files = df_core::config::AgentTlsConfig {
+            cert_file: dir.join("tls.crt"),
+            key_file: dir.join("tls.key"),
+            client_ca_file: dir.join("ca.crt"),
+        };
+        std::fs::write(&files.cert_file, cert.pem())?;
+        std::fs::write(&files.key_file, key.serialize_pem())?;
+        std::fs::write(&files.client_ca_file, &self.ca_pem)?;
+        Ok(files)
+    }
+
     /// Writes `tls.crt`, `tls.key` (server) and `ca.crt` into `dir` and returns the matching
     /// agent port configuration.
     pub fn write_agent_tls(

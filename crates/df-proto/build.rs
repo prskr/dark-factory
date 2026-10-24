@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         proto_root.join("darkfactory/transcript/v1/transcript.proto"),
         proto_root.join("darkfactory/agent/v1/agent.proto"),
+        proto_root.join("darkfactory/gateway/v1/gateway.proto"),
     ];
 
     for proto in &protos {

@@ -188,6 +188,8 @@
             "health": { "type": "integer", "minimum": 1, "maximum": 65535 }
           }
         },
+        "bufferSize": { "type": "integer", "minimum": 1 },
+        "blockedCidrs": { "type": "array", "items": { "type": "string" } },
         "resources": { "type": "object" }
       }
     },

@@ -1,0 +1,51 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "df_gateway",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_gateway",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-agent-channel:df_agent_channel",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+alias(
+    name = "df-gateway",
+    actual = ":df_gateway",
+)
+
+# Rebuilt from source (instead of `crate = ":df_gateway"`) so that the tests can use the
+# `test-util` variant of `df-agent-channel` (test PKI) without the library linking it.
+rust_test(
+    name = "df_gateway_test",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_gateway",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        "//crates/df-agent-channel:df_agent_channel_test_util",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+        "//crates/df-test-postgres:df_test_postgres",
+    ],
+)

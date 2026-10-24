@@ -20,6 +20,13 @@ pub mod agent {
     }
 }
 
+pub mod gateway {
+    pub mod v1 {
+        tonic::include_proto!("darkfactory.gateway.v1");
+        include!(concat!(env!("OUT_DIR"), "/darkfactory.gateway.v1.serde.rs"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::agent::v1::{
@@ -37,6 +44,27 @@ mod tests {
             let _server = AgentChannelServer::new(svc);
         }
         let _client_type: Option<AgentChannelClient<tonic::transport::Channel>> = None;
+    }
+
+    #[test]
+    fn gateway_services_and_flow_event_json_exist() {
+        use super::gateway::v1::{
+            FlowEvent, Verdict, gateway_log_server::GatewayLogServer,
+            gateway_policy_client::GatewayPolicyClient,
+        };
+        let _client_type: Option<GatewayPolicyClient<tonic::transport::Channel>> = None;
+        fn _server<T: super::gateway::v1::gateway_log_server::GatewayLog>(svc: T) {
+            let _ = GatewayLogServer::new(svc);
+        }
+        let event = FlowEvent {
+            host: "example.com".into(),
+            verdict: Verdict::Denied.into(),
+            reason: "not-allowlisted".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(serde_json::from_str::<FlowEvent>(&json).unwrap(), event);
+        assert!(json.contains("VERDICT_DENIED"), "{json}");
     }
 
     fn base_event(kind: event::Kind) -> Event {

@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'\n                     AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ecc729388489890c6d7bd27bccc9f3684793408b33a97315e2d3afeeee199c46"
+}
