@@ -100,6 +100,13 @@ impl OidcClient {
             .read_client_secret()
             .map_err(|e| OidcError::Config(e.to_string()))?;
         let public_url = cfg.public_url.trim_end_matches('/').to_string();
+        let redirect = RedirectUrl::new(format!("{public_url}/auth/callback"))
+            .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?;
+        if redirect.url().scheme() == "http" && !is_loopback(redirect.url()) {
+            return Err(OidcError::Config(
+                "publicUrl: plain http is only allowed on loopback (local development)".into(),
+            ));
+        }
         // Following redirects would open the token requests to SSRF.
         let http = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
@@ -111,8 +118,7 @@ impl OidcClient {
                 .map_err(|e| OidcError::Config(format!("issuerUrl: {e}")))?,
             client_id: ClientId::new(cfg.client_id.clone()),
             secret: ClientSecret::new(secret.expose_secret().to_string()),
-            redirect: RedirectUrl::new(format!("{public_url}/auth/callback"))
-                .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?,
+            redirect,
             public_url,
             roles_claim: cfg.roles_claim.clone(),
             extra_scopes: cfg.extra_scopes.clone(),
@@ -121,7 +127,7 @@ impl OidcClient {
     }
 
     /// Whether the session cookie gets the `Secure` flag: always, unless `publicUrl` is plain
-    /// `http://` (local development without TLS).
+    /// `http://` on loopback (local development without TLS; [`Self::new`] refuses it elsewhere).
     pub fn secure_cookies(&self) -> bool {
         self.redirect.url().scheme() != "http"
     }
@@ -297,6 +303,16 @@ fn roles_from_payload(
     }
 }
 
+/// Whether the URL points at this machine (`localhost`, `127.0.0.0/8` or `::1`).
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(openidconnect::url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(openidconnect::url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(openidconnect::url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn cookies_are_secure_unless_the_public_url_is_plain_http() {
+    fn cookies_are_secure_unless_the_public_url_is_plain_http_on_loopback() {
         let dir = tempfile::tempdir().unwrap();
         let secret_file = dir.path().join("secret");
         std::fs::write(&secret_file, "s3cret\n").unwrap();
@@ -357,11 +373,23 @@ mod tests {
                 roles_claim: "roles".into(),
                 extra_scopes: Vec::new(),
             })
-            .unwrap()
         };
-        assert!(client("https://factory.test").secure_cookies());
-        assert!(client("HTTPS://factory.test").secure_cookies());
-        assert!(!client("http://127.0.0.1:8080").secure_cookies());
+        assert!(client("https://factory.test").unwrap().secure_cookies());
+        assert!(client("HTTPS://factory.test").unwrap().secure_cookies());
+        for local in [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+            "http://[::1]:8080",
+        ] {
+            assert!(!client(local).unwrap().secure_cookies(), "{local}");
+        }
+        // Anywhere else the session cookie would travel in cleartext.
+        let remote = client("http://factory.lan");
+        assert!(
+            matches!(&remote, Err(OidcError::Config(msg)) if msg.contains("publicUrl")),
+            "{:?}",
+            remote.err()
+        );
     }
 
     #[test]

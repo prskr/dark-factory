@@ -30,7 +30,8 @@ tools:
 # Local services from compose.yml: PostgreSQL 17 on :5432 and Dex (OIDC) on :5556. Tests do not use them.
 db:
     {{container}} compose up -d
-    until {{container}} compose exec postgres pg_isready -q -U postgres 2>/dev/null; do sleep 1; done
+    for _ in $(seq 60); do {{container}} compose exec postgres pg_isready -q -U postgres 2>/dev/null && exit 0; sleep 1; done; \
+        {{container}} compose logs postgres; echo "PostgreSQL not ready after 60 s" >&2; exit 1
 
 # Stop and remove the local services and their data
 db-rm:

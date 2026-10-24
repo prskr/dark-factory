@@ -22,7 +22,13 @@ Tests do not need these: they start their own PostgreSQL (section 3). [`compose.
 | `postgres` | `127.0.0.1:5432` | PostgreSQL 17, user and password `postgres`, database `dark_factory` |
 | `dex` | `http://127.0.0.1:5556/dex` | OIDC provider for the web UI, static users from [`dev/dex.yaml`](../dev/dex.yaml) |
 
-`just db` starts both and waits for PostgreSQL (with `docker`, or `podman` when Docker is not installed; `CONTAINER_CLI` overrides). `just db-rm` removes them and their data. Without `just`:
+Earlier versions of this guide started PostgreSQL as a standalone container named `dark-factory-pg`. It still holds port `5432` and blocks `just db`; `just db-rm` does not remove it. Remove it first (export data you want to keep with `docker exec dark-factory-pg pg_dump -U postgres dark_factory > dump.sql`):
+
+```bash
+docker rm -f dark-factory-pg
+```
+
+`just db` starts both and waits up to 60 s for PostgreSQL (with `docker`, or `podman` when Docker is not installed; `CONTAINER_CLI` overrides). `just db-rm` removes them and their data. Without `just`:
 
 ```bash
 docker compose up -d
@@ -134,7 +140,7 @@ Limits of `serve --no-cluster` (local development only):
 - Egress log (`/egress/log`) answers `503 Egress log unavailable`: without `gateway.headlessService` and gateway pods there is nothing to stream.
 - The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
 
-Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://`, the session cookie is sent without `Secure`; with an `https://` URL it always carries `Secure`.
+Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is refused on any other host; with an `https://` URL the cookie always carries `Secure`.
 
 ```mermaid
 sequenceDiagram
