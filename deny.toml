@@ -6,6 +6,11 @@ ignore = [
     # keys are used only by df-web's test OIDC provider. Revisit when `openidconnect` moves to a
     # fixed `rsa` (0.10).
     { id = "RUSTSEC-2023-0071", reason = "rsa: only public-key verification in production" },
+    # Non-constant-time operations in crypto-bigint 0.5 (fixed in 0.7.6). Reached only through
+    # openidconnect -> p256/p384 -> elliptic-curve 0.13, which verifies ES256/ES384 ID-token
+    # signatures with the provider's public keys: no secret integers. Revisit when `openidconnect`
+    # moves to elliptic-curve 0.14.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint: only public-key ECDSA verification" },
 ]
 
 [licenses]
