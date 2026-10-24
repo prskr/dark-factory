@@ -199,5 +199,5 @@ Final checks (orchestrator, 400e8f1): `cargo build --workspace` ok, `cargo mache
 ## Result, iteration 2
 
 - Status: done. No blocking finding open. Fix rounds: 3.
-- Tasks 17/18; open: 5.1 (manual dev-cluster check) and the manual `git clone` check of 7.2.
+- Tasks 17/18; open: 5.1 (manual dev-cluster check). The manual `git clone` check of 7.2 was verified by the user on 2026-10-24 (dual-stack forge cloned from the IPv4-only cluster).
 - Tech debt: TD-48 resolved and removed; TD-51 added (configurable IP family, address fallback).
