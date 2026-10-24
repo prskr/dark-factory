@@ -59,4 +59,5 @@ rust_test(
     data = [":dark-factory"],
     edition = "2024",
     env = {"DF_TEST_BIN": "$(rootpath :dark-factory)"},
+    deps = all_crate_deps(normal_dev = True),
 )
