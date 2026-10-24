@@ -129,8 +129,10 @@ Open <http://127.0.0.1:8080> and log in at Dex:
 
 Limits of `serve --no-cluster` (local development only):
 
-- Every sandbox operation fails, so starting a run fails. Tasks, projects, personas and credentials can be created and edited.
-- The agent port (`9443`) uses the throwaway certificate; no sandbox connects.
+- Every sandbox operation fails, so starting a run fails. Tasks, projects, personas, credentials and `host` allowlist entries can be created and edited.
+- Egress allowlist: adding a `cluster-service` entry fails ("Services cannot be checked"), because there is no Kubernetes API to look the Service up.
+- Egress log (`/egress/log`) answers `503 Egress log unavailable`: without `gateway.headlessService` and gateway pods there is nothing to stream.
+- The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
 
 Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://`, the session cookie is sent without `Secure`; with an `https://` URL it always carries `Secure`.
 
@@ -141,6 +143,9 @@ sequenceDiagram
     participant D as Dex :5556
     participant P as PostgreSQL :5432
     B->>C: GET /tasks
+    C-->>B: 303 /login?next=/tasks
+    B->>C: GET /login?next=/tasks
+    C->>D: GET /.well-known/openid-configuration
     C-->>B: 303 Dex /auth (scope openid profile groups offline_access)
     B->>D: log in (admin@example.com)
     D-->>B: 302 /auth/callback?code
