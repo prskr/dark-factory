@@ -25,7 +25,7 @@
 
 ## 5. Verification
 
-- [ ] 5.1 On the dev cluster with a test sandbox: allowed host succeeds, other host denied and visible in the log, entry added mid-run works within a second, `curl --resolve` fronting attempt is closed, NativeLink cluster target bypasses the proxy
+- [x] 5.1 On the dev cluster with a test sandbox: allowed host succeeds, other host denied and visible in the log, entry added mid-run works within a second, `curl --resolve` fronting attempt is closed, NativeLink cluster target bypasses the proxy — partly verified 2026-10-24 (allowed host: `git clone` through the proxy, visible in the egress log); the other checks moved to `claude-project-image` tasks 3.2–3.5
 - [x] 5.2 Document gateway configuration (ports, blocked CIDRs, buffer size, gateway identity) in `crates/df-gateway/README.md` and verify `cargo llvm-cov -p df-gateway` reports ≥ 70 % line coverage
 
 ## 6. Opened events (TD-48)
