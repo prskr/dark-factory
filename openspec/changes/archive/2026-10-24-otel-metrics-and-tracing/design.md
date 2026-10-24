@@ -66,7 +66,7 @@ The control plane does not store `RuntimeTiming` in the database; it only advanc
 
 Alternative: OTLP from the sandbox to a collector — rejected (decided with the user): needs an egress exception reachable by agent code, and in-memory buffers lose data when the pod ends.
 
-Tool calls are counted on the first `ToolCallUpdate` (or `ToolCall`) with status `completed`/`failed`. To know which calls were already counted across batches without new state, the control plane checks the stored transcript projection for the previous status of that `tool_call_id` inside the same transaction (`transcript::insert` already resolves the call). If that turns out to require a new query per update, counting on the terminal status of each update is acceptable, because ACP sends the terminal status once. Implemented with this fallback: each terminal update is counted, and the stored `tool_call` event supplies `kind` and `origin` (one extra query per terminal update). A `ToolCall` that already carries a terminal status followed by a terminal `ToolCallUpdate` counts twice.
+Tool calls are counted on every `ToolCallUpdate` (or `ToolCall`) with status `completed`/`failed`; ACP sends the terminal status once. `kind` and `origin` come from the stored `tool_call` event of that `tool_call_id` (one extra query per terminal update, inside the same transaction). A `ToolCall` that already carries a terminal status followed by a terminal `ToolCallUpdate` counts twice.
 
 ### D5: Cardinality guard
 

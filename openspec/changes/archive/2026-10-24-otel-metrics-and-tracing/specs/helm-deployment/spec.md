@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Telemetry values
-The chart SHALL expose `telemetry.metrics.exporters` (list of `prometheus` and `otlp`, default `[prometheus]`; empty disables metrics), `telemetry.metrics.port` (default `9464`), `telemetry.traces.enabled` (default `false`), `telemetry.traces.sampler`, `telemetry.traces.samplerArg`, and `telemetry.otlp.endpoint`, `.protocol` (only `grpc`), `.insecure` and `.headersSecret`. The values schema SHALL reject `otlp` exporters or enabled traces without an endpoint.
+The chart SHALL expose `telemetry.metrics.exporters` (list of `prometheus` and `otlp`, default `[prometheus]`; empty disables metrics), `telemetry.metrics.port` (default `9464`), `telemetry.traces.enabled` (default `false`), `telemetry.traces.sampler`, `telemetry.traces.samplerArg`, and `telemetry.otlp.endpoint`, `.protocol` (only `grpc`), `.insecure` and `.headersSecret`. When no `telemetry.otlp.endpoint` is set, the values schema SHALL reject selecting the `otlp` exporter and enabling traces; with an endpoint both are valid.
 
 #### Scenario: OTLP without endpoint
 - **WHEN** the chart is rendered with `telemetry.traces.enabled: true` and no endpoint
