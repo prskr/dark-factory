@@ -67,6 +67,7 @@ message AgentMessage {
     CredentialRequest credential_request = 14;
     PushReport push_report = 15;
     RunReport run_report = 16;
+    RuntimeTiming runtime_timing = 17;
   }
 }
 
@@ -353,6 +354,29 @@ message WorkspaceState {
   bool task_branch_pushed = 3;
   bool diverged = 4;
   uint64 size_bytes = 5;
+}
+
+// Duration of one runtime operation, measured by the runtime (the control plane
+// cannot derive it from arrival times: replays skew them). Sequenced and
+// replayed like every other message; the control plane does not store it, it
+// only records it as a metric.
+message RuntimeTiming {
+  RuntimeOperation operation = 1;
+  uint64 duration_ms = 2;
+  // False if the operation failed.
+  bool ok = 3;
+}
+
+enum RuntimeOperation {
+  RUNTIME_OPERATION_UNSPECIFIED = 0;
+  RUNTIME_OPERATION_WORKSPACE_PREPARE = 1;
+  // Process spawn until the ACP session is ready.
+  RUNTIME_OPERATION_HARNESS_START = 2;
+  // Prompt sent until the prompt response or cancel.
+  RUNTIME_OPERATION_TURN = 3;
+  // Push after a turn.
+  RUNTIME_OPERATION_PUSH = 4;
+  RUNTIME_OPERATION_FINALIZE = 5;
 }
 
 // ---------------------------------------------------------------------------

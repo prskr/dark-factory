@@ -24,15 +24,15 @@
 
 ## Decisions
 
-### D1: Libraries use the OTel API, the binary owns the SDK
+### D1: Libraries use the OTel API, `df-telemetry` owns the SDK
 
-`df-agent-channel` and the gateway code take instruments from `opentelemetry::global::meter("<crate>")`. `crates/dark-factory/src/telemetry.rs` builds the `SdkMeterProvider` / `SdkTracerProvider`, registers them globally and returns a guard that flushes on shutdown. Without a provider (tests, `none`) the global meter is a no-op.
+`df-agent-channel` and the gateway take their instruments from `opentelemetry::global::meter("<crate>")`, bundled in a small `Metrics` struct per crate that the constructors receive as `Arc<Metrics>`; the default uses the global meter, tests inject a meter with an in-memory reader. `df_telemetry::otel` (feature `otel`, enabled only by `dark-factory`, see D9) builds the `SdkMeterProvider` / `SdkTracerProvider`, registers them globally and returns a guard that flushes on shutdown. Without a provider (tests, `none`) the global meter is a no-op.
 
-Alternative: pass a `Metrics` struct through constructors. Rejected: touches every constructor for an optional concern; the global API is the documented OTel pattern for libraries.
+Alternative: only the global meter, no injected struct. Rejected: parallel tests share the process-global provider and cannot assert their own instruments.
 
 ### D2: Exporters from standard env vars
 
-`OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` are parsed by `telemetry.rs` (the Rust SDK does not auto-configure exporters from them). Defaults deviate from the OTel spec on purpose: metrics `prometheus` (spec: `otlp`) and traces `none` (spec: `otlp`), because a homelab without a collector must not log export errors forever. The OTLP builders resolve `OTEL_EXPORTER_OTLP_*` themselves (0.33 behavior: schemeless endpoints default to `https`, `OTEL_EXPORTER_OTLP_INSECURE` for plaintext). Both `grpc` (tonic, already a dependency; TLS through `tls-ring` with the native root store via `tls-roots`, which the distroless static base image provides and which honours a mounted private CA) and `http/protobuf` are enabled; `http/protobuf` uses `reqwest` with rustls if `cargo deny` accepts it, otherwise only `grpc` is offered and the schema enum shrinks.
+`OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` are parsed by `df_telemetry::otel` (the Rust SDK does not auto-configure exporters from them). Defaults deviate from the OTel spec on purpose: metrics `prometheus` (spec: `otlp`) and traces `none` (spec: `otlp`), because a homelab without a collector must not log export errors forever. The OTLP builders resolve `OTEL_EXPORTER_OTLP_*` themselves (0.33 behavior: schemeless endpoints default to `https`, `OTEL_EXPORTER_OTLP_INSECURE` for plaintext). Only `grpc` is offered (tonic, already a dependency; TLS through `tls-ring` with the native root store via `tls-roots`, which the distroless static base image provides and which honours a mounted private CA). `http/protobuf` would need `reqwest` with rustls, which pulls in `aws-lc-rs`, banned by `cargo deny`. Any `OTEL_EXPORTER_OTLP_PROTOCOL`, `_METRICS_PROTOCOL` or `_TRACES_PROTOCOL` value other than `grpc` stops the process at startup with an error naming the variable. The SDK's `PeriodicReader` logs failed exports at ERROR, once per export interval.
 
 Alternative: a `telemetry:` section in the instance config. Rejected: telemetry must be installed together with the subscriber before the config file is read, and the standard variables are what collector documentation tells operators to set.
 
@@ -66,7 +66,7 @@ The control plane does not store `RuntimeTiming` in the database; it only advanc
 
 Alternative: OTLP from the sandbox to a collector — rejected (decided with the user): needs an egress exception reachable by agent code, and in-memory buffers lose data when the pod ends.
 
-Tool calls are counted on the first `ToolCallUpdate` (or `ToolCall`) with status `completed`/`failed`. To know which calls were already counted across batches without new state, the control plane checks the stored transcript projection for the previous status of that `tool_call_id` inside the same transaction (`transcript::insert` already resolves the call). If that turns out to require a new query per update, counting on the terminal status of each update is acceptable, because ACP sends the terminal status once.
+Tool calls are counted on the first `ToolCallUpdate` (or `ToolCall`) with status `completed`/`failed`. To know which calls were already counted across batches without new state, the control plane checks the stored transcript projection for the previous status of that `tool_call_id` inside the same transaction (`transcript::insert` already resolves the call). If that turns out to require a new query per update, counting on the terminal status of each update is acceptable, because ACP sends the terminal status once. Implemented with this fallback: each terminal update is counted, and the stored `tool_call` event supplies `kind` and `origin` (one extra query per terminal update). A `ToolCall` that already carries a terminal status followed by a terminal `ToolCallUpdate` counts twice.
 
 ### D5: Cardinality guard
 
@@ -74,7 +74,7 @@ A small `BoundedLabel` (mutex-protected `HashSet<String>`, capacity 32, values t
 
 ### D6: Tracing layer
 
-With `OTEL_TRACES_EXPORTER=otlp`, `init_tracing` adds a `tracing_opentelemetry` layer (filtered by the same `RUST_LOG`) to the existing fmt layer. New spans: `http.request` (method, route, status), `agent.session` (run id as span attribute — allowed on spans, not on metrics), `agent.persist_batch` (message count), `gateway.connect` (decision; no host for denied connections). The sampler is built from `OTEL_TRACES_SAMPLER`/`_ARG` if the SDK does not read them itself.
+With `OTEL_TRACES_EXPORTER=otlp`, `df_telemetry::logging::init_tracing(format, extra)` adds a `tracing_opentelemetry` layer (filtered by the same `RUST_LOG`) to the existing fmt layer. New spans: `http.request` (method, route, status; UI and gateway health routers through `df_telemetry::http::request_span`, no span for the `/metrics` scrape endpoint), `agent.session` (run id as span attribute — allowed on spans, not on metrics), `agent.persist_batch` (message count), `gateway.connect` (decision; no host for denied connections). `df_telemetry::otel` parses `OTEL_TRACES_SAMPLER` (`always_on`, `always_off`, `traceidratio`, `parentbased_*`) and `OTEL_TRACES_SAMPLER_ARG` (ratio from 0 to 1) and builds the sampler; invalid values stop startup with an error naming the variable.
 
 ### D7: Helm
 
@@ -90,21 +90,30 @@ telemetry:
     samplerArg: ""
   otlp:
     endpoint: ""
-    protocol: grpc               # grpc | http/protobuf
+    protocol: grpc               # grpc only (D2)
     insecure: false
     headersSecret: ""            # Secret with key `headers` -> OTEL_EXPORTER_OTLP_HEADERS (HTTP headers or gRPC metadata)
 networkPolicy:
   metricsScraper:
-    namespaceSelector: {}        # empty = no scraper ingress rule
+    namespaceSelector: {}        # empty = no scraper ingress rule; required when the ServiceMonitor renders with network policies on;
+                                 # selecting the sandbox namespace by kubernetes.io/metadata.name fails the render
     podSelector: {}
 ```
 
 Settings are shared by control plane and gateway; `OTEL_SERVICE_NAME` is set per component by the templates. Per-component overrides can be added when someone needs them.
 
+### D8: Shutdown budget
+
+The shutdown grace period (30 s, the default `terminationGracePeriodSeconds`) counts from the signal and is shared: the listeners drain first, the telemetry flush gets what is left, possibly nothing. The signal instant is passed from `main` to the `serve` and `gateway` commands; the budget is a pure function of signal time, now and grace.
+
+### D9: `df-telemetry` crate
+
+Logging setup (shared by `dark-factory` and `factory-agent`), the HTTP request span middleware and the OTel setup live in `crates/df-telemetry`, with features: none (`LogFormat`, `RUST_LOG` filter, `init_tracing`), `clap` (`ValueEnum` for `LogFormat`), `http` (`request_span`, axum), `otel` (exporters, `trace_layer`, `/metrics`, shutdown) and `test-util` (log capture helpers). `dark-factory` enables `clap`, `http`, `otel`; `df-gateway` `http`; `df-k8s` the default (typed `LogFormat` for sandboxes); `factory-agent` only `clap`, so the sandbox runtime links neither OpenTelemetry nor axum. Bazel builds the full variant (`clap`, `http`, `otel`) shared by control plane, gateway and df-k8s, so their crate graph has one `LogFormat`, and slim variants for `factory-agent` (`df_telemetry_slim`, `df_telemetry_slim_test_util`). This replaces the duplicated logging setup and the string-typed sandbox log format (TD-53, TD-54).
+
 ## Risks / Trade-offs
 
 - [`opentelemetry-prometheus` depends on the `prometheus` crate (and `protobuf`)] → Check `cargo deny` and `cargo xtask outdated` first (task 1.1). Fallback: OTLP-only plus the documented Prometheus OTLP receiver.
-- [OTel Rust API churn between 0.x releases] → All OTel crates are pinned to one release line in `[workspace.dependencies]`; usage is concentrated in `telemetry.rs`.
+- [OTel Rust API churn between 0.x releases] → All OTel crates are pinned to one release line in `[workspace.dependencies]`; usage is concentrated in `df-telemetry/src/otel.rs`.
 - [Metrics recorded after commit are lost if the process crashes between commit and record] → Accepted as best-effort: counters reset on restart anyway. The database stays the source of truth for runs, turns, tool calls, tokens and pushes; `RuntimeTiming` is not stored, so those samples are lost in that window without a way to recover them.
 - [Unauthenticated `/metrics`] → Separate port, never exposed through the ingress, NetworkPolicy allows only the configured scraper; metrics carry no run ids or hosts.
 - [Gateway instruments depend on `iter1-egress-gateway`] → Gateway exporter setup lands independently; instruments are added in the proxy once that change is merged.

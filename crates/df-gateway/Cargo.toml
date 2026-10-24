@@ -16,12 +16,14 @@ df-agent-channel.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 df-proto.workspace = true
+df-telemetry = { workspace = true, features = ["http"] }
 futures.workspace = true
 hickory-resolver.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 ipnet.workspace = true
+opentelemetry.workspace = true
 thiserror.workspace = true
 tls-parser.workspace = true
 tokio.workspace = true
@@ -33,6 +35,9 @@ x509-parser.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tracing-opentelemetry.workspace = true
+tracing-subscriber.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
 df-agent-channel = { workspace = true, features = ["test-util"] }

@@ -104,6 +104,13 @@ struct Running {
 }
 
 async fn start_gateway(control_plane: SocketAddr) -> Result<Running> {
+    start_gateway_with(control_plane, Arc::default()).await
+}
+
+async fn start_gateway_with(
+    control_plane: SocketAddr,
+    metrics: Arc<crate::metrics::Metrics>,
+) -> Result<Running> {
     let health = TcpListener::bind("127.0.0.1:0").await?;
     let proxy = TcpListener::bind("127.0.0.1:0").await?;
     let tail = TcpListener::bind("127.0.0.1:0").await?;
@@ -116,6 +123,7 @@ async fn start_gateway(control_plane: SocketAddr) -> Result<Running> {
         blocked_cidrs: vec![],
         retry: Duration::from_millis(50),
         control_plane_name: None,
+        metrics,
     };
     let outside = Outside {
         connector: Arc::new(PlainConnector),
@@ -251,6 +259,27 @@ async fn gateway_keeps_its_policy_while_the_control_plane_is_gone_and_resyncs_af
 }
 
 #[tokio::test]
+async fn the_applied_policy_version_is_exported() -> Result<()> {
+    let probe = df_agent_channel::metrics::probe::Probe::new();
+    let free = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let control_plane = free.local_addr()?;
+    drop(free);
+    let _control_plane = serve_control_plane(control_plane, snapshot(7, &["api.anthropic.com"]));
+    let metrics = Arc::new(crate::metrics::Metrics::new(&probe.meter()));
+    let gateway = start_gateway_with(control_plane, metrics).await?;
+
+    wait_for_policy(&gateway, |policy| {
+        policy.as_ref().is_some_and(|policy| policy.version == 7)
+    })
+    .await?;
+
+    assert_eq!(probe.total("df.gateway.policy_version", &[]), 7.0);
+    gateway.shutdown.cancel();
+    gateway.task.await??;
+    Ok(())
+}
+
+#[tokio::test]
 async fn gateway_rejects_bad_blocked_cidrs() -> Result<()> {
     let health = TcpListener::bind("127.0.0.1:0").await?;
     let proxy = TcpListener::bind("127.0.0.1:0").await?;
@@ -263,6 +292,7 @@ async fn gateway_rejects_bad_blocked_cidrs() -> Result<()> {
             blocked_cidrs: vec!["nonsense".into()],
             retry: Duration::from_secs(1),
             control_plane_name: None,
+            metrics: Arc::default(),
         },
         watch::channel(None).0,
         Outside {

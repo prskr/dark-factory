@@ -19,6 +19,7 @@ rust_binary(
         "//crates/df-k8s:df_k8s",
         "//crates/df-plugins:df_plugins",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry",
         "//crates/df-web:df_web",
     ],
 )
@@ -48,6 +49,7 @@ rust_test(
         "//crates/df-k8s:df_k8s",
         "//crates/df-plugins:df_plugins",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry",
         "//crates/df-test-postgres:df_test_postgres",
         "//crates/df-web:df_web",
     ],

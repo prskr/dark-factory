@@ -17,6 +17,7 @@ rust_library(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry",
     ],
 )
 
@@ -46,6 +47,25 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry",
         "//crates/df-test-postgres:df_test_postgres",
+    ],
+)
+
+rust_test(
+    name = "spans_test",
+    srcs = ["tests/spans.rs"],
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+        "//crates/df-core:df_core",
+        "//crates/df-proto:df_proto",
     ],
 )

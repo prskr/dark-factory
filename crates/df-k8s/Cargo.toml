@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 df-core.workspace = true
+df-telemetry.workspace = true
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true

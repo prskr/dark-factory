@@ -11,7 +11,6 @@ pub mod connection;
 pub mod fs_util;
 pub mod git;
 pub mod harness;
-pub mod logging;
 pub mod mcp;
 pub mod outbox;
 pub mod runner;
@@ -39,7 +38,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => {
-            logging::init_tracing(cli.log_format);
+            df_telemetry::logging::init_tracing(cli.log_format, None);
             let config = match config::RuntimeConfig::from_env() {
                 Ok(c) => c,
                 Err(e) => {

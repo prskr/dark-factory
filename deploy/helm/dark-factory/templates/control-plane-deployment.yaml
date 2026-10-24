@@ -43,6 +43,7 @@ spec:
               value: {{ .Values.logging.format | quote }}
             - name: RUST_LOG
               value: {{ .Values.controlPlane.logLevel | quote }}
+            {{- include "dark-factory.telemetry.env" (dict "ctx" . "component" "control-plane") | nindent 12 }}
           args:
             - "--config"
             - "/etc/dark-factory/config.yaml"
@@ -57,6 +58,11 @@ spec:
             - name: internal-grpc
               containerPort: {{ .Values.controlPlane.ports.internalGrpc }}
               protocol: TCP
+            {{- if include "dark-factory.telemetry.prometheus" . }}
+            - name: metrics
+              containerPort: {{ .Values.telemetry.metrics.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

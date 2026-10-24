@@ -90,6 +90,16 @@ impl Harness {
         names: &[(&str, &str)],
         upstream: SocketAddr,
     ) -> Result<Self> {
+        Self::start_with(policy, names, upstream, Arc::default()).await
+    }
+
+    /// Like [`Harness::start`], recording metrics into `metrics`.
+    async fn start_with(
+        policy: Option<Arc<Policy>>,
+        names: &[(&str, &str)],
+        upstream: SocketAddr,
+        metrics: Arc<crate::metrics::Metrics>,
+    ) -> Result<Self> {
         let (policy_tx, policy_rx) = watch::channel(policy);
         let flows = Arc::new(FlowLog::new(100));
         let proxy = Arc::new(Proxy::new(
@@ -99,6 +109,7 @@ impl Harness {
             Arc::new(RedirectDialer { to: upstream }),
             BlockedRanges::new([])?,
             flows.clone(),
+            metrics,
         ));
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
@@ -379,6 +390,7 @@ async fn a_name_with_one_private_address_among_public_ones_is_refused() -> Resul
         }),
         BlockedRanges::new([])?,
         Arc::new(FlowLog::new(10)),
+        Arc::default(),
     );
     let refusal = proxy.resolve("mixed.example.com").await.err().unwrap();
     assert_eq!(refusal.reason, "private-destination");
@@ -847,5 +859,69 @@ async fn every_request_gets_its_own_flow_id_denied_ones_too() -> Result<()> {
     assert!(first.flow_id != second.flow_id);
     // Seeded with the time, so a restarted pod does not reuse the ids of its previous run.
     assert!(first.flow_id > 1_700_000_000_000_000, "{}", first.flow_id);
+    Ok(())
+}
+
+fn probed() -> (
+    df_agent_channel::metrics::probe::Probe,
+    Arc<crate::metrics::Metrics>,
+) {
+    let probe = df_agent_channel::metrics::probe::Probe::new();
+    let metrics = Arc::new(crate::metrics::Metrics::new(&probe.meter()));
+    (probe, metrics)
+}
+
+#[tokio::test]
+async fn a_denied_connect_is_counted_with_its_reason_and_no_host() -> Result<()> {
+    let (probe, metrics) = probed();
+    let harness = Harness::start_with(
+        policy_of("127.0.0.1", vec![rule("api.anthropic.com", 443)]),
+        &[("example.com", PUBLIC_IP)],
+        "127.0.0.1:1".parse()?,
+        metrics,
+    )
+    .await?;
+
+    request(harness.proxy, &connect_head("example.com", 443)).await?;
+    harness.closed_event(0).await;
+
+    let denied = [("decision", "denied"), ("reason", "not-allowlisted")];
+    assert_eq!(probe.total("df.gateway.connections", &denied), 1.0);
+    assert_eq!(
+        probe.total("df.gateway.connections", &[("decision", "allowed")]),
+        0.0
+    );
+    assert!(probe.values("df.gateway.connections", "host").is_empty());
+    assert_eq!(probe.total("df.gateway.active_connections", &[]), 0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_allowed_tunnel_is_counted_active_while_open_and_reports_its_bytes() -> Result<()> {
+    let (probe, metrics) = probed();
+    let (upstream, tls) = tls_echo_server("api.anthropic.com").await?;
+    let harness = Harness::start_with(
+        policy_of("127.0.0.1", vec![rule("api.anthropic.com", 443)]),
+        &[("api.anthropic.com", PUBLIC_IP)],
+        upstream,
+        metrics,
+    )
+    .await?;
+
+    let (stream, _) = request(harness.proxy, &connect_head("api.anthropic.com", 443)).await?;
+    let mut tls = tls.connect("api.anthropic.com".try_into()?, stream).await?;
+    tls.write_all(b"ping").await?;
+    let mut echoed = [0; 4];
+    tls.read_exact(&mut echoed).await?;
+    assert_eq!(probe.total("df.gateway.active_connections", &[]), 1.0);
+    drop(tls);
+    harness.closed_event(0).await;
+
+    let allowed = [("decision", "allowed"), ("reason", "none")];
+    assert_eq!(probe.total("df.gateway.connections", &allowed), 1.0);
+    assert_eq!(probe.total("df.gateway.active_connections", &[]), 0.0);
+    assert!(probe.total("df.gateway.bytes", &[("direction", "upstream")]) > 4.0);
+    assert!(probe.total("df.gateway.bytes", &[("direction", "downstream")]) > 4.0);
+    assert!(probe.values("df.gateway.bytes", "host").is_empty());
     Ok(())
 }

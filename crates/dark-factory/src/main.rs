@@ -5,8 +5,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::ExitCode;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand};
@@ -19,6 +19,8 @@ use df_k8s::{
     K8sSandboxProvider, K8sSecretStore, ProvisioningConfig, ResolvedClusterTarget,
     run_leader_election, run_policy_reconcile_loop, verify_startup, watch_cluster_target_changes,
 };
+use df_telemetry::logging;
+use df_telemetry::otel as telemetry;
 use df_web::egress::LookupError;
 use kube::Client;
 use kube::api::Api;
@@ -28,13 +30,16 @@ use tokio::task::JoinSet;
 use tracing::{error, info};
 
 mod forge;
-mod logging;
 mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 /// Name of the forge integration plugin (`plugins.forgejo`); the only one supported for now.
 const FORGE_PLUGIN: &str = "forgejo";
+
+/// When the shutdown signal arrived, set by the command that waited for it; the grace period
+/// counts from there.
+type Signalled = Arc<OnceLock<Instant>>;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -88,11 +93,50 @@ async fn main() -> ExitCode {
     // Ignored on purpose: an already installed provider is fine.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cli = Cli::parse();
-    logging::init_tracing(cli.log_format);
+    // `migrate` is a short-lived job: no telemetry.
+    let component = match cli.command {
+        Command::Serve { .. } => Some(telemetry::Component::ControlPlane),
+        Command::Gateway => Some(telemetry::Component::Gateway),
+        Command::Migrate => None,
+    };
+    let signalled = Signalled::default();
+    let telemetry = match component {
+        Some(component) => telemetry::Telemetry::start(component)
+            .await
+            .map(Some)
+            // anyhow renders the cause chain with `{:#}`.
+            .map_err(anyhow::Error::from),
+        None => Ok(None),
+    };
+    let telemetry = match telemetry {
+        Ok(telemetry) => {
+            let layer = telemetry
+                .as_ref()
+                .and_then(telemetry::Telemetry::trace_layer);
+            logging::init_tracing(cli.log_format, layer);
+            if let Some(addr) = telemetry
+                .as_ref()
+                .and_then(telemetry::Telemetry::metrics_addr)
+            {
+                info!(%addr, "serving Prometheus metrics");
+            }
+            telemetry
+        }
+        Err(err) => {
+            logging::init_tracing(cli.log_format, None);
+            error!(
+                error = format!("{err:#}"),
+                "invalid telemetry configuration"
+            );
+            return ExitCode::from(1);
+        }
+    };
 
-    match cli.command {
+    let code = match cli.command {
         Command::Serve { no_cluster } => {
-            match run_serve_command(&cli.config, no_cluster, cli.log_format).await {
+            match run_serve_command(&cli.config, no_cluster, cli.log_format, signalled.clone())
+                .await
+            {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
                     error!(error = format!("{err:#}"), "control plane server failed");
@@ -110,14 +154,19 @@ async fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
-        Command::Gateway => match run_gateway_command(&cli.config).await {
+        Command::Gateway => match run_gateway_command(&cli.config, signalled.clone()).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 error!(error = format!("{err:#}"), "egress gateway failed");
                 ExitCode::from(1)
             }
         },
+    };
+    if let Some(telemetry) = telemetry {
+        let budget = flush_budget(signalled.get().copied(), Instant::now(), SHUTDOWN_GRACE);
+        telemetry.shutdown(budget).await;
     }
+    code
 }
 
 /// Cluster targets from the egress allowlist in the database, resolved against the cluster.
@@ -292,7 +341,7 @@ impl SandboxBackend for KubernetesBackend {
                 proxy_port: cfg.gateway.proxy_port,
             },
         )
-        .with_log_format(log_format.as_str());
+        .with_log_format(log_format);
 
         let secrets: Arc<dyn df_core::SecretStore> = Arc::new(K8sSecretStore::new(
             kube_client.clone(),
@@ -413,6 +462,7 @@ async fn run_serve_command(
     config_path: &std::path::Path,
     no_cluster: bool,
     log_format: logging::LogFormat,
+    signalled: Signalled,
 ) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
     let http_listener = bind_listener(cfg.server.http_port).await?;
@@ -426,7 +476,7 @@ async fn run_serve_command(
             http_listener,
             agent_listener,
             internal_listener,
-            wait_for_shutdown_signal(),
+            wait_for_shutdown_signal(signalled),
         )
         .await;
     }
@@ -439,7 +489,7 @@ async fn run_serve_command(
         http_listener,
         agent_listener,
         internal_listener,
-        wait_for_shutdown_signal(),
+        wait_for_shutdown_signal(signalled),
     )
     .await
 }
@@ -505,6 +555,7 @@ where
         forge,
         secrets,
         config: Arc::new(ChannelConfig::from(&cfg)),
+        metrics: Arc::default(),
     };
 
     let http_port = http_listener.local_addr()?.port();
@@ -649,7 +700,10 @@ async fn until_stopped(stop: watch::Receiver<bool>, task: impl std::future::Futu
     }
 }
 
-async fn run_gateway_command(config_path: &std::path::Path) -> anyhow::Result<()> {
+async fn run_gateway_command(
+    config_path: &std::path::Path,
+    signalled: Signalled,
+) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
     let tls = cfg
         .agent
@@ -679,6 +733,7 @@ async fn run_gateway_command(config_path: &std::path::Path) -> anyhow::Result<()
         blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
         retry: df_gateway::watch::RETRY_INTERVAL,
         control_plane_name: Some(control_plane_name.clone()),
+        metrics: Arc::default(),
     };
     let outside = df_gateway::gateway::Outside {
         connector: Arc::new(df_gateway::link::MtlsConnector::new(
@@ -696,7 +751,7 @@ async fn run_gateway_command(config_path: &std::path::Path) -> anyhow::Result<()
     let shutdown = tokio_util::sync::CancellationToken::new();
     let signal = shutdown.clone();
     let signals = tokio::spawn(async move {
-        wait_for_shutdown_signal().await;
+        wait_for_shutdown_signal(signalled).await;
         info!("received shutdown signal; stopping the gateway");
         signal.cancel();
     });
@@ -824,12 +879,28 @@ async fn serve_policy_watch(
 }
 
 async fn serve_ui(listener: TcpListener, router: axum::Router) {
+    let router = router.layer(axum::middleware::from_fn(df_telemetry::http::request_span));
     if let Err(err) = axum::serve(listener, router).await {
         error!(error = %err, "UI listener failed");
     }
 }
 
-async fn wait_for_shutdown_signal() {
+/// What is left of `grace` for the telemetry flush: listeners and flush share one deadline, so
+/// the process never outlives the grace period of the platform. No signal: the whole grace.
+fn flush_budget(signalled: Option<Instant>, now: Instant, grace: Duration) -> Duration {
+    signalled.map_or(grace, |at| {
+        grace.saturating_sub(now.saturating_duration_since(at))
+    })
+}
+
+/// Resolves on the shutdown signal and records when it arrived.
+async fn wait_for_shutdown_signal(signalled: Signalled) {
+    wait_for_signal().await;
+    // Ignored on purpose: only the first signal starts the clock.
+    let _ = signalled.set(Instant::now());
+}
+
+async fn wait_for_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
@@ -950,6 +1021,21 @@ mod tests {
         let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(ready.starts_with("http/1.1 200"), "{ready}");
         Ok(())
+    }
+
+    #[test]
+    fn the_flush_gets_what_is_left_of_the_grace_period() {
+        let start = Instant::now();
+        let grace = Duration::from_secs(30);
+        assert_eq!(flush_budget(None, start, grace), grace);
+        assert_eq!(flush_budget(Some(start), start, grace), grace);
+        let later = start + Duration::from_secs(25);
+        assert_eq!(
+            flush_budget(Some(start), later, grace),
+            Duration::from_secs(5)
+        );
+        let over = start + Duration::from_secs(40);
+        assert_eq!(flush_budget(Some(start), over, grace), Duration::ZERO);
     }
 
     #[tokio::test]

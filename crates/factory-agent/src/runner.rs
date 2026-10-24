@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, PromptRequest, RequestPermissionRequest, RequestPermissionResponse,
@@ -16,8 +16,9 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use df_proto::agent::v1::{
     AgentMessage, Assign, ControlMessage, CredentialGrant, CredentialRequest, GitCredentialRequest,
-    HarnessCredentials, Prompt, PushReport, RunOutcome, RunReport, ToolCallRequest, ToolCallResult,
-    ToolDescriptor, agent_message, control_message, credential_grant, credential_request,
+    HarnessCredentials, Prompt, PushReport, PushStatus, RunOutcome, RunReport, RuntimeOperation,
+    RuntimeTiming, ToolCallRequest, ToolCallResult, ToolDescriptor, agent_message, control_message,
+    credential_grant, credential_request,
 };
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason, UsageSource};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
@@ -65,6 +66,25 @@ async fn send_body(outbound_tx: &mpsc::Sender<AgentMessage>, body: agent_message
             body: Some(body),
         })
         .await;
+}
+
+/// Reports how long `operation` took, measured from `started` (`RuntimeTiming`). Reported in whole
+/// milliseconds, at least 1: the control plane rejects a zero duration as implausible.
+async fn send_timing(
+    outbound_tx: &mpsc::Sender<AgentMessage>,
+    operation: RuntimeOperation,
+    started: Instant,
+    ok: bool,
+) {
+    let duration_ms = u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    let timing = RuntimeTiming {
+        operation: operation as i32,
+        duration_ms,
+        ok,
+    };
+    send_body(outbound_tx, agent_message::Body::RuntimeTiming(timing)).await;
 }
 
 /// Maximum bytes of a variable-size field in the log: a tool call's raw input or a chunk's text.
@@ -632,15 +652,23 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         .await);
     }
 
-    let prepare_res = match crate::workspace::prepare_workspace(
+    let prepare_started = Instant::now();
+    let prepare_result = crate::workspace::prepare_workspace(
         &git,
         &params.repo_dir,
         &workspace,
         &params.hooks_path,
         &credential_helper_cmd,
     )
-    .await
-    {
+    .await;
+    send_timing(
+        &params.outbound_tx,
+        RuntimeOperation::WorkspacePrepare,
+        prepare_started,
+        prepare_result.is_ok(),
+    )
+    .await;
+    let prepare_res = match prepare_result {
         Ok(res) => res,
         Err(e) => {
             return Ok(fail_run(
@@ -710,9 +738,17 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit());
 
+    let harness_started = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
+            send_timing(
+                &params.outbound_tx,
+                RuntimeOperation::HarnessStart,
+                harness_started,
+                false,
+            )
+            .await;
             return Ok(fail_run(
                 &params.outbound_tx,
                 format!("Failed to spawn harness process '{harness_cmd}': {e}"),
@@ -842,14 +878,22 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let run_driver_result: Result<TurnLoopOutcome, _> = client
         .connect_with(transport, async move |cx| {
             // Setup ACP session
-            let setup_res = setup_session(
+            let setup_result = setup_session(
                 &cx,
                 &repo_dir,
                 assign.continuation.as_ref(),
                 &mcp_command,
                 &runtime_sock_path,
             )
-            .await?;
+            .await;
+            send_timing(
+                &outbound_tx_turn,
+                RuntimeOperation::HarnessStart,
+                harness_started,
+                setup_result.is_ok(),
+            )
+            .await;
+            let setup_res = setup_result?;
 
             let final_session_id = setup_res.session_id.clone();
             tracing::info!(session_id = %final_session_id, resumed = setup_res.is_resumed, "harness session ready");
@@ -924,6 +968,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                 let prompt_blocks = build_acp_prompt_blocks(&prompts_for_turn, prepend_summary);
 
                 session_log_tracker.mark_turn_start();
+                let turn_started = Instant::now();
 
                 // Send PromptRequest to ACP adapter
                 let prompt_req =
@@ -983,6 +1028,14 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                         }
                     }
                 };
+
+                send_timing(
+                    &outbound_tx_turn,
+                    RuntimeOperation::Turn,
+                    turn_started,
+                    prompt_res.is_ok(),
+                )
+                .await;
 
                 let mut rate_limited = None;
                 let mut harness_crashed = false;
@@ -1059,9 +1112,24 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                 }
 
                 // Push task branch after turn if commits were created
-                if let Ok(Some(pr)) =
-                    push_after_turn(&git_for_turn, &workspace_for_turn, &mut last_pushed_sha).await
-                {
+                let push_started = Instant::now();
+                let push_result =
+                    push_after_turn(&git_for_turn, &workspace_for_turn, &mut last_pushed_sha).await;
+                // Nothing to push is not an operation worth a sample.
+                if let Some(ok) = match &push_result {
+                    Ok(Some(pr)) => Some(pr.status() == PushStatus::Ok),
+                    Ok(None) => None,
+                    Err(_) => Some(false),
+                } {
+                    send_timing(
+                        &outbound_tx_turn,
+                        RuntimeOperation::Push,
+                        push_started,
+                        ok,
+                    )
+                    .await;
+                }
+                if let Ok(Some(pr)) = push_result {
                     let _ = outbox_turn
                         .lock()
                         .await
@@ -1158,20 +1226,29 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         diverged: prepare_diverged,
     };
 
-    let finalize_res =
-        match finalize_workspace(&git, &finalize_params, &mut loop_outcome.last_pushed_sha).await {
-            Ok(res) => res,
-            Err(e) => {
-                return Ok(fail_run(
-                    &params.outbound_tx,
-                    format!("Workspace finalization failed: {e}"),
-                    loop_outcome.session_id.clone(),
-                    collected_push_reports,
-                    collected_notices,
-                )
-                .await);
-            }
-        };
+    let finalize_started = Instant::now();
+    let finalize_result =
+        finalize_workspace(&git, &finalize_params, &mut loop_outcome.last_pushed_sha).await;
+    send_timing(
+        &params.outbound_tx,
+        RuntimeOperation::Finalize,
+        finalize_started,
+        finalize_result.is_ok(),
+    )
+    .await;
+    let finalize_res = match finalize_result {
+        Ok(res) => res,
+        Err(e) => {
+            return Ok(fail_run(
+                &params.outbound_tx,
+                format!("Workspace finalization failed: {e}"),
+                loop_outcome.session_id.clone(),
+                collected_push_reports,
+                collected_notices,
+            )
+            .await);
+        }
+    };
 
     let _ = params
         .outbox

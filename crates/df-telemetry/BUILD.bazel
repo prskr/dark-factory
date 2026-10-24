@@ -1,0 +1,83 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+# The control plane, the gateway and df-k8s share one library, so that the crate graph has a
+# single `LogFormat`. The sandbox runtime gets a slim variant of the same crate (no OpenTelemetry,
+# no axum), and its tests the one with `test-util`.
+_SLIM = ["clap"]
+
+_FULL = _SLIM + [
+    "http",
+    "otel",
+]
+
+_TEST = _FULL + ["test-util"]
+
+rust_library(
+    name = "df_telemetry",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_features = _FULL,
+    crate_name = "df_telemetry",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+# `all_crate_deps` lists the optional dependencies whatever the features are, so the slim
+# variants name their (few) dependencies. The list must match the non-optional `[dependencies]` of
+# Cargo.toml plus those of the features the slim targets enable (today `clap`).
+_SLIM_DEPS = [
+    "@crates//:clap",
+    "@crates//:tracing",
+    "@crates//:tracing-subscriber",
+]
+
+[
+    rust_library(
+        name = name,
+        srcs = glob(["src/**/*.rs"]),
+        crate_features = features,
+        crate_name = "df_telemetry",
+        edition = "2024",
+        deps = _SLIM_DEPS,
+    )
+    for name, features in {
+        "df_telemetry_slim": _SLIM,
+        "df_telemetry_slim_test_util": _SLIM + ["test-util"],
+    }.items()
+]
+
+alias(
+    name = "df-telemetry",
+    actual = ":df_telemetry",
+)
+
+rust_test(
+    name = "df_telemetry_test",
+    crate = ":df_telemetry",
+    crate_features = _TEST,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True),
+)
+
+rust_test(
+    name = "spans_test",
+    srcs = ["tests/spans.rs"],
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [":df_telemetry"],
+)

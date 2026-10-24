@@ -341,6 +341,7 @@ async fn an_entry_added_on_one_replica_reaches_a_gateway_on_another_within_a_sec
         "gw-0".into(),
         policy_tx,
         Duration::from_millis(50),
+        Arc::default(),
     ));
     let allows = |policy: &Option<Arc<crate::policy::Policy>>| {
         decide(

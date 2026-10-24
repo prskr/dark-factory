@@ -187,3 +187,81 @@ sandbox:
   gatewayIp: {{ .Values.sandboxNamespace.gatewayIp | quote }}
   {{- end }}
 {{- end }}
+
+{{/*
+Whether the control plane and gateway serve Prometheus metrics
+*/}}
+{{- define "dark-factory.telemetry.prometheus" -}}
+{{- if has "prometheus" .Values.telemetry.metrics.exporters }}true{{- end }}
+{{- end }}
+
+{{/*
+OTEL_* environment of the control plane and gateway containers.
+Arguments: dict "ctx" <root context> "component" <service name suffix>
+*/}}
+{{- define "dark-factory.telemetry.env" -}}
+{{- $t := .ctx.Values.telemetry -}}
+- name: OTEL_SERVICE_NAME
+  value: {{ printf "dark-factory-%s" .component | quote }}
+- name: OTEL_METRICS_EXPORTER
+  value: {{ if $t.metrics.exporters }}{{ join "," $t.metrics.exporters | quote }}{{ else }}"none"{{ end }}
+{{- if has "prometheus" $t.metrics.exporters }}
+- name: OTEL_EXPORTER_PROMETHEUS_PORT
+  value: {{ $t.metrics.port | quote }}
+{{- end }}
+- name: OTEL_TRACES_EXPORTER
+  value: {{ if $t.traces.enabled }}"otlp"{{ else }}"none"{{ end }}
+{{- if $t.traces.enabled }}
+- name: OTEL_TRACES_SAMPLER
+  value: {{ $t.traces.sampler | quote }}
+{{- if $t.traces.samplerArg }}
+- name: OTEL_TRACES_SAMPLER_ARG
+  value: {{ $t.traces.samplerArg | quote }}
+{{- end }}
+{{- end }}
+{{- if $t.otlp.endpoint }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ $t.otlp.endpoint | quote }}
+- name: OTEL_EXPORTER_OTLP_PROTOCOL
+  value: {{ $t.otlp.protocol | quote }}
+{{- if $t.otlp.insecure }}
+- name: OTEL_EXPORTER_OTLP_INSECURE
+  value: "true"
+{{- end }}
+{{- if $t.otlp.headersSecret }}
+- name: OTEL_EXPORTER_OTLP_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ $t.otlp.headersSecret | quote }}
+      key: headers
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+NetworkPolicy ingress rule that lets the metrics scraper reach the metrics port; renders nothing
+without a scraper namespace selector or without Prometheus metrics. Only a
+`kubernetes.io/metadata.name` selector that names the sandbox namespace is rejected; other labels
+the sandbox namespace shares with the selector are not checked (its default-deny egress blocks
+sandboxes anyway).
+*/}}
+{{- define "dark-factory.netpol.scraper" -}}
+{{- $scraper := .Values.networkPolicy.metricsScraper -}}
+{{- if eq (index $scraper.namespaceSelector "kubernetes.io/metadata.name" | default "") .Values.sandboxNamespace.name -}}
+{{- fail "networkPolicy.metricsScraper.namespaceSelector must not select the sandbox namespace: sandboxes must not reach the metrics port" -}}
+{{- end -}}
+{{- if and $scraper.namespaceSelector (include "dark-factory.telemetry.prometheus" .) -}}
+- from:
+    - namespaceSelector:
+        matchLabels:
+          {{- toYaml $scraper.namespaceSelector | nindent 10 }}
+      {{- if $scraper.podSelector }}
+      podSelector:
+        matchLabels:
+          {{- toYaml $scraper.podSelector | nindent 10 }}
+      {{- end }}
+  ports:
+    - protocol: TCP
+      port: {{ .Values.telemetry.metrics.port }}
+{{- end }}
+{{- end }}

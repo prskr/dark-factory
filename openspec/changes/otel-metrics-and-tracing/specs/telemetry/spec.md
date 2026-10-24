@@ -31,10 +31,17 @@ With `otlp` selected the component SHALL push metrics periodically over OTLP, co
 
 #### Scenario: Collector unreachable
 - **WHEN** `otlp` is selected and the OTLP endpoint does not accept connections
-- **THEN** the component keeps serving its other functions and logs the export failure at WARN at most once per export interval
+- **THEN** the component keeps serving its other functions and logs the export failure at ERROR at most once per export interval
+
+### Requirement: OTLP protocol
+The only supported OTLP protocol SHALL be `grpc`. Any other value of `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` SHALL stop the process at startup with an error naming the variable.
+
+#### Scenario: Unsupported protocol
+- **WHEN** a component starts with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`
+- **THEN** it exits with a non-zero status and reports the invalid `OTEL_EXPORTER_OTLP_PROTOCOL` value
 
 ### Requirement: Optional tracing
-Tracing SHALL be disabled unless `OTEL_TRACES_EXPORTER=otlp` is set; the default and `none` SHALL install no trace exporter and open no connection. When enabled, the control plane and gateway SHALL export their spans over OTLP using the standard `OTEL_EXPORTER_OTLP_*` variables and SHALL honour `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` (default `parentbased_always_on`).
+Tracing SHALL be disabled unless `OTEL_TRACES_EXPORTER=otlp` is set; the default and `none` SHALL install no trace exporter and open no connection. When enabled, the control plane and gateway SHALL export their spans over OTLP using the standard `OTEL_EXPORTER_OTLP_*` variables and SHALL honour `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` (default `parentbased_always_on`). An invalid sampler or sampler argument SHALL stop the process at startup with an error naming the variable.
 
 #### Scenario: Tracing off by default
 - **WHEN** the control plane starts without `OTEL_TRACES_EXPORTER`
@@ -45,14 +52,14 @@ Tracing SHALL be disabled unless `OTEL_TRACES_EXPORTER=otlp` is set; the default
 - **THEN** about 10 % of agent channel batch spans are exported
 
 ### Requirement: Span coverage
-With tracing enabled, spans SHALL exist at least for each HTTP request, each agent channel session, each persisted agent message batch and each gateway proxy connection. Span attributes SHALL NOT contain credentials, prompt content or tool input/output.
+With tracing enabled, spans SHALL exist at least for each HTTP request to the UI and health endpoints (the `/metrics` scrape endpoint gets no span), each agent channel session, each persisted agent message batch and each gateway proxy connection. Span attributes SHALL NOT contain credentials, prompt content or tool input/output.
 
 #### Scenario: Batch span
 - **WHEN** tracing is enabled and the control plane persists an agent message batch
 - **THEN** an exported span for the batch carries the message count and no message content
 
 ### Requirement: Resource attributes
-Every exported metric and span SHALL carry `service.name` (`dark-factory-control-plane` or `dark-factory-gateway`), `service.version` (the binary version) and `service.instance.id` (pod name when available, otherwise host name). Attributes from `OTEL_RESOURCE_ATTRIBUTES` SHALL be added, and `OTEL_SERVICE_NAME` SHALL override `service.name`.
+Every exported metric and span SHALL carry `service.name` (`dark-factory-control-plane` or `dark-factory-gateway`), `service.version` (the binary version) and `service.instance.id` (pod name when available, otherwise host name). Attributes from `OTEL_RESOURCE_ATTRIBUTES` SHALL be added, and `OTEL_SERVICE_NAME` SHALL override `service.name`. With the Prometheus exporter, `service.instance.id` SHALL be a label on every series; the other resource attributes are exposed on `target_info`.
 
 #### Scenario: Two replicas
 - **WHEN** two control plane replicas export metrics
@@ -94,7 +101,7 @@ The control plane SHALL record:
 
 | Instrument | Type | Attributes | Source |
 |------------|------|------------|--------|
-| `df.agent.tool_calls` | counter | `kind`, `origin`, `status` | first terminal status of a tool call |
+| `df.agent.tool_calls` | counter | `kind`, `origin`, `status` | each terminal status update of a tool call |
 | `df.agent.pushes` | counter | `target`, `status` | `PushReport` |
 | `df.agent.runtime.duration` | histogram (s) | `operation`, `result` | `RuntimeTiming` |
 
@@ -133,7 +140,7 @@ The gateway SHALL record `df.gateway.connections` (counter; `decision` = `allowe
 - **THEN** `df.gateway.connections{decision="denied"}` increases by one
 
 ### Requirement: Telemetry shutdown
-On a shutdown signal the control plane and gateway SHALL flush pending OTLP metrics and spans within the existing shutdown grace period and SHALL NOT delay shutdown beyond it when the collector is unreachable.
+On a shutdown signal the control plane and gateway SHALL flush pending OTLP metrics and spans within the existing shutdown grace period and SHALL NOT delay shutdown beyond it when the collector is unreachable. The grace period counts from the signal and is shared with draining the listeners; the flush gets the time that is left.
 
 #### Scenario: Flush on shutdown
 - **WHEN** the control plane receives SIGTERM with OTLP metrics enabled and a reachable collector

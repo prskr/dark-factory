@@ -45,6 +45,7 @@ spec:
     {{- end }}
         - protocol: TCP
           port: {{ .Values.controlPlane.ports.http }}
+    {{- include "dark-factory.netpol.scraper" . | nindent 4 }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -75,4 +76,5 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.gateway.ports.internalGrpc }}
+    {{- include "dark-factory.netpol.scraper" . | nindent 4 }}
 {{- end }}

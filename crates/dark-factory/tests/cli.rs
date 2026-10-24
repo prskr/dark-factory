@@ -29,3 +29,26 @@ fn unknown_log_format_in_env_exits_non_zero_naming_the_variable() {
         "{stderr}"
     );
 }
+
+#[test]
+fn unknown_metrics_exporter_exits_non_zero_naming_the_variable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = Command::new(binary())
+        .arg("--config")
+        .arg(dir.path().join("missing.yaml"))
+        .arg("serve")
+        .env_clear()
+        .env("OTEL_METRICS_EXPORTER", "statsd")
+        .output()
+        .expect("run binary");
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(1), "{output}");
+    assert!(
+        output.contains("OTEL_METRICS_EXPORTER") && output.contains("statsd"),
+        "{output}"
+    );
+}

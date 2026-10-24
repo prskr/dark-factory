@@ -21,8 +21,8 @@ Dark Factory has no metrics and no traces. No component exposes or exports telem
 
 ## Impact
 
-- New dependencies (workspace): `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `opentelemetry-prometheus`, `tracing-opentelemetry` (all on the 0.33 / 0.34 line, released together), plus direct use of `axum` (already in the dependency graph through `tonic`) for `/metrics`. Library crates depend on the `opentelemetry` API only; the SDK and exporters are set up in the `dark-factory` binary.
-- `factory-agent` gets no new dependencies; it only sends `RuntimeTiming` messages.
-- Code: `crates/dark-factory` (telemetry setup, `/metrics` server, shutdown flush), `crates/df-agent-channel` (instruments recorded after `persist_batch` commits), `contract/proto/darkfactory/agent/v1/agent.proto` (`RuntimeTiming`), `crates/factory-agent` (timings), gateway instruments.
+- New dependencies (workspace): `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `opentelemetry-prometheus`, `tracing-opentelemetry` (all on the 0.33 / 0.34 line, released together), plus direct use of `axum` (already in the dependency graph through `tonic`) for `/metrics`. Library crates depend on the `opentelemetry` API only; the SDK and exporters are set up by the new `df-telemetry` crate (`otel` feature), which only the `dark-factory` binary enables.
+- `factory-agent` gets no OpenTelemetry or axum dependency (cargo and Bazel); it uses `df-telemetry` for its logging setup and only sends `RuntimeTiming` messages.
+- Code: `crates/df-telemetry` (logging setup shared by both binaries, HTTP request span middleware, OTel setup and `/metrics` server), `crates/dark-factory` (telemetry wiring, shutdown flush), `crates/df-k8s` (typed `LogFormat`), `crates/df-agent-channel` (instruments recorded after `persist_batch` commits), `contract/proto/darkfactory/agent/v1/agent.proto` (`RuntimeTiming`), `crates/factory-agent` (timings), gateway instruments.
 - Chart: values, schema, Services, NetworkPolicy, optional `ServiceMonitor`, tests, README.
 - **Depends on `agent-session-logging`** (subscriber setup that the OTel layer plugs into) and **`iter1-egress-gateway`** (gateway instruments are added to the proxy it implements). Neither change is amended.

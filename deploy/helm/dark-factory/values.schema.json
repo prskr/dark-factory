@@ -7,6 +7,7 @@
     "image",
     "database",
     "oidc",
+    "telemetry",
     "logging",
     "sandbox",
     "sandboxNamespace",
@@ -75,6 +76,60 @@
         "clientSecretKey": { "type": "string", "minLength": 1 },
         "publicUrl": { "type": "string" },
         "rolesClaim": { "type": "string", "minLength": 1 }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "required": ["metrics", "traces", "otlp"],
+      "properties": {
+        "metrics": {
+          "type": "object",
+          "required": ["exporters", "port"],
+          "properties": {
+            "exporters": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "enum": ["prometheus", "otlp"] }
+            },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "interval": { "type": "string" }
+              }
+            }
+          }
+        },
+        "traces": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "sampler": {
+              "type": "string",
+              "enum": [
+                "always_on",
+                "always_off",
+                "traceidratio",
+                "parentbased_always_on",
+                "parentbased_always_off",
+                "parentbased_traceidratio"
+              ]
+            },
+            "samplerArg": { "type": "string" }
+          }
+        },
+        "otlp": {
+          "type": "object",
+          "properties": {
+            "endpoint": { "type": "string" },
+            "protocol": { "type": "string", "enum": ["grpc"] },
+            "insecure": { "type": "boolean" },
+            "headersSecret": { "type": "string" }
+          }
+        }
       }
     },
     "logging": {
@@ -264,10 +319,27 @@
             "namespaceSelector": { "type": "object" },
             "podSelector": { "type": "object" }
           }
+        },
+        "metricsScraper": {
+          "type": "object",
+          "properties": {
+            "namespaceSelector": { "type": "object" },
+            "podSelector": { "type": "object" }
+          }
         }
       }
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "telemetry": { "properties": { "traces": { "properties": { "enabled": { "const": true } } } } } } },
+      "then": { "properties": { "telemetry": { "properties": { "otlp": { "required": ["endpoint"], "properties": { "endpoint": { "minLength": 1 } } } } } } }
+    },
+    {
+      "if": { "properties": { "telemetry": { "properties": { "metrics": { "properties": { "exporters": { "contains": { "const": "otlp" } } } } } } } },
+      "then": { "properties": { "telemetry": { "properties": { "otlp": { "required": ["endpoint"], "properties": { "endpoint": { "minLength": 1 } } } } } } }
+    }
+  ],
   "$defs": {
     "imageRef": {
       "type": "object",

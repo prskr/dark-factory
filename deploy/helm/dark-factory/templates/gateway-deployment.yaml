@@ -43,6 +43,7 @@ spec:
               value: {{ .Values.logging.format | quote }}
             - name: RUST_LOG
               value: {{ .Values.gateway.logLevel | quote }}
+            {{- include "dark-factory.telemetry.env" (dict "ctx" . "component" "gateway") | nindent 12 }}
           args:
             - "--config"
             - "/etc/dark-factory/config.yaml"
@@ -54,6 +55,11 @@ spec:
             - name: internal-grpc
               containerPort: {{ .Values.gateway.ports.internalGrpc }}
               protocol: TCP
+            {{- if include "dark-factory.telemetry.prometheus" . }}
+            - name: metrics
+              containerPort: {{ .Values.telemetry.metrics.port }}
+              protocol: TCP
+            {{- end }}
             - name: health
               containerPort: {{ .Values.gateway.ports.health }}
               protocol: TCP

@@ -222,7 +222,7 @@ pub fn render_sandbox(
         },
         SandboxPodTemplateSpecContainersEnv {
             name: "DF_LOG_FORMAT".to_string(),
-            value: Some(config.log_format.clone()),
+            value: Some(config.log_format.as_str().to_string()),
             ..Default::default()
         },
         SandboxPodTemplateSpecContainersEnv {
@@ -702,7 +702,7 @@ mod tests {
                 .to_string(),
             gateway_ip: IpAddr::V4(Ipv4Addr::new(10, 105, 68, 86)),
             gateway_proxy_port: 3128,
-            log_format: "text".to_string(),
+            log_format: df_telemetry::logging::LogFormat::Text,
         }
     }
 
@@ -1013,7 +1013,7 @@ mod tests {
 
     #[test]
     fn sandbox_inherits_the_control_plane_log_format() {
-        let json = test_config().with_log_format("json");
+        let json = test_config().with_log_format(df_telemetry::logging::LogFormat::Json);
         assert_eq!(sandbox_env(&json, "DF_LOG_FORMAT").as_deref(), Some("json"));
         assert_eq!(
             sandbox_env(&test_config(), "DF_LOG_FORMAT").as_deref(),
