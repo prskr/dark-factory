@@ -82,15 +82,7 @@ At 1280 px and more, a task's page SHALL show the task list, the transcript with
 - **THEN** a bottom sheet with status line, links, project, persona, branch and runs opens over the transcript
 
 ### Requirement: Task list filters
-The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. From 768 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 768 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
-
-#### Scenario: Filter by project
-- **WHEN** the board member picks "Website" in the project menu
-- **THEN** only tasks of project `WEB` are listed and the URL contains `project=WEB`
-
-#### Scenario: Project search
-- **WHEN** "fac" is typed into the project menu's search
-- **THEN** the menu lists only "Dark Factory"
+The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = waiting, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
 
 #### Scenario: Live update respects filters
 - **WHEN** the list shows Active tasks and a listed task becomes `completed`
@@ -99,6 +91,17 @@ The task list SHALL filter by status group (Active = queued, running, rate limit
 #### Scenario: Narrower filter from a link
 - **WHEN** `/tasks?status=queued` is opened
 - **THEN** only queued tasks are listed, live updates keep that filter, and no status chip is marked current
+
+### Requirement: Project filter
+From 768 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 768 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter.
+
+#### Scenario: Filter by project
+- **WHEN** the board member picks "Website" in the project menu
+- **THEN** only tasks of project `WEB` are listed and the URL contains `project=WEB`
+
+#### Scenario: Project search
+- **WHEN** "fac" is typed into the project menu's search
+- **THEN** the menu lists only "Dark Factory"
 
 #### Scenario: Project filter on a phone
 - **WHEN** a board member opens the task list of project `DF` from the Projects screen at 390 px width
