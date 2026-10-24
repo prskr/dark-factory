@@ -151,7 +151,7 @@ impl OidcClient {
                 CsrfToken::new_random,
                 Nonce::new_random,
             )
-            .add_scope(Scope::new("openid".into()))
+            // `authorize_url` always requests `openid` itself.
             .add_scope(Scope::new("profile".into()))
             .add_scopes(self.extra_scopes.iter().cloned().map(Scope::new))
             .set_pkce_challenge(challenge)
@@ -340,11 +340,7 @@ mod tests {
             .find(|(k, _)| k == "scope")
             .map(|(_, v)| v.into_owned())
             .unwrap_or_default();
-        let scopes: Vec<&str> = scope.split(' ').collect();
-        assert!(
-            scopes.ends_with(&["profile", "groups", "offline_access"]),
-            "{scope}"
-        );
+        assert_eq!(scope, "openid profile groups offline_access");
     }
 
     #[test]
