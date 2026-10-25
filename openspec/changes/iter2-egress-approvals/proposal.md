@@ -7,7 +7,7 @@ When a harness needs a host that isn't allowlisted, iteration 1 offers only one 
 ## What Changes
 
 - **Task-scoped `http-host` entries:** a run's effective allowlist becomes instance ∪ project ∪ its task's entries.
-- **"Allow" in the egress log:** denied events and denied-hosts summary rows get an action that allows the host for the task, the project or the instance (desktop).
+- **"Allow" in the egress log:** denied events (rows of the events table and blocked graph nodes of the network traffic page, using the action slot and menu of `network-management-ui-polish`) get an action that allows the host for the task, the project or the instance (desktop); the design's dialog and toast apply.
 - **`network-access` approval type** (`http-host` only in this iteration) with scopes task, project and instance. Approving writes the allowlist entry, which reaches the gateway within a second, so the running agent's next attempt succeeds.
 - **Requests from denials:** the gateway reports `not-allowlisted` denials to the control plane (deduplicated per run, host and port). The control plane raises a non-blocking `network-access` request on the task.
 - **Factory tool `request_approval`** (factory tools v2) with type `network-access`, payload `{host, port}`, a reason and `blocking`.

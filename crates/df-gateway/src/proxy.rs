@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use df_core::host::{normalize_host, strip_brackets};
 use df_proto::gateway::v1::{FlowEvent, Phase, Verdict};
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::body::Incoming;
@@ -30,7 +31,7 @@ use tracing::Instrument as _;
 use crate::count::{Counted, Direction, Metered, Traffic};
 use crate::flow::{FlowLog, duration_proto, timestamp_now};
 use crate::metrics::{Decision, Metrics};
-use crate::policy::{self, Policy, Sandbox, normalize_host};
+use crate::policy::{self, Policy, Sandbox};
 use crate::resolve::{BlockedRanges, Resolver};
 use crate::sni;
 
@@ -701,7 +702,7 @@ fn http_target(uri: &Uri) -> Option<Target> {
 
 /// Lower case, without the brackets of an IPv6 literal or a trailing dot.
 fn host_of(host: &str) -> String {
-    normalize_host(host.trim_start_matches('[').trim_end_matches(']'))
+    normalize_host(strip_brackets(host))
 }
 
 /// Rewrites an absolute-form request for the origin server: path only, `Host` of the target, no

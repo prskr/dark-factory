@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-56.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-57.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -18,6 +18,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-51: first cluster run of `iter1-egress-gateway` (2026-10-24).
 - Origin of TD-52: code review of `agent-session-logging` (`factory-agent`, `dark-factory`, `df-k8s`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-55: code review of `otel-metrics-and-tracing` (`factory-agent`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-56: code review of `network-management-ui-polish` (`df-web`, 2026-10-25). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -75,6 +76,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
 | TD-52 | medium | `factory-agent` logging | Tool call `input` is logged at INFO and can carry credentials the agent typed |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
+| TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings |
 
 ## Entries
 
@@ -530,6 +532,16 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 **Matters when:** more operations are timed, or the timing message changes; a missed `send_timing` goes unnoticed.
 
 **Fix:** One `async fn timed<T, E>(tx, op, fut) -> Result<T, E>` that sends the timing and returns the result; keep explicit calls only where the result needs extra handling (push).
+
+### TD-56 (P6). Traffic page client behaviour has no runtime test
+
+`crates/df-web/src/egress/log/page.rs` (Alpine state: pause/resume, divider drag/keys/resize, remembered width, details panel, Advanced badge)
+
+Tests assert that strings appear in the rendered page. Nothing runs the script, and the obscura browser cannot stream SSE, so the live updates, the pause closing the stream, the clamping and the stored width were never exercised. Review rounds 2–4 each found a bug in this code that string tests did not catch (P10, P13, P14).
+
+**Matters when:** the page script changes again, or htmx/Alpine are upgraded (P1 and P10 depend on internals of the vendored versions).
+
+**Fix:** A browser test (for example Playwright against `just serve-local` with `--demo-flows`) for the spec scenarios Pause, Resume, Drag, Keyboard, Reset, Remembered width and Open/close details; run it in CI.
 
 ## Accepted decisions
 

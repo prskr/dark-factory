@@ -25,6 +25,7 @@
   --app: #fafaf9;
   --panel: #ffffff;
   --sunk: #f5f5f4;
+  --raised: #ffffff;
   --line: #e7e5e4;
   --line-strong: #a8a29e;
   --ink: #1c1917;
@@ -64,6 +65,7 @@
     --app: #0c0a09;
     --panel: #1c1917;
     --sunk: #292524;
+    --raised: #34302d;
     --line: #2e2a27;
     --line-strong: #57534e;
     --ink: #f5f5f4;
@@ -100,6 +102,7 @@
   --color-app: var(--app);
   --color-panel: var(--panel);
   --color-sunk: var(--sunk);
+  --color-raised: var(--raised);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);

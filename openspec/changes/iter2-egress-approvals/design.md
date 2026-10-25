@@ -44,7 +44,15 @@ Requests are matched with the proxy's own host matcher, not by comparing fingerp
 `request_approval` in `factory-tools.v2.json` declares `type` as an enum with `network-access` and `payload` as an object validated per type by the control plane, since JSON Schema `oneOf` per type is poorly supported by harnesses. The handler first checks the run's effective allowlist and returns "already allowed" without storing anything.
 
 ### D5 — Log action
-Denied events in the SSE log render a small menu (task / project / instance) when the event has a run. The scopes a summary row offers are derived from the set of tasks in its aggregate: task scope only if it holds exactly one task, project scope only if all tasks belong to one project, instance scope always. The action posts to the allowlist handler with `host` and `port` taken from the event, never a wildcard.
+Denied events with a run render the action (task / project / instance) in the row's action slot, or the menu in a narrow panel. A row's scopes come from the event's own task and project.
+
+A blocked graph node also gets the action, but it is one `host:port` and can have denied edges from runs of several tasks and projects. Its scopes are derived from those denied edges:
+
+- task scope only if they all belong to one task;
+- project scope only if they all belong to one project;
+- instance scope always.
+
+This prevents a node action from creating an entry for another run's task or project. The action posts to the allowlist handler with `host` and `port` taken from the event or node, never a wildcard.
 
 ## Risks / Trade-offs
 

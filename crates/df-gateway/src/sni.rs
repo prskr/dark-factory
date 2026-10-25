@@ -43,7 +43,7 @@ pub fn server_name(record: &[u8]) -> Option<String> {
             .iter()
             .find(|(kind, _)| *kind == SNI_HOST_NAME)
             .and_then(|(_, name)| std::str::from_utf8(name).ok())
-            .map(crate::policy::normalize_host),
+            .map(df_core::host::normalize_host),
         _ => None,
     })
 }

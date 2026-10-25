@@ -19,10 +19,15 @@ const SECTIONS: [(Nav, &str, &str, Icon); 6] = [
     (
         Nav::Allowlist,
         "/egress/allowlist",
-        "Egress allowlist",
+        "Egress rules",
         Icon::Shield,
     ),
-    (Nav::EgressLog, "/egress/log", "Egress log", Icon::Activity),
+    (
+        Nav::EgressLog,
+        "/egress/log",
+        "Network traffic",
+        Icon::Activity,
+    ),
 ];
 
 /// A round badge with initials.

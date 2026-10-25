@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod badges;
 pub mod forms;
+pub mod host_icon;
 pub mod icons;
 pub mod lists;
 pub mod overlay;
@@ -23,6 +24,7 @@ pub use forms::{
     FormErrors, MenuItem, field, field_error, form_error, readonly_field, search_menu,
     select_field, text_field, textarea_field,
 };
+pub use host_icon::{HostIconSize, host_icon};
 pub use icons::{Icon, forge_icon, icon, logo};
 pub use lists::{EmptyPanel, EmptySize, definition_list, empty_panel, empty_state, section};
 pub use overlay::{DialogStyle, details_panel, dialog, dialog_close, dialog_with};
@@ -120,6 +122,7 @@ mod tests {
             "avatar",
             "icon",
             "forge_icon",
+            "host_icon",
         ];
         for name in components {
             assert!(

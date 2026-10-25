@@ -37,7 +37,7 @@ db:
 db-rm:
     {{container}} compose down -v
 
-# Run the control plane with the web UI on http://127.0.0.1:8080 without a Kubernetes cluster (login: admin@example.com / password)
+# Run the control plane with the web UI on http://127.0.0.1:8080 without a Kubernetes cluster and with scripted network traffic (login: admin@example.com / password). Needs the `dev-tools` feature.
 serve-local: db plugins
     mkdir -p target/local-dev
     printf 'postgres\n' > target/local-dev/owner-password
@@ -45,8 +45,8 @@ serve-local: db plugins
     printf 'local-dev-secret\n' > target/local-dev/oidc-client-secret
     [ -f target/local-dev/agent.crt ] || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
         -days 365 -subj /CN=localhost -keyout target/local-dev/agent.key -out target/local-dev/agent.crt 2>/dev/null
-    cargo run -p dark-factory -- --config dev/config.yaml migrate
-    cargo run -p dark-factory -- --config dev/config.yaml serve --no-cluster
+    cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml migrate
+    cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml serve --no-cluster --demo-flows
 
 # Remove the shared test PostgreSQL containers that testcontainers keeps running between test runs
 test-db-rm:

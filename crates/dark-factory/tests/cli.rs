@@ -52,3 +52,19 @@ fn unknown_metrics_exporter_exits_non_zero_naming_the_variable() {
         "{output}"
     );
 }
+
+/// A default build (a release binary, the Bazel image) has no development switches.
+#[cfg(not(feature = "dev-tools"))]
+#[test]
+fn serve_help_lists_no_development_flags() {
+    let out = Command::new(binary())
+        .args(["serve", "--help"])
+        .output()
+        .expect("run binary");
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && help.contains("Usage"), "{help}");
+    assert!(
+        !help.contains("no-cluster") && !help.contains("demo-flows"),
+        "{help}"
+    );
+}

@@ -14,11 +14,19 @@ The allowlist page SHALL be titled "Egress rules" with the number of entries, an
 - **THEN** the network traffic page opens
 
 ### Requirement: Rules table
-Each entry SHALL be a row with its target (host icon and monospace host for an `http-host`; namespace/service with a "cluster service" badge for a `cluster-service`), its port or ports, its scope and a delete button with a trash icon and an accessible name that includes the target. Known hosts SHALL show a brand monogram (for example `GH` for `github.com`), other hosts a generic globe.
+Each entry SHALL be a row with its target (host icon and monospace host for an `http-host`; namespace/service with a "cluster service" badge for a `cluster-service`), its port or ports, its scope and a delete button with a trash icon and an accessible name that includes the target. Known providers SHALL show a brand monogram (for example `GH` for `github.com` and any subdomain such as `api.github.com`, but not for `evilgithub.com`), IP literals a server icon, other hosts a generic globe.
 
 #### Scenario: Known host
 - **WHEN** an entry for `github.com:443` exists
 - **THEN** its row shows the `GH` monogram, `github.com`, port `443` and the scope
+
+#### Scenario: Subdomain of a known provider
+- **WHEN** an entry for `api.github.com:443` exists
+- **THEN** its row shows the `GH` monogram
+
+#### Scenario: IP literal
+- **WHEN** a row or event targets `10.0.0.1:443`
+- **THEN** it shows the server icon, not the globe
 
 #### Scenario: Unknown host
 - **WHEN** an entry for `ghcr.io:443` exists

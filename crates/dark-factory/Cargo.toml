@@ -8,6 +8,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Local debugging only (`just serve-local`): `serve --no-cluster` and `serve --demo-flows`. Off in
+# release builds and in the Bazel images.
+dev-tools = []
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true

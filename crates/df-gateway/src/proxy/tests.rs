@@ -356,6 +356,50 @@ async fn ip_literal_connect_gets_403() -> Result<()> {
     Ok(())
 }
 
+/// `host_of` strips exactly one pair of brackets, so a malformed literal is no IP address (and
+/// is then denied as a name nothing allows) while a well-formed one is still an IP literal.
+#[test]
+fn only_a_well_formed_bracketed_ipv6_literal_counts_as_an_ip_address() {
+    assert!(host_of("[2606:4700::1111]").parse::<IpAddr>().is_ok());
+    for malformed in ["[[::1]]", "[[::1", "::1]", "[::1"] {
+        assert!(host_of(malformed).parse::<IpAddr>().is_err(), "{malformed}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_ipv6_brackets_are_refused_and_a_well_formed_literal_is_an_ip_literal()
+-> Result<()> {
+    let harness = Harness::start(
+        policy_of("127.0.0.1", vec![rule("api.anthropic.com", 443)]),
+        &[],
+        "127.0.0.1:1".parse()?,
+    )
+    .await?;
+    // The head may be refused by the HTTP parser (400) or reach the policy (403): never a tunnel.
+    for target in ["[[::1]]", "[[::1"] {
+        let (_, response) = request(harness.proxy, &connect_head(target, 443)).await?;
+        assert!(
+            response.starts_with("HTTP/1.1 400") || response.starts_with("HTTP/1.1 403"),
+            "{target}: {response}"
+        );
+    }
+    let (_, response) = request(harness.proxy, &connect_head("[2606:4700::1111]", 443)).await?;
+    assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    let reasons: Vec<String> = harness.events().iter().map(|e| e.reason.clone()).collect();
+    assert_eq!(
+        reasons.last().map(String::as_str),
+        Some("ip-literal"),
+        "{reasons:?}"
+    );
+    assert!(
+        reasons
+            .iter()
+            .all(|r| r == "ip-literal" || r == "not-allowlisted"),
+        "{reasons:?}"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn allowed_name_that_resolves_internally_is_refused() -> Result<()> {
     let upstream = TcpListener::bind("127.0.0.1:0").await?;

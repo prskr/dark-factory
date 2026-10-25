@@ -29,7 +29,10 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::{error, info};
 
+#[cfg(feature = "dev-tools")]
+mod demo_flows;
 mod forge;
+#[cfg(any(test, feature = "dev-tools"))]
 mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
@@ -77,15 +80,51 @@ pub struct Cli {
 pub enum Command {
     /// Run the Dark Factory control plane server.
     Serve {
-        /// Local development only: run without a Kubernetes cluster. The UI works; every sandbox
-        /// operation (starting a run) fails.
-        #[arg(long)]
-        no_cluster: bool,
+        #[command(flatten)]
+        dev: DevOptions,
     },
     /// Apply embedded PostgreSQL migrations, optional application role management, and grants.
     Migrate,
     /// Run the Dark Factory sandbox egress gateway.
     Gateway,
+}
+
+/// Switches for local debugging, present only in a build with the feature `dev-tools`
+/// (`just serve-local`); a default build has no such flags.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::Args)]
+pub struct DevOptions {
+    /// Run without a Kubernetes cluster. The UI works; every sandbox operation (starting a run)
+    /// fails.
+    #[cfg(feature = "dev-tools")]
+    #[arg(long)]
+    no_cluster: bool,
+    /// Fill the network traffic page with scripted events instead of the gateway pods' (needs
+    /// `--no-cluster`): `script` is a mix of allowed, denied and open connections, `bulk` has
+    /// 10,000 events.
+    #[cfg(feature = "dev-tools")]
+    #[arg(
+        long,
+        value_enum,
+        num_args = 0..=1,
+        default_missing_value = "script",
+        requires = "no_cluster"
+    )]
+    demo_flows: Option<demo_flows::DemoMode>,
+}
+
+impl DevOptions {
+    /// The scripted event source if `--demo-flows` is given.
+    #[cfg(feature = "dev-tools")]
+    fn demo_flows(self) -> Option<Arc<dyn df_web::egress::FlowSource>> {
+        self.demo_flows
+            .map(|mode| Arc::new(demo_flows::DemoFlows::new(mode)) as _)
+    }
+
+    #[cfg(not(feature = "dev-tools"))]
+    #[allow(clippy::unused_self)]
+    fn demo_flows(self) -> Option<Arc<dyn df_web::egress::FlowSource>> {
+        None
+    }
 }
 
 #[tokio::main]
@@ -133,10 +172,8 @@ async fn main() -> ExitCode {
     };
 
     let code = match cli.command {
-        Command::Serve { no_cluster } => {
-            match run_serve_command(&cli.config, no_cluster, cli.log_format, signalled.clone())
-                .await
-            {
+        Command::Serve { dev } => {
+            match run_serve_command(&cli.config, dev, cli.log_format, signalled.clone()).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
                     error!(error = format!("{err:#}"), "control plane server failed");
@@ -271,8 +308,10 @@ trait SandboxBackend {
 }
 
 /// Backend without a cluster (`serve --no-cluster`, tests): every sandbox operation fails.
+#[cfg(any(test, feature = "dev-tools"))]
 struct UnconfiguredBackend;
 
+#[cfg(any(test, feature = "dev-tools"))]
 #[async_trait::async_trait]
 impl SandboxBackend for UnconfiguredBackend {
     async fn start(
@@ -460,7 +499,7 @@ async fn run_migrate_command(config_path: &std::path::Path) -> anyhow::Result<()
 
 async fn run_serve_command(
     config_path: &std::path::Path,
-    no_cluster: bool,
+    dev: DevOptions,
     log_format: logging::LogFormat,
     signalled: Signalled,
 ) -> anyhow::Result<()> {
@@ -468,7 +507,8 @@ async fn run_serve_command(
     let http_listener = bind_listener(cfg.server.http_port).await?;
     let agent_listener = bind_listener(cfg.server.agent_port).await?;
     let internal_listener = bind_listener(cfg.server.internal_grpc_port).await?;
-    if no_cluster {
+    #[cfg(feature = "dev-tools")]
+    if dev.no_cluster {
         tracing::warn!("running without a Kubernetes cluster; sandbox operations fail");
         return serve(
             cfg,
@@ -476,6 +516,7 @@ async fn run_serve_command(
             http_listener,
             agent_listener,
             internal_listener,
+            dev,
             wait_for_shutdown_signal(signalled),
         )
         .await;
@@ -489,6 +530,7 @@ async fn run_serve_command(
         http_listener,
         agent_listener,
         internal_listener,
+        dev,
         wait_for_shutdown_signal(signalled),
     )
     .await
@@ -502,6 +544,7 @@ async fn serve<B, F>(
     http_listener: TcpListener,
     agent_listener: TcpListener,
     internal_listener: TcpListener,
+    dev: DevOptions,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
@@ -539,7 +582,9 @@ where
         .await?;
 
     let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
-    let flows = egress_log_relay(&cfg, tls_config);
+    let flows = dev
+        .demo_flows()
+        .or_else(|| egress_log_relay(&cfg, tls_config));
     let web = web_router(
         &cfg,
         &pool,
@@ -952,10 +997,59 @@ mod tests {
     #[test]
     fn parses_subcommands() {
         let cli = Cli::try_parse_from(["dark-factory", "-c", "/tmp/cfg.yaml", "serve"]).unwrap();
-        assert_eq!(cli.command, Command::Serve { no_cluster: false });
+        assert_eq!(
+            cli.command,
+            Command::Serve {
+                dev: DevOptions::default()
+            }
+        );
         assert_eq!(cli.config, PathBuf::from("/tmp/cfg.yaml"));
-        let cli = Cli::try_parse_from(["dark-factory", "serve", "--no-cluster"]).unwrap();
-        assert_eq!(cli.command, Command::Serve { no_cluster: true });
+    }
+
+    #[cfg(not(feature = "dev-tools"))]
+    #[test]
+    fn development_flags_do_not_exist_without_the_dev_tools_feature() {
+        for flag in ["--no-cluster", "--demo-flows"] {
+            let err = Cli::try_parse_from(["dark-factory", "serve", flag]).unwrap_err();
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{flag}"
+            );
+        }
+        assert!(DevOptions::default().demo_flows().is_none());
+    }
+
+    #[cfg(feature = "dev-tools")]
+    fn dev_options(args: &[&str]) -> DevOptions {
+        let cli = Cli::try_parse_from(
+            ["dark-factory", "serve"]
+                .into_iter()
+                .chain(args.iter().copied()),
+        )
+        .unwrap();
+        match cli.command {
+            Command::Serve { dev } => dev,
+            other => unreachable!("`serve` parsed as {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "dev-tools")]
+    #[test]
+    fn development_flags_parse_with_the_dev_tools_feature() {
+        let dev = dev_options(&["--no-cluster"]);
+        assert!(dev.no_cluster && dev.demo_flows.is_none() && dev.demo_flows().is_none());
+
+        let dev = dev_options(&["--no-cluster", "--demo-flows"]);
+        assert_eq!(dev.demo_flows, Some(demo_flows::DemoMode::Script));
+        // The flag fills the event source of the web state.
+        assert!(dev.demo_flows().is_some());
+
+        let dev = dev_options(&["--no-cluster", "--demo-flows=bulk"]);
+        assert_eq!(dev.demo_flows, Some(demo_flows::DemoMode::Bulk));
+
+        // Scripted events without the cluster stub would pretend to be a real gateway.
+        assert!(Cli::try_parse_from(["dark-factory", "serve", "--demo-flows"]).is_err());
     }
 
     #[test]
@@ -1146,6 +1240,7 @@ mod tests {
             http,
             agent,
             internal,
+            DevOptions::default(),
             async {
                 let _ = stopped.await;
             },
@@ -1190,6 +1285,7 @@ mod tests {
             http,
             agent,
             internal,
+            DevOptions::default(),
             std::future::pending(),
         )
         .await
@@ -1249,6 +1345,7 @@ mod tests {
             http,
             agent,
             internal,
+            DevOptions::default(),
             std::future::pending(),
         )
         .await
@@ -1291,6 +1388,7 @@ mod tests {
             http,
             agent,
             internal,
+            DevOptions::default(),
             async {
                 let _ = stopped.await;
             },

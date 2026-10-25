@@ -38,7 +38,7 @@ The filter bar sits outside a `#traffic` region (graph, divider, table, counts, 
 
 Because the filtered stream must still deliver non-matching events to the graph, `shown()` splits into "feeds the graph and counts" (every flow event) and "gets a row" (matches the filter). `gap` and `backlog_end` markers feed neither graph nor counts; a `gap` keeps its own row in the table regardless of the filter, as today.
 
-Each batch that changes graph or counts morphs `#graph` and `#counts` as `<hx-partial>`s. Rendering an SVG with absolutely positioned nodes server-side follows the mockup's layout: sandbox column x=20/width 176, destinations right of it, 60 px top offset, 70 px destination pitch, 160 px sandbox pitch (the mockup's `Network.dc.html` numbers), bezier edges. The graph height is `max(rows) * pitch`; the panel scrolls.
+Each batch that changes graph or counts morphs `#graph` and `#counts` as `<hx-partial>`s. Rendering an SVG with absolutely positioned nodes server-side follows the mockup's layout: sandbox column x=20/width 176, destinations right of it, 60 px top offset, 70 px destination pitch, 160 px sandbox pitch (the mockup's `Network.dc.html` numbers), bezier edges. The graph height is `max(rows) * pitch`; the panel scrolls. The graph area has the `sunk` background so that the node cards stand out. A sandbox node is a card (`raised` fill, visible `line-strong` border, `rounded-xl`, light shadow; `raised` equals `panel` in the light theme and is lighter than `sunk` in the dark theme, where a shadow is invisible) with an icon tile on the left (near-black `rail` square with a green Lucide `box` icon) and two lines to its right: the short run id (mono, medium weight) and the task key (muted, truncated); destination nodes use the same card style.
 
 Caps: the 12 most recently seen sandboxes and 30 most recently seen destinations are drawn, with a "+N not shown" note; the edge map follows the ring buffer (cleared at `MAX_OPEN_ROWS` like the open set).
 
@@ -46,7 +46,7 @@ Caps: the 12 most recently seen sandboxes and 30 most recently seen destinations
 
 ### D3. No name lookups
 
-Persona names and task titles are not resolved (personas dropped as not critical). The sandbox column shows the first 8 characters of the run id and the task key (`DF-7`), which is what the event carries. The existing persona-id filter stays under *Advanced*. No database access is added to the log page.
+Persona names and task titles are not resolved (personas dropped as not critical). The sandbox column shows the first 8 characters of the run id and the task key (`DF-7`), which is what the event carries. *Advanced* offers the personas by name (one `list_personas` query when the page loads; on failure only "All personas" is offered) and the task key; the parameter stays the persona id.
 
 ### D4. One `data-flow` attribute per row feeds the details panel
 
@@ -58,7 +58,7 @@ The panel is an overlay `aside` (500 px, right edge, `role="dialog"`), closes on
 
 ### D5. Pause closes the stream
 
-The connect element is inside an Alpine `x-if`. *Pause* removes it (htmx closes the SSE connection when the element leaves the DOM; to be verified in task 4.3, otherwise `hx-sse:close`), *Resume* re-inserts it and the backlog replaces the rows. The *Live* badge reads *Paused* meanwhile and *Reconnecting* on `htmx:sseError`.
+The connect element sits in a slot (`#sse-slot`). *Pause* aborts the stream explicitly (`_htmx.sse.abortController.abort()` and `reader.cancel()`) and then removes the element: the vendored htmx has no MutationObserver, so removing the element alone never runs the extension's cleanup and an idle stream would stay open. *Resume* creates a new connect element, calls `htmx.process` on it and the backlog replaces the rows. The *Live* badge reads *Paused* meanwhile and *Reconnecting* on `htmx:sse:error`. A filter change swaps in a freshly connected `#traffic`, so it resumes a paused page: changing a filter means wanting to see data.
 
 *Alternative:* keep the connection and buffer messages in the browser. Rejected: unbounded memory for a long pause, and the gateways keep streaming to a page nobody reads.
 
@@ -78,11 +78,11 @@ An event carries the matched pattern, not the entry id. The details panel and th
 
 ### D9. Host icons: one component, static table
 
-`host_icon(host, size)` in `components/` renders a rounded square with a brand monogram and colour from a static table (the mockup's: `api.anthropic.com` A, `github.com` and `objects.githubusercontent.com` GH, `registry.npmjs.org` n, `proxy.golang.org` Go, `pypi.org` and `files.pythonhosted.org` Py, `www.googleapis.com` G) or the globe icon. Wildcard entries use their suffix (`*.github.com` → GH). No logos are embedded, only letters. It is used by the rules table, the events table, graph nodes and the details panel. Colours are written as literal Tailwind classes so they are generated; the table is a module-level constant.
+`host_icon(host, size)` in `components/` renders a rounded square with a brand monogram and colour from a static table of provider domains (`anthropic.com` A, `github.com` and `githubusercontent.com` GH, `npmjs.org` n, `golang.org` Go, `pypi.org` and `pythonhosted.org` Py, `googleapis.com` G). A host matches a provider when it equals the domain or ends with `.<domain>` (label boundary: `api.github.com` and `codeload.github.com` are GH, `evilgithub.com` is not). Wildcard entries use their suffix (`*.github.com` → GH). IP literals (IPv4, IPv6, bracketed or not) get the `Server` icon; every other name the globe (`ghcr.io`). No logos are embedded, only letters. It is used by the rules table, the events table, graph nodes and the details panel. The tones are theme-aware status tokens; the table is a module-level constant.
 
 ### D10. Naming and kept behaviour
 
-UI label "Blocked" replaces "denied" (design); wire values, reasons and the spec's reason list keep "denied". The denied-hosts summary is removed: the graph (blocked destinations) and the *Blocked* segment cover spotting missing domains, and iteration 2 (`iter2-egress-approvals`) is going to supersede it with actions on the events table. Nobody uses the product yet, so no migration of the view is needed. The existing *project* and *task* filters stay under *Advanced* next to sandbox and the persona-id filter (the design shows persona and sandbox). Routes and URLs of both pages stay.
+UI label "Blocked" replaces "denied" (design); wire values, reasons and the spec's reason list keep "denied". The denied-hosts summary is removed: the graph (blocked destinations) and the *Blocked* segment cover spotting missing domains, and iteration 2 (`iter2-egress-approvals`) is going to supersede it with actions on the events table. Nobody uses the product yet, so no migration of the view is needed. *Advanced* holds persona (a select, as in the design) and task (a text field, any case). The design's sandbox select and the earlier project filter are dropped: the task key identifies the work, and a run id is not something a board member knows; old links with `project` or `sandbox` still open, without that filter. Routes and URLs of both pages stay.
 
 ### D11. Development-only code behind a Cargo feature
 
@@ -93,10 +93,10 @@ UI label "Blocked" replaces "denied" (design); wire values, reasons and the spec
 ## Risks / Trade-offs
 
 - [Server-rendered graph re-sent on every batch] → The graph partial is only sent when the batch changes an edge or a node (new edge, verdict change, new last-seen is not drawn), and batches are already coalesced by `ready_chunks(CHUNK)`.
-- [Debounced reconnect on every filter change replays up to 10,000 events] → The backlog is sent as one message already; measured in task 9.1 with a 10,000-event fixture, and the debounce can grow if needed.
-- [Details panel reads row attributes: a large `data-flow` per row bloats the DOM] → About 600 bytes per row; the table already holds up to 10,000 rows. Trimming rows is a follow-up if it shows in task 9.1.
+- [Debounced reconnect on every filter change replays up to 10,000 events] → The backlog is sent as one message already. With the row limit (requirement "Row limit") at its maximum of 5000, the manual check with the 10,000-event fixture (`--demo-flows bulk`) loaded fast and stayed responsive; the debounce can grow if needed.
+- [Details panel reads row attributes: a large `data-flow` per row bloats the DOM] → About 600 bytes per row. The table keeps at most the chosen row limit (default 500, at most 5000): the backlog sends only the newest rows, and the page drops the oldest after each live swap. The viewer mirrors the trim (it knows the row ids the page has), so the close of a dropped open flow becomes a new row instead of a swap into a missing target.
 - [Container queries need a recent browser] → Same support level as the rest of the Tailwind v4 output the project already ships.
-- [Pause relies on htmx closing the SSE connection] → Task 4.3 verifies it in a test against the rendered markup and in the browser check; fallback is the extension's close attribute.
+- [Pause relies on aborting the extension's connection object] → The markup test pins the abort call. The manual browser check (task 9.7) confirmed in the developer tools that the request ends; no automated test covers it (TD-56).
 - [The graph dims by "latest event per edge"] → An edge that was denied once and allowed later turns grey; that is what "current state" means and is simpler than keeping two edges.
 - [Design and `iter2-egress-approvals` diverge] → The action slot and the menu are reserved here; the proposal recommends updating that change to the design's dialog and toast.
 
