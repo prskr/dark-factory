@@ -12,9 +12,9 @@ pub enum Nav {
     Projects,
     Personas,
     Credentials,
-    /// Egress allowlist (desktop only).
+    /// Egress rules (desktop only).
     Allowlist,
-    /// Live egress log (desktop only).
+    /// Network traffic (desktop only).
     EgressLog,
     /// Pages outside the navigation (login errors, 403).
     None,
@@ -136,6 +136,20 @@ mod tests {
         ] {
             assert!(desktop.contains(shown), "{shown} missing on desktop");
         }
+    }
+
+    #[test]
+    fn egress_entries_are_named_after_what_they_show() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        let desktop = nav_html(&page, "desktop-menu");
+        for (href, label) in [
+            ("/egress/allowlist", "Egress rules"),
+            ("/egress/log", "Network traffic"),
+        ] {
+            let link = format!("<a href=\"{href}\" aria-label=\"{label}\" title=\"{label}\"");
+            assert!(desktop.contains(&link), "{link} in {desktop}");
+        }
+        assert!(!desktop.contains("Egress allowlist") && !desktop.contains("Egress log"));
     }
 
     #[test]

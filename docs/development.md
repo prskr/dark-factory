@@ -124,7 +124,7 @@ cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 
 1. starts the compose services (`just db`) and builds the plugin components (`just plugins`),
 2. writes the password files, the OIDC client secret and a self-signed agent certificate to `target/local-dev/`,
-3. runs `migrate` and `serve --no-cluster` with [`dev/config.yaml`](../dev/config.yaml).
+3. runs `migrate` and `serve --no-cluster --demo-flows` with [`dev/config.yaml`](../dev/config.yaml), built with the Cargo feature `dev-tools`.
 
 Open <http://127.0.0.1:8080> and log in at Dex:
 
@@ -133,11 +133,11 @@ Open <http://127.0.0.1:8080> and log in at Dex:
 | `admin@example.com` | `password` | Member of the group `board-member`: full UI |
 | `viewer@example.com` | `password` | No role: `403` page |
 
-Limits of `serve --no-cluster` (local development only):
+The flags `--no-cluster` and `--demo-flows` exist only in a build with the Cargo feature `dev-tools` (`cargo run -p dark-factory --features dev-tools -- serve --no-cluster`). A default or release build and the Bazel images have neither; `cargo clippy --all-targets --all-features` keeps the gated code linted. Limits of `serve --no-cluster` (local development only):
 
 - Every sandbox operation fails, so starting a run fails. Tasks, projects, personas, credentials and `host` allowlist entries can be created and edited.
 - Egress allowlist: adding a `cluster-service` entry fails ("Services cannot be checked"), because there is no Kubernetes API to look the Service up.
-- Egress log (`/egress/log`) answers `503 Egress log unavailable`: without `gateway.headlessService` and gateway pods there is nothing to stream.
+- Network traffic (`/egress/log`) answers `503 Network traffic unavailable` without `--demo-flows`: without `gateway.headlessService` and gateway pods there is nothing to stream. `--demo-flows` replays scripted events (`--demo-flows=script`, the default: allowed, blocked and open connections, a gap, three runs, one new event every 3 s) or `--demo-flows=bulk` (10,000 events, to see how the page copes with a full buffer). It needs `--no-cluster`.
 - The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
 
 Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is refused on any other host; with an `https://` URL the cookie always carries `Secure`.

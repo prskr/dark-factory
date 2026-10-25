@@ -1,11 +1,10 @@
 //! `/egress/allowlist`: instance and project entries of kind `http-host` and `cluster-service`.
 
-use std::net::IpAddr;
-
 use axum::Extension;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
+use df_core::host::{is_ip_literal, normalize_host};
 use df_db::catalog::Actor;
 use df_db::{DbError, EntryKind, EntryRecord};
 use maud::{Markup, html};
@@ -15,11 +14,12 @@ use uuid::Uuid;
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::{
-    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, Tone, data_table, empty_panel, form_error, icon,
-    select_field, td, text_field, th, tone_badge, tr,
+    ButtonKind, Cell, FormErrors, HostIconSize, ICON_BUTTON_CLASS, Icon, Tone, action_class,
+    data_table, empty_panel, form_error, host_icon, icon, link_button, select_field, td,
+    text_field, th, tone_badge,
 };
 use crate::config_pages::{
-    create_button, form_footer, form_grid, full_row, list_header, list_page, modal, saved,
+    create_button, form_footer, form_grid, full_row, list_page, modal, open_modal, saved,
 };
 use crate::layout::Nav;
 use crate::responses::{internal_error, invalid, not_found};
@@ -61,11 +61,11 @@ fn is_dns_label(label: &str) -> bool {
 /// A hostname or `*.suffix` as stored: lower case, no trailing dot. IP literals, a bare `*` and
 /// wildcards anywhere but at the start are rejected.
 fn validate_host(raw: &str) -> Result<String, &'static str> {
-    let host = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    let host = normalize_host(raw.trim());
     if host.is_empty() {
         return Err("Host is required.");
     }
-    if host.parse::<IpAddr>().is_ok() || host.trim_matches(['[', ']']).parse::<IpAddr>().is_ok() {
+    if is_ip_literal(&host) {
         return Err("IP addresses are not allowed. Use a hostname.");
     }
     let name = host.strip_prefix("*.").unwrap_or(&host);
@@ -121,73 +121,133 @@ fn scope_label(record: &EntryRecord) -> String {
         .unwrap_or_else(|| "Instance".to_string())
 }
 
+/// The ports of a cluster service entry: the list, or "all ports".
+fn service_ports(ports: &[u16]) -> String {
+    if ports.is_empty() {
+        "all ports".to_string()
+    } else {
+        ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// `host:port` of an `http-host` entry, `namespace/service` of a cluster service: the target as
+/// named in accessible labels and matched by `?highlight=`.
 fn target(record: &EntryRecord) -> String {
     match &record.kind {
         EntryKind::HttpHost { host, port } => format!("{host}:{port}"),
         EntryKind::ClusterService {
-            namespace,
-            service,
-            ports,
-            allow_dns,
+            namespace, service, ..
+        } => format!("{namespace}/{service}"),
+    }
+}
+
+fn target_cell(record: &EntryRecord) -> Markup {
+    match &record.kind {
+        EntryKind::HttpHost { host, .. } => html! {
+            span class="flex items-center gap-3" {
+                (host_icon(host, HostIconSize::Table))
+                span class="font-mono text-[13px]" { (host) }
+            }
+        },
+        EntryKind::ClusterService {
+            namespace, service, ..
+        } => html! {
+            span class="flex items-center gap-3" {
+                span aria-hidden="true" class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-sunk text-muted [&>svg]:size-4" { (icon(Icon::Server)) }
+                span class="font-mono text-[13px]" { (namespace) "/" (service) }
+                (tone_badge(Tone::Waiting, "cluster service"))
+            }
+        },
+    }
+}
+
+fn ports_cell(record: &EntryRecord) -> String {
+    match &record.kind {
+        EntryKind::HttpHost { port, .. } => port.to_string(),
+        EntryKind::ClusterService {
+            ports, allow_dns, ..
         } => {
-            let ports = if ports.is_empty() {
-                "all ports".to_string()
-            } else {
-                ports
-                    .iter()
-                    .map(u16::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
             let dns = if *allow_dns { ", DNS allowed" } else { "" };
-            format!("{namespace}/{service}: {ports}{dns}")
+            format!("{}{dns}", service_ports(ports))
         }
     }
 }
 
-fn kind_badge(kind: &EntryKind) -> Markup {
-    match kind {
-        EntryKind::HttpHost { .. } => tone_badge(Tone::Running, "http-host"),
-        EntryKind::ClusterService { .. } => tone_badge(Tone::Waiting, "cluster-service"),
+fn header(count: usize) -> Markup {
+    html! {
+        header class="mb-5 flex flex-wrap items-start justify-between gap-4" {
+            div {
+                h1 class="text-2xl font-semibold" {
+                    "Egress rules " span class="font-normal text-faint" { (count) }
+                }
+                p class="mt-1 text-sm text-muted" {
+                    "External hosts and cluster services that sandboxes may reach."
+                }
+            }
+            div class="flex flex-wrap items-center gap-2" {
+                (link_button(ButtonKind::Secondary, "/egress/log", "Live traffic"))
+                (open_modal(
+                    "/egress/allowlist/service/new",
+                    "",
+                    action_class(ButtonKind::Secondary),
+                    html! { "Add cluster service" },
+                ))
+                (create_button("/egress/allowlist/host/new", "New egress rule"))
+            }
+        }
     }
 }
 
-fn region(entries: &[EntryRecord]) -> Markup {
-    let create = html! {
-        div class="flex items-center gap-2" {
-            (create_button("/egress/allowlist/service/new", "Add cluster service"))
-            (create_button("/egress/allowlist/host/new", "Add host"))
-        }
-    };
+/// The page's live region. `highlight` (`host:port`) tints the rows of that target and scrolls
+/// to the first of them.
+fn region(entries: &[EntryRecord], highlight: Option<&str>) -> Markup {
+    let mut scrolled = false;
     html! {
         div id="config-list" {
-            (list_header("Egress allowlist", entries.len(), create, None))
+            (header(entries.len()))
             @if entries.is_empty() {
                 (empty_panel(
-                    "Nothing is allowed yet",
-                    "Sandboxes reach no external host until it is on the allowlist. Entries apply to running sandboxes within about a second.",
-                    create_button("/egress/allowlist/host/new", "Add host"),
+                    "No egress rules yet",
+                    "Sandboxes reach no external host until it is allowed. Blocked attempts appear in the live traffic view.",
+                    html! {
+                        div class="flex flex-wrap items-center justify-center gap-2" {
+                            (link_button(ButtonKind::Secondary, "/egress/log", "Open live traffic"))
+                            (create_button("/egress/allowlist/host/new", "New egress rule"))
+                        }
+                    },
                 ))
             } @else {
                 (data_table(
                     html! {
-                        (th(Cell::First, html! { "Scope" })) (th(Cell::Text, html! { "Kind" })) (th(Cell::Mono, html! { "Allows" }))
+                        (th(Cell::First, html! { "Target" })) (th(Cell::Mono, html! { "Port" }))
+                        (th(Cell::Text, html! { "Scope" }))
                         (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
                     },
                     html! {
                         @for entry in entries {
-                            (tr(html! {
-                                (td(Cell::First, html! { (scope_label(entry)) }))
-                                (td(Cell::Text, kind_badge(&entry.kind)))
-                                (td(Cell::Mono, html! { (target(entry)) }))
+                            @let target = target(entry);
+                            // Cluster services have no host:port to highlight.
+                            @let marked = matches!(entry.kind, EntryKind::HttpHost { .. }) && highlight == Some(target.as_str());
+                            @let scroll = marked && !std::mem::replace(&mut scrolled, true);
+                            tr class={"border-t border-line" @if marked { " bg-accent-soft" }}
+                                aria-current=[marked.then_some("true")]
+                                x-data=[scroll.then_some("")]
+                                x-init=[scroll.then_some("$el.scrollIntoView({ block: 'center' })")] {
+                                (td(Cell::First, target_cell(entry)))
+                                (td(Cell::Mono, html! { (ports_cell(entry)) }))
+                                (td(Cell::Text, html! { (scope_label(entry)) }))
                                 (td(Cell::Actions, html! {
                                     button type="button" hx-delete={"/egress/allowlist/" (entry.id)}
                                         hx-target="#config-list" hx-swap="outerHTML"
-                                        aria-label={"Remove " (target(entry))} title="Remove" class=(ICON_BUTTON_CLASS) {
-                                        (icon(Icon::Close))
+                                        aria-label={"Delete egress rule " (target)} title="Delete" class=(ICON_BUTTON_CLASS) {
+                                        (icon(Icon::Trash))
                                     }
                                 }))
-                            }))
+                            }
                         }
                     },
                 ))
@@ -200,7 +260,7 @@ async fn region_markup(state: &WebState) -> Result<Markup, Box<Response>> {
     let entries = df_db::list_entries(&state.pool)
         .await
         .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(region(&entries))
+    Ok(region(&entries, None))
 }
 
 /// `(key, "Name (KEY)")` of every project, for the scope select.
@@ -267,11 +327,21 @@ fn service_form(options: &[(String, String)], values: &ServiceForm, errors: &For
 // Handlers
 // ---------------------------------------------------------------------------------------------
 
-pub async fn list(State(state): State<WebState>) -> Response {
-    match region_markup(&state).await {
-        Ok(region) => list_page("Egress allowlist", Nav::Allowlist, region),
-        Err(response) => *response,
-    }
+/// Query of the rules page.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ListQuery {
+    /// `host:port`: the rows of that target are highlighted.
+    highlight: String,
+}
+
+pub async fn list(State(state): State<WebState>, Query(query): Query<ListQuery>) -> Response {
+    let entries = match df_db::list_entries(&state.pool).await {
+        Ok(entries) => entries,
+        Err(e) => return internal_error(&e),
+    };
+    let highlight = Some(query.highlight.as_str()).filter(|h| !h.is_empty());
+    list_page("Egress rules", Nav::Allowlist, region(&entries, highlight))
 }
 
 pub async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Response {
@@ -470,6 +540,9 @@ mod tests {
             "exa_mple.com",
             "a.com/x",
             "*.*.com",
+            "[[::1]]",
+            "[::1",
+            "::1]",
         ] {
             assert!(validate_host(bad).is_err(), "{bad:?}");
         }

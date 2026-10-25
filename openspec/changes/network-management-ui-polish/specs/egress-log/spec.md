@@ -34,7 +34,7 @@ The page header SHALL show the title "Network traffic", a badge with the stream 
 - **THEN** events that occurred during the pause appear and the badge reads *Live*
 
 ### Requirement: Traffic filters
-The page SHALL offer a domain or IP search (substring of the host), a verdict control *All / Blocked / Allowed* showing the number of matching events per segment, and *Advanced* filters for persona, sandbox (run), project and task, with a count badge of the advanced filters in use. *Clear filters* SHALL reset all filters. Filters SHALL be part of the page URL, and the existing `denied=1` parameter SHALL select *Blocked*.
+The page SHALL offer, right-aligned, a domain or IP search (substring of the host), a verdict control *All / Blocked / Allowed* with the number of matching events per segment, and *Advanced* with a count badge of the advanced filters in use: a persona chosen by name and a task key (any case). *Clear filters* SHALL show while a filter is set and reset all. Filters SHALL be part of the page URL; `denied=1` SHALL select *Blocked*.
 
 #### Scenario: Search narrows rows and graph
 - **WHEN** a board member types `github` into the search
@@ -54,7 +54,11 @@ The page SHALL offer a domain or IP search (substring of the host), a verdict co
 
 #### Scenario: Old link
 - **WHEN** a board member opens `/egress/log?denied=1&project=DF`
-- **THEN** *Blocked* is selected and project `DF` is applied
+- **THEN** *Blocked* is selected and the dropped `project` parameter is ignored
+
+#### Scenario: Persona and task
+- **WHEN** a board member opens *Advanced*, picks persona "Linus" and types `df-7` as task
+- **THEN** the table lists only events of task `DF-7` run by Linus, and the badge reads 2
 
 ### Requirement: Split view with draggable divider
 The graph and the events table SHALL sit side by side, separated by a divider that resizes them by pointer drag, by arrow keys (Home/End for the limits) and resets on double-click. The graph SHALL never be narrower than the width that shows its nodes untruncated, and the table SHALL keep at least 520 px. The width SHALL be remembered per browser.
@@ -94,8 +98,19 @@ The graph SHALL draw sandboxes (one per run, or per source IP for unknown source
 - **WHEN** the verdict control selects *Blocked*
 - **THEN** destinations and edges of allowed events are dimmed
 
+#### Scenario: Resized graph
+- **WHEN** a board member drags the divider to widen or narrow the graph
+- **THEN** every edge still ends with its arrowhead at the left edge of its destination node
+
+### Requirement: Graph node cards
+Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the short run id and the task key, a destination node its host icon, host and port. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one.
+
+#### Scenario: Node content
+- **WHEN** the graph shows sandbox `a4c2…` of task `DF-7` and destination `github.com:443`
+- **THEN** the sandbox node is a card with an icon tile, `a4c2…` and `DF-7`, and the destination node shows the `GH` icon, `github.com` and `443`
+
 ### Requirement: Events table
-The events table SHALL be headed "Events · newest first" with "N of M" (rows shown of events seen) and list per event: time (UTC), sandbox (short run id and task key), destination (host icon, `host:port`), a verdict pill (*Allowed*, *Blocked*, *Open*) and actions. Bytes and duration SHALL be shown in the request details, not in the table.
+The events table SHALL be headed "Events · newest first" with "N of M" (events matching the filters of events seen) and list per event: time (UTC), sandbox (short run id and task key), destination (host icon, `host:port`), a verdict pill (*Allowed*, *Blocked*, *Open*) and actions. Bytes and duration SHALL be shown in the request details, not in the table.
 
 #### Scenario: Row content
 - **WHEN** task `DF-7` is denied `203.0.113.42:22`
@@ -108,6 +123,25 @@ The events table SHALL be headed "Events · newest first" with "N of M" (rows sh
 #### Scenario: Row actions
 - **WHEN** an allowed event has a matched rule
 - **THEN** its row offers *Request details* and a link to the rule; blocked rows offer *Request details* only
+
+### Requirement: Row limit
+The events table SHALL keep at most a chosen number of rows, the newest: 100, 250, 500 (default), 1000, 2500 or 5000, chosen in a *Rows* select of the filter bar and kept in the page URL. Older rows SHALL be dropped as new ones arrive. The counts and the graph SHALL still cover every event, and *Clear filters* SHALL keep the choice.
+
+#### Scenario: Full buffer
+- **WHEN** the page opens while a gateway pod holds 10,000 events
+- **THEN** the table shows the newest 500 rows and "N of M" still counts all 10,000 events
+
+#### Scenario: Live rows past the limit
+- **WHEN** the table shows 500 rows and a new event arrives
+- **THEN** the new row is on top and the oldest row is dropped
+
+#### Scenario: Closing a dropped row
+- **WHEN** the closing event of a tunnel arrives whose open row was already dropped
+- **THEN** it is shown as a new row on top
+
+#### Scenario: Other choice
+- **WHEN** a board member chooses 1000 under *Rows*
+- **THEN** the URL carries `rows=1000` and the table keeps up to 1000 rows
 
 ### Requirement: Narrow events table
 When the events panel is narrower than 680 px, the verdict column SHALL be replaced by a coloured row edge (solid green for allowed and open, dashed red with a tinted row for blocked; the verdict stays available to assistive technology) and the actions SHALL collapse into a menu button per row.

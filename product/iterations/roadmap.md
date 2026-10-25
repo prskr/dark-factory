@@ -37,6 +37,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 
 - **Git smart-HTTP proxy in the gateway (F1, [`design/agent-run.md`](../../design/agent-run.md) §11):** credential injection (removes the credential helper and the forge egress rule from sandboxes), ref enforcement (task branch and `factory/wip/<key>` only), secret scanning of every pushed pack, built-in push checks (commit identity, protected paths incl. `.dark-factory/**`, size/file-type limits, linear history), push audit log, cached bare mirror per repository.
 - **Questions and approval requests (ADR-0038):** `ask_question` and `request_approval` factory tools, `AwaitingInput`, pending-requests inbox (phone and desktop), audit entries. Initial approval types: `push-check-exception` and `network-access`.
+- **Egress rule editing (`egress-rule-editing`):** edit an existing rule (host, port, scope) from the egress rules page instead of delete and add; update route, validation, audit action and policy announcement.
 - **Egress from approvals ([`design/egress.md`](../../design/egress.md) §8):** task-scoped allowlist entries; allow a denied host from the live log; denied hosts raise a `network-access` request automatically.
 - **Cancel button** for tasks and runs.
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).

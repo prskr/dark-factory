@@ -14,7 +14,7 @@
 
 ## 3. UI
 
-- [ ] 3.1 Add task entries to the allowlist page and the "allow" actions to the egress log and denied-hosts summary (design D5). Verify "task entries listed", "allow for the project", "summary row across projects", "summary row of one project" and "wildcard not offered" with handler tests; update the operator docs for the allowlist
+- [ ] 3.1 Add task entries to the allowlist page and the "allow" actions to the events table rows and blocked graph nodes of the network traffic page (design D5). Verify "task entries listed", "allow for the project", "action on the table row", "graph node of one task", "graph node across tasks of one project", "graph node across projects" and "wildcard not offered" with handler tests; update the operator docs for the allowlist
 
 ## 4. Integration
 

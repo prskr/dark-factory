@@ -3,6 +3,7 @@
 pub mod config;
 pub mod domain;
 pub mod forge;
+pub mod host;
 pub mod ids;
 pub mod keys;
 pub mod seams;

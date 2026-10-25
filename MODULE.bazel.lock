@@ -580,7 +580,7 @@
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "FILE:@@//Cargo.lock 171517a88c9f6266a013f1e8852104613d673de5bf57239168540087261527d9",
           "FILE:@@//Cargo.toml df530e856c1636c737f08b357d45ff55fcc7c50a87ca33e8a7466b0af11efde0",
-          "FILE:@@//crates/dark-factory/Cargo.toml 0f35a8f762aa0902b95ce4d3f4e19aa65d1c5345d551234a1541fafb4d98e731",
+          "FILE:@@//crates/dark-factory/Cargo.toml 2c34519558b76d9ca64027d7f2ec6945e42c1ed425538fc822c7b1e966bbe03f",
           "FILE:@@//crates/df-core/Cargo.toml 430d20a981d6c277f45ec0cd5edfad76087971f75b1c45616bd52dad174ebe60",
           "FILE:@@//crates/df-db/Cargo.toml 00bb14aac61b9ae22335750663a264ab1d4109bb51a2d675faf64bbe9d96e8d3",
           "FILE:@@//crates/df-k8s/Cargo.toml 4aa38a02da680aad5bb6f89d664236d7804ec121ac43e07ad592f67c79a1c4cc",

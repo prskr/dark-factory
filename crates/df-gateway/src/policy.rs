@@ -123,7 +123,7 @@ fn sandbox_from_entry(entry: SandboxEntry) -> Option<(IpAddr, Sandbox)> {
         .into_iter()
         .filter_map(|rule| {
             Some(HostRule {
-                pattern: normalize_host(&rule.pattern),
+                pattern: df_core::host::normalize_host(&rule.pattern),
                 port: u16::try_from(rule.port).ok().filter(|port| *port != 0)?,
                 scope: rule.scope,
                 entry_id: rule.entry_id,
@@ -142,11 +142,6 @@ fn sandbox_from_entry(entry: SandboxEntry) -> Option<(IpAddr, Sandbox)> {
     ))
 }
 
-/// Lower case without a trailing dot, the form hosts are compared in.
-pub fn normalize_host(host: &str) -> String {
-    host.trim_end_matches('.').to_ascii_lowercase()
-}
-
 /// The outcome of [`decide`]: the identified sandbox (if any) and the verdict.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Decision<'a> {
@@ -155,7 +150,7 @@ pub struct Decision<'a> {
 }
 
 /// Whether the sandbox at `source` may make `request`. `host` of `request` must be normalized
-/// ([`normalize_host`]).
+/// ([`df_core::host::normalize_host`]).
 pub fn decide<'a>(
     policy: Option<&'a Policy>,
     source: IpAddr,
