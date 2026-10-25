@@ -11,7 +11,7 @@ use maud::{Markup, html};
 use super::filter::Filter;
 use super::graph::{self, Edges};
 use super::rows::{row, row_id};
-use crate::components::{ButtonKind, action_class};
+use crate::components::{ButtonKind, ProjectHosts, action_class};
 
 /// Flows a viewer keeps track of (open ones and their edges). A gateway pod keeps 10,000
 /// events, so more are rare; past the cap the set is cleared and the closes of those flows are
@@ -78,6 +78,7 @@ pub(in crate::egress) struct Viewer {
     /// The rows the page has, newest first, by row id (`None` for a gap row). The page drops
     /// rows past the row limit from the bottom, and so does this list.
     table: VecDeque<Option<String>>,
+    projects: ProjectHosts,
     edges: Edges,
     counts: Counts,
     sent_graph: Option<String>,
@@ -85,9 +86,10 @@ pub(in crate::egress) struct Viewer {
 }
 
 impl Viewer {
-    pub(in crate::egress) fn new(filter: Filter) -> Self {
+    pub(in crate::egress) fn new(filter: Filter, projects: ProjectHosts) -> Self {
         Self {
             filter,
+            projects,
             open: HashMap::new(),
             table: VecDeque::new(),
             edges: Edges::default(),
@@ -160,7 +162,8 @@ impl Viewer {
                         }
                     }
                     None => batch.replacements.push_str(
-                        &partial(&format!("#{id}"), "outerMorph", &row(event)).into_string(),
+                        &partial(&format!("#{id}"), "outerMorph", &row(event, &self.projects))
+                            .into_string(),
                     ),
                 },
                 (_, id) => {
@@ -187,7 +190,7 @@ impl Viewer {
         for event in dropped {
             self.forget_row(row_key(event));
         }
-        let rows = html! { @for event in kept { (row(event)) } };
+        let rows = html! { @for event in kept { (row(event, &self.projects)) } };
         let mut body = partial("#flows tbody", "innerHTML", &rows).into_string();
         self.sent_graph = None;
         self.sent_counts = None;
@@ -211,7 +214,7 @@ impl Viewer {
                 let trimmed = self.table.pop_back().flatten();
                 self.forget_row(trimmed);
             }
-            let rows = html! { @for event in rows.iter().rev() { (row(event)) } };
+            let rows = html! { @for event in rows.iter().rev() { (row(event, &self.projects)) } };
             body.push_str(&partial("#flows tbody", "afterbegin", &rows).into_string());
         }
         body.push_str(&replacements);
@@ -229,7 +232,8 @@ impl Viewer {
     /// The graph and the counts, each only if it differs from what the page has.
     fn state_partials(&mut self) -> String {
         let mut body = String::new();
-        let graph = graph::render(&graph::model(&self.edges, &self.filter)).into_string();
+        let graph =
+            graph::render(&graph::model(&self.edges, &self.filter), &self.projects).into_string();
         if self.sent_graph.as_ref() != Some(&graph) {
             body.push_str(&partial_str("#graph", "innerHTML", &graph));
             self.sent_graph = Some(graph);

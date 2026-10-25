@@ -9,7 +9,7 @@ use maud::{Markup, html};
 
 use super::filter::{Filter, is_blocked};
 use super::rows::{sandbox_key, sandbox_label, task_label};
-use crate::components::{HostIconSize, Icon, host_icon, icon};
+use crate::components::{HostIconSize, Icon, ProjectHosts, host_icon, icon};
 
 /// Sandboxes drawn at most, the most recently seen.
 pub(super) const MAX_SANDBOXES: usize = 12;
@@ -328,7 +328,7 @@ fn dim(dimmed: bool) -> &'static str {
 
 /// The contents of `#graph`. Positions are inline styles, so the region is replaced
 /// (`innerHTML`), not morphed. Nodes are text; the drawing is decoration (`aria-hidden`).
-pub(super) fn render(model: &Model) -> Markup {
+pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
     let layout = layout(model, DEFAULT_WIDTH);
     let gutter_left = SANDBOX_X + SANDBOX_W;
     let right = RIGHT_PAD + layout.destination_width;
@@ -381,7 +381,7 @@ pub(super) fn render(model: &Model) -> Markup {
                     svg data-arrow class="absolute -left-[8px] top-1/2 -translate-y-1/2" aria-hidden="true" width="7" height="10" viewBox="0 0 7 10" {
                         path d="M0 0 7 5 0 10z" class=(if node.blocked { "fill-danger" } else { "fill-faint" }) {}
                     }
-                    (host_icon(&node.host, HostIconSize::Graph))
+                    (host_icon(&node.host, HostIconSize::Graph, projects))
                     span class="min-w-0 flex-1 truncate font-mono text-[13px]" title=(node.host) { (node.host) }
                     span class="shrink-0 rounded-md bg-sunk px-1.5 py-0.5 font-mono text-xs text-muted" { (node.port) }
                 }
@@ -412,6 +412,11 @@ mod tests {
     use super::super::filter::VerdictFilter;
     use super::*;
     use df_proto::gateway::v1::{Phase, Verdict};
+
+    /// The graph without project hosts.
+    fn render(model: &Model) -> Markup {
+        super::render(model, &ProjectHosts::default())
+    }
 
     fn event(run: &str, host: &str, verdict: Verdict) -> FlowEvent {
         FlowEvent {

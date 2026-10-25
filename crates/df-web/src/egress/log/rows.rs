@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::details::reason_explanation;
 use super::filter::is_blocked;
-use crate::components::{HostIconSize, Icon, Tone, host_icon, icon, tone_badge};
+use crate::components::{HostIconSize, Icon, ProjectHosts, Tone, host_icon, icon, tone_badge};
 
 const CELL: &str = "px-3 py-3";
 
@@ -144,7 +144,7 @@ pub(super) fn rule_href(event: &FlowEvent) -> Option<String> {
 
 /// The event as the details panel shows it. Everything is text, formatted here; the two pieces of
 /// markup (`icon`, `pill`) are built from fixed tables, never from the event's strings.
-fn flow_json(event: &FlowEvent, target: &str) -> String {
+fn flow_json(event: &FlowEvent, target: &str, projects: &ProjectHosts) -> String {
     let outcome = Outcome::of(event);
     let status = if event.http_status != 0 {
         event.http_status.to_string()
@@ -154,7 +154,7 @@ fn flow_json(event: &FlowEvent, target: &str) -> String {
     let closed = event.phase() == Phase::Closed;
     json!({
         "destination": target,
-        "icon": host_icon(&event.host, HostIconSize::Panel).into_string(),
+        "icon": host_icon(&event.host, HostIconSize::Panel, projects).into_string(),
         "pill": outcome.pill().into_string(),
         "time": time_label(event),
         "sandbox": sandbox_label(event),
@@ -177,7 +177,7 @@ fn flow_json(event: &FlowEvent, target: &str) -> String {
 
 /// A row of the events table. In a narrow panel (container query, `@[680px]` is the wide
 /// variant) the verdict column is hidden and the verdict shows as the edge of the row.
-pub(super) fn row(event: &FlowEvent) -> Markup {
+pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
     if event.gap {
         return html! {
             tr class="border-t border-line" {
@@ -202,7 +202,7 @@ pub(super) fn row(event: &FlowEvent) -> Markup {
     };
     let rule = rule_href(event).filter(|_| outcome != Outcome::Blocked);
     html! {
-        tr id=[id.as_deref()] class={"border-t border-line" (tint)} data-flow=(flow_json(event, &target)) data-outcome=(outcome.label().to_ascii_lowercase()) {
+        tr id=[id.as_deref()] class={"border-t border-line" (tint)} data-flow=(flow_json(event, &target, projects)) data-outcome=(outcome.label().to_ascii_lowercase()) {
             td class={"font-mono text-[13px] text-muted " (CELL) " " (edge) " @[680px]:border-l-0"} { (time) }
             td class=(CELL) {
                 span class="font-mono text-[13px]" { (sandbox_label(event)) }
@@ -210,7 +210,7 @@ pub(super) fn row(event: &FlowEvent) -> Markup {
             }
             td class=(CELL) {
                 span class="flex items-center gap-2" {
-                    (host_icon(&event.host, HostIconSize::Table))
+                    (host_icon(&event.host, HostIconSize::Table, projects))
                     span class="min-w-0 truncate font-mono text-[13px]" { (target) }
                     span class="sr-only @[680px]:hidden" { (outcome.label()) }
                 }
@@ -257,6 +257,11 @@ mod tests {
     use super::*;
     use df_proto::gateway::v1::Verdict;
     use df_proto::pbjson_types::{Duration, Timestamp};
+
+    /// The row without project hosts.
+    fn row(event: &FlowEvent) -> Markup {
+        super::row(event, &ProjectHosts::default())
+    }
 
     fn event(verdict: Verdict, phase: Phase) -> FlowEvent {
         FlowEvent {
@@ -408,7 +413,8 @@ mod tests {
     fn a_denied_event_in_the_panel_data_has_a_reason_and_no_rule() {
         let mut denied = event(Verdict::Denied, Phase::Closed);
         denied.reason = "not-allowlisted".into();
-        let json: serde_json::Value = serde_json::from_str(&flow_json(&denied, "x:22")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&flow_json(&denied, "x:22", &ProjectHosts::default())).unwrap();
         assert_eq!(json["reason"], "not-allowlisted");
         assert!(
             json["explanation"]
@@ -421,7 +427,8 @@ mod tests {
         assert_eq!(json["status"], "Blocked");
         // An unknown code is shown as it is, without explanation.
         denied.reason = "from-the-future".into();
-        let json: serde_json::Value = serde_json::from_str(&flow_json(&denied, "x:22")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&flow_json(&denied, "x:22", &ProjectHosts::default())).unwrap();
         assert_eq!(json["explanation"], "");
     }
 
@@ -430,11 +437,13 @@ mod tests {
         let mut plain = event(Verdict::Allowed, Phase::Closed);
         plain.http_status = 200;
         plain.method = "GET".into();
-        let json: serde_json::Value = serde_json::from_str(&flow_json(&plain, "x:22")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&flow_json(&plain, "x:22", &ProjectHosts::default())).unwrap();
         assert_eq!(json["status"], "200");
         let mut open = event(Verdict::Allowed, Phase::Opened);
         open.bytes_out = 99;
-        let json: serde_json::Value = serde_json::from_str(&flow_json(&open, "x:22")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&flow_json(&open, "x:22", &ProjectHosts::default())).unwrap();
         assert_eq!(json["bytes_out"], "");
         assert_eq!(json["duration"], "");
         assert_eq!(json["status"], "Open");

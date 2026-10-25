@@ -1,10 +1,11 @@
-//! The icon of an external host: a brand monogram for well-known hosts, the globe otherwise.
-//! Only letters are drawn, no logos are embedded.
+//! The icon of an external host: the forge or issue-tracker icon of a project host, a brand
+//! monogram for well-known hosts, the globe otherwise. Brands draw only letters.
 
 use df_core::host::{is_ip_literal, normalize_host};
 use maud::{Markup, html};
 
 use super::icons::{Icon, icon};
+use super::project_host::{ProjectHosts, role_icon};
 
 /// Where the icon is used; sets its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,15 +63,21 @@ const BRANDS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// The icon of `host`, decorative: the host name is always written next to it.
-pub fn host_icon(host: &str, size: HostIconSize) -> Markup {
+/// The icon of `host`, decorative: the host name is always written next to it. Precedence: a
+/// project host, a provider monogram, an IP literal, the globe.
+pub fn host_icon(host: &str, size: HostIconSize, projects: &ProjectHosts) -> Markup {
     let (frame, text) = match size {
         HostIconSize::Table => ("size-6 rounded-md", "text-[10px]"),
         HostIconSize::Graph => ("size-7 rounded-md", "text-[11px]"),
         HostIconSize::Panel => ("size-9 rounded-lg", "text-sm"),
     };
     html! {
-        @if let Some((monogram, tone)) = brand(host) {
+        @if let Some(role) = projects.get(host) {
+            span aria-hidden="true" data-host-icon=(role.data())
+                class={"inline-flex shrink-0 items-center justify-center bg-sunk text-muted [&>svg]:size-4 " (frame)} {
+                (role_icon(role))
+            }
+        } @else if let Some((monogram, tone)) = brand(host) {
             span aria-hidden="true" data-host-icon=(monogram)
                 class={"inline-flex shrink-0 items-center justify-center font-semibold " (frame) " " (text) " " (tone)} {
                 (monogram)
@@ -102,10 +109,57 @@ fn brand(host: &str) -> Option<(&'static str, &'static str)> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::project_host::test_project as project;
     use super::*;
 
     fn rendered(host: &str) -> String {
-        host_icon(host, HostIconSize::Table).into_string()
+        host_icon(host, HostIconSize::Table, &ProjectHosts::default()).into_string()
+    }
+
+    fn with_projects(
+        forge: df_core::ForgeKind,
+        projects: &[df_db::catalog::ProjectRecord],
+        host: &str,
+    ) -> String {
+        let hosts = ProjectHosts::from_projects(Some(&forge), projects);
+        host_icon(host, HostIconSize::Table, &hosts).into_string()
+    }
+
+    #[test]
+    fn project_hosts_show_the_forge_icons_and_the_issue_icon() {
+        use df_core::ForgeKind;
+        let forgejo = [project(
+            "https://git.example.internal/o/r.git",
+            Some("https://jira.example.com/DF"),
+            true,
+        )];
+        assert!(
+            with_projects(ForgeKind::Forgejo, &forgejo, "git.example.internal")
+                .contains("data-host-icon=\"forge-forgejo\"")
+        );
+        assert!(
+            with_projects(ForgeKind::Forgejo, &forgejo, "jira.example.com")
+                .contains("data-host-icon=\"issue\"")
+        );
+        let github = [project("https://code.example.org/o/r.git", None, true)];
+        assert!(
+            with_projects(ForgeKind::GitHub, &github, "code.example.org")
+                .contains("data-host-icon=\"forge-github\"")
+        );
+        let plain = [project("https://code.example.org/o/r.git", None, false)];
+        assert!(
+            with_projects(ForgeKind::GitHub, &plain, "code.example.org")
+                .contains("data-host-icon=\"forge-git\"")
+        );
+    }
+
+    #[test]
+    fn a_project_host_beats_the_monogram_but_only_for_that_exact_host() {
+        let projects = [project("https://github.com/o/r.git", None, true)];
+        let github = with_projects(df_core::ForgeKind::GitHub, &projects, "github.com");
+        assert!(github.contains("data-host-icon=\"forge-github\"") && !github.contains(">GH<"));
+        let api = with_projects(df_core::ForgeKind::GitHub, &projects, "api.github.com");
+        assert!(api.contains("data-host-icon=\"GH\""));
     }
 
     #[test]
@@ -170,9 +224,12 @@ mod tests {
 
     #[test]
     fn sizes_differ() {
-        let table = host_icon("pypi.org", HostIconSize::Table).into_string();
-        let graph = host_icon("pypi.org", HostIconSize::Graph).into_string();
-        let panel = host_icon("pypi.org", HostIconSize::Panel).into_string();
+        let table =
+            host_icon("pypi.org", HostIconSize::Table, &ProjectHosts::default()).into_string();
+        let graph =
+            host_icon("pypi.org", HostIconSize::Graph, &ProjectHosts::default()).into_string();
+        let panel =
+            host_icon("pypi.org", HostIconSize::Panel, &ProjectHosts::default()).into_string();
         assert!(table.contains("size-6") && graph.contains("size-7") && panel.contains("size-9"));
     }
 }

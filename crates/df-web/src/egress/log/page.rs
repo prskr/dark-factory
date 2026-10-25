@@ -8,7 +8,7 @@ use super::filter::{ADVANCED_FIELDS, Filter, ROW_LIMITS, VerdictFilter};
 use super::graph::{self, DEFAULT_WIDTH as DEFAULT_GRAPH_WIDTH, MIN_WIDTH};
 use super::viewer::{Counts, empty_state, event_count};
 use crate::components::forms::INPUT_CLASS;
-use crate::components::{ButtonKind, Icon, action_class, icon, link_button};
+use crate::components::{ButtonKind, Icon, ProjectHosts, action_class, icon, link_button};
 
 /// The controls of the *Advanced* row: like a form input, but as wide as their content, so a
 /// label and its control stay on one line.
@@ -283,7 +283,7 @@ fn traffic(events_url: &str, filter: &Filter) -> Markup {
                 ":style"="{'--graph-w': w + 'px'}" "x-on:resize.window"="setW(want, false)" {
                 section aria-labelledby="connections-title" class="min-w-0 overflow-hidden rounded-xl border border-line bg-panel" {
                     h2 id="connections-title" class="border-b border-line px-5 py-3 text-xs font-medium uppercase tracking-wide text-faint" { "Connections" }
-                    div id="graph" { (graph::render(&graph::Model::default())) }
+                    div id="graph" { (graph::render(&graph::Model::default(), &ProjectHosts::default())) }
                 }
                 div role="separator" aria-orientation="vertical" aria-label="Resize connections and events"
                     aria-valuenow=(DEFAULT_GRAPH_WIDTH) aria-valuemin=(MIN_GRAPH_PANEL) aria-valuemax=(DEFAULT_GRAPH_WIDTH + 240)

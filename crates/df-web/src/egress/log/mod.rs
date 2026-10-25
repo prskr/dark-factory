@@ -66,6 +66,8 @@ pub async fn events(
     };
     // The subscription is not filtered: the graph and the counts need every event.
     let mut source = flows.subscribe();
+    // Built once per connection: a project created later shows after a reconnect.
+    let projects = super::project_hosts(&state).await;
     // The source sends the backlog, a `backlog_end` marker, then live events. The backlog is the
     // first message and replaces the table body: after a reconnect the page already shows rows.
     let stream = futures::stream::once(async move {
@@ -76,7 +78,7 @@ pub async fn events(
             }
             backlog.push(event);
         }
-        let mut viewer = Viewer::new(filter);
+        let mut viewer = Viewer::new(filter, projects);
         let first = viewer.backlog_message(&backlog);
         let live = source.ready_chunks(CHUNK).filter_map(move |batch| {
             let body = viewer.live_message(&batch);

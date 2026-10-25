@@ -486,7 +486,7 @@ async fn the_rule_link_of_an_event_highlights_its_rule_on_the_rules_page() {
     add_host(&app, &cookie, "", "*.crates.io", "443").await;
     let mut event = allowed("index.crates.io", "DF", 1);
     event.matched_rule = "*.crates.io".into();
-    let row = Viewer::new(Filter::default()).backlog_message(&[event]);
+    let row = new_viewer(Filter::default()).backlog_message(&[event]);
     let href = row
         .split("href=\"")
         .map(|p| &p[..p.find('"').unwrap_or(0)])
@@ -512,8 +512,13 @@ fn part<'a>(body: &'a str, target: &str) -> Option<&'a str> {
     Some(&content[..content.find("</hx-partial>")?])
 }
 
+/// A viewer without project hosts.
+fn new_viewer(filter: Filter) -> Viewer {
+    Viewer::new(filter, Default::default())
+}
+
 fn live(filter: Filter, batch: &[FlowEvent]) -> Option<String> {
-    Viewer::new(filter).live_message(batch)
+    new_viewer(filter).live_message(batch)
 }
 
 #[test]
@@ -543,7 +548,7 @@ fn a_repeatedly_denied_domain_is_a_blocked_destination_and_a_blocked_row() {
     let events: Vec<_> = (1..=3)
         .map(|i| denied("statsig.anthropic.com", "DF", i))
         .collect();
-    let mut viewer = Viewer::new(Filter {
+    let mut viewer = new_viewer(Filter {
         verdict: Some(VerdictFilter::Blocked),
         ..Default::default()
     });
@@ -580,12 +585,12 @@ fn segment_counts_ignore_the_verdict_filter() {
             verdict,
             ..Default::default()
         };
-        let body = Viewer::new(filter).backlog_message(&events);
+        let body = new_viewer(filter).backlog_message(&events);
         assert_eq!(part(&body, "#count-all"), Some("15"), "{verdict:?}");
         assert_eq!(part(&body, "#count-blocked"), Some("3"), "{verdict:?}");
         assert_eq!(part(&body, "#count-allowed"), Some("12"), "{verdict:?}");
     }
-    let body = Viewer::new(Filter {
+    let body = new_viewer(Filter {
         q: "pypi".into(),
         verdict: Some(VerdictFilter::Blocked),
         ..Default::default()
@@ -649,7 +654,7 @@ fn a_gap_is_a_row_that_changes_neither_graph_nor_counts() {
         gap: true,
         ..Default::default()
     };
-    let mut viewer = Viewer::new(Filter {
+    let mut viewer = new_viewer(Filter {
         q: "never".into(),
         ..Default::default()
     });
@@ -1012,14 +1017,14 @@ fn the_marker_is_never_a_row() {
         backlog_end: true,
         ..Default::default()
     };
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     viewer.backlog_message(&[]);
     assert!(viewer.live_message(&[marker]).is_none());
 }
 
 #[test]
 fn a_replacing_message_is_sent_even_without_events() {
-    let body = Viewer::new(Filter::default()).backlog_message(&[]);
+    let body = new_viewer(Filter::default()).backlog_message(&[]);
     assert!(
         body.contains("hx-target=\"#flows tbody\"") && body.contains("innerHTML"),
         "{body}"
@@ -1065,7 +1070,7 @@ fn row_id_of(pod: &str, id: u64) -> String {
 
 #[test]
 fn a_closing_event_replaces_the_open_row_of_its_flow() {
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     let mut opened = flow(opened("api.anthropic.com", "DF", 1), 5);
     // Whatever the opening event carries, an open row shows no duration.
     opened.duration = Some(df_proto::pbjson_types::Duration {
@@ -1116,7 +1121,7 @@ fn a_closing_event_replaces_the_open_row_of_its_flow() {
 
 #[test]
 fn a_closing_event_without_a_known_open_row_is_a_new_row() {
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     let message = viewer
         .live_message(&[closed_of("api.anthropic.com", 8, 3)])
         .unwrap();
@@ -1127,7 +1132,7 @@ fn a_closing_event_without_a_known_open_row_is_a_new_row() {
     assert!(message.contains(&format!("id=\"{}\"", row_id_of("gw-0", 8))));
 
     // Opened events filtered out of the view leave nothing to replace either.
-    let mut denied_only = Viewer::new(Filter {
+    let mut denied_only = new_viewer(Filter {
         denied: "1".into(),
         ..Default::default()
     });
@@ -1145,7 +1150,7 @@ fn a_closing_event_without_a_known_open_row_is_a_new_row() {
 
 #[test]
 fn the_backlog_has_one_row_per_flow_and_tracks_the_open_ones() {
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     let backlog = [
         flow(opened("done.example.com", "DF", 1), 1),
         flow(opened("still-open.example.com", "DF", 2), 2),
@@ -1186,7 +1191,7 @@ fn a_rollout_does_not_make_hosts_blocked() {
     let default = Filter::default();
     for body in [
         live(default.clone(), &batch).unwrap(),
-        Viewer::new(default).backlog_message(&batch),
+        new_viewer(default).backlog_message(&batch),
     ] {
         let graph = part(&body, "#graph").unwrap();
         assert_eq!(graph.matches("data-blocked=\"true\"").count(), 1, "{graph}");
@@ -1254,7 +1259,7 @@ fn durations_are_short_and_human() {
 
 #[test]
 fn opened_and_closed_in_one_batch_make_one_closed_row() {
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     let batch = [
         flow(opened("a.example.com", "DF", 1), 9),
         closed_of("a.example.com", 9, 2),
@@ -1275,7 +1280,7 @@ fn opened_and_closed_in_one_batch_make_one_closed_row() {
 
 #[test]
 fn a_viewer_stops_tracking_open_rows_past_the_cap() {
-    let mut viewer = Viewer::new(Filter::default());
+    let mut viewer = new_viewer(Filter::default());
     let cap = super::log::MAX_OPEN_ROWS as u64;
     let batch: Vec<_> = (1..=cap + 1)
         .map(|id| flow(opened("a.example.com", "DF", 1), id))
@@ -1307,7 +1312,7 @@ fn a_rollout_is_not_shown_by_the_blocked_filter() {
     };
     let message = live(blocked_only.clone(), std::slice::from_ref(&shutdown)).unwrap();
     assert!(part(&message, "#flows tbody").is_none(), "{message}");
-    let backlog = Viewer::new(blocked_only).backlog_message(&[shutdown]);
+    let backlog = new_viewer(blocked_only).backlog_message(&[shutdown]);
     assert!(
         !part(&backlog, "#flows tbody")
             .unwrap()
@@ -1349,7 +1354,7 @@ fn the_backlog_sends_only_the_newest_rows_up_to_the_limit() {
     let backlog: Vec<_> = (1..=150)
         .map(|i| flow(allowed(&format!("h{i}.com"), "DF", i), i as u64))
         .collect();
-    let body = Viewer::new(filter_from_query("rows=100")).backlog_message(&backlog);
+    let body = new_viewer(filter_from_query("rows=100")).backlog_message(&backlog);
     let rows = part(&body, "#flows tbody").unwrap();
     assert_eq!(rows.matches("data-outcome=").count(), 100, "{rows}");
     assert!(rows.contains("h150.com:443") && rows.contains("h51.com:443"));
@@ -1363,7 +1368,7 @@ fn a_flow_whose_row_was_trimmed_closes_as_a_new_row() {
     // Flow 1 is open and the oldest of 100 rows: the next new row pushes it out of the table.
     let mut backlog = vec![flow(opened("a.example.com", "DF", 1), 1)];
     backlog.extend((2..=100).map(|i| flow(allowed(&format!("h{i}.com"), "DF", i), i as u64)));
-    let mut viewer = Viewer::new(filter_from_query("rows=100"));
+    let mut viewer = new_viewer(filter_from_query("rows=100"));
     let body = viewer.backlog_message(&backlog);
     assert_eq!(
         part(&body, "#flows tbody")
@@ -1384,7 +1389,7 @@ fn a_flow_whose_row_was_trimmed_closes_as_a_new_row() {
         "{close}"
     );
     // A flow still in the table is replaced in place.
-    let mut viewer = Viewer::new(filter_from_query("rows=100"));
+    let mut viewer = new_viewer(filter_from_query("rows=100"));
     viewer.backlog_message(&backlog);
     let close = viewer
         .live_message(&[closed_of("a.example.com", 1, 201)])
@@ -1426,4 +1431,268 @@ async fn the_rows_choice_sits_in_the_filter_bar_and_the_page_trims_the_table() {
         default.contains("<option value=\"500\" selected>")
             && default.contains("data-limit=\"500\"")
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Project host icons
+// ---------------------------------------------------------------------------------------------
+
+async fn forgejo_app(events: Vec<FlowEvent>) -> TestApp {
+    TestApp::with_egress(
+        Some(df_core::ForgeKind::Forgejo),
+        Some(Arc::new(FakeFlows(events))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await
+}
+
+/// Creates a project through the form; `credential` is a forge credential reference.
+async fn add_project(
+    app: &TestApp,
+    cookie: &str,
+    key: &str,
+    repo: &str,
+    issue: &str,
+    credential: &str,
+) {
+    let body = form(&[
+        ("key", key),
+        ("name", key),
+        ("repo_url", repo),
+        ("issue_tracker_url", issue),
+        ("image", "ghcr.io/example/sandbox:1"),
+        ("base_branch", "main"),
+        ("forge_credential_id", credential),
+    ]);
+    let response = app.post("/projects", &body, cookie).await;
+    assert_eq!(response.status(), StatusCode::OK, "{key}");
+}
+
+/// Creates a forge credential reference and returns its id.
+async fn add_credential(app: &TestApp, cookie: &str) -> String {
+    let body = form(&[
+        ("name", "forge"),
+        ("secret_name", "forge"),
+        ("secret_key", "t"),
+    ]);
+    let response = app.post("/credentials", &body, cookie).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM credential_refs")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap()
+        .to_string()
+}
+
+const ICON_KEY: &str = "data-host-icon=\"";
+
+/// The attribute value that starts after the `data-host-icon="` found at `key_at` in `html`.
+fn icon_value(html: &str, key_at: usize) -> String {
+    let from = key_at + ICON_KEY.len();
+    let len = html[from..].find('"').expect("closing quote");
+    html[from..from + len].to_string()
+}
+
+/// The `data-host-icon` of the last element before `marker` in `html`.
+fn icon_before(html: &str, marker: &str) -> String {
+    let at = html.find(marker).expect("marker in html");
+    icon_value(
+        html,
+        html[..at].rfind(ICON_KEY).expect("icon before marker"),
+    )
+}
+
+/// The `data-host-icon` of the first element after `marker` in `html`.
+fn icon_after(html: &str, marker: &str) -> String {
+    let at = html.find(marker).expect("marker in html");
+    icon_value(
+        html,
+        at + html[at..].find(ICON_KEY).expect("icon after marker"),
+    )
+}
+
+/// The events table row of `host:443`.
+fn row_of<'a>(body: &'a str, host: &str) -> &'a str {
+    part(body, "#flows tbody")
+        .expect("rows")
+        .split("<tr ")
+        .find(|row| row.contains(&format!(">{host}:443<")))
+        .expect("row of host")
+}
+
+/// The icon of the events table row of `host:443`.
+fn row_icon(body: &str, host: &str) -> String {
+    icon_after(row_of(body, host), "<td")
+}
+
+/// The `data-flow` JSON of the row of `host:443`, as the details panel reads it.
+fn flow_of(body: &str, host: &str) -> serde_json::Value {
+    let row = row_of(body, host);
+    let start = row.find("data-flow=\"").expect("data-flow") + "data-flow=\"".len();
+    let json = row[start..start + row[start..].find('"').expect("end")]
+        .replace("&quot;", "\"")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&");
+    serde_json::from_str(&json).expect("flow json")
+}
+
+async fn events_frame(app: &TestApp, cookie: &str) -> String {
+    SseReader::new(app.get("/egress/log/events", cookie).await)
+        .next()
+        .await
+        .data
+}
+
+#[tokio::test]
+async fn project_hosts_show_their_icons_in_rows_graph_and_details() {
+    let hosts = [
+        "git.example.internal",
+        "code.example.org",
+        "jira.example.com",
+        "api.git.example.internal",
+        "ops.example.internal",
+    ];
+    let events = hosts
+        .iter()
+        .zip(1..)
+        .map(|(host, second)| allowed(host, "DF", second))
+        .collect();
+    let app = forgejo_app(events).await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://git.example.internal/org/df.git",
+        "https://jira.example.com/browse/DF",
+        &credential,
+    )
+    .await;
+    // No forge credential, tracker on the repository host.
+    add_project(
+        &app,
+        &cookie,
+        "WEB",
+        "https://code.example.org/web.git",
+        "https://code.example.org/web/issues",
+        "",
+    )
+    .await;
+    // Served project with the tracker on the repository host: the forge icon, not the issue icon.
+    add_project(
+        &app,
+        &cookie,
+        "OPS",
+        "https://ops.example.internal/org/ops.git",
+        "https://ops.example.internal/org/ops/issues",
+        &credential,
+    )
+    .await;
+
+    let body = events_frame(&app, &cookie).await;
+    for (host, icon) in [
+        ("git.example.internal", "forge-forgejo"),
+        ("code.example.org", "forge-git"),
+        ("jira.example.com", "issue"),
+        ("api.git.example.internal", "globe"),
+        ("ops.example.internal", "forge-forgejo"),
+    ] {
+        assert_eq!(row_icon(&body, host), icon, "row {host}");
+        let graph = part(&body, "#graph").expect("graph");
+        assert_eq!(
+            icon_before(graph, &format!("title=\"{host}\"")),
+            icon,
+            "graph {host}"
+        );
+    }
+    // The details panel reads its icon from the row's JSON.
+    let flow = flow_of(&body, "git.example.internal");
+    let panel = flow["icon"].as_str().expect("icon");
+    assert!(
+        panel.contains("data-host-icon=\"forge-forgejo\""),
+        "{panel}"
+    );
+}
+
+#[tokio::test]
+async fn a_project_host_beats_the_provider_monogram_on_a_github_instance() {
+    let events = vec![
+        allowed("github.com", "DF", 1),
+        allowed("api.github.com", "DF", 2),
+    ];
+    let app = TestApp::with_egress(
+        Some(df_core::ForgeKind::GitHub),
+        Some(Arc::new(FakeFlows(events))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://github.com/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    let body = events_frame(&app, &cookie).await;
+    assert_eq!(row_icon(&body, "github.com"), "forge-github");
+    assert_eq!(row_icon(&body, "api.github.com"), "GH");
+}
+
+#[tokio::test]
+async fn a_project_created_while_the_page_is_open_shows_after_a_reconnect() {
+    let app = forgejo_app(vec![allowed("git.example.internal", "DF", 1)]).await;
+    let cookie = app.login().await;
+    let first = SseReader::new(app.get("/egress/log/events", &cookie).await)
+        .next()
+        .await;
+    assert_eq!(row_icon(&first.data, "git.example.internal"), "globe");
+
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://git.example.internal/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    let second = SseReader::new(app.get("/egress/log/events", &cookie).await)
+        .next()
+        .await;
+    assert_eq!(
+        row_icon(&second.data, "git.example.internal"),
+        "forge-forgejo"
+    );
+}
+
+#[tokio::test]
+async fn the_rules_page_shows_project_hosts_before_wildcards_and_brands() {
+    let app = forgejo_app(vec![]).await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://git.example.internal/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    add_host(&app, &cookie, "", "git.example.internal", "443").await;
+    add_host(&app, &cookie, "", "*.git.example.internal", "443").await;
+    add_host(&app, &cookie, "", "pypi.org", "443").await;
+    let page = text(app.get("/egress/allowlist", &cookie).await).await;
+    let icon_of = |host: &str| icon_before(&page, &format!(">{host}<"));
+    assert_eq!(icon_of("git.example.internal"), "forge-forgejo");
+    assert_eq!(icon_of("*.git.example.internal"), "globe");
+    assert_eq!(icon_of("pypi.org"), "Py");
 }
