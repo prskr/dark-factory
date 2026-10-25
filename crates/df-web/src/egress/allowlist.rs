@@ -14,9 +14,9 @@ use uuid::Uuid;
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::{
-    ButtonKind, Cell, FormErrors, HostIconSize, ICON_BUTTON_CLASS, Icon, Tone, action_class,
-    data_table, empty_panel, form_error, host_icon, icon, link_button, select_field, td,
-    text_field, th, tone_badge,
+    ButtonKind, Cell, FormErrors, HostIconSize, ICON_BUTTON_CLASS, Icon, ProjectHosts, Tone,
+    action_class, data_table, empty_panel, form_error, host_icon, icon, link_button, select_field,
+    td, text_field, th, tone_badge,
 };
 use crate::config_pages::{
     create_button, form_footer, form_grid, full_row, list_page, modal, open_modal, saved,
@@ -145,11 +145,11 @@ fn target(record: &EntryRecord) -> String {
     }
 }
 
-fn target_cell(record: &EntryRecord) -> Markup {
+fn target_cell(record: &EntryRecord, projects: &ProjectHosts) -> Markup {
     match &record.kind {
         EntryKind::HttpHost { host, .. } => html! {
             span class="flex items-center gap-3" {
-                (host_icon(host, HostIconSize::Table))
+                (host_icon(host, HostIconSize::Table, projects))
                 span class="font-mono text-[13px]" { (host) }
             }
         },
@@ -204,7 +204,7 @@ fn header(count: usize) -> Markup {
 
 /// The page's live region. `highlight` (`host:port`) tints the rows of that target and scrolls
 /// to the first of them.
-fn region(entries: &[EntryRecord], highlight: Option<&str>) -> Markup {
+fn region(entries: &[EntryRecord], highlight: Option<&str>, projects: &ProjectHosts) -> Markup {
     let mut scrolled = false;
     html! {
         div id="config-list" {
@@ -237,7 +237,7 @@ fn region(entries: &[EntryRecord], highlight: Option<&str>) -> Markup {
                                 aria-current=[marked.then_some("true")]
                                 x-data=[scroll.then_some("")]
                                 x-init=[scroll.then_some("$el.scrollIntoView({ block: 'center' })")] {
-                                (td(Cell::First, target_cell(entry)))
+                                (td(Cell::First, target_cell(entry, projects)))
                                 (td(Cell::Mono, html! { (ports_cell(entry)) }))
                                 (td(Cell::Text, html! { (scope_label(entry)) }))
                                 (td(Cell::Actions, html! {
@@ -260,7 +260,7 @@ async fn region_markup(state: &WebState) -> Result<Markup, Box<Response>> {
     let entries = df_db::list_entries(&state.pool)
         .await
         .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(region(&entries, None))
+    Ok(region(&entries, None, &super::project_hosts(state).await))
 }
 
 /// `(key, "Name (KEY)")` of every project, for the scope select.
@@ -341,7 +341,12 @@ pub async fn list(State(state): State<WebState>, Query(query): Query<ListQuery>)
         Err(e) => return internal_error(&e),
     };
     let highlight = Some(query.highlight.as_str()).filter(|h| !h.is_empty());
-    list_page("Egress rules", Nav::Allowlist, region(&entries, highlight))
+    let projects = super::project_hosts(&state).await;
+    list_page(
+        "Egress rules",
+        Nav::Allowlist,
+        region(&entries, highlight, &projects),
+    )
 }
 
 pub async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Response {

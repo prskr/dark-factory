@@ -8,6 +8,7 @@ use df_proto::gateway::v1::FlowEvent;
 use futures::stream::BoxStream;
 
 use crate::WebState;
+use crate::components::ProjectHosts;
 
 mod allowlist;
 mod log;
@@ -38,6 +39,18 @@ pub enum LookupError {
     Timeout,
     #[error("Kubernetes API error: {0}")]
     Api(String),
+}
+
+/// The hosts of the projects, for the host icons. They only decorate, so a failed query is logged
+/// and the icons fall back to the generic ones.
+async fn project_hosts(state: &WebState) -> ProjectHosts {
+    match df_db::catalog::list_projects(&state.pool).await {
+        Ok(projects) => ProjectHosts::from_projects(state.forge.as_ref(), &projects),
+        Err(error) => {
+            tracing::warn!(%error, "listing projects for the host icons");
+            ProjectHosts::default()
+        }
+    }
 }
 
 pub fn routes() -> Router<WebState> {

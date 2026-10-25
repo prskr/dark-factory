@@ -21,10 +21,10 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::{INPUT_CLASS, field};
 use crate::components::{
-    ButtonKind, Cell, DialogStyle, FormErrors, ICON_BUTTON_CLASS, Icon, Tone, action_class, avatar,
-    data_table, dialog_with, empty_panel, forge_icon, form_error, harness_label, icon, initials,
-    page_header, profile_menu, readonly_field, select_field, submit_button, td, text_field,
-    textarea_field, th, tr,
+    ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
+    action_class, avatar, data_table, dialog_with, empty_panel, forge_icon, form_error,
+    harness_label, icon, initials, issue_role, page_header, profile_menu, project_forge_kind,
+    readonly_field, role_icon, select_field, submit_button, td, text_field, textarea_field, th, tr,
 };
 use crate::layout::{Nav, layout};
 use crate::responses::{internal_error, invalid, not_found};
@@ -525,7 +525,8 @@ fn credential_options(credentials: &[CredentialRef]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A valid HTTPS repository URL: scheme, host and at least an owner and a repository segment.
+/// A valid HTTPS repository URL (stricter than the lenient `url_host` of the host icons, which only
+/// needs the host): scheme, host and at least an owner and a repository segment.
 fn repository_host(url: &str) -> Option<String> {
     let url = Url::parse(url.trim()).ok()?;
     let segments = url.path_segments()?.filter(|s| !s.is_empty()).count();
@@ -546,17 +547,13 @@ struct ForgeFeedback {
 fn forge_feedback(forge: Option<&ForgeKind>, repo_url: &str, issue_url: &str) -> ForgeFeedback {
     let host = repository_host(repo_url);
     let served = forge.filter(|_| host.is_some());
+    // A typed but unparsable tracker URL still shows the issue icon.
     let issue_icon = if issue_url.trim().is_empty() {
         html! {}
-    } else if served.is_some()
-        && Url::parse(issue_url.trim())
-            .ok()
-            .and_then(|u| u.host_str().map(str::to_string))
-            == host
-    {
-        forge_icon(served)
     } else {
-        html! { span class="inline-flex shrink-0" role="img" aria-label="Issue tracker" title="Issue tracker" data-forge="issue" { (icon(Icon::Issue)) } }
+        let role =
+            issue_role(served, repo_url, issue_url).map_or(HostRole::IssueTracker, |(_, r)| r);
+        role_icon(&role)
     };
     let hint = match served {
         Some(kind) => format!(
@@ -754,15 +751,6 @@ fn count_link(project: &str, status: &str, label: &str, count: i64, dot: Option<
             } @else { (count) }
         }
     }
-}
-
-/// Icon and name of the forge that serves a project: the instance's integration when the project
-/// has a forge credential, generic Git otherwise.
-fn project_forge_kind<'a>(
-    forge: Option<&'a ForgeKind>,
-    p: &ProjectRecord,
-) -> Option<&'a ForgeKind> {
-    forge.filter(|_| p.forge_credential_id.is_some())
 }
 
 fn projects_region(

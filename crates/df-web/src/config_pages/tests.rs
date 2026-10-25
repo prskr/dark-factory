@@ -1168,3 +1168,17 @@ async fn a_changed_key_and_another_error_are_both_shown_and_the_key_error_is_lin
     assert!(html.contains("id=\"key-error\""));
     assert_eq!(stored_key(&app).await, "DF");
 }
+
+#[tokio::test]
+async fn a_tracker_on_the_host_of_an_unserved_repository_shows_the_issue_icon() {
+    let app = TestApp::with_forge(None).await;
+    let cookie = app.login().await;
+    let html = forge_fragment(
+        &app,
+        &cookie,
+        "https://git.example.com/o/r.git",
+        "https://git.example.com/o/r/issues",
+    )
+    .await;
+    assert!(html[html.find("#issue-forge").unwrap()..].contains("data-forge=\"issue\""));
+}
