@@ -1,5 +1,11 @@
 # Dark Factory
 
+## Product Development Stage
+
+This is currently PRE MVP. There are no real users yet and no production installations.
+In consequence this is the time for breaking changes.
+If there are good reasons to break something now or to clean something up in a way that would be breaking, always suggest this in this stage, to get the best and cleanest possible MVP.
+
 ## First step in a sandbox: Rust toolchain
 
 Sandbox environments have no Rust toolchain pre-installed, but `rustup` is available. Before running anything else (`cargo`, `rustc`, `rust-analyzer`, Bazel targets that call `cargo`), install the toolchain pinned in `rust-toolchain.toml`:
@@ -41,6 +47,9 @@ Readability and maintainability have a higher priority than performance (in a se
 Even if an algorithm has a few more allocations but can be understood in seconds, it is generally to be preferred over a slightly more performant one, if that one increases the maintenance burden significantly.
 
 Follow the user's global rules as well: TDD (write the failing test first, then the minimum code to pass it), >70% coverage as a target, concise and fact-based documentation.
+
+When addressing review feedback after the WIP commits of a multi-step implementation iteration were already squashed prefer to 'absorb' changes into the squashed commits.
+This can be done either with `git absorb` if installed or otherwise with `git commit --fixup`.
 
 ## Project Overview
 
