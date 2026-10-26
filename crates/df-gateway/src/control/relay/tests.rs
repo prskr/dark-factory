@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use df_proto::gateway::v1::Verdict;
@@ -142,8 +143,11 @@ impl GatewayDirectory for FakeDirectory {
     }
 }
 
+/// A relay that closes its streams as soon as the last viewer left.
 fn relay(directory: &Arc<FakeDirectory>) -> Relay {
-    Relay::new(directory.clone(), Duration::from_millis(20))
+    let mut relay = Relay::new(directory.clone(), Duration::from_millis(20));
+    relay.grace = Duration::ZERO;
+    relay
 }
 
 async fn next_event(viewer: &mut BoxStream<'static, FlowEvent>) -> FlowEvent {
@@ -393,5 +397,119 @@ async fn a_viewer_waits_for_the_buffered_events_of_pods_that_connect_late() {
         hosts,
         [("a-1", false), ("b-2", false), ("", true)],
         "the backlog comes first, in time order"
+    );
+}
+
+/// Counts the discovery rounds, i.e. the sessions (the interval is longer than any test).
+#[derive(Default)]
+struct CountingDirectory {
+    lookups: AtomicUsize,
+}
+
+impl CountingDirectory {
+    fn lookups(&self) -> usize {
+        self.lookups.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl GatewayDirectory for CountingDirectory {
+    async fn pods(&self) -> io::Result<Vec<String>> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        Ok(Vec::new())
+    }
+
+    async fn connect(&self, pod: &str) -> Result<Channel, LinkError> {
+        PlainConnector.connect(pod).await
+    }
+}
+
+/// Reads a viewer stream up to its `backlog_end` marker, then drops it.
+async fn read_backlog_and_leave(relay: &Relay) {
+    let mut viewer = relay.subscribe();
+    while !next_event(&mut viewer).await.backlog_end {}
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_viewer_that_comes_back_within_the_grace_period_reuses_the_session() {
+    let directory = Arc::new(CountingDirectory::default());
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+
+    read_backlog_and_leave(&relay).await;
+    tokio::time::sleep(SESSION_GRACE / 2).await;
+    read_backlog_and_leave(&relay).await;
+
+    assert_eq!(directory.lookups(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_viewer_that_comes_back_after_the_grace_period_starts_a_new_session() {
+    let directory = Arc::new(CountingDirectory::default());
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+
+    read_backlog_and_leave(&relay).await;
+    tokio::time::sleep(SESSION_GRACE + Duration::from_secs(1)).await;
+    read_backlog_and_leave(&relay).await;
+
+    assert_eq!(directory.lookups(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_next_viewer() {
+    let a = Pod::start().await;
+    a.record("old", 1);
+    let directory = Arc::new(FakeDirectory::default());
+    directory.set(&[&a]);
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+
+    let mut first = relay.subscribe();
+    assert_eq!(next_host(&mut first).await, "old");
+    drop(first);
+
+    tokio::time::sleep(SESSION_GRACE / 2).await;
+    assert_eq!(a.streams(), 1);
+    // The warm session answers at once: no wait for the pods' backlog.
+    let started = tokio::time::Instant::now();
+    let mut second = relay.subscribe();
+    assert_eq!(next_host(&mut second).await, "old");
+    assert!(next_event(&mut second).await.backlog_end);
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    drop(second);
+
+    // The grace period restarts with the last viewer.
+    tokio::time::sleep(SESSION_GRACE / 2 + Duration::from_secs(1)).await;
+    assert_eq!(a.streams(), 1);
+    tokio::time::sleep(SESSION_GRACE).await;
+    a.wait_for_streams(0).await;
+}
+
+/// A directory whose discovery never finishes, so the session's backlog stays pending.
+struct StuckDirectory;
+
+#[async_trait]
+impl GatewayDirectory for StuckDirectory {
+    async fn pods(&self) -> io::Result<Vec<String>> {
+        std::future::pending().await
+    }
+
+    async fn connect(&self, pod: &str) -> Result<Channel, LinkError> {
+        PlainConnector.connect(pod).await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_viewer_that_comes_back_does_not_wait_for_the_backlog_again() {
+    let relay = Relay::new(Arc::new(StuckDirectory), Duration::from_secs(3600));
+
+    let started = tokio::time::Instant::now();
+    read_backlog_and_leave(&relay).await;
+    assert_eq!(started.elapsed(), BACKLOG_WAIT, "the first viewer waits");
+
+    let started = tokio::time::Instant::now();
+    read_backlog_and_leave(&relay).await;
+    assert_eq!(
+        started.elapsed(),
+        Duration::ZERO,
+        "the session already waited"
     );
 }

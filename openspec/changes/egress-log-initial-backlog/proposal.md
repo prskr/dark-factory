@@ -18,11 +18,12 @@ None.
 
 ### Modified Capabilities
 
-- `egress-log`: the "Live log page" requirement: the page as served already shows the buffered events.
+- `egress-log`: the "Live log page" requirement (the page as served already shows the buffered events) and "Relay across gateway pods" (streams stay open for a grace period after the last viewer).
 
 ## Impact
 
 - `crates/df-web/src/egress/log/mod.rs` (`page`), `page.rs` (`page_body`, `traffic`, `events_panel`), `viewer.rs` (backlog state usable outside an SSE message).
-- One extra `Tail` per gateway pod per page load, closed after `backlog_end`. The page response waits at most the relay's backlog wait (2 s, `crates/df-gateway/src/control/relay.rs`).
+- The relay keeps its session for 5 s after the last viewer (`SESSION_GRACE`), so the event stream that follows a page load reuses the page's `Tail` streams instead of opening new ones; the streams to the pods stay open up to 5 s longer. The page response waits at most the relay's backlog wait (2 s, `crates/df-gateway/src/control/relay.rs`).
+- `crates/df-gateway/src/control/relay.rs` (session grace period), `design/egress.md` (stream lifetime).
 - `docs/design-system.md`: the `/egress/log` paragraph.
 - Independent of `egress-log-run-number`; both modify different `egress-log` requirements.

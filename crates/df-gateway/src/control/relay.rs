@@ -31,8 +31,13 @@ pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(5);
 const BUFFER_EVENTS: usize = 10_000;
 /// Live events a slow viewer may fall behind.
 const LIVE_BACKLOG: usize = 1024;
-/// How long a new viewer waits for the buffered events of all pods before it starts anyway.
+/// How long, from the start of a session, its viewers wait for the buffered events of all pods
+/// before they start anyway.
 const BACKLOG_WAIT: Duration = Duration::from_secs(2);
+
+/// How long the streams to the pods stay open after the last viewer left, so that the event
+/// stream that follows a page load (which read the backlog and left) finds a warm session.
+const SESSION_GRACE: Duration = Duration::from_secs(5);
 
 /// Finds the gateway pods and opens channels to them.
 #[async_trait]
@@ -82,6 +87,9 @@ pub struct Relay {
     interval: Duration,
     /// The streams to the gateway pods while viewers exist.
     session: Mutex<Weak<Session>>,
+    /// Keeps the session alive for `SESSION_GRACE` after a viewer left; only the newest runs.
+    linger: Arc<Mutex<Option<JoinHandle<()>>>>,
+    grace: Duration,
 }
 
 impl Relay {
@@ -90,11 +98,14 @@ impl Relay {
             directory,
             interval,
             session: Mutex::default(),
+            linger: Arc::default(),
+            grace: SESSION_GRACE,
         }
     }
 
     /// A viewer's stream: the buffered events of all gateway pods in time order, an event with
-    /// `backlog_end` set, then live events. Dropping it ends the viewer; the last one closes the streams to the pods.
+    /// `backlog_end` set, then live events. Dropping it ends the viewer; the streams to the pods close
+    /// `SESSION_GRACE` after the last one left.
     pub fn subscribe(&self) -> BoxStream<'static, FlowEvent> {
         let session = {
             let mut current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
@@ -104,9 +115,15 @@ impl Relay {
                 session
             })
         };
+        // Owned by the stream, also while it still waits for the backlog.
+        let lease = Lease {
+            session,
+            linger: self.linger.clone(),
+            grace: self.grace,
+        };
         stream::once(async move {
-            session.wait_for_backlog().await;
-            let (backlog, live) = session.merged.subscribe();
+            lease.wait_for_backlog().await;
+            let (backlog, live) = lease.merged.subscribe();
             let live = BroadcastStream::new(live).map(|received| match received {
                 Ok(event) => event,
                 Err(BroadcastStreamRecvError::Lagged(_)) => FlowEvent {
@@ -123,7 +140,7 @@ impl Relay {
                 .chain(stream::once(std::future::ready(backlog_end)))
                 .chain(live)
                 .map(move |event| {
-                    let _keep_session_open = &session;
+                    let _keep_session_open = &lease;
                     event
                 })
         })
@@ -132,10 +149,60 @@ impl Relay {
     }
 }
 
+impl Drop for Relay {
+    fn drop(&mut self) {
+        if let Some(linger) = self
+            .linger
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            linger.abort();
+        }
+    }
+}
+
+/// A viewer's hold on the session. When the viewer leaves, a task keeps the session open for
+/// `SESSION_GRACE`; the relay owns that task and replaces it when the next viewer leaves.
+struct Lease {
+    session: Arc<Session>,
+    linger: Arc<Mutex<Option<JoinHandle<()>>>>,
+    grace: Duration,
+}
+
+impl std::ops::Deref for Lease {
+    type Target = Session;
+
+    fn deref(&self) -> &Session {
+        &self.session
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Outside a runtime (shutdown) the session closes at once, without the grace period.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let session = self.session.clone();
+        let grace = self.grace;
+        let task = runtime.spawn(async move {
+            tokio::time::sleep(grace).await;
+            drop(session);
+        });
+        let mut linger = self.linger.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(previous) = linger.replace(task) {
+            previous.abort();
+        }
+    }
+}
+
 /// The shared streams. Dropping it closes them.
 struct Session {
     merged: Arc<Merged>,
     task: JoinHandle<()>,
+    /// Viewers wait for the backlog until then; a viewer that joins later starts at once.
+    backlog_deadline: tokio::time::Instant,
 }
 
 impl Session {
@@ -144,13 +211,21 @@ impl Session {
         // The first discovery round counts as a pending backlog until it has started its pods.
         merged.pending.send_modify(|pending| *pending += 1);
         let task = tokio::spawn(follow_pods(directory, interval, merged.clone()));
-        Arc::new(Self { merged, task })
+        Arc::new(Self {
+            merged,
+            task,
+            backlog_deadline: tokio::time::Instant::now() + BACKLOG_WAIT,
+        })
     }
 
     async fn wait_for_backlog(&self) {
         let mut pending = self.merged.pending.subscribe();
         // A timeout is no failure: the viewer starts with what has arrived.
-        let _ = tokio::time::timeout(BACKLOG_WAIT, pending.wait_for(|pending| *pending == 0)).await;
+        let _ = tokio::time::timeout_at(
+            self.backlog_deadline,
+            pending.wait_for(|pending| *pending == 0),
+        )
+        .await;
     }
 }
 

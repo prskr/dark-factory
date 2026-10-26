@@ -70,6 +70,13 @@ pub(super) enum Emptiness {
     NoMatch,
 }
 
+/// What a backlog makes of the page: the table body, the graph and the counts.
+pub(in crate::egress) struct Backlog {
+    pub(super) rows: Markup,
+    pub(super) graph: String,
+    pub(super) counts: Counts,
+}
+
 pub(in crate::egress) struct Viewer {
     filter: Filter,
     /// Flows whose opening event was seen and whose closing event is not yet: whether the table
@@ -177,24 +184,35 @@ impl Viewer {
         batch
     }
 
-    /// The first message of a connection: the backlog (oldest first) replaces the table body, one
-    /// row per flow, and graph and counts are sent whatever the backlog holds, so that what an
-    /// earlier connection of the page showed is cleared.
-    pub(in crate::egress) fn backlog_message(&mut self, backlog: &[FlowEvent]) -> String {
+    /// Applies the backlog (oldest first): one row per flow, only the newest up to the row limit,
+    /// while graph and counts cover all of it. The first SSE message and the served page both
+    /// render this state.
+    pub(in crate::egress) fn apply_backlog(&mut self, backlog: &[FlowEvent]) -> Backlog {
         // The page has no rows of an earlier connection to replace: only `rows` is used.
         let batch = self.collect_rows(backlog);
-        // Only the newest rows up to the limit; the counts and the graph still cover all.
         let rows: Vec<&FlowEvent> = batch.rows.into_iter().rev().collect();
         let (kept, dropped) = rows.split_at(rows.len().min(self.filter.row_limit()));
         self.table = kept.iter().map(|event| row_key(event)).collect();
         for event in dropped {
             self.forget_row(row_key(event));
         }
-        let rows = html! { @for event in kept { (row(event, &self.projects)) } };
-        let mut body = partial("#flows tbody", "innerHTML", &rows).into_string();
-        self.sent_graph = None;
-        self.sent_counts = None;
-        body.push_str(&self.state_partials());
+        Backlog {
+            rows: html! { @for event in kept { (row(event, &self.projects)) } },
+            graph: self.render_graph(),
+            counts: self.counts.clone(),
+        }
+    }
+
+    /// The first message of a connection: the backlog replaces the table body, and graph and
+    /// counts are sent whatever the backlog holds, so that what an earlier connection of the page
+    /// showed is cleared.
+    pub(in crate::egress) fn backlog_message(&mut self, backlog: &[FlowEvent]) -> String {
+        let state = self.apply_backlog(backlog);
+        let mut body = partial("#flows tbody", "innerHTML", &state.rows).into_string();
+        body.push_str(&partial_str("#graph", "innerHTML", &state.graph));
+        body.push_str(&counts_partials(&state.counts, &self.filter));
+        self.sent_graph = Some(state.graph);
+        self.sent_counts = Some(state.counts);
         body
     }
 
@@ -229,11 +247,14 @@ impl Viewer {
         }
     }
 
+    fn render_graph(&self) -> String {
+        graph::render(&graph::model(&self.edges, &self.filter), &self.projects).into_string()
+    }
+
     /// The graph and the counts, each only if it differs from what the page has.
     fn state_partials(&mut self) -> String {
         let mut body = String::new();
-        let graph =
-            graph::render(&graph::model(&self.edges, &self.filter), &self.projects).into_string();
+        let graph = self.render_graph();
         if self.sent_graph.as_ref() != Some(&graph) {
             body.push_str(&partial_str("#graph", "innerHTML", &graph));
             self.sent_graph = Some(graph);
