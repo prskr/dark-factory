@@ -6,11 +6,15 @@ A live, ephemeral view of every connection attempt through the egress proxy, bui
 ## Requirements
 
 ### Requirement: Flow events in a ring buffer
-Each gateway pod SHALL record one closing flow event per proxy request in an in-memory ring buffer (default 10,000 events) with: time, gateway pod, flow id, source IP, run, task, project, persona, method, host, port, SNI, phase, verdict, reason, matched rule, bytes in/out, duration and HTTP status for plain HTTP. Nothing SHALL be persisted per event.
+Each gateway pod SHALL record one closing flow event per proxy request in an in-memory ring buffer (default 10,000 events) with: time, gateway pod, flow id, source IP, run (id and number), task, project, persona, method, host, port, SNI, phase, verdict, reason, matched rule, bytes in/out, duration and HTTP status for plain HTTP. Nothing SHALL be persisted per event.
 
 #### Scenario: Buffer full
 - **WHEN** event 10,001 is recorded
 - **THEN** the oldest event is dropped
+
+#### Scenario: Run number recorded
+- **WHEN** run 2 of task `DF-7` opens a connection
+- **THEN** its flow events carry the run's id and the number 2
 
 ### Requirement: Opened events
 An allowed request (a `CONNECT` tunnel, or plain HTTP once the response headers arrived) SHALL additionally record an event with phase `opened` as soon as the destination is connected; its closing event has phase `closed`. Denied requests SHALL record only the closing event.
@@ -143,18 +147,33 @@ The graph SHALL draw sandboxes (one per run, or per source IP for unknown source
 - **THEN** every edge still ends with its arrowhead at the left edge of its destination node
 
 ### Requirement: Graph node cards
-Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the short run id and the task key, a destination node its host icon, host and port. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one.
+Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the run number (`#2`) and the task key, a destination node its host icon, host and port. A node of an unknown source SHALL show its source IP. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one.
 
 #### Scenario: Node content
-- **WHEN** the graph shows sandbox `a4c2…` of task `DF-7` and destination `github.com:443`
-- **THEN** the sandbox node is a card with an icon tile, `a4c2…` and `DF-7`, and the destination node shows the `GH` icon, `github.com` and `443`
+- **WHEN** the graph shows run 2 of task `DF-7` and destination `github.com:443`
+- **THEN** the sandbox node is a card with an icon tile, `#2` and `DF-7`, and the destination node shows the `GH` icon, `github.com` and `443`
+
+#### Scenario: Unknown source
+- **WHEN** a connection comes from `10.0.0.9`, which is no active sandbox
+- **THEN** its sandbox node shows `10.0.0.9`
+
+#### Scenario: Event without a run number
+- **WHEN** an event of a known run carries no run number (an older gateway)
+- **THEN** the sandbox node shows the first 8 characters of the run id
+
+### Requirement: Graph column widths
+At every width the divider allows, the two node columns of the graph SHALL NOT overlap and the space between them SHALL be at least 60 px; the destination nodes SHALL narrow (from 260 px down to 120 px) before that space does.
+
+#### Scenario: Narrowest graph
+- **WHEN** the graph panel is at its minimum width (398 px: the 396 px graph plus its 1 px border on each side)
+- **THEN** sandbox and destination nodes do not overlap, the destination nodes are 120 px wide and the edges span a gutter of at least 60 px
 
 ### Requirement: Events table
-The events table SHALL be headed "Events · newest first" with "N of M" (events matching the filters of events seen) and list per event: time (UTC), sandbox (short run id and task key), destination (host icon, `host:port`), a verdict pill (*Allowed*, *Blocked*, *Open*) and actions. Bytes and duration SHALL be shown in the request details, not in the table.
+The events table SHALL be headed "Events · newest first" with "N of M" (events matching the filters of events seen) and list per event: time (UTC), sandbox (task key and run number, `DF-7 #2`), destination (host icon, `host:port`), a verdict pill (*Allowed*, *Blocked*, *Open*) and actions. Bytes and duration SHALL be shown in the request details, not in the table.
 
 #### Scenario: Row content
-- **WHEN** task `DF-7` is denied `203.0.113.42:22`
-- **THEN** the row shows the run's short id, "DF-7", `203.0.113.42:22` and a *Blocked* pill
+- **WHEN** run 2 of task `DF-7` is denied `203.0.113.42:22`
+- **THEN** the row shows "DF-7 #2", `203.0.113.42:22` and a *Blocked* pill, and the details panel names the sandbox "DF-7 #2"
 
 #### Scenario: Missed events
 - **WHEN** the stream reports a `gap` because the page could not keep up
