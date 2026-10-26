@@ -848,7 +848,7 @@ async fn the_split_view_has_an_accessible_separator_and_the_details_panel_is_a_d
     let separator = &separator[..separator.find('>').unwrap()];
     for attribute in [
         "aria-valuenow=\"520\"",
-        "aria-valuemin=\"397\"",
+        "aria-valuemin=\"398\"",
         "aria-valuemax=",
         "tabindex=\"0\"",
         "aria-orientation=\"vertical\"",

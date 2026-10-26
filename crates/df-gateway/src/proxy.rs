@@ -603,10 +603,16 @@ impl Flow {
         target: &Target,
         metrics: Arc<Metrics>,
     ) -> Self {
-        let sandbox = sandbox
-            .cloned()
-            .map(|s| (s.run_id, s.task_key, s.project_key, s.persona_id));
-        let (run_id, task_key, project_key, persona_id) = sandbox.unwrap_or_default();
+        let sandbox = sandbox.cloned().map(|s| {
+            (
+                s.run_id,
+                s.task_key,
+                s.run_number,
+                s.project_key,
+                s.persona_id,
+            )
+        });
+        let (run_id, task_key, run_number, project_key, persona_id) = sandbox.unwrap_or_default();
         Self {
             event: FlowEvent {
                 gateway_pod: pod.to_string(),
@@ -614,6 +620,7 @@ impl Flow {
                 source_ip: source.to_string(),
                 run_id,
                 task_key,
+                run_number,
                 project_key,
                 persona_id,
                 method: method.to_string(),

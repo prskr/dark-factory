@@ -75,6 +75,7 @@ fn policy_of(source: &str, hosts: Vec<HostRule>) -> Option<Arc<Policy>> {
             Sandbox {
                 run_id: "run-1".into(),
                 task_key: "DF-1".into(),
+                run_number: 2,
                 project_key: "DF".into(),
                 persona_id: "persona".into(),
                 hosts,
@@ -263,6 +264,7 @@ async fn allowed_host_gets_a_tunnel_and_an_allowed_event() -> Result<()> {
         ),
         ("run-1", "DF-1", "DF")
     );
+    assert_eq!(event.run_number, 2);
     assert_eq!(event.matched_rule, "api.anthropic.com");
     assert_eq!(event.gateway_pod, "gw-0");
     assert!(event.bytes_out > 4 && event.bytes_in > 4, "{event:?}");

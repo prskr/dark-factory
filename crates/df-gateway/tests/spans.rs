@@ -63,6 +63,7 @@ async fn start_proxy() -> anyhow::Result<Started> {
     let sandbox = Sandbox {
         run_id: "run-1".into(),
         task_key: "DF-1".into(),
+        run_number: 1,
         project_key: "DF".into(),
         persona_id: "persona".into(),
         hosts: vec![HostRule {

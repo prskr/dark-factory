@@ -14,10 +14,11 @@ const BULK_EVENTS: usize = 10_000;
 /// Time between the live events that follow the backlog.
 const LIVE_INTERVAL: Duration = Duration::from_secs(3);
 
-const RUNS: [(&str, &str, &str); 3] = [
-    ("a4c2e7f0-1111-4a2b-9c3d-000000000001", "DF-7", "DF"),
-    ("b91d0c33-2222-4a2b-9c3d-000000000002", "DF-8", "DF"),
-    ("c07e55a1-3333-4a2b-9c3d-000000000003", "WEB-2", "WEB"),
+/// Run id, task key, run number and project key.
+const RUNS: [(&str, &str, u32, &str); 3] = [
+    ("a4c2e7f0-1111-4a2b-9c3d-000000000001", "DF-7", 2, "DF"),
+    ("b91d0c33-2222-4a2b-9c3d-000000000002", "DF-8", 1, "DF"),
+    ("c07e55a1-3333-4a2b-9c3d-000000000003", "WEB-2", 1, "WEB"),
 ];
 
 /// Host, port, method and what happens to it: `Some(rule)` is allowed by that rule, `None`
@@ -114,7 +115,7 @@ fn now() -> Timestamp {
 }
 
 fn event(index: usize, seconds_ago: i64) -> FlowEvent {
-    let (run_id, task_key, project_key) = RUNS[index % RUNS.len()];
+    let (run_id, task_key, run_number, project_key) = RUNS[index % RUNS.len()];
     let (host, port, rule, reason) = TARGETS[(index * 7 + index / 3) % TARGETS.len()];
     let mut time = now();
     time.seconds -= seconds_ago;
@@ -124,6 +125,7 @@ fn event(index: usize, seconds_ago: i64) -> FlowEvent {
         source_ip: format!("10.42.0.{}", 10 + index % RUNS.len()),
         run_id: run_id.into(),
         task_key: task_key.into(),
+        run_number,
         project_key: project_key.into(),
         method: "CONNECT".into(),
         host: host.into(),

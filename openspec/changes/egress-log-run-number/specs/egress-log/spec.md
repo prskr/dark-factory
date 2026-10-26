@@ -14,7 +14,7 @@ Each gateway pod SHALL record one closing flow event per proxy request in an in-
 - **THEN** its flow events carry the run's id and the number 2
 
 ### Requirement: Graph node cards
-Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the run number (`#2`) and the task key, a destination node its host icon, host and port. A node of an unknown source SHALL show its source IP. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one.
+Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the run number (`#2`) and the task key, a destination node its host icon, host and port. A node of an unknown source SHALL show its source IP. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one. At every width the divider allows, the two node columns SHALL NOT overlap and the space between them SHALL be at least 60 px; the destination nodes narrow (from 260 px down to 120 px) before that space does.
 
 #### Scenario: Node content
 - **WHEN** the graph shows run 2 of task `DF-7` and destination `github.com:443`
@@ -27,6 +27,10 @@ Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows 
 #### Scenario: Event without a run number
 - **WHEN** an event of a known run carries no run number (an older gateway)
 - **THEN** the sandbox node shows the first 8 characters of the run id
+
+#### Scenario: Narrowest graph
+- **WHEN** the graph panel is at its minimum width (398 px: the 396 px graph plus its 1 px border on each side)
+- **THEN** sandbox and destination nodes do not overlap, the destination nodes are 120 px wide and the edges span a gutter of at least 60 px
 
 ### Requirement: Events table
 The events table SHALL be headed "Events · newest first" with "N of M" (events matching the filters of events seen) and list per event: time (UTC), sandbox (task key and run number, `DF-7 #2`), destination (host icon, `host:port`), a verdict pill (*Allowed*, *Blocked*, *Open*) and actions. Bytes and duration SHALL be shown in the request details, not in the table.

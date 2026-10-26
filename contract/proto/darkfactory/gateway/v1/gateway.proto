@@ -56,6 +56,8 @@ message SandboxEntry {
   string project_key = 4;
   string persona_id = 5;
   repeated HostRule hosts = 6;
+  // The run's number within its task (`#2`); 0 if unknown.
+  uint32 run_number = 7;
 }
 
 message HostRule {
@@ -146,4 +148,6 @@ message FlowEvent {
   // Identifies the request among those of this gateway pod; the opened and the closed event of
   // one request have the same id. 0 if unset.
   uint64 flow_id = 22;
+  // The run's number within its task (`#2`); 0 if unknown (an older gateway).
+  uint32 run_number = 23;
 }

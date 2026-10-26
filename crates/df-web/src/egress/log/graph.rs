@@ -8,7 +8,7 @@ use df_proto::gateway::v1::FlowEvent;
 use maud::{Markup, html};
 
 use super::filter::{Filter, is_blocked};
-use super::rows::{sandbox_key, sandbox_label, task_label};
+use super::rows::{sandbox_key, sandbox_lines};
 use crate::components::{HostIconSize, Icon, ProjectHosts, host_icon, icon};
 
 /// Sandboxes drawn at most, the most recently seen.
@@ -33,10 +33,14 @@ const GROUP_PAD: u32 = 12;
 const GROUP_TOP: u32 = 8;
 /// Classes of a column heading.
 const HEADING: &str = "text-xs font-medium uppercase tracking-wide text-faint";
-const MIN_DEST_W: u32 = 120;
+/// Narrowest destination node; the graph minimum is built on it.
+pub(super) const MIN_DEST_W: u32 = 120;
 const MAX_DEST_W: u32 = 260;
+/// Everything in a graph row but the destination column: the sandbox column, the minimum gutter
+/// and the right padding.
+pub(super) const DEST_OFFSET: u32 = SANDBOX_X + SANDBOX_W + MIN_GUTTER + RIGHT_PAD;
 /// Narrowest graph that shows its nodes untruncated: 20 + 176 + 60 + 120 + 20.
-pub(super) const MIN_WIDTH: u32 = SANDBOX_X + SANDBOX_W + MIN_GUTTER + MIN_DEST_W + RIGHT_PAD;
+pub(super) const MIN_WIDTH: u32 = DEST_OFFSET + MIN_DEST_W;
 pub(super) const MAX_WIDTH: u32 = 960;
 /// Width the server lays out for; the browser stretches the gutter to the real width.
 pub(super) const DEFAULT_WIDTH: u32 = 520;
@@ -221,8 +225,7 @@ pub(super) fn model(edges: &Edges, filter: &Filter) -> Model {
         // The label and task of a sandbox node are those of its latest event.
         if edge.last >= *seen {
             *seen = edge.last;
-            sandbox.label = sandbox_label(&edge.latest);
-            sandbox.task = task_label(&edge.latest);
+            (sandbox.label, sandbox.task) = sandbox_lines(&edge.latest);
         }
         model.edges.push(EdgeLine {
             sandbox: s,
@@ -255,11 +258,9 @@ pub(super) struct Path {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Layout {
-    pub(super) width: u32,
     pub(super) height: u32,
     /// Width of the space between the two columns.
     pub(super) gutter: u32,
-    pub(super) destination_width: u32,
     pub(super) sandboxes: Vec<Placed>,
     pub(super) destinations: Vec<Placed>,
     pub(super) paths: Vec<Path>,
@@ -270,9 +271,8 @@ pub(super) struct Layout {
 /// first node 60 px from the top.
 pub(super) fn layout(model: &Model, width: u32) -> Layout {
     let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let destination_width =
-        (width - SANDBOX_X - SANDBOX_W - MIN_GUTTER - RIGHT_PAD).clamp(MIN_DEST_W, MAX_DEST_W);
-    let gutter = width - SANDBOX_X - SANDBOX_W - RIGHT_PAD - destination_width;
+    let destination_width = (width - DEST_OFFSET).clamp(MIN_DEST_W, MAX_DEST_W);
+    let gutter = MIN_GUTTER + (width - DEST_OFFSET - destination_width);
     // The shorter column is centred on the taller one.
     let sandbox_span = span(model.sandboxes.len(), SANDBOX_PITCH, SANDBOX_H);
     let destination_span = span(model.destinations.len(), DEST_PITCH, DEST_H);
@@ -304,10 +304,8 @@ pub(super) fn layout(model: &Model, width: u32) -> Layout {
         })
         .collect();
     Layout {
-        width,
         height: TOP + rows + BOTTOM,
         gutter,
-        destination_width,
         sandboxes,
         destinations,
         paths,
@@ -331,9 +329,9 @@ fn dim(dimmed: bool) -> &'static str {
 pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
     let layout = layout(model, DEFAULT_WIDTH);
     let gutter_left = SANDBOX_X + SANDBOX_W;
-    let right = RIGHT_PAD + layout.destination_width;
+    let destination_width = destination_width_css();
     html! {
-        div class="relative" style={"height:" (layout.height) "px"} {
+        div class="relative" style={"height:" (layout.height) "px;container-type:inline-size"} {
             @let sandboxes = html! { "Sandboxes " (model.sandboxes.len() + model.hidden_sandboxes) };
             // As in the design: the sandbox column sits in a dashed box that holds its heading
             // and grows only as far as the nodes need, so it moves with centred sandboxes.
@@ -348,7 +346,7 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
                 @if layout.sandboxes.is_empty() {
                     span style={"width:" (SANDBOX_W) "px"} { (sandboxes) }
                 }
-                span class="ml-auto" style={"width:" (layout.destination_width) "px"} { "Destinations " (model.destinations.len() + model.hidden_destinations) }
+                span class="ml-auto" style={"width:" (destination_width)} { "Destinations " (model.destinations.len() + model.hidden_destinations) }
             }
             // An SVG does not stretch between `left` and `right` (`width:auto` keeps its own
             // width), so the width is set explicitly: the gutter then always ends at the
@@ -356,7 +354,7 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
             // destination nodes, so the stretch never distorts them.
             svg aria-hidden="true" class="absolute top-0 overflow-visible" preserveAspectRatio="none"
                 viewBox={"0 0 " (layout.gutter) " " (layout.height)}
-                style={"left:" (gutter_left) "px;width:calc(100% - " (gutter_left + right) "px);height:" (layout.height) "px"} {
+                style={"left:" (gutter_left) "px;width:calc(100% - " (gutter_left + RIGHT_PAD) "px - " (destination_width) ");height:" (layout.height) "px"} {
                 @for path in &layout.paths {
                     @let class = if path.blocked { "fill-none stroke-danger [stroke-dasharray:5_4]" } else { "fill-none stroke-faint" };
                     path d=(path.d) vector-effect="non-scaling-stroke" stroke-width="1.5"
@@ -376,7 +374,7 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
             @for (node, placed) in model.destinations.iter().zip(&layout.destinations) {
                 div data-node="destination" data-blocked=[node.blocked.then_some("true")]
                     class={"absolute flex items-center gap-2 " (CARD) " px-2 " (if node.blocked { "border-danger" } else { "border-line-strong" }) (dim(node.dimmed))}
-                    style={"right:" (RIGHT_PAD) "px;top:" (placed.y) "px;width:" (layout.destination_width) "px;height:" (DEST_H) "px"} {
+                    style={"right:" (RIGHT_PAD) "px;top:" (placed.y) "px;width:" (destination_width) ";height:" (DEST_H) "px"} {
                     // Where the edges arrive: the tip touches the card's outer left edge.
                     svg data-arrow class="absolute -left-[8px] top-1/2 -translate-y-1/2" aria-hidden="true" width="7" height="10" viewBox="0 0 7 10" {
                         path d="M0 0 7 5 0 10z" class=(if node.blocked { "fill-danger" } else { "fill-faint" }) {}
@@ -405,6 +403,14 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
             span { "Dimmed: excluded by the filters" }
         }
     }
+}
+
+/// CSS width of the destination nodes: the graph width (`cqw` of the graph container) less
+/// the sandbox column, the minimum gutter and the right padding, between the node limits. The
+/// nodes, the *Destinations* heading and the gutter SVG share it, so the browser keeps them
+/// apart at any panel width.
+fn destination_width_css() -> String {
+    format!("clamp({MIN_DEST_W}px, 100cqw - {DEST_OFFSET}px, {MAX_DEST_W}px)")
 }
 
 #[cfg(test)]
@@ -504,16 +510,13 @@ mod tests {
     fn width_is_limited_and_the_gutter_never_collapses() {
         let model = model_of(&[event("a", "x.com", Verdict::Allowed)]);
         let narrow = layout(&model, 100);
-        assert_eq!(narrow.width, MIN_WIDTH);
         assert_eq!(MIN_WIDTH, 396);
-        assert_eq!(narrow.destination_width, MIN_DEST_W);
         assert_eq!(narrow.gutter, MIN_GUTTER);
         let wide = layout(&model, 5000);
-        assert_eq!(wide.width, MAX_WIDTH);
-        assert_eq!(wide.destination_width, MAX_DEST_W);
+        // The destinations stop growing at their maximum: the gutter takes the rest.
         assert_eq!(
-            SANDBOX_X + SANDBOX_W + wide.gutter + wide.destination_width + RIGHT_PAD,
-            MAX_WIDTH
+            wide.gutter,
+            MAX_WIDTH - DEST_OFFSET + MIN_GUTTER - MAX_DEST_W
         );
     }
 
@@ -611,18 +614,35 @@ mod tests {
     }
 
     #[test]
+    fn the_destination_width_follows_the_graph_width_in_css() {
+        let model = model_of(&[event("run-a", "pypi.org", Verdict::Allowed)]);
+        let html = render(&model).into_string();
+        // 276 = 20 + 176 + 60 + 20: sandbox column, minimum gutter and right padding.
+        let width = "clamp(120px, 100cqw - 276px, 260px)";
+        assert_eq!(destination_width_css(), width);
+        assert!(html.contains("container-type:inline-size"), "{html}");
+        // Destination node, heading and gutter SVG share the one width.
+        assert_eq!(html.matches(width).count(), 3, "{html}");
+        let node = &html[html.find("data-node=\"destination\"").unwrap()..];
+        assert!(
+            node.contains(&format!("width:{width};height:48px")),
+            "{node}"
+        );
+        assert!(html.contains(&format!("style=\"width:{width}\"")), "{html}");
+    }
+
+    #[test]
     fn edges_stretch_with_the_panel_and_end_at_the_destination_nodes() {
         let model = model_of(&[event("run-a", "pypi.org", Verdict::Allowed)]);
-        let l = layout(&model, DEFAULT_WIDTH);
         let html = render(&model).into_string();
         // An SVG does not stretch between `left` and `right`: its width is set explicitly, so
         // the gutter always reaches the destinations, which are aligned to the right edge.
         let left = SANDBOX_X + SANDBOX_W;
-        let right = RIGHT_PAD + l.destination_width;
         assert!(
             html.contains(&format!(
-                "left:{left}px;width:calc(100% - {}px);height:",
-                left + right
+                "left:{left}px;width:calc(100% - {}px - {});height:",
+                left + RIGHT_PAD,
+                destination_width_css()
             )),
             "{html}"
         );
@@ -680,6 +700,15 @@ mod tests {
     }
 
     #[test]
+    fn a_node_shows_the_run_number_over_the_task_key() {
+        let mut numbered = event("a4c2e7f01", "pypi.org", Verdict::Allowed);
+        numbered.run_number = 2;
+        let model = model_of(&[numbered]);
+        assert_eq!(model.sandboxes[0].label, "#2");
+        assert_eq!(model.sandboxes[0].task, "DF-7");
+    }
+
+    #[test]
     fn unknown_sources_are_nodes_by_address() {
         let mut unknown = event("", "a.com", Verdict::Denied);
         unknown.source_ip = "10.1.2.3".into();
@@ -687,6 +716,17 @@ mod tests {
         let model = model_of(&[unknown]);
         assert_eq!(model.sandboxes[0].label, "10.1.2.3");
         assert_eq!(model.sandboxes[0].task, "unknown source");
+    }
+
+    #[test]
+    fn a_numbered_node_renders_the_run_number_over_the_task_key() {
+        let mut numbered = event("a4c2e7f01", "pypi.org", Verdict::Allowed);
+        numbered.run_number = 2;
+        let html = render(&model_of(&[numbered])).into_string();
+        let node = &html[html.find("data-node=\"sandbox\"").unwrap()..];
+        let node = &node[..node.find("data-node=\"destination\"").unwrap()];
+        assert!(node.contains(">#2<") && node.contains(">DF-7<"), "{node}");
+        assert!(!node.contains("a4c2e7f0"), "{node}");
     }
 
     #[test]
