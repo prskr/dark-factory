@@ -88,7 +88,7 @@ Claude Code harness image reference (supports digest or tag)
 {{- if $img.digest }}
 {{- printf "%s@%s" $img.repository $img.digest }}
 {{- else }}
-{{- printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) }}
+{{- printf "%s:%s" $img.repository (required "image.harness.claudeCode.tag or .digest is required (the harness is tagged with its adapter version, not the chart appVersion)" $img.tag) }}
 {{- end }}
 {{- end }}
 

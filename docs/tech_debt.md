@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-60.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-61.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -20,6 +20,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-56: code review of `network-management-ui-polish` (`df-web`, 2026-10-25). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-57 to TD-58 (both resolved the same day): code review of `harness-images` (`df-k8s`, `df-agent-channel`, `deploy/images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-59: dev cluster verification of `harness-images` (2026-10-26), task 7.4 carried over from `iter1-egress-gateway`.
+- Origin of TD-60: CodeRabbit review of PR #26 (`harness-images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -78,6 +79,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
 | TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings |
 | TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway |
+| TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 
 ## Entries
 
@@ -545,6 +547,16 @@ The gateway closes a CONNECT tunnel whose ClientHello names another host than th
 **Matters when:** the gateway, its network policy or the sandbox proxy setup changes, or before the egress controls are relied on for isolation.
 
 **Fix:** Run the check from a sandbox that stays up (for example a fake-acp-agent mode that waits, or a debug pod with the sandbox labels in the sandbox namespace); verify the tunnel is closed before the destination is contacted and the event is logged as `sni-mismatch`. Then delete this entry.
+
+### TD-60 (CR3). Adapter command loses argument boundaries
+
+`crates/df-web/src/config_pages.rs` (`validate_project`, `project_values`)
+
+The project form shows the stored `adapter_command` joined with spaces and parses the field with `split_whitespace`. An argument containing whitespace (`/workspace/my config.json`) is split into two arguments on save, and every later edit keeps it split. The persona field this replaces behaved the same way.
+
+**Matters when:** a project adapter needs an argument with whitespace.
+
+**Fix:** Use a reversible format for the field (one argument per line, or shell-style quoting with a small parser) and add a test that an edit keeps an argument containing a space.
 
 ## Accepted decisions
 

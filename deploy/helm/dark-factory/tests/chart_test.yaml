@@ -641,6 +641,16 @@ tests:
           pattern: 'image: "registry.example.org/claude-harness@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
         documentIndex: 0
 
+  - it: requires a harness image tag or digest
+    # the config checksum in the gateway Deployment renders the config first, so it fails there
+    template: gateway-deployment.yaml
+    set:
+      image.harness.claudeCode.tag: ''
+      image.harness.claudeCode.digest: ''
+    asserts:
+      - failedTemplate:
+          errorPattern: image.harness.claudeCode.tag or .digest is required
+
   - it: has no runtime delivery setting
     template: configmap.yaml
     asserts:

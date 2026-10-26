@@ -65,5 +65,6 @@ jobs:
 
       - name: Chart requires Kubernetes 1.36
         run: |
-          bazel run $BAZEL_ARGS //:bazel_env
+          # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
+          bazel run $BAZEL_ARGS //:bazel_env || test -x .bazel_env/bin/helm
           build/with_tools.sh deploy/helm/check_kube_version.sh
