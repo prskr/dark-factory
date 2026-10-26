@@ -70,6 +70,9 @@ spec:
               name: task-data
             - mountPath: /run/factory
               name: tmpfs
+            - mountPath: /opt/harness/claude-code
+              name: harness-claude-code
+              readOnly: true
       hostAliases:
         - hostnames:
             - scheduler.nativelink.svc.cluster.local
@@ -89,6 +92,10 @@ spec:
             pullPolicy: IfNotPresent
             reference: "ghcr.io/prskr/dark-factory/runtime:dev"
           name: factory-runtime
+        - image:
+            pullPolicy: IfNotPresent
+            reference: "registry.example.org/claude-harness:0.95.0"
+          name: harness-claude-code
         - csi:
             driver: csi.cert-manager.io
             readOnly: true

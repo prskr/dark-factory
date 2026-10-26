@@ -13,7 +13,7 @@ The runtime inside each sandbox starts and supervises the harness, owns the work
 | Concern | Choice |
 |---|---|
 | ACP | `agent-client-protocol` (official Rust SDK) |
-| Claude Code | `@zed-industries/claude-agent-acp` (Node package bundling Claude Code); iteration 1: baked into the project image, adapter path configurable |
+| Claude Code | `@agentclientprotocol/claude-agent-acp` (Node package bundling Claude Code); delivered as a harness image volume (ADR-0022), a project can set its own adapter command |
 | Inference (full-harness mode) | Thin reqwest + SSE client (or `async-openai`) speaking the OpenAI-compatible API to the inference endpoint in the gateway Deployment (ADR-0029) |
 | MCP | The runtime serves the factory tools to the harness (stdio entry point) and forwards calls to the control plane (ADR-0027). Third-party MCP servers come from the gateway's MCP endpoint, which the runtime registers in the harness configuration as a second server; lazy loading happens there (ADR-0032) |
 | Skills | `SKILL.md` format, scanned from `.claude/skills`, `.agents/skills` and a directory the control plane fills |

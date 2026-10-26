@@ -17,20 +17,17 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, 
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use thiserror::Error;
 
-use crate::config::{ProvisioningConfig, RuntimeDelivery};
+use crate::config::ProvisioningConfig;
 use crate::crd::{
     Sandbox, SandboxOperatingMode, SandboxPodTemplate, SandboxPodTemplateMetadata,
     SandboxPodTemplateSpec, SandboxPodTemplateSpecContainers, SandboxPodTemplateSpecContainersEnv,
     SandboxPodTemplateSpecContainersSecurityContext,
     SandboxPodTemplateSpecContainersSecurityContextCapabilities,
     SandboxPodTemplateSpecContainersVolumeMounts, SandboxPodTemplateSpecHostAliases,
-    SandboxPodTemplateSpecInitContainers, SandboxPodTemplateSpecInitContainersSecurityContext,
-    SandboxPodTemplateSpecInitContainersSecurityContextCapabilities,
-    SandboxPodTemplateSpecInitContainersVolumeMounts, SandboxPodTemplateSpecSecurityContext,
-    SandboxPodTemplateSpecSecurityContextSeccompProfile, SandboxPodTemplateSpecVolumes,
-    SandboxPodTemplateSpecVolumesCsi, SandboxPodTemplateSpecVolumesEmptyDir,
-    SandboxPodTemplateSpecVolumesImage, SandboxPodTemplateSpecVolumesPersistentVolumeClaim,
-    SandboxShutdownPolicy, SandboxSpec,
+    SandboxPodTemplateSpecSecurityContext, SandboxPodTemplateSpecSecurityContextSeccompProfile,
+    SandboxPodTemplateSpecVolumes, SandboxPodTemplateSpecVolumesCsi,
+    SandboxPodTemplateSpecVolumesEmptyDir, SandboxPodTemplateSpecVolumesImage,
+    SandboxPodTemplateSpecVolumesPersistentVolumeClaim, SandboxShutdownPolicy, SandboxSpec,
 };
 
 /// Errors encountered while rendering resources.
@@ -38,6 +35,8 @@ use crate::crd::{
 pub enum RenderError {
     #[error("headless service `{namespace}/{service}` is not allowed without allowDns")]
     HeadlessServiceNotAllowed { namespace: String, service: String },
+    #[error("no image is configured for harness `{harness}`")]
+    NoHarnessImage { harness: String },
 }
 
 /// A resolved cluster service target for network wiring and policies.
@@ -232,7 +231,7 @@ pub fn render_sandbox(
         },
     ];
 
-    let volume_mounts = vec![
+    let mut volume_mounts = vec![
         SandboxPodTemplateSpecContainersVolumeMounts {
             name: "factory-runtime".to_string(),
             mount_path: "/opt/factory".to_string(),
@@ -257,26 +256,39 @@ pub fn render_sandbox(
         },
     ];
 
-    let mut volumes = Vec::new();
+    let mut volumes = vec![SandboxPodTemplateSpecVolumes {
+        name: "factory-runtime".to_string(),
+        image: Some(SandboxPodTemplateSpecVolumesImage {
+            reference: Some(config.sandbox.runtime_image.clone()),
+            pull_policy: Some("IfNotPresent".to_string()),
+        }),
+        ..Default::default()
+    }];
 
-    match config.sandbox.runtime_delivery {
-        RuntimeDelivery::ImageVolume => {
-            volumes.push(SandboxPodTemplateSpecVolumes {
-                name: "factory-runtime".to_string(),
-                image: Some(SandboxPodTemplateSpecVolumesImage {
-                    reference: Some(config.sandbox.runtime_image.clone()),
-                    pull_policy: Some("IfNotPresent".to_string()),
-                }),
-                ..Default::default()
-            });
-        }
-        RuntimeDelivery::InitContainer => {
-            volumes.push(SandboxPodTemplateSpecVolumes {
-                name: "factory-runtime".to_string(),
-                empty_dir: Some(SandboxPodTemplateSpecVolumesEmptyDir::default()),
-                ..Default::default()
-            });
-        }
+    // Below /opt/harness/<harness> so the mount does not hide other content of /opt/harness.
+    if let Some(harness) = &spec.harness {
+        let image =
+            config
+                .harness_images
+                .get(harness)
+                .ok_or_else(|| RenderError::NoHarnessImage {
+                    harness: harness.clone(),
+                })?;
+        let name = format!("harness-{harness}");
+        volume_mounts.push(SandboxPodTemplateSpecContainersVolumeMounts {
+            name: name.clone(),
+            mount_path: format!("/opt/harness/{harness}"),
+            read_only: Some(true),
+            ..Default::default()
+        });
+        volumes.push(SandboxPodTemplateSpecVolumes {
+            name,
+            image: Some(SandboxPodTemplateSpecVolumesImage {
+                reference: Some(image.clone()),
+                pull_policy: Some("IfNotPresent".to_string()),
+            }),
+            ..Default::default()
+        });
     }
 
     let mut csi_attrs = BTreeMap::new();
@@ -334,35 +346,6 @@ pub fn render_sandbox(
         ..Default::default()
     });
 
-    let mut init_containers = None;
-    if config.sandbox.runtime_delivery == RuntimeDelivery::InitContainer {
-        init_containers = Some(vec![SandboxPodTemplateSpecInitContainers {
-            name: "install-runtime".to_string(),
-            image: Some(config.sandbox.runtime_image.clone()),
-            command: Some(vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                "cp -a /opt/factory/* /target/".to_string(),
-            ]),
-            volume_mounts: Some(vec![SandboxPodTemplateSpecInitContainersVolumeMounts {
-                name: "factory-runtime".to_string(),
-                mount_path: "/target".to_string(),
-                ..Default::default()
-            }]),
-            security_context: Some(SandboxPodTemplateSpecInitContainersSecurityContext {
-                allow_privilege_escalation: Some(false),
-                capabilities: Some(
-                    SandboxPodTemplateSpecInitContainersSecurityContextCapabilities {
-                        drop: Some(vec!["ALL".to_string()]),
-                        ..Default::default()
-                    },
-                ),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }]);
-    }
-
     let agent_container = SandboxPodTemplateSpecContainers {
         name: "agent".to_string(),
         image: Some(spec.image.clone()),
@@ -406,7 +389,6 @@ pub fn render_sandbox(
             Some(host_aliases)
         },
         containers: vec![agent_container],
-        init_containers,
         volumes: Some(volumes),
         ..Default::default()
     };
@@ -692,7 +674,6 @@ mod tests {
                 certificate_duration: "6h".to_string(),
                 certificate_renew_before: "2h".to_string(),
                 runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
-                runtime_delivery: RuntimeDelivery::ImageVolume,
                 cluster_domain: "cluster.local".to_string(),
                 log_level: "info".to_string(),
             },
@@ -702,6 +683,10 @@ mod tests {
                 .to_string(),
             gateway_ip: IpAddr::V4(Ipv4Addr::new(10, 105, 68, 86)),
             gateway_proxy_port: 3128,
+            harness_images: BTreeMap::from([(
+                df_core::CLAUDE_CODE_HARNESS.to_string(),
+                "registry.example.org/claude-harness:0.95.0".to_string(),
+            )]),
             log_format: df_telemetry::logging::LogFormat::Text,
         }
     }
@@ -716,6 +701,7 @@ mod tests {
             project_key: ProjectKey::new("DF").unwrap(),
             persona_id: PersonaId::from_uuid(Uuid::from_u128(20)),
             image: "test-project:latest".to_string(),
+            harness: Some(df_core::CLAUDE_CODE_HARNESS.to_string()),
             volume_name: "task-df-1".to_string(),
             labels: BTreeMap::new(),
         }
@@ -906,7 +892,7 @@ mod tests {
         );
 
         let mounts = container.volume_mounts.as_ref().unwrap();
-        assert_eq!(mounts.len(), 4);
+        assert_eq!(mounts.len(), 5);
         assert!(
             mounts
                 .iter()
@@ -1081,23 +1067,78 @@ mod tests {
     }
 
     #[test]
-    fn test_render_sandbox_init_container_fallback() {
-        let mut config = test_config();
-        config.sandbox.runtime_delivery = RuntimeDelivery::InitContainer;
-        let spec = test_spec();
-        let sandbox = render_sandbox(&spec, &[], &config).unwrap();
-
+    fn harness_image_is_a_read_only_volume_below_opt_harness() {
+        let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
         let pod_spec = sandbox.spec.pod_template.spec;
-        let init_containers = pod_spec.init_containers.unwrap();
-        assert_eq!(init_containers.len(), 1);
-        assert_eq!(init_containers[0].name, "install-runtime");
 
-        let volumes = pod_spec.volumes.unwrap();
-        let runtime_vol = volumes
-            .iter()
-            .find(|v| v.name == "factory-runtime")
+        let volume = pod_spec
+            .volumes
+            .unwrap()
+            .into_iter()
+            .find(|v| v.name == "harness-claude-code")
             .unwrap();
-        assert!(runtime_vol.empty_dir.is_some());
+        let image = volume.image.unwrap();
+        assert_eq!(
+            image.reference.as_deref(),
+            Some("registry.example.org/claude-harness:0.95.0")
+        );
+        assert_eq!(image.pull_policy.as_deref(), Some("IfNotPresent"));
+        let mount = pod_spec.containers[0]
+            .volume_mounts
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|m| m.name == "harness-claude-code")
+            .unwrap();
+        assert_eq!(mount.mount_path, "/opt/harness/claude-code");
+        assert_eq!(mount.read_only, Some(true));
+    }
+
+    #[test]
+    fn project_with_its_own_adapter_gets_no_harness_volume() {
+        let spec = RunSandboxSpec {
+            harness: None,
+            ..test_spec()
+        };
+        let sandbox = render_sandbox(&spec, &[], &test_config()).unwrap();
+        let pod_spec = sandbox.spec.pod_template.spec;
+        assert!(
+            !pod_spec
+                .volumes
+                .unwrap()
+                .iter()
+                .any(|v| v.name.starts_with("harness-"))
+        );
+        assert!(
+            !pod_spec.containers[0]
+                .volume_mounts
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|m| m.mount_path.starts_with("/opt/harness"))
+        );
+    }
+
+    #[test]
+    fn missing_harness_image_names_the_harness() {
+        let config = ProvisioningConfig {
+            harness_images: BTreeMap::new(),
+            ..test_config()
+        };
+        let err = render_sandbox(&test_spec(), &[], &config).unwrap_err();
+        assert_eq!(
+            err,
+            RenderError::NoHarnessImage {
+                harness: df_core::CLAUDE_CODE_HARNESS.to_string()
+            }
+        );
+        assert!(err.to_string().contains("claude-code"));
+    }
+
+    #[test]
+    fn pod_has_no_init_containers() {
+        let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
+        assert!(sandbox.spec.pod_template.spec.init_containers.is_none());
     }
 
     #[test]
@@ -1229,11 +1270,6 @@ mod tests {
 
         let sandbox = render_sandbox(&spec, &targets, &config).unwrap();
         insta::assert_yaml_snapshot!("sandbox_image_volume", sandbox);
-
-        let mut config_init = config.clone();
-        config_init.sandbox.runtime_delivery = RuntimeDelivery::InitContainer;
-        let sandbox_init = render_sandbox(&spec, &targets, &config_init).unwrap();
-        insta::assert_yaml_snapshot!("sandbox_init_container", sandbox_init);
 
         // Network policy scenarios
         // 1. Baseline (internet blocked - only cp & gw)

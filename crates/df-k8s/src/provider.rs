@@ -433,14 +433,9 @@ pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
         return Some(SandboxEvent::Gone { run_id, reason });
     }
 
-    // 3. Container waiting errors (e.g. ErrImagePull, ImagePullBackOff, CreateContainerConfigError),
-    // including init containers (the runtime image with `runtimeDelivery: initContainer`).
-    let statuses = status
-        .init_container_statuses
-        .iter()
-        .chain(status.container_statuses.iter());
+    // 3. Container waiting errors (e.g. ErrImagePull, ImagePullBackOff, CreateContainerConfigError)
     {
-        for cs in statuses.flatten() {
+        for cs in status.container_statuses.iter().flatten() {
             if let Some(ref state) = cs.state
                 && let Some(ref waiting) = state.waiting
             {
@@ -609,6 +604,7 @@ impl SandboxProvider for K8sSandboxProvider {
                     "headless service `{namespace}/{service}` not allowed without allowDns"
                 ))
             }
+            e @ RenderError::NoHarnessImage { .. } => ProviderError::InvalidSpec(e.to_string()),
         })?;
 
         let sandbox_name = sandbox
@@ -1153,6 +1149,7 @@ mod tests {
             project_key: df_core::keys::ProjectKey::new("DF").unwrap(),
             persona_id: df_core::ids::PersonaId::new(),
             image: "alpine:latest".to_string(),
+            harness: None,
             volume_name: task.volume_name.clone(),
             labels: BTreeMap::new(),
         };
@@ -1363,21 +1360,6 @@ mod tests {
         emitted.into_inner().unwrap()
     }
 
-    #[test]
-    fn init_container_image_pull_failure_is_gone() {
-        let run_id = RunId::from_uuid(Uuid::from_u128(77));
-        let mut pod = image_pull_failure_pod(run_id);
-        let status = pod.status.as_mut().unwrap();
-        status.init_container_statuses = status.container_statuses.take();
-        assert_eq!(
-            map_pod_event(&pod),
-            Some(SandboxEvent::Gone {
-                run_id,
-                reason: "ErrImagePull: pull access denied".to_string()
-            })
-        );
-    }
-
     #[tokio::test]
     async fn event_loop_emits_gone_for_image_pull_failure_without_a_prior_started() {
         // Also the state after a control plane restart: nothing was ever `Started`.
@@ -1544,6 +1526,44 @@ mod tests {
         let err = provider.ensure_task_volume(&task).await.unwrap_err();
         assert!(
             matches!(&err, ProviderError::Backend(msg) if msg.contains("timeout")),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn provision_without_a_harness_image_is_invalid_and_names_the_harness() {
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
+        let (pod_store, _) = reflector::store();
+        let (sb_store, _) = reflector::store();
+        let config = ProvisioningConfig {
+            harness_images: BTreeMap::new(),
+            ..test_config()
+        };
+        let provider = K8sSandboxProvider::new(
+            Client::new(mock_service, "default"),
+            config,
+            Arc::new(StaticClusterTargetsProvider::new(vec![])),
+            pod_store,
+            sb_store,
+        );
+        let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
+        let spec = RunSandboxSpec {
+            run_id: RunId::new(),
+            run_number: 1,
+            task_key: task.task_key.clone(),
+            project_id: df_core::ids::ProjectId::new(),
+            project_key: df_core::keys::ProjectKey::new("DF").unwrap(),
+            persona_id: df_core::ids::PersonaId::new(),
+            image: "alpine:latest".to_string(),
+            harness: Some(df_core::CLAUDE_CODE_HARNESS.to_string()),
+            volume_name: task.volume_name.clone(),
+            labels: BTreeMap::new(),
+        };
+
+        let err = provider.provision(&spec).await.unwrap_err();
+        assert!(
+            matches!(&err, ProviderError::InvalidSpec(msg) if msg.contains("claude-code")),
             "{err}"
         );
     }

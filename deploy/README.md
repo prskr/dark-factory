@@ -53,43 +53,70 @@ bazel build --config=linux-arm64-musl \
 
 ---
 
-## 2. Reference Project Images
+## 2. Harness and Reference Project Images
 
-### Claude Code Project Image (`deploy/images/claude-project/Dockerfile`)
+The sandbox pod mounts two read-only image volumes (Kubernetes 1.36 or newer, image volumes GA; the chart's `kubeVersion` enforces it): the runtime image at `/opt/factory` and the **harness image** of the run's harness at `/opt/harness/<harness>` (`/opt/harness/claude-code`). A project image therefore needs only its toolchain, git and a shell; it contains neither Node.js nor the ACP adapter.
 
-Project images are owned by individual projects rather than Dark Factory's Bazel build (ADR-0024 / design D4). A reference `Dockerfile` bundling Debian Trixie (13), `git`, `bash`, Node.js 22 LTS, and pinned `@zed-industries/claude-agent-acp` (`0.23.1`) is provided at `deploy/images/claude-project/Dockerfile`.
+Both images below are built from Dockerfiles (not Bazel), checked by `test.sh` and published by CI to `ghcr.io/prskr/dark-factory/`.
 
-#### Build & Verify Locally
+| Image | Content | Tags |
+|---|---|---|
+| `claude-harness` | `scratch` image: static launcher `bin/claude-agent-acp` (and `bin/claude`), Node.js, `@agentclientprotocol/claude-agent-acp`, the Claude Code CLI and a bundled musl runtime | adapter version (`0.95.0`, `ARG CLAUDE_AGENT_ACP_VERSION`), `latest` |
+| `claude-project` | Debian Trixie, git, bash, curl, CA certificates, OpenSSH client, UID 1000, `/workspace` | release tag, `latest` |
 
-```bash
-docker build \
-  --load \
-  --platform linux/amd64 \
-  -t ghcr.io/prskr/dark-factory/claude-project:0.23.1 \
-  deploy/images/claude-project
+Prefer version tags: `latest` moves. The chart default `image.harness.claudeCode.tag` and the `df-core` default of `harness.claudeCode.image` are the adapter version; bump the three together.
 
-docker run --rm --platform linux/amd64 \
-  ghcr.io/prskr/dark-factory/claude-project:0.23.1 \
-  claude-agent-acp --help
-```
+### How a project uses the harness
 
-#### Push to GHCR
+- **Injected harness (default).** The project's adapter command is empty. The control plane mounts the harness image and starts `harness.claudeCode.adapterCommand` (`/opt/harness/claude-code/bin/claude-agent-acp`). The bundled musl runtime lets it run in glibc (Debian, Ubuntu), Alpine and distroless project images; the launcher needs no shell and no libc of the project image. The CLI starts through `bin/claude` of the same mount (`CLAUDE_CODE_EXECUTABLE`).
+- **Own adapter.** Set "Adapter command" on the project when its image already contains an adapter (for example `/usr/local/bin/my-acp-adapter`). No harness image is mounted and the command is started as is. The `fake-acp-agent` test project (`image.testProject`) is created this way with `/opt/harness/bin/fake-acp-agent`.
 
-Log in once with a personal access token that has the `write:packages` scope:
+### Build and check locally
 
 ```bash
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+docker build -t claude-harness:dev deploy/images/claude-harness
+deploy/images/claude-harness/test.sh claude-harness:dev
+
+docker build -t claude-project:dev deploy/images/claude-project
+deploy/images/claude-project/test.sh claude-project:dev
 ```
 
+With Buildah and Podman (they share the local image storage, so `test.sh` runs through `podman`):
+
 ```bash
-docker push ghcr.io/prskr/dark-factory/claude-project:0.23.1
+buildah build -t localhost/claude-harness:dev deploy/images/claude-harness
+CONTAINER_CLI=podman deploy/images/claude-harness/test.sh localhost/claude-harness:dev
+
+buildah build -t localhost/claude-project:dev deploy/images/claude-project
+CONTAINER_CLI=podman deploy/images/claude-project/test.sh localhost/claude-project:dev
 ```
+
+To check the other architecture, build it with `--platform linux/amd64` (or `linux/arm64`) and pass `HARNESS_ARCH=amd64` to `test.sh`; this needs emulation for foreign binaries (binfmt/QEMU, or Rosetta on macOS hosts).
+
+`CONTAINER_CLI` selects another CLI (default `docker`). The harness check needs network access to pull `debian:trixie-slim` and `alpine` once; it verifies the layout, the static launcher of the image's architecture, the adapter version and an ACP `initialize` handshake in both images. It does not start the Claude CLI and needs no credentials.
+
+### Publish
+
+The `release` workflow builds both images for `linux/amd64` and `linux/arm64`, runs the checks on the amd64 image and pushes them (`harness-images` job). Pull requests that touch `deploy/images/**` run the checks (`.github/workflows/harness-images.yaml`). For a manual push, log in with a token that has `write:packages` (`echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin`) and `docker buildx build --platform linux/amd64,linux/arm64 --push -t ghcr.io/prskr/dark-factory/<image>:<tag> deploy/images/<image>`.
+
+The same with Buildah (multi-arch builds need emulation for the foreign architecture, see above):
+
+```bash
+echo "$GITHUB_TOKEN" | buildah login ghcr.io -u <github-user> --password-stdin
+buildah manifest rm <image>:<tag> 2>/dev/null || true   # start from an empty manifest list
+buildah build --platform linux/amd64,linux/arm64 --manifest <image>:<tag> deploy/images/<image>
+buildah manifest push --all <image>:<tag> docker://ghcr.io/prskr/dark-factory/<image>:<tag>
+```
+
+`--manifest` adds to an existing list of that name, so remove it first; otherwise images of earlier builds are pushed as well.
+
+`bazel run //deploy:dev` builds and pushes both images with tag `dev` itself (section 3).
 
 ---
 
 ## 3. Inner-Loop Cluster Deploy (`//deploy:dev`)
 
-Deploy the control plane, gateway, runtime image, and test project image to the active Kubernetes context using `deploy/values-dev.yaml`:
+Deploy the control plane, gateway, runtime image, test project image and the harness images (`claude-harness`, `claude-project`) to the active Kubernetes context using `deploy/values-dev.yaml`:
 
 ```bash
 bazel run //deploy:dev
@@ -102,3 +129,13 @@ DARK_FACTORY_REGISTRY=ghcr.io/prskr/dark-factory \
 DARK_FACTORY_NAMESPACE=dark-factory-dev \
   bazel run //deploy:dev
 ```
+
+The Bazel images are pushed first. `claude-harness` and `claude-project` are then built from `deploy/images/` for `linux/amd64,linux/arm64` (multi-arch builds need emulation for the foreign architecture) and pushed to `${DARK_FACTORY_REGISTRY}/<image>:dev`. Helm gets `image.harness.claudeCode.repository` and the pushed `digest`, so nodes do not keep a stale `dev` under `IfNotPresent`.
+
+| Variable | Required | Default | Effect |
+|---|---|---|---|
+| `DARK_FACTORY_IMAGE_BUILDER` | no | `buildah` if on `PATH`, else `docker` | `buildah` or `docker` (`buildx`) builds and pushes the harness images |
+| `DARK_FACTORY_BUILDAH_PUSH_ARGS` | no | empty | extra arguments for `buildah manifest push` (for example `--tls-verify=false` for a local registry) |
+| `DARK_FACTORY_SKIP_HARNESS_IMAGES` | no | `0` | `1` skips building and pushing the harness images; Helm then uses the `dev` tag of `values-dev.yaml` |
+| `DARK_FACTORY_PUSH_ONLY` | no | `0` | `1` pushes all images and skips `helm upgrade` |
+

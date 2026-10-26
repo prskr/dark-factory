@@ -47,6 +47,9 @@ pub struct RunSandboxSpec {
     pub project_key: ProjectKey,
     pub persona_id: PersonaId,
     pub image: String,
+    /// Harness whose image the sandbox mounts read-only at `/opt/harness/<harness>`; `None` when
+    /// the project image brings its own adapter.
+    pub harness: Option<String>,
     pub volume_name: String,
     pub labels: BTreeMap<String, String>,
 }

@@ -10,6 +10,7 @@
 | **Run** | One execution of an agent on a task inside one sandbox. A task has 1..n runs, strictly sequential. A run ends when the agent finishes, asks a question or requests approval, hits a limit, or fails. |
 | **Sandbox** | An agent-sandbox `Sandbox` (one pod) hosting exactly one run. Always cold-started; no warm pools. |
 | **Runtime** | The Rust agent binary, mounted into the sandbox via an image volume. |
+| **Harness image** | Image volume with the harness (adapter, Node.js, CLI) mounted at `/opt/harness/<harness>`; the project image needs no Node.js. |
 | **Harness** | What drives the model: an external agent via ACP (e.g. Claude Code) or the runtime's built-in loop (full-harness mode). |
 | **Workspace** | The task's Git working tree and caches on the PVC. |
 
@@ -82,7 +83,7 @@ The control plane's authorization decision is always: *sandbox identity → boun
 Paths and `HOME` stay identical across runs so absolute symlinks (e.g. Bazel convenience symlinks into the output base) remain valid.
 
 ### 5.3 Sandbox creation
-- The control plane creates a `Sandbox` per run with: the project's image, the runtime image volume at `/opt/factory`, the csi-driver certificate volume, the task PVC at `/data`, a tmpfs at `/run/factory`, the configured runtime class (Kata in the homelab), resources, and run/persona labels for network policy selection.
+- The control plane creates a `Sandbox` per run with: the project's image, the runtime image volume at `/opt/factory`, the image volume of the run's harness at `/opt/harness/<harness>` (unless the project sets an adapter command, ADR-0022), the csi-driver certificate volume, the task PVC at `/data`, a tmpfs at `/run/factory`, the configured runtime class (Kata in the homelab), resources, and run/persona labels for network policy selection.
 - Network wiring (details in [`egress.md`](egress.md) §5): `HTTP(S)_PROXY` with the gateway's ClusterIP, `NO_PROXY` and `hostAliases` for cluster targets, the control plane endpoint as an IP — no DNS needed. A generated `NetworkPolicy` (or `CiliumNetworkPolicy`) owned by the Sandbox is created alongside.
 - Entrypoint: `/opt/factory/factory-agent run`. The project image only needs git, a shell and glibc (for the Claude adapter).
 - No warm pools: every run cold-starts. Throughput comes from concurrent tasks, not start-up time.
@@ -444,7 +445,6 @@ Configuration from the base branch can be ahead of or behind the code on an olde
 - Divergence policy: agent rebases automatically vs human decides.
 - Separate UIDs for runtime and harness to protect `/data/runtime` and `.git/config` within the sandbox.
 - Keep-alive window length for `AwaitingInput` (responsiveness vs resource use).
-- How the harness (Node + Claude ACP adapter) gets into project images beyond iteration 1: baked in, or a second image volume.
 - Forgejo token scoping and expiry options for the v1 credential helper.
 - Tasks starting from existing branches (ADR-0025): prepare/finalize with a non-`factory/task/` branch.
 - [gitoxide](https://github.com/GitoxideLabs/gitoxide) instead of the Git CLI for the runtime's own operations (prepare, push, WIP snapshot): no hooks or config-triggered programs by construction, typed errors. Blocked as of 2026-10 by missing push and partial-clone (promisor) support; revisit when both exist. Until then a mixed setup would put two Git implementations on one repository, and the runtime would have to read whatever format the agent's `git` writes (index versions, extensions, reftable).

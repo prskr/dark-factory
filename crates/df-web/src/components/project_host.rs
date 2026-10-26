@@ -135,6 +135,7 @@ pub(crate) fn test_project(repo: &str, issue: Option<&str>, credential: bool) ->
         issue_tracker_url: issue.map(Into::into),
         image: String::new(),
         base_branch: "main".into(),
+        adapter_command: Vec::new(),
         forge_credential_id: credential.then(uuid::Uuid::nil),
         has_tasks: false,
     }

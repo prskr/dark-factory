@@ -106,7 +106,6 @@ Original options considered:
 - Agent memory phase 3: selecting relevant memories by embeddings or by a small selection model on a local provider (ADR-0040). LSP support comes after memory.
 - Chat context management for long-running employee chats: compaction strategy — candidate for the plugin API (F3).
 - Full permission catalogue: more permissions will appear over time, especially instance-management operations (CRUD on agents, skills, tools, routines, projects).
-- Harness delivery beyond iteration 1: baked into project images (iteration 1) vs a second image volume once a second project or harness appears.
 - Webhook routing details beyond the rules in ADR-0015 (e.g. CI events when no task waits for CI).
 - Further agent-run questions (divergence policy, UID separation, keep-alive window) are tracked in `design/agent-run.md` §17.
 

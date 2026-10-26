@@ -30,6 +30,9 @@ data:
       bufferSize: {{ .Values.gateway.bufferSize }}
       blockedCidrs: {{ .Values.gateway.blockedCidrs | toJson }}
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
+    harness:
+      claudeCode:
+        image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}
     {{- if .Values.oidc.publicUrl }}
     auth:
       issuerUrl: {{ .Values.oidc.issuerUrl | quote }}

@@ -9,6 +9,8 @@ Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031)
 - Private CA behind a `ClusterIssuer` (or reference to an existing `ClusterIssuer`) and mTLS `Certificate`s for control plane and gateway; sandbox pods request their client certificates from the same issuer
 - Instance namespace `NetworkPolicy` objects (`design/deployment.md` §5)
 
+The chart requires Kubernetes 1.36 or newer (`kubeVersion`): the runtime and the harness are delivered as image volumes.
+
 ## Values Reference
 
 Every key in `values.yaml` is documented below:
@@ -26,7 +28,10 @@ Every key in `values.yaml` is documented below:
 | `image.runtime.repository` | `string` | `"ghcr.io/prskr/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image that sandboxes mount (control plane config `sandbox.runtimeImage`). |
 | `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
-| `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. |
+| `image.harness.claudeCode.repository` | `string` | `"ghcr.io/prskr/dark-factory/claude-harness"` | OCI repository of the Claude Code harness image (adapter, Node.js, CLI) that sandboxes mount at `/opt/harness/claude-code`. Rendered as `harness.claudeCode.image`. |
+| `image.harness.claudeCode.tag` | `string` | `"0.95.0"` | Tag of the harness image when `digest` is empty (the adapter version); empty falls back to the chart `appVersion`. |
+| `image.harness.claudeCode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.claudeCode.tag`. |
+| `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. Create its project with the adapter command `/opt/harness/bin/fake-acp-agent`, so that no harness image is mounted. |
 | `image.testProject.tag` | `string` | `"0.1.0"` | Tag used for the test project image when `digest` is empty. |
 | `image.testProject.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.testProject.tag`. |
 | `database.host` | `string` | `"postgres.default.svc"` | PostgreSQL server hostname. |
@@ -75,7 +80,6 @@ Every key in `values.yaml` is documented below:
 | `sandboxNamespace.issuerGroup` | `string` | `"cert-manager.io"` | API group of that issuer. |
 | `sandboxNamespace.certificateDuration` | `string` | `"6h"` | Lifetime of sandbox client certificates. |
 | `sandboxNamespace.certificateRenewBefore` | `string` | `"2h"` | Renewal window of sandbox client certificates. |
-| `sandboxNamespace.runtimeDelivery` | `string` | `"imageVolume"` | `imageVolume` or `initContainer`. |
 | `sandboxNamespace.clusterDomain` | `string` | `"cluster.local"` | Cluster DNS domain used for Service FQDN host aliases. |
 | `sandboxNamespace.controlPlaneIp` | `string` | `""` | Static control plane ClusterIP; empty resolves the Service at startup. |
 | `sandboxNamespace.gatewayIp` | `string` | `""` | Static gateway ClusterIP; empty resolves the Service at startup. |

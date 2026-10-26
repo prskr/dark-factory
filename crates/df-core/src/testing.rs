@@ -535,6 +535,7 @@ mod tests {
             project_key: task_key.project().clone(),
             persona_id: PersonaId::new(),
             image: "harbor.example.test/df/project:latest".into(),
+            harness: None,
             volume_name: vol_spec.volume_name.clone(),
             labels: BTreeMap::new(),
         };

@@ -247,17 +247,6 @@ impl GatewayConfig {
     }
 }
 
-/// Delivery mechanism for the factory agent runtime binaries into the sandbox.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuntimeDelivery {
-    /// OCI image volume mounted at `/opt/factory` (read-only).
-    #[default]
-    ImageVolume,
-    /// Init container copying binaries into an `emptyDir` at `/opt/factory`.
-    InitContainer,
-}
-
 /// Namespaces in which sandboxes may be granted egress to cluster Services. Mirrors the chart's
 /// `clusterTargets` value and therefore the RBAC the control plane has: it watches Services and
 /// EndpointSlices exactly there.
@@ -305,7 +294,6 @@ pub struct SandboxProvisioningConfig {
     pub certificate_duration: String,
     pub certificate_renew_before: String,
     pub runtime_image: String,
-    pub runtime_delivery: RuntimeDelivery,
     pub cluster_domain: String,
     /// `RUST_LOG` directive of the sandbox runtime. Passed on as is; an invalid value makes the
     /// runtime fall back to `info`.
@@ -356,7 +344,6 @@ impl Default for SandboxProvisioningConfig {
             certificate_duration: "6h".to_string(),
             certificate_renew_before: "2h".to_string(),
             runtime_image: "ghcr.io/prskr/dark-factory/runtime:0.1.0".to_string(),
-            runtime_delivery: RuntimeDelivery::default(),
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
         }
@@ -416,6 +403,9 @@ impl Default for CommitIdentityConfig {
     }
 }
 
+/// Name of the Claude Code harness (persona `harness` value, key of the harness image map).
+pub const CLAUDE_CODE_HARNESS: &str = "claude-code";
+
 /// Instance-wide harness defaults; persona fields override them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -424,10 +414,28 @@ pub struct HarnessConfig {
     pub claude_code: ClaudeCodeConfig,
 }
 
+impl HarnessConfig {
+    /// Harness name to image, handed to the sandbox provider. A blank image counts as not
+    /// configured and is left out.
+    pub fn images(&self) -> BTreeMap<String, String> {
+        [(CLAUDE_CODE_HARNESS, &self.claude_code.image)]
+            .into_iter()
+            .filter(|(_, image)| !image.trim().is_empty())
+            .map(|(name, image)| (name.to_string(), image.trim().to_string()))
+            .collect()
+    }
+}
+
 /// Defaults for the `claude-code` harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaudeCodeConfig {
+    /// Image holding the harness (adapter, Node.js, CLI); the control plane mounts it read-only
+    /// at `/opt/harness/claude-code` in the sandbox of every run whose project has no adapter
+    /// command of its own.
+    #[serde(default = "default_claude_code_image")]
+    pub image: String,
+    /// Command that starts the adapter, unless the project sets its own.
     #[serde(default = "default_adapter_command")]
     pub adapter_command: Vec<String>,
     /// Non-secret environment, e.g. `DISABLE_AUTOUPDATER=1`.
@@ -441,6 +449,7 @@ pub struct ClaudeCodeConfig {
 impl Default for ClaudeCodeConfig {
     fn default() -> Self {
         Self {
+            image: default_claude_code_image(),
             adapter_command: default_adapter_command(),
             env: BTreeMap::new(),
             settings_json: String::new(),
@@ -527,8 +536,13 @@ fn default_commit_email() -> String {
     "dark-factory@localhost".to_string()
 }
 
+/// The adapter version is the tag of the harness image (`deploy/images/claude-harness`).
+fn default_claude_code_image() -> String {
+    "ghcr.io/prskr/dark-factory/claude-harness:0.95.0".to_string()
+}
+
 fn default_adapter_command() -> Vec<String> {
-    vec!["/opt/harness/bin/claude-agent-acp".to_string()]
+    vec!["/opt/harness/claude-code/bin/claude-agent-acp".to_string()]
 }
 
 fn default_plugin_call_timeout() -> u64 {
@@ -699,7 +713,6 @@ sandbox:
         assert_eq!(p.runtime_class_name, None);
         assert_eq!(p.pvc_size, "20Gi");
         assert_eq!(p.issuer_kind, "ClusterIssuer");
-        assert_eq!(p.runtime_delivery, RuntimeDelivery::ImageVolume);
         assert_eq!(section.endpoints, SandboxEndpointsConfig::default());
         assert_eq!(
             section.provisioning,
@@ -708,6 +721,35 @@ sandbox:
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn harness_images_come_from_the_parsed_instance_config() {
+        let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
+                    harness:\n  claudeCode:\n    image: registry.example/harness:1\n";
+        let cfg = InstanceConfig::from_yaml_str(yaml).unwrap();
+        assert_eq!(
+            cfg.harness.images(),
+            BTreeMap::from([(
+                CLAUDE_CODE_HARNESS.to_string(),
+                "registry.example/harness:1".to_string()
+            )])
+        );
+    }
+
+    #[test]
+    fn blank_harness_image_counts_as_not_configured() {
+        let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
+                    harness:\n  claudeCode:\n    image: \"  \"\n";
+        let cfg = InstanceConfig::from_yaml_str(yaml).unwrap();
+        assert!(cfg.harness.images().is_empty());
+    }
+
+    #[test]
+    fn removed_runtime_delivery_key_is_ignored() {
+        let section: SandboxSectionConfig =
+            serde_saphyr::from_str("namespace: sb\nruntimeDelivery: initContainer").unwrap();
+        assert_eq!(section.provisioning.namespace, "sb");
     }
 
     #[test]
@@ -821,7 +863,11 @@ database:
         assert_eq!(cfg.runs.cancel_grace_seconds, 300);
         assert_eq!(
             cfg.harness.claude_code.adapter_command,
-            ["/opt/harness/bin/claude-agent-acp"]
+            ["/opt/harness/claude-code/bin/claude-agent-acp"]
+        );
+        assert_eq!(
+            cfg.harness.claude_code.image,
+            "ghcr.io/prskr/dark-factory/claude-harness:0.95.0"
         );
 
         let custom = format!(
@@ -835,6 +881,7 @@ runs:
   maxWallClockSeconds: 60
 harness:
   claudeCode:
+    image: registry.example/harness:1
     env:
       DISABLE_AUTOUPDATER: "1"
 "#
@@ -845,6 +892,7 @@ harness:
         assert_eq!(cfg.runs.max_wall_clock_seconds, 60);
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.harness.claude_code.env["DISABLE_AUTOUPDATER"], "1");
+        assert_eq!(cfg.harness.claude_code.image, "registry.example/harness:1");
     }
 
     #[test]

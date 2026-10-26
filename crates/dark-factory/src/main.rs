@@ -380,6 +380,7 @@ impl SandboxBackend for KubernetesBackend {
                 proxy_port: cfg.gateway.proxy_port,
             },
         )
+        .with_harness_images(cfg.harness.images())
         .with_log_format(log_format);
 
         let secrets: Arc<dyn df_core::SecretStore> = Arc::new(K8sSecretStore::new(

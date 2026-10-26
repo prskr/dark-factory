@@ -12,6 +12,11 @@ image:
     repository: ghcr.io/prskr/dark-factory/runtime
     tag: 'dev'
     digest: ''
+  harness:
+    claudeCode:
+      repository: ghcr.io/prskr/dark-factory/claude-harness
+      tag: 'dev'
+      digest: ''
   testProject:
     repository: ghcr.io/prskr/dark-factory/test-project
     tag: 'dev'

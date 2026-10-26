@@ -12,8 +12,9 @@ pub mod testing;
 pub mod title;
 
 pub use config::{
-    AuthConfig, ClusterTargetsConfig, ConfigError, DatabaseConfig, InstanceConfig, PluginConfig,
-    RuntimeDelivery, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+    AuthConfig, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
+    InstanceConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
+    SandboxSectionConfig,
 };
 pub use domain::{
     ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus,

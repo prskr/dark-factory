@@ -3,12 +3,11 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-57.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-60.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
 - Origin of TD-28 to TD-36: code review of `iter1-sandbox-provisioning` (`df-k8s`, 2026-10-21). The `TD-n (Rn-Nm)` headings give the IDs used in that review.
-- Origin of TD-37: planning of `iter2-plugin-distribution` (2026-10-22), which found that the init-container runtime delivery of `iter1-sandbox-provisioning` (ADR-0030) cannot work with the `scratch` runtime image.
 - Origin of TD-41: external review of the `run-network-policy` spec (2026-10-22).
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
@@ -19,6 +18,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-52: code review of `agent-session-logging` (`factory-agent`, `dark-factory`, `df-k8s`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-55: code review of `otel-metrics-and-tracing` (`factory-agent`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-56: code review of `network-management-ui-polish` (`df-web`, 2026-10-25). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-57 to TD-58 (both resolved the same day): code review of `harness-images` (`df-k8s`, `df-agent-channel`, `deploy/images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-59: dev cluster verification of `harness-images` (2026-10-26), task 7.4 carried over from `iter1-egress-gateway`.
 
 ## Summary
 
@@ -54,13 +55,12 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-28 | medium | `df-k8s` provider | A transient resolution error at provision time leaves the run without the target's host alias |
 | TD-29 | low   | `df-k8s` provider | A named target port without a ready endpoint skips the target until endpoints appear |
 | TD-30 | low   | `df-db`, `df-k8s` | Nothing publishes `egress_policy`; DB changes reach policies only through the 30 s resync |
-| TD-31 | medium | `df-k8s` events | Runtime image-volume pull failures produce no `Gone` event |
+| TD-31 | medium | `df-k8s` events | Image-volume pull failures (runtime and harness) produce no `Gone` event |
 | TD-32 | low   | `df-k8s` events | Watcher and resolver state is lost across a control-plane restart or leader change |
 | TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions |
 | TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
 | TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
 | TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
-| TD-37 | medium | `df-k8s` render | `runtimeDelivery: initContainer` runs `sh` in the `scratch` runtime image |
 | TD-38 | low    | `df-plugins` forge client | Every `ForgeClient` method repeats resolve → retry → run → error mapping |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
@@ -77,6 +77,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-52 | medium | `factory-agent` logging | Tool call `input` is logged at INFO and can carry credentials the agent typed |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
 | TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings |
+| TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway |
 
 ## Entries
 
@@ -333,11 +334,11 @@ The reconcile loop listens for `EgressPolicy`, but nothing sends it: there is no
 
 **Fix:** Send the notification when allowlist entries change. This belongs to `iter1-egress-gateway` (the allowlist writer); delete this entry there.
 
-### TD-31 (R5-N5). Runtime image-volume pull failure produces no `Gone`
+### TD-31 (R5-N5). Image-volume pull failure produces no `Gone`
 
 `crates/df-k8s/src/provider.rs` (`map_pod_event`)
 
-With `runtimeDelivery: imageVolume`, a runtime image that cannot be pulled keeps the pod in `ContainerCreating`. The failure is not in the container or init-container statuses, so no `Gone` event is emitted. The run waits until the connect timeout (10 min). The init-container delivery is handled.
+A runtime or harness image (the two image volumes of a sandbox) that cannot be pulled keeps the pod in `ContainerCreating`. The failure is not in the container statuses, so no `Gone` event is emitted. The run waits until the connect timeout (10 min).
 
 **Fix:** Watch the pod's Events (reason `Failed`/`ErrImagePull` for the image volume), or treat a pod that stays in `ContainerCreating` beyond a limit as `Gone` with a reason.
 
@@ -380,14 +381,6 @@ The chart always sets the issuer name, so deployments are not affected. Running 
 `live_config()` (`crates/df-k8s/src/test_support.rs`) delivers `alpine:latest` as the runtime image, which has no `/opt/factory/factory-agent`, so the container cannot start. Only `test_reconciliation_live_cluster` overrides it with `runtime:dev`, and it checks the policy only. None of the live tests asserts `Running` or a `Started` event. The pod-start path is only covered by unit tests with a seeded store.
 
 **Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
-
-### TD-37. Init-container runtime delivery needs a shell the runtime image lacks
-
-`crates/df-k8s/src/render.rs` (`install-runtime` init container), `deploy/BUILD.bazel` (`runtime_manifest`)
-
-With `sandboxNamespace.runtimeDelivery: initContainer`, the init container runs `sh -c "cp -a /opt/factory/* /target/"` in the runtime image. That image has no base (`scratch`) and contains only `factory-agent`, `hooks-empty/` and `gitconfig` (`build-pipeline` spec), so there is no `sh` and no `cp`. The init container should fail to start, and the run should end `provisioning_failed` or by connect timeout. This is not tested on a cluster: the unit test only checks the rendered spec, and the live tests use `alpine` (TD-36). The paths also do not match: the runtime image puts its files at `/` (for example `/factory-agent`), not under `/opt/factory`.
-
-**Fix:** Let `factory-agent` copy itself and its support files (a subcommand such as `factory-agent install <dir>`), and run that as the init container command. This keeps the image `scratch`. Alternatively, drop the fallback and require image volumes (ADR-0030 already lists them). Add a live test for the chosen option.
 
 ### TD-38 (S7). Duplicated call pipeline in `PluginForgeClient`
 
@@ -542,6 +535,16 @@ Tests assert that strings appear in the rendered page. Nothing runs the script, 
 **Matters when:** the page script changes again, or htmx/Alpine are upgraded (P1 and P10 depend on internals of the vendored versions).
 
 **Fix:** A browser test (for example Playwright against `just serve-local` with `--demo-flows`) for the spec scenarios Pause, Resume, Drag, Keyboard, Reset, Remembered width and Open/close details; run it in CI.
+
+### TD-59. SNI mismatch not checked on a cluster
+
+`crates/df-gateway/src/proxy.rs` (`sni-mismatch`)
+
+The gateway closes a CONNECT tunnel whose ClientHello names another host than the allowed CONNECT target and logs it as `sni-mismatch`. Unit tests in `crates/df-gateway/src/proxy/tests.rs` cover it, but the check against the deployed gateway (`harness-images` task 7.4: `openssl s_client -proxy <gateway>:3128 -connect <allowlisted host>:443 -servername <other-name>` from a sandbox) was not done: a run ends before a manual request can be sent from its sandbox.
+
+**Matters when:** the gateway, its network policy or the sandbox proxy setup changes, or before the egress controls are relied on for isolation.
+
+**Fix:** Run the check from a sandbox that stays up (for example a fake-acp-agent mode that waits, or a debug pod with the sandbox labels in the sandbox namespace); verify the tunnel is closed before the destination is contacted and the event is logged as `sni-mismatch`. Then delete this entry.
 
 ## Accepted decisions
 

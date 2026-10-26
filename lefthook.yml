@@ -41,9 +41,17 @@ pre-commit:
       glob: ['Cargo.toml', '*/Cargo.toml', '*/*/Cargo.toml']
       run: build/with_tools.sh cargo xtask outdated --since HEAD
 
+    image-versions:
+      glob: ['deploy/images/**', 'crates/df-core/src/config.rs', 'deploy/helm/**', 'crates/df-k8s/README.md', 'crates/df-agent-channel/docs/configuration.md']
+      run: deploy/images/check_versions.sh
+
     helm-lint:
       glob: 'deploy/helm/**'
       run: build/with_tools.sh helm lint deploy/helm/dark-factory
+
+    helm-kube-version:
+      glob: 'deploy/helm/**'
+      run: build/with_tools.sh deploy/helm/check_kube_version.sh
 
     helm-unittest:
       glob: 'deploy/helm/**'

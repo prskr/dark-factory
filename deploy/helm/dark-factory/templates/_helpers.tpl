@@ -81,6 +81,18 @@ Runtime image reference (supports digest or tag)
 {{- end }}
 
 {{/*
+Claude Code harness image reference (supports digest or tag)
+*/}}
+{{- define "dark-factory.harness.claudeCode.image" -}}
+{{- $img := .Values.image.harness.claudeCode -}}
+{{- if $img.digest }}
+{{- printf "%s@%s" $img.repository $img.digest }}
+{{- else }}
+{{- printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Test project image reference (supports digest or tag)
 */}}
 {{- define "dark-factory.testProject.image" -}}
@@ -175,7 +187,6 @@ sandbox:
   certificateDuration: {{ .Values.sandboxNamespace.certificateDuration | quote }}
   certificateRenewBefore: {{ .Values.sandboxNamespace.certificateRenewBefore | quote }}
   runtimeImage: {{ include "dark-factory.runtime.image" . | quote }}
-  runtimeDelivery: {{ .Values.sandboxNamespace.runtimeDelivery | quote }}
   clusterDomain: {{ .Values.sandboxNamespace.clusterDomain | quote }}
   controlPlaneServiceName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
   gatewayServiceName: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}

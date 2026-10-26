@@ -118,6 +118,21 @@ EOF
 cargo run -p dark-factory -- --config /tmp/dark-factory-dev/config.yaml migrate
 ```
 
+### Existing dev database after the harness-images change
+
+The initial migration `20261017000001_initial_schema.sql` was edited in place: `personas.adapter_command` is gone and `projects.adapter_command` is new. `sqlx` stores a checksum per applied migration, so `migrate` on an existing database fails naming `20261017000001`. Either reset the database (`docker compose down -v && docker compose up -d`) or change it once by hand (schema `dark_factory`; adjust it to `database.schema`):
+
+```bash
+sum="$(sha384sum crates/df-db/migrations/20261017000001_initial_schema.sql | cut -d' ' -f1)"
+docker compose exec -T postgres psql -U postgres dark_factory <<EOF
+ALTER TABLE dark_factory.personas DROP COLUMN adapter_command;
+ALTER TABLE dark_factory.projects ADD COLUMN adapter_command TEXT[] NOT NULL DEFAULT '{}'::TEXT[];
+UPDATE dark_factory._sqlx_migrations SET checksum = decode('$sum', 'hex') WHERE version = 20261017000001;
+EOF
+```
+
+The checksum is the SHA-384 of the migration file; run the `UPDATE` again after every further edit of that file. Set the adapter command on projects whose image brings its own adapter afterwards (project form, "Adapter command").
+
 ## 6. Running the Web UI Locally
 
 `just serve-local` runs the control plane against the compose services without a Kubernetes cluster:

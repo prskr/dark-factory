@@ -3,9 +3,9 @@
 //! Defaults live in [`df_core::config::SandboxProvisioningConfig`]; this struct is only built in code
 //! from that section and the runtime network parameters.
 
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-pub use df_core::RuntimeDelivery;
 use df_core::config::SandboxProvisioningConfig;
 use df_telemetry::logging::LogFormat;
 
@@ -43,6 +43,9 @@ pub struct ProvisioningConfig {
     pub gateway_ip: IpAddr,
     /// Port of the gateway egress proxy.
     pub gateway_proxy_port: u16,
+    /// Image per harness name (`claude-code`), mounted at `/opt/harness/<name>` in the sandbox of
+    /// a run whose project has no adapter command of its own.
+    pub harness_images: BTreeMap<String, String>,
     /// Log format the sandbox runtime is started with: the control plane's own.
     pub log_format: LogFormat,
 }
@@ -63,8 +66,15 @@ impl ProvisioningConfig {
             control_plane_tls_server_name: control_plane.tls_server_name,
             gateway_ip: gateway.ip,
             gateway_proxy_port: gateway.proxy_port,
+            harness_images: BTreeMap::new(),
             log_format: LogFormat::Text,
         }
+    }
+
+    /// Sets the image per harness name.
+    pub fn with_harness_images(mut self, harness_images: BTreeMap<String, String>) -> Self {
+        self.harness_images = harness_images;
+        self
     }
 
     /// Sets the log format passed to sandboxes (`DF_LOG_FORMAT`).

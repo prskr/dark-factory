@@ -1,0 +1,26 @@
+name: Build and check an image
+description: Builds deploy/images/<image> for linux/amd64 and runs its test.sh (openspec change harness-images, design D9/D10)
+inputs:
+  image:
+    description: Directory name below deploy/images
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - name: Build ${{ inputs.image }} (linux/amd64)
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: deploy/images/${{ inputs.image }}
+        platforms: linux/amd64
+        load: true
+        tags: ${{ inputs.image }}:ci
+        cache-from: type=gha,scope=${{ inputs.image }}
+        cache-to: type=gha,scope=${{ inputs.image }},mode=max
+
+    - name: Check ${{ inputs.image }}
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: deploy/images/"$IMAGE"/test.sh "$IMAGE":ci

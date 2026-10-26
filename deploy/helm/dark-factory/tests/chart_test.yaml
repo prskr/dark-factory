@@ -619,6 +619,36 @@ tests:
           pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
         documentIndex: 0
 
+  - it: renders the harness image from tag and repository
+    template: configmap.yaml
+    set:
+      image.harness.claudeCode.repository: registry.example.org/claude-harness
+      image.harness.claudeCode.tag: 0.95.0
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'harness:\n  claudeCode:\n    image: "registry.example.org/claude-harness:0.95.0"'
+        documentIndex: 0
+
+  - it: prefers image.harness.claudeCode.digest over the tag
+    template: configmap.yaml
+    set:
+      image.harness.claudeCode.repository: registry.example.org/claude-harness
+      image.harness.claudeCode.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'image: "registry.example.org/claude-harness@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+        documentIndex: 0
+
+  - it: has no runtime delivery setting
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeDelivery'
+        documentIndex: 0
+
   - it: rejects an unknown logging.format
     template: control-plane-deployment.yaml
     set:
