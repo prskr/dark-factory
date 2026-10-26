@@ -25,7 +25,7 @@ flowchart LR
 
 ## 1 — Thin vertical slice
 
-Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`, `transcript-view-polish`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
+Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`, `transcript-view-polish`, `iter1-keep-alive-and-review`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
 
 ## 1.1 — Operability
 
@@ -56,6 +56,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Branch rewrites, fan-out and merge triggers (ADR-0033).**
 - **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
+- **Monitors:** a task-scoped wake-up set by the agent (factory tool) or a human, for example to poll a third-party system without webhooks. A due monitor queues a system prompt (reason `monitor.wake`) through the same path as messages and routines. A wake-up due within `runs.keepAliveSeconds` extends the control plane's idle deadline (`iter1-keep-alive-and-review`), so the sandbox stays up; a later one lets the run end and starts a new run when due.
 - **Tasks starting from existing branches** and PR modes other than "create draft PR" (ADR-0025).
 - **Anthropic pass-through in the gateway:** removes the subscription token from sandboxes (ADR-0010 accepted risk). Same shape as the Git proxy: pod-IP identity, bearer swap, streaming. Depends on the `ANTHROPIC_BASE_URL` result of the iteration-1 Claude spike.
 
