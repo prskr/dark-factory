@@ -506,10 +506,18 @@ async fn the_rule_link_of_an_event_highlights_its_rule_on_the_rules_page() {
 
 /// The content of the `<hx-partial>` for `target` in a message; `None` if the message has none.
 fn part<'a>(body: &'a str, target: &str) -> Option<&'a str> {
-    let open = format!("<hx-partial hx-target=\"{target}\"");
-    let at = body.find(&open)?;
-    let content = &body[at + body[at..].find('>')? + 1..];
-    Some(&content[..content.find("</hx-partial>")?])
+    inner(
+        body,
+        &format!("<hx-partial hx-target=\"{target}\""),
+        "</hx-partial>",
+    )
+}
+
+/// The text between the end of the first tag that starts with `open` and the next `end`.
+fn inner<'a>(html: &'a str, open: &str, end: &str) -> Option<&'a str> {
+    let at = html.find(open)?;
+    let content = &html[at + html[at..].find('>')? + 1..];
+    Some(&content[..content.find(end)?])
 }
 
 /// A viewer without project hosts.
@@ -1695,4 +1703,73 @@ async fn the_rules_page_shows_project_hosts_before_wildcards_and_brands() {
     assert_eq!(icon_of("git.example.internal"), "forge-forgejo");
     assert_eq!(icon_of("*.git.example.internal"), "globe");
     assert_eq!(icon_of("pypi.org"), "Py");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backlog in the served page
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_page_as_served_shows_the_backlog_the_stream_sends_first() {
+    let events = vec![
+        denied("statsig.anthropic.com", "DF", 1_700_000_001),
+        allowed("api.anthropic.com", "DF", 1_700_000_002),
+        denied("statsig.anthropic.com", "DF", 1_700_000_003),
+    ];
+    let app = app_with_egress(events).await;
+    let cookie = app.login().await;
+    let page = text(app.get("/egress/log", &cookie).await).await;
+    let frame = SseReader::new(app.get("/egress/log/events", &cookie).await)
+        .next()
+        .await;
+
+    let rows = part(&frame.data, "#flows tbody").unwrap();
+    assert_eq!(rows.matches("<tr").count(), 3, "{rows}");
+    assert_eq!(
+        inner(&page, "<tbody data-limit", "</tbody>").expect("element in page"),
+        rows
+    );
+    assert!(page.contains(part(&frame.data, "#graph").unwrap()));
+    assert_eq!(
+        inner(&page, "<span id=\"event-count\"", "</span>").expect("element in page"),
+        part(&frame.data, "#event-count").unwrap()
+    );
+    for (id, target) in [
+        ("count-all", "#count-all"),
+        ("count-blocked", "#count-blocked"),
+        ("count-allowed", "#count-allowed"),
+    ] {
+        assert_eq!(
+            inner(&page, &format!("<span id=\"{id}\""), "</span>").expect("element in page"),
+            part(&frame.data, target).unwrap(),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        inner(&page, "<div id=\"flows-empty\"", "</div>").expect("element in page"),
+        ""
+    );
+    assert!(!page.contains("No network traffic yet"));
+}
+
+#[tokio::test]
+async fn a_page_without_events_says_there_is_no_traffic() {
+    let app = app_with_egress(vec![]).await;
+    let cookie = app.login().await;
+    let page = text(app.get("/egress/log", &cookie).await).await;
+    assert!(page.contains("No network traffic yet"), "{page}");
+}
+
+#[tokio::test]
+async fn the_page_applies_its_filters_to_the_rows_but_not_to_the_graph() {
+    let events = vec![denied("bad.com", "DF", 1), allowed("good.com", "WEB", 2)];
+    let app = app_with_egress(events).await;
+    let cookie = app.login().await;
+    let page = text(app.get("/egress/log?task=DF-1", &cookie).await).await;
+    let rows = inner(&page, "<tbody data-limit", "</tbody>").expect("element in page");
+    assert!(
+        rows.contains("bad.com") && !rows.contains("good.com"),
+        "{rows}"
+    );
+    assert!(page.contains(">good.com<"));
 }

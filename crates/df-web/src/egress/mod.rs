@@ -19,6 +19,9 @@ mod tests;
 pub trait FlowSource: Send + Sync {
     /// A viewer's stream: recent events, then an event with `backlog_end` set, then live ones.
     /// Dropping it ends the viewer.
+    ///
+    /// Implementations MUST send `backlog_end` within a short bound (the gateway relay's
+    /// `BACKLOG_WAIT`): `GET /egress/log` waits for it before it responds.
     fn subscribe(&self) -> BoxStream<'static, FlowEvent>;
 }
 

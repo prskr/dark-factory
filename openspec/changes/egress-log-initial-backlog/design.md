@@ -35,11 +35,15 @@ See `proposal.md`. Current state:
 
 The page waits for `backlog_end` like the SSE handler. The relay already bounds that wait (2 s); the demo source and test sources end their backlog immediately.
 
+### D4. The relay keeps its session for a grace period
+
+The page reads the backlog and drops its stream; the event stream subscribes right after. Without a grace period the relay would close its `Tail` streams at the first drop and start a new session (with a new wait for the pods' backlog, up to 2 s) for the event stream. `Relay` therefore keeps the session alive for `SESSION_GRACE` (5 s) after the last viewer left, through a linger task it owns (replaced when the next viewer leaves, aborted when the relay drops). A subscribe within the window upgrades the weak reference and reuses the warm session.
+
 ## Risks / Trade-offs
 
-- [A slow gateway pod delays the page response by up to 2 s] → The same delay applies today before the first rows appear; it only moves from the stream to the response.
+- [A slow gateway pod delays the page response by up to 2 s] → The same delay applies today before the first rows appear; it only moves from the stream to the response. Filter changes (`hx-get` of `/egress/log` with `hx-select="#traffic"`) reload the page and wait for the backlog by the same bound.
 - [Events between the page's backlog and the stream's backlog] → The stream's first message replaces rows, graph and counts, so the page ends in the stream's state.
-- [One more `Tail` per gateway pod per page load] → It ends with `backlog_end`; viewers already open one per connection and per reconnect.
+- [One more `Tail` per gateway pod per page load] → None when the event stream follows within the grace period (D4): both use the same session. The streams to the pods stay open up to 5 s longer after the last viewer.
 
 ## Migration Plan
 

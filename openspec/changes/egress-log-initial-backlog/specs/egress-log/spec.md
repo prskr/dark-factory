@@ -16,3 +16,18 @@ The desktop-only network traffic page (navigation label "Network traffic") SHALL
 #### Scenario: Stream connects after load
 - **WHEN** the event stream connects after the page has rendered the buffered events
 - **THEN** the table shows each flow once, and graph and counts match the stream's backlog
+
+### Requirement: Relay across gateway pods
+For each viewer, a control plane replica SHALL open `Tail` to every gateway pod, merge buffered events by time, interleave live events, and stream them to the browser via SSE; streams SHALL exist only while viewers are connected, plus a short grace period (5 s) after the last viewer left, and SHALL follow gateway pods appearing and disappearing.
+
+#### Scenario: Two gateway pods
+- **WHEN** runs connect through two different gateway pods
+- **THEN** the viewer sees events from both in one time-ordered stream
+
+#### Scenario: Last viewer leaves
+- **WHEN** the last viewer on a replica closes the page
+- **THEN** that replica closes its `Tail` streams after the grace period (5 s)
+
+#### Scenario: Stream follows page load
+- **WHEN** the event stream subscribes within the grace period after the page read the backlog
+- **THEN** it reuses the open `Tail` streams and does not wait for the backlog again

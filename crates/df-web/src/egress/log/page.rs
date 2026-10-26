@@ -1,14 +1,14 @@
 //! The markup of `/egress/log`: header, filter bar, the split view and the Alpine state that
 //! drives pause, divider and details panel.
 
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 
 use super::details;
 use super::filter::{ADVANCED_FIELDS, Filter, ROW_LIMITS, VerdictFilter};
-use super::graph::{self, DEFAULT_WIDTH as DEFAULT_GRAPH_WIDTH, MIN_WIDTH};
-use super::viewer::{Counts, empty_state, event_count};
+use super::graph::{DEFAULT_WIDTH as DEFAULT_GRAPH_WIDTH, MIN_WIDTH};
+use super::viewer::{Backlog, Counts, empty_state, event_count};
 use crate::components::forms::INPUT_CLASS;
-use crate::components::{ButtonKind, Icon, ProjectHosts, action_class, icon, link_button};
+use crate::components::{ButtonKind, Icon, action_class, icon, link_button};
 
 /// The controls of the *Advanced* row: like a form input, but as wide as their content, so a
 /// label and its control stay on one line.
@@ -166,14 +166,19 @@ fn state(advanced: usize, dirty: bool) -> String {
     )
 }
 
-/// The page; `personas` (id, name) are the choices of the persona filter.
-pub(super) fn page_body(filter: &Filter, personas: &[(String, String)]) -> Markup {
+/// The page; `personas` (id, name) are the choices of the persona filter, `backlog` is what the
+/// stream's first message will show.
+pub(super) fn page_body(
+    filter: &Filter,
+    personas: &[(String, String)],
+    backlog: &Backlog,
+) -> Markup {
     let events = format!("/egress/log/events{}", filter.query());
     html! {
         div x-data=(state(filter.advanced_count(), !filter.is_empty())) ":class"="dragging && 'select-none'" {
             (header())
-            (filter_bar(filter, personas))
-            (traffic(&events, filter))
+            (filter_bar(filter, personas, &backlog.counts))
+            (traffic(&events, filter, backlog))
             (details::panel())
         }
     }
@@ -198,19 +203,19 @@ fn header() -> Markup {
     }
 }
 
-fn segment(value: VerdictFilter, label: &str, selected: VerdictFilter) -> Markup {
+fn segment(value: VerdictFilter, label: &str, selected: VerdictFilter, count: usize) -> Markup {
     let id = format!("count-{}", value.param());
     html! {
         label class="relative" {
             input type="radio" name="verdict" value=(value.param()) checked[value == selected] class="peer sr-only";
             span class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 text-sm font-medium text-muted peer-checked:bg-accent-soft peer-checked:text-accent-text peer-focus-visible:outline-2 lg:min-h-9" {
-                (label) " " span id=(id) class="font-mono text-xs" { "0" }
+                (label) " " span id=(id) class="font-mono text-xs" { (count) }
             }
         }
     }
 }
 
-fn filter_bar(filter: &Filter, personas: &[(String, String)]) -> Markup {
+fn filter_bar(filter: &Filter, personas: &[(String, String)], counts: &Counts) -> Markup {
     let selected = filter.verdict_filter();
     let advanced = filter.advanced_count();
     let open = advanced > 0;
@@ -221,7 +226,7 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)]) -> Markup {
         form id="filters" method="get" action="/egress/log" class="mb-4 flex flex-col items-end gap-2"
             "x-on:input"="sync($el)" "x-on:change"="sync($el)"
             hx-get="/egress/log" hx-trigger="input changed delay:300ms, change" hx-target="#traffic" hx-select="#traffic"
-            hx-swap="outerHTML" hx-push-url="true" {
+            hx-select-oob="#count-all,#count-blocked,#count-allowed" hx-swap="outerHTML" hx-push-url="true" {
             div id="filter-row" class="flex flex-wrap items-center justify-end gap-2" {
                 button type="button" "x-show"="dirty" x-cloak[filter.is_empty()] "x-on:click"="clearFilters($el.form)"
                     class={(action_class(ButtonKind::Ghost)) " whitespace-nowrap"} { "Clear filters" }
@@ -233,9 +238,9 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)]) -> Markup {
                 }
                 fieldset class="inline-flex overflow-hidden rounded-lg border border-line-strong bg-panel" {
                     legend class="sr-only" { "Verdict" }
-                    (segment(VerdictFilter::All, "All", selected))
-                    (segment(VerdictFilter::Blocked, "Blocked", selected))
-                    (segment(VerdictFilter::Allowed, "Allowed", selected))
+                    (segment(VerdictFilter::All, "All", selected, counts.all))
+                    (segment(VerdictFilter::Blocked, "Blocked", selected, counts.blocked))
+                    (segment(VerdictFilter::Allowed, "Allowed", selected, counts.allowed))
                 }
                 button type="button" "x-on:click"="advOpen = !advOpen" aria-controls="adv-filters"
                     aria-expanded=(if open { "true" } else { "false" }) ":aria-expanded"="advOpen"
@@ -272,8 +277,7 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)]) -> Markup {
     }
 }
 
-fn traffic(events_url: &str, filter: &Filter) -> Markup {
-    let counts = Counts::default();
+fn traffic(events_url: &str, filter: &Filter, backlog: &Backlog) -> Markup {
     html! {
         div id="traffic" {
             div id="sse-slot" data-url=(events_url) {
@@ -285,7 +289,7 @@ fn traffic(events_url: &str, filter: &Filter) -> Markup {
                 ":style"="{'--graph-w': w + 'px'}" "x-on:resize.window"="setW(want, false)" {
                 section aria-labelledby="connections-title" class="min-w-0 overflow-hidden rounded-xl border border-line bg-panel" {
                     h2 id="connections-title" class="border-b border-line px-5 py-3 text-xs font-medium uppercase tracking-wide text-faint" { "Connections" }
-                    div id="graph" { (graph::render(&graph::Model::default(), &ProjectHosts::default())) }
+                    div id="graph" { (PreEscaped(&backlog.graph)) }
                 }
                 div role="separator" aria-orientation="vertical" aria-label="Resize connections and events"
                     aria-valuenow=(DEFAULT_GRAPH_WIDTH) aria-valuemin=(MIN_GRAPH_PANEL) aria-valuemax=(DEFAULT_GRAPH_WIDTH + 240)
@@ -296,13 +300,14 @@ fn traffic(events_url: &str, filter: &Filter) -> Markup {
                     "x-on:keydown"="divKey($event)" "x-on:dblclick"=(format!("setW({DEFAULT_GRAPH_WIDTH})")) {
                     span aria-hidden="true" class="w-0.5 rounded-full bg-line group-hover:bg-line-strong group-focus-visible:bg-accent-text" {}
                 }
-                (events_panel(&counts, filter))
+                (events_panel(backlog, filter))
             }
         }
     }
 }
 
-fn events_panel(counts: &Counts, filter: &Filter) -> Markup {
+fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
+    let counts = &backlog.counts;
     let th = "px-3 py-3 font-medium";
     html! {
         section id="events" aria-labelledby="events-title" class="@container min-w-0 rounded-xl border border-line bg-panel" {
@@ -321,7 +326,7 @@ fn events_panel(counts: &Counts, filter: &Filter) -> Markup {
                             th scope="col" class="w-11 py-3 pr-4 pl-3" { span class="sr-only" { "Actions" } }
                         }
                     }
-                    tbody data-limit=(filter.row_limit()) {}
+                    tbody data-limit=(filter.row_limit()) { (backlog.rows) }
                 }
             }
             div id="flows-empty" { (empty_state(counts, filter)) }
@@ -339,5 +344,12 @@ mod tests {
         // The panel has a border on both sides; the graph gets what is left.
         let graph = MIN_GRAPH_PANEL - 2 * PANEL_BORDER;
         assert!(graph >= DEST_OFFSET + MIN_DEST_W, "graph is {graph} px");
+    }
+
+    #[test]
+    fn a_filter_change_also_swaps_the_segment_counts() {
+        // The counts depend on the filter but sit outside `#traffic`, the form's swap target.
+        let form = filter_bar(&Filter::default(), &[], &Counts::default()).into_string();
+        assert!(form.contains(r##"hx-select-oob="#count-all,#count-blocked,#count-allowed""##));
     }
 }

@@ -8,6 +8,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use df_proto::gateway::v1::FlowEvent;
 use futures::StreamExt;
 
 use crate::WebState;
@@ -32,13 +33,13 @@ pub(super) use viewer::Viewer;
 const CHUNK: usize = 200;
 
 pub async fn page(State(state): State<WebState>, Query(filter): Query<Filter>) -> Response {
-    if state.flows.is_none() {
+    let Some(flows) = &state.flows else {
         return crate::auth::error_page(
             StatusCode::SERVICE_UNAVAILABLE,
             "Network traffic unavailable",
             "The gateway pods cannot be discovered: set `gateway.headlessService`.",
         );
-    }
+    };
     // The persona filter is a convenience: without the list it offers only "All personas".
     let personas = df_db::catalog::list_personas(&state.pool)
         .await
@@ -47,12 +48,29 @@ pub async fn page(State(state): State<WebState>, Query(filter): Query<Filter>) -
         .into_iter()
         .map(|p| (p.id.to_string(), p.name))
         .collect::<Vec<_>>();
+    // The same backlog as the stream's first message; the stream replaces it once connected.
+    let mut viewer = Viewer::new(filter.clone(), super::project_hosts(&state).await);
+    let backlog = viewer.apply_backlog(&collect_backlog(&mut flows.subscribe()).await);
     layout(
         "Network traffic",
         Nav::EgressLog,
-        page::page_body(&filter, &personas),
+        page::page_body(&filter, &personas, &backlog),
     )
     .into_response()
+}
+
+/// The events of the source up to its `backlog_end` marker.
+async fn collect_backlog(
+    source: &mut (impl futures::Stream<Item = FlowEvent> + Unpin),
+) -> Vec<FlowEvent> {
+    let mut backlog = Vec::new();
+    while let Some(event) = source.next().await {
+        if event.backlog_end {
+            break;
+        }
+        backlog.push(event);
+    }
+    backlog
 }
 
 /// `GET /egress/log/events`: the viewer's rows, graph and counts as `<hx-partial>` messages.
@@ -71,13 +89,7 @@ pub async fn events(
     // The source sends the backlog, a `backlog_end` marker, then live events. The backlog is the
     // first message and replaces the table body: after a reconnect the page already shows rows.
     let stream = futures::stream::once(async move {
-        let mut backlog = Vec::new();
-        while let Some(event) = source.next().await {
-            if event.backlog_end {
-                break;
-            }
-            backlog.push(event);
-        }
+        let backlog = collect_backlog(&mut source).await;
         let mut viewer = Viewer::new(filter, projects);
         let first = viewer.backlog_message(&backlog);
         let live = source.ready_chunks(CHUNK).filter_map(move |batch| {
