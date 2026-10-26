@@ -23,7 +23,7 @@ See `proposal.md`. Current state:
 
 `log::page` subscribes, collects up to `backlog_end` and drops the stream. The SSE handler is not changed: its first message replaces rows, graph and counts again.
 
-*Alternative:* hand the stream's position to the SSE connection so it only sends live events. Rejected: the relay merges several gateway pods and has no shared cursor; a resume token would need one per pod, plus handling of buffer overruns between the two requests. Sending the backlog twice is a few hundred rows of HTML per page load.
+*Alternative:* hand the stream's position to the SSE connection so it only sends live events (a per-pod cursor through the connect URL and `Last-Event-ID`). Rejected by [ADR-0042](../../../design/adr/0042-live-views-resume-only-from-an-authoritative-sequence.md): the gateway buffers have no authoritative sequence, so a cursor depends on per-pod ordering and clocks, fails silently, and the page would no longer correct itself on reconnect. Sending the backlog twice is a few hundred rows of HTML per page load.
 
 ### D2. One backlog state, two renderings
 
