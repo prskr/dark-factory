@@ -1,14 +1,5 @@
 {
   "mcpServers": {
-    "playwright": {
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@0.0.83",
-        "--browser",
-        "chromium"
-      ]
-    },
     "codegraph": {
       "type": "stdio",
       "command": "codegraph",
@@ -17,7 +8,7 @@
         "--mcp"
       ]
     },
-    "playwright-container": {
+    "playwright": {
       "type": "http",
       "url": "http://localhost:8931/mcp"
     }
