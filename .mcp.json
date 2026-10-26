@@ -1,11 +1,12 @@
 {
   "mcpServers": {
-    "obscura": {
+    "playwright": {
       "type": "stdio",
-      "command": "obscura",
+      "command": "npx",
       "args": [
-        "mcp",
-        "--allow-private-network"
+        "@playwright/mcp@0.0.83",
+        "--browser",
+        "chromium"
       ]
     },
     "codegraph": {
@@ -15,6 +16,10 @@
         "serve",
         "--mcp"
       ]
+    },
+    "playwright-container": {
+      "type": "http",
+      "url": "http://localhost:8931/mcp"
     }
   }
 }
