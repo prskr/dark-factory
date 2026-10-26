@@ -43,3 +43,5 @@ apm_modules/
 /.bazel_env
 bazel-remote-grpc.log
 execution_log.binpb.zst
+
+.playwright-mcp/
