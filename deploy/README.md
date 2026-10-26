@@ -59,6 +59,8 @@ The sandbox pod mounts two read-only image volumes (Kubernetes 1.36 or newer, im
 
 Both images below are built from Dockerfiles (not Bazel), checked by `test.sh` and published by CI to `ghcr.io/prskr/dark-factory/`.
 
+Sandbox pods have no image pull secret (`image.pullSecrets` reaches only the control plane, gateway and migrate pods), so the runtime and harness images must be pullable anonymously. GHCR creates a new package as private: after its first push, set it to public (package settings, "Change visibility").
+
 | Image | Content | Tags |
 |---|---|---|
 | `claude-harness` | `scratch` image: static launcher `bin/claude-agent-acp` (and `bin/claude`), Node.js, `@agentclientprotocol/claude-agent-acp`, the Claude Code CLI and a bundled musl runtime | adapter version (`0.95.0`, `ARG CLAUDE_AGENT_ACP_VERSION`), `latest` |

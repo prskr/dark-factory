@@ -85,7 +85,7 @@ Paths and `HOME` stay identical across runs so absolute symlinks (e.g. Bazel con
 ### 5.3 Sandbox creation
 - The control plane creates a `Sandbox` per run with: the project's image, the runtime image volume at `/opt/factory`, the image volume of the run's harness at `/opt/harness/<harness>` (unless the project sets an adapter command, ADR-0022), the csi-driver certificate volume, the task PVC at `/data`, a tmpfs at `/run/factory`, the configured runtime class (Kata in the homelab), resources, and run/persona labels for network policy selection.
 - Network wiring (details in [`egress.md`](egress.md) §5): `HTTP(S)_PROXY` with the gateway's ClusterIP, `NO_PROXY` and `hostAliases` for cluster targets, the control plane endpoint as an IP — no DNS needed. A generated `NetworkPolicy` (or `CiliumNetworkPolicy`) owned by the Sandbox is created alongside.
-- Entrypoint: `/opt/factory/factory-agent run`. The project image only needs git, a shell and glibc (for the Claude adapter).
+- Entrypoint: `/opt/factory/factory-agent run`. The project image only needs git and a shell; the harness image brings the adapter and its runtime (glibc, Alpine and distroless project images work, ADR-0022).
 - No warm pools: every run cold-starts. Throughput comes from concurrent tasks, not start-up time.
 - After the run, the control plane deletes the Sandbox; the PVC stays. While a run waits for an answer to a blocking question, the sandbox stays alive for a short keep-alive window (§6.4).
 

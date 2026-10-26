@@ -29,7 +29,7 @@ Every key in `values.yaml` is documented below:
 | `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
 | `image.harness.claudeCode.repository` | `string` | `"ghcr.io/prskr/dark-factory/claude-harness"` | OCI repository of the Claude Code harness image (adapter, Node.js, CLI) that sandboxes mount at `/opt/harness/claude-code`. Rendered as `harness.claudeCode.image`. |
-| `image.harness.claudeCode.tag` | `string` | `"0.95.0"` | Tag of the harness image when `digest` is empty (the adapter version); empty falls back to the chart `appVersion`. |
+| `image.harness.claudeCode.tag` | `string` | `"0.95.0"` | Tag of the harness image when `digest` is empty (the adapter version). Required when `digest` is empty; the render fails otherwise. |
 | `image.harness.claudeCode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.claudeCode.tag`. |
 | `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. Create its project with the adapter command `/opt/harness/bin/fake-acp-agent`, so that no harness image is mounted. |
 | `image.testProject.tag` | `string` | `"0.1.0"` | Tag used for the test project image when `digest` is empty. |

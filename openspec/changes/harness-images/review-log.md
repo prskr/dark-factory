@@ -121,3 +121,19 @@ User decision: one extra fix round beyond the limit for S22, S23.
 
 - `cargo test -j 2 --workspace --no-fail-fast` with the Podman socket: 878 passed, 0 failed, 7 ignored (pre-existing `#[ignore]`: dev cluster with RBAC x2, live cluster x3, Forgejo instance, Claude token). fmt, clippy `-D warnings`, cargo-machete, helm-unittest 49/49 passed earlier the same day; later commits changed no Rust code.
 - Open: 5.1 (pull request run of `harness-images.yaml`), 5.2 (`workflow_dispatch` run of `release`).
+
+## PR #26 review (2026-10-26)
+
+- CI on 352f481: bazel, images (claude-harness, native amd64 handshake), images (claude-project), validate pass; chart-kube-version failed.
+
+| ID | Axis | Class | Where | Finding | Decision | Status |
+|----|------|-------|-------|---------|----------|--------|
+| CI1 | CI | Blocking | `.github/workflows/harness-images.yaml:68` | `bazel run //:bazel_env` exits 1 without direnv on runners after writing `.bazel_env/bin` | fix-now | fixed (fixup) |
+| CR4 | CodeRabbit | P1 | `deploy/helm/dark-factory/templates/_helpers.tpl:91` | Empty tag and digest fell back to `Chart.AppVersion`, never published for the harness | fix-now | fixed (fixup; chart test `requires a harness image tag or digest`) |
+| CR5 | CodeRabbit | P1 | `design/agent-run.md:88` | Stale "glibc (for the Claude adapter)" requirement | fix-now | fixed (fixup) |
+| CR1 | CodeRabbit | P1 | `release.yaml:99`, chart | Sandbox pods have no pull secret; harness package private | fix-now (doc) + user makes packages public | fixed (fixup, deploy/README.md) |
+| CR3 | CodeRabbit | P2 | `crates/df-web/src/config_pages.rs:204` | Adapter command split on whitespace (carried over from the persona field) | tech-debt | tech-debt (TD-60) |
+| CR6 | CodeRabbit | P3 | `docs/development.md:129` | Manual dev-DB statements drop persona adapter commands; pre-MVP, only DB already migrated | cosmetic | cosmetic |
+| CR2 | CodeRabbit | Rejected | `crates/df-k8s/src/render.rs:284` | Image-volume pull failure ends only at connect timeout | rejected | rejected (tracked as TD-31) |
+
+User decision: fix blocking + P1.
