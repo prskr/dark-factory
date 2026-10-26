@@ -18,3 +18,13 @@ services:
       - ./dev/dex.yaml:/etc/dex/config.yaml:ro,z
     ports:
       - "127.0.0.1:5556:5556"
+
+  # Headless Chromium behind the Playwright MCP for design comparisons (docs/design-workflow.md).
+  # Not started by `just db`: `podman compose --profile design up -d playwright`. Host networking so
+  # the browser reaches the web UI and Dex on 127.0.0.1 like a local browser; keep the version in
+  # sync with the `playwright` entry of .mcp.json.
+  playwright:
+    image: mcr.microsoft.com/playwright/mcp:v0.0.83
+    profiles: ["design"]
+    network_mode: host
+    command: ["--isolated", "--host", "127.0.0.1", "--port", "8931"]

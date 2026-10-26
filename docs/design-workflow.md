@@ -8,7 +8,7 @@ Draft. PenPot is the master of the UI design. Agents compare the running web UI 
 |---|---|---|
 | PenPot | Self-hosted, file "App Design" | Needs the PenPot tab open in a browser with the MCP plugin connected for the whole session. |
 | PenPot MCP | `penpot` in the user scope | The URL carries a personal user token, so the server is not in `.mcp.json`. Add it with `claude mcp add --scope user --transport http penpot <URL with token>`. |
-| Playwright MCP | `playwright` in `.mcp.json`, `--browser chromium` | Real Chromium with viewport control (`browser_resize`). |
+| Playwright MCP | `playwright-container` in `.mcp.json` (container from `compose.yml`) or `playwright` (local, pinned) | Real Chromium with viewport control (`browser_resize`). The container pins browser, libraries and MCP in one image. |
 | App | `just serve-local` | `http://127.0.0.1:8080`, login `admin@example.com` / `password`, scripted traffic with `--demo-flows` ([development.md](development.md), section 6). |
 
 ### Check the setup
@@ -20,7 +20,21 @@ Run these before the first comparison of a session:
 3. Playwright: `browser_resize` to 1440 x 1000, open `http://127.0.0.1:8080/` and check with `browser_evaluate` that `innerWidth` is 1440. An error about a missing browser means step 2 or 3 of the Fedora setup below is open.
 4. App: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/` returns `303` while `just serve-local` runs.
 
-### Playwright on Fedora
+### Playwright in a container
+
+`compose.yml` has a `playwright` service (`mcr.microsoft.com/playwright/mcp`, tag = pinned `@playwright/mcp` version). It is behind the `design` profile, so `just db` does not start it.
+
+```bash
+podman compose --profile design up -d playwright
+```
+
+- The MCP listens on `http://localhost:8931/mcp`. It only accepts the host name `localhost`; `127.0.0.1` answers `403`.
+- Host networking: the browser reaches the web UI and Dex on `127.0.0.1`, which the OIDC login and the cookie without `Secure` need.
+- Files the browser writes (screenshots, console logs) land inside the container. Screenshots are also returned inline.
+- Change the image tag and the `@playwright/mcp@<version>` pin of the local entry together.
+- Sandboxes usually have no container socket and an agent must not start a daemon. There the browser has to come from the sandbox image or a sidecar of the same pod.
+
+### Playwright on Fedora (local install)
 
 1. Install the browser libraries (the Playwright check prints Debian package names):
 
@@ -82,6 +96,7 @@ flowchart TD
 | Token bindings are lost when the page changes before PenPot applies them | Boards stay unbound | Wait on a page until the bindings are visible, then switch. |
 | `setParentIndex` counts from the end of the child list | Inserted components land in the wrong place | Compute the target order, then assign `length - 1 - position`. |
 | Library tokens cannot be applied in a consuming file | A separate library file does not share tokens | Keep components and tokens in one file. |
+| `@playwright/mcp@latest` depends on an alpha Playwright and wants its own Chromium revision | Browser start fails with a missing revision | Pin the version, or use the container. |
 | Obscura: fixed 1280 px viewport, no web fonts, no event stream, no graph lines | Comparisons were wrong | Replaced by Playwright. |
 
 ## Known deviations
