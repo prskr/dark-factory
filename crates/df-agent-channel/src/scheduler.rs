@@ -139,6 +139,10 @@ impl Scheduler {
             project_key,
             persona_id: rc.persona.id,
             image: rc.project.image.clone(),
+            harness: rc
+                .project
+                .mounts_harness()
+                .then(|| rc.persona.harness.clone()),
             volume_name,
             labels: BTreeMap::from([
                 ("dark-factory.io/run-id".to_string(), run_id.to_string()),
@@ -338,6 +342,7 @@ mod tests {
             .expect("a provision call");
         assert_eq!(spec.run_id, run.id);
         assert_eq!(spec.image, "registry.example.org/df/project:latest");
+        assert_eq!(spec.harness.as_deref(), Some("claude-code"));
         assert_eq!(spec.labels["dark-factory.io/task-key"], "DF-1");
     }
 
@@ -370,6 +375,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list_runs(&pool).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn project_with_an_adapter_command_gets_no_harness_mount() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        sqlx::query(
+            "UPDATE projects SET adapter_command = ARRAY['/opt/harness/bin/fake-acp-agent']",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+            .await
+            .unwrap();
+
+        let spec = env
+            .provider
+            .calls()
+            .into_iter()
+            .find_map(|c| match c {
+                SandboxCall::Provision(spec) => Some(spec),
+                _ => None,
+            })
+            .expect("a provision call");
+        assert_eq!(spec.harness, None);
+    }
+
+    #[tokio::test]
+    async fn missing_harness_image_ends_the_run_provisioning_failed_naming_the_harness() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        env.provider
+            .push_provision_result(Err(ProviderError::InvalidSpec(
+                "no image is configured for harness `claude-code`".into(),
+            )));
+        tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+            .await
+            .unwrap();
+
+        let run = only_run(&pool).await;
+        assert_eq!(run.outcome, Some(RunOutcome::ProvisioningFailed));
+        assert!(run.detail.contains("claude-code"), "{}", run.detail);
     }
 
     #[tokio::test]

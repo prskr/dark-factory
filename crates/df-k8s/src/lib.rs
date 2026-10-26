@@ -13,7 +13,7 @@ mod test_support;
 /// Timeout applied to every single Kubernetes API call made by this crate.
 pub const K8S_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-pub use config::{ControlPlaneEndpoint, GatewayEndpoint, ProvisioningConfig, RuntimeDelivery};
+pub use config::{ControlPlaneEndpoint, GatewayEndpoint, ProvisioningConfig};
 pub use crd::{
     Sandbox, SandboxOperatingMode, SandboxPodTemplate, SandboxPodTemplateMetadata,
     SandboxPodTemplateSpec, SandboxShutdownPolicy, SandboxSpec, SandboxStatus,

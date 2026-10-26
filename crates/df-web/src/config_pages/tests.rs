@@ -26,8 +26,59 @@ fn project_form(key: &str, repo: &str) -> String {
         ("issue_tracker_url", ""),
         ("image", "ghcr.io/example/sandbox:1"),
         ("base_branch", "main"),
+        ("adapter_command", ""),
         ("forge_credential_id", ""),
     ])
+}
+
+async fn stored_adapter_command(app: &TestApp) -> Vec<String> {
+    sqlx::query_scalar("SELECT adapter_command FROM projects WHERE key = 'DF'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn project_adapter_command_is_stored_shown_again_and_clearable() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    seed(&app.pool).await;
+    let body = |command: &str| {
+        form(&[
+            ("key", "DF"),
+            ("name", "Dark Factory"),
+            ("repo_url", REPO),
+            ("issue_tracker_url", ""),
+            ("image", "ghcr.io/example/sandbox:1"),
+            ("base_branch", "main"),
+            ("adapter_command", command),
+            ("forge_credential_id", ""),
+        ])
+    };
+
+    let response = app
+        .post(
+            "/projects/DF",
+            &body("/usr/local/bin/my-acp-adapter --flag"),
+            &cookie,
+        )
+        .await;
+    assert_saved(&response);
+    assert_eq!(
+        stored_adapter_command(&app).await,
+        ["/usr/local/bin/my-acp-adapter", "--flag"]
+    );
+    let edit = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    assert!(
+        edit.contains("value=\"/usr/local/bin/my-acp-adapter --flag\""),
+        "{edit}"
+    );
+    assert!(edit.contains("Adapter command (optional)"));
+    assert!(edit.contains("Leave empty to use the instance"));
+
+    let response = app.post("/projects/DF", &body(""), &cookie).await;
+    assert_saved(&response);
+    assert!(stored_adapter_command(&app).await.is_empty());
 }
 
 #[tokio::test]
@@ -277,25 +328,21 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
     let body = form(&[
         ("name", "Torvalds"),
         ("system_prompt", "old prompt"),
-        ("adapter_command", "claude-code-acp --flag"),
         ("model", "opus"),
         ("harness_credential_id", ""),
     ]);
     let response = app.post("/personas", &body, &cookie).await;
     assert_saved(&response);
-    let (id, command): (uuid::Uuid, Vec<String>) =
-        sqlx::query_as("SELECT id, adapter_command FROM personas WHERE name = 'Torvalds'")
-            .fetch_one(&app.pool)
-            .await
-            .unwrap();
-    assert_eq!(command, ["claude-code-acp", "--flag"]);
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE name = 'Torvalds'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
     let new_task_page = text(app.get("/tasks/compose", &cookie).await).await;
     assert!(new_task_page.contains("Torvalds") && new_task_page.contains("Linus"));
 
     let edited = form(&[
         ("name", "Torvalds"),
         ("system_prompt", "new prompt"),
-        ("adapter_command", ""),
         ("model", ""),
         ("harness_credential_id", ""),
     ]);
@@ -769,7 +816,6 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_credential() {
             "system_prompt",
             "Be Linus.\nReview carefully.\nShip small changes.\nNever skip tests.",
         ),
-        ("adapter_command", ""),
         ("model", "opus"),
         ("harness_credential_id", &credential.to_string()),
     ]);
@@ -777,7 +823,6 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_credential() {
     let plain = form(&[
         ("name", "Ada"),
         ("system_prompt", "Be Ada."),
-        ("adapter_command", ""),
         ("model", ""),
         ("harness_credential_id", ""),
     ]);
@@ -872,7 +917,6 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
     let persona = form(&[
         ("name", "Ada"),
         ("system_prompt", "x"),
-        ("adapter_command", ""),
         ("model", ""),
         ("harness_credential_id", ""),
     ]);
@@ -995,12 +1039,7 @@ async fn the_persona_form_pairs_harness_and_model() {
     let cookie = app.login().await;
     let html = text(app.get_htmx("/personas/new", &cookie).await).await;
     assert!(html.contains("md:grid-cols-2"));
-    for full in [
-        "name",
-        "system_prompt",
-        "adapter_command",
-        "harness_credential_id",
-    ] {
+    for full in ["name", "system_prompt", "harness_credential_id"] {
         assert!(
             html.contains(&format!(
                 "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{full}\""
@@ -1013,7 +1052,10 @@ async fn the_persona_form_pairs_harness_and_model() {
         assert!(html.contains(&format!("for=\"{half}\"")));
     }
     assert!(html.find("for=\"harness\"").unwrap() < html.find("for=\"model\"").unwrap());
-    assert!(html.find("for=\"model\"").unwrap() < html.find("for=\"adapter_command\"").unwrap());
+    assert!(
+        !html.contains("adapter_command"),
+        "persona form has no adapter command"
+    );
 }
 
 #[tokio::test]
@@ -1024,7 +1066,6 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
     let persona = form(&[
         ("name", "Ada"),
         ("system_prompt", "x"),
-        ("adapter_command", ""),
         ("model", ""),
         ("harness_credential_id", ""),
     ]);

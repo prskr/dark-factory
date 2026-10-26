@@ -1,0 +1,69 @@
+name: Harness images
+
+# Builds the harness image and the reference project image for amd64 and runs their structure
+# checks (openspec change harness-images, design D9/D10). The release workflow publishes them.
+on:
+  pull_request:
+    paths:
+      - "deploy/images/**"
+      - ".github/workflows/harness-images.yaml"
+      - ".github/actions/check-image/**"
+      - "crates/df-core/src/config.rs"
+      - "deploy/helm/**"
+      - "crates/df-k8s/README.md"
+      - "crates/df-agent-channel/docs/configuration.md"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/images/**"
+      - ".github/workflows/harness-images.yaml"
+      - ".github/actions/check-image/**"
+      - "crates/df-core/src/config.rs"
+      - "deploy/helm/**"
+      - "crates/df-k8s/README.md"
+      - "crates/df-agent-channel/docs/configuration.md"
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [claude-harness, claude-project]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Versions agree
+        run: deploy/images/check_versions.sh
+
+      - uses: ./.github/actions/check-image
+        with:
+          image: ${{ matrix.image }}
+
+  chart-kube-version:
+    runs-on: ubuntu-latest
+    env:
+      BAZEL_ARGS: >-
+        --config=cache --config=ci --config=linux-amd64-musl
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # the pinned helm of the repo (docs/development.md, "Pinned linters")
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          # as in ci.yaml: avoids registry rate limits on every run
+          repository-cache: true
+
+      - name: Chart requires Kubernetes 1.36
+        run: |
+          bazel run $BAZEL_ARGS //:bazel_env
+          build/with_tools.sh deploy/helm/check_kube_version.sh

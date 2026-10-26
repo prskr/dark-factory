@@ -3,7 +3,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::ProvisioningConfig;
-use crate::config::{ControlPlaneEndpoint, GatewayEndpoint, RuntimeDelivery};
+use crate::config::{ControlPlaneEndpoint, GatewayEndpoint};
 
 /// Configuration for the `#[ignore]` tests that run against the dev cluster.
 ///
@@ -25,7 +25,6 @@ pub(crate) fn live_config() -> ProvisioningConfig {
             certificate_duration: "6h".to_string(),
             certificate_renew_before: "2h".to_string(),
             runtime_image: "alpine:latest".to_string(),
-            runtime_delivery: RuntimeDelivery::ImageVolume,
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
         },

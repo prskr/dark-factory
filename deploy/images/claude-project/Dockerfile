@@ -1,10 +1,9 @@
 # syntax=docker/dockerfile:1
-# Reference Claude Code project image for Dark Factory sandboxes (ADR-0024 / design D4).
-# Bundles Debian Trixie (13), git, bash, Node.js 22 LTS, and pinned @zed-industries/claude-agent-acp.
+# Reference Claude Code project image for Dark Factory sandboxes (openspec change harness-images, design D8).
+# Debian Trixie (13) with git, bash, curl, CA certificates and the OpenSSH client, UID 1000 and /workspace.
+# It contains no Node.js and no adapter: the control plane mounts the harness image at /opt/harness/claude-code.
 
-FROM node:22-trixie-slim
-
-ARG CLAUDE_AGENT_ACP_VERSION=0.23.1
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
@@ -13,11 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g "@zed-industries/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
-    && npm cache clean --force \
-    && mkdir -p /opt/harness/bin /workspace \
-    && ln -sf /usr/local/bin/claude-agent-acp /opt/harness/bin/claude-agent-acp \
-    && chown -R node:node /workspace
+    && useradd --uid 1000 --create-home --shell /bin/bash dev \
+    && mkdir -p /workspace \
+    && chown 1000:1000 /workspace
 
 USER 1000:1000
 WORKDIR /workspace

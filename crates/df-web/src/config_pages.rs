@@ -30,7 +30,7 @@ use crate::layout::{Nav, layout};
 use crate::responses::{internal_error, invalid, not_found};
 
 /// Harness every persona uses in iteration 1.
-const HARNESS: &str = "claude-code";
+const HARNESS: &str = df_core::CLAUDE_CODE_HARNESS;
 
 /// The forms are fragments that open as a modal over their list; a plain browser request for one
 /// (no `HX-Request` header) goes to the list instead.
@@ -75,6 +75,7 @@ pub struct ProjectForm {
     issue_tracker_url: String,
     image: String,
     base_branch: String,
+    adapter_command: String,
     forge_credential_id: String,
 }
 
@@ -83,7 +84,6 @@ pub struct ProjectForm {
 pub struct PersonaForm {
     name: String,
     system_prompt: String,
-    adapter_command: String,
     model: String,
     harness_credential_id: String,
 }
@@ -198,6 +198,12 @@ fn validate_project(form: &ProjectForm, credentials: &[Uuid]) -> Result<ProjectI
         issue_tracker_url,
         image,
         base_branch,
+        // Empty means the instance's harness image and adapter.
+        adapter_command: form
+            .adapter_command
+            .split_whitespace()
+            .map(str::to_string)
+            .collect(),
         forge_credential_id,
     })
 }
@@ -221,12 +227,6 @@ fn validate_persona(form: &PersonaForm, credentials: &[Uuid]) -> Result<PersonaI
         name,
         system_prompt,
         harness: HARNESS.to_string(),
-        // Empty means the instance default (`harness.claudeCode.adapterCommand`).
-        adapter_command: form
-            .adapter_command
-            .split_whitespace()
-            .map(str::to_string)
-            .collect(),
         model: Some(form.model.trim().to_string()).filter(|m| !m.is_empty()),
         harness_credential_id,
     })
@@ -511,6 +511,7 @@ fn project_values(p: &ProjectRecord) -> ProjectForm {
         issue_tracker_url: p.issue_tracker_url.clone().unwrap_or_default(),
         image: p.image.clone(),
         base_branch: p.base_branch.clone(),
+        adapter_command: p.adapter_command.join(" "),
         forge_credential_id: p
             .forge_credential_id
             .map(|id| id.to_string())
@@ -630,6 +631,8 @@ fn project_form(
                 (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
                 (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
                     &values.forge_credential_id, Some("None"), errors))
+                (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
+                    Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
             }))
             (form_footer(submit))
         }
@@ -1027,7 +1030,6 @@ fn persona_values(p: &PersonaRecord) -> PersonaForm {
     PersonaForm {
         name: p.name.clone(),
         system_prompt: p.system_prompt.clone(),
-        adapter_command: p.adapter_command.join(" "),
         model: p.model.clone().unwrap_or_default(),
         harness_credential_id: p
             .harness_credential_id
@@ -1056,8 +1058,6 @@ fn persona_form(
                     }
                 }
                 (text_field("Model", "model", &values.model, errors, Some("Optional.")))
-                (full_row(text_field("Adapter command", "adapter_command", &values.adapter_command, errors,
-                    Some("Optional, space separated. Empty uses the instance default."))))
                 (full_row(select_field("Harness credential", "harness_credential_id", &credential_options(credentials),
                     &values.harness_credential_id, Some("None"), errors)))
             }))

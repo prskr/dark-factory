@@ -15,6 +15,14 @@ image:
     repository: ghcr.io/prskr/dark-factory/runtime
     tag: '0.1.0'
     digest: ''
+  # Harness images; the control plane mounts the image of a run's harness at /opt/harness/<harness>.
+  # The tag is the adapter version of deploy/images/claude-harness (keep it in step with the
+  # df-core default of harness.claudeCode.image).
+  harness:
+    claudeCode:
+      repository: ghcr.io/prskr/dark-factory/claude-harness
+      tag: '0.95.0'
+      digest: ''
   testProject:
     repository: ghcr.io/prskr/dark-factory/test-project
     tag: '0.1.0'
@@ -113,7 +121,6 @@ sandboxNamespace:
   issuerGroup: 'cert-manager.io'
   certificateDuration: '6h'
   certificateRenewBefore: '2h'
-  runtimeDelivery: 'imageVolume'
   clusterDomain: 'cluster.local'
   controlPlaneIp: ''
   gatewayIp: ''

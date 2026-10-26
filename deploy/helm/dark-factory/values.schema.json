@@ -25,7 +25,7 @@
     "instanceName": { "type": "string", "minLength": 1 },
     "image": {
       "type": "object",
-      "required": ["pullPolicy", "controlPlane", "runtime", "testProject"],
+      "required": ["pullPolicy", "controlPlane", "runtime", "harness", "testProject"],
       "properties": {
         "pullPolicy": {
           "type": "string",
@@ -43,6 +43,13 @@
         },
         "controlPlane": { "$ref": "#/$defs/imageRef" },
         "runtime": { "$ref": "#/$defs/imageRef" },
+        "harness": {
+          "type": "object",
+          "required": ["claudeCode"],
+          "properties": {
+            "claudeCode": { "$ref": "#/$defs/imageRef" }
+          }
+        },
         "testProject": { "$ref": "#/$defs/imageRef" }
       }
     },
@@ -160,7 +167,6 @@
         "issuerGroup": { "type": "string" },
         "certificateDuration": { "type": "string" },
         "certificateRenewBefore": { "type": "string" },
-        "runtimeDelivery": { "type": "string", "enum": ["imageVolume", "initContainer"] },
         "clusterDomain": { "type": "string" },
         "controlPlaneIp": { "type": "string" },
         "gatewayIp": { "type": "string" },

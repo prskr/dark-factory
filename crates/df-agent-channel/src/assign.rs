@@ -4,6 +4,7 @@
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
+use df_core::config::ClaudeCodeConfig;
 use df_core::{CredentialRef, CredentialRefId, PersonaId, Principal, ProjectId, TaskId};
 use df_db::{
     TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
@@ -38,7 +39,26 @@ pub struct ProjectInfo {
     pub repo_url: String,
     pub image: String,
     pub base_branch: String,
+    /// Command that starts the adapter in the project image; empty means the harness image.
+    pub adapter_command: Vec<String>,
     pub forge_credential: Option<CredentialRef>,
+}
+
+impl ProjectInfo {
+    /// The command that starts the adapter: the project's own, otherwise the harness default.
+    pub fn adapter_command(&self, harness: &ClaudeCodeConfig) -> Vec<String> {
+        if self.adapter_command.is_empty() {
+            harness.adapter_command.clone()
+        } else {
+            self.adapter_command.clone()
+        }
+    }
+
+    /// Whether the sandbox mounts the harness image; not when the project image brings its own
+    /// adapter.
+    pub fn mounts_harness(&self) -> bool {
+        self.adapter_command.is_empty()
+    }
 }
 
 /// Persona columns the channel needs.
@@ -47,7 +67,7 @@ pub struct PersonaInfo {
     pub id: PersonaId,
     pub name: String,
     pub system_prompt: String,
-    pub adapter_command: Vec<String>,
+    pub harness: String,
     pub model: Option<String>,
     pub harness_credential: Option<CredentialRef>,
 }
@@ -96,6 +116,7 @@ struct ProjectRecord {
     repo_url: String,
     image: String,
     base_branch: String,
+    adapter_command: Vec<String>,
     #[sqlx(flatten)]
     credential: CredentialColumns,
 }
@@ -104,7 +125,7 @@ struct ProjectRecord {
 struct PersonaRecord {
     name: String,
     system_prompt: String,
-    adapter_command: Vec<String>,
+    harness: String,
     model: Option<String>,
     #[sqlx(flatten)]
     credential: CredentialColumns,
@@ -117,7 +138,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         .ok_or_else(|| ChannelError::InvalidData(format!("task of run {} is missing", run.id)))?;
 
     let project: ProjectRecord = sqlx::query_as(
-        "SELECT p.key, p.repo_url, p.image, p.base_branch,
+        "SELECT p.key, p.repo_url, p.image, p.base_branch, p.adapter_command,
                 c.id AS credential_id, c.name AS credential_name, c.secret_name, c.secret_key
          FROM projects p LEFT JOIN credential_refs c ON c.id = p.forge_credential_id
          WHERE p.id = $1",
@@ -131,11 +152,12 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         repo_url: project.repo_url,
         image: project.image,
         base_branch: project.base_branch,
+        adapter_command: project.adapter_command,
         forge_credential: project.credential.into_ref(),
     };
 
     let persona: PersonaRecord = sqlx::query_as(
-        "SELECT p.name, p.system_prompt, p.adapter_command, p.model,
+        "SELECT p.name, p.system_prompt, p.harness, p.model,
                 c.id AS credential_id, c.name AS credential_name, c.secret_name, c.secret_key
          FROM personas p LEFT JOIN credential_refs c ON c.id = p.harness_credential_id
          WHERE p.id = $1",
@@ -147,7 +169,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         id: task.persona_id,
         name: persona.name,
         system_prompt: persona.system_prompt,
-        adapter_command: persona.adapter_command,
+        harness: persona.harness,
         model: persona.model,
         harness_credential: persona.credential.into_ref(),
     };
@@ -228,11 +250,7 @@ pub fn tool_descriptors() -> Vec<ToolDescriptor> {
 /// Builds `Assign` for the run; identical for every call for the same run.
 pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assign, ChannelError> {
     let config = &ctx.config;
-    let command = if rc.persona.adapter_command.is_empty() {
-        config.harness.claude_code.adapter_command.clone()
-    } else {
-        rc.persona.adapter_command.clone()
-    };
+    let command = rc.project.adapter_command(&config.harness.claude_code);
     Ok(Assign {
         run_id: rc.run.id.to_string(),
         task: Some(TaskRef {
@@ -463,6 +481,36 @@ mod tests {
     use crate::runs::get_run;
     use crate::testing::Env;
 
+    fn project(command: &[&str]) -> ProjectInfo {
+        ProjectInfo {
+            id: ProjectId::new(),
+            key: "DF".into(),
+            repo_url: "https://git.example.org/o/r.git".into(),
+            image: "img".into(),
+            base_branch: "main".into(),
+            adapter_command: command.iter().map(ToString::to_string).collect(),
+            forge_credential: None,
+        }
+    }
+
+    #[test]
+    fn default_adapter_command_comes_from_the_harness_and_the_image_is_mounted() {
+        let project = project(&[]);
+        let harness = ClaudeCodeConfig::default();
+        assert_eq!(project.adapter_command(&harness), harness.adapter_command);
+        assert!(project.mounts_harness());
+    }
+
+    #[test]
+    fn project_adapter_command_replaces_the_default_and_skips_the_mount() {
+        let project = project(&["/opt/harness/bin/fake-acp-agent"]);
+        assert_eq!(
+            project.adapter_command(&ClaudeCodeConfig::default()),
+            ["/opt/harness/bin/fake-acp-agent"]
+        );
+        assert!(!project.mounts_harness());
+    }
+
     #[test]
     fn embedded_tools_are_exactly_the_factory_tools() {
         let names: Vec<_> = tool_descriptors().into_iter().map(|t| t.name).collect();
@@ -539,7 +587,14 @@ mod tests {
         let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
             anyhow::bail!("expected ACP harness");
         };
-        assert_eq!(acp.command, ["/opt/harness/bin/claude-agent-acp"]);
+        assert_eq!(
+            acp.command,
+            ["/opt/harness/claude-code/bin/claude-agent-acp"]
+        );
+        assert_eq!(
+            acp.command,
+            env.ctx.config.harness.claude_code.adapter_command
+        );
         assert_eq!(
             assign
                 .budgets
@@ -549,6 +604,28 @@ mod tests {
                 .seconds,
             7200
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn assign_uses_the_project_adapter_command_when_set() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        sqlx::query(
+            "UPDATE projects SET adapter_command = ARRAY['/opt/harness/bin/fake-acp-agent']",
+        )
+        .execute(&pool)
+        .await?;
+        let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&pool, run_id).await?.expect("run");
+        let rc = load_run_context(&pool, run).await?;
+
+        let assign = build_assign(&env.ctx, &rc).await?;
+
+        let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
+            anyhow::bail!("expected ACP harness");
+        };
+        assert_eq!(acp.command, ["/opt/harness/bin/fake-acp-agent"]);
         Ok(())
     }
 

@@ -368,6 +368,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             issue_tracker_url: None,
             image: "img:latest".into(),
             base_branch: "main".into(),
+            adapter_command: vec![],
             forge_credential_id: None,
         },
     )
@@ -381,7 +382,6 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             name: "Linus".into(),
             system_prompt: "Be Linus.".into(),
             harness: "claude-code".into(),
-            adapter_command: vec![],
             model: None,
             harness_credential_id: None,
         },

@@ -36,6 +36,9 @@ pub struct ProjectInput {
     pub issue_tracker_url: Option<String>,
     pub image: String,
     pub base_branch: String,
+    /// Command that starts the adapter inside the project image; empty means the instance's
+    /// harness image and adapter are used.
+    pub adapter_command: Vec<String>,
     pub forge_credential_id: Option<Uuid>,
 }
 
@@ -49,6 +52,7 @@ pub struct ProjectRecord {
     pub issue_tracker_url: Option<String>,
     pub image: String,
     pub base_branch: String,
+    pub adapter_command: Vec<String>,
     pub forge_credential_id: Option<Uuid>,
     /// Whether tasks exist.
     pub has_tasks: bool,
@@ -60,7 +64,6 @@ pub struct PersonaInput {
     pub name: String,
     pub system_prompt: String,
     pub harness: String,
-    pub adapter_command: Vec<String>,
     pub model: Option<String>,
     pub harness_credential_id: Option<Uuid>,
 }
@@ -72,7 +75,6 @@ pub struct PersonaRecord {
     pub name: String,
     pub system_prompt: String,
     pub harness: String,
-    pub adapter_command: Vec<String>,
     pub model: Option<String>,
     pub harness_credential_id: Option<Uuid>,
 }
@@ -101,7 +103,7 @@ macro_rules! select_project {
     ($tail:literal) => {
         concat!(
             "SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch, \
-             p.forge_credential_id, \
+             p.adapter_command, p.forge_credential_id, \
              EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS has_tasks \
              FROM projects p ",
             $tail
@@ -113,7 +115,7 @@ macro_rules! select_project {
 macro_rules! select_persona {
     ($tail:literal) => {
         concat!(
-            "SELECT id, name, system_prompt, harness, adapter_command, model, \
+            "SELECT id, name, system_prompt, harness, model, \
              harness_credential_id FROM personas ",
             $tail
         )
@@ -262,13 +264,15 @@ pub async fn save_project(
     let row_id: Uuid = match &before {
         Some(b) => sqlx::query_scalar(
             "UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5, \
-             image = $6, base_branch = $7, forge_credential_id = $8, updated_at = now() \
+             image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9, \
+             updated_at = now() \
              WHERE id = $1 RETURNING id",
         )
         .bind(b.id),
         None => sqlx::query_scalar(
             "INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image, base_branch, \
-             forge_credential_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+             forge_credential_id, adapter_command) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             RETURNING id",
         )
         .bind(Uuid::now_v7()),
     }
@@ -279,6 +283,7 @@ pub async fn save_project(
     .bind(&input.image)
     .bind(&input.base_branch)
     .bind(input.forge_credential_id)
+    .bind(&input.adapter_command)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| conflict_or(e, "a project with this key already exists"))?;
@@ -322,22 +327,21 @@ pub async fn save_persona(
     };
     let record: PersonaRecord = match &before {
         Some(b) => sqlx::query_as(
-            "UPDATE personas SET name = $2, system_prompt = $3, harness = $4, adapter_command = $5, \
-             model = $6, harness_credential_id = $7, updated_at = now() WHERE id = $1 \
-             RETURNING id, name, system_prompt, harness, adapter_command, model, harness_credential_id",
+            "UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5, \
+             harness_credential_id = $6, updated_at = now() WHERE id = $1 \
+             RETURNING id, name, system_prompt, harness, model, harness_credential_id",
         )
         .bind(b.id),
         None => sqlx::query_as(
-            "INSERT INTO personas (id, name, system_prompt, harness, adapter_command, model, \
-             harness_credential_id) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             RETURNING id, name, system_prompt, harness, adapter_command, model, harness_credential_id",
+            "INSERT INTO personas (id, name, system_prompt, harness, model, harness_credential_id) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             RETURNING id, name, system_prompt, harness, model, harness_credential_id",
         )
         .bind(Uuid::now_v7()),
     }
     .bind(&input.name)
     .bind(&input.system_prompt)
     .bind(&input.harness)
-    .bind(&input.adapter_command)
     .bind(&input.model)
     .bind(input.harness_credential_id)
     .fetch_one(&mut *tx)
@@ -348,7 +352,6 @@ pub async fn save_persona(
         name: b.name,
         system_prompt: b.system_prompt,
         harness: b.harness,
-        adapter_command: b.adapter_command,
         model: b.model,
         harness_credential_id: b.harness_credential_id,
     });
@@ -374,6 +377,7 @@ fn project_input(p: &ProjectRecord) -> ProjectInput {
         issue_tracker_url: p.issue_tracker_url.clone(),
         image: p.image.clone(),
         base_branch: p.base_branch.clone(),
+        adapter_command: p.adapter_command.clone(),
         forge_credential_id: p.forge_credential_id,
     }
 }
@@ -432,6 +436,7 @@ mod tests {
             issue_tracker_url: None,
             image: "img:latest".into(),
             base_branch: "main".into(),
+            adapter_command: Vec::new(),
             forge_credential_id: credential,
         }
     }
@@ -441,7 +446,6 @@ mod tests {
             name: "Linus".into(),
             system_prompt: prompt.into(),
             harness: "claude-code".into(),
-            adapter_command: vec!["claude-code-acp".into()],
             model: None,
             harness_credential_id: None,
         }
@@ -504,6 +508,37 @@ mod tests {
 
         let duplicate = save_persona(&pool, actor, None, &persona("x")).await;
         assert!(matches!(duplicate, Err(DbError::Conflict(_))));
+    }
+
+    #[tokio::test]
+    async fn project_adapter_command_round_trips() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+        assert!(p.adapter_command.is_empty());
+
+        let mut input = project("DF", None);
+        input.adapter_command = vec!["/opt/harness/bin/fake-acp-agent".into(), "--x".into()];
+        let p = save_project(&pool, actor, Some(p.id), &input)
+            .await
+            .unwrap();
+        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
+        assert_eq!(stored.adapter_command, input.adapter_command);
+        assert_eq!(p.adapter_command, input.adapter_command);
+
+        input.adapter_command.clear();
+        save_project(&pool, actor, Some(p.id), &input)
+            .await
+            .unwrap();
+        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
+        assert!(stored.adapter_command.is_empty());
     }
 
     #[tokio::test]

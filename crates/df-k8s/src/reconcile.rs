@@ -597,7 +597,6 @@ mod tests {
         let config = ProvisioningConfig {
             sandbox: df_core::SandboxProvisioningConfig {
                 runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
-                runtime_delivery: Default::default(),
                 ..live.sandbox.clone()
             },
             ..live
@@ -629,6 +628,7 @@ mod tests {
             project_key: "DF".parse().unwrap(),
             persona_id: df_core::PersonaId::new(),
             image: "alpine:latest".to_string(),
+            harness: None,
             volume_name: task.volume_name.clone(),
             labels: BTreeMap::new(),
         };
@@ -719,6 +719,7 @@ mod tests {
             project_key: "DF".parse().unwrap(),
             persona_id: df_core::PersonaId::new(),
             image: "alpine:latest".to_string(),
+            harness: None,
             volume_name: task.volume_name.clone(),
             labels: BTreeMap::new(),
         };

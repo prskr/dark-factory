@@ -8,7 +8,7 @@ Spikes 1.1-1.4 were run on the development cluster (Kata, cert-manager CSI drive
 
 | Spike | Result |
 |---|---|
-| 1.1 Image volumes | An `image` volume mounted read-only at `/opt/factory` works with containerd and Kata. `runtimeDelivery: imageVolume` is the default, `initContainer` the fallback. |
+| 1.1 Image volumes | An `image` volume mounted read-only at `/opt/factory` works with containerd and Kata. Image volumes are the only delivery of the runtime and the harness; the cluster must run Kubernetes 1.36 or newer (image volumes GA). |
 | 1.2 cert-manager CSI driver | `csi.cert-manager.io` volumes mount at `/run/factory/tls` (`tls.crt`, `tls.key`, `ca.crt`) and substitute `${POD_NAMESPACE}`, `${POD_NAME}`, `${POD_UID}` into the URI SAN. |
 | 1.3 `Sandbox` pod template | The pinned `agents.x-k8s.io/v1beta1` controller passes `runtimeClassName`, `automountServiceAccountToken: false`, `hostAliases`, the restricted `securityContext`, `image`/`csi`/PVC/`emptyDir` volumes to the pod. |
 | 1.4 NetworkPolicy | Policies are enforced and pod source IPs are preserved. |
@@ -33,7 +33,6 @@ An empty string for `storageClass` or `runtimeClassName` counts as unset.
 | `sandbox.certificateDuration` | no | `6h` | Lifetime of sandbox client certificates. |
 | `sandbox.certificateRenewBefore` | no | `2h` | Renewal window of sandbox client certificates. |
 | `sandbox.runtimeImage` | no | `ghcr.io/prskr/dark-factory/runtime:0.1.0` | Runtime image delivered to `/opt/factory`. |
-| `sandbox.runtimeDelivery` | no | `imageVolume` | `imageVolume` or `initContainer`. |
 | `sandbox.clusterDomain` | no | `cluster.local` | Cluster DNS domain for Service FQDN host aliases. |
 | `sandbox.logLevel` | no | `info` | `RUST_LOG` directive set in the sandbox runtime's environment. Passed on as is; the runtime falls back to `info` (with a warning) for an invalid value. |
 | `sandbox.controlPlaneIp` | no | resolved | ClusterIP sandboxes use to reach the agent port. Unset: resolved from the control plane Service at startup. |
@@ -43,6 +42,12 @@ An empty string for `storageClass` or `runtimeClassName` counts as unset.
 | `sandbox.controlPlaneTlsServerName` | no (the chart sets it) | `<instanceName>-control-plane` | Server name sandboxes verify on the agent endpoint. It must be a DNS name of the control plane certificate. |
 | `clusterTargets.anyNamespace` | no | `false` | The control plane may read Services and EndpointSlices in every namespace. |
 | `clusterTargets.namespaces` | no | `[]` | Namespaces it may read when `anyNamespace` is `false`. |
+
+Harness image (not part of the `sandbox` table; `dark-factory` passes it on as `ProvisioningConfig.harness_images`):
+
+| Key | Required | Default | Effect |
+|-----|----------|---------|--------|
+| `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.95.0` | Image of the `claude-code` harness (adapter, Node.js, Claude Code CLI), mounted read-only at `/opt/harness/claude-code` (volume `harness-claude-code`) unless the run's project sets an adapter command. A blank value counts as not configured: a run that needs the image then fails provisioning with a message naming the harness. |
 
 The sandbox also gets `DF_LOG_FORMAT`, set to the control plane's own log format (`text` or `json`), next to `RUST_LOG` from `sandbox.logLevel`. See `docs/logging.md`.
 
@@ -58,7 +63,7 @@ The chart always sets the three name keys from the release's `fullname`; the fal
   - Provisioning fails only if the allowlist itself cannot be read (database error). One bad entry does not fail provisioning of other runs; the affected run starts without that target.
   - Rules resolve one after another (worst case two API calls of `K8S_API_TIMEOUT` per rule).
 - **Named `targetPort`.** Resolved through the EndpointSlices of the Service. EndpointSlice ports are named after the Service port's `name`, so that name is matched; ports of all matching slices are allowed (pods may use different numbers for the same name).
-- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container or init container (even if the pod never ran), a deleted Sandbox, or a pod / Sandbox that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known, and the scheduler does **not** resync active runs against the cluster: a run whose pod vanished while the control plane was down ends through the scheduler's connect timeout or wall-clock hard stop.
+- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container (even if the pod never ran), a deleted Sandbox, or a pod / Sandbox that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known, and the scheduler does **not** resync active runs against the cluster: a run whose pod vanished while the control plane was down ends through the scheduler's connect timeout or wall-clock hard stop.
 - **Timeouts.** Every Kubernetes API call made by this crate is bounded by `K8S_API_TIMEOUT` (5 s).
 - **Loops.** The reconcile loop ends when shutdown is requested, or when the shutdown or leader channel sender is gone. A closed notification channel only disables that trigger; the 30 s resync continues.
 

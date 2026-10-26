@@ -720,7 +720,6 @@ mod tests {
     ) -> Result<(ProjectId, PersonaId), DbError> {
         let project_id = ProjectId::new();
         let persona_id = PersonaId::new();
-        let empty_cmd: Vec<String> = Vec::new();
 
         sqlx::query(
             r#"
@@ -738,14 +737,13 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO personas (id, name, system_prompt, harness, adapter_command)
-            VALUES ($1, $2, $3, 'claude-code', $4)
+            INSERT INTO personas (id, name, system_prompt, harness)
+            VALUES ($1, $2, $3, 'claude-code')
             "#,
         )
         .bind(persona_id.as_uuid())
         .bind(persona_name)
         .bind("You are Linus, a careful software engineer.")
-        .bind(&empty_cmd)
         .execute(pool)
         .await?;
 

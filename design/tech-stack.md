@@ -90,8 +90,8 @@
 
 | Concern | Choice | Status | ADR |
 |---|---|---|---|
-| First harness | Claude Code via `@zed-industries/claude-agent-acp`, subscription auth (`CLAUDE_CODE_OAUTH_TOKEN`) | Decided | [0005](adr/0005-agent-runtime-stack.md), [0021](adr/0021-usage-and-cost-data.md) |
-| Delivery | Node + adapter baked into the project image (iteration 1); configurable adapter path | Decided | [0022](adr/0022-project-images-runtime-volume-no-warm-pools.md) |
+| First harness | Claude Code via `@agentclientprotocol/claude-agent-acp`, subscription auth (`CLAUDE_CODE_OAUTH_TOKEN`) | Decided | [0005](adr/0005-agent-runtime-stack.md), [0021](adr/0021-usage-and-cost-data.md) |
+| Delivery | Harness image volume per harness at `/opt/harness/<harness>`; a project with its own adapter command skips it | Decided | [0022](adr/0022-project-images-runtime-volume-no-warm-pools.md) |
 | Other ACP harnesses | Any ACP-compatible agent | Later | — |
 
 ## Integration plugins
@@ -123,7 +123,7 @@
 | Networking | Any CNI enforcing `NetworkPolicy`; Cilium optional (`CiliumNetworkPolicy`, FQDN rules, Hubble) — the homelab runs Cilium | Decided | [0029](adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Certificates | cert-manager + csi-driver, private CA Issuer | Decided | [0006](adr/0006-agent-dial-back-grpc-mtls.md) |
 | Workspace volumes | Longhorn StorageClass with one replica | Decided | [0009](adr/0009-agent-managed-workspaces-git-durable.md) |
-| Runtime delivery | Kubernetes image volumes (fallback: init container) | Decided | [0022](adr/0022-project-images-runtime-volume-no-warm-pools.md) |
+| Runtime and harness delivery | Kubernetes image volumes (1.36 or newer), no init-container fallback | Decided | [0022](adr/0022-project-images-runtime-volume-no-warm-pools.md) |
 | Identity provider | Keycloak (OIDC, `roles` claim mapper) | Decided | [0011](adr/0011-authentication-authorization-personas.md) |
 | Registry | Harbor (images, plugins, pull-through cache) | Decided | [0018](adr/0018-plugin-packaging-versioning-config.md), [0024](adr/0024-build-tooling-and-dev-loop.md) |
 | Forge / issue tracker | Forgejo | Decided | [0014](adr/0014-tasks-authoritative-issues-linked.md) |
