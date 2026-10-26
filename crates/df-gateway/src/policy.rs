@@ -82,6 +82,7 @@ impl HostRule {
 pub struct Sandbox {
     pub run_id: String,
     pub task_key: String,
+    pub run_number: u32,
     pub project_key: String,
     pub persona_id: String,
     pub hosts: Vec<HostRule>,
@@ -135,6 +136,7 @@ fn sandbox_from_entry(entry: SandboxEntry) -> Option<(IpAddr, Sandbox)> {
         Sandbox {
             run_id: entry.run_id,
             task_key: entry.task_key,
+            run_number: entry.run_number,
             project_key: entry.project_key,
             persona_id: entry.persona_id,
             hosts,
@@ -219,6 +221,7 @@ mod tests {
                 Sandbox {
                     run_id: "run-1".into(),
                     task_key: "DF-1".into(),
+                    run_number: 2,
                     project_key: "DF".into(),
                     persona_id: "p".into(),
                     hosts,
@@ -337,6 +340,22 @@ mod tests {
             ),
             Err(Denial::NotAllowlisted)
         );
+    }
+
+    #[test]
+    fn snapshot_conversion_carries_the_run_number() {
+        use df_proto::gateway::v1::Snapshot;
+        let policy = Policy::from_update(PolicyUpdate {
+            version: 1,
+            snapshot: Some(Snapshot {
+                sandboxes: vec![SandboxEntry {
+                    pod_ip: POD.into(),
+                    run_number: 2,
+                    ..Default::default()
+                }],
+            }),
+        });
+        assert_eq!(policy.sandbox(POD.parse().unwrap()).unwrap().run_number, 2);
     }
 
     #[test]

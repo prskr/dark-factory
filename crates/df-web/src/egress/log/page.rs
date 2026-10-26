@@ -17,8 +17,10 @@ const FILTER_CONTROL: &str = "min-h-11 rounded-lg border border-line-strong bg-p
 const DIVIDER_WIDTH: u32 = 16;
 /// The events table keeps at least this much.
 const MIN_TABLE_WIDTH: u32 = 520;
-/// Narrowest graph panel: the graph's own minimum plus the panel border.
-const MIN_GRAPH_PANEL: u32 = MIN_WIDTH + 1;
+/// Border of the graph panel in px, on each side.
+const PANEL_BORDER: u32 = 1;
+/// Narrowest graph panel: the graph's own minimum plus the panel border on both sides.
+const MIN_GRAPH_PANEL: u32 = MIN_WIDTH + 2 * PANEL_BORDER;
 /// Where the browser remembers the graph width.
 const WIDTH_KEY: &str = "df.traffic.graph-w";
 
@@ -324,5 +326,18 @@ fn events_panel(counts: &Counts, filter: &Filter) -> Markup {
             }
             div id="flows-empty" { (empty_state(counts, filter)) }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::egress::log::graph::{DEST_OFFSET, MIN_DEST_W};
+
+    #[test]
+    fn the_narrowest_panel_leaves_the_destinations_their_minimum_and_the_gutter_its_own() {
+        // The panel has a border on both sides; the graph gets what is left.
+        let graph = MIN_GRAPH_PANEL - 2 * PANEL_BORDER;
+        assert!(graph >= DEST_OFFSET + MIN_DEST_W, "graph is {graph} px");
     }
 }

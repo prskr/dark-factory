@@ -76,9 +76,23 @@ pub(super) fn sandbox_key(event: &FlowEvent) -> &str {
     }
 }
 
-/// First 8 characters of the run id, or the source address of an unknown source.
+/// `DF-7 #2`; the short run id or the source address if the event carries no run number.
 pub(super) fn sandbox_label(event: &FlowEvent) -> String {
-    sandbox_key(event).chars().take(8).collect()
+    if has_run_number(event) {
+        format!("{} #{}", event.task_key, event.run_number)
+    } else {
+        short_key(event)
+    }
+}
+
+/// The two lines of a graph node: `#2` over `DF-7`, or the short run id (source address) over
+/// the task note.
+pub(super) fn sandbox_lines(event: &FlowEvent) -> (String, String) {
+    if has_run_number(event) {
+        (format!("#{}", event.run_number), event.task_key.clone())
+    } else {
+        (short_key(event), task_label(event))
+    }
 }
 
 /// The task key, or a note for connections from an unknown source.
@@ -206,7 +220,9 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
             td class={"font-mono text-[13px] text-muted " (CELL) " " (edge) " @[680px]:border-l-0"} { (time) }
             td class=(CELL) {
                 span class="font-mono text-[13px]" { (sandbox_label(event)) }
-                " " span class="text-xs text-faint" { (task_label(event)) }
+                @if !has_run_number(event) {
+                    " " span class="text-xs text-faint" { (task_label(event)) }
+                }
             }
             td class=(CELL) {
                 span class="flex items-center gap-2" {
@@ -250,6 +266,17 @@ fn details_button(target: &str, time: &str, class: &str, label: Markup) -> Marku
     html! {
         button type="button" "x-on:click"="openDetails($el)" aria-label={"Request details for " (target) " at " (time)} class=(class) { (label) }
     }
+}
+
+/// Whether the event names its sandbox by task key and run number (`DF-7 #2`). Without a number
+/// (an older gateway) or a task key the sandbox is named by [`short_key`].
+fn has_run_number(event: &FlowEvent) -> bool {
+    event.run_number != 0 && !event.task_key.is_empty()
+}
+
+/// First 8 characters of the run id, or the source address of an unknown source.
+fn short_key(event: &FlowEvent) -> String {
+    sandbox_key(event).chars().take(8).collect()
 }
 
 #[cfg(test)]
@@ -300,6 +327,20 @@ mod tests {
         assert_eq!(
             Outcome::of(&event(Verdict::Denied, Phase::Opened)),
             Outcome::Blocked
+        );
+    }
+
+    #[test]
+    fn a_row_names_the_sandbox_by_task_key_and_run_number() {
+        let mut numbered = event(Verdict::Denied, Phase::Closed);
+        numbered.run_number = 2;
+        let html = row(&numbered).into_string();
+        assert!(html.contains(">DF-7 #2<"), "{html}");
+        assert!(!html.contains("a4c2e7f0"), "{html}");
+        assert!(
+            html.contains("\"sandbox\":\"DF-7 #2\"")
+                || html.contains("&quot;sandbox&quot;:&quot;DF-7 #2&quot;"),
+            "{html}"
         );
     }
 

@@ -23,6 +23,8 @@ pub fn assemble(version: u64, runs: &[ActiveRun], entries: &[HostEntry]) -> Poli
             pod_ip: run.pod_ip.clone(),
             run_id: run.run_id.to_string(),
             task_key: run.task_key.clone(),
+            // Never negative (CHECK number >= 1); 0 means unknown.
+            run_number: u32::try_from(run.run_number).unwrap_or(0),
             project_key: run.project_key.clone(),
             persona_id: run.persona_id.to_string(),
             hosts: entries
@@ -58,6 +60,7 @@ mod tests {
             run_id: Uuid::now_v7(),
             pod_ip: "10.0.0.1".into(),
             task_key: format!("{key}-1"),
+            run_number: 2,
             project_id: project,
             project_key: key.into(),
             persona_id: Uuid::now_v7(),
@@ -87,6 +90,7 @@ mod tests {
         );
         assert_eq!(update.version, 9);
         let sandboxes = update.snapshot.unwrap().sandboxes;
+        assert!(sandboxes.iter().all(|sandbox| sandbox.run_number == 2));
         let hosts = |sandbox: &SandboxEntry| -> Vec<(String, String)> {
             sandbox
                 .hosts

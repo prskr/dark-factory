@@ -8,6 +8,7 @@ See `proposal.md`. Current state:
 - `df_db::active_runs` gives the control plane the active runs: run id, pod IP, task key, project and persona. `crates/df-gateway/src/control/snapshot.rs` turns each into a `SandboxEntry`.
 - The gateway matches a connection's source IP against the registry and copies run id, task, project and persona into the `FlowEvent` (`crates/df-gateway/src/proxy.rs:605`).
 - `df-web` labels a sandbox with `sandbox_label`: the first 8 characters of the run id, or the source IP (`crates/df-web/src/egress/log/rows.rs:80`). `sandbox_key` (run id, or source IP) keys graph nodes, edges and rows.
+- `graph::render` lays out for a fixed 520 px (`layout(model, DEFAULT_WIDTH)`) with a fixed destination width (244 px), while the divider allows a 397 px panel; below 520 px the gutter shrinks under 60 px, below about 460 px nodes overlap.
 
 ## Goals / Non-Goals
 
@@ -41,6 +42,12 @@ The graph node shows the two parts on its two lines: `#2` in the mono first line
 ### D3. Protobuf compatibility
 
 The fields are additive. Old readers ignore them, and new readers see 0 from old writers, which D2 handles. Control plane and gateways can therefore be rolled out in any order.
+
+### D4. The destination width follows the panel in CSS
+
+The graph container is a size container (`container-type: inline-size`). The destination node width is `clamp(120px, 100cqw - 276px, 260px)` (276 = sandbox column 196 px + minimum gutter 60 px + right padding 20 px, the formula of `layout()`), shared by the destination nodes, the *Destinations* heading and the gutter SVG width. The panel minimum is the graph minimum (396 px) plus the panel border on both sides, 398 px; at that width the destination nodes are 120 px and the gutter 60 px.
+
+*Alternative:* raise the panel minimum to 521 px. Rejected: narrow windows clamp the panel to the minimum anyway, and the board member asked for narrower graphs to work.
 
 ## Risks / Trade-offs
 

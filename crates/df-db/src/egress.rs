@@ -90,6 +90,7 @@ pub struct ActiveRun {
     pub run_id: Uuid,
     pub pod_ip: String,
     pub task_key: String,
+    pub run_number: i64,
     pub project_id: Uuid,
     pub project_key: String,
     pub persona_id: Uuid,
@@ -118,7 +119,7 @@ pub async fn next_policy_version(pool: &PgPool) -> Result<u64, DbError> {
 pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
     Ok(sqlx::query_as!(
         ActiveRun,
-        r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.key AS task_key, p.id AS project_id,
+        r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.key AS task_key, r.number AS run_number, p.id AS project_id,
                   p.key AS project_key, t.persona_id
            FROM runs r
            JOIN tasks t ON t.id = r.task_id
@@ -646,6 +647,7 @@ mod tests {
             (runs[0].pod_ip.as_str(), runs[0].task_key.as_str()),
             ("10.1.0.7", "DF-1")
         );
+        assert_eq!(runs[0].run_number, 1);
         assert_eq!(runs[0].project_id, project);
 
         insert_rule(&pool, "instance", None, "http-host", "x", &[]).await;

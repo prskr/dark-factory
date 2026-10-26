@@ -17,6 +17,7 @@ A board member cannot get from `a4c2e7f0` to the run or its sandbox without quer
   - table and details panel: `DF-7 #1`.
 - The run UUID stays the internal key: the graph edges, the dimming and the row ids keep using it.
 - A connection from an unknown source still shows its source IP.
+- The graph keeps both node columns apart at every divider width: destination nodes narrow down to 120 px before the gutter shrinks under 60 px.
 - Both protobuf additions are new fields. An older gateway or viewer ignores them; an event without a number (number 0) falls back to the short run id.
 
 ## Capabilities
@@ -36,5 +37,6 @@ None.
 - `crates/df-db/src/egress.rs`: `active_runs` also selects `r.number`; regenerate `.sqlx/`.
 - `crates/df-gateway`: copy the number into the snapshot entry and into `Flow::start`.
 - `crates/df-web/src/egress/log/`: sandbox label in graph, rows and details.
+- `crates/df-web/src/egress/log/graph.rs`: destination width as a CSS `clamp()` on a size container; `docs/design-system.md` graph text.
 - `crates/dark-factory` demo flows: events carry run numbers.
 - Depends on `network-management-ui-polish`, whose egress-log requirements this change modifies. Archive that change first.

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.key AS task_key, p.id AS project_id,\n                  p.key AS project_key, t.persona_id\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state NOT IN ('succeeded', 'blocked', 'failed', 'cancelled')\n           ORDER BY r.started_at, r.id",
+  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.key AS task_key, r.number AS run_number, p.id AS project_id,\n                  p.key AS project_key, t.persona_id\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state NOT IN ('succeeded', 'blocked', 'failed', 'cancelled')\n           ORDER BY r.started_at, r.id",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "run_number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "project_id",
         "type_info": "Uuid",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "project_key",
         "type_info": "Text",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "persona_id",
         "type_info": "Uuid",
         "origin": {
@@ -79,8 +90,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "4c2c626a325cbf7abf8490d1647a504a60365f3b333e085583549233dcffe582"
+  "hash": "44c7ef39ec55cbe0bbc11bd445f7e0d1cb3c34519a58766d19f6ed8a103352ab"
 }
