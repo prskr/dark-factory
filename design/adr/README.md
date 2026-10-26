@@ -45,3 +45,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0039](0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
 | [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 5) |
 | [ADR-0041](0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3) |
+| [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
