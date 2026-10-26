@@ -25,7 +25,7 @@ flowchart LR
 
 ## 1 — Thin vertical slice
 
-Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
+Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`, `transcript-view-polish`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
 
 ## 1.1 — Operability
 
