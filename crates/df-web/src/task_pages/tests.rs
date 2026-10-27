@@ -212,12 +212,14 @@ async fn detail_lists_runs_with_outcome_retry_time_and_token_counts_per_model() 
         card.contains("<time datetime=\"") && card.contains("class=\"ml-auto"),
         "{card}"
     );
-    let table = &html[html
-        .find("<th scope=\"col\" class=\"py-0.5 text-left font-medium\">model")
-        .unwrap()..];
+    let table = &html[html.find("<th scope=\"col\"").unwrap()..];
     let table = &table[..table.find("</table>").unwrap()];
-    assert!(table.contains("<td class=\"py-0.5\">opus</td><td class=\"text-right\">150</td><td class=\"text-right\">14</td><td class=\"text-right\">6 / 2</td>"), "{table}");
-    assert!(table.contains("<td class=\"py-0.5\">haiku</td><td class=\"text-right\">9</td><td class=\"text-right\">7</td><td class=\"text-right\">3 / 1</td>"), "{table}");
+    for cell in [
+        ">opus<", ">150<", ">14<", ">6 / 2<", ">haiku<", ">9<", ">7<", ">3 / 1<",
+    ] {
+        assert!(table.contains(cell), "{cell}: {table}");
+    }
+    assert!(card.contains("href=\"#run-1\""), "{card}");
 }
 
 #[tokio::test]
@@ -319,7 +321,7 @@ async fn follow_up_message_is_pending_and_requeues_the_task() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header_str(&response, "hx-trigger"), "message-queued");
     let fragment = text(response).await;
-    assert!(fragment.contains("also add a test for X") && fragment.contains("Queued"));
+    assert!(fragment.contains("also add a test for X") && fragment.contains("1 queued"));
     assert!(
         fragment.contains("aria-label=\"Edit queued message\""),
         "{fragment}"
@@ -372,6 +374,20 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
     new_task(&app.pool, &seed, "t").await;
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert_eq!(html.matches("x-model=\"draft\"").count(), 1);
+    // The transcript container follows new items while the reader is at the bottom.
+    for needle in [
+        "id=\"transcript-scroll\"",
+        "x-data=\"{ pinned: true }\"",
+        "x-init=",
+        // Content growth without a DOM mutation (images) and a shrinking viewport (queued
+        // messages) also keep the last item in view.
+        "new ResizeObserver(down).observe($el)",
+        "new ResizeObserver(down).observe($el.querySelector(",
+        "x-on:scroll=",
+        "&lt; 48",
+    ] {
+        assert!(html.contains(needle), "{needle}");
+    }
 
     // The regions the stream replaces never contain the draft state.
     let detail = df_db::task_views::get_task_detail_by_key(&app.pool, "DF-1")
@@ -382,7 +398,7 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
         head_region(&detail, None),
         details_region(&detail),
         runs_region(&[], None),
-        pending_region("DF-1", "queued", &[], None),
+        pending_region("DF-1", "Linus", "queued", &[], None),
     ] {
         assert!(!region.into_string().contains("draft"));
     }
@@ -1294,8 +1310,10 @@ async fn a_failed_run_shows_one_line_of_the_error_and_the_full_text_in_a_disclos
         .unwrap();
 
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+    // Newest first: run 2 (short reason), then run 1 (failed).
     let runs = &html[html.find("id=\"runs\"").unwrap()..];
-    let first = &runs[..runs.find("</li>").unwrap()];
+    let runs = &runs[runs.find("<ul").unwrap()..];
+    let (second, first) = runs.split_once("</li>").unwrap();
     // Header: #n, status, start time on the right.
     assert!(
         first.contains(">#") && first.contains(">failed<") && first.contains("ml-auto"),
@@ -1314,7 +1332,6 @@ async fn a_failed_run_shows_one_line_of_the_error_and_the_full_text_in_a_disclos
     );
     assert!(first[first.find("</summary>").unwrap()..].contains("second line of the error"));
     // A short reason needs no disclosure.
-    let second = &runs[runs.find("</li>").unwrap()..];
     assert!(
         second.contains("short reason") && !second.contains("<details"),
         "{second}"
@@ -1640,21 +1657,81 @@ async fn the_phone_sheet_keeps_handle_and_head_fixed_and_scrolls_only_its_body()
     assert!(handle < head && head < body);
     let body_tag = &html[body..body + html[body..].find('>').unwrap()];
     assert!(
-        body_tag.contains("max-md:min-h-0")
-            && body_tag.contains("max-md:flex-1")
-            && body_tag.contains("max-md:overflow-y-auto"),
+        body_tag.contains("min-h-0")
+            && body_tag.contains("flex-1")
+            && body_tag.contains("overflow-y-auto")
+            && body_tag.contains("md:flex-col"),
         "{body_tag}"
     );
     let css = crate::app_css().unwrap();
-    let phone = &css[css
-        .find("@media (max-width:767px){.ws-details{")
-        .expect("phone sheet rule")..];
+    let phone = &css[css.find(".ws-details{").expect("sheet rule")..];
     let phone = &phone[..phone.find('}').unwrap()];
     assert!(
         phone.contains("flex-direction:column")
             && phone.contains("overflow:hidden")
             && phone.contains("display:flex"),
         "{phone}"
+    );
+}
+
+/// The declarations of the first rule that starts with `selector` (given with its `{`).
+fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
+    let start = css.find(selector).unwrap_or_else(|| panic!("{selector}"));
+    let body = &css[start + selector.len()..];
+    &body[..body.find('}').unwrap()]
+}
+
+#[test]
+fn tool_rows_share_one_line_between_consecutive_calls() {
+    let css = crate::app_css().unwrap();
+    let rule = |selector: &str| css_rule(&css, selector);
+    let row = rule("[data-tool]{");
+    assert!(
+        row.contains("border-top") && row.contains("border-bottom"),
+        "{row}"
+    );
+    assert!(rule("[data-tool]+[data-tool]{").contains("border-top-width:0"));
+}
+
+#[test]
+fn the_runs_fill_the_details_column_and_keep_room_for_two_cards() {
+    let css = crate::app_css().unwrap();
+    let rule = |selector: &str| css_rule(&css, selector);
+    // The panel is a clipped column at every width; the body (or the runs list) scrolls.
+    let panel = rule(".ws-details{");
+    assert!(
+        panel.contains("display:flex")
+            && panel.contains("flex-direction:column")
+            && panel.contains("overflow:hidden"),
+        "{panel}"
+    );
+    let runs = rule(".ws-runs{");
+    assert!(
+        runs.contains("flex:1;") && runs.contains("min-height:0"),
+        "{runs}"
+    );
+    assert!(rule(".ws-runs:has(details[open]){").contains("min-height:17rem"));
+    assert!(rule(".ws-runs details::details-content{").contains("flex:1;"));
+    let region = runs_region(&[], None).into_string();
+    assert!(region.contains("ws-runs"), "{region}");
+}
+
+#[tokio::test]
+async fn the_description_is_cut_after_three_lines_with_the_full_text_as_title() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    sqlx::query("UPDATE tasks SET description = 'Do it <now>' WHERE id = $1")
+        .bind(task.id.as_uuid())
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+    let desc = tag_around(&html, "Do it &lt;now&gt;");
+    assert!(
+        desc.contains("line-clamp-3") && desc.contains("title=\"Do it &lt;now&gt;\""),
+        "{desc}"
     );
 }
 
@@ -1732,6 +1809,8 @@ async fn the_details_overview_has_the_sections_of_the_mockup_in_order() {
         .unwrap();
     insert_run(&app.pool, task.id, 1, "failed").await;
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+    // The sections above Runs keep their height when the runs area fills the column.
+    assert!(html.contains("id=\"task-details\" class=\"md:shrink-0\""));
     let full = &html[html.find("class=\"ws-details-full").unwrap()..];
     let at = |needle: &str| {
         full.find(needle)
@@ -1742,7 +1821,7 @@ async fn the_details_overview_has_the_sections_of_the_mockup_in_order() {
         at(">Links</h2>"),
         at("<dl "),
         at(">Description<"),
-        at(">Runs</h2>"),
+        at(">Runs<"),
     ];
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
     // Now: the status line, next to a status dot.
@@ -1912,11 +1991,11 @@ async fn the_description_header_matches_the_other_sections_and_runs_has_no_botto
     // Nothing adds space between the details and the runs, and Runs closes the list.
     assert!(!html.contains("ws-details-pad"), "dead wrapper class");
     let runs = tag_around(&html, "id=\"runs\"");
-    assert!(runs.contains("[&amp;&gt;section]:border-b-0"), "{runs}");
+    assert!(!runs.contains("border-b"), "{runs}");
     let css = crate::app_css().unwrap();
     assert!(!css.contains("ws-details-pad"));
     assert!(
-        css.contains(">section\\]\\:border-b-0"),
+        css.contains("group-open\\:hidden"),
         "the utility is generated"
     );
 }

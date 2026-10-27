@@ -108,7 +108,6 @@ mod tests {
             "tool_row",
             "code_block",
             "plan",
-            "turn_end",
             "notice",
             "unreadable",
             "rail",

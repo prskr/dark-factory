@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-62.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-63.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -22,6 +22,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-59: dev cluster verification of `harness-images` (2026-10-26), task 7.4 carried over from `iter1-egress-gateway`.
 - Origin of TD-60: CodeRabbit review of PR #26 (`harness-images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -82,6 +83,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
+| TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list |
 
 ## Entries
 
@@ -569,6 +571,16 @@ Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `c
 **Matters when:** a third buffer needs the age rule, or the rule changes (the floor or the prune interval).
 
 **Fix:** Store `max_age` in `AgedEvents` and give it `prune_if_due(now)` and `unexpired()` that compute the cutoff. Apply the clamp once.
+
+### TD-62 (I1). `AbortError` from `hx-sse` when swapping tasks
+
+`crates/df-web` (`#ws-detail` swap, htmx SSE extension)
+
+Swapping `#ws-detail` through the task list logs an `AbortError` in the browser console at `htmx_before_cleanup`. Found in the browser check of `transcript-view-polish`, not traced. Probably the cause fixed for Pause in 001e81e (cleanup aborts the stream while the read is pending); no visible effect seen.
+
+**Matters when:** console errors are collected or alerted on, or the swap leaves a stream open.
+
+**Fix:** Reproduce with the Playwright container, then handle the abort in the same place as the Pause fix (cancel the reader before the controller aborts) and add a browser-level check.
 
 ## Accepted decisions
 

@@ -19,6 +19,7 @@ use axum::response::{IntoResponse, Response};
 use df_core::TaskId;
 use df_db::Notification;
 use df_db::task_views::StoredEvent;
+use df_proto::transcript::v1::event;
 use futures::StreamExt;
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -169,6 +170,13 @@ impl DetailStream {
             if row.id <= self.start {
                 continue;
             }
+            // The run's token usage changes with a turn end, which adds no transcript item.
+            if matches!(
+                row.event.as_ref().and_then(|e| e.kind.as_ref()),
+                Some(event::Kind::TurnEnded(_))
+            ) {
+                self.check_regions = true;
+            }
             for change in changes {
                 match touched.iter_mut().find(|t| t.index == change.index) {
                     // Added in this batch: still added, now with its latest content.
@@ -179,7 +187,7 @@ impl DetailStream {
                     Some(ItemKind::Agent {
                         complete: false, ..
                     }) => streamed = true,
-                    Some(ItemKind::User { .. } | ItemKind::TurnEnd { .. }) => {
+                    Some(ItemKind::User { .. }) => {
                         self.check_regions = true;
                     }
                     _ => {}
@@ -207,7 +215,13 @@ impl DetailStream {
             head_region(&data.task, None),
             details_region(&data.task),
             runs_region(&data.runs, data.task.persona_model.as_deref()),
-            pending_region(&data.task.key, &data.task.status, &data.pending, None),
+            pending_region(
+                &data.task.key,
+                &data.task.persona_name,
+                &data.task.status,
+                &data.pending,
+                None,
+            ),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(

@@ -179,15 +179,12 @@
 
   /* Details: bottom sheet on phones, slide-over from 768 px, a column from 1280 px. */
   .ws-details {
-    @apply invisible fixed inset-x-0 bottom-0 z-40 translate-y-full overflow-y-auto rounded-t-[18px] border-t border-line bg-panel;
+    @apply invisible fixed inset-x-0 bottom-0 z-40 flex translate-y-full flex-col overflow-hidden rounded-t-[18px] border-t border-line bg-panel;
   }
   /* The phone sheet opens at half height; the handle drags it to full height or closes it. */
   @media (max-width: 767px) {
     /* A column: handle and head stay in view, only the body scrolls. */
     .ws-details {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
       height: 50dvh;
     }
     .ws-details[data-size="full"] {
@@ -203,6 +200,26 @@
     }
     .ws-details[data-open="true"] {
       @apply translate-x-0;
+    }
+    /* The runs fill what the sections above leave. */
+    .ws-runs {
+      display: flex;
+      flex: 1 1 0%;
+      flex-direction: column;
+      min-height: 0;
+    }
+    /* The list sits in the details' content box, which has to take part in the column. Browsers
+       without `::details-content`: the list does not scroll on its own, the body scrolls instead. */
+    .ws-runs details::details-content {
+      display: flex;
+      flex: 1 1 0%;
+      flex-direction: column;
+      min-height: 0;
+    }
+    /* Open, the runs keep room for about two run cards (summary and two cards); the body scrolls
+       if the sections above are taller. */
+    .ws-runs:has(details[open]) {
+      min-height: 17rem;
     }
   }
   @media (min-width: 1280px) {
@@ -251,6 +268,18 @@
   [data-author="human"]:has(+ [data-author="human"]) .avatar,
   [data-author="agent"]:has(+ [data-author="agent"]) .avatar {
     visibility: hidden;
+  }
+}
+
+/* Tool rows: a line above and below, consecutive calls share one. Live appends regroup without
+   re-rendering. */
+@layer components {
+  [data-tool] {
+    border-top: 1px solid var(--color-line);
+    border-bottom: 1px solid var(--color-line);
+  }
+  [data-tool] + [data-tool] {
+    border-top-width: 0;
   }
 }
 

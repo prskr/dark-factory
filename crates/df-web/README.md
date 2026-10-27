@@ -44,6 +44,18 @@ Transcript messages carry the id of the last event they contain as the SSE `id`.
 arrive within 150 ms are sent as one update; when a turn ends, its messages are re-rendered as
 Markdown. The DOM id of an agent message is `msg-<message_id>`; ids from the runtime are reduced to
 `[A-Za-z0-9_-]`.
+A `TurnEnded` event completes the turn's agent messages but adds no item; it refreshes the runs and
+details regions. Tool rows (`data-tool`) get their separator lines from the stylesheet, so live
+appends regroup without re-rendering.
+
+In the run cards `#n` links to the run divider (`#run-n`). Token counts are compact (`9.4k`,
+`182k`, `1.2M`) with the exact value as `title`.
+
+The transcript container (`#transcript-scroll`) opens at the bottom and follows new and growing items
+while the reader is within 48 px of the bottom (Alpine `x-data`/`x-init` with a `MutationObserver`).
+The queued stack shows three rows and scrolls inside itself; the runs list (newest first) is a
+`<details>` that starts closed, and its `open` state survives live updates (`morphIgnore`).
+From `md` the details do not scroll as a whole: the sections above Runs keep their height and only the run list scrolls (minimum area 17 rem when open); the description is cut after three lines. The phone sheet scrolls as a whole.
 
 ## Spike: htmx 4 SSE (task 1.1, htmx 4.0.0, `hx-sse.js`)
 

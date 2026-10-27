@@ -36,11 +36,21 @@ expression: render_all(&fold(&every_kind()))
 </div>
 </div>
 </div>
-<details id="ev-6" data-author="agent" class="ml-11">
+<details id="ev-6" data-author="agent" data-tool class="group ml-11">
 <summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8">
+<span class="text-muted">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>
+</svg>
+</span>
 <span class="min-w-0 flex-1 truncate font-mono text-xs">Run tests</span>
 <span class="text-xs text-faint">execute</span>
 <span class="text-xs text-status-completed-fg">completed</span>
+<span class="text-faint transition-transform group-open:rotate-180">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="m6 9 6 6 6-6"/>
+</svg>
+</span>
 </summary>
 <div class="space-y-2 pb-3 text-sm">
 <div class="font-mono text-xs text-faint">src/lib.rs:3</div>
@@ -85,6 +95,4 @@ expression: render_all(&fold(&every_kind()))
 </div>
 <div id="ev-9" class="rounded-lg px-3 py-2 text-sm bg-status-waiting-bg text-status-waiting-fg">
 <span class="mr-2 font-mono text-xs">workspace.diverged</span>branch diverged</div>
-<div id="ev-10" class="border-t border-line pt-2 font-mono text-xs text-faint">Turn ended: end_turn - done<div>opus: 10 in, 5 out, 2 cache read, 1 cache write</div>
-</div>
 </div>

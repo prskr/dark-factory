@@ -206,11 +206,11 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         .await?)
 }
 
-/// Runs of a task in order, with token usage summed per model from the `TurnEnded` events.
+/// Runs of a task, newest first, with token usage summed per model from the `TurnEnded` events.
 pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, DbError> {
     let runs: Vec<RunRow> = sqlx::query_as(
         "SELECT id, number, state, outcome, detail, retry_after, started_at, ended_at
-         FROM runs WHERE task_id = $1 ORDER BY number",
+         FROM runs WHERE task_id = $1 ORDER BY number DESC",
     )
     .bind(task_id.as_uuid())
     .fetch_all(pool)
@@ -444,6 +444,27 @@ mod tests {
         assert_eq!(tail.first().map(|e| e.id), Some(first + 1));
         assert_eq!(tail.last().map(|e| e.id), Some(last));
         assert_eq!(transcript_after(&pool, task, 0, 2).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn lists_runs_newest_first() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, _) = seed(&pool).await;
+        sqlx::query(
+            "INSERT INTO runs (id, task_id, number, state) VALUES ($1, $2, 2, 'succeeded')",
+        )
+        .bind(Uuid::now_v7())
+        .bind(task.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let numbers: Vec<i64> = list_runs(&pool, task)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.number)
+            .collect();
+        assert_eq!(numbers, [2, 1]);
     }
 
     #[tokio::test]
