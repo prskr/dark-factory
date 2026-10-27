@@ -104,7 +104,8 @@ async fn replay_after_an_id_has_no_gaps_and_no_duplicates() {
     );
     assert!(frame.data.contains("<p>AB</p>"), "{}", frame.data);
     assert_eq!(frame.data.matches(&format!("id=\"ev-{e4}\"")).count(), 1);
-    assert_eq!(frame.data.matches(&format!("id=\"ev-{e5}\"")).count(), 1);
+    // The turn end is no item.
+    assert_eq!(frame.data.matches(&format!("id=\"ev-{e5}\"")).count(), 0);
     assert!(
         frame
             .data
@@ -353,6 +354,30 @@ async fn run_changes_rerender_the_runs_region() {
         "{}",
         frame.data
     );
+}
+
+#[tokio::test]
+async fn a_turn_end_refreshes_the_runs_and_details_regions_without_adding_an_item() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    let first = sse.next().await;
+    assert!(!first.data.contains("182k"), "{}", first.data);
+
+    // Nothing is published: only the turn end itself can trigger the refresh.
+    let id = f
+        .add(
+            1,
+            "t1",
+            json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN", "usage": [{"modelId": "opus", "inputTokens": "182345"}]}}),
+        )
+        .await;
+    let frame = sse.next_within(LIVE).await;
+    assert!(
+        frame.data.contains(r##"hx-target="#runs""##) && frame.data.contains(">182k<"),
+        "{}",
+        frame.data
+    );
+    assert!(!frame.data.contains(&format!("id=\"ev-{id}\"")));
 }
 
 #[tokio::test]

@@ -105,6 +105,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 
 - Elements of the "Rejected" page are not built (request URL, query parameters, headers, response details; "Last matched" and "Matched N requests").
 - The traffic page filters by persona and task, not by sandbox, and labels sandboxes with task key and run number.
+- Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
 ## Mapping views to boards
@@ -117,6 +118,9 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Network / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
 | Network / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
 | Desktop / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
+| Desktop / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
+| Desktop / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
+| Desktop / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
 
 The remaining boards follow the same pattern.

@@ -314,12 +314,17 @@ pub fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
     }
 }
 
+/// Whether the task ended (`failed`, `completed`): its queued messages go out with the next run.
+fn task_ended(status: &str) -> bool {
+    matches!(status, "failed" | "completed")
+}
+
 /// Where a queued message stands: held back, forwarded and waiting, or forwarded to a task that
 /// ended (`failed`, `completed`), where the next run sends it again.
 fn queued_state(message: &TaskMessageRow, task_status: &str) -> QueuedState {
     if message.is_editable() {
         QueuedState::Editable
-    } else if matches!(task_status, "failed" | "completed") {
+    } else if task_ended(task_status) {
         QueuedState::NotDelivered
     } else {
         QueuedState::WaitingForDelivery
@@ -331,8 +336,13 @@ fn queued_state(message: &TaskMessageRow, task_status: &str) -> QueuedState {
 /// remove), forwarded and `WaitingForDelivery`, or forwarded to a task that ended
 /// (`NotDelivered`: `task_status` is `failed` or `completed`, the next run sends it again). The
 /// two forwarded states offer no actions. `error` is shown above the stack. Updated live.
+///
+/// With messages, a header reads "N queued · `persona` reads them at the next turn" ("N queued ·
+/// sent with the next run" when the task ended) above a list of single-line rows that shows at
+/// most three of them and scrolls inside itself. Without messages there is no header.
 pub fn pending_region(
     key: &str,
+    persona: &str,
     task_status: &str,
     messages: &[TaskMessageRow],
     error: Option<&str>,
@@ -346,11 +356,22 @@ pub fn pending_region(
     } else {
         " px-3 pt-3"
     };
+    let reader = if task_ended(task_status) {
+        "sent with the next run".to_string()
+    } else {
+        format!("{persona} reads them at the next turn")
+    };
     html! {
         div id="pending" class={"flex flex-col gap-2" (padding)} {
             (field_error(error))
-            @for m in queued {
-                (queued_message(key, &m.id.to_string(), &blocks_text(&m.content), m.queued_at, queued_state(m, task_status)))
+            @if !queued.is_empty() {
+                p class="text-xs text-muted" { (queued.len()) " queued · " (reader) }
+                // Three rows of the queued item (`h-11 lg:h-9`) and two 4 px gaps; the list scrolls beyond.
+                div class="flex max-h-[calc(3*2.75rem+2*0.25rem)] flex-col gap-1 overflow-y-auto lg:max-h-[calc(3*2.25rem+2*0.25rem)]" {
+                    @for m in queued {
+                        (queued_message(key, &m.id.to_string(), &blocks_text(&m.content), m.queued_at, queued_state(m, task_status)))
+                    }
+                }
             }
         }
     }
@@ -358,7 +379,12 @@ pub fn pending_region(
 
 /// The queued stack and the message input below the transcript. One Alpine scope holds the
 /// draft and the edit state, so the stack's buttons and the input share them (design D3).
-pub fn message_area(key: &str, task_status: &str, pending: &[TaskMessageRow]) -> Markup {
+pub fn message_area(
+    key: &str,
+    persona: &str,
+    task_status: &str,
+    pending: &[TaskMessageRow],
+) -> Markup {
     let messages = format!("/tasks/{key}/messages");
     html! {
         // The state lives outside every region the stream swaps, so the draft survives
@@ -368,7 +394,7 @@ pub fn message_area(key: &str, task_status: &str, pending: &[TaskMessageRow]) ->
             x-data="{ draft: '', saved: '', editing: null }"
             "x-on:message-queued.window"="draft = ''"
             "x-on:message-saved.window"="editing = null; draft = ''" {
-            (pending_region(key, task_status, pending, None))
+            (pending_region(key, persona, task_status, pending, None))
             form class="p-3" {
                 div x-show="editing" x-cloak class="mb-2 flex items-center justify-between gap-2 rounded-lg bg-accent-soft px-3 text-sm text-accent-text" {
                     span { "Editing a queued message" }
@@ -416,7 +442,7 @@ pub fn details_region(task: &TaskDetail) -> Markup {
         .zip(task.issue_number)
         .map(|(url, number)| (url, format!("Issue #{number}")));
     html! {
-        div id="task-details" {
+        div id="task-details" class="md:shrink-0" {
             div class="ws-strip flex-col items-center gap-3 p-2" {
                 button type="button" class=(ICON_BUTTON_CLASS) aria-label="Show details" title="Show details" "x-on:click"="setCollapsed(false)" { (icon(Icon::PanelRight)) }
                 @if let Some(status) = status_of(&task.status) {
@@ -457,7 +483,7 @@ pub fn details_region(task: &TaskDetail) -> Markup {
                 @if !task.description.is_empty() {
                     details class="border-b border-line px-5 py-4 text-sm" {
                         summary class="flex min-h-11 cursor-pointer items-center text-xs font-medium uppercase tracking-wide text-faint" { "Description" }
-                        div class="whitespace-pre-wrap break-words text-muted" { (task.description) }
+                        div class="line-clamp-3 whitespace-pre-wrap break-words text-muted" title=(task.description) { (task.description) }
                     }
                 }
             }
@@ -481,13 +507,21 @@ fn strip_link(url: &str, label: &str, glyph: Icon) -> Markup {
 /// table per model); updated live.
 pub fn runs_region(runs: &[RunView], persona_model: Option<&str>) -> Markup {
     html! {
-        div id="runs" class="ws-details-full [&>section]:border-b-0" {
+        div id="runs" class="ws-details-full ws-runs" {
             @if !runs.is_empty() {
-                (section("Runs", html! {
-                    ul class="space-y-2" {
-                        @for run in runs { li class="space-y-2 rounded-lg border border-line p-3 text-sm" { (run_card(run, persona_model)) } }
+                // Closed by default; `open` is in `morphIgnore`, so live updates keep the reader's choice.
+                details class="group space-y-2.5 px-5 py-4 md:flex md:min-h-0 md:flex-1 md:flex-col" {
+                    summary class="flex min-h-11 cursor-pointer list-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-faint lg:min-h-8 [&::-webkit-details-marker]:hidden" {
+                        span class="group-open:hidden" { (icon(Icon::ChevronRight)) }
+                        span class="hidden group-open:inline" { (icon(Icon::ChevronDown)) }
+                        "Runs"
+                        span class="ml-1 font-mono normal-case" { (runs.len()) }
                     }
-                }))
+                    ul class="space-y-2 md:min-h-0 md:flex-1 md:overflow-y-auto" {
+                        // The id keeps a card (and an open disclosure in it) with its run when morphing.
+                        @for run in runs { li id={"run-card-" (run.id)} class="space-y-2 rounded-lg border border-line p-3 text-sm" { (run_card(run, persona_model)) } }
+                    }
+                }
             }
         }
     }
@@ -499,7 +533,10 @@ const DETAIL_LINE_CHARS: usize = 80;
 fn run_card(run: &RunView, persona_model: Option<&str>) -> Markup {
     html! {
         div class="flex items-center gap-2" {
-            span class="font-mono text-sm" { "#" (run.number) }
+            // The divider of the run in the transcript; the click also closes the details where
+            // they overlay the transcript (no effect from 1280 px, where they are a column).
+            a href={"#run-" (run.number)} "x-on:click"="details = false"
+                class="font-mono text-sm text-accent-text hover:underline" { "#" (run.number) }
             (tone_badge(Tone::of_run(run.state), run.state.as_str()))
             @if let Some(outcome) = &run.outcome { span class="text-xs text-muted" { (outcome_text(outcome)) } }
             time datetime=(run.started_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(run.started_at)) }
@@ -511,25 +548,43 @@ fn run_card(run: &RunView, persona_model: Option<&str>) -> Markup {
             p class="text-xs text-muted" { (persona_model.unwrap_or("default model")) " · no token usage recorded" }
         }
         @if !run.usage.is_empty() {
-            table class="w-full border-collapse font-mono text-xs text-muted" {
+            table class="w-full table-fixed border-collapse font-mono text-xs text-muted" {
                 thead { tr class="text-faint" {
-                    th scope="col" class="py-0.5 text-left font-medium" { "model" }
                     th scope="col" class="text-right font-medium" { "in" }
                     th scope="col" class="text-right font-medium" { "out" }
                     th scope="col" class="text-right font-medium" title="read / write" { "cache" }
                 } }
                 tbody {
                     @for u in &run.usage {
+                        // The model on its own line, then its counts; the exact values are the titles.
+                        tr { td colspan="3" class="truncate pt-1 text-left" title=(u.model_id) { (u.model_id) } }
                         tr {
-                            td class="py-0.5" { (u.model_id) }
-                            td class="text-right" { (u.input_tokens) }
-                            td class="text-right" { (u.output_tokens) }
-                            td class="text-right" { (u.cache_read_tokens) " / " (u.cache_write_tokens) }
+                            td class="text-right" title=(u.input_tokens) { (compact_count(u.input_tokens)) }
+                            td class="text-right" title=(u.output_tokens) { (compact_count(u.output_tokens)) }
+                            td class="text-right" title={(u.cache_read_tokens) " / " (u.cache_write_tokens)} {
+                                (compact_count(u.cache_read_tokens)) " / " (compact_count(u.cache_write_tokens))
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/// A token count for a narrow column: exact below 1,000, then `9.4k`, `182k`, `1.2M` and `12M`
+/// (cut, not rounded, so `999999` never reads `1000k`).
+fn compact_count(n: i64) -> String {
+    if n < 1_000 {
+        n.to_string()
+    } else if n < 10_000 {
+        format!("{}.{}k", n / 1_000, n % 1_000 / 100)
+    } else if n < 1_000_000 {
+        format!("{}k", n / 1_000)
+    } else if n < 10_000_000 {
+        format!("{}.{}M", n / 1_000_000, n % 1_000_000 / 100_000)
+    } else {
+        format!("{}M", n / 1_000_000)
     }
 }
 
@@ -811,9 +866,155 @@ mod tests {
         );
     }
 
+    fn run(number: i64) -> RunView {
+        RunView {
+            id: uuid::Uuid::now_v7(),
+            number,
+            state: df_core::RunState::Succeeded,
+            outcome: None,
+            detail: String::new(),
+            retry_after: None,
+            started_at: DateTime::UNIX_EPOCH,
+            ended_at: None,
+            usage: vec![],
+        }
+    }
+
+    fn queued(n: usize) -> Vec<TaskMessageRow> {
+        (0..n)
+            .map(|i| TaskMessageRow {
+                id: df_core::PromptId::new(),
+                task_id: df_core::TaskId::new(),
+                author: Principal::human(df_core::UserId::new(), "Peter"),
+                content: vec![df_proto::transcript::v1::ContentBlock {
+                    kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
+                        df_proto::transcript::v1::TextContent {
+                            text: format!("message {i}"),
+                        },
+                    )),
+                }],
+                queued_at: DateTime::UNIX_EPOCH,
+                delivered_run_id: None,
+                delivered_at: None,
+                forwarded_at: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn runs_are_closed_by_default_with_count_and_keep_the_given_order() {
+        let html = runs_region(&[run(3), run(2), run(1)], None).into_string();
+        assert!(
+            html.contains("<details") && !html.contains("<details open"),
+            "{html}"
+        );
+        assert!(html.contains("<summary"), "{html}");
+        assert!(html.contains(">Runs<") && html.contains(">3<"), "{html}");
+        assert!(
+            html.find("#3").unwrap() < html.find("#1").unwrap(),
+            "{html}"
+        );
+        assert!(!runs_region(&[], None).into_string().contains("<details"));
+        // The list is the scrolling element of the runs area from `md`.
+        let ul = &html[html.find("<ul").unwrap()..];
+        let ul = &ul[..ul.find('>').unwrap()];
+        assert!(
+            ul.contains("md:overflow-y-auto") && ul.contains("md:min-h-0"),
+            "{ul}"
+        );
+    }
+
+    #[test]
+    fn run_cards_keep_their_id_when_the_order_changes() {
+        let runs: Vec<RunView> = (1..=4).map(run).collect();
+        let by_number = |n: i64| runs.iter().find(|r| r.number == n).unwrap();
+        for order in [[3, 2, 1].as_slice(), [4, 3, 2, 1].as_slice()] {
+            let list: Vec<RunView> = order.iter().map(|n| by_number(*n).clone()).collect();
+            let html = runs_region(&list, None).into_string();
+            for r in &list {
+                let id = format!("id=\"run-card-{}\"", r.id);
+                assert_eq!(html.matches(&id).count(), 1, "{html}");
+                // The id belongs to the card of its own run.
+                let card = &html[html.find(&id).unwrap()..];
+                let card = &card[..card.find("</li>").unwrap()];
+                assert!(card.contains(&format!(">#{}<", r.number)), "{card}");
+            }
+        }
+    }
+
+    #[test]
+    fn queued_stack_has_a_header_and_a_list_capped_at_three_rows() {
+        let seven = queued(7);
+        let html = pending_region("DF-1", "Linus", "running", &seven, None).into_string();
+        assert!(
+            html.contains("7 queued · Linus reads them at the next turn"),
+            "{html}"
+        );
+        assert!(
+            html.contains("max-h-[calc(3*2.75rem+2*0.25rem)]")
+                && html.contains("lg:max-h-[calc(3*2.25rem+2*0.25rem)]")
+                && html.contains("overflow-y-auto"),
+            "{html}"
+        );
+        let ended = pending_region("DF-1", "Linus", "failed", &queued(1), None).into_string();
+        assert!(
+            ended.contains("1 queued · sent with the next run"),
+            "{ended}"
+        );
+        let none = pending_region("DF-1", "Linus", "running", &[], None).into_string();
+        assert!(!none.contains("queued"), "{none}");
+    }
+
+    #[test]
+    fn counts_are_compact_from_1000() {
+        let shown: Vec<String> = [
+            0, 999, 1000, 9437, 9999, 10_000, 182_345, 999_999, 1_000_000, 1_234_567, 12_000_000,
+        ]
+        .into_iter()
+        .map(compact_count)
+        .collect();
+        assert_eq!(
+            shown,
+            [
+                "0", "999", "1.0k", "9.4k", "9.9k", "10k", "182k", "999k", "1.0M", "1.2M", "12M"
+            ]
+        );
+    }
+
+    #[test]
+    fn run_card_links_to_the_divider_and_lists_usage_in_three_columns() {
+        let mut r = run(3);
+        r.usage = vec![df_db::task_views::ModelUsage {
+            model_id: "anthropic/claude-sonnet-5-5-20261001".into(),
+            input_tokens: 9437,
+            output_tokens: 182_345,
+            cache_read_tokens: 1_234_567,
+            cache_write_tokens: 12,
+        }];
+        let html = run_card(&r, None).into_string();
+        assert!(html.contains("<a href=\"#run-3\""), "{html}");
+        assert!(
+            html.contains("details = false"),
+            "closes the overlaying panel: {html}"
+        );
+        // The model on its own line, truncated, with the full name as title.
+        assert!(
+            html.contains("class=\"truncate")
+                && html.contains("title=\"anthropic/claude-sonnet-5-5-20261001\""),
+            "{html}"
+        );
+        for cell in [
+            "title=\"9437\">9.4k<",
+            "title=\"182345\">182k<",
+            "title=\"1234567 / 12\">1.2M / 12<",
+        ] {
+            assert!(html.contains(cell), "{cell}: {html}");
+        }
+    }
+
     #[test]
     fn send_save_and_create_use_the_round_action_classes() {
-        let area = message_area("DF-1", "queued", &[]).into_string();
+        let area = message_area("DF-1", "Linus", "queued", &[]).into_string();
         assert!(
             area.contains(&format!("class=\"{ROUND_ACTION_CLASS}\"")),
             "{area}"

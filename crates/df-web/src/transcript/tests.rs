@@ -158,15 +158,15 @@ fn turn_end_completes_agent_messages_and_renders_markdown() {
         "t",
         json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
     ));
-    assert_eq!(changes.len(), 2);
+    // The message is re-rendered; the turn end adds no item.
     assert_eq!(
-        changes[0],
-        Change {
+        changes,
+        [Change {
             index: 1,
             added: false
-        }
+        }]
     );
-    assert!(changes[1].added);
+    assert_eq!(folder.items().len(), 3);
     let done = render_item(&folder.items()[1]).into_string();
     assert!(done.contains("<strong>bold</strong>"), "{done}");
     // Another turn's message is untouched.
@@ -175,6 +175,19 @@ fn turn_end_completes_agent_messages_and_renders_markdown() {
             .into_string()
             .contains("**other**")
     );
+}
+
+#[test]
+fn a_turn_end_without_messages_changes_nothing() {
+    let mut folder = Folder::default();
+    let changes = folder.apply(&stored(
+        1,
+        "t",
+        json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
+    ));
+    assert!(changes.is_empty());
+    assert!(folder.items().is_empty());
+    assert_eq!(folder.last_id(), 1);
 }
 
 #[test]

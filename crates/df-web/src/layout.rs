@@ -36,7 +36,8 @@ impl View {
     }
 }
 
-/// htmx keeps the `open` state of `<details>` (tool calls) when it morphs an updated element.
+/// htmx keeps the `open` state of `<details>` (tool calls, the runs list) when it morphs an
+/// updated element.
 const HTMX_CONFIG: &str = r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"]}"#;
 
 /// Renders a full page of the usual width.
@@ -114,6 +115,20 @@ mod tests {
         let start = page.find(&format!("id=\"{id}\"")).expect(id);
         let end = page[start..].find("</nav>").expect("nav end");
         page[start..start + end].to_string()
+    }
+
+    #[test]
+    fn morph_keeps_the_open_state_of_details() {
+        // The runs `<details>` (`runs_region`) stays open or closed across live updates only
+        // because `open` is ignored when morphing.
+        let config: serde_json::Value = serde_json::from_str(HTMX_CONFIG).unwrap();
+        assert!(
+            config["morphIgnore"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a == "open")
+        );
     }
 
     #[test]

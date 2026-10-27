@@ -237,10 +237,16 @@ fn selected_columns(s: &Selected) -> Markup {
         div x-show="details" x-cloak "x-on:click"="details = false" class="fixed inset-0 z-30 bg-black/40 xl:hidden" {}
         section class="ws-main" aria-label="Task" {
             (head_region(&s.detail, None))
-            div class="min-h-0 flex-1 overflow-y-auto p-4" {
+            // Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
+            // messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
+            // re-runs `x-init`, so opening another task lands at the bottom too.
+            div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
+                x-data="{ pinned: true }"
+                x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
+                "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
                 (render_transcript(s.folder.items()))
             }
-            (message_area(key, &s.detail.status, &s.pending))
+            (message_area(key, &s.detail.persona_name, &s.detail.status, &s.pending))
         }
         (details_column(&s.detail, &s.runs))
     }
@@ -611,7 +617,13 @@ async fn stack(
     let pending = df_db::list_undelivered_messages(&state.pool, TaskId::from_uuid(task.id))
         .await
         .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(pending_region(&task.key, &task.status, &pending, error))
+    Ok(pending_region(
+        &task.key,
+        &task.persona_name,
+        &task.status,
+        &pending,
+        error,
+    ))
 }
 
 fn with_trigger(body: Markup, name: &'static str) -> Response {

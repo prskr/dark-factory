@@ -91,7 +91,7 @@ pub fn details_panel(title: &str, body: Markup) -> Markup {
                     button type="button" class={(ICON_BUTTON_CLASS) " max-xl:hidden"} aria-label="Hide details" "x-on:click"="setCollapsed(true)" { (icon(Icon::PanelRight)) }
                 }
             }
-            div class="ws-details-body max-md:min-h-0 max-md:flex-1 max-md:overflow-y-auto" { (body) }
+            div class="ws-details-body min-h-0 flex-1 overflow-y-auto md:flex md:flex-col" { (body) }
         }
     }
 }

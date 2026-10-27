@@ -46,6 +46,8 @@ pub enum Icon {
     Play,
     /// The factory mark; also `assets/logo.svg`.
     Logo,
+    /// A tool call (Lucide `wrench`).
+    Wrench,
     /// Generic Git (branch).
     Git,
     /// GitHub, used only to identify the forge next to a repository.
@@ -88,6 +90,7 @@ impl Icon {
         Self::Pause,
         Self::Play,
         Self::Logo,
+        Self::Wrench,
         Self::Git,
         Self::GitHub,
     ];
@@ -95,6 +98,9 @@ impl Icon {
     /// Inner SVG elements of the 24x24 icon.
     const fn body(self) -> &'static str {
         match self {
+            Self::Wrench => {
+                "<path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z\"/>"
+            }
             Self::Plus => "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>",
             Self::Tasks => {
                 "<rect x=\"3\" y=\"5\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"m3 17 2 2 4-4\"/><path d=\"M13 6h8\"/><path d=\"M13 12h8\"/><path d=\"M13 18h8\"/>"

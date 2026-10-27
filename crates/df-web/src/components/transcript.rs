@@ -114,16 +114,14 @@ pub fn queued_message(
     html! {
         div id={"queued-" (id)} data-queued-id=(id)
             ":class"={"editing === '" (id) "' ? 'border-accent-text bg-accent-soft' : 'border-line-strong bg-app'"}
-            class="flex items-start gap-2 rounded-[10px] border border-dashed px-3 py-2" {
-            div class="min-w-0 flex-1" {
-                div class="line-clamp-3 whitespace-pre-wrap break-words text-sm" { (text) }
-                div class="mt-0.5 text-xs text-faint" {
-                    "Queued " time datetime=(queued_at.to_rfc3339()) { (clock(queued_at)) }
-                    @match state {
-                        QueuedState::Editable => {}
-                        QueuedState::WaitingForDelivery => { " · waiting for delivery" }
-                        QueuedState::NotDelivered => { " · not delivered, sent with the next run" }
-                    }
+            class="flex shrink-0 items-center gap-2 rounded-[10px] border border-dashed px-3 h-11 lg:h-9" {
+            div class="min-w-0 flex-1 truncate text-sm" title=(text) { (text) }
+            div class="shrink-0 text-xs text-faint" {
+                time datetime=(queued_at.to_rfc3339()) { (clock(queued_at)) }
+                @match state {
+                    QueuedState::Editable => {}
+                    QueuedState::WaitingForDelivery => { " · waiting for delivery" }
+                    QueuedState::NotDelivered => { " · not delivered, sent with the next run" }
                 }
             }
             @if editable {
@@ -159,11 +157,14 @@ pub fn tool_row(row: &ToolRow<'_>) -> Markup {
         _ => "text-faint",
     };
     html! {
-        details id=(row.id) data-author="agent" class="ml-11" {
+        // `data-tool`: the stylesheet draws the lines between consecutive rows.
+        details id=(row.id) data-author="agent" data-tool class="group ml-11" {
             summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8" {
+                span class="text-muted" { (icon(Icon::Wrench)) }
                 span class="min-w-0 flex-1 truncate font-mono text-xs" { (row.title) }
                 span class="text-xs text-faint" { (row.kind) }
                 span class={"text-xs " (status_class)} { (row.status) }
+                span class="text-faint transition-transform group-open:rotate-180" { (icon(Icon::ChevronDown)) }
             }
             div class="space-y-2 pb-3 text-sm" {
                 @for location in row.locations { div class="font-mono text-xs text-faint" { (location) } }
@@ -194,17 +195,6 @@ pub fn plan(id: &str, entries: &[(String, String)]) -> Markup {
                     li { span class="mr-2 text-faint" { "[" (status) "]" } (content) }
                 }
             }
-        }
-    }
-}
-
-/// The end of a turn with its token usage lines.
-pub fn turn_end(id: &str, stop_reason: &str, detail: &str, usage: &[String]) -> Markup {
-    html! {
-        div id=(id) class="border-t border-line pt-2 font-mono text-xs text-faint" {
-            "Turn ended: " (stop_reason)
-            @if !detail.is_empty() { " - " (detail) }
-            @for line in usage { div { (line) } }
         }
     }
 }
@@ -293,7 +283,7 @@ mod tests {
         let held =
             queued_message("DF-1", "abc", "later <b>", at(), QueuedState::Editable).into_string();
         assert!(
-            held.contains("later &lt;b&gt;") && held.contains("Queued <time"),
+            held.contains("later &lt;b&gt;") && held.contains("<time"),
             "{held}"
         );
         assert!(
@@ -309,11 +299,18 @@ mod tests {
             "highlighted while edited"
         );
         // The edit highlight must not lose against the static classes (CSS order, not class order).
-        let class = &held[held.find("class=\"flex items-start").unwrap()..];
+        let class = &held[held.find("class=\"flex shrink-0").unwrap()..];
         let class = &class[..class[7..].find('"').unwrap() + 8];
         assert!(
             !class.contains("bg-panel") && !class.contains("border-line"),
             "{class}"
+        );
+        // The board's single-line item: fixed height, truncated text with the full text in `title`.
+        assert!(
+            class.contains("h-11 lg:h-9")
+                && held.contains("truncate")
+                && held.contains("title=\"later &lt;b&gt;\""),
+            "{held}"
         );
         // The mockup: a dashed strong border, 10 px radius and the app background.
         assert!(
@@ -363,6 +360,35 @@ mod tests {
     }
 
     #[test]
+    fn tool_row_has_the_wrench_in_front_and_a_turning_chevron_at_the_end() {
+        let html = tool_row(&ToolRow {
+            id: "ev-2",
+            title: "Run tests",
+            kind: "execute",
+            status: "completed",
+            locations: &[],
+            blocks: &[],
+            truncated: false,
+        })
+        .into_string();
+        let wrench = html
+            .find(&icon(Icon::Wrench).into_string())
+            .expect("wrench");
+        let chevron = html
+            .find(&icon(Icon::ChevronDown).into_string())
+            .expect("chevron");
+        assert!(wrench < html.find("Run tests").unwrap(), "{html}");
+        assert!(html.find("completed").unwrap() < chevron, "{html}");
+        assert!(
+            html.contains(
+                "<details id=\"ev-2\" data-author=\"agent\" data-tool class=\"group ml-11\""
+            ),
+            "{html}"
+        );
+        assert!(html.contains("group-open:rotate-180"), "{html}");
+    }
+
+    #[test]
     fn notice_levels_use_distinct_tokens() {
         assert!(
             notice("n", "error", "c", "m")
@@ -380,11 +406,6 @@ mod tests {
                 .contains("bg-sunk")
         );
         assert!(unreadable("u").into_string().contains("Unreadable"));
-        assert!(
-            turn_end("t", "end_turn", "", &["a: 1 in".to_string()])
-                .into_string()
-                .contains("a: 1 in")
-        );
         assert!(
             plan("p", &[("pending".into(), "do".into())])
                 .into_string()

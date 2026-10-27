@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
-    ContentBlock, NoticeLevel, PlanEntryStatus, StopReason, ToolCallContent, ToolCallStatus,
-    ToolKind, content_block, event, tool_call_content,
+    ContentBlock, NoticeLevel, PlanEntryStatus, ToolCallContent, ToolCallStatus, ToolKind,
+    content_block, event, tool_call_content,
 };
 use maud::{Markup, PreEscaped, html};
 
@@ -45,11 +45,6 @@ pub enum ItemKind {
     },
     Tool(ToolItem),
     Plan(Vec<PlanItem>),
-    TurnEnd {
-        stop_reason: String,
-        detail: String,
-        usage: Vec<UsageItem>,
-    },
     Notice {
         level: String,
         code: String,
@@ -89,15 +84,6 @@ pub enum ToolContent {
 pub struct PlanItem {
     pub content: String,
     pub status: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct UsageItem {
-    pub model: String,
-    pub input: u64,
-    pub output: u64,
-    pub cache_read: u64,
-    pub cache_write: u64,
 }
 
 /// What an event did to the folded transcript.
@@ -274,7 +260,7 @@ impl Folder {
                     }
                 }
             }
-            event::Kind::TurnEnded(t) => {
+            event::Kind::TurnEnded(_) => {
                 // The turn is over: its agent messages are complete and get rendered as Markdown.
                 let mut changes: Vec<Change> = Vec::new();
                 for (index, item) in self.items.iter_mut().enumerate() {
@@ -289,26 +275,6 @@ impl Folder {
                         });
                     }
                 }
-                let usage = t
-                    .usage
-                    .iter()
-                    .map(|u| UsageItem {
-                        model: u.model_id.clone(),
-                        input: u.input_tokens,
-                        output: u.output_tokens,
-                        cache_read: u.cache_read_tokens,
-                        cache_write: u.cache_write_tokens,
-                    })
-                    .collect();
-                changes.push(self.push(
-                    format!("ev-{}", stored.id),
-                    turn,
-                    ItemKind::TurnEnd {
-                        stop_reason: stop_reason(t.stop_reason),
-                        detail: t.detail.clone(),
-                        usage,
-                    },
-                ));
                 changes
             }
             event::Kind::Notice(n) => vec![self.push(
@@ -503,17 +469,6 @@ fn plan_status(status: PlanEntryStatus) -> &'static str {
     }
 }
 
-fn stop_reason(reason: i32) -> String {
-    StopReason::try_from(reason).map_or_else(
-        |_| "unknown".into(),
-        |r| {
-            r.as_str_name()
-                .trim_start_matches("STOP_REASON_")
-                .to_lowercase()
-        },
-    )
-}
-
 fn notice_level(level: i32) -> String {
     NoticeLevel::try_from(level).map_or_else(
         |_| "info".into(),
@@ -574,22 +529,6 @@ pub fn render_item(item: &Item) -> Markup {
                 .map(|e| (e.status.clone(), e.content.clone()))
                 .collect();
             c::plan(id, &entries)
-        }
-        ItemKind::TurnEnd {
-            stop_reason,
-            detail,
-            usage,
-        } => {
-            let lines: Vec<String> = usage
-                .iter()
-                .map(|u| {
-                    format!(
-                        "{}: {} in, {} out, {} cache read, {} cache write",
-                        u.model, u.input, u.output, u.cache_read, u.cache_write
-                    )
-                })
-                .collect();
-            c::turn_end(id, stop_reason, detail, &lines)
         }
         ItemKind::Notice {
             level,
