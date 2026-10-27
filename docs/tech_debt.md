@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-61.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-62.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -21,6 +21,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-57 to TD-58 (both resolved the same day): code review of `harness-images` (`df-k8s`, `df-agent-channel`, `deploy/images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-59: dev cluster verification of `harness-images` (2026-10-26), task 7.4 carried over from `iter1-egress-gateway`.
 - Origin of TD-60: CodeRabbit review of PR #26 (`harness-images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -80,6 +81,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings |
 | TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
+| TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
 
 ## Entries
 
@@ -557,6 +559,16 @@ The project form shows the stored `adapter_command` joined with spaces and parse
 **Matters when:** a project adapter needs an argument with whitespace.
 
 **Fix:** Use a reversible format for the field (one argument per line, or shell-style quoting with a small parser) and add a test that an edit keeps an argument containing a space.
+
+### TD-61 (S4). `FlowLog` and `Merged` repeat the age-prune steps
+
+`crates/df-gateway/src/flow.rs` (`FlowLog`), `crates/df-gateway/src/control/relay.rs` (`Merged`)
+
+Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `cutoff(max_age)`, `prune_if_due`, `unexpired`. `with_max_age` and the `MIN_MAX_AGE` clamp are also written twice.
+
+**Matters when:** a third buffer needs the age rule, or the rule changes (the floor or the prune interval).
+
+**Fix:** Store `max_age` in `AgedEvents` and give it `prune_if_due(now)` and `unexpired()` that compute the cutoff. Apply the clamp once.
 
 ## Accepted decisions
 

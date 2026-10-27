@@ -26,6 +26,8 @@ pub struct Settings {
     pub control_plane: String,
     /// Events kept in the ring buffer.
     pub buffer_size: usize,
+    /// Events older than this are dropped from the ring buffer.
+    pub buffer_max_age: Duration,
     /// Cluster pod and Service CIDRs on top of the built-in blocked ranges.
     pub blocked_cidrs: Vec<String>,
     /// Pause between attempts to reach the control plane.
@@ -76,7 +78,7 @@ where
         + 'static,
 {
     let blocked = BlockedRanges::new(settings.blocked_cidrs.iter().map(String::as_str))?;
-    let flows = Arc::new(FlowLog::new(settings.buffer_size));
+    let flows = Arc::new(FlowLog::new(settings.buffer_size).with_max_age(settings.buffer_max_age));
     let policy_rx = policy_tx.subscribe();
     let proxy = Arc::new(Proxy::new(
         settings.pod.clone(),

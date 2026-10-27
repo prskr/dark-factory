@@ -114,6 +114,7 @@ Every key in `values.yaml` is documented below:
 | `gateway.ports.internalGrpc` | `int` | `9444` | Gateway internal gRPC port (`Tail`, mTLS). |
 | `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`; ready after the first policy snapshot). |
 | `gateway.bufferSize` | `int` | `10000` | Flow events of the live egress log kept in memory per gateway pod. |
+| `gateway.bufferMaxAgeSeconds` | `int` | `3600` | Maximum age of the flow events in the gateway and control plane buffers. Minimum 1: the chart schema rejects 0 (outside the chart, the runtime raises 0 to 1 s). |
 | `gateway.logLevel` | `string` | `info` | `RUST_LOG` of the gateway. |
 | `gateway.blockedCidrs` | `list` | `[]` | Pod and Service CIDRs the proxy refuses as destinations, on top of the built-in private, loopback, link-local, CGNAT and unique-local ranges. |
 | `gateway.resources.requests.cpu` | `string` | `"100m"` | Gateway CPU request. |

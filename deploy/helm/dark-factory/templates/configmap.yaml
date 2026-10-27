@@ -28,6 +28,7 @@ data:
       identity: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}
       headlessService: {{ printf "%s-gateway-headless.%s.svc" (include "dark-factory.fullname" .) .Release.Namespace | quote }}
       bufferSize: {{ .Values.gateway.bufferSize }}
+      bufferMaxAgeSeconds: {{ .Values.gateway.bufferMaxAgeSeconds }}
       blockedCidrs: {{ .Values.gateway.blockedCidrs | toJson }}
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
     harness:

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use df_proto::gateway::v1::Verdict;
+use df_proto::gateway::v1::{Phase, Verdict};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -15,6 +15,9 @@ use super::*;
 use crate::flow::FlowLog;
 use crate::link::PlainConnector;
 use crate::tail;
+
+/// A maximum age that keeps the events with small test timestamps.
+const FOREVER: Duration = Duration::from_secs(u32::MAX as u64);
 
 /// A gateway pod's `Tail` server on a loopback port. It counts its open `Tail` streams.
 struct Pod {
@@ -68,7 +71,7 @@ impl Pod {
     async fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap().to_string();
-        let flows = Arc::new(FlowLog::new(100));
+        let flows = Arc::new(FlowLog::new(100).with_max_age(FOREVER));
         let open = Arc::new(watch::channel(0).0);
         let service = CountingTail {
             inner: tail::TailService::new(flows.clone()),
@@ -145,7 +148,7 @@ impl GatewayDirectory for FakeDirectory {
 
 /// A relay that closes its streams as soon as the last viewer left.
 fn relay(directory: &Arc<FakeDirectory>) -> Relay {
-    let mut relay = Relay::new(directory.clone(), Duration::from_millis(20));
+    let mut relay = Relay::new(directory.clone(), Duration::from_millis(20)).with_max_age(FOREVER);
     relay.grace = Duration::ZERO;
     relay
 }
@@ -284,7 +287,7 @@ async fn a_reopened_stream_does_not_repeat_known_events() {
 
 #[tokio::test]
 async fn buffer_keeps_events_in_time_order() {
-    let merged = Merged::new();
+    let merged = Merged::new(FOREVER);
     for second in [3, 1, 2] {
         merged.insert(FlowEvent {
             host: second.to_string(),
@@ -318,7 +321,7 @@ async fn a_viewer_gets_a_marker_between_the_backlog_and_live_events() {
 
 #[test]
 fn a_replayed_event_older_than_a_full_buffer_is_neither_stored_nor_sent() {
-    let merged = Merged::new();
+    let merged = Merged::new(FOREVER);
     let at = |second: i64| FlowEvent {
         host: second.to_string(),
         time: Some(Timestamp {
@@ -375,7 +378,7 @@ async fn a_viewer_waits_for_the_buffered_events_of_pods_that_connect_late() {
         inner,
         gate: tokio::sync::Semaphore::new(0),
     });
-    let relay = Relay::new(directory.clone(), Duration::from_millis(20));
+    let relay = Relay::new(directory.clone(), Duration::from_millis(20)).with_max_age(FOREVER);
 
     // The viewer subscribes while no pod stream is connected: it must wait for the backlog.
     let mut viewer = relay.subscribe();
@@ -433,7 +436,7 @@ async fn read_backlog_and_leave(relay: &Relay) {
 #[tokio::test(start_paused = true)]
 async fn a_viewer_that_comes_back_within_the_grace_period_reuses_the_session() {
     let directory = Arc::new(CountingDirectory::default());
-    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600)).with_max_age(FOREVER);
 
     read_backlog_and_leave(&relay).await;
     tokio::time::sleep(SESSION_GRACE / 2).await;
@@ -445,7 +448,7 @@ async fn a_viewer_that_comes_back_within_the_grace_period_reuses_the_session() {
 #[tokio::test(start_paused = true)]
 async fn a_viewer_that_comes_back_after_the_grace_period_starts_a_new_session() {
     let directory = Arc::new(CountingDirectory::default());
-    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600)).with_max_age(FOREVER);
 
     read_backlog_and_leave(&relay).await;
     tokio::time::sleep(SESSION_GRACE + Duration::from_secs(1)).await;
@@ -460,7 +463,7 @@ async fn the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_ne
     a.record("old", 1);
     let directory = Arc::new(FakeDirectory::default());
     directory.set(&[&a]);
-    let relay = Relay::new(directory.clone(), Duration::from_secs(3600));
+    let relay = Relay::new(directory.clone(), Duration::from_secs(3600)).with_max_age(FOREVER);
 
     let mut first = relay.subscribe();
     assert_eq!(next_host(&mut first).await, "old");
@@ -499,7 +502,8 @@ impl GatewayDirectory for StuckDirectory {
 
 #[tokio::test(start_paused = true)]
 async fn a_viewer_that_comes_back_does_not_wait_for_the_backlog_again() {
-    let relay = Relay::new(Arc::new(StuckDirectory), Duration::from_secs(3600));
+    let relay =
+        Relay::new(Arc::new(StuckDirectory), Duration::from_secs(3600)).with_max_age(FOREVER);
 
     let started = tokio::time::Instant::now();
     read_backlog_and_leave(&relay).await;
@@ -512,4 +516,82 @@ async fn a_viewer_that_comes_back_does_not_wait_for_the_backlog_again() {
         Duration::ZERO,
         "the session already waited"
     );
+}
+
+#[test]
+fn merged_does_not_buffer_or_forward_a_late_event_that_is_already_expired() {
+    let merged = Merged::new(Duration::from_secs(3600));
+    let now = crate::flow::timestamp_now().seconds;
+    let event = |host: &str, phase: Phase, flow_id: u64, age: i64| FlowEvent {
+        host: host.into(),
+        phase: phase.into(),
+        flow_id,
+        time: Some(Timestamp {
+            seconds: now - age,
+            nanos: 0,
+        }),
+        ..Default::default()
+    };
+    let cutoff = now - 3600;
+    let t0 = Instant::now();
+    let (_, mut live) = merged.subscribe();
+    merged.insert_at(event("late", Phase::Closed, 1, 7200), cutoff, t0);
+    // The opened event of a connection that is still open is kept, however old it is.
+    merged.insert_at(event("tunnel", Phase::Opened, 2, 5400), cutoff, t0);
+    merged.insert_at(event("new", Phase::Closed, 3, 10), cutoff, t0);
+    let mut forwarded = Vec::new();
+    while let Ok(e) = live.try_recv() {
+        forwarded.push(e.host);
+    }
+    assert_eq!(forwarded, ["tunnel", "new"]);
+    assert_eq!(merged.buffer.lock().unwrap().events.len(), 2);
+}
+
+#[test]
+fn merged_drops_expired_events_on_subscribe_and_on_insert() {
+    let merged = Merged::new(Duration::from_secs(3600));
+    let now = crate::flow::timestamp_now().seconds;
+    let event = |host: &str, phase: Phase, flow_id: u64, age: i64| FlowEvent {
+        host: host.into(),
+        phase: phase.into(),
+        flow_id,
+        time: Some(Timestamp {
+            seconds: now - age,
+            nanos: 0,
+        }),
+        ..Default::default()
+    };
+    let t0 = Instant::now();
+    let cutoff = now - 3600;
+    // Admitted while young enough: they expire inside the buffer, as time passes.
+    let earlier = now - 10_000;
+    merged.insert_at(event("old", Phase::Closed, 1, 7200), earlier, t0);
+    merged.insert_at(event("tunnel", Phase::Opened, 2, 5400), earlier, t0);
+    merged.insert_at(event("new", Phase::Closed, 3, 10), earlier, t0);
+    let (backlog, _) = merged.subscribe();
+    let hosts: Vec<_> = backlog.iter().map(|e| e.host.as_str()).collect();
+    assert_eq!(hosts, ["tunnel", "new"], "old is not handed out");
+    assert_eq!(
+        merged.buffer.lock().unwrap().events.len(),
+        3,
+        "not pruned yet"
+    );
+
+    merged.insert_at(
+        event("newer", Phase::Closed, 4, 1),
+        cutoff,
+        t0 + Duration::from_secs(61),
+    );
+    assert_eq!(
+        merged.buffer.lock().unwrap().events.len(),
+        3,
+        "old was pruned"
+    );
+}
+
+#[test]
+fn a_zero_maximum_age_is_raised_to_one_second() {
+    let relay = Relay::new(Arc::new(FakeDirectory::default()), Duration::from_secs(1))
+        .with_max_age(Duration::ZERO);
+    assert_eq!(relay.max_age, crate::flow::MIN_MAX_AGE);
 }

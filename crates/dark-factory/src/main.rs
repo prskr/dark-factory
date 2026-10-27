@@ -776,6 +776,7 @@ async fn run_gateway_command(
         pod,
         control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
         buffer_size: cfg.gateway.buffer_size,
+        buffer_max_age: cfg.gateway.buffer_max_age(),
         blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
         retry: df_gateway::watch::RETRY_INTERVAL,
         control_plane_name: Some(control_plane_name.clone()),
@@ -897,7 +898,8 @@ fn egress_log_relay(
     let relay = df_gateway::control::Relay::new(
         Arc::new(directory),
         df_gateway::control::relay::DISCOVERY_INTERVAL,
-    );
+    )
+    .with_max_age(cfg.gateway.buffer_max_age());
     Some(Arc::new(RelayFlows(relay)))
 }
 

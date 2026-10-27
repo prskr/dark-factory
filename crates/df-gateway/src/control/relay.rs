@@ -6,10 +6,10 @@
 //! all pods are kept in time order in a buffer, so a viewer that joins gets the recent history of
 //! every pod in one sequence and then the live events.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use df_proto::gateway::v1::gateway_log_client::GatewayLogClient;
@@ -23,6 +23,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tonic::transport::Channel;
 
+use crate::flow::{AgedEvents, DEFAULT_MAX_AGE, MIN_MAX_AGE, cutoff};
 use crate::link::{GrpcConnector, LinkError};
 
 /// How often the gateway pods are looked up.
@@ -90,6 +91,8 @@ pub struct Relay {
     /// Keeps the session alive for `SESSION_GRACE` after a viewer left; only the newest runs.
     linger: Arc<Mutex<Option<JoinHandle<()>>>>,
     grace: Duration,
+    /// Events older than this are dropped from the merged buffer.
+    max_age: Duration,
 }
 
 impl Relay {
@@ -100,7 +103,15 @@ impl Relay {
             session: Mutex::default(),
             linger: Arc::default(),
             grace: SESSION_GRACE,
+            max_age: DEFAULT_MAX_AGE,
         }
+    }
+
+    /// Events older than `max_age` are dropped.
+    #[must_use]
+    pub fn with_max_age(mut self, max_age: Duration) -> Self {
+        self.max_age = max_age.max(MIN_MAX_AGE);
+        self
     }
 
     /// A viewer's stream: the buffered events of all gateway pods in time order, an event with
@@ -110,7 +121,7 @@ impl Relay {
         let session = {
             let mut current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
             current.upgrade().unwrap_or_else(|| {
-                let session = Session::start(self.directory.clone(), self.interval);
+                let session = Session::start(self.directory.clone(), self.interval, self.max_age);
                 *current = Arc::downgrade(&session);
                 session
             })
@@ -206,8 +217,12 @@ struct Session {
 }
 
 impl Session {
-    fn start(directory: Arc<dyn GatewayDirectory>, interval: Duration) -> Arc<Self> {
-        let merged = Arc::new(Merged::new());
+    fn start(
+        directory: Arc<dyn GatewayDirectory>,
+        interval: Duration,
+        max_age: Duration,
+    ) -> Arc<Self> {
+        let merged = Arc::new(Merged::new(max_age));
         // The first discovery round counts as a pending backlog until it has started its pods.
         merged.pending.send_modify(|pending| *pending += 1);
         let task = tokio::spawn(follow_pods(directory, interval, merged.clone()));
@@ -238,23 +253,35 @@ impl Drop for Session {
 
 /// Events of all pods in time order, and the live channel.
 struct Merged {
-    buffer: Mutex<VecDeque<FlowEvent>>,
+    buffer: Mutex<AgedEvents>,
+    max_age: Duration,
     live: broadcast::Sender<FlowEvent>,
     /// Streams that have not yet delivered their buffered events.
     pending: watch::Sender<usize>,
 }
 
 impl Merged {
-    fn new() -> Self {
+    fn new(max_age: Duration) -> Self {
         Self {
             buffer: Mutex::default(),
+            max_age,
             live: broadcast::channel(LIVE_BACKLOG).0,
             pending: watch::channel(0).0,
         }
     }
 
     fn insert(&self, event: FlowEvent) {
+        self.insert_at(event, cutoff(self.max_age), Instant::now());
+    }
+
+    fn insert_at(&self, event: FlowEvent, cutoff: i64, now: Instant) {
         let mut buffer = self.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+        buffer.prune_if_due(cutoff, now);
+        // A late event would reach the viewers that are connected but no later backlog.
+        if buffer.arrives_expired(&event, cutoff) {
+            return;
+        }
+        let buffer = &mut buffer.events;
         let key = time_key(&event);
         let start = buffer.partition_point(|e| time_key(e) < key);
         let end = buffer.partition_point(|e| time_key(e) <= key);
@@ -286,7 +313,8 @@ impl Merged {
 
     fn subscribe(&self) -> (Vec<FlowEvent>, broadcast::Receiver<FlowEvent>) {
         let buffer = self.buffer.lock().unwrap_or_else(PoisonError::into_inner);
-        (buffer.iter().cloned().collect(), self.live.subscribe())
+        let backlog = buffer.unexpired(cutoff(self.max_age)).cloned().collect();
+        (backlog, self.live.subscribe())
     }
 }
 

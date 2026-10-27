@@ -428,6 +428,10 @@ tests:
         documentIndex: 0
       - matchRegex:
           path: data["config.yaml"]
+          pattern: 'bufferMaxAgeSeconds: 3600'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
           pattern: 'blockedCidrs: \["10.42.0.0/16"\]'
         documentIndex: 0
 

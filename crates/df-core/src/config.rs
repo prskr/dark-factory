@@ -210,6 +210,10 @@ pub struct GatewayConfig {
     /// Flow events kept in memory per gateway pod.
     #[serde(default = "default_flow_buffer_size")]
     pub buffer_size: usize,
+    /// Flow events older than this many seconds are dropped from the buffers of the gateway
+    /// pods and of the control plane (an `opened` event of an open connection is kept).
+    #[serde(default = "default_flow_buffer_max_age_seconds")]
+    pub buffer_max_age_seconds: u64,
     /// Pod and Service CIDRs of the cluster, refused as proxy destinations on top of the
     /// built-in private, loopback, link-local, CGNAT and unique-local ranges.
     #[serde(default)]
@@ -226,12 +230,18 @@ impl Default for GatewayConfig {
             identity: None,
             headless_service: None,
             buffer_size: default_flow_buffer_size(),
+            buffer_max_age_seconds: default_flow_buffer_max_age_seconds(),
             blocked_cidrs: Vec::new(),
         }
     }
 }
 
 impl GatewayConfig {
+    /// `buffer_max_age_seconds` as a duration.
+    pub fn buffer_max_age(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.buffer_max_age_seconds)
+    }
+
     /// The certificate name of the control plane.
     pub fn control_plane_name(&self, instance_name: &str) -> String {
         self.control_plane_host
@@ -609,6 +619,10 @@ fn default_flow_buffer_size() -> usize {
     10_000
 }
 
+fn default_flow_buffer_max_age_seconds() -> u64 {
+    3600
+}
+
 fn default_sandbox_namespace() -> String {
     "dark-factory-sandboxes".to_string()
 }
@@ -831,17 +845,19 @@ sandbox:
         let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
         let gateway = InstanceConfig::from_yaml_str(minimal).unwrap().gateway;
         assert_eq!(gateway.buffer_size, 10_000);
+        assert_eq!(gateway.buffer_max_age_seconds, 3600);
         assert!(gateway.blocked_cidrs.is_empty() && gateway.headless_service.is_none());
         assert_eq!(gateway.control_plane_name("df"), "df-control-plane");
         assert_eq!(gateway.identity_name("df"), "df-gateway");
 
         let yaml = format!(
-            "{minimal}gateway:\n  controlPlaneHost: cp.svc\n  identity: gw\n  headlessService: gw-headless.ns.svc\n  bufferSize: 50\n  blockedCidrs: [\"10.42.0.0/16\"]\n"
+            "{minimal}gateway:\n  controlPlaneHost: cp.svc\n  identity: gw\n  headlessService: gw-headless.ns.svc\n  bufferSize: 50\n  bufferMaxAgeSeconds: 120\n  blockedCidrs: [\"10.42.0.0/16\"]\n"
         );
         let gateway = InstanceConfig::from_yaml_str(&yaml).unwrap().gateway;
         assert_eq!(gateway.control_plane_name("df"), "cp.svc");
         assert_eq!(gateway.identity_name("df"), "gw");
         assert_eq!(gateway.buffer_size, 50);
+        assert_eq!(gateway.buffer_max_age_seconds, 120);
         assert_eq!(gateway.blocked_cidrs, ["10.42.0.0/16"]);
     }
 
