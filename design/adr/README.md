@@ -48,3 +48,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
 | [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3) |
 | [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3) |
+| [ADR-0045](0045-full-harness-mode-as-separate-acp-binary.md) | Full-harness mode as a separate ACP binary | Proposed (spike `native-harness-spike`) |

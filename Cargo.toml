@@ -61,7 +61,11 @@ prost-build = "0.14"
 prost-types = "0.14"
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rmcp = { version = "3.5.1", default-features = false, features = ["client", "server", "transport-async-rw"] }
+rpi-agent = "=0.11.0"
+rpi-ai = { version = "=0.11.0", features = ["providers"] }
+rpi-tools = "=0.11.0"
 rsa = { version = "0.9", features = ["pem"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -109,3 +113,6 @@ wiremock = "0.6"
 wit-bindgen = "0.63"
 x509-parser = "0.18"
 
+
+[workspace.metadata.outdated.ignore]
+reqwest = "native-harness-spike: rpi-ai 0.11 builds its provider client on reqwest 0.12; df-harness must hand it a client of the same version"

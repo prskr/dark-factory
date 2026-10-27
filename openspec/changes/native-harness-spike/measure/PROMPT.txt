@@ -1,0 +1,1 @@
+`node test.js` in the current directory fails. Fix slug.js so that it passes. Do not modify test.js. When the test passes, stop.

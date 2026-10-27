@@ -1,0 +1,1 @@
+{"tool_calls": 5, "thought_chunks": 34, "message_chunks": 10, "usage": {"used": 2287, "size": 128000}, "stop_reason": "end_turn", "wall_seconds": 6.9}

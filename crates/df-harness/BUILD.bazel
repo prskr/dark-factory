@@ -1,0 +1,17 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+# Spike (native-harness-spike): the ACP tests spawn the cargo-built binary, so there is no
+# rust_test target.
+rust_binary(
+    name = "df-harness",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)

@@ -1,0 +1,28 @@
+[package]
+name = "df-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Spike: native ACP harness on rpi-agent (see openspec/changes/archive/2026-10-27-native-harness-spike)"
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-client-protocol.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+rmcp.workspace = true
+rpi-agent.workspace = true
+rpi-ai.workspace = true
+rpi-tools.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
