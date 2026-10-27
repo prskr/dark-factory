@@ -25,7 +25,7 @@ flowchart LR
 
 ## 1 — Thin vertical slice
 
-Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`, `transcript-view-polish`, `iter1-keep-alive-and-review`, `egress-log-viewport`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
+Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `iter1-integration-plugins`, `iter1-sandbox-provisioning`, `iter1-demo-e2e`, `transcript-view-polish`, `iter1-keep-alive-and-review`, `egress-log-viewport`, `hide-system-prompt-blocks`. Scope and definition of done: [`iteration-1.md`](iteration-1.md).
 
 ## 1.1 — Operability
 
@@ -93,6 +93,7 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 | Context compaction plugins | F3 |
 | `push-check` WASI plugins | [`design/agent-run.md`](../../design/agent-run.md) §11 |
 | Declarative configuration import | F4 |
+| Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | `openspec/changes/hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox | F7 |
 | Cilium mode, DNS server in the gateway | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
 | Separate UIDs for runtime and harness | [`design/agent-run.md`](../../design/agent-run.md) §17 |
