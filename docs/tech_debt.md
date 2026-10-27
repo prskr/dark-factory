@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-63.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-65.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -23,6 +23,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-60: CodeRabbit review of PR #26 (`harness-images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -84,6 +85,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
 | TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list |
+| TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
+| TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
 
 ## Entries
 
@@ -581,6 +584,26 @@ Swapping `#ws-detail` through the task list logs an `AbortError` in the browser 
 **Matters when:** console errors are collected or alerted on, or the swap leaves a stream open.
 
 **Fix:** Reproduce with the Playwright container, then handle the abort in the same place as the Pause fix (cancel the reader before the controller aborts) and add a browser-level check.
+
+### TD-63 (S3). `DF_HARNESS_*` variables undocumented
+
+`crates/df-harness/src/main.rs`
+
+`DF_HARNESS_BASE_URL`, `DF_HARNESS_API_KEY`, `DF_HARNESS_MODEL` and `DF_HARNESS_REASONING` (default true) have no reference entry. `design.md` of `native-harness-spike` mentions only some of them.
+
+**Matters when:** `df-harness` is promoted from the spike branch (`full-harness-mode`).
+
+**Fix:** Add a reference table (variable, required or optional, default, effect) to the harness docs, as `crates/factory-agent/docs/configuration.md` does for the runtime.
+
+### TD-64 (S14). `call_tool` timeout untested
+
+`crates/df-harness/src/mcp.rs`
+
+`CALL_TIMEOUT` (600 s) is a private constant and no test covers it. The setup timeout is injectable and tested.
+
+**Matters when:** `df-harness` is promoted, or the timeout is changed.
+
+**Fix:** Pass the timeout in as a field on `Server`/`McpTool`, like `setup_timeout`, and add a test against a fake MCP server that lists tools but never answers `tools/call`.
 
 ## Accepted decisions
 

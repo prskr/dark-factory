@@ -1,6 +1,9 @@
 [advisories]
 version = 2
 ignore = [
+    # `paste` is unmaintained; reached only through the spike crate df-harness (rpi-tools -> image
+    # -> exr -> pulp). Spike-only: revisit if the native-harness-spike decision is to build.
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained: spike-only (df-harness via rpi-tools)" },
     # Marvin attack on RSA private-key operations; no fixed `rsa` release exists. Production only
     # verifies OIDC ID-token signatures with the provider's public keys (`openidconnect`); private
     # keys are used only by df-web's test OIDC provider. Revisit when `openidconnect` moves to a

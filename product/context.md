@@ -49,7 +49,7 @@
 
 ### 4.1 Operation modes
 - **ACP mode**: acts as an ACP (Agent Client Protocol) client that starts an external agent/harness. Claude Code first; other ACP-compatible harnesses are a future option.
-- **Full harness mode**: own agent loop using an inference provider via an OpenAI-compatible API (through the inference endpoint in the gateway Deployment, ADR-0029). Before building its tools, study existing work: output reduction for shell tools as done by tools like `rtk` (truncating/cleaning output to save context), and existing open-source harnesses (e.g. Codex CLI and goose, both Rust — check licenses before reusing code).
+- **Full harness mode**: own agent loop in a separate ACP binary (`df-native`, started by the runtime like any harness, ADR-0045) using an inference provider via an OpenAI-compatible API (through the inference endpoint in the gateway Deployment, ADR-0029). Before building its tools, study existing work: output reduction for shell tools as done by tools like `rtk` (truncating/cleaning output to save context), and existing open-source harnesses (e.g. Codex CLI and goose, both Rust — check licenses before reusing code).
 
 ### 4.2 Capabilities
 - Serve the factory tools to the harness (ADR-0027) and register the gateway's MCP endpoint for third-party MCP servers, loaded lazily (ADR-0032).

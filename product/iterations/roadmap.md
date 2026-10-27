@@ -86,7 +86,7 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 
 | Item | Reference |
 |---|---|
-| Full-harness mode and inference gateway | context §4.1, F5, [`design/egress.md`](../../design/egress.md) §9 |
+| Full-harness mode as a separate ACP binary (ADR-0045, spike decided: build) and inference gateway | context §4.1, F5, [`design/egress.md`](../../design/egress.md) §9, `openspec/changes/full-harness-mode` |
 | Subscription pools and fallback | F6 |
 | Further ACP harnesses (harness delivery is decided: one image volume per harness, ADR-0022) | context §7 |
 | MCP tools as WASI components | F2 |

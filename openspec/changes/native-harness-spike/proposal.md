@@ -27,4 +27,4 @@ None.
 - **Code on `main`:** none. The prototype stays on the spike branch.
 - **Docs, only if the decision is to build:** `product/context.md` §4.1 (full-harness mode as a separate ACP binary instead of a loop in the runtime, if D1 holds), `product/iterations/roadmap.md` (backlog entry updated), a new ADR.
 - **Limitation:** the memory saving applies only to runs billed by API through the inference endpoint (`design/egress.md` §9). Runs on a Claude subscription keep Claude Code (`product/context.md` §1).
-- **Dependencies, if the decision is to build:** `rpi-ai`, `rpi-agent`, `rpi-tools` (0.9.x, one maintainer) or `octolib`. `cargo deny` and dependency weight are part of the evaluation.
+- **Dependencies, if the decision is to build:** `rpi-ai`, `rpi-agent`, `rpi-tools` (0.11.0 at the time of the spike, one maintainer) or `octolib`. `cargo deny` and dependency weight are part of the evaluation.
