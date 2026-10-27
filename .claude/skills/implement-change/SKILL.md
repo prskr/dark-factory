@@ -17,18 +17,30 @@ Change: `$ARGUMENTS`
 4. Ledger: `openspec/changes/<name>/review-log.md`.
    - If it exists, this is a resumed run. Read it and take `BASE`, the round number and the open findings from it. Continue at the step the ledger records.
    - Otherwise create it with `BASE=$(git rev-parse HEAD)` and the template below.
-5. Announce: change, store, BASE, progress (`n/m tasks`), resumed or fresh.
+5. Design tasks: read `tasks.md` and list the open tasks that produce or change a design (they name PenPot, a board, a mockup or the design mapping in `docs/design-workflow.md`). Call them `DESIGN`. If `DESIGN` is not empty, check that the PenPot MCP is connected to the right file, as in `docs/design-workflow.md`, "Check the setup": through `execute_code`, `penpot.currentFile.name` must be `App Design` and `penpotUtils.getPages()` must list the nine pages. If either check fails, ask the user to connect or select the right file before going on; do not start the implementer with open design tasks.
+6. Container socket: probe for one, as described in `AGENTS.md` ("Containers and integration tests in a sandbox"): `$XDG_RUNTIME_DIR/podman/podman.sock` and `/var/run/docker.sock`, each with `curl -sf --max-time 3 --unix-socket <socket> http://d/_ping`. Remember the answering socket as `DOCKER_HOST=unix://<socket>` (`DOCKER_HOST` is none if nothing answers). Never start or install Docker or Podman.
+7. Announce: change, store, BASE, progress (`n/m tasks`), design tasks open (`DESIGN` or none), `DOCKER_HOST` (or none), resumed or fresh.
 
-## 1. Implement
+## 1. Design (only if `DESIGN` is not empty)
 
-Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Remember its agent ID so later rounds can reach it with `SendMessage`.
+The implementer cannot ask questions and has no judgement about the look, so the orchestrator does the open design tasks itself, before any code is written. Follow `docs/design-workflow.md`.
+
+1. Read the change's `design.md` and specs, and the existing boards the task refers to.
+2. Do each design task in PenPot (clone the nearest board, then change it). Export the board with `export_shape` and look at it.
+3. Show the result to the user and ask with `AskUserQuestion`: "Approve" / "Change it (say what)" / "Stop". On a change request, iterate and ask again. Don't go on without approval.
+4. Add the mapping row to `docs/design-workflow.md`, tick the design tasks in `tasks.md`, and commit them as `wip(<change>): design`. Record the SHA in the ledger.
+5. If the design shows that `design.md` or a spec is wrong or incomplete, suggest `/opsx:update` and stop.
+
+## 2. Implement
+
+Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Pass the same status with every fix round. Remember its agent ID so later rounds can reach it with `SendMessage`.
 
 When it reports:
 - `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/opsx:update` and stop.
 - Any check failed or `COMMIT: none`: send it back once to fix. If it fails again, show the failure to the user and stop.
 - Record the commit SHA as `HEAD_n` in the ledger.
 
-## 2. Review
+## 3. Review
 
 1. Read `~/.claude/skills/code-review/SKILL.md`. Use step 3 for the standards sources and the smell baseline. Here the standards sources are at least `AGENTS.md`, `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`.
 2. Diff range:
@@ -38,7 +50,7 @@ When it reports:
    - `subagent_type: standards-reviewer`: diff command, commit list, standards files, the smell baseline pasted in full, the ledger rows.
    - `subagent_type: spec-reviewer`: diff command, commit list, the change's context files (`openspec instructions apply --change <name> --json`, with `--store`, → `contextFiles`), the ledger rows.
 
-## 3. Classify
+## 4. Classify
 
 For every finding, decide each of the following and record it in the ledger.
 
@@ -58,7 +70,7 @@ For every finding, decide each of the following and record it in the ledger.
 
 **Convergence rule:** from round 2 on, a newly found `critical` or `major` finding stays blocking wherever it is. A lower-severity finding is blocking only if it is in code the last fix round changed, or it is a regression; on untouched code it is at most P2.
 
-## 4. Gate (every round)
+## 5. Gate (every round)
 
 Show the user this table, sorted by Blocking, then P1, P2, P3, Rejected:
 
@@ -74,14 +86,14 @@ Then ask with `AskUserQuestion`:
 
 Write the user's decision to the ledger before acting on it.
 
-## 5. Fix round
+## 6. Fix round
 
 - Build the fix list: ID, file:line, problem, expected fix. Include only the items the user approved.
 - Send it to the same implementer with `SendMessage` (`Fix round <n>`). Spawn a fresh implementer, with the change name and the fix list, only if the old one is gone or its reports become incoherent.
-- Handle its report as in step 1, then go back to step 2.
+- Handle its report as in step 2, then go back to step 3.
 - Limit: after 3 fix rounds with blocking findings still open, stop. Show the open items and ask the user how to continue.
 
-## 6. Finish
+## 7. Finish
 
 When no blocking finding is open, or the user chose "Stop here" (or the fix-round limit was hit):
 
