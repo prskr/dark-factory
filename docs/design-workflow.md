@@ -114,6 +114,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Board (page / name) | Route | Data | Viewport |
 |---|---|---|---|
 | Network / Network · live traffic | `/egress/log` | `--demo-flows` | 1440 |
+| Network / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
 | Network / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
 | Desktop / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |

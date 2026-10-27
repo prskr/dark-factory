@@ -174,6 +174,8 @@ gateway:
     health: 8080
   # Flow events of the live egress log kept in memory per gateway pod.
   bufferSize: 10000
+  # Flow events older than this many seconds leave the buffers (open connections stay visible).
+  bufferMaxAgeSeconds: 3600
   # Pod and Service CIDRs of the cluster that the proxy must never connect to, on top of the
   # built-in private, loopback, link-local, CGNAT and unique-local ranges.
   blockedCidrs: []

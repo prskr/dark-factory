@@ -44,6 +44,9 @@ fn state(advanced: usize, dirty: bool) -> String {
   dragging: false,
   startX: 0,
   startW: 0,
+  graphDragging: false,
+  gx: 0,
+  gy: 0,
   flow: null,
   flowId: '',
   flowRow: null,
@@ -128,6 +131,24 @@ fn state(advanced: usize, dirty: bool) -> String {
   }},
   dragMove(e) {{ if (this.dragging) this.setW(this.startW + e.clientX - this.startX) }},
   dragEnd() {{ this.dragging = false }},
+  // Drag the graph background to scroll it; node cards keep their text selectable.
+  graphDragStart(e) {{
+    const box = e.currentTarget
+    if (e.button !== 0 || e.target.closest('[data-node]')) return
+    // A press on the scrollbar scrolls natively.
+    const rect = box.getBoundingClientRect()
+    if (e.clientX - rect.left - box.clientLeft >= box.clientWidth || e.clientY - rect.top - box.clientTop >= box.clientHeight) return
+    box.setPointerCapture(e.pointerId)
+    this.graphDragging = true
+    this.gx = e.clientX + box.scrollLeft
+    this.gy = e.clientY + box.scrollTop
+  }},
+  graphDragMove(e) {{
+    if (!this.graphDragging) return
+    e.currentTarget.scrollLeft = this.gx - e.clientX
+    e.currentTarget.scrollTop = this.gy - e.clientY
+  }},
+  graphDragEnd() {{ this.graphDragging = false }},
   divKey(e) {{
     const step = e.shiftKey ? 96 : 32
     const [lo, hi] = this.limits()
@@ -175,7 +196,7 @@ pub(super) fn page_body(
 ) -> Markup {
     let events = format!("/egress/log/events{}", filter.query());
     html! {
-        div x-data=(state(filter.advanced_count(), !filter.is_empty())) ":class"="dragging && 'select-none'" {
+        div class="md:flex md:h-[calc(100dvh-4rem)] md:flex-col" x-data=(state(filter.advanced_count(), !filter.is_empty())) ":class"="(dragging || graphDragging) && 'select-none'" {
             (header())
             (filter_bar(filter, personas, &backlog.counts))
             (traffic(&events, filter, backlog))
@@ -186,7 +207,7 @@ pub(super) fn page_body(
 
 fn header() -> Markup {
     html! {
-        header class="mb-5 flex flex-wrap items-center justify-between gap-4" {
+        header class="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-4" {
             div class="flex items-center gap-3" {
                 h1 class="text-2xl font-semibold" { "Network traffic" }
                 span role="status" class="inline-flex items-center gap-1.5 rounded-full bg-status-completed-bg px-2.5 py-0.5 text-xs font-medium text-status-completed-fg"
@@ -223,7 +244,7 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)], counts: &Counts) -
     // A persona that no longer exists stays selectable, so the link keeps its meaning.
     let unknown = !persona.is_empty() && !personas.iter().any(|(id, _)| id == persona);
     html! {
-        form id="filters" method="get" action="/egress/log" class="mb-4 flex flex-col items-end gap-2"
+        form id="filters" method="get" action="/egress/log" class="mb-4 flex shrink-0 flex-col items-end gap-2"
             "x-on:input"="sync($el)" "x-on:change"="sync($el)"
             hx-get="/egress/log" hx-trigger="input changed delay:300ms, change" hx-target="#traffic" hx-select="#traffic"
             hx-select-oob="#count-all,#count-blocked,#count-allowed" hx-swap="outerHTML" hx-push-url="true" {
@@ -279,17 +300,23 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)], counts: &Counts) -
 
 fn traffic(events_url: &str, filter: &Filter, backlog: &Backlog) -> Markup {
     html! {
-        div id="traffic" {
+        div id="traffic" class="flex min-h-0 flex-1 flex-col" {
             div id="sse-slot" data-url=(events_url) {
                 div hx-sse:connect=(events_url) hx-swap="none" {}
             }
             div id="split" x-ref="split"
-                class="grid items-start gap-0"
+                class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] items-stretch gap-0"
                 style={"grid-template-columns:var(--graph-w," (DEFAULT_GRAPH_WIDTH) "px) " (DIVIDER_WIDTH) "px minmax(0,1fr)"}
                 ":style"="{'--graph-w': w + 'px'}" "x-on:resize.window"="setW(want, false)" {
-                section aria-labelledby="connections-title" class="min-w-0 overflow-hidden rounded-xl border border-line bg-panel" {
-                    h2 id="connections-title" class="border-b border-line px-5 py-3 text-xs font-medium uppercase tracking-wide text-faint" { "Connections" }
-                    div id="graph" { (PreEscaped(&backlog.graph)) }
+                section aria-labelledby="connections-title" class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel" {
+                    h2 id="connections-title" class="shrink-0 border-b border-line px-5 py-3 text-xs font-medium uppercase tracking-wide text-faint" { "Connections" }
+                    // Outside `#graph`, which is morphed: the scroll position survives updates.
+                    div id="graph-scroll" role="region" aria-label="Connections graph" tabindex="0"
+                        class="relative min-h-0 flex-1 overflow-auto cursor-grab focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent-text"
+                        "x-on:pointerdown"="graphDragStart($event)" "x-on:pointermove"="graphDragMove($event)"
+                        "x-on:pointerup"="graphDragEnd()" "x-on:pointercancel"="graphDragEnd()" {
+                        div id="graph" { (PreEscaped(&backlog.graph)) }
+                    }
                 }
                 div role="separator" aria-orientation="vertical" aria-label="Resize connections and events"
                     aria-valuenow=(DEFAULT_GRAPH_WIDTH) aria-valuemin=(MIN_GRAPH_PANEL) aria-valuemax=(DEFAULT_GRAPH_WIDTH + 240)
@@ -308,14 +335,14 @@ fn traffic(events_url: &str, filter: &Filter, backlog: &Backlog) -> Markup {
 
 fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
     let counts = &backlog.counts;
-    let th = "px-3 py-3 font-medium";
+    let th = "sticky top-0 bg-panel px-3 py-3 font-medium";
     html! {
-        section id="events" aria-labelledby="events-title" class="@container min-w-0 rounded-xl border border-line bg-panel" {
-            div class="flex items-baseline justify-between gap-3 border-b border-line px-5 py-3" {
+        section id="events" aria-labelledby="events-title" class="@container flex min-h-0 min-w-0 flex-col rounded-xl border border-line bg-panel" {
+            div class="flex shrink-0 items-baseline justify-between gap-3 border-b border-line px-5 py-3" {
                 h2 id="events-title" class="text-xs font-medium uppercase tracking-wide text-faint" { "Events · newest first" }
                 span id="event-count" class="font-mono text-xs text-faint" { (event_count(counts)) }
             }
-            div class="overflow-x-auto" {
+            div id="flows-scroll" class="relative min-h-0 flex-1 overflow-auto" {
                 table id="flows" class="w-full border-collapse text-left text-sm" {
                     thead {
                         tr class="text-xs font-medium uppercase tracking-wide text-faint" {
@@ -323,13 +350,13 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
                             th scope="col" class=(th) { "Sandbox" }
                             th scope="col" class=(th) { "Destination" }
                             th scope="col" class={"hidden @[680px]:table-cell " (th)} { "Verdict" }
-                            th scope="col" class="w-11 py-3 pr-4 pl-3" { span class="sr-only" { "Actions" } }
+                            th scope="col" class="sticky top-0 w-11 bg-panel py-3 pr-4 pl-3" { span class="sr-only" { "Actions" } }
                         }
                     }
                     tbody data-limit=(filter.row_limit()) { (backlog.rows) }
                 }
             }
-            div id="flows-empty" { (empty_state(counts, filter)) }
+            div id="flows-empty" class="shrink-0" { (empty_state(counts, filter)) }
         }
     }
 }
@@ -351,5 +378,87 @@ mod tests {
         // The counts depend on the filter but sit outside `#traffic`, the form's swap target.
         let form = filter_bar(&Filter::default(), &[], &Counts::default()).into_string();
         assert!(form.contains(r##"hx-select-oob="#count-all,#count-blocked,#count-allowed""##));
+    }
+
+    fn page() -> String {
+        page_body(
+            &Filter::default(),
+            &[],
+            &Backlog {
+                rows: html! {},
+                graph: String::new(),
+                counts: Counts::default(),
+            },
+        )
+        .into_string()
+    }
+
+    /// The tag that carries `marker`, without its content.
+    fn tag<'a>(html: &'a str, marker: &str) -> &'a str {
+        let at = html
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} missing"));
+        let start = html[..at].rfind('<').unwrap();
+        &html[start..at + html[at..].find('>').unwrap() + 1]
+    }
+
+    #[test]
+    fn from_md_up_the_page_is_a_viewport_high_column_and_the_split_fills_it() {
+        let html = page();
+        let root = &html[..html.find('>').unwrap()];
+        assert!(
+            root.contains("md:flex")
+                && root.contains("md:h-[calc(100dvh-4rem)]")
+                && root.contains("md:flex-col")
+        );
+        assert!(tag(&html, "<header").contains("shrink-0"));
+        assert!(tag(&html, "id=\"filters\"").contains("shrink-0"));
+        let traffic = tag(&html, "id=\"traffic\"");
+        assert!(traffic.contains("flex min-h-0 flex-1 flex-col"));
+        let split = tag(&html, "id=\"split\"");
+        assert!(split.contains("min-h-0 flex-1") && split.contains("items-stretch"));
+        assert!(!split.contains("items-start"));
+    }
+
+    #[test]
+    fn both_panel_bodies_scroll_and_the_table_header_is_pinned() {
+        let html = page();
+        for marker in ["id=\"graph-scroll\"", "id=\"flows-scroll\""] {
+            let body = tag(&html, marker);
+            assert!(body.contains("min-h-0 flex-1 overflow-auto"), "{body}");
+            // The panel is the containing block of the table's `sr-only` spans, which would
+            // otherwise escape the clip and make the page scroll.
+            assert!(body.contains("relative"), "{body}");
+        }
+        assert!(html.contains("sticky top-0 bg-panel"));
+    }
+
+    #[test]
+    fn the_graph_scroll_area_is_keyboard_focusable_and_named() {
+        let html = page();
+        // No focusable control inside the graph: without a tab stop, keyboard users (Safari)
+        // cannot scroll to the lower nodes.
+        let scroll = tag(&html, "id=\"graph-scroll\"");
+        assert!(scroll.contains("tabindex=\"0\""), "{scroll}");
+        assert!(scroll.contains("role=\"region\""), "{scroll}");
+        assert!(
+            scroll.contains("aria-label=\"Connections graph\""),
+            "{scroll}"
+        );
+    }
+
+    #[test]
+    fn the_graph_scroll_container_sits_outside_the_morphed_graph_and_drags() {
+        let html = page();
+        let scroll = html.find("id=\"graph-scroll\"").unwrap();
+        assert!(scroll < html.find("id=\"graph\"").unwrap());
+        let scroll = tag(&html, "id=\"graph-scroll\"");
+        assert!(scroll.contains("pointerdown") && scroll.contains("graphDragStart"));
+        assert!(scroll.contains("graphDragMove") && scroll.contains("cursor-grab"));
+        let js = state(0, false);
+        assert!(js.contains("graphDragStart(e)") && js.contains("[data-node]"));
+        // Relative to the scroll box, not to the event target (the tall graph inside it).
+        assert!(js.contains("e.clientX - rect.left - box.clientLeft >= box.clientWidth"));
+        assert!(!js.contains("offsetX") && !js.contains("offsetY"));
     }
 }

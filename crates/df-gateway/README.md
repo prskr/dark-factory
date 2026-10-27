@@ -47,7 +47,7 @@ Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `h
 
 ## Live log
 
-Every gateway pod keeps the last `gateway.bufferSize` flow events in memory. Nothing is persisted. `GatewayLog.Tail` streams the buffered events matching a filter (verdict, project, task, persona, host substring), a `backlog_end` marker, then live events; a subscriber that falls behind receives a `gap` marker.
+Every gateway pod keeps the last `gateway.bufferSize` flow events in memory, none older than `gateway.bufferMaxAgeSeconds` (the control plane's merged buffer applies the same age). The `opened` event of a connection that has not closed yet is kept regardless of age. Expired events are never part of a backlog and are removed from the buffer at most once a minute. An open page keeps the rows it has until it receives a new backlog (Resume, reload, or the reconnect after a token refresh). Nothing is persisted. `GatewayLog.Tail` streams the buffered events matching a filter (verdict, project, task, persona, host substring), a `backlog_end` marker, then live events; a subscriber that falls behind receives a `gap` marker.
 
 A control plane replica opens `Tail` to every gateway pod, only while at least one viewer is connected. It finds the pods by resolving `gateway.headlessService` every 5 s, merges the buffered events of all pods by time and shares the streams between its viewers. Without `gateway.headlessService`, the egress log page reports the log as unavailable.
 
@@ -84,6 +84,7 @@ Settings of the `gateway` section of the instance configuration (the chart rende
 | `gateway.identity` | no | `<instanceName>-gateway` | DNS name in the gateway certificate. |
 | `gateway.headlessService` | no | none | DNS name of the gateway's headless Service, for the control plane's pod discovery. |
 | `gateway.bufferSize` | no | `10000` | Flow events kept per pod. |
+| `gateway.bufferMaxAgeSeconds` | no | `3600` | Flow events older than this are dropped (not an open connection's `opened` event). Minimum 1; a value of 0 is raised to 1 s. |
 | `gateway.blockedCidrs` | no | `[]` | Pod and Service CIDRs of the cluster that the proxy refuses on top of the built-in ranges. |
 | `agent.tls` | yes | none | Certificate, key and CA for both links. |
 
