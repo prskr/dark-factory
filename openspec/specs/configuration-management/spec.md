@@ -6,7 +6,7 @@ Lets board members configure what agents work on and as whom: projects, personas
 ## Requirements
 
 ### Requirement: Projects
-Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, base branch and forge credential reference. The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only.
+Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, optional adapter command, base branch and forge credential reference. The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
 
 #### Scenario: Create a project
 - **WHEN** a board member submits name "Dark Factory", key `DF`, repo `https://git.example.org/peter/dark-factory.git`, image, base `main` and a forge credential
@@ -28,12 +28,24 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 - **WHEN** an edit request for project `DF`, which has no tasks, carries a different key
 - **THEN** the change is rejected with a validation error and nothing is stored
 
+#### Scenario: Project image with its own adapter
+- **WHEN** a board member sets the adapter command `/usr/local/bin/my-acp-adapter` on project `DF`
+- **THEN** it is stored and the form shows it on the next edit
+
+#### Scenario: Adapter command left empty
+- **WHEN** a board member saves a project with an empty adapter command
+- **THEN** the project uses the instance's harness image and adapter
+
 ### Requirement: Personas
-Board members SHALL list, create and edit personas with name, system prompt, harness (iteration 1: `claude-code`), adapter command, optional model and harness credential reference.
+Board members SHALL list, create and edit personas with name, system prompt, harness (iteration 1: `claude-code`), optional model and harness credential reference. A persona SHALL NOT have an adapter command.
 
 #### Scenario: Create a persona
 - **WHEN** a board member creates persona "Linus" with a system prompt and a harness credential
 - **THEN** the persona is stored and can be selected when creating a task
+
+#### Scenario: No adapter command on the form
+- **WHEN** a board member opens the persona form
+- **THEN** it has no adapter command field
 
 ### Requirement: Credential references never hold values
 Board members SHALL create and edit credential references consisting of a name, a Kubernetes Secret name and a key. The UI and database SHALL never accept, store or display secret values.

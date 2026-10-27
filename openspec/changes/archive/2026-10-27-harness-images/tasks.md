@@ -31,8 +31,8 @@ Tests come first in every task (write the failing test, then the code). Database
 
 ## 5. CI and release
 
-- [ ] 5.1 Add `.github/workflows/harness-images.yaml` (design D10: build both images for amd64, run both `test.sh`, path filter `deploy/images/**`, actions pinned by commit); verify with `actionlint` and a pull request run
-- [ ] 5.2 Add the release jobs (multi-arch builds, checks, push `claude-harness:<adapter version>` and `:latest`, `claude-project:<release tag>` and `:latest`, version read from the harness Dockerfile `ARG`); verify with `actionlint` and a `workflow_dispatch` run that pushes the images
+- [x] 5.1 Add `.github/workflows/harness-images.yaml` (design D10: build both images for amd64, run both `test.sh`, path filter `deploy/images/**`, actions pinned by commit); verify with `actionlint` and a pull request run
+- [x] 5.2 Add the release jobs (multi-arch builds, checks, push `claude-harness:<adapter version>` and `:latest`, `claude-project:<release tag>` and `:latest`, version read from the harness Dockerfile `ARG`); verify with `actionlint` and a `workflow_dispatch` run that pushes the images
 - [x] 5.3 Update `deploy/README.md` (the two images, tags, how a project uses the injected harness or sets an adapter command, glibc/Alpine support as decided in 1.1, local builds with `test.sh`, Kubernetes ≥ 1.36); verify the commands in it by running them
 
 ## 6. Documentation
