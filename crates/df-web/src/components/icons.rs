@@ -40,6 +40,10 @@ pub enum Icon {
     Globe,
     /// More filters (Lucide `list-filter`).
     Filter,
+    /// Pause the live view (Lucide `pause`).
+    Pause,
+    /// Resume the live view (Lucide `play`).
+    Play,
     /// The factory mark; also `assets/logo.svg`.
     Logo,
     /// Generic Git (branch).
@@ -81,6 +85,8 @@ impl Icon {
         Self::Server,
         Self::Globe,
         Self::Filter,
+        Self::Pause,
+        Self::Play,
         Self::Logo,
         Self::Git,
         Self::GitHub,
@@ -157,6 +163,10 @@ impl Icon {
                 "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20\"/><path d=\"M2 12h20\"/>"
             }
             Self::Filter => "<path d=\"M3 6h18\"/><path d=\"M7 12h10\"/><path d=\"M10 18h4\"/>",
+            Self::Pause => "<path d=\"M9 5v14\"/><path d=\"M15 5v14\"/>",
+            Self::Play => {
+                "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>"
+            }
             Self::Link => {
                 "<path d=\"M9 17H7A5 5 0 0 1 7 7h2\"/><path d=\"M15 7h2a5 5 0 1 1 0 10h-2\"/><line x1=\"8\" x2=\"16\" y1=\"12\" y2=\"12\"/>"
             }

@@ -8,7 +8,7 @@ use super::filter::{ADVANCED_FIELDS, Filter, ROW_LIMITS, VerdictFilter};
 use super::graph::{DEFAULT_WIDTH as DEFAULT_GRAPH_WIDTH, MIN_WIDTH};
 use super::viewer::{Backlog, Counts, empty_state, event_count};
 use crate::components::forms::INPUT_CLASS;
-use crate::components::{ButtonKind, Icon, action_class, icon, link_button};
+use crate::components::{ButtonKind, Icon, action_class, icon};
 
 /// The controls of the *Advanced* row: like a form input, but as wide as their content, so a
 /// label and its control stay on one line.
@@ -217,8 +217,16 @@ fn header() -> Markup {
                 }
             }
             div class="flex items-center gap-2" {
-                button type="button" "x-on:click"="togglePause()" class=(action_class(ButtonKind::Secondary)) "x-text"="paused ? 'Resume' : 'Pause'" { "Pause" }
-                (link_button(ButtonKind::Secondary, "/egress/allowlist", "Egress rules"))
+                // 16 px glyphs, as in the design.
+                button type="button" "x-on:click"="togglePause()" class={(action_class(ButtonKind::Secondary)) " [&_svg]:size-4"} {
+                    span class="inline-flex" "x-show"="!paused" { (icon(Icon::Pause)) }
+                    span class="inline-flex" "x-show"="paused" x-cloak { (icon(Icon::Play)) }
+                    span "x-text"="paused ? 'Resume' : 'Pause'" { "Pause" }
+                }
+                a href="/egress/allowlist" class={(action_class(ButtonKind::Secondary)) " [&_svg]:size-4"} {
+                    (icon(Icon::Shield))
+                    "Egress rules"
+                }
             }
         }
     }
@@ -444,6 +452,21 @@ mod tests {
         assert!(
             scroll.contains("aria-label=\"Connections graph\""),
             "{scroll}"
+        );
+    }
+
+    #[test]
+    fn pause_and_egress_rules_carry_their_design_icons() {
+        let html = header().into_string();
+        let pause = &html
+            [html.find("togglePause()").unwrap()..html.find("href=\"/egress/allowlist\"").unwrap()];
+        // Pause shows the pause glyph, Resume the play glyph.
+        assert!(pause.matches("<svg").count() == 2, "{pause}");
+        assert!(pause.contains("[&amp;_svg]:size-4"), "{pause}");
+        let rules = &html[html.find("href=\"/egress/allowlist\"").unwrap()..];
+        assert!(
+            rules.contains("<svg") && rules.contains("[&amp;_svg]:size-4"),
+            "{rules}"
         );
     }
 
