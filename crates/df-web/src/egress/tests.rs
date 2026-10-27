@@ -902,14 +902,16 @@ async fn pause_stops_the_stream_explicitly_and_the_stored_width_is_clamped() {
     let app = app_with_egress(vec![]).await;
     let cookie = app.login().await;
     let page = text(app.get("/egress/log", &cookie).await).await;
-    // Nothing observes the removal of the connect element: the stream is aborted by hand.
+    // Nothing observes the removal of the connect element: the request is aborted by hand, which
+    // also ends a reconnect that has no reader yet. Cancelling the reader of an aborted stream
+    // rejects with the abort error: swallow it, or it is logged as unhandled.
     let pause = &page[page.find("togglePause() {").unwrap()..];
     let abort = pause.find("abortController.abort()").unwrap();
     assert!(
         abort < pause.find("slot.replaceChildren()").unwrap(),
         "{pause}"
     );
-    assert!(pause.contains("sse.reader.cancel()"));
+    assert!(pause.contains("sse.reader.cancel().catch(() =&gt; undefined)"));
     // The stored width is passed through the limits once the layout exists.
     assert!(page.contains("this.$nextTick(() =&gt; this.setW(this.want, false))"));
     // Only a drag, a key or a double click remembers a width; fitting does not.
