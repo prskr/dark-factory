@@ -68,11 +68,13 @@ fn state(advanced: usize, dirty: bool) -> String {
     this.paused = !this.paused
     if (this.paused) {{
       // Nothing observes the removal, so the extension's cleanup would never run: stop the
-      // stream explicitly, then remove the element.
+      // stream explicitly, then remove the element. A reconnect in flight has no reader yet,
+      // only the abort ends it. Cancelling the reader of an aborted stream rejects with the
+      // abort error: swallow it.
       const sse = slot.firstElementChild && slot.firstElementChild._htmx && slot.firstElementChild._htmx.sse
       if (sse) {{
         if (sse.abortController) sse.abortController.abort()
-        if (sse.reader && sse.reader.cancel) sse.reader.cancel()
+        if (sse.reader && sse.reader.cancel) sse.reader.cancel().catch(() => undefined)
       }}
       slot.replaceChildren()
       this.reconnecting = false
@@ -329,11 +331,11 @@ fn traffic(events_url: &str, filter: &Filter, backlog: &Backlog) -> Markup {
                 div role="separator" aria-orientation="vertical" aria-label="Resize connections and events"
                     aria-valuenow=(DEFAULT_GRAPH_WIDTH) aria-valuemin=(MIN_GRAPH_PANEL) aria-valuemax=(DEFAULT_GRAPH_WIDTH + 240)
                     ":aria-valuenow"="w" ":aria-valuemax"="limits()[1]" tabindex="0"
-                    class="group flex h-full min-h-40 cursor-col-resize touch-none justify-center focus-visible:outline-2"
+                    class="group flex h-full min-h-40 cursor-col-resize touch-none items-center justify-center focus-visible:outline-2"
                     "x-on:pointerdown"="dragStart($event)" "x-on:pointermove"="dragMove($event)"
                     "x-on:pointerup"="dragEnd()" "x-on:pointercancel"="dragEnd()"
                     "x-on:keydown"="divKey($event)" "x-on:dblclick"=(format!("setW({DEFAULT_GRAPH_WIDTH})")) {
-                    span aria-hidden="true" class="w-0.5 rounded-full bg-line group-hover:bg-line-strong group-focus-visible:bg-accent-text" {}
+                    span aria-hidden="true" class="h-12 w-1 rounded-full bg-line-strong/50 group-hover:bg-line-strong group-focus-visible:bg-accent-text" {}
                 }
                 (events_panel(backlog, filter))
             }
@@ -453,6 +455,24 @@ mod tests {
             scroll.contains("aria-label=\"Connections graph\""),
             "{scroll}"
         );
+    }
+
+    #[test]
+    fn the_divider_is_a_short_rounded_grip_in_a_wide_hit_area() {
+        let html = page();
+        let separator = tag(&html, "role=\"separator\"");
+        // The design: a 16 px wide handle with a 4 x 48 px pill grip in the middle.
+        assert!(
+            separator.contains("items-center justify-center"),
+            "{separator}"
+        );
+        let at = html.find("role=\"separator\"").unwrap();
+        let grip = tag(&html[at..], "aria-hidden=\"true\"");
+        assert!(
+            grip.contains("h-12 w-1 rounded-full bg-line-strong/50"),
+            "{grip}"
+        );
+        assert!(!grip.contains("w-0.5"), "{grip}");
     }
 
     #[test]
