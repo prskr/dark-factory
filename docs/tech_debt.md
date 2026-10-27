@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-65.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-69.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -24,6 +24,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -87,6 +88,10 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
+| TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" state list is hard-coded in three SQL statements |
+| TD-66 | low   | `df-agent-channel` session | `start_finalizing(only_idle: bool)` takes a flag argument |
+| TD-67 | low   | `factory-agent` tests | `idle_tests.rs` rebuilds the fixture setup of `tests.rs` |
+| TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
 
 ## Entries
 
@@ -604,6 +609,45 @@ Swapping `#ws-detail` through the task list logs an `AbortError` in the browser 
 **Matters when:** `df-harness` is promoted, or the timeout is changed.
 
 **Fix:** Pass the timeout in as a field on `Server`/`McpTool`, like `setup_timeout`, and add a test against a fake MCP server that lists tools but never answers `tools/call`.
+### TD-65 (S2, S16). The run-state list for "no longer commandable" is repeated in SQL
+
+`crates/df-agent-channel/src/runs.rs`, `crates/df-agent-channel/src/session.rs`, `crates/df-db/src/tasks.rs`
+
+`state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')` is written out in `set_idle_tx`, `start_finalizing` and the `queue_message` CASE. It restates `RunState::is_terminal` plus `Finalizing`.
+
+**Matters when:** a run state is added or changed; all three statements have to change together.
+
+**Fix:** Put the list in one `RunState` constant next to `is_terminal` and bind it with `= ANY($n)`.
+
+### TD-66 (S15). `start_finalizing` takes a flag argument
+
+`crates/df-agent-channel/src/session.rs`
+
+`start_finalizing(&self, only_idle: bool)` runs one of two different UPDATE statements; the call sites `start_finalizing(true)` and `start_finalizing(false)` don't show the difference.
+
+**Matters when:** a third finalize variant appears.
+
+**Fix:** Split into `finalize_if_idle` and `finalize_unless_ending` around a shared lock-and-publish part.
+
+### TD-67 (S13). `idle_tests.rs` repeats the fixture setup of `tests.rs`
+
+`crates/factory-agent/src/idle_tests.rs`, `crates/factory-agent/src/tests.rs`
+
+`workspace_bin` and `start` rebuild the `target/debug/...` lookup and the `RunDriverParams` setup that `tests.rs` already has. Only `setup_test_remote_repo` is shared.
+
+**Matters when:** the fixture changes; both copies have to follow.
+
+**Fix:** One `pub(crate)` fixture builder in `tests.rs`, used by both files.
+
+### TD-68 (S11). Keep-alive tests wait on real deadlines
+
+`crates/df-agent-channel/src/session.rs` (tests), `crates/factory-agent/src/idle_tests.rs`
+
+The session tests use a 1 s `keepAliveSeconds` and the budget test a 3 s wall clock. `tokio::time::pause()` is not used because auto-advance would fire the idle timer during database I/O. AGENTS.md asks to avoid timing-based tests.
+
+**Matters when:** CI is slow enough that a deadline passes before the test reaches its assertion, or the suite gets longer.
+
+**Fix:** Inject a clock into the idle deadline computation, then drive it with a paused runtime.
 
 ## Accepted decisions
 
@@ -618,7 +662,7 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 - **Fake agent cancel flag:** `fake-acp-agent` resets `cancelled` at the end of a prompt, because a cancel can be handled before the spawned prompt task starts.
 - **Hooks path not configurable:** `/opt/factory/hooks-empty` is a constant. It matches the runtime image layer (`deploy/BUILD.bazel`, `/hooks-empty` in the image mounted at `/opt/factory`). Generated commit hooks (`/run/factory/git-hooks`, `design/agent-run.md` §7.1) are not implemented yet.
 - **Placeholder sandbox provider fails queued tasks:** `crates/dark-factory/src/unconfigured.rs` fails every provision, so queued tasks end as `provisioning_failed` instead of waiting forever. It stands in until `iter1-sandbox-provisioning` and `iter1-integration-plugins` are implemented. Don't deploy this build to an instance with queued tasks before then.
-- **`RunPhase::AwaitingInput` maps to no run state:** `AwaitingInput` is a non-goal of `iter1-run-orchestration` (`design.md`, Non-Goals). Revisit with blocking questions and approvals.
+- **`RunPhase::AwaitingInput` moves the run to `awaiting_input`:** since `iter1-keep-alive-and-review` the runtime waits for the next prompt after a normal turn end and the control plane keeps the task `waiting` (or `running` while a message is undelivered). Blocking questions and approvals (`iter2-agent-requests`) reuse the same wait.
 - **At-most-once tool calls:** a crash between the forge call and storing its result loses the result; the call is not repeated (`crates/df-agent-channel/src/tools.rs`, spec `factory-tools`).
 - **Session ends the stream once its run ended:** after a `RunReport` a relevant notification closes the stream. The runtime sends `RunReport` last (`crates/factory-agent/src/runner.rs`), it is acked before the effects run, and in-flight handlers are drained, so nothing is lost.
 - **`Assign` may differ on reconnect:** `continuation.summary` is rebuilt from the transcript on every connect. The runtime uses only the first `Assign` per `run_id` (`CommandFilter`, `crates/factory-agent/src/connection.rs`).

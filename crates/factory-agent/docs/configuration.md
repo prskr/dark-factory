@@ -47,6 +47,12 @@ These are compiled in and not configurable.
 - **Message order.** `HarnessCredentials` must arrive before `Assign`. Credentials that arrive later are
   ignored and reported as a `runtime.harness_credentials_late` notice. A `Cancel` that arrives before
   `Assign` ends the run as `CANCELLED` without preparing the workspace.
+- **Idle wait.** After a turn that ended normally with no queued prompt (and no `complete_task`,
+  rate limit, budget limit, cancel or crash), the runtime reports `AWAITING_INPUT` and keeps the
+  harness session up. A `Prompt` starts the next turn in the same session (reported as `RUNNING`),
+  `Cancel` ends the run `CANCELLED`, and `Release` or the end of the wall-clock budget ends it
+  `END_TURN`. The runtime has no idle timer of its own: the control plane decides when to send
+  `Release` (`runs.keepAliveSeconds`). A lost stream does not end the wait; the runtime reconnects.
 - **Shutdown.** After the final `RunReport` is queued, the runtime keeps trying to deliver queued
   messages: it flushes them over the open stream, or reconnects, for up to about 10 s plus a 5 s
   acknowledgement wait. Messages that are not acknowledged stay in the outbox and a warning is logged.

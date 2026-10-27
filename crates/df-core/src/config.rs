@@ -480,6 +480,10 @@ pub struct RunsConfig {
     /// Extra time after the wall-clock budget before `Cancel`, and again before teardown.
     #[serde(default = "default_cancel_grace")]
     pub cancel_grace_seconds: u64,
+    /// How long a run stays up after a normal turn end before the control plane releases it.
+    /// `0` releases right after the turn.
+    #[serde(default = "default_keep_alive")]
+    pub keep_alive_seconds: u64,
 }
 
 impl Default for RunsConfig {
@@ -488,6 +492,7 @@ impl Default for RunsConfig {
             max_wall_clock_seconds: default_max_wall_clock(),
             connect_timeout_seconds: default_connect_timeout(),
             cancel_grace_seconds: default_cancel_grace(),
+            keep_alive_seconds: default_keep_alive(),
         }
     }
 }
@@ -573,6 +578,10 @@ fn default_connect_timeout() -> u64 {
 
 fn default_cancel_grace() -> u64 {
     5 * 60
+}
+
+fn default_keep_alive() -> u64 {
+    10 * 60
 }
 
 fn default_instance_name() -> String {
@@ -877,6 +886,7 @@ database:
         assert_eq!(cfg.runs.max_wall_clock_seconds, 7200);
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.runs.cancel_grace_seconds, 300);
+        assert_eq!(cfg.runs.keep_alive_seconds, 600);
         assert_eq!(
             cfg.harness.claude_code.adapter_command,
             ["/opt/harness/claude-code/bin/claude-agent-acp"]
@@ -895,6 +905,7 @@ agent:
     clientCaFile: /tls/ca.crt
 runs:
   maxWallClockSeconds: 60
+  keepAliveSeconds: 30
 harness:
   claudeCode:
     image: registry.example/harness:1
@@ -906,6 +917,7 @@ harness:
         let tls = cfg.agent.tls.unwrap();
         assert_eq!(tls.client_ca_file, PathBuf::from("/tls/ca.crt"));
         assert_eq!(cfg.runs.max_wall_clock_seconds, 60);
+        assert_eq!(cfg.runs.keep_alive_seconds, 30);
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.harness.claude_code.env["DISABLE_AUTOUPDATER"], "1");
         assert_eq!(cfg.harness.claude_code.image, "registry.example/harness:1");

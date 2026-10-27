@@ -15,6 +15,8 @@ pub enum DbError {
     InvalidIdentifier(String),
     #[error("invalid database data: {0}")]
     InvalidData(String),
+    #[error("invalid database data: {0}")]
+    Parse(#[from] df_core::ParseEnumError),
     #[error("database error: {0}")]
     Sqlx(#[from] sqlx::Error),
     #[error("migration error: {0}")]

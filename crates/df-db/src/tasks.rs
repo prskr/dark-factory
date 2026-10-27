@@ -227,12 +227,13 @@ pub async fn create_task(
 
 /// Queues a message on a task.
 ///
-/// If the task is not currently `running` (i.e. `waiting`, `failed`, `completed`,
-/// `rate_limited`, or `limit_reached`), its status transitions to `queued` so the run
-/// scheduler starts a new run (`iter1-run-orchestration` spec: *"the task is `rate_limited`
-/// and no new run starts until a message is queued"*; `iter1-demo-e2e` spec: *"the task is
-/// `rate_limited`, and a new message starts a run that continues the work"*). If the task is
-/// `running`, it remains `running` so the active run picks up the message on its next turn.
+/// If the task has an active run that is not `finalizing` (running, or idle in `awaiting_input`),
+/// the status becomes `running` and the run picks the message up. Otherwise (`waiting`,
+/// `in_review`, `failed`, `completed`, `rate_limited`, `limit_reached`, or a run that is ending)
+/// it becomes `queued` and the scheduler starts a new run once the old one ended
+/// (`iter1-run-orchestration` spec: *"the task is `rate_limited` and no new run starts until a
+/// message is queued"*). The `UPDATE` locks the task row, which serializes with the run's phase
+/// updates and its end.
 pub async fn queue_message(
     pool: &PgPool,
     task_id: TaskId,
@@ -249,7 +250,11 @@ pub async fn queue_message(
         r#"
         UPDATE tasks
         SET status = CASE
-                WHEN status = 'running' THEN 'running'
+                WHEN EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.task_id = tasks.id
+                      AND runs.state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')
+                ) THEN 'running'
                 ELSE 'queued'
             END,
             updated_at = now()
@@ -358,17 +363,11 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             number,
             key,
             title: r.title,
-            title_source: r
-                .title_source
-                .parse()
-                .map_err(|e: df_core::ParseEnumError| DbError::InvalidData(e.to_string()))?,
+            title_source: r.title_source.parse()?,
             description: r.description,
             persona_id: PersonaId::from_uuid(r.persona_id),
             issue_number: r.issue_number,
-            status: r
-                .status
-                .parse()
-                .map_err(|e: df_core::ParseEnumError| DbError::InvalidData(e.to_string()))?,
+            status: r.status.parse()?,
             status_line: r.status_line,
             pr_number: r.pr_number,
             pr_url: r.pr_url,
@@ -669,6 +668,62 @@ pub async fn rename_task(
     Ok(())
 }
 
+/// A board member marks a task done: it becomes `completed`, an idle run (`awaiting_input`)
+/// becomes `finalizing` so the replica holding its stream cancels it (no prompt reaches it from
+/// here on), the change is audited as `task.done` and `task_changed` and `run_changed` are
+/// published. Tasks that are `queued`, `running` or already `completed` are rejected with
+/// [`DbError::Conflict`].
+pub async fn mark_task_done(
+    pool: &PgPool,
+    task_id: TaskId,
+    actor: Principal,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    // Lock order everywhere: run rows, then the task row (see `lock_task` in df-agent-channel).
+    sqlx::query("SELECT 1 FROM runs WHERE task_id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
+    let parsed: TaskStatus = status.parse()?;
+    if !parsed.can_mark_done() {
+        return Err(DbError::Conflict(format!(
+            "a {status} task cannot be marked done"
+        )));
+    }
+    sqlx::query("UPDATE tasks SET status = 'completed', updated_at = now() WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
+    let idle_run: Option<uuid::Uuid> = sqlx::query_scalar(
+        "UPDATE runs SET state = 'finalizing' WHERE task_id = $1 AND state = 'awaiting_input'
+         RETURNING id",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_optional(&mut *tx)
+    .await?;
+    let entry = NewAuditEntry::new(actor, Vec::new(), "task.done", "task", task_id.to_string())
+        .with_details(&serde_json::json!({ "old_status": status }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    if let Some(run_id) = idle_run {
+        publish(
+            &mut *tx,
+            &Notification::RunChanged {
+                run_id: RunId::from_uuid(run_id),
+                task_id,
+            },
+        )
+        .await?;
+    }
+    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Asks a persona to name a task that has no title from a person.
 fn ask_for_title() -> String {
     format!(
@@ -881,6 +936,12 @@ mod tests {
                 .is_empty()
         );
 
+        // The run ended (no idle run to pick the message up), the task is `waiting`
+        sqlx::query("UPDATE runs SET state = 'succeeded' WHERE id = $1")
+            .bind(run_id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
         // Transition task to `waiting`, then queue a follow-up message
         update_task_status(&pool, task.id, TaskStatus::Waiting)
             .await
@@ -1258,6 +1319,173 @@ mod tests {
             .unwrap()
     }
 
+    /// A task in `status` with a run in `run_state`; its assignment message is delivered.
+    async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: &str) -> TaskRow {
+        let key: ProjectKey = "DF".parse().unwrap();
+        let (project_id, persona_id) = seed_project_and_persona(pool, &key, "Linus").await.unwrap();
+        let (task, assignment) = create_task(pool, new_task(project_id, persona_id, Some("T")))
+            .await
+            .unwrap();
+        let run = insert_run(pool, task.id).await;
+        mark_prompt_delivered(pool, assignment.id, run)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE runs SET state = $2 WHERE id = $1")
+            .bind(run.as_uuid())
+            .bind(run_state)
+            .execute(pool)
+            .await
+            .unwrap();
+        update_task_status(pool, task.id, status).await.unwrap();
+        task
+    }
+
+    /// A transaction that holds the run row and then wants the task row (`persist_batch`) must
+    /// not deadlock with `mark_task_done`: that waits for the run row before taking the task row.
+    #[tokio::test]
+    async fn mark_done_takes_the_run_lock_before_the_task_lock() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, TaskStatus::Waiting, "awaiting_input").await;
+        let mut other = pool.begin().await.unwrap();
+        sqlx::query("SELECT 1 FROM runs WHERE task_id = $1 FOR UPDATE")
+            .bind(task.id.as_uuid())
+            .execute(&mut *other)
+            .await
+            .unwrap();
+        let done = {
+            let pool = pool.clone();
+            let id = task.id;
+            tokio::spawn(async move { mark_task_done(&pool, id, human()).await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("mark_task_done did not wait for the run lock");
+
+        // Without the run lock first, `mark_task_done` now holds the task row and this deadlocks.
+        sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+            .bind(task.id.as_uuid())
+            .execute(&mut *other)
+            .await
+            .unwrap();
+        other.commit().await.unwrap();
+        done.await.unwrap().unwrap();
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn a_message_on_a_task_with_an_idle_run_makes_it_running() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, TaskStatus::Waiting, "awaiting_input").await;
+        queue_message(&pool, task.id, human(), text("again"))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_message_on_a_task_whose_run_is_finalizing_makes_it_queued() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, TaskStatus::Running, "finalizing").await;
+        queue_message(&pool, task.id, human(), text("too late"))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn a_message_on_a_task_in_review_makes_it_queued() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, TaskStatus::InReview, "succeeded").await;
+        queue_message(&pool, task.id, human(), text("one more"))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn mark_done_allows_the_statuses_that_wait_for_a_human() {
+        for status in [
+            TaskStatus::Waiting,
+            TaskStatus::InReview,
+            TaskStatus::RateLimited,
+            TaskStatus::LimitReached,
+            TaskStatus::Failed,
+        ] {
+            let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+            let task = task_with_run(&pool, status, "succeeded").await;
+            mark_task_done(&pool, task.id, human()).await.unwrap();
+            assert_eq!(status_of(&pool, task.id).await, TaskStatus::Completed);
+            assert_eq!(audit_count(&pool, "task.done").await, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_done_is_rejected_for_queued_running_and_completed_tasks() {
+        for status in [
+            TaskStatus::Queued,
+            TaskStatus::Running,
+            TaskStatus::Completed,
+        ] {
+            let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+            let task = task_with_run(&pool, status, "running").await;
+            let err = mark_task_done(&pool, task.id, human()).await;
+            assert!(matches!(err, Err(DbError::Conflict(_))), "{status}");
+            assert_eq!(status_of(&pool, task.id).await, status);
+            assert_eq!(audit_count(&pool, "task.done").await, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_done_finalizes_an_idle_run_and_a_later_message_queues_the_task() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, TaskStatus::Waiting, "awaiting_input").await;
+        let notifier = Notifier::start(&pool).await.unwrap();
+        let mut events = notifier.subscribe();
+
+        mark_task_done(&pool, task.id, human()).await.unwrap();
+
+        let state: String = sqlx::query_scalar("SELECT state FROM runs WHERE task_id = $1")
+            .bind(task.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(state, "finalizing");
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            seen.push(
+                tokio::time::timeout(Duration::from_secs(5), events.recv())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        assert!(
+            seen.iter()
+                .any(|n| matches!(n, Notification::RunChanged { .. }))
+        );
+        assert!(seen.contains(&Notification::TaskChanged { task_id: task.id }));
+
+        // The run is going away: a message queued now is for the next run.
+        queue_message(&pool, task.id, human(), text("one more"))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    }
+
     #[tokio::test]
     async fn claim_marks_held_back_messages_forwarded_once_in_queue_order() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
@@ -1302,12 +1530,13 @@ mod tests {
     #[tokio::test]
     async fn message_undelivered_before_the_migration_is_not_editable() {
         let pool = df_test_postgres::empty_pool().await;
-        let before = crate::MIGRATOR
+        // The migration that added `forwarded_at` is the one the messages predate.
+        let versions: Vec<_> = crate::MIGRATOR.iter().collect();
+        let at = versions
             .iter()
-            .map(|m| m.version)
-            .rev()
-            .nth(1)
+            .position(|m| m.description.contains("forwarded at"))
             .unwrap();
+        let before = versions[at - 1].version;
         crate::MIGRATOR.run_to(before, &pool).await.unwrap();
         let (task, msg) = task_with_queued_message_pre_migration(&pool).await;
 

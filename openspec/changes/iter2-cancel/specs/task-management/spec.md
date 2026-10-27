@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Task status vocabulary
-A task SHALL have exactly one status: `queued` (pending work, no active run), `running` (a run is active), `waiting` (last run ended its turn; waits for a human), `blocked` (last run waited for an answer or approval that didn't arrive within the keep-alive window), `completed` (agent called `complete_task`), `cancelled` (a human cancelled the task), `rate_limited`, `limit_reached` or `failed`.
+A task SHALL have exactly one status: `queued` (pending work, no active run), `running` (a run is active), `waiting` (the last turn ended; waits for a human, the run may still be alive in its keep-alive window), `blocked` (last run waited for an answer or approval that didn't arrive within the idle deadline), `in_review` (the agent called `complete_task`; the PR waits for review), `completed` (a human marked the task done), `cancelled` (a human cancelled the task), `rate_limited`, `limit_reached` or `failed`.
 
 #### Scenario: Status is always one of the defined values
 - **WHEN** any component writes a task status outside this set
@@ -16,7 +16,7 @@ A task SHALL have exactly one status: `queued` (pending work, no active run), `r
 ## ADDED Requirements
 
 ### Requirement: Cancelling a task
-A board member SHALL be able to cancel a task in any status except `completed` and `cancelled`. Cancelling SHALL set the status `cancelled`, stop its active run, mark its undelivered messages as discarded and write an audit entry `task.cancel`. The task's PR and linked issue SHALL NOT be changed.
+A board member SHALL be able to cancel a task in any status except `completed` and `cancelled` (including `in_review`). Cancelling SHALL set the status `cancelled`, stop its active run, mark its undelivered messages as discarded and write an audit entry `task.cancel`. The task's PR and linked issue SHALL NOT be changed.
 
 #### Scenario: Cancel a running task
 - **WHEN** a board member cancels `DF-9` while its run is active and one message is undelivered

@@ -279,7 +279,6 @@ pub fn list_column(
 
 /// Key, title with inline rename, status and the details button; updated live.
 pub fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
-    let status = status_of(&task.status);
     let action = format!("/tasks/{}/title", task.key);
     html! {
         header id="task-head" class="border-b border-line bg-panel px-2 py-2 lg:px-4" {
@@ -307,7 +306,7 @@ pub fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
                     }
                     (field_error(error))
                 }
-                @if let Some(status) = status { (status_badge(status)) }
+                (status_badge(task.status))
                 button type="button" aria-label="Details" "x-on:click"="details = true; sheet = 'half'" class={(ICON_BUTTON_CLASS) " xl:hidden"} { (icon(Icon::PanelRight)) }
             }
         }
@@ -445,20 +444,16 @@ pub fn details_region(task: &TaskDetail) -> Markup {
         div id="task-details" class="md:shrink-0" {
             div class="ws-strip flex-col items-center gap-3 p-2" {
                 button type="button" class=(ICON_BUTTON_CLASS) aria-label="Show details" title="Show details" "x-on:click"="setCollapsed(false)" { (icon(Icon::PanelRight)) }
-                @if let Some(status) = status_of(&task.status) {
-                    span class={"size-3 rounded-full " (Tone::of_status(status).dot_class())}
-                        role="img" aria-label=(format!("Status: {}", task.status.replace('_', " "))) title=(task.status.replace('_', " ")) {}
-                }
+                span class={"size-3 rounded-full " (Tone::of_status(task.status).dot_class())}
+                    role="img" aria-label=(format!("Status: {}", status_name(task.status))) title=(status_name(task.status)) {}
                 @if let Some((url, label)) = &pr { (strip_link(url, label, Icon::PullRequest)) }
                 @if let Some((url, label)) = &issue { (strip_link(url, label, Icon::Issue)) }
             }
             div class="ws-details-full" {
                 (section("Now", html! {
                     p class="flex items-center gap-2 font-medium" {
-                        @if let Some(status) = status_of(&task.status) {
-                            span aria-hidden="true" class={"size-2 shrink-0 rounded-full " (Tone::of_status(status).dot_class())} {}
-                        }
-                        @if task.status_line.is_empty() { (task.status.replace('_', " ")) } @else { span class="break-words" { (task.status_line) } }
+                        span aria-hidden="true" class={"size-2 shrink-0 rounded-full " (Tone::of_status(task.status).dot_class())} {}
+                        @if task.status_line.is_empty() { (status_name(task.status)) } @else { span class="break-words" { (task.status_line) } }
                     }
                 }))
                 (section("Links", html! {
@@ -475,6 +470,7 @@ pub fn details_region(task: &TaskDetail) -> Markup {
                 }))
                 div class="border-b border-line px-5 py-4" {
                     (definition_list(&[
+                        ("Status", status_select(task)),
                         ("Project", html! { (task.project_name) " " (chip(&task.project_key)) }),
                         ("Persona", html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } }),
                         ("Branch", html! { span class="font-mono text-xs" { (branch) } }),
@@ -484,6 +480,35 @@ pub fn details_region(task: &TaskDetail) -> Markup {
                     details class="border-b border-line px-5 py-4 text-sm" {
                         summary class="flex min-h-11 cursor-pointer items-center text-xs font-medium uppercase tracking-wide text-faint" { "Description" }
                         div class="line-clamp-3 whitespace-pre-wrap break-words text-muted" title=(task.description) { (task.description) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The status of the details list: a select like the project filter whose menu shows the current
+/// status (checked) and "Mark done"; a status that does not allow it shows the plain name.
+fn status_select(task: &TaskDetail) -> Markup {
+    let name = status_name(task.status);
+    if !task.status.can_mark_done() {
+        return html! { (name) };
+    }
+    let done = format!("/tasks/{}/done", task.key);
+    html! {
+        div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
+            button type="button" aria-haspopup="true" ":aria-expanded"="open" "x-on:click"="open = !open"
+                class="inline-flex min-h-11 items-center gap-1 rounded-[10px] border border-line bg-panel px-3 text-sm font-medium hover:bg-sunk lg:min-h-8" {
+                (name) (icon(Icon::ChevronDown))
+            }
+            div x-show="open" x-cloak class="absolute left-0 z-20 mt-1 w-48 rounded-xl border border-line bg-panel p-2 shadow-lg" {
+                ul {
+                    li class="flex min-h-11 items-center justify-between gap-2 rounded-lg px-2 text-sm font-medium text-accent-text lg:min-h-9" aria-current="true" {
+                        span { (name) } (icon(Icon::Check))
+                    }
+                    li {
+                        button type="button" hx-post=(done) hx-target="#task-details" hx-swap="outerMorph"
+                            class="flex min-h-11 w-full items-center rounded-lg px-2 text-left text-sm font-normal text-ink hover:bg-sunk lg:min-h-9" { "Mark done" }
                     }
                 }
             }
@@ -727,6 +752,11 @@ fn url_encode(value: &str) -> String {
 
 fn short_time(time: DateTime<Utc>) -> String {
     time.format("%b %d %H:%M").to_string()
+}
+
+/// A task status as shown: without underscores.
+fn status_name(status: TaskStatus) -> String {
+    status.as_str().replace('_', " ")
 }
 
 fn status_of(item: &str) -> Option<TaskStatus> {

@@ -10,25 +10,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use df_core::{RunOutcome, RunState};
+use df_core::{RunOutcome, RunState, TaskStatus};
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, Assign, Cancel, ControlMessage, CredentialRequest, HarnessCredentials, HelloAck,
-    PushReport, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
+    PushReport, Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tonic::Status;
 
 use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts};
 use crate::error::ChannelError;
 use crate::metrics::Observation;
 use crate::runs::{
-    EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, mark_connected, set_run_state_tx,
+    EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, has_undelivered_message, lock_task,
+    mark_connected, set_idle_tx, set_run_state_tx,
 };
 use crate::scheduler::cancel_deadline;
 use crate::{ChannelContext, credentials, pr, tools, transcript};
@@ -120,6 +122,9 @@ where
         busy,
         tasks: JoinSet::new(),
         ended: false,
+        idle_at: None,
+        done_cancel_sent: false,
+        release_sent: false,
     };
     let result = session
         .serve(inbound, hello_ack, credentials, assign, stop)
@@ -140,6 +145,14 @@ struct Session {
     tasks: JoinSet<()>,
     /// Set once this session persisted the run's `RunReport`.
     ended: bool,
+    /// When the idle run is to be released: last persisted `TurnEnded` plus
+    /// `runs.keepAliveSeconds`. `None` unless the run is `awaiting_input` and no prompt is in
+    /// flight.
+    idle_at: Option<Instant>,
+    /// This session sent `Cancel` because the task was marked done.
+    done_cancel_sent: bool,
+    /// This session sent `Release`.
+    release_sent: bool,
 }
 
 /// What a persisted batch asks the session to do afterwards.
@@ -158,6 +171,8 @@ struct Persisted {
     busy: Option<bool>,
     /// The batch persisted a `TurnEnded`.
     turn_ended: bool,
+    /// The batch changed whether the run is idle (idle or running phase, turn event).
+    idle_changed: bool,
     /// `(expected, got)` if the batch contained a sequence gap.
     gap: Option<(u64, u64)>,
     /// What the committed messages say happened; recorded as metrics by the session.
@@ -190,6 +205,12 @@ impl Session {
         if !self.send_new_prompts().await? {
             return Ok(());
         }
+        // A run that was idle (or already released) before this stream existed: a replica that
+        // takes over computes the same deadline from the persisted turn end.
+        self.refresh_idle().await?;
+        if !self.reconcile_finalizing().await? {
+            return Ok(());
+        }
 
         let mut notifications = self.ctx.notifier.subscribe();
         let cancel_at = cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs);
@@ -204,6 +225,12 @@ impl Session {
         let mut cancel_sent = cancel_at.is_none();
 
         loop {
+            let idle = async {
+                match self.idle_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 // The control plane is shutting down: stop reading; `run` lets in-flight
                 // handlers finish before the stream ends.
@@ -235,6 +262,11 @@ impl Session {
                     }
                 }
                 note = notifications.recv() => {
+                    if matches!(&note, Ok(Notification::RunChanged { run_id, .. }) if *run_id == self.rc.run.id)
+                        && !self.reconcile_finalizing().await?
+                    {
+                        return Ok(());
+                    }
                     let relevant = match note {
                         Ok(Notification::TaskMessageQueued { task_id }) => task_id == self.rc.task.id,
                         Ok(Notification::Reconnected) | Err(RecvError::Lagged(_)) => true,
@@ -250,16 +282,161 @@ impl Session {
                     if !self.active().await? {
                         return Ok(());
                     }
-                    let cancel = control(control_message::Body::Cancel(Cancel {
-                        reason: "wall-clock budget exceeded".to_string(),
-                    }));
-                    if !self.send(cancel).await {
+                    // `finalizing` first: no prompt may reach a run that is being cancelled.
+                    self.start_finalizing(false).await?;
+                    if !self.send_cancel("wall-clock budget exceeded").await {
+                        return Ok(());
+                    }
+                }
+                () = idle => {
+                    if !self.release_if_idle().await? {
                         return Ok(());
                     }
                 }
                 Some(_) = self.tasks.join_next() => {}
             }
         }
+    }
+
+    /// Releases the idle run at its deadline: `finalizing` first (in the transaction that checks
+    /// for undelivered messages), then `Release`. Returns `false` once the peer is gone or the
+    /// run ended.
+    async fn release_if_idle(&mut self) -> Result<bool, ChannelError> {
+        self.idle_at = None;
+        if !self.active().await? {
+            return Ok(false);
+        }
+        if !self.start_finalizing(true).await? {
+            return Ok(true);
+        }
+        self.release_sent = true;
+        Ok(self.send_release().await)
+    }
+
+    /// Moves the run to `finalizing` in a transaction that holds the task row lock (the one
+    /// `queue_message` takes), so a message queued meanwhile is either seen here or sees the
+    /// run `finalizing` and queues the task for the next run. With `only_idle` the move happens
+    /// only for an `awaiting_input` run without an undelivered message (the idle `Release`);
+    /// otherwise for any run that is not ending yet (the budget `Cancel`). Returns whether the
+    /// run was moved.
+    async fn start_finalizing(&self, only_idle: bool) -> Result<bool, ChannelError> {
+        let mut tx = self.ctx.pool.begin().await?;
+        // Lock order: run row, then task row (see `lock_task`).
+        sqlx::query("SELECT 1 FROM runs WHERE id = $1 FOR UPDATE")
+            .bind(self.rc.run.id.as_uuid())
+            .execute(&mut *tx)
+            .await?;
+        lock_task(&mut tx, self.rc.task.id).await?;
+        let moved = if only_idle {
+            !has_undelivered_message(&mut tx, self.rc.task.id).await?
+                && sqlx::query(
+                    "UPDATE runs SET state = 'finalizing' WHERE id = $1 AND state = 'awaiting_input'",
+                )
+                .bind(self.rc.run.id.as_uuid())
+                .execute(&mut *tx)
+                .await?
+                .rows_affected()
+                    > 0
+        } else {
+            sqlx::query(
+                "UPDATE runs SET state = 'finalizing'
+                 WHERE id = $1
+                   AND state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')",
+            )
+            .bind(self.rc.run.id.as_uuid())
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+                > 0
+        };
+        if moved {
+            publish(
+                &mut *tx,
+                &Notification::RunChanged {
+                    run_id: self.rc.run.id,
+                    task_id: self.rc.task.id,
+                },
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(moved)
+    }
+
+    /// Re-arms the idle timer from the database: the run is idle when it is `awaiting_input` and
+    /// no prompt is in flight.
+    async fn refresh_idle(&mut self) -> Result<(), ChannelError> {
+        self.idle_at = None;
+        if self.busy {
+            return Ok(());
+        }
+        let awaiting = get_run(&self.ctx.pool, self.rc.run.id)
+            .await?
+            .is_some_and(|run| run.state == RunState::AwaitingInput);
+        if !awaiting {
+            return Ok(());
+        }
+        let Some(turn_end) = last_turn_end(&self.ctx.pool, self.rc.run.id).await? else {
+            return Ok(());
+        };
+        self.idle_at = idle_instant(turn_end, self.ctx.config.runs.keep_alive_seconds);
+        Ok(())
+    }
+
+    /// Commands for a run the control plane has moved to `finalizing`: `Cancel` when the task was
+    /// marked done, `Release` when the idle deadline passed (again after a reconnect, when the
+    /// first one was lost with the old stream). Returns `false` once the peer is gone or the run
+    /// ended.
+    async fn reconcile_finalizing(&mut self) -> Result<bool, ChannelError> {
+        let Some(run) = get_run(&self.ctx.pool, self.rc.run.id).await? else {
+            return Ok(false);
+        };
+        if run.state.is_terminal() || self.ended {
+            return Ok(false);
+        }
+        if run.state != RunState::Finalizing {
+            return Ok(true);
+        }
+        let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+            .bind(self.rc.task.id.as_uuid())
+            .fetch_one(&self.ctx.pool)
+            .await?;
+        let status: TaskStatus = status.parse()?;
+        if status == TaskStatus::Completed {
+            if self.done_cancel_sent {
+                return Ok(true);
+            }
+            self.done_cancel_sent = true;
+            return Ok(self.send_cancel("task marked done").await);
+        }
+        // A budget `Cancel` also leaves the run `finalizing`. Once the budget deadline has passed
+        // the budget timer sends it (also on a replica that takes over after the first one was
+        // lost), so an idle `Release` must not follow.
+        let budget_cancelled = cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs)
+            .is_some_and(|at| at <= Utc::now());
+        if budget_cancelled
+            || self.release_sent
+            || last_turn_end(&self.ctx.pool, self.rc.run.id)
+                .await?
+                .is_none()
+        {
+            return Ok(true);
+        }
+        self.release_sent = true;
+        Ok(self.send_release().await)
+    }
+
+    async fn send_release(&self) -> bool {
+        self.send(control(control_message::Body::Release(Release {})))
+            .await
+    }
+
+    async fn send_cancel(&self, reason: &str) -> bool {
+        let cancel = Cancel {
+            reason: reason.to_string(),
+        };
+        self.send(control(control_message::Body::Cancel(cancel)))
+            .await
     }
 
     /// Lets in-flight tool calls and credential requests finish after the stream ended: their
@@ -276,12 +453,18 @@ impl Session {
     /// Whether commands may still be sent: this session has not seen the run end and the
     /// database (another replica may have ended it) agrees.
     async fn active(&self) -> Result<bool, ChannelError> {
+        Ok(self.run_state().await?.is_some())
+    }
+
+    /// State of the run if this session may still command it, `None` once it ended.
+    async fn run_state(&self) -> Result<Option<RunState>, ChannelError> {
         if self.ended {
-            return Ok(false);
+            return Ok(None);
         }
         Ok(get_run(&self.ctx.pool, self.rc.run.id)
             .await?
-            .is_some_and(|run| !run.state.is_terminal()))
+            .map(|run| run.state)
+            .filter(|state| !state.is_terminal()))
     }
 
     /// Runs forge work beside the stream loop, so a slow forge neither stops acks nor delays
@@ -304,8 +487,12 @@ impl Session {
     /// between turns, the held-back ones (which this marks as forwarded). `false` ends the
     /// session: the peer is gone or the run ended, so a prompt must stay queued for the next run.
     async fn send_new_prompts(&mut self) -> Result<bool, ChannelError> {
-        if !self.active().await? {
-            return Ok(false);
+        match self.run_state().await? {
+            None => return Ok(false),
+            // Ending (`Release`, `Cancel`): a prompt sent now could be lost with the turn it
+            // interrupts. It stays queued; the run end makes the task `queued` for the next run.
+            Some(RunState::Finalizing) => return Ok(true),
+            Some(_) => {}
         }
         for prompt in pending_prompts(&self.ctx.pool, self.rc.task.id, self.busy).await? {
             if !self.sent_prompts.insert(prompt.prompt_id.clone()) {
@@ -320,6 +507,7 @@ impl Session {
             // The runtime starts a turn for it: hold back new messages until the persisted
             // `TurnEnded` clears this, not only once `TurnStarted` is persisted.
             self.busy = true;
+            self.idle_at = None;
         }
         Ok(true)
     }
@@ -346,6 +534,9 @@ impl Session {
         }
         if persisted.turn_ended && !self.ended && !self.send_new_prompts().await? {
             return Ok(false);
+        }
+        if persisted.idle_changed && !self.ended {
+            self.refresh_idle().await?;
         }
         if let Some((expected, got)) = persisted.gap {
             return Err(Status::data_loss(format!(
@@ -468,11 +659,8 @@ async fn persist_batch(
             .await?;
     // Event ids are the task-wide cursor of the web UI's live transcript, so they must become
     // visible in id order. The run lock alone allows another run of the same task (a lost run's
-    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task.
-    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
-        .bind(rc.task.id.as_uuid())
-        .execute(&mut *tx)
-        .await?;
+    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task (see `lock_task`).
+    lock_task(&mut tx, rc.task.id).await?;
     let start = u64::try_from(stored)
         .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))?;
     let mut last = start;
@@ -482,6 +670,7 @@ async fn persist_batch(
     let mut newest_event = None;
     let mut busy = None;
     let mut turn_ended = false;
+    let mut idle_changed = false;
 
     for msg in batch {
         if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= last {
@@ -501,14 +690,24 @@ async fn persist_batch(
         match body {
             agent_message::Body::Hello(_) => {}
             agent_message::Body::PhaseChanged(change) => {
-                let state = match change.phase() {
-                    RunPhase::Preparing => Some(RunState::Preparing),
-                    RunPhase::Running => Some(RunState::Running),
-                    RunPhase::Finalizing => Some(RunState::Finalizing),
-                    RunPhase::AwaitingInput | RunPhase::Unspecified => None,
-                };
-                if let Some(state) = state {
-                    set_run_state_tx(&mut tx, rc.run.id, state, None).await?;
+                match change.phase() {
+                    RunPhase::Preparing => {
+                        set_run_state_tx(&mut tx, rc.run.id, RunState::Preparing, None).await?;
+                    }
+                    RunPhase::Finalizing => {
+                        set_run_state_tx(&mut tx, rc.run.id, RunState::Finalizing, None).await?;
+                    }
+                    // The task row is locked above: a message queued concurrently is either
+                    // visible here or waits for this transaction.
+                    RunPhase::Running => {
+                        set_idle_tx(&mut tx, rc.run.id, rc.task.id, false).await?;
+                        idle_changed = true;
+                    }
+                    RunPhase::AwaitingInput => {
+                        set_idle_tx(&mut tx, rc.run.id, rc.task.id, true).await?;
+                        idle_changed = true;
+                    }
+                    RunPhase::Unspecified => {}
                 }
             }
             agent_message::Body::TranscriptEvent(raw) => {
@@ -519,10 +718,14 @@ async fn persist_batch(
                     newest_event = newest_event.max(Some(id));
                     observations.extend(observe_event(&mut tx, rc, &raw).await?);
                     match event.kind {
-                        "turn_started" => busy = Some(true),
+                        "turn_started" => {
+                            busy = Some(true);
+                            idle_changed = true;
+                        }
                         "turn_ended" => {
                             busy = Some(false);
                             turn_ended = true;
+                            idle_changed = true;
                         }
                         _ => {}
                     }
@@ -586,6 +789,7 @@ async fn persist_batch(
         effects,
         busy,
         turn_ended,
+        idle_changed,
         gap,
         observations,
     })
@@ -665,16 +869,45 @@ async fn busy_on_connect(
     Ok(turn_open(pool, run_id).await? || !pending_prompts(pool, task_id, true).await?.is_empty())
 }
 
-async fn turn_open(pool: &sqlx::PgPool, run_id: df_core::RunId) -> Result<bool, ChannelError> {
-    let last: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM transcript_events
+/// Kind (`turn_started` or `turn_ended`) and time of the run's last persisted turn event.
+async fn last_turn_event(
+    pool: &sqlx::PgPool,
+    run_id: df_core::RunId,
+) -> Result<Option<(String, DateTime<Utc>)>, ChannelError> {
+    Ok(sqlx::query_as(
+        "SELECT kind, occurred_at FROM transcript_events
          WHERE run_id = $1 AND kind IN ('turn_started', 'turn_ended')
          ORDER BY seq DESC LIMIT 1",
     )
     .bind(run_id.as_uuid())
     .fetch_optional(pool)
-    .await?;
-    Ok(last.as_deref() == Some("turn_started"))
+    .await?)
+}
+
+async fn turn_open(pool: &sqlx::PgPool, run_id: df_core::RunId) -> Result<bool, ChannelError> {
+    Ok(last_turn_event(pool, run_id)
+        .await?
+        .is_some_and(|(kind, _)| kind == "turn_started"))
+}
+
+/// When the run's last persisted turn ended, if the last turn event is a `TurnEnded`.
+async fn last_turn_end(
+    pool: &sqlx::PgPool,
+    run_id: df_core::RunId,
+) -> Result<Option<DateTime<Utc>>, ChannelError> {
+    Ok(last_turn_event(pool, run_id)
+        .await?
+        .and_then(|(kind, at)| (kind == "turn_ended").then_some(at)))
+}
+
+/// The instant `keep_alive_seconds` after `turn_end`; `None` if that is not representable.
+fn idle_instant(turn_end: DateTime<Utc>, keep_alive_seconds: u64) -> Option<Instant> {
+    let keep_alive = chrono::TimeDelta::try_seconds(i64::try_from(keep_alive_seconds).ok()?)?;
+    let wait = (turn_end.checked_add_signed(keep_alive)? - Utc::now())
+        .to_std()
+        .unwrap_or_default()
+        .min(MAX_TIMER);
+    Some(Instant::now() + wait)
 }
 
 fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
@@ -763,10 +996,23 @@ mod tests {
         run_id: df_core::RunId,
         messages: Vec<AgentMessage>,
     ) -> Result<(), Status> {
+        run_session_with_output(env, run_id, messages).await.0
+    }
+
+    /// Like [`run_session`], also returning what the session sent.
+    async fn run_session_with_output(
+        env: &Env,
+        run_id: df_core::RunId,
+        messages: Vec<AgentMessage>,
+    ) -> (Result<(), Status>, Vec<ControlMessage>) {
         let row = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
-        let (tx, _rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
         let inbound = futures::stream::iter(messages.into_iter().map(Ok));
-        run(env.ctx.clone(), row, inbound, tx, never_stops()).await
+        let result = run(env.ctx.clone(), row, inbound, tx, never_stops()).await;
+        let sent = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(Result::ok)
+            .collect();
+        (result, sent)
     }
 
     fn never_stops() -> watch::Receiver<bool> {
@@ -892,6 +1138,426 @@ mod tests {
         assert_eq!(stored, 1);
     }
 
+    fn phase(phase: RunPhase) -> agent_message::Body {
+        agent_message::Body::PhaseChanged(df_proto::agent::v1::PhaseChanged {
+            phase: phase as i32,
+            detail: String::new(),
+        })
+    }
+
+    async fn state_and_status(env: &Env, run_id: df_core::RunId) -> (RunState, String) {
+        let run = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
+        let status = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .fetch_one(&env.ctx.pool)
+            .await
+            .unwrap();
+        (run.state, status)
+    }
+
+    /// A run in `state` of a task that is `running`, without undelivered messages.
+    async fn run_of_running_task(env: &Env, state: &str) -> df_core::RunId {
+        let run_id = env.insert_run(env.task.id, 1, state).await;
+        env.bind_pod(run_id);
+        sqlx::query("UPDATE tasks SET status = 'running' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&env.ctx.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE task_id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&env.ctx.pool)
+            .await
+            .unwrap();
+        run_id
+    }
+
+    #[tokio::test]
+    async fn the_idle_phase_makes_the_run_awaiting_input_and_the_task_waiting() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "running").await;
+
+        run_session(
+            &env,
+            run_id,
+            vec![hello(), msg(1, phase(RunPhase::AwaitingInput))],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state_and_status(&env, run_id).await,
+            (RunState::AwaitingInput, "waiting".to_string())
+        );
+
+        run_session(
+            &env,
+            run_id,
+            vec![hello(), msg(2, phase(RunPhase::Running))],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state_and_status(&env, run_id).await,
+            (RunState::Running, "running".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_idle_phase_keeps_the_task_running_while_a_message_is_undelivered() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "running").await;
+        let prompt_id = queue_human(&env, "one more thing").await;
+
+        let (result, sent) = run_session_with_output(
+            &env,
+            run_id,
+            vec![hello(), msg(1, phase(RunPhase::AwaitingInput))],
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(
+            state_and_status(&env, run_id).await,
+            (RunState::AwaitingInput, "running".to_string())
+        );
+        // The session forwards the message to the idle run.
+        let prompts: Vec<_> = sent
+            .into_iter()
+            .filter_map(|c| match c.body {
+                Some(control_message::Body::Prompt(p)) => Some(p.prompt_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prompts, [prompt_id]);
+    }
+
+    #[tokio::test]
+    async fn idle_phases_do_not_reopen_a_finalizing_run() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "finalizing").await;
+        sqlx::query("UPDATE tasks SET status = 'completed' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        run_session(
+            &env,
+            run_id,
+            vec![hello(), msg(1, phase(RunPhase::Running))],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state_and_status(&env, run_id).await,
+            (RunState::Finalizing, "completed".to_string())
+        );
+    }
+
+    /// Persists a `TurnEnded` of the run that occurred at `at`.
+    async fn persist_turn_end(env: &Env, run_id: df_core::RunId, at: DateTime<Utc>) {
+        sqlx::query(
+            "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
+             VALUES ($1, $2, 1, $3, 'turn_ended', '{}')",
+        )
+        .bind(env.task.id.as_uuid())
+        .bind(run_id.as_uuid())
+        .bind(at)
+        .execute(&env.ctx.pool)
+        .await
+        .unwrap();
+    }
+
+    fn with_keep_alive(env: &mut Env, seconds: u64) {
+        env.ctx.config = Arc::new(crate::ChannelConfig {
+            runs: df_core::config::RunsConfig {
+                keep_alive_seconds: seconds,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    }
+
+    /// Serves `run_id` on a stream that stays open and returns the time the first control
+    /// message accepted by `wanted` was sent, with the run state at that moment. Fails if none
+    /// comes within 30 s.
+    async fn serve_until(
+        env: &Env,
+        run_id: df_core::RunId,
+        wanted: impl Fn(&control_message::Body) -> bool,
+    ) -> (DateTime<Utc>, RunState) {
+        let row = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
+        let (to_session, inbound) = mpsc::channel(8);
+        let (tx, mut rx) = mpsc::channel(64);
+        to_session.send(Ok(hello())).await.unwrap();
+        let ctx = env.ctx.clone();
+        let session = tokio::spawn(async move {
+            run(
+                ctx,
+                row,
+                tokio_stream::wrappers::ReceiverStream::new(inbound),
+                tx,
+                never_stops(),
+            )
+            .await
+        });
+        let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while let Some(Ok(control)) = rx.recv().await {
+                if control.body.as_ref().is_some_and(&wanted) {
+                    return Some(Utc::now());
+                }
+            }
+            None
+        })
+        .await
+        .expect("the command in time")
+        .expect("the stream ended without the command");
+        let (state, _) = state_and_status(env, run_id).await;
+        drop(to_session);
+        session.await.unwrap().unwrap();
+        (found, state)
+    }
+
+    /// Serves an idle run whose turn ended at `turn_end` and returns when `Release` was sent,
+    /// with the run state at that moment. The deadline is wall-clock (a persisted timestamp plus
+    /// the keep-alive), so these tests wait in real time; the keep-alive is at most 1 s.
+    async fn wait_for_release(
+        keep_alive: u64,
+        turn_end: impl FnOnce() -> DateTime<Utc>,
+    ) -> (DateTime<Utc>, RunState) {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool.clone()).await;
+        with_keep_alive(&mut env, keep_alive);
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        persist_turn_end(&env, run_id, turn_end()).await;
+        serve_until(&env, run_id, |b| {
+            matches!(b, control_message::Body::Release(_))
+        })
+        .await
+    }
+
+    /// `persist_batch` holds the run row and then wants the task row; `start_finalizing` must
+    /// wait for the run row first instead of holding the task row, or both deadlock.
+    #[tokio::test]
+    async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        let (session, _rx) = session_for(&env, run_id).await;
+        let mut other = pool.begin().await.unwrap();
+        sqlx::query("SELECT 1 FROM runs WHERE id = $1 FOR UPDATE")
+            .bind(run_id.as_uuid())
+            .execute(&mut *other)
+            .await
+            .unwrap();
+        let task_id = env.task.id;
+        let finalizing = tokio::spawn(async move { session.start_finalizing(false).await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("start_finalizing did not wait for the run lock");
+
+        // Without the run lock first, `start_finalizing` now holds the task row: deadlock.
+        lock_task(&mut other, task_id).await.unwrap();
+        other.commit().await.unwrap();
+        assert!(finalizing.await.unwrap().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_budget_cancel_is_never_followed_by_a_release() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool.clone()).await;
+        env.ctx.config = Arc::new(crate::ChannelConfig {
+            runs: df_core::config::RunsConfig {
+                max_wall_clock_seconds: 0,
+                cancel_grace_seconds: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        persist_turn_end(&env, run_id, Utc::now()).await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+
+        // The session that sent the budget `Cancel` sees its own `finalizing` run.
+        assert!(session.start_finalizing(false).await.unwrap());
+        assert!(session.reconcile_finalizing().await.unwrap());
+        // A replica that takes over later sees the same.
+        let (mut other, mut other_rx) = session_for(&env, run_id).await;
+        assert!(other.reconcile_finalizing().await.unwrap());
+
+        assert!(rx.try_recv().is_err() && other_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_budget_cancel_finalizes_the_run_first_and_no_prompt_follows() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool.clone()).await;
+        env.ctx.config = Arc::new(crate::ChannelConfig {
+            runs: df_core::config::RunsConfig {
+                max_wall_clock_seconds: 0,
+                cancel_grace_seconds: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let run_id = run_of_running_task(&env, "running").await;
+
+        // The run is `finalizing` when `Cancel` goes out.
+        let (_, state) = serve_until(&env, run_id, |b| {
+            matches!(b, control_message::Body::Cancel(_))
+        })
+        .await;
+        assert_eq!(state, RunState::Finalizing);
+
+        // A message queued afterwards is not forwarded to the cancelled run.
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+        queue_human(&env, "too late").await;
+        assert!(session.send_new_prompts().await.unwrap());
+        assert!(sent_prompt_ids(&mut rx).is_empty());
+        assert_eq!(state_and_status(&env, run_id).await.1, "queued");
+    }
+
+    #[tokio::test]
+    async fn the_idle_run_is_released_one_keep_alive_after_its_turn_end() {
+        let turn_end = Utc::now();
+        let (released_at, state) = wait_for_release(1, || turn_end).await;
+        assert!(released_at - turn_end >= chrono::Duration::seconds(1));
+        // `finalizing` is set before `Release` is sent.
+        assert_eq!(state, RunState::Finalizing);
+    }
+
+    #[tokio::test]
+    async fn a_keep_alive_of_zero_releases_right_after_the_turn() {
+        let turn_end = Utc::now();
+        let (released_at, state) = wait_for_release(0, || turn_end).await;
+        assert!(released_at - turn_end < chrono::Duration::seconds(30));
+        assert_eq!(state, RunState::Finalizing);
+    }
+
+    #[tokio::test]
+    async fn a_new_session_after_the_deadline_releases_after_the_handshake() {
+        let (_, state) =
+            wait_for_release(600, || Utc::now() - chrono::Duration::seconds(3600)).await;
+        assert_eq!(state, RunState::Finalizing);
+    }
+
+    #[tokio::test]
+    async fn a_run_with_a_message_in_flight_is_not_released() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool.clone()).await;
+        with_keep_alive(&mut env, 0);
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        persist_turn_end(&env, run_id, Utc::now()).await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+
+        // A prompt was forwarded and its turn has not been confirmed yet.
+        session.busy = true;
+        session.refresh_idle().await.unwrap();
+        assert!(session.idle_at.is_none());
+
+        // The message was queued after the last forwarding: the deadline does not release.
+        session.busy = false;
+        queue_human(&env, "wait for me").await;
+        assert!(session.release_if_idle().await.unwrap());
+        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            state_and_status(&env, run_id).await.0,
+            RunState::AwaitingInput
+        );
+    }
+
+    #[tokio::test]
+    async fn a_message_for_an_idle_run_starts_no_run_and_is_forwarded_at_once() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        sqlx::query("UPDATE tasks SET status = 'waiting' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+
+        let prompt_id = queue_human(&env, "and one more thing").await;
+
+        assert_eq!(state_and_status(&env, run_id).await.1, "running");
+        assert!(
+            crate::runs::start_queued_runs(&pool, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(session.send_new_prompts().await.unwrap());
+        assert_eq!(sent_prompt_ids(&mut rx), [prompt_id]);
+    }
+
+    #[tokio::test]
+    async fn marking_the_task_done_cancels_its_finalizing_run_once() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "awaiting_input").await;
+        sqlx::query("UPDATE tasks SET status = 'waiting' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+
+        // Nothing to do while the run is idle.
+        assert!(session.reconcile_finalizing().await.unwrap());
+        assert!(rx.try_recv().is_err());
+
+        df_db::mark_task_done(
+            &pool,
+            env.task.id,
+            df_core::Principal::human(df_core::UserId::new(), "Ada"),
+        )
+        .await
+        .unwrap();
+        assert!(session.reconcile_finalizing().await.unwrap());
+        assert!(session.reconcile_finalizing().await.unwrap());
+
+        let sent: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|m| m.ok().and_then(|c| c.body))
+            .collect();
+        assert!(
+            matches!(sent.as_slice(), [control_message::Body::Cancel(_)]),
+            "{sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_prompt_is_sent_to_a_finalizing_run_and_its_end_queues_the_task() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = run_of_running_task(&env, "finalizing").await;
+        let (mut session, mut rx) = session_for(&env, run_id).await;
+
+        queue_human(&env, "too late").await;
+        assert!(session.send_new_prompts().await.unwrap());
+        assert!(sent_prompt_ids(&mut rx).is_empty());
+
+        let end = RunEnd::failure(run_id, RunOutcome::EndTurn, "");
+        crate::runs::end_run(&pool, &end).await.unwrap();
+        assert_eq!(state_and_status(&env, run_id).await.1, "queued");
+    }
+
     async fn session_for(
         env: &Env,
         run_id: df_core::RunId,
@@ -907,6 +1573,9 @@ mod tests {
             busy: false,
             tasks: JoinSet::new(),
             ended: false,
+            idle_at: None,
+            done_cancel_sent: false,
+            release_sent: false,
         };
         (session, rx)
     }

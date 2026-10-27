@@ -18,7 +18,7 @@ The run state SHALL follow `pending → provisioning → connecting → preparin
 - **THEN** the run state becomes `succeeded` with outcome `blocked` and no further phase changes are accepted for it
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`completed`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with a retry time
@@ -38,9 +38,9 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 
 ## ADDED Requirements
 
-### Requirement: Keep-alive window in Assign
-`Assign.keep_alive` SHALL be the instance's configured keep-alive window (default 10 minutes). The wall-clock budget SHALL include time spent awaiting input.
+### Requirement: Deadline for blocking questions
+For a run whose last turn had a blocking request, the control plane SHALL apply the idle deadline of "Idle deadline" (`iter1-keep-alive-and-review`) and send `Release` with outcome `BLOCKED` expected. The wall-clock budget includes time spent awaiting input.
 
 #### Scenario: Default window
-- **WHEN** a run connects in an instance without a keep-alive setting
-- **THEN** `Assign.keep_alive` is 10 minutes
+- **WHEN** a run awaits an answer in an instance without `runs.keepAliveSeconds`
+- **THEN** the control plane sends `Release` after 10 minutes and the run ends `blocked`

@@ -157,6 +157,7 @@ impl CommandFilter {
                 self.seen_credential_grants.insert(grant.request_id.clone())
             }
             Some(control_message::Body::Cancel(_))
+            | Some(control_message::Body::Release(_))
             | Some(control_message::Body::HarnessCredentials(_)) => true,
             Some(control_message::Body::HelloAck(_)) | None => true,
         }

@@ -218,7 +218,7 @@ impl DetailStream {
             pending_region(
                 &data.task.key,
                 &data.task.persona_name,
-                &data.task.status,
+                data.task.status.as_str(),
                 &data.pending,
                 None,
             ),

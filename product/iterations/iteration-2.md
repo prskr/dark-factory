@@ -41,7 +41,7 @@ flowchart LR
 | Change | Scope |
 |---|---|
 | `iter2-git-proxy` | Gateway Git smart-HTTP endpoint: identity by pod IP, forge credential injection, ref enforcement, bare mirror per repository, push audit records. The runtime uses the proxy URL and drops the credential helper. |
-| `iter2-agent-requests` | ADR-0038 request model: `ask_question` and `request_approval` factory tools, request storage, inbox and transcript cards, decisions delivered as messages, `AwaitingInput` keep-alive, `blocked` task status. |
+| `iter2-agent-requests` | ADR-0038 request model: `ask_question` and `request_approval` factory tools, request storage, inbox and transcript cards, decisions delivered as messages, `blocked` task status (reuses the idle wait of `iter1-keep-alive-and-review`). |
 | `iter2-push-checks` | Quarantine and checks for pushes: secret scan, commit identity, protected paths, size limits, linear history. Per-project push policy, approval-gated checks raising `push-check-exception`, rejection feedback to the agent. |
 | `iter2-egress-approvals` | Task-scoped allowlist entries, "allow" action in the egress log, `network-access` approvals (raised automatically on denials or by the agent). |
 | `iter2-cancel` | Stop a run, cancel a task (new `cancelled` status), with UI actions. |
@@ -78,7 +78,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | Contract | Change |
 |---|---|
 | `darkfactory.gateway.v1` | Snapshot: Git route per sandbox (upstream URL, task/WIP/base branch, commit identity), forge credentials keyed by reference, push policy per project, approved exceptions per task, task-scoped host rules. New services on the control plane: `GatewayGit.RecordPush` (with findings), `GatewayEvents.ReportDenial`. |
-| `darkfactory.agent.v1` | `Assign.keep_alive` (AwaitingInput window); `ToolCallResult.await_input_after_turn`; `PushStatus` `REJECTED_BY_CHECK`; `CredentialRequest` marked deprecated. |
+| `darkfactory.agent.v1` | `ToolCallResult.await_input_after_turn`; `PushStatus` `REJECTED_BY_CHECK`; `CredentialRequest` marked deprecated. |
 | Factory tools | v2 file adds `ask_question` and `request_approval` (type `network-access` in this iteration). |
 
 ## 6. Out of scope (later iterations)

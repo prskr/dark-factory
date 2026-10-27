@@ -118,6 +118,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Network / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
 | Network / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
 | Desktop / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
+| Desktop / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
 | Desktop / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
 | Desktop / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Desktop / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |

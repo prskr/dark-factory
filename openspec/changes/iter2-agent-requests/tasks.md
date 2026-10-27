@@ -2,7 +2,7 @@
 
 ## 1. Contract
 
-- [ ] 1.1 Add `Assign.keep_alive` and `ToolCallResult.await_input_after_turn` to `agent.proto`, create `contract/mcp/factory-tools.v2.json` (v1 + `ask_question` with limits from `specs/factory-tools/spec.md`), and update `contract/README.md`. Verify with the `protoc` command from `contract/README.md` and a JSON Schema meta-validation of the new tool file
+- [ ] 1.1 Add `ToolCallResult.await_input_after_turn` to `agent.proto`, create `contract/mcp/factory-tools.v2.json` (v1 + `ask_question` with limits from `specs/factory-tools/spec.md`), and update `contract/README.md`. Verify with the `protoc` command from `contract/README.md` and a JSON Schema meta-validation of the new tool file
 
 ## 2. Storage and request service
 
@@ -14,11 +14,11 @@
 ## 3. Tool and run orchestration
 
 - [ ] 3.1 Implement the `ask_question` handler and switch runs to tool set v2. Verify the "non-blocking question", "blocking question" and "tools listed" scenarios
-- [ ] 3.2 Add `run.keepAlive` to instance configuration and `Assign`, the `awaiting_input` run state and the `blocked` outcome mapping. Verify the "default window", "awaiting input reported", "blocked run is terminal", "blocked run" and "completed with an undelivered message" scenarios, and document `run.keepAlive` in the operator configuration reference
+- [ ] 3.2 Add the blocked-question deadline in the control plane (reusing `runs.keepAliveSeconds`) and the `blocked` outcome mapping (`awaiting_input` and `Release` exist). Verify the "default window", "awaiting input reported", "blocked run is terminal", "blocked run" and "completed with an undelivered message" scenarios
 
 ## 4. Runtime
 
-- [ ] 4.1 Implement the awaiting-input loop in `factory-agent` (design D4). Verify "answer within the window", "nobody answered in time" (`tokio::time::pause`), "blocking request and completion in one turn" and cancel during awaiting input with the fake ACP agent
+- [ ] 4.1 Finalize `BLOCKED` on `Release` after a blocking request in `factory-agent`, reusing the idle wait (design D4). Verify "answer within the window", "nobody answered in time" (`tokio::time::pause`), "blocking request and completion in one turn" and cancel during awaiting input with the fake ACP agent
 - [ ] 4.2 Add a fake-agent script step that calls `ask_question` with `blocking: true`. Verify with a runtime test that the script reaches `AwaitingInput`
 
 ## 5. UI

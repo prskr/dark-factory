@@ -124,6 +124,7 @@ pub fn routes() -> Router<WebState> {
             patch(message_edit).delete(message_remove),
         )
         .route("/tasks/{key}/title", post(task_rename))
+        .route("/tasks/{key}/done", post(task_done))
 }
 
 /// The query of the list pages.
@@ -246,7 +247,7 @@ fn selected_columns(s: &Selected) -> Markup {
                 "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
                 (render_transcript(s.folder.items()))
             }
-            (message_area(key, &s.detail.persona_name, &s.detail.status, &s.pending))
+            (message_area(key, &s.detail.persona_name, s.detail.status.as_str(), &s.pending))
         }
         (details_column(&s.detail, &s.runs))
     }
@@ -480,6 +481,30 @@ async fn task_rename(
     response
 }
 
+/// `POST /tasks/{key}/done`: a board member marks the task done. The answer is the details
+/// region as the task is now, also when the task could not be marked done (409).
+async fn task_done(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(key): Path<String>,
+) -> Response {
+    let task = match task_by_key(&state, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    let id = TaskId::from_uuid(task.id);
+    let status = match df_db::mark_task_done(&state.pool, id, user.principal()).await {
+        Ok(()) => StatusCode::OK,
+        Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
+        Err(e) => return internal_error(&e),
+    };
+    match df_db::task_views::get_task_detail(&state.pool, id).await {
+        Ok(Some(task)) => (status, details_region(&task)).into_response(),
+        Ok(None) => not_found("The task"),
+        Err(e) => internal_error(&e),
+    }
+}
+
 async fn message_create(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
@@ -620,7 +645,7 @@ async fn stack(
     Ok(pending_region(
         &task.key,
         &task.persona_name,
-        &task.status,
+        task.status.as_str(),
         &pending,
         error,
     ))

@@ -510,6 +510,8 @@ impl BudgetTracker {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcomeDecision {
     ContinueNextTurn,
+    /// The turn ended normally and nothing is queued: wait for a `Prompt`, `Cancel` or `Release`.
+    AwaitInput,
     Finalize {
         outcome: RunOutcome,
         detail: String,
@@ -539,8 +541,8 @@ pub struct TurnOutcomeInput {
 /// `RATE_LIMITED` (with retry time if known) if the provider rate-limited;
 /// `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit;
 /// `CANCELLED` on `Cancel`;
-/// `FAILED` if the harness crashed;
-/// `END_TURN` otherwise."
+/// `FAILED` if the harness crashed.
+/// Otherwise the runtime waits for input and finalizes `END_TURN` on `Release`."
 pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
     // 1. Cancellation from control plane
     if input.cancelled {
@@ -624,12 +626,8 @@ pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
         }
         RunOutcomeDecision::ContinueNextTurn
     } else {
-        // "WHEN the turn ends normally and no prompts are queued
-        //  THEN the run finalizes with END_TURN"
-        RunOutcomeDecision::Finalize {
-            outcome: RunOutcome::EndTurn,
-            detail: "Turn ended normally with no queued prompts".to_string(),
-            retry_after: None,
-        }
+        // "WHEN the turn ends normally, no prompts are queued and the control plane sends Release
+        //  THEN the run finalizes with END_TURN" - the wait itself lives in the runner.
+        RunOutcomeDecision::AwaitInput
     }
 }

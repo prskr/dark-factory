@@ -11,6 +11,17 @@ use crate::cli::{Cli, Command};
 use crate::connection::{TlsFiles, connect_channel};
 use crate::test_harness::{MockControlPlane, TestPki};
 
+/// A `Release`, as the control plane sends it once the idle deadline passed. The runtime keeps
+/// an early one, so tests queue it up front to end the idle wait after the last turn.
+fn release_message() -> ControlMessage {
+    ControlMessage {
+        ack: 0,
+        body: Some(control_message::Body::Release(
+            df_proto::agent::v1::Release {},
+        )),
+    }
+}
+
 #[test]
 fn log_format_defaults_to_text_and_rejects_unknown_values() {
     use df_telemetry::logging::LogFormat;
@@ -4847,22 +4858,18 @@ fn test_determine_run_outcome_priority() {
         RunOutcomeDecision::ContinueNextTurn
     );
 
-    // 10. No queued prompts ends turn
+    // 10. A normal turn end without queued prompts waits for input instead of ending the run
     let input_end_turn = TurnOutcomeInput {
         has_queued_prompts: false,
         ..Default::default()
     };
     assert_eq!(
         determine_run_outcome(&input_end_turn),
-        RunOutcomeDecision::Finalize {
-            outcome: RunOutcome::EndTurn,
-            detail: "Turn ended normally with no queued prompts".to_string(),
-            retry_after: None,
-        }
+        RunOutcomeDecision::AwaitInput
     );
 }
 
-fn setup_test_remote_repo(temp_dir: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn setup_test_remote_repo(temp_dir: &std::path::Path) -> std::path::PathBuf {
     let upstream = temp_dir.join("upstream.git");
     // explicit branch: without `init.defaultBranch` HEAD would point to the never pushed `master`
     let status = std::process::Command::new("git")
@@ -5013,7 +5020,8 @@ sessions:
         queued_at: None,
     }];
 
-    let (_inbound_tx, inbound_rx) = mpsc::channel(100);
+    let (inbound_tx, inbound_rx) = mpsc::channel(100);
+    inbound_tx.try_send(release_message()).unwrap();
     let (outbound_tx, mut outbound_rx) = mpsc::channel(100);
 
     // Drain outbound messages in background to prevent backpressure
@@ -5136,6 +5144,7 @@ sessions:
         queued_at: None,
     }];
     let (inbound_tx, inbound_rx) = mpsc::channel(100);
+    inbound_tx.try_send(release_message()).unwrap();
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
     // Mock control plane: queues the second turn's prompt during the first turn and keeps
     // everything the runtime sends.
@@ -6541,7 +6550,8 @@ sessions:
         queued_at: None,
     }];
 
-    let (_inbound_tx1, inbound_rx1) = mpsc::channel(100);
+    let (inbound_tx1, inbound_rx1) = mpsc::channel(100);
+    inbound_tx1.try_send(release_message()).unwrap();
     let (outbound_tx1, mut outbound_rx1) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
 
     let run1_messages = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
