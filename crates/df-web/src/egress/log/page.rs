@@ -342,7 +342,7 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
                 h2 id="events-title" class="text-xs font-medium uppercase tracking-wide text-faint" { "Events · newest first" }
                 span id="event-count" class="font-mono text-xs text-faint" { (event_count(counts)) }
             }
-            div id="flows-scroll" class="relative min-h-0 flex-1 overflow-auto" {
+            div id="flows-scroll" class="relative min-h-0 flex-1 overflow-auto has-[+#flows-empty:not(:empty)]:flex-none" {
                 table id="flows" class="w-full border-collapse text-left text-sm" {
                     thead {
                         tr class="text-xs font-medium uppercase tracking-wide text-faint" {
@@ -356,7 +356,7 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
                     tbody data-limit=(filter.row_limit()) { (backlog.rows) }
                 }
             }
-            div id="flows-empty" class="shrink-0" { (empty_state(counts, filter)) }
+            div id="flows-empty" class="flex shrink-0 grow items-center justify-center empty:grow-0" { (empty_state(counts, filter)) }
         }
     }
 }
@@ -444,6 +444,23 @@ mod tests {
         assert!(
             scroll.contains("aria-label=\"Connections graph\""),
             "{scroll}"
+        );
+    }
+
+    #[test]
+    fn the_empty_state_fills_and_centres_in_the_space_under_the_table_header() {
+        let html = page();
+        // With an empty state the rows box shrinks to the header and the empty state takes the
+        // rest; without one it stays out of the way.
+        let scroll = tag(&html, "id=\"flows-scroll\"");
+        assert!(
+            scroll.contains("has-[+#flows-empty:not(:empty)]:flex-none"),
+            "{scroll}"
+        );
+        let empty = tag(&html, "id=\"flows-empty\"");
+        assert!(
+            empty.contains("grow items-center justify-center empty:grow-0"),
+            "{empty}"
         );
     }
 
