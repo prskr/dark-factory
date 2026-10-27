@@ -19,7 +19,7 @@ flowchart LR
 | 1 | Thin vertical slice | [`iteration-1.md`](iteration-1.md) |
 | 1.1 | Operability | `openspec/changes/agent-session-logging`, `openspec/changes/otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | 2 | Closed Git boundary + human in the loop | [`iteration-2.md`](iteration-2.md), F1, ADR-0038 |
-| 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
+| 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0043, ADR-0044, ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
 | 4 | Configurable projects and tools | F9, F10, F11, ADR-0011, ADR-0032, ADR-0039 |
 | 5 | Visibility and memory | F8, ADR-0021, ADR-0040 |
 
@@ -50,9 +50,11 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 
 ## 3 — Team workflow
 
-- **Chats per (persona, project), `blocked_by` dependencies, project context document (ADR-0026).** Chats start with a simple summary-based compaction; plugin-based compaction (F3) stays in the backlog.
+- **Agent-created tasks and delegation (ADR-0043, ADR-0026):** the creator of a task becomes a principal (human or task), agents create tasks for other personas (`create_task`, `list_personas`, personas get a description), `blocked_by` dependencies, a parent wakes on every child that ends. The task's parent is also the escalation target.
+- **Task artifacts (`iter3-artifacts`, ADR-0044):** Markdown artifacts per task, chats included; `write_artifact` (own task), `list_artifacts` and `read_artifact` (own, ancestors, descendants, `blocked_by`, `base_task`); research results travel between tasks without a commit. A plain rendered view in the task page and chat UI.
+- **Chats as tasks (ADR-0043, ADR-0026):** a chat is a task of kind `chat` per (persona, project), the root of the delegation chain, with a read-only checkout of the default branch, a `-CHAT` key suffix, its own chat UI (not in the task list) and the project context document. Chats start with a simple summary-based compaction; plugin-based compaction (F3) stays in the backlog.
 - **Tasks based on another task's branch (ADR-0041):** `base_task` at task creation, prepare fast-forwards task branches without own commits to their base.
-- **Task tree, subtask branches and merging (ADR-0034)**, incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Sub-tasks with a progress bar and the sub-tasks with their status), and task rows with sub-tasks get a done/total chip (design canvas, "Later" row).
+- **Task tree, subtask branches and merging (ADR-0034, no group tasks)**, questions to the parent task's agent (`ask_question` addressed to the parent, `answer_question`; escalation along the parent chain, ADR-0043), incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Sub-tasks with a progress bar and the sub-tasks with their status), and task rows with sub-tasks get a done/total chip (design canvas, "Later" row).
 - **Branch rewrites, fan-out and merge triggers (ADR-0033).**
 - **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
@@ -75,7 +77,7 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 
 - Audit log view, cost and "what if" views (ADR-0021), dashboard-wide live status.
 - Full-text search across tasks and transcripts.
-- Artifacts per task, shown in a details tab as cards with a preview, title, time and type (design canvas, "Later" row).
+- Artifact cards in a details tab with a preview, title, time and type (design canvas, "Later" row); artifacts and their tools come with iteration 3 (ADR-0044).
 - **Workspace changes view (F8)**, reading from the Git proxy's mirror.
 - **Agent memory (ADR-0040)**, explicit memories with full-text search first.
 - Installable web app with push notifications (ADR-0035).

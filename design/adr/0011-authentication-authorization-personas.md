@@ -20,7 +20,7 @@ A handful of human users and many agent personas act in the system. Humans log i
 
 **Agents**
 - The certificate identifies the sandbox pod, not the persona; the control plane resolves pod → run → task → persona.
-- A persona (e.g. "Linus — software engineer") is a first-class entity: system prompt, harness configuration, skills, tool grants, budgets and permissions.
+- A persona (e.g. "Linus — software engineer") is a first-class entity, global to the instance (ADR-0043): description (role), system prompt, harness configuration, skills, tool grants, budgets and permissions.
 - Optionally, the persona is a pod label so CiliumNetworkPolicies can scope egress per persona (network scoping only).
 
 **Permissions**
@@ -28,7 +28,7 @@ A handful of human users and many agent personas act in the system. Humans log i
 - Initial permissions include `task:create`, `task:assign`, `transcript:read`, `approval:decide`, `agent:configure`, `credential:manage`, `project:context:write`; instance-management operations (CRUD on personas, skills, tool grants, routines, projects) will follow.
 - Instance-management permissions for agents have three modes: deny, requires approval, allow.
 - Configurable per instance: role → permission mapping for humans (defaults in code, overridable in instance config) and a ceiling on what may be granted to agents at all.
-- No privilege escalation: an agent can only grant a subset of its own permissions; credential management and human roles are never grantable to agents.
+- No privilege escalation (not to be confused with escalating a question to a parent task, ADR-0043): an agent can only grant a subset of its own permissions; credential management and human roles are never grantable to agents.
 
 ## Consequences
 

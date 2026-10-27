@@ -1,6 +1,6 @@
 # ADR-0038: Agent questions and typed approval requests
 
-- **Status:** Accepted (planned for iteration 2; amended by [ADR-0039](0039-repository-configuration-activated-by-approval.md): `project-config` approval type, raised by the control plane on the project instead of a task)
+- **Status:** Accepted (planned for iteration 2; amended by [ADR-0039](0039-repository-configuration-activated-by-approval.md): `project-config` approval type, raised by the control plane on the project instead of a task; amended by [ADR-0043](0043-delegation-chain-chats-as-tasks.md): questions to the parent task's agent, answered with `answer_question`, fall back to a human if the parent has ended)
 - **Date:** 2026-10-17
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0029](0029-egress-gateway-and-generated-network-policies.md), [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md), [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md)
 
@@ -11,7 +11,7 @@ Several parts of the design need a human's decision on something an agent wants:
 ## Decision
 
 - **One request model with two kinds**, raised through factory tools and shown in the task's transcript and in a pending-requests inbox:
-  - **Question:** free text, optionally with suggested answers that can be picked with one tap. Addressed to a human or to the agent of the parent or creating task. The answer is delivered to the agent as a message; nothing else happens.
+  - **Question:** free text, optionally with suggested answers that can be picked with one tap. Addressed to a human or to the agent of the parent task (ADR-0043); an agent that can't decide asks its own parent or a human. The answer is delivered to the agent as a message; nothing else happens.
   - **Approval request:** a typed request whose action the control plane carries out when a human approves it — the agent never applies it itself. Every request carries a reason written by the agent.
 - **Initial approval types** (closed list; new types are added to the contract additively):
   - `network-access`: an allowlist entry (`http-host`, `cluster-service`, …, ADR-0029). Also raised by the control plane itself when the proxy denies a host, so a request exists even if the agent doesn't ask.

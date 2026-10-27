@@ -63,7 +63,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | 5 | WIP snapshot pushes get only the secret scan and size limits, and never raise approval requests. | Same checks as the task branch: protected paths and identity make no sense for a snapshot. |
 | 6 | Task-scoped allowlist entries are pulled forward from iteration 4, because "allow for this task" is the least-privilege approval scope. Persona scope stays in iteration 4. | Instance and project scope only. |
 | 7 | Requests and decisions are stored in their own table and rendered on the task timeline next to the transcript. Decisions reach the agent as system-authored messages. No new transcript event kinds. | Control-plane-authored transcript events: the transcript is runtime-sequenced per run today. |
-| 8 | Questions in iteration 2 are addressed to humans only. Questions to a parent task's agent come with the task tree (iteration 3). | — |
+| 8 | Questions in iteration 2 are addressed to humans only. Questions to a parent task's agent come with the task tree (iteration 3, ADR-0043). | — |
 | 9 | Only `board-member` decides requests (`approval:decide` maps to it). The full permission model stays in iteration 4. | — |
 | 10 | A cancelled task can be reopened by queueing a message (like `failed`). | Terminal `cancelled`: needs an extra "reopen" action. |
 | 11 | Tasks resume automatically after rate limits and, up to `runs.maxAutoResumes` consecutive times, after infrastructure failures (`sandbox_lost`, `connect_timeout`, `provisioning_failed`). `failed` runs (harness crash) stay for a human. | Resume everything: a crash loop spends subscription usage all night. Resume nothing: every blip stops the batch. |

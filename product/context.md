@@ -72,14 +72,14 @@
 - **Egress control**: per-run generated network policies, host allowlists enforced by the gateway's egress proxy, cluster targets for in-cluster services, and a live egress log ([`design/egress.md`](../design/egress.md), ADR-0029).
 - **Skill management** for agents.
 - **Web UI** to manage multiple agents ("employees", similar to Paperclip): harness configuration, skills, tools, … One responsive UI: starting tasks, reading transcripts, answering questions and chatting with agents work on a phone; workspace changes, configuration and audit views are desktop-only (ADR-0035).
-- **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), a tree of subtasks with per-subtree settings for subtask branches and merging (ADR-0034), …
+- **Task management**: tasks delegated to agents, including state, transcript, dependencies (ADR-0026), a tree of subtasks with per-subtree settings for subtask branches and merging (ADR-0034), delegation to other personas and escalation of questions along the parent chain (ADR-0043), …
 - **Task history** displayed in a chat-style UI.
-- **Chats** with employees, one per (persona, project) (ADR-0026).
+- **Chats** with employees, one per (persona, project); a chat is a task of kind `chat` (ADR-0026, ADR-0043).
 - **Questions and approvals**: agents ask questions and raise typed approval requests (network access, tool access, push-check exceptions, …); the control plane applies approved actions and keeps one inbox and audit trail (ADR-0038).
 - **Full-text search** across tasks and transcripts.
 - **Projects**: typically one Git repository in a forge + one issue tracker + a sandbox image (ADR-0022) + a project context document (ADR-0026) + Git config entries and commit hooks for the agents' own commits (also at instance scope, ADR-0009), optionally a repository configuration file `.dark-factory/config.toml`, activated by approval (F11, ADR-0039).
 - **Agent memory**: agents store, search and retrieve memories at project and (project, persona) scope; memories are hints with provenance, reviewable in the UI, and can be promoted into the project context by approval. Explicit memories with full-text search first, curation and semantic retrieval later (ADR-0040) *(not in the first iteration; planned before LSP)*.
-- **Artifacts per task**: text documents (Markdown) an agent creates for the human in the loop, or as intermediate results to be consumed later.
+- **Artifacts per task**: text documents (Markdown) an agent creates for the human in the loop, or as intermediate results to be consumed later. Agents write only their own task's artifacts and read those of related tasks (ancestors, descendants, `blocked_by`, `base_task`), chats included (ADR-0044).
 - **Routines**: scheduled tasks with a fixed prompt, always assigned to a specific agent.
 - **Audit log**:
   - last activity
@@ -141,7 +141,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0013](../design/adr/0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
 | [ADR-0014](../design/adr/0014-tasks-authoritative-issues-linked.md) | Tasks are authoritative; issues are linked | Accepted |
 | [ADR-0015](../design/adr/0015-webhook-filtering-and-routing.md) | Inbound events: plugins normalize, the control plane filters and routes | Accepted |
-| [ADR-0016](../design/adr/0016-runs-and-triggers.md) | Runs and triggers | Accepted (amended by ADR-0034) |
+| [ADR-0016](../design/adr/0016-runs-and-triggers.md) | Runs and triggers | Accepted (amended by ADR-0034 and ADR-0043) |
 | [ADR-0017](../design/adr/0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](../design/adr/0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](../design/adr/0019-identifiers.md) | Identifiers | Accepted |
@@ -151,7 +151,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0023](../design/adr/0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](../design/adr/0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
 | [ADR-0025](../design/adr/0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033) |
-| [ADR-0026](../design/adr/0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041) |
+| [ADR-0026](../design/adr/0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041 and ADR-0043) |
 | [ADR-0027](../design/adr/0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](../design/adr/0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
 | [ADR-0029](../design/adr/0029-egress-gateway-and-generated-network-policies.md) | Egress gateway and generated network policies | Accepted |
@@ -159,14 +159,16 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0031](../design/adr/0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](../design/adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
 | [ADR-0033](../design/adr/0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted |
-| [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 3, amended by ADR-0041) |
+| [ADR-0034](../design/adr/0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 3, amended by ADR-0041 and ADR-0043) |
 | [ADR-0035](../design/adr/0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](../design/adr/0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |
 | [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
-| [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039) |
+| [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039 and ADR-0043) |
 | [ADR-0039](../design/adr/0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
 | [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 5) |
 | [ADR-0041](../design/adr/0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3) |
+| [ADR-0043](../design/adr/0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3) |
+| [ADR-0044](../design/adr/0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3) |
 
 ## 9. Future options
 
