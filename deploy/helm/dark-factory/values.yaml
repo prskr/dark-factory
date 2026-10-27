@@ -145,6 +145,11 @@ clusterTargets:
   anyNamespace: false
   namespaces: []
 
+runs:
+  # Seconds a run stays up after a normal turn end (task "waiting") before it is released.
+  # 0 releases right after the turn.
+  keepAliveSeconds: 600
+
 controlPlane:
   replicas: 1
   # RUST_LOG (EnvFilter syntax) of the control plane and the migrate job.

@@ -651,7 +651,7 @@ async fn run_report_maps_every_outcome_to_run_state_and_task_status() -> anyhow:
             WireOutcome::Completed,
             RunState::Succeeded,
             RunOutcome::Completed,
-            "completed",
+            "in_review",
         ),
         (
             WireOutcome::EndTurn,

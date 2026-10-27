@@ -1,6 +1,6 @@
 //! Error type shared by the modules of this crate.
 
-use df_core::{IntegrationError, ProviderError, SecretError};
+use df_core::{IntegrationError, ParseEnumError, ProviderError, SecretError};
 use df_db::DbError;
 use thiserror::Error;
 
@@ -19,7 +19,10 @@ pub enum ChannelError {
     Integration(#[from] IntegrationError),
     #[error("serialization error: {0}")]
     Json(#[from] serde_json::Error),
-    /// A row or message violates an invariant (unknown enum value, missing relation).
+    /// A stored value is not a known enum value.
+    #[error(transparent)]
+    Parse(#[from] ParseEnumError),
+    /// A row or message violates an invariant (for example a missing relation).
     #[error("invalid data: {0}")]
     InvalidData(String),
 }

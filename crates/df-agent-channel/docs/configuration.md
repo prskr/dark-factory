@@ -20,6 +20,7 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `runs.maxWallClockSeconds` | no | `7200` | `Assign.budgets.max_wall_clock`. Counts from the runtime's first `Hello`, not from run creation. A value too large to represent as a date means no limit. |
 | `runs.connectTimeoutSeconds` | no | `600` | Time from run creation until the runtime opens its stream; then the run fails with `connect_timeout`. |
 | `runs.cancelGraceSeconds` | no | `300` | Grace after the wall-clock budget. |
+| `runs.keepAliveSeconds` | no | `600` | How long a run waits for a follow-up after a normal turn end (`awaiting_input`) before the control plane sends `Release` and the run ends `end_turn`. `0` releases right after the turn. Idle time counts toward `maxWallClockSeconds`. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
 
@@ -39,6 +40,9 @@ stateDiagram-v2
     connecting --> preparing: Hello
     connecting --> failed: connect_timeout
     preparing --> running: PhaseChanged RUNNING
+    running --> awaiting_input: PhaseChanged AWAITING_INPUT (turn ended)
+    awaiting_input --> running: PhaseChanged RUNNING (follow-up prompt)
+    awaiting_input --> finalizing: idle deadline (Release) or mark done (Cancel)
     running --> finalizing: PhaseChanged FINALIZING
     finalizing --> succeeded: RunReport completed / end_turn / limit_reached / rate_limited
     finalizing --> cancelled: RunReport cancelled
@@ -54,7 +58,7 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 
 | Run outcome | Run state | Task status |
 |-------------|-----------|-------------|
-| `completed` | `succeeded` | `completed` |
+| `completed` | `succeeded` | `in_review` |
 | `end_turn` | `succeeded` | `waiting` |
 | `limit_reached` | `succeeded` | `limit_reached` |
 | `rate_limited` | `succeeded` | `rate_limited` |
@@ -63,7 +67,19 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 | `failed`, `provisioning_failed`, `connect_timeout`, `sandbox_lost` | `failed` | `failed` |
 
 If prompts are still undelivered when a run ends with an outcome other than `failed`-class or
-`rate_limited`, the task becomes `queued` and the next run starts with them.
+`rate_limited`, the task becomes `queued` and the next run starts with them. A task a board member
+marked done (`completed`) keeps its status when its run ends, unless prompts are undelivered.
+
+### Idle run (keep-alive)
+
+After a normal turn end the runtime reports `AWAITING_INPUT`: the run becomes `awaiting_input`
+and the task `waiting` (it stays `running` while a message is undelivered). The replica holding
+the stream sends `Release` at the last persisted `TurnEnded` + `runs.keepAliveSeconds`; a replica
+that takes over, or a run that reconnects after the deadline, computes the same deadline. Before it
+sends `Release` (or `Cancel` for a task marked done) the control plane moves the run to
+`finalizing`; no prompt is sent to a `finalizing` run, a message queued meanwhile makes the task
+`queued` and the run end starts the next run. A message for an `awaiting_input` run sets the task
+`running`, starts no run and is forwarded at once.
 
 ## Protocol behavior
 

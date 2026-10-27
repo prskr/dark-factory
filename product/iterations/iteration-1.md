@@ -14,6 +14,7 @@ The slice deliberately exercises the riskiest parts early: the agent protocol, t
 2. A Sandbox cold-starts: project image, runtime via image volume, Kata runtime class, task PVC, csi-driver certificate. The runtime dials back over mTLS, clones the repository, creates `factory/task/DF-1` and starts Claude Code via ACP.
 3. The board member watches the live transcript. Whenever a turn produced new commits, the runtime pushes the task branch; on the first push the control plane opens a **draft PR** through the WASI forge plugin. The agent can rephrase the PR title/body and comment on the linked issue through factory tools.
 4. The board member sends a follow-up message in the UI ("also add a test for X"). A new run starts on the same PVC with the task's history, addresses the message and updates the PR.
+   Follow-ups to a run that just ended its turn reuse the live run for `runs.keepAliveSeconds` (default 10 min, `iter1-keep-alive-and-review`); a task whose agent called `complete_task` shows `in_review`, and a board member closes it with "Mark done".
 
 ## 3. In scope
 

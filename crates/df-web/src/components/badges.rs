@@ -16,6 +16,8 @@ pub enum Tone {
     Failed,
     /// Rate limited or limit reached.
     Limited,
+    /// The agent is done and the PR waits for review.
+    Review,
 }
 
 impl Tone {
@@ -27,6 +29,7 @@ impl Tone {
             Self::Completed => "bg-status-completed-bg text-status-completed-fg",
             Self::Failed => "bg-status-failed-bg text-status-failed-fg",
             Self::Limited => "bg-status-limited-bg text-status-limited-fg",
+            Self::Review => "bg-status-review-bg text-status-review-fg",
         }
     }
 
@@ -39,6 +42,7 @@ impl Tone {
             Self::Completed => "bg-status-completed-fg",
             Self::Failed => "bg-status-failed-fg",
             Self::Limited => "bg-status-limited-fg",
+            Self::Review => "bg-status-review-fg",
         }
     }
 
@@ -48,6 +52,7 @@ impl Tone {
             TaskStatus::Queued => Self::Queued,
             TaskStatus::Running => Self::Running,
             TaskStatus::Waiting => Self::Waiting,
+            TaskStatus::InReview => Self::Review,
             TaskStatus::Completed => Self::Completed,
             TaskStatus::RateLimited | TaskStatus::LimitReached => Self::Limited,
             TaskStatus::Failed => Self::Failed,
@@ -116,6 +121,7 @@ mod tests {
             (TaskStatus::Queued, "status-queued"),
             (TaskStatus::Running, "status-running"),
             (TaskStatus::Waiting, "status-waiting"),
+            (TaskStatus::InReview, "status-review"),
             (TaskStatus::Completed, "status-completed"),
             (TaskStatus::RateLimited, "status-limited"),
             (TaskStatus::LimitReached, "status-limited"),

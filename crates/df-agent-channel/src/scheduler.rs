@@ -583,6 +583,7 @@ mod tests {
             max_wall_clock_seconds: u64::MAX,
             connect_timeout_seconds: u64::MAX,
             cancel_grace_seconds: u64::MAX,
+            keep_alive_seconds: 600,
         };
         assert_eq!(cancel_deadline(Utc::now(), &cfg), None);
         assert_eq!(hard_stop(Utc::now(), &cfg), None);
@@ -598,6 +599,7 @@ mod tests {
                 max_wall_clock_seconds: u64::MAX,
                 connect_timeout_seconds: u64::MAX,
                 cancel_grace_seconds: u64::MAX,
+                keep_alive_seconds: 600,
             },
             ..crate::ChannelConfig::default()
         });

@@ -34,5 +34,5 @@ None.
 - `df-db`: migration for the status constraint, `queue_message`, mark-done query, `.sqlx` metadata.
 - `df-web`: mark-done action and route, badge, filters.
 - Docs and Helm: `crates/df-agent-channel/docs/configuration.md`, chart values.
-- Design: PenPot "Status badge" variant "In review" and the "Mark done" action in the task header.
+- Design: PenPot "Status badge" variant "In review" and the "Mark done" action in the details-pane Status select.
 - Overlaps `iter2-agent-requests` (it planned `Assign.keep_alive` for `AwaitingInput`; it reuses the idle wait and sets its own deadline in the control plane instead) and `iter2-cancel` (status requirements): both rebase on this change.

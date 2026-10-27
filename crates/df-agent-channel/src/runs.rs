@@ -66,13 +66,12 @@ impl TryFrom<RunRecord> for RunRow {
     type Error = ChannelError;
 
     fn try_from(r: RunRecord) -> Result<Self, ChannelError> {
-        let invalid = |e: df_core::ParseEnumError| ChannelError::InvalidData(e.to_string());
         Ok(Self {
             id: RunId::from_uuid(r.id),
             task_id: TaskId::from_uuid(r.task_id),
             number: r.number,
-            state: r.state.parse().map_err(invalid)?,
-            outcome: r.outcome.map(|o| o.parse().map_err(invalid)).transpose()?,
+            state: r.state.parse()?,
+            outcome: r.outcome.map(|o| o.parse()).transpose()?,
             detail: r.detail,
             pod_ip: r.pod_ip,
             last_persisted_seq: u64::try_from(r.last_persisted_seq)
@@ -219,6 +218,59 @@ pub async fn set_run_state_tx(
     Ok(true)
 }
 
+/// Applies the runtime's idle phases: `idle` moves the run to `awaiting_input` and the task to
+/// `waiting` (unless a message is undelivered, then the task stays `running` and the session
+/// forwards it), otherwise back to `running` for both. A `finalizing` or terminal run is never
+/// moved: once the control plane decided to end it, the runtime cannot reopen it.
+///
+/// The caller holds the task row lock (see `queue_message`).
+pub async fn set_idle_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    run_id: RunId,
+    task_id: TaskId,
+    idle: bool,
+) -> Result<(), ChannelError> {
+    let state = if idle {
+        RunState::AwaitingInput
+    } else {
+        RunState::Running
+    };
+    let changed: Option<uuid::Uuid> = sqlx::query_scalar(
+        "UPDATE runs SET state = $2
+         WHERE id = $1 AND state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')
+           AND state <> $2
+         RETURNING task_id",
+    )
+    .bind(run_id.as_uuid())
+    .bind(state.as_str())
+    .fetch_optional(&mut **tx)
+    .await?;
+    if changed.is_none() {
+        return Ok(());
+    }
+    // `waiting` -> `running` is the idle task being woken by the next turn.
+    let (from, to) = if idle {
+        (TaskStatus::Running, TaskStatus::Waiting)
+    } else {
+        (TaskStatus::Waiting, TaskStatus::Running)
+    };
+    sqlx::query(
+        "UPDATE tasks SET status = $3, updated_at = now()
+         WHERE id = $1 AND status = $2
+           AND ($4 = false OR NOT EXISTS (
+               SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL))",
+    )
+    .bind(task_id.as_uuid())
+    .bind(from.as_str())
+    .bind(to.as_str())
+    .bind(idle)
+    .execute(&mut **tx)
+    .await?;
+    publish(&mut **tx, &Notification::RunChanged { run_id, task_id }).await?;
+    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+    Ok(())
+}
+
 /// Final state of a run, from a `RunReport` or from the control plane's own failure handling.
 #[derive(Debug, Clone)]
 pub struct RunEnd {
@@ -272,10 +324,11 @@ pub const fn run_state_for(outcome: RunOutcome) -> RunState {
     }
 }
 
-/// Task status for a finished run, before the "undelivered prompts" override.
+/// Task status for a finished run, before the "undelivered prompts" override. `completed` is
+/// reserved for a human (mark done), so the agent's `completed` outcome puts the task in review.
 pub const fn task_status_for(outcome: RunOutcome) -> TaskStatus {
     match outcome {
-        RunOutcome::Completed => TaskStatus::Completed,
+        RunOutcome::Completed => TaskStatus::InReview,
         RunOutcome::EndTurn | RunOutcome::Cancelled | RunOutcome::Blocked => TaskStatus::Waiting,
         RunOutcome::LimitReached => TaskStatus::LimitReached,
         RunOutcome::RateLimited => TaskStatus::RateLimited,
@@ -295,6 +348,36 @@ const fn keeps_status_on_pending_prompts(outcome: RunOutcome) -> bool {
             | RunOutcome::SandboxLost
             | RunOutcome::RateLimited
     )
+}
+
+/// Locks the task row, the lock `queue_message` takes. What the caller decides afterwards cannot
+/// miss a message queued concurrently.
+///
+/// Lock order: run rows first, then the task row. A transaction that needs both locks its
+/// run row(s) before calling this (`persist_batch`, `end_run_tx`, `Session::start_finalizing`,
+/// `df_db::mark_task_done`), otherwise two of them can deadlock.
+pub async fn lock_task(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+) -> Result<(), ChannelError> {
+    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Whether a message of the task is still undelivered.
+pub async fn has_undelivered_message(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+) -> Result<bool, ChannelError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL)",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_one(&mut **tx)
+    .await?)
 }
 
 /// Ends a non-terminal run and sets the task status. Returns `None` if the run was already
@@ -338,18 +421,19 @@ pub async fn end_run_tx(
 
     // `queue_message` locks the task row before it inserts. Waiting for that lock makes a message
     // queued concurrently visible below, instead of the task becoming `waiting` with it stranded.
-    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
-        .bind(task_id.as_uuid())
-        .execute(&mut **tx)
-        .await?;
-    let pending_prompts: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL)",
-    )
-    .bind(task_id.as_uuid())
-    .fetch_one(&mut **tx)
-    .await?;
+    lock_task(tx, task_id).await?;
+    let pending_prompts = has_undelivered_message(tx, task_id).await?;
+    let current: TaskStatus =
+        sqlx::query_scalar::<_, String>("SELECT status FROM tasks WHERE id = $1")
+            .bind(task_id.as_uuid())
+            .fetch_one(&mut **tx)
+            .await?
+            .parse()?;
     let task_status = if pending_prompts && !keeps_status_on_pending_prompts(end.outcome) {
         TaskStatus::Queued
+    } else if current == TaskStatus::Completed {
+        // A human marked the task done; the end of its run must not reopen it.
+        TaskStatus::Completed
     } else {
         task_status_for(end.outcome)
     };
@@ -482,6 +566,87 @@ async fn notify_run(tx: &mut Transaction<'_, Postgres>, run: &RunRow) -> Result<
 mod tests {
     use super::*;
     use crate::testing::Env;
+
+    #[test]
+    fn the_agent_completing_puts_the_task_in_review() {
+        assert_eq!(task_status_for(RunOutcome::Completed), TaskStatus::InReview);
+        assert_eq!(run_state_for(RunOutcome::Completed), RunState::Succeeded);
+    }
+
+    fn end_with(run_id: RunId, outcome: RunOutcome) -> RunEnd {
+        RunEnd::failure(run_id, outcome, "")
+    }
+
+    async fn status_of(pool: &PgPool, task_id: TaskId) -> String {
+        sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+            .bind(task_id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn deliver_all(pool: &PgPool, task_id: TaskId) {
+        sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE task_id = $1")
+            .bind(task_id.as_uuid())
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn completed_run_puts_the_task_in_review_or_queues_a_waiting_message() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.insert_run(env.task.id, 1, "running").await;
+        // The seeded task has an undelivered message.
+        end_run(&pool, &end_with(run_id, RunOutcome::Completed))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, env.task.id).await, "queued");
+
+        deliver_all(&pool, env.task.id).await;
+        let run_id = env.insert_run(env.task.id, 2, "running").await;
+        end_run(&pool, &end_with(run_id, RunOutcome::Completed))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, env.task.id).await, "in_review");
+    }
+
+    #[tokio::test]
+    async fn run_end_keeps_a_task_a_human_marked_done() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        deliver_all(&pool, env.task.id).await;
+        let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
+        sqlx::query("UPDATE tasks SET status = 'completed' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ended = end_run(&pool, &end_with(run_id, RunOutcome::Cancelled))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ended.task_status, TaskStatus::Completed);
+        assert_eq!(status_of(&pool, env.task.id).await, "completed");
+    }
+
+    #[tokio::test]
+    async fn run_end_of_a_task_marked_done_queues_a_message_that_arrived_since() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        // The seeded message is still undelivered.
+        let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
+        sqlx::query("UPDATE tasks SET status = 'completed' WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        end_run(&pool, &end_with(run_id, RunOutcome::Cancelled))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, env.task.id).await, "queued");
+    }
 
     #[tokio::test]
     async fn message_queued_while_the_run_ends_is_not_stranded() {

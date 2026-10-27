@@ -58,7 +58,7 @@ pub trait ApprovalType: Send + Sync {
 Lock the request row (`FOR UPDATE`) and check `state = 'pending'` (otherwise "already decided"). Then, for an approval, `apply`. Then update the state and decision, write the audit entry, queue the `request.decided` message through the existing queued-message function (which sets the task to `queued` if no run is active), and publish `request_changed` and `task_message_queued` after commit. If `apply` fails, the whole transaction rolls back.
 
 ### D4 — Runtime awaiting input
-`ToolCallResult.await_input_after_turn` is set by the control plane for blocking requests. After the turn, the runtime decides in this order: `end_run_after_turn` → finalize `COMPLETED`; queued prompts → next turn; `await_input_after_turn` → `AwaitingInput`. In `AwaitingInput` it runs a `tokio::select!` over the prompt channel, the cancel signal, the budget deadline and `sleep(keep_alive)`. Only receiving from the channel has a side effect, and an mpsc receive is cancel-safe. The harness process stays up, so the next turn reuses the ACP session.
+`ToolCallResult.await_input_after_turn` is set by the control plane for blocking requests. After the turn, the runtime decides in this order: `end_run_after_turn` → finalize `COMPLETED`; queued prompts → next turn; `await_input_after_turn` → `AwaitingInput`. `AwaitingInput` is the idle wait of `iter1-keep-alive-and-review` (`select!` over prompt, cancel, `Release` and the budget); this change adds no runtime timer. The control plane sends `Release` at the deadline; the runtime finalizes `BLOCKED` instead of `END_TURN` when the last turn had a blocking request. The harness process stays up, so the next turn reuses the ACP session.
 
 ### D5 — UI
 - `/requests` lists pending requests. Each card is a maud component shared with the task timeline. Actions are htmx `POST`s with the CSRF header. The response swaps the card in place.
@@ -67,7 +67,7 @@ Lock the request row (`FOR UPDATE`) and check `state = 'pending'` (otherwise "al
 - The scope picker is a radio group with the narrowest scope preselected, so approval is one tap plus "Approve".
 
 ### D6 — Configuration
-Instance configuration `run.keepAlive` (duration, default `10m`, `0` disables waiting) goes into `Assign.keep_alive`. It is documented in the operator configuration reference.
+No new setting: the deadline for blocking questions is `runs.keepAliveSeconds` (default 600), enforced by the control plane (`iter1-keep-alive-and-review`). There is no `Assign.keep_alive`.
 
 ## Risks / Trade-offs
 

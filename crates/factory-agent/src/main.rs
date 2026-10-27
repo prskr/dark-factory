@@ -23,6 +23,9 @@ pub mod workspace;
 pub mod test_harness;
 
 #[cfg(test)]
+mod idle_tests;
+
+#[cfg(test)]
 mod tests;
 
 use cli::{Cli, Command};

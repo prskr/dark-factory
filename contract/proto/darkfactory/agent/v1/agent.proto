@@ -84,6 +84,7 @@ message ControlMessage {
     Cancel cancel = 14;
     ToolCallResult tool_call_result = 15;
     CredentialGrant credential_grant = 16;
+    Release release = 17;
   }
 }
 
@@ -268,6 +269,12 @@ message Cancel {
   string reason = 1;
 }
 
+// End a run that waits for input (RUN_PHASE_AWAITING_INPUT): the runtime
+// finalizes with RUN_OUTCOME_END_TURN. Nothing is interrupted; sent by the
+// control plane when the idle deadline passed. A Release that arrives during a
+// turn is kept and ends the next idle wait.
+message Release {}
+
 // ---------------------------------------------------------------------------
 // Progress (agent -> control plane)
 // ---------------------------------------------------------------------------
@@ -283,6 +290,9 @@ enum RunPhase {
   RUN_PHASE_UNSPECIFIED = 0;
   RUN_PHASE_PREPARING = 1;
   RUN_PHASE_RUNNING = 2;
+  // A turn ended normally and no prompt is queued: the run and the harness
+  // session stay up until a Prompt, Cancel or Release arrives (or the
+  // wall-clock budget ends). RUN_PHASE_RUNNING is reported with the next turn.
   RUN_PHASE_AWAITING_INPUT = 3;
   RUN_PHASE_FINALIZING = 4;
 }

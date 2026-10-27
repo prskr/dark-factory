@@ -52,7 +52,11 @@ impl StatusSet {
                 TaskStatus::Running,
                 TaskStatus::RateLimited,
             ],
-            Self::Waiting => &[TaskStatus::Waiting, TaskStatus::LimitReached],
+            Self::Waiting => &[
+                TaskStatus::Waiting,
+                TaskStatus::InReview,
+                TaskStatus::LimitReached,
+            ],
             Self::Done => &[TaskStatus::Completed, TaskStatus::Failed],
             Self::Queued => &[TaskStatus::Queued],
             Self::Running => &[TaskStatus::Running, TaskStatus::RateLimited],
@@ -77,6 +81,9 @@ pub enum TaskStatus {
     Queued,
     Running,
     Waiting,
+    /// The agent called `complete_task`; the PR waits for review.
+    InReview,
+    /// A human marked the task done.
     Completed,
     RateLimited,
     LimitReached,
@@ -87,15 +94,22 @@ impl TaskStatus {
     pub const fn group(&self) -> StatusGroup {
         match self {
             Self::Queued | Self::Running | Self::RateLimited => StatusGroup::Active,
-            Self::Waiting | Self::LimitReached => StatusGroup::Waiting,
+            Self::Waiting | Self::InReview | Self::LimitReached => StatusGroup::Waiting,
             Self::Completed | Self::Failed => StatusGroup::Done,
         }
+    }
+
+    /// Whether a board member may mark a task in this status done: not while a run works or is
+    /// about to (`queued`, `running`) and not twice (`completed`).
+    pub const fn can_mark_done(&self) -> bool {
+        !matches!(self, Self::Queued | Self::Running | Self::Completed)
     }
 
     pub const ALL: &'static [Self] = &[
         Self::Queued,
         Self::Running,
         Self::Waiting,
+        Self::InReview,
         Self::Completed,
         Self::RateLimited,
         Self::LimitReached,
@@ -107,6 +121,7 @@ impl TaskStatus {
             Self::Queued => "queued",
             Self::Running => "running",
             Self::Waiting => "waiting",
+            Self::InReview => "in_review",
             Self::Completed => "completed",
             Self::RateLimited => "rate_limited",
             Self::LimitReached => "limit_reached",
@@ -121,6 +136,14 @@ impl fmt::Display for TaskStatus {
     }
 }
 
+impl TryFrom<String> for TaskStatus {
+    type Error = ParseEnumError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
 impl FromStr for TaskStatus {
     type Err = ParseEnumError;
 
@@ -129,6 +152,7 @@ impl FromStr for TaskStatus {
             "queued" => Ok(Self::Queued),
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
+            "in_review" => Ok(Self::InReview),
             "completed" => Ok(Self::Completed),
             "rate_limited" => Ok(Self::RateLimited),
             "limit_reached" => Ok(Self::LimitReached),
@@ -374,6 +398,7 @@ mod tests {
             (TaskStatus::Queued, "queued"),
             (TaskStatus::Running, "running"),
             (TaskStatus::Waiting, "waiting"),
+            (TaskStatus::InReview, "in_review"),
             (TaskStatus::Completed, "completed"),
             (TaskStatus::RateLimited, "rate_limited"),
             (TaskStatus::LimitReached, "limit_reached"),
@@ -400,7 +425,10 @@ mod tests {
         use TaskStatus::*;
         assert_eq!(StatusSet::Queued.statuses(), [Queued]);
         assert_eq!(StatusSet::Running.statuses(), [Running, RateLimited]);
-        assert_eq!(StatusSet::Waiting.statuses(), [Waiting, LimitReached]);
+        assert_eq!(
+            StatusSet::Waiting.statuses(),
+            [Waiting, InReview, LimitReached]
+        );
         assert_eq!(StatusSet::Done.statuses(), [Completed, Failed]);
         // The groups are made of the statuses `TaskStatus::group` assigns to them.
         for group in [StatusGroup::Active, StatusGroup::Waiting, StatusGroup::Done] {
@@ -418,6 +446,17 @@ mod tests {
     }
 
     #[test]
+    fn only_idle_or_ended_statuses_can_be_marked_done() {
+        use TaskStatus::*;
+        for status in [Waiting, InReview, RateLimited, LimitReached, Failed] {
+            assert!(status.can_mark_done(), "{status}");
+        }
+        for status in [Queued, Running, Completed] {
+            assert!(!status.can_mark_done(), "{status}");
+        }
+    }
+
+    #[test]
     fn every_status_has_a_group() {
         use StatusGroup::*;
         let expected = [
@@ -425,6 +464,7 @@ mod tests {
             (TaskStatus::Running, Active),
             (TaskStatus::RateLimited, Active),
             (TaskStatus::Waiting, Waiting),
+            (TaskStatus::InReview, Waiting),
             (TaskStatus::LimitReached, Waiting),
             (TaskStatus::Completed, Done),
             (TaskStatus::Failed, Done),

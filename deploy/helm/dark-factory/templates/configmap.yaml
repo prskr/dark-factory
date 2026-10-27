@@ -31,6 +31,8 @@ data:
       bufferMaxAgeSeconds: {{ .Values.gateway.bufferMaxAgeSeconds }}
       blockedCidrs: {{ .Values.gateway.blockedCidrs | toJson }}
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
+    runs:
+      keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
     harness:
       claudeCode:
         image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}

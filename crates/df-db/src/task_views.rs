@@ -1,7 +1,7 @@
 //! Read models of the web UI: task list, task detail, runs with token usage and the transcript.
 
 use chrono::{DateTime, Utc};
-use df_core::{RunState, StatusSet, TaskId, TitleSource};
+use df_core::{RunState, StatusSet, TaskId, TaskStatus, TitleSource};
 use df_proto::transcript::v1::Event;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -69,7 +69,8 @@ pub struct TaskDetail {
     /// Model of the persona; `None` means the instance default.
     pub persona_model: Option<String>,
     pub issue_number: Option<i64>,
-    pub status: String,
+    #[sqlx(try_from = "String")]
+    pub status: TaskStatus,
     pub status_line: String,
     pub pr_number: Option<i64>,
     pub pr_url: Option<String>,

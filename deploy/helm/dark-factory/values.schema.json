@@ -225,6 +225,12 @@
         }
       }
     },
+    "runs": {
+      "type": "object",
+      "properties": {
+        "keepAliveSeconds": { "type": "integer", "minimum": 0 }
+      }
+    },
     "controlPlane": {
       "type": "object",
       "required": ["replicas", "ports", "resources"],

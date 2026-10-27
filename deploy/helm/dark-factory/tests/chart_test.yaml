@@ -623,6 +623,24 @@ tests:
           pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
         documentIndex: 0
 
+  - it: renders the keep-alive window of runs
+    template: configmap.yaml
+    set:
+      runs.keepAliveSeconds: 120
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runs:\n  keepAliveSeconds: 120\n'
+        documentIndex: 0
+
+  - it: defaults the keep-alive window to 10 minutes
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runs:\n  keepAliveSeconds: 600\n'
+        documentIndex: 0
+
   - it: renders the harness image from tag and repository
     template: configmap.yaml
     set:

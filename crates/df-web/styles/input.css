@@ -56,6 +56,8 @@
   --status-failed-fg: #991b1b;
   --status-limited-bg: #ffedd5;
   --status-limited-fg: #9a3412;
+  --status-review-bg: #ede9fe;
+  --status-review-fg: #5b21b6;
 }
 
 /* Dark theme: chosen by the browser before the first paint, no script involved. */
@@ -93,6 +95,8 @@
     --status-failed-fg: #fca5a5;
     --status-limited-bg: #431407;
     --status-limited-fg: #fdba74;
+    --status-review-bg: #4c1d95;
+    --status-review-fg: #ddd6fe;
   }
 }
 
@@ -133,6 +137,8 @@
   --color-status-failed-fg: var(--status-failed-fg);
   --color-status-limited-bg: var(--status-limited-bg);
   --color-status-limited-fg: var(--status-limited-fg);
+  --color-status-review-bg: var(--status-review-bg);
+  --color-status-review-fg: var(--status-review-fg);
 }
 
 @layer base {

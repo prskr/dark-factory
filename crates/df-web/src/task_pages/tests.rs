@@ -2123,3 +2123,131 @@ async fn both_message_boxes_signal_focus_neutrally() {
         );
     }
 }
+
+async fn set_status(app: &TestApp, status: &str) {
+    sqlx::query("UPDATE tasks SET status = $1")
+        .bind(status)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn mark_done_is_offered_in_the_status_select_only_for_allowed_statuses() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "t").await;
+
+    for (status, offered) in [
+        ("waiting", true),
+        ("in_review", true),
+        ("rate_limited", true),
+        ("limit_reached", true),
+        ("failed", true),
+        ("queued", false),
+        ("running", false),
+        ("completed", false),
+    ] {
+        set_status(&app, status).await;
+        let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+        let dl = &html[html.find("<dl ").unwrap()..];
+        let dl = &dl[..dl.find("</dl>").unwrap()];
+        assert_eq!(
+            dl.contains("hx-post=\"/tasks/DF-1/done\""),
+            offered,
+            "{status}"
+        );
+        assert_eq!(dl.contains(">Mark done<"), offered, "{status}");
+        // The Status row comes first, above Project.
+        assert!(
+            dl.find(">Status<").unwrap() < dl.find(">Project<").unwrap(),
+            "{status}"
+        );
+        assert!(dl.contains(&status.replace('_', " ")), "{status}: {dl}");
+    }
+}
+
+#[tokio::test]
+async fn posting_mark_done_completes_the_task_and_answers_the_details() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "t").await;
+    set_status(&app, "in_review").await;
+
+    let before = text(app.get("/tasks?status=done", &cookie).await).await;
+    assert!(!before.contains("DF-1"), "{before}");
+    let response = app.post("/tasks/DF-1/done", "", &cookie).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = text(response).await;
+    assert!(html.contains("id=\"task-details\""), "{html}");
+    assert!(
+        html.contains("completed") && !html.contains("Mark done"),
+        "{html}"
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "completed");
+    let audited: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'task.done'")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(audited, 1);
+
+    // The task moved to the "Done" filter and its header shows the completed badge.
+    let done = text(app.get("/tasks?status=done", &cookie).await).await;
+    assert!(done.contains("DF-1"), "{done}");
+    let page = text(app.get("/tasks/DF-1", &cookie).await).await;
+    let head = &page[page.find("id=\"task-head\"").unwrap()..];
+    let head = &head[..head.find("</header>").unwrap()];
+    assert!(
+        head.contains("bg-status-completed-bg text-status-completed-fg"),
+        "{head}"
+    );
+}
+
+#[tokio::test]
+async fn mark_done_is_refused_for_working_tasks_and_unknown_keys() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "t").await;
+    set_status(&app, "running").await;
+
+    let response = app.post("/tasks/DF-1/done", "", &cookie).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    // The answer shows the task as it is, so the page catches up.
+    assert!(text(response).await.contains("id=\"task-details\""));
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "running");
+    assert_eq!(
+        app.post("/tasks/DF-9/done", "", &cookie).await.status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn in_review_has_its_own_badge_and_belongs_to_the_waiting_filter() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "review me").await;
+    set_status(&app, "in_review").await;
+
+    let waiting = text(app.get("/tasks?status=waiting", &cookie).await).await;
+    assert!(waiting.contains("review me"), "{waiting}");
+    assert!(
+        waiting.contains("bg-status-review-bg text-status-review-fg")
+            && waiting.contains("in review"),
+        "{waiting}"
+    );
+    let active = text(app.get("/tasks", &cookie).await).await;
+    assert!(!active.contains("review me"));
+}

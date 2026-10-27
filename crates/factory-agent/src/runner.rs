@@ -16,12 +16,12 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use df_proto::agent::v1::{
     AgentMessage, Assign, ControlMessage, CredentialGrant, CredentialRequest, GitCredentialRequest,
-    HarnessCredentials, Prompt, PushReport, PushStatus, RunOutcome, RunReport, RuntimeOperation,
-    RuntimeTiming, ToolCallRequest, ToolCallResult, ToolDescriptor, agent_message, control_message,
-    credential_grant, credential_request,
+    HarnessCredentials, PhaseChanged, Prompt, PushReport, PushStatus, RunOutcome, RunPhase,
+    RunReport, RuntimeOperation, RuntimeTiming, ToolCallRequest, ToolCallResult, ToolDescriptor,
+    agent_message, control_message, credential_grant, credential_request,
 };
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason, UsageSource};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::connection::CREDENTIAL_REQUEST_TIMEOUT;
@@ -516,6 +516,72 @@ async fn recv_cancel(
     }
 }
 
+/// What ended the idle wait after a normal turn end.
+#[derive(Debug, PartialEq, Eq)]
+enum IdleWake {
+    Prompt,
+    Cancel,
+    Release,
+    BudgetEnded,
+}
+
+/// What can end the idle wait besides the cancel broadcast and the budget.
+struct IdleSignals<'a> {
+    prompt_queue: &'a Mutex<PromptQueue>,
+    /// Notified when a prompt was queued or `Release` arrived.
+    wake: &'a Notify,
+    released: &'a AtomicBool,
+    cancelled: &'a AtomicBool,
+}
+
+/// Waits (harness session kept up) until a prompt is queued, `Cancel` or `Release` arrives, or
+/// the wall-clock budget (`remaining`) ends. Nothing else ends the wait, in particular not a lost
+/// control plane stream: the connection manager reconnects underneath the run.
+///
+/// Cancel-safe: the only side effect is the `cancelled` flag, which is idempotent.
+async fn wait_for_input(
+    signals: IdleSignals<'_>,
+    cancel_rx: &mut Option<broadcast::Receiver<String>>,
+    remaining: Option<Duration>,
+) -> IdleWake {
+    let IdleSignals {
+        prompt_queue,
+        wake,
+        released,
+        cancelled,
+    } = signals;
+    let budget = tokio::time::sleep(remaining.unwrap_or(Duration::from_secs(86400 * 365)));
+    tokio::pin!(budget);
+    loop {
+        // Register for wakeups before checking the state, so none is lost in between.
+        let notified = wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        if cancelled.load(Ordering::SeqCst) {
+            return IdleWake::Cancel;
+        }
+        if prompt_queue.lock().await.has_queued() {
+            return IdleWake::Prompt;
+        }
+        if released.load(Ordering::SeqCst) {
+            return IdleWake::Release;
+        }
+        tokio::select! {
+            _ = &mut notified => {}
+            recv = recv_cancel(cancel_rx) => match recv {
+                Ok(_reason) => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return IdleWake::Cancel;
+                }
+                Err(broadcast::error::RecvError::Closed) => *cancel_rx = None,
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+            },
+            _ = &mut budget => return IdleWake::BudgetEnded,
+        }
+    }
+}
+
 /// Runs the complete agent run lifecycle.
 pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecutionResult> {
     let mut collected_notices = Vec::new();
@@ -538,6 +604,10 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let (cancel_broadcast_tx, cancel_broadcast_rx) = broadcast::channel::<String>(16);
 
     let prompt_queue = Arc::new(Mutex::new(PromptQueue::new()));
+    // Wakes the idle wait: a prompt was queued or `Release` arrived.
+    let input_wake = Arc::new(Notify::new());
+    // Sticky: a `Release` that arrives before the wait starts still ends it.
+    let released = Arc::new(AtomicBool::new(false));
     for p in params.initial_prompts {
         log_prompt_received(&p);
         prompt_queue.lock().await.push(p);
@@ -591,6 +661,8 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let pending_calls_inbound = Arc::clone(&pending_tool_calls);
     let pending_cred_inbound = Arc::clone(&pending_cred_requests);
     let prompt_queue_inbound = Arc::clone(&prompt_queue);
+    let wake_inbound = Arc::clone(&input_wake);
+    let released_inbound = Arc::clone(&released);
     let cancelled_inbound = Arc::clone(&cancelled);
     let end_run_inbound = Arc::clone(&end_run_requested);
     let outbound_tx_inbound = params.outbound_tx.clone();
@@ -602,6 +674,11 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                 Some(control_message::Body::Prompt(p)) => {
                     log_prompt_received(&p);
                     prompt_queue_inbound.lock().await.push(p);
+                    wake_inbound.notify_one();
+                }
+                Some(control_message::Body::Release(_)) => {
+                    released_inbound.store(true, Ordering::SeqCst);
+                    wake_inbound.notify_one();
                 }
                 Some(control_message::Body::Cancel(c)) => {
                     cancelled_inbound.store(true, Ordering::SeqCst);
@@ -1154,6 +1231,56 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                 match determine_run_outcome(&outcome_input) {
                     RunOutcomeDecision::ContinueNextTurn => {
                         continue;
+                    }
+                    RunOutcomeDecision::AwaitInput => {
+                        send_body(
+                            &outbound_tx_turn,
+                            agent_message::Body::PhaseChanged(PhaseChanged {
+                                phase: RunPhase::AwaitingInput as i32,
+                                detail: String::new(),
+                            }),
+                        )
+                        .await;
+                        let woke = wait_for_input(
+                            IdleSignals {
+                                prompt_queue: &prompt_queue,
+                                wake: &input_wake,
+                                released: &released,
+                                cancelled: &cancelled,
+                            },
+                            &mut cancel_rx,
+                            budget_tracker.remaining_wall_clock(),
+                        )
+                        .await;
+                        match woke {
+                            IdleWake::Prompt => {
+                                send_body(
+                                    &outbound_tx_turn,
+                                    agent_message::Body::PhaseChanged(PhaseChanged {
+                                        phase: RunPhase::Running as i32,
+                                        detail: String::new(),
+                                    }),
+                                )
+                                .await;
+                                continue;
+                            }
+                            IdleWake::Cancel => {
+                                final_outcome = RunOutcome::Cancelled;
+                                final_detail = "Run cancelled by control plane".to_string();
+                            }
+                            IdleWake::Release => {
+                                final_outcome = RunOutcome::EndTurn;
+                                final_detail = "Released while waiting for input".to_string();
+                            }
+                            // No work was cut off, so this is not LimitReached.
+                            IdleWake::BudgetEnded => {
+                                final_outcome = RunOutcome::EndTurn;
+                                final_detail =
+                                    "Wall clock budget ended while waiting for input".to_string();
+                            }
+                        }
+                        final_retry_after = None;
+                        break;
                     }
                     RunOutcomeDecision::Finalize {
                         outcome,
