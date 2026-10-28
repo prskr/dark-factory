@@ -88,7 +88,7 @@ Write the user's decision to the ledger before acting on it.
 
 ## 6. Fix round
 
-- Build the fix list: ID, file:line, problem, expected fix. Include only the items the user approved.
+- Build the fix list: ID, file:line, problem, expected fix. Include only the items the user approved. Describe the expected behavior and the test that proves it. Prescribe a mechanism only if you verified it against the code; an unverified "how" from the orchestrator becomes the next round's regression.
 - Send it to the same implementer with `SendMessage` (`Fix round <n>`). Spawn a fresh implementer, with the change name and the fix list, only if the old one is gone or its reports become incoherent.
 - Handle its report as in step 2, then go back to step 3.
 - Limit: after 3 fix rounds with blocking findings still open, stop. Show the open items and ask the user how to continue.
@@ -97,19 +97,20 @@ Write the user's decision to the ledger before acting on it.
 
 When no blocking finding is open, or the user chose "Stop here" (or the fix-round limit was hit):
 
-1. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
+1. **Bazel build.** Reviewers only read code. If the change touched any `Cargo.toml` or `Cargo.lock`, run `bazel --bazelrc=.bazelrc.agents build --lockfile_mode=error //crates/... //plugins/...` (see the `rust` skill). A failure goes back to the implementer as a blocking fix round.
+2. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
    - the next free ID from the header, and update the "next free ID" line
    - an "Origin of TD-x to TD-y: code review of `<change>` (<date>)" line
    - a summary table row and a `### TD-n (<finding IDs>). <title>` entry: what is wrong, when it matters, how to fix it
    
    Show the user the entries before you write them.
-2. **Ledger.** Set the status to `done` only if no blocking finding is open. If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
-3. **Commit** the ledger and the tech-debt changes: `wip(<change>): review log and tech debt` (the ledger status is `done` or `stopped` as above).
-4. **Report**:
+3. **Ledger.** Set the status to `done` only if no blocking finding is open. If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
+4. **Commit** the ledger and the tech-debt changes: `wip(<change>): review log and tech debt` (the ledger status is `done` or `stopped` as above).
+5. **Report**:
    - status (`done` or `stopped` with the open blocking findings), tasks `n/m`, rounds run
    - findings fixed, deferred (with TD IDs), cosmetic, rejected
    - container tests skipped (from the implementer reports), so CI covers them
-   - next steps: squash the `wip(<change>)` commits (`git reset --soft BASE` and commit again; ask before doing this), then `/opsx:archive`. The ledger is archived with the change.
+   - next steps: squash the `wip(<change>)` commits (`git reset --soft BASE` and commit again; ask before doing this), then `/opsx:archive`. Before rebasing onto `main`, check whether commits below BASE already landed on `main` under other SHAs (`git log --oneline $(git merge-base HEAD main)..BASE`). If so, move only the squashed commit: `git rebase --onto main BASE`. The ledger is archived with the change.
 
 ## Ledger template
 
