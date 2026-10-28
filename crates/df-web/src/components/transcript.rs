@@ -15,18 +15,33 @@ fn clock(at: DateTime<Utc>) -> String {
 }
 
 /// A message of a board member: a bubble on the right with name and time below it. The avatar is
-/// shown for the last message of a group only (CSS, `data-author`).
+/// shown for the last message of a group only (CSS, `data-author`). `parts` are `(text, hidden)`;
+/// hidden parts are shown muted and labeled below the visible text.
 pub fn user_message(
     id: &str,
     prompt_id: &str,
     author: &str,
     at: DateTime<Utc>,
-    text: &str,
+    parts: &[(String, bool)],
 ) -> Markup {
+    let visible = parts
+        .iter()
+        .filter(|(_, hidden)| !hidden)
+        .map(|(text, _)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     html! {
         div id=(id) data-prompt-id=(prompt_id) data-author="human" class="flex items-end justify-end gap-2" {
             div class="min-w-0 max-w-[85%] md:max-w-[75%]" {
-                div class="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink" { (text) }
+                div class="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink" {
+                    (visible)
+                    @for (text, _) in parts.iter().filter(|(_, hidden)| *hidden) {
+                        div data-hidden class="mt-2 border-t border-line pt-2 text-sm text-muted" {
+                            div class="text-xs text-faint" { "Instruction for the agent" }
+                            (text)
+                        }
+                    }
+                }
                 (meta(author, at, "text-right"))
             }
             (avatar(&initials(author)))
@@ -199,17 +214,24 @@ pub fn plan(id: &str, entries: &[(String, String)]) -> Markup {
     }
 }
 
-/// A notice from the runtime or the control plane.
+/// A notice from the runtime or the control plane: a one-line row like a tool call, expandable
+/// to the full message. The level only tints the code.
 pub fn notice(id: &str, level: &str, code: &str, message: &str) -> Markup {
-    let class = match level {
-        "error" => "bg-danger-soft text-danger",
-        "warning" => "bg-status-waiting-bg text-status-waiting-fg",
-        _ => "bg-sunk text-muted",
+    let code_class = match level {
+        "error" => "text-danger",
+        "warning" => "text-status-waiting-fg",
+        _ => "text-muted",
     };
     html! {
-        div id=(id) class={"rounded-lg px-3 py-2 text-sm " (class)} {
-            span class="mr-2 font-mono text-xs" { (code) }
-            (message)
+        // `data-system`: the stylesheet draws the lines between consecutive rows (with `data-tool`).
+        details id=(id) data-author="agent" data-system class="group ml-11" {
+            summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8" {
+                span class="text-muted" { (icon(Icon::BotMessage)) }
+                span class={"shrink-0 font-mono text-xs " (code_class)} { (code) }
+                span class="min-w-0 flex-1 truncate text-xs" { (message) }
+                span class="text-faint transition-transform group-open:rotate-180" { (icon(Icon::ChevronDown)) }
+            }
+            div class="whitespace-pre-wrap break-words pb-3 text-sm" { (message) }
         }
     }
 }
@@ -231,14 +253,16 @@ mod tests {
 
     #[test]
     fn messages_escape_their_text_and_keep_their_ids() {
-        let user = user_message("ev-1", "p1", "Peter", at(), "<b>x</b>").into_string();
+        let user =
+            user_message("ev-1", "p1", "Peter", at(), &[("<b>x</b>".into(), false)]).into_string();
         assert!(user.contains("id=\"ev-1\"") && user.contains("data-prompt-id=\"p1\""));
         assert!(user.contains("&lt;b&gt;x&lt;/b&gt;") && !user.contains("<b>x"));
     }
 
     #[test]
     fn user_message_is_a_right_aligned_bubble_with_meta_below_and_an_avatar() {
-        let html = user_message("ev-1", "p1", "Peter Test", at(), "hi").into_string();
+        let html =
+            user_message("ev-1", "p1", "Peter Test", at(), &[("hi".into(), false)]).into_string();
         assert!(
             html.contains("data-author=\"human\"") && html.contains("justify-end"),
             "{html}"
@@ -249,6 +273,25 @@ mod tests {
         assert!(bubble < meta, "name and time below the bubble");
         assert!(html.contains(">10:42<") && html.contains("class=\"avatar "));
         assert!(html.contains(">PT<"));
+    }
+
+    #[test]
+    fn hidden_parts_are_muted_and_labeled_below_the_visible_text() {
+        let parts = [
+            ("desc".to_string(), false),
+            ("call <tool>".to_string(), true),
+        ];
+        let html = user_message("ev-1", "p1", "Peter", at(), &parts).into_string();
+        let label = html.find("Instruction for the agent").expect("label");
+        assert!(html.find("desc").unwrap() < label, "{html}");
+        assert!(
+            html.contains("data-hidden") && html.contains("text-muted"),
+            "{html}"
+        );
+        assert!(html.contains("call &lt;tool&gt;"), "{html}");
+
+        let plain = user_message("ev-1", "p1", "Peter", at(), &parts[..1]).into_string();
+        assert!(!plain.contains("Instruction for the agent"), "{plain}");
     }
 
     #[test]
@@ -389,21 +432,47 @@ mod tests {
     }
 
     #[test]
-    fn notice_levels_use_distinct_tokens() {
+    fn notice_is_an_expandable_row_with_the_bot_icon_and_a_tinted_code() {
+        let html = notice(
+            "n",
+            "error",
+            "runtime.outbox_discarded",
+            "long <b>message</b>",
+        )
+        .into_string();
         assert!(
-            notice("n", "error", "c", "m")
-                .into_string()
-                .contains("bg-danger-soft")
+            html.starts_with(
+                "<details id=\"n\" data-author=\"agent\" data-system class=\"group ml-11\""
+            ),
+            "{html}"
+        );
+        let bot = html
+            .find(&icon(Icon::BotMessage).into_string())
+            .expect("icon");
+        assert!(
+            bot < html.find("runtime.outbox_discarded").unwrap(),
+            "{html}"
+        );
+        assert!(
+            html.contains("text-danger") && !html.contains("bg-"),
+            "{html}"
+        );
+        assert!(html.contains("group-open:rotate-180"), "{html}");
+        // Summary (truncated) and body both carry the escaped message.
+        assert_eq!(
+            html.matches("long &lt;b&gt;message&lt;/b&gt;").count(),
+            2,
+            "{html}"
         );
         assert!(
             notice("n", "warning", "c", "m")
                 .into_string()
-                .contains("bg-status-waiting-bg")
+                .contains("text-status-waiting-fg")
         );
         assert!(
             notice("n", "info", "c", "m")
                 .into_string()
-                .contains("bg-sunk")
+                .contains("text-muted")
         );
         assert!(unreadable("u").into_string().contains("Unreadable"));
         assert!(

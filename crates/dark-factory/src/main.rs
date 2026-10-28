@@ -870,6 +870,7 @@ fn web_router(
         forge,
         flows: egress.flows,
         services: egress.services,
+        show_hidden_blocks: cfg.web.show_hidden_blocks,
     }))
 }
 

@@ -52,6 +52,8 @@ pub struct WebState {
     pub flows: Option<Arc<dyn egress::FlowSource>>,
     /// Checks `cluster-service` entries against the cluster; without it they cannot be added.
     pub services: Option<Arc<dyn egress::ServiceLookup>>,
+    /// Show transcript content blocks marked `hidden` (`web.showHiddenBlocks`).
+    pub show_hidden_blocks: bool,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.

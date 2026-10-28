@@ -976,6 +976,7 @@ mod tests {
                         kind: Some(wire::content_block::Kind::Text(wire::TextContent {
                             text: "x".into(),
                         })),
+                        hidden: false,
                     }),
                 },
             )),
@@ -1772,6 +1773,7 @@ mod tests {
             kind: Some(wire::content_block::Kind::Text(wire::TextContent {
                 text: text.into(),
             })),
+            hidden: false,
         }];
         let author = df_core::Principal::human(df_core::UserId::new(), "Ada");
         df_db::queue_message(&env.ctx.pool, env.task.id, author, content)

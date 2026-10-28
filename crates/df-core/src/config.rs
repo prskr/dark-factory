@@ -56,6 +56,8 @@ pub struct InstanceConfig {
     pub harness: HarnessConfig,
     #[serde(default)]
     pub runs: RunsConfig,
+    #[serde(default)]
+    pub web: WebConfig,
     /// Integration plugins by name (`forgejo`, ...).
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginConfig>,
@@ -497,6 +499,16 @@ impl Default for RunsConfig {
     }
 }
 
+/// Web UI settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebConfig {
+    /// Show transcript content blocks marked `hidden` (instructions for the agent), for
+    /// debugging prompts. Read at startup.
+    #[serde(default)]
+    pub show_hidden_blocks: bool,
+}
+
 /// One integration plugin: its component, per-call limits and free-form settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -868,6 +880,24 @@ sandbox:
         assert_eq!(gateway.buffer_size, 50);
         assert_eq!(gateway.buffer_max_age_seconds, 120);
         assert_eq!(gateway.blocked_cidrs, ["10.42.0.0/16"]);
+    }
+
+    #[test]
+    fn web_section_defaults_to_hidden_blocks_off_and_rejects_unknown_keys() {
+        let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
+        assert!(!cfg.web.show_hidden_blocks);
+
+        let on = format!("{minimal}web:\n  showHiddenBlocks: true\n");
+        assert!(
+            InstanceConfig::from_yaml_str(&on)
+                .unwrap()
+                .web
+                .show_hidden_blocks
+        );
+
+        let unknown = format!("{minimal}web:\n  showHidden: true\n");
+        assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
     }
 
     #[test]

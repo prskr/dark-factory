@@ -31,6 +31,7 @@ fn text_event() -> agent_message::Body {
                     kind: Some(wire::content_block::Kind::Text(wire::TextContent {
                         text: "secret-prompt-text".into(),
                     })),
+                    hidden: false,
                 }),
             },
         )),

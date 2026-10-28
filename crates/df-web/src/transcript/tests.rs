@@ -317,6 +317,62 @@ fn each_run_starts_with_a_divider_before_its_first_item() {
     );
 }
 
+fn assignment(blocks: Value) -> StoredEvent {
+    stored(
+        2,
+        "t",
+        json!({"userMessage": {"promptId": "p1", "content": blocks}}),
+    )
+}
+
+#[test]
+fn hidden_blocks_are_left_out_and_an_all_hidden_message_is_skipped() {
+    let mut folder = Folder::new("Linus");
+    let changes = folder.apply(&assignment(json!([
+        {"text": {"text": "Fix login"}},
+        {"hidden": true, "text": {"text": "call set_task_title"}},
+    ])));
+    assert_eq!(changes.len(), 2, "run divider and message");
+    let html = render_all(&folder);
+    assert!(html.contains("Fix login"), "{html}");
+    assert!(
+        !html.contains("set_task_title") && !html.contains("Instruction"),
+        "{html}"
+    );
+
+    let mut folder = Folder::new("Linus");
+    let changes = folder.apply(&assignment(
+        json!([{"hidden": true, "text": {"text": "secret"}}]),
+    ));
+    assert!(changes.is_empty());
+    assert!(folder.items().is_empty());
+}
+
+#[test]
+fn hidden_blocks_are_shown_muted_with_the_option() {
+    let mut folder = Folder::new("Linus").with_hidden_blocks(true);
+    folder.apply(&assignment(json!([
+        {"text": {"text": "Fix login"}},
+        {"hidden": true, "text": {"text": "call set_task_title"}},
+    ])));
+    let html = render_all(&folder);
+    assert!(
+        html.contains("Fix login") && html.contains("call set_task_title"),
+        "{html}"
+    );
+    assert!(html.contains("Instruction for the agent"), "{html}");
+
+    let mut folder = Folder::new("Linus").with_hidden_blocks(true);
+    let changes = folder.apply(&assignment(
+        json!([{"hidden": true, "text": {"text": "secret"}}]),
+    ));
+    assert_eq!(
+        changes.len(),
+        2,
+        "an all-hidden message is rendered with the option"
+    );
+}
+
 #[test]
 fn agent_items_carry_the_persona_name_and_the_time_of_their_first_event() {
     let mut folder = Folder::new("Linus");

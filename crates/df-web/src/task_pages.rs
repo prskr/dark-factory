@@ -178,6 +178,7 @@ struct Selected {
     runs: Vec<RunView>,
     pending: Vec<df_db::TaskMessageRow>,
     folder: Folder,
+    show_hidden: bool,
 }
 
 /// Renders the workspace page; the transcript and details columns exist only for a selected task.
@@ -247,7 +248,7 @@ fn selected_columns(s: &Selected) -> Markup {
                 "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
                 (render_transcript(s.folder.items()))
             }
-            (message_area(key, &s.detail.persona_name, s.detail.status.as_str(), &s.pending))
+            (message_area(key, &s.detail.persona_name, s.detail.status.as_str(), &s.pending, s.show_hidden))
         }
         (details_column(&s.detail, &s.runs))
     }
@@ -272,7 +273,8 @@ async fn task_detail(
         Err(response) => return *response,
     };
     let id = TaskId::from_uuid(task.id);
-    let mut folder = Folder::new(task.persona_name.clone());
+    let mut folder =
+        Folder::new(task.persona_name.clone()).with_hidden_blocks(state.show_hidden_blocks);
     loop {
         let rows = match df_db::task_views::transcript_after(
             &state.pool,
@@ -302,6 +304,7 @@ async fn task_detail(
         runs: data.runs,
         pending: data.pending,
         folder,
+        show_hidden: state.show_hidden_blocks,
     };
     workspace(&state, &user, &query.filters(), Some(selected)).await
 }
@@ -527,6 +530,7 @@ async fn message_create(
             kind: Some(content_block::Kind::Text(TextContent {
                 text: text.to_string(),
             })),
+            hidden: false,
         }];
         match df_db::queue_message(&state.pool, id, user.principal(), content).await {
             Ok(_) => None,
@@ -647,6 +651,7 @@ async fn stack(
         &task.persona_name,
         task.status.as_str(),
         &pending,
+        state.show_hidden_blocks,
         error,
     ))
 }

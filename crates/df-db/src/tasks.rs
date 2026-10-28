@@ -82,12 +82,23 @@ pub fn format_assignment_prompt(title: Option<&str>, description: &str) -> Vec<C
     let text = match title {
         Some(title) if description.is_empty() => format!("# {title}"),
         Some(title) => format!("# {title}\n\n{description}"),
-        None if description.is_empty() => ask_for_title(),
-        None => format!("{description}\n\n{}", ask_for_title()),
+        None => description.to_string(),
     };
-    vec![ContentBlock {
+    let mut blocks = Vec::new();
+    if !text.is_empty() {
+        blocks.push(text_block(text, false));
+    }
+    if title.is_none() {
+        blocks.push(text_block(ask_for_title(), true));
+    }
+    blocks
+}
+
+fn text_block(text: String, hidden: bool) -> ContentBlock {
+    ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text })),
-    }]
+        hidden,
+    }
 }
 
 /// Creates a project-scoped task with gap-free numbering (`projects.next_task_number` row lock)
@@ -488,9 +499,7 @@ pub async fn edit_queued_message(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(not_editable)?;
-    let new = serde_json::to_value(vec![ContentBlock {
-        kind: Some(content_block::Kind::Text(TextContent { text: text.into() })),
-    }])?;
+    let new = serde_json::to_value(vec![text_block(text.into(), false)])?;
     sqlx::query!(
         "UPDATE task_messages SET content = $2 WHERE id = $1",
         prompt_id.as_uuid(),
@@ -953,6 +962,7 @@ mod tests {
             kind: Some(content_block::Kind::Text(TextContent {
                 text: "also add a test for X".into(),
             })),
+            hidden: false,
         }];
         let follow_up = queue_message(&pool, task.id, author.clone(), content)
             .await
@@ -1079,9 +1089,44 @@ mod tests {
     }
 
     fn prompt_text(msg: &TaskMessageRow) -> String {
-        match &msg.content[0].kind {
-            Some(content_block::Kind::Text(t)) => t.text.clone(),
-            other => panic!("unexpected content {other:?}"),
+        msg.content
+            .iter()
+            .map(block_text)
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    #[test]
+    fn assignment_prompt_hides_only_the_title_instruction() {
+        let blocks = format_assignment_prompt(None, "desc");
+        assert_eq!(blocks.len(), 2);
+        assert!(!blocks[0].hidden);
+        assert_eq!(block_text(&blocks[0]), "desc");
+        assert!(blocks[1].hidden);
+        assert!(block_text(&blocks[1]).contains("set_task_title"));
+
+        let blocks = format_assignment_prompt(Some("T"), "desc");
+        assert!(blocks.iter().all(|b| !b.hidden));
+        assert_eq!(blocks.len(), 1);
+
+        let blocks = format_assignment_prompt(None, "");
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].hidden);
+    }
+
+    #[test]
+    fn content_block_without_hidden_key_reads_as_visible() {
+        let block: ContentBlock =
+            serde_json::from_value(serde_json::json!({"text": {"text": "x"}})).unwrap();
+        assert!(!block.hidden);
+        let json = serde_json::to_value(format_assignment_prompt(None, "d")).unwrap();
+        assert_eq!(json[1]["hidden"], true);
+    }
+
+    fn block_text(block: &ContentBlock) -> &str {
+        match &block.kind {
+            Some(content_block::Kind::Text(t)) => &t.text,
+            _ => "",
         }
     }
 
@@ -1281,6 +1326,7 @@ mod tests {
     fn text(t: &str) -> Vec<ContentBlock> {
         vec![ContentBlock {
             kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
+            hidden: false,
         }]
     }
 

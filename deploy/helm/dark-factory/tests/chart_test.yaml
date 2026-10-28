@@ -641,6 +641,24 @@ tests:
           pattern: 'runs:\n  keepAliveSeconds: 600\n'
         documentIndex: 0
 
+  - it: hides hidden transcript blocks by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'web:\n  showHiddenBlocks: false\n'
+        documentIndex: 0
+
+  - it: renders web.showHiddenBlocks
+    template: configmap.yaml
+    set:
+      web.showHiddenBlocks: true
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'web:\n  showHiddenBlocks: true\n'
+        documentIndex: 0
+
   - it: renders the harness image from tag and repository
     template: configmap.yaml
     set:

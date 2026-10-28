@@ -81,6 +81,7 @@ fn log_outbound_cuts_long_chunk_text() {
                 kind: Some(content_block::Kind::Text(TextContent {
                     text: "x".repeat(5000),
                 })),
+                hidden: false,
             }),
         }),
     );
@@ -201,6 +202,7 @@ fn log_outbound_chunks_only_at_debug() {
         kind: Some(content_block::Kind::Text(TextContent {
             text: "hello chunk".into(),
         })),
+        hidden: false,
     });
     let message = event_body(
         "t1",
@@ -1319,6 +1321,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
                             text: "Do something".to_string(),
                         },
                     )),
+                    hidden: false,
                 }],
                 queued_at: None,
             })),
@@ -1368,6 +1371,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
                             text: "Do something".to_string(),
                         },
                     )),
+                    hidden: false,
                 }],
                 queued_at: None,
             })),
@@ -1388,6 +1392,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
                             text: "Do next thing".to_string(),
                         },
                     )),
+                    hidden: false,
                 }],
                 queued_at: None,
             })),
@@ -3669,6 +3674,7 @@ async fn test_scenario_harness_resume_success() {
                                     text: "Follow up prompt".to_string(),
                                 },
                             )),
+                            hidden: false,
                         }],
                     }],
                     prepend_summary,
@@ -3758,6 +3764,7 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                                     text: "First prompt of run 2".to_string(),
                                 },
                             )),
+                            hidden: false,
                         }],
                     }],
                     prepend_summary,
@@ -3972,6 +3979,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
             kind: Some(ContentKind::Text(TextContent {
                 text: "Turn 1 prompt".to_string(),
             })),
+            hidden: false,
         }],
         queued_at: None,
     };
@@ -4003,6 +4011,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
             kind: Some(ContentKind::Text(TextContent {
                 text: "Second prompt (queued during turn 1)".to_string(),
             })),
+            hidden: false,
         }],
         queued_at: None,
     };
@@ -4014,6 +4023,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
             kind: Some(ContentKind::Text(TextContent {
                 text: "Third prompt (queued during turn 1)".to_string(),
             })),
+            hidden: false,
         }],
         queued_at: None,
     };
@@ -4056,6 +4066,37 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
     // Queue is now empty
     assert!(!queue.has_queued());
     assert_eq!(queue.len(), 0);
+}
+
+#[test]
+fn test_hidden_block_is_delivered_and_keeps_its_flag_in_the_event() {
+    use crate::harness::{PromptQueue, build_acp_prompt_blocks};
+    use df_proto::agent::v1::Prompt;
+    use df_proto::transcript::v1::{
+        ContentBlock, TextContent, content_block::Kind as ContentKind, event::Kind as EventKind,
+    };
+
+    let block = |text: &str, hidden| ContentBlock {
+        kind: Some(ContentKind::Text(TextContent { text: text.into() })),
+        hidden,
+    };
+    let mut queue = PromptQueue::new();
+    queue.push(Prompt {
+        prompt_id: "p".into(),
+        author: None,
+        content: vec![block("visible", false), block("secret", true)],
+        queued_at: None,
+    });
+
+    let (prompts, events) = queue.start_turn("t");
+
+    // A missing UserMessage yields no flags and fails the assertion.
+    let flags: Vec<bool> = match &events[1].kind {
+        Some(EventKind::UserMessage(um)) => um.content.iter().map(|b| b.hidden).collect(),
+        _ => Vec::new(),
+    };
+    assert_eq!(flags, [false, true]);
+    assert_eq!(build_acp_prompt_blocks(&prompts, None).len(), 2);
 }
 
 #[test]
@@ -4531,6 +4572,7 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
                             kind: Some(ContentBlockKind::Text(TextContent {
                                 text: "this task has no linked issue".to_string(),
                             })),
+                            hidden: false,
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: false,
@@ -4545,6 +4587,7 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
                             kind: Some(ContentBlockKind::Text(TextContent {
                                 text: "task completed successfully".to_string(),
                             })),
+                            hidden: false,
                         }],
                         structured_content_json: r#"{"status":"completed"}"#.to_string(),
                         end_run_after_turn: true,
@@ -5016,6 +5059,7 @@ sessions:
                     text: "Start working".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -5140,6 +5184,7 @@ sessions:
                     text: "Start working".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -5350,6 +5395,7 @@ sessions:
                     text: "Complete the task".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -5377,6 +5423,7 @@ sessions:
                                     text: "Task marked completed".to_string(),
                                 },
                             )),
+                            hidden: false,
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
@@ -5589,6 +5636,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
                     text: "Complete the task".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -6546,6 +6594,7 @@ sessions:
                     text: "Start run 1 work".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -6701,6 +6750,7 @@ sessions:
                     text: "Continue and complete work".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];
@@ -6729,6 +6779,7 @@ sessions:
                                     text: "Task completed successfully".to_string(),
                                 },
                             )),
+                            hidden: false,
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
@@ -6933,6 +6984,7 @@ async fn test_manual_claude_acp_run() {
                         .to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }];

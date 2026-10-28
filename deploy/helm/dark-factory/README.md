@@ -99,6 +99,7 @@ Every key in `values.yaml` is documented below:
 | `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a release-prefixed read-only `ClusterRole`/`ClusterRoleBinding` for `services` and `endpointslices`. |
 | `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s are created when `anyNamespace` is `false`. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
+| `web.showHiddenBlocks` | `bool` | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, such as the title request) in the task UI, muted and labeled (`web.showHiddenBlocks` of the instance config). For debugging prompts. Read at startup: a change restarts the control plane. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
 | `controlPlane.logLevel` | `string` | `info` | `RUST_LOG` (`EnvFilter` syntax, e.g. `info,df_web=debug`) of the control plane and the migrate job. |
 | `controlPlane.serviceAccountName` | `string` | `""` | Optional override for the control plane `ServiceAccount` name. |

@@ -117,6 +117,7 @@ mod tests {
                     kind: Some(content_block::Kind::Text(TextContent {
                         text: "Hello world".into(),
                     })),
+                    hidden: false,
                 },
                 ContentBlock {
                     kind: Some(content_block::Kind::Image(ImageContent {
@@ -125,6 +126,7 @@ mod tests {
                             source: Some(blob_data::Source::Sha256("deadbeef".into())),
                         }),
                     })),
+                    hidden: false,
                 },
                 ContentBlock {
                     kind: Some(content_block::Kind::ResourceLink(ResourceLink {
@@ -134,6 +136,7 @@ mod tests {
                         title: Some("Readme".into()),
                         size_bytes: Some(4096),
                     })),
+                    hidden: false,
                 },
                 ContentBlock {
                     kind: Some(content_block::Kind::Resource(EmbeddedResource {
@@ -143,6 +146,7 @@ mod tests {
                             source: Some(blob_data::Source::Inline(Bytes::from_static(b"abc"))),
                         })),
                     })),
+                    hidden: false,
                 },
             ],
         })));
@@ -162,6 +166,7 @@ mod tests {
                     kind: Some(content_block::Kind::Text(TextContent {
                         text: "Working on it...".into(),
                     })),
+                    hidden: false,
                 }),
             },
         )));
@@ -175,6 +180,7 @@ mod tests {
                     kind: Some(content_block::Kind::Text(TextContent {
                         text: "Thinking...".into(),
                     })),
+                    hidden: false,
                 }),
             },
         )));

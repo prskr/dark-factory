@@ -344,6 +344,7 @@ pub fn pending_region(
     persona: &str,
     task_status: &str,
     messages: &[TaskMessageRow],
+    show_hidden: bool,
     error: Option<&str>,
 ) -> Markup {
     let queued: Vec<&TaskMessageRow> = messages
@@ -368,7 +369,7 @@ pub fn pending_region(
                 // Three rows of the queued item (`h-11 lg:h-9`) and two 4 px gaps; the list scrolls beyond.
                 div class="flex max-h-[calc(3*2.75rem+2*0.25rem)] flex-col gap-1 overflow-y-auto lg:max-h-[calc(3*2.25rem+2*0.25rem)]" {
                     @for m in queued {
-                        (queued_message(key, &m.id.to_string(), &blocks_text(&m.content), m.queued_at, queued_state(m, task_status)))
+                        (queued_message(key, &m.id.to_string(), &blocks_text(&m.content, show_hidden), m.queued_at, queued_state(m, task_status)))
                     }
                 }
             }
@@ -383,6 +384,7 @@ pub fn message_area(
     persona: &str,
     task_status: &str,
     pending: &[TaskMessageRow],
+    show_hidden: bool,
 ) -> Markup {
     let messages = format!("/tasks/{key}/messages");
     html! {
@@ -393,7 +395,7 @@ pub fn message_area(
             x-data="{ draft: '', saved: '', editing: null }"
             "x-on:message-queued.window"="draft = ''"
             "x-on:message-saved.window"="editing = null; draft = ''" {
-            (pending_region(key, persona, task_status, pending, None))
+            (pending_region(key, persona, task_status, pending, show_hidden, None))
             form class="p-3" {
                 div x-show="editing" x-cloak class="mb-2 flex items-center justify-between gap-2 rounded-lg bg-accent-soft px-3 text-sm text-accent-text" {
                     span { "Editing a queued message" }
@@ -922,6 +924,7 @@ mod tests {
                             text: format!("message {i}"),
                         },
                     )),
+                    hidden: false,
                 }],
                 queued_at: DateTime::UNIX_EPOCH,
                 delivered_run_id: None,
@@ -975,7 +978,7 @@ mod tests {
     #[test]
     fn queued_stack_has_a_header_and_a_list_capped_at_three_rows() {
         let seven = queued(7);
-        let html = pending_region("DF-1", "Linus", "running", &seven, None).into_string();
+        let html = pending_region("DF-1", "Linus", "running", &seven, false, None).into_string();
         assert!(
             html.contains("7 queued · Linus reads them at the next turn"),
             "{html}"
@@ -986,13 +989,33 @@ mod tests {
                 && html.contains("overflow-y-auto"),
             "{html}"
         );
-        let ended = pending_region("DF-1", "Linus", "failed", &queued(1), None).into_string();
+        let ended =
+            pending_region("DF-1", "Linus", "failed", &queued(1), false, None).into_string();
         assert!(
             ended.contains("1 queued · sent with the next run"),
             "{ended}"
         );
-        let none = pending_region("DF-1", "Linus", "running", &[], None).into_string();
+        let none = pending_region("DF-1", "Linus", "running", &[], false, None).into_string();
         assert!(!none.contains("queued"), "{none}");
+    }
+
+    #[test]
+    fn queued_stack_shows_hidden_text_only_with_the_option() {
+        use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+        let block = |text: &str, hidden| ContentBlock {
+            kind: Some(content_block::Kind::Text(TextContent { text: text.into() })),
+            hidden,
+        };
+        let mut message = queued(1).remove(0);
+        message.content = vec![block("visible text", false), block("secret text", true)];
+        let off = pending_region("DF-1", "Linus", "running", &[message.clone()], false, None)
+            .into_string();
+        assert!(
+            off.contains("visible text") && !off.contains("secret text"),
+            "{off}"
+        );
+        let on = pending_region("DF-1", "Linus", "running", &[message], true, None).into_string();
+        assert!(on.contains("secret text"), "{on}");
     }
 
     #[test]
@@ -1044,7 +1067,7 @@ mod tests {
 
     #[test]
     fn send_save_and_create_use_the_round_action_classes() {
-        let area = message_area("DF-1", "Linus", "queued", &[]).into_string();
+        let area = message_area("DF-1", "Linus", "queued", &[], false).into_string();
         assert!(
             area.contains(&format!("class=\"{ROUND_ACTION_CLASS}\"")),
             "{area}"

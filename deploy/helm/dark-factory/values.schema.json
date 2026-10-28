@@ -231,6 +231,12 @@
         "keepAliveSeconds": { "type": "integer", "minimum": 0 }
       }
     },
+    "web": {
+      "type": "object",
+      "properties": {
+        "showHiddenBlocks": { "type": "boolean" }
+      }
+    },
     "controlPlane": {
       "type": "object",
       "required": ["replicas", "ports", "resources"],

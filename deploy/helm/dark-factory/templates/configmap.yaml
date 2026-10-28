@@ -33,6 +33,8 @@ data:
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
     runs:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
+    web:
+      showHiddenBlocks: {{ .Values.web.showHiddenBlocks }}
     harness:
       claudeCode:
         image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}

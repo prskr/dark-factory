@@ -398,7 +398,7 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
         head_region(&detail, None),
         details_region(&detail),
         runs_region(&[], None),
-        pending_region("DF-1", "Linus", "queued", &[], None),
+        pending_region("DF-1", "Linus", "queued", &[], false, None),
     ] {
         assert!(!region.into_string().contains("draft"));
     }
@@ -855,6 +855,28 @@ async fn icon_only_controls_have_accessible_names() {
     }
 }
 
+#[tokio::test]
+async fn hidden_blocks_are_labelled_on_the_task_page_only_with_the_option() {
+    let hidden = json!({"userMessage": {"promptId": "p", "content": [
+        {"text": {"text": "Fix login"}},
+        {"hidden": true, "text": {"text": "call set_task_title"}},
+    ]}});
+    for (app, shown) in [
+        (TestApp::with_hidden_blocks().await, true),
+        (TestApp::new().await, false),
+    ] {
+        let cookie = app.login().await;
+        let seed = seed(&app.pool).await;
+        let task = new_task(&app.pool, &seed, "t").await;
+        let run = insert_run(&app.pool, task.id, 1, "running").await;
+        add_event(&app.pool, task.id, run, 1, "t1", hidden.clone()).await;
+        let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+        assert!(html.contains("Fix login"), "{html}");
+        assert_eq!(html.contains("Instruction for the agent"), shown);
+        assert_eq!(html.contains("call set_task_title"), shown);
+    }
+}
+
 fn human() -> Principal {
     Principal::human(df_core::UserId::new(), "Peter")
 }
@@ -863,6 +885,7 @@ fn text_content(text: &str) -> Vec<df_proto::transcript::v1::ContentBlock> {
     use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
     vec![ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text: text.into() })),
+        hidden: false,
     }]
 }
 
@@ -1685,12 +1708,13 @@ fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
 fn tool_rows_share_one_line_between_consecutive_calls() {
     let css = crate::app_css().unwrap();
     let rule = |selector: &str| css_rule(&css, selector);
-    let row = rule("[data-tool]{");
+    let row = rule("[data-tool],[data-system]{");
     assert!(
         row.contains("border-top") && row.contains("border-bottom"),
         "{row}"
     );
-    assert!(rule("[data-tool]+[data-tool]{").contains("border-top-width:0"));
+    let shared = rule(":is([data-tool],[data-system])+:is([data-tool],[data-system]){");
+    assert!(shared.contains("border-top-width:0"), "{shared}");
 }
 
 #[test]

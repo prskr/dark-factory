@@ -150,6 +150,11 @@ runs:
   # 0 releases right after the turn.
   keepAliveSeconds: 600
 
+web:
+  # Show transcript blocks marked hidden (instructions for the agent) in the task UI, muted and
+  # labeled. For debugging prompts; changing it restarts the control plane.
+  showHiddenBlocks: false
+
 controlPlane:
   replicas: 1
   # RUST_LOG (EnvFilter syntax) of the control plane and the migrate job.

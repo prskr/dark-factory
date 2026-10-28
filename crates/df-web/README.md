@@ -42,10 +42,10 @@ Each SSE message is a bundle of `<hx-partial hx-target=... hx-swap=...>` element
 
 Transcript messages carry the id of the last event they contain as the SSE `id`. Agent chunks that
 arrive within 150 ms are sent as one update; when a turn ends, its messages are re-rendered as
-Markdown. The DOM id of an agent message is `msg-<message_id>`; ids from the runtime are reduced to
+Markdown. Content blocks marked `hidden` are dropped from user messages unless `web.showHiddenBlocks` is set (`Folder::with_hidden_blocks`); a message without a shown block produces no item. The DOM id of an agent message is `msg-<message_id>`; ids from the runtime are reduced to
 `[A-Za-z0-9_-]`.
 A `TurnEnded` event completes the turn's agent messages but adds no item; it refreshes the runs and
-details regions. Tool rows (`data-tool`) get their separator lines from the stylesheet, so live
+details regions. Tool and notice rows (`data-tool`, `data-system`) get their separator lines from the stylesheet, so live
 appends regroup without re-rendering.
 
 In the run cards `#n` links to the run divider (`#run-n`). Token counts are compact (`9.4k`,

@@ -241,6 +241,7 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
             kind: Some(content_block::Kind::Text(TextContent {
                 text: outcome.text.clone(),
             })),
+            hidden: false,
         }],
         structured_content_json: String::new(),
         end_run_after_turn: outcome.end_run_after_turn,
