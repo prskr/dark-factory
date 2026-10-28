@@ -25,11 +25,11 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 - **THEN** the run ends with outcome `provisioning_failed` and the task status becomes `failed`
 
 ### Requirement: Assign content
-`Assign` SHALL contain the task reference, the workspace (project repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v1, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
+`Assign` SHALL contain the task reference, the workspace (project repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects
-- **THEN** `Assign.workspace.task_branch` is `factory/task/DF-1` and `Assign.tools` contains exactly the four factory tools v1
+- **THEN** `Assign.workspace.task_branch` is `factory/task/DF-1` and `Assign.tools` contains exactly the six factory tools v2
 
 #### Scenario: Default adapter command
 - **WHEN** a run of a project without an adapter command connects
@@ -47,7 +47,7 @@ Every run after the first SHALL carry the harness session id reported by the pre
 - **THEN** `Assign.continuation.harness_session_id` is `S` and `summary` is not empty
 
 ### Requirement: Run phases
-The run state SHALL follow `pending → provisioning → connecting → preparing → running → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages. Between turns a run SHALL move `running → awaiting_input → running` on `RUN_PHASE_AWAITING_INPUT` and `RUN_PHASE_RUNNING`. When a run becomes `awaiting_input`, its task SHALL become `waiting` unless undelivered messages exist, in which case it stays `running`; when the run is `running` again, the task SHALL be `running`. The phase update and `queue_message` SHALL serialize on the task row, so neither overwrites the other. Once the control plane has sent `Release` or `Cancel` to a run, the run SHALL be `finalizing`.
+The run state SHALL follow `pending → provisioning → connecting → preparing → running → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages. Between turns a run SHALL move `running → awaiting_input → running` on `RUN_PHASE_AWAITING_INPUT` and `RUN_PHASE_RUNNING`. When a run becomes `awaiting_input`, its task SHALL become `waiting` unless undelivered messages exist, in which case it stays `running`; when the run is `running` again, the task SHALL be `running`. The phase update and `queue_message` SHALL serialize on the task row, so neither overwrites the other. Once the control plane has sent `Release` or `Cancel` to a run, the run SHALL be `finalizing`. The terminal state records how the run ended technically; the outcome (`completed`, `end_turn`, `blocked`, `rate_limited`, …) is stored separately, so a `blocked` run ends in state `succeeded` with outcome `blocked`.
 
 #### Scenario: Phase reported
 - **WHEN** the runtime reports `RUN_PHASE_RUNNING`
@@ -61,6 +61,14 @@ The run state SHALL follow `pending → provisioning → connecting → preparin
 - **WHEN** a message is queued while the turn ends and the `RUN_PHASE_AWAITING_INPUT` report is processed afterwards
 - **THEN** the run is `awaiting_input`, the task stays `running` and the message is forwarded
 
+#### Scenario: Awaiting input reported
+- **WHEN** the runtime reports `RUN_PHASE_AWAITING_INPUT`
+- **THEN** the run state becomes `awaiting_input` and the task detail shows that the run waits for an answer
+
+#### Scenario: Blocked run is terminal
+- **WHEN** a run in state `finalizing` reports `RUN_OUTCOME_BLOCKED`
+- **THEN** the run state becomes `succeeded` with outcome `blocked` and no further phase changes are accepted for it
+
 ### Requirement: Timeouts and lost sandboxes
 The control plane SHALL fail a run that doesn't connect within the configured connect timeout (outcome `connect_timeout`), SHALL send `Cancel` when the wall-clock budget plus grace is exceeded, and SHALL fail a non-terminal run whose sandbox disappears (outcome `sandbox_lost`). Failed runs' sandboxes SHALL be torn down.
 
@@ -73,7 +81,7 @@ The control plane SHALL fail a run that doesn't connect within the configured co
 - **THEN** the run fails with `sandbox_lost` and the task volume is kept
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with a retry time
@@ -90,6 +98,14 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 #### Scenario: Marked done while idle
 - **WHEN** a board member marks a task done while its run is `awaiting_input`
 - **THEN** the run is cancelled, its sandbox deleted, and the task stays `completed`
+
+#### Scenario: Blocked run
+- **WHEN** a run reports `RUN_OUTCOME_BLOCKED`
+- **THEN** the task becomes `blocked` and no new run starts until a message is queued
+
+#### Scenario: Completed with an undelivered message
+- **WHEN** a human queues a message during the turn in which the agent calls `complete_task`
+- **THEN** the run ends `completed`, the PR is marked ready, and the task becomes `queued` so the next run addresses the message
 
 ### Requirement: Prompts during a run
 A message queued while a run is active and not `finalizing` SHALL be sent to the runtime as a `Prompt` by the replica holding the run's stream. This includes a run that is `awaiting_input`; no new run SHALL start for it. A message queued while the run is `finalizing` (including after `Release` or `Cancel`) SHALL stay held back; the run end makes the task `queued` and the next run delivers it.
@@ -120,3 +136,10 @@ The control plane SHALL end an `awaiting_input` run by sending `Release` once th
 #### Scenario: Message after release
 - **WHEN** a message is queued after `Release` was sent but before the run ended
 - **THEN** the message is not sent to that run and the task becomes `queued` when the run ends
+
+### Requirement: Deadline for blocking questions
+For a run whose last turn had a blocking request, the control plane SHALL apply the idle deadline of "Idle deadline" (`iter1-keep-alive-and-review`) and send `Release` with outcome `BLOCKED` expected. The wall-clock budget includes time spent awaiting input.
+
+#### Scenario: Default window
+- **WHEN** a run awaits an answer in an instance without `runs.keepAliveSeconds`
+- **THEN** the control plane sends `Release` after 10 minutes and the run ends `blocked`
