@@ -8460,3 +8460,134 @@ async fn test_review_r40_final_report_is_delivered_after_shutdown_while_disconne
         .unwrap();
     server.shutdown();
 }
+
+/// A resumed harness replays the conversation before it answers `session/load`. The replay is
+/// already in the transcript and must not be recorded again.
+#[tokio::test]
+async fn test_resumed_session_does_not_record_the_replayed_history() {
+    use crate::git::Git;
+    use crate::outbox::Outbox;
+    use crate::runner::{RunDriverParams, run_session};
+    use df_proto::agent::v1::{Assign, Continuation, Harness, Prompt, Workspace, agent_message};
+    use df_proto::transcript::v1::event::Kind as EventKind;
+    use tokio::sync::mpsc;
+
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fake_bin = root.join("target/debug/fake-acp-agent");
+    let mcp_bin = root.join("target/debug/factory-agent");
+    if !fake_bin.exists() || !mcp_bin.exists() {
+        eprintln!("Skipping integration test: binaries not present");
+        return;
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let upstream = setup_test_remote_repo(temp.path());
+    let script_file = temp.path().join("script.yaml");
+    std::fs::write(
+        &script_file,
+        r#"
+sessions:
+  new:
+    - - say: "old answer"
+      - end: end_turn
+  loaded:
+    - - say: "new answer"
+      - end: end_turn
+"#,
+    )
+    .unwrap();
+
+    // The session of the previous run, as the harness keeps it under HOME.
+    let home_dir = temp.path().join("home");
+    let sessions = home_dir.join(".fake-acp").join("sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    std::fs::write(sessions.join("sess-1"), "").unwrap();
+
+    let repo_dir = temp.path().join("repo");
+    let runtime_dir = temp.path().join("runtime");
+    let hooks_path = temp.path().join("hooks-empty");
+    std::fs::create_dir_all(&hooks_path).unwrap();
+    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
+        Outbox::open(&runtime_dir, "run-resume", 10 * 1024 * 1024, 64 * 1024).unwrap(),
+    ));
+    let assign = Assign {
+        run_id: "run-resume".to_string(),
+        task: None,
+        workspace: Some(Workspace {
+            repo_url: upstream.to_str().unwrap().to_string(),
+            base_branch: "main".to_string(),
+            task_branch: "factory/task/DF-1".to_string(),
+            wip_branch: "factory/wip/DF-1".to_string(),
+            commit_identity: None,
+            git_hooks: Vec::new(),
+            git_config: Vec::new(),
+        }),
+        harness: Some(Harness {
+            kind: Some(df_proto::agent::v1::harness::Kind::Acp(
+                df_proto::agent::v1::AcpHarness {
+                    command: vec![
+                        fake_bin.to_string_lossy().to_string(),
+                        "--script".to_string(),
+                        script_file.to_string_lossy().to_string(),
+                    ],
+                    env: std::collections::HashMap::new(),
+                    model: None,
+                    settings_json: String::new(),
+                },
+            )),
+            system_prompt: String::new(),
+        }),
+        tools: Vec::new(),
+        budgets: None,
+        continuation: Some(Continuation {
+            harness_session_id: "sess-1".to_string(),
+            summary: "old".to_string(),
+        }),
+    };
+    let initial_prompts = vec![Prompt {
+        prompt_id: "prompt-1".to_string(),
+        author: None,
+        content: vec![],
+        queued_at: None,
+    }];
+    let (inbound_tx, inbound_rx) = mpsc::channel(100);
+    inbound_tx.try_send(release_message()).unwrap();
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    let collector = tokio::spawn(async move {
+        let mut texts = Vec::new();
+        while let Some(msg) = outbound_rx.recv().await {
+            if let Some(agent_message::Body::TranscriptEvent(ev)) = msg.body
+                && let Some(EventKind::AgentMessageChunk(chunk)) = ev.kind
+                && let Some(df_proto::transcript::v1::ContentBlock {
+                    kind: Some(df_proto::transcript::v1::content_block::Kind::Text(t)),
+                    ..
+                }) = chunk.content
+            {
+                texts.push(t.text);
+            }
+        }
+        texts
+    });
+    let params = RunDriverParams {
+        assign,
+        credentials: None,
+        initial_prompts,
+        repo_dir: repo_dir.clone(),
+        home_dir,
+        runtime_dir,
+        hooks_path,
+        mcp_command: mcp_bin,
+        runtime_sock_path: temp.path().join("runtime.sock"),
+        git: Git::new(&repo_dir).allow_protocols(["file", "https"]),
+        outbox,
+        inbound_rx,
+        outbound_tx,
+        git_credentials: None,
+        cancel_requested: false,
+    };
+    run_session(params)
+        .await
+        .expect("run_session should succeed");
+
+    assert_eq!(collector.await.unwrap(), ["new answer"]);
+}

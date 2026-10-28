@@ -120,7 +120,7 @@ pub fn build_agent(
         .on_receive_request(
             async move |req: LoadSessionRequest,
                         responder: Responder<LoadSessionResponse>,
-                        _cx: ConnectionTo<Client>| {
+                        cx: ConnectionTo<Client>| {
                 let session_id_str = req.session_id.to_string();
                 let mut st = state_load.lock().await;
 
@@ -141,6 +141,18 @@ pub fn build_agent(
                         mcp_servers: req.mcp_servers,
                     },
                 );
+
+                // Like real adapters, replay the history before answering the load. The script
+                // has no recording of it, so the `Say` steps of the first-run turns stand in.
+                for step in st.script.sessions.new.iter().flat_map(|turn| &turn.steps) {
+                    if let Step::Say(text) = step {
+                        let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text.clone())));
+                        let _ = cx.send_notification(SessionNotification::new(
+                            req.session_id.clone(),
+                            SessionUpdate::AgentMessageChunk(chunk),
+                        ));
+                    }
+                }
 
                 responder.respond(LoadSessionResponse::new())
             },

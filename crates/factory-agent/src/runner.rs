@@ -855,12 +855,19 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let outbound_tx_acp = params.outbound_tx.clone();
     let translator_mutex = Arc::new(Mutex::new(TranscriptTranslator::new("")));
     let translator_notif = Arc::clone(&translator_mutex);
+    // `session/load` replays the whole conversation as updates before it answers. That history
+    // is in the transcript already, so updates are dropped until the session is set up.
+    let session_ready = Arc::new(AtomicBool::new(false));
+    let session_ready_notif = Arc::clone(&session_ready);
 
     let client = Client
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification,
                         _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
+                if !session_ready_notif.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
                 // `UsageUpdate` is context-window occupancy, not per-turn tokens, so it is ignored;
                 // per-turn usage comes from the session log.
                 let event = match notification.update {
@@ -971,6 +978,9 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
             )
             .await;
             let setup_res = setup_result?;
+            // The dispatch loop runs each handler before it routes the next message, so the
+            // replay has been dropped by the time the load response resolved.
+            session_ready.store(true, Ordering::SeqCst);
 
             let final_session_id = setup_res.session_id.clone();
             tracing::info!(session_id = %final_session_id, resumed = setup_res.is_resumed, "harness session ready");
