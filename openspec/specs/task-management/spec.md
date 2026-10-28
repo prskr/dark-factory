@@ -29,7 +29,7 @@ The task branch SHALL be `factory/task/<KEY>`, the WIP snapshot branch `factory/
 - **THEN** they are `factory/task/DF-1`, `factory/wip/DF-1` and `task-df-1`
 
 ### Requirement: Task creation queues the assignment prompt
-Creating a task SHALL store description, project, assigned persona, optional linked issue number, creator and an optional title, and SHALL queue one prompt authored by the system principal (reason `task.assigned`) containing the description, in the same transaction. When the task has no title from the user, the prompt SHALL ask the persona to set one with `set_task_title`.
+Creating a task SHALL store description, project, assigned persona, optional linked issue number, creator and an optional title, and SHALL queue one prompt authored by the system principal (reason `task.assigned`) containing the description, in the same transaction. When the task has no title from the user, the prompt SHALL ask the persona to set one with `set_task_title`, in a separate content block marked `hidden`; the description SHALL be in visible blocks.
 
 #### Scenario: Task created
 - **WHEN** a board member creates a task with description "Fix login" assigned to persona "Linus"
@@ -37,7 +37,11 @@ Creating a task SHALL store description, project, assigned persona, optional lin
 
 #### Scenario: Prompt asks for a title
 - **WHEN** a task is created without a title
-- **THEN** its assignment prompt contains the description and asks the persona to call `set_task_title`
+- **THEN** its assignment prompt contains the description in a visible block and, in a block with `hidden` set, the request to call `set_task_title`
+
+#### Scenario: Title given by a person
+- **WHEN** a task is created with a title
+- **THEN** the assignment prompt contains no hidden block
 
 ### Requirement: Queued messages
 A human SHALL be able to queue a message on any task at any time. Each message SHALL get a unique prompt id, its author and queue time, and stays undelivered until a transcript `UserMessage` event with that prompt id is persisted. If the task has an active run that is not `finalizing`, the status SHALL become `running`; otherwise it SHALL become `queued`.
