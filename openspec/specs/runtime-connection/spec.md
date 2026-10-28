@@ -22,7 +22,15 @@ On every connect the runtime SHALL send `Hello` with its version, capabilities a
 
 #### Scenario: Leftover from a crashed run
 - **WHEN** `HelloAck.run_id` differs from the stored run id
-- **THEN** the old outbox is discarded and a `Notice` with code `runtime.outbox_discarded` is emitted
+- **THEN** the old outbox is discarded; if it held unacknowledged messages, a `Notice` with code `runtime.outbox_discarded` names how many were lost
+
+#### Scenario: Fully acknowledged leftover
+- **WHEN** `HelloAck.run_id` differs from the stored run id and the old outbox holds no unacknowledged messages
+- **THEN** the old outbox is discarded without a `Notice`
+
+#### Scenario: Unreadable leftover
+- **WHEN** `HelloAck.run_id` differs from the stored run id and the old outbox cannot be read
+- **THEN** the old outbox is discarded and a `Notice` with code `runtime.outbox_discarded` says that unsent messages may have been lost
 
 ### Requirement: Durable outbox
 Every message except `Hello` SHALL get a per-run sequence number starting at 1 and SHALL be written to the on-disk outbox before sending; acknowledged messages SHALL be removed. The outbox SHALL be bounded; when full, the runtime SHALL pause the harness until acknowledgements free space.

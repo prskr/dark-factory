@@ -1058,6 +1058,103 @@ async fn test_scenario_leftover_from_crashed_run_emits_notice() {
 }
 
 #[tokio::test]
+async fn test_scenario_fully_acknowledged_leftover_is_discarded_silently() {
+    let server_name = "control-plane.darkfactory.local";
+    let pki = TestPki::generate(server_name).expect("pki");
+    let mut server =
+        MockControlPlane::start(&pki.server_cert_pem, &pki.server_key_pem, &pki.ca_cert_pem)
+            .await
+            .expect("server start");
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let tls_dir = temp_dir.path().join("tls");
+    pki.write_client_tls_dir(&tls_dir).expect("write certs");
+    let runtime_dir = temp_dir.path().join("runtime");
+
+    // Outbox of a previous run whose messages were all acknowledged
+    let outbox = {
+        let mut ob =
+            crate::outbox::Outbox::open(&runtime_dir, "run-crashed", 1024 * 1024, 64 * 1024)
+                .expect("open outbox");
+        ob.append(AgentMessage {
+            seq: 0,
+            body: Some(agent_message::Body::PhaseChanged(
+                df_proto::agent::v1::PhaseChanged {
+                    phase: df_proto::agent::v1::RunPhase::Running as i32,
+                    detail: "Crashed run left behind".to_string(),
+                },
+            )),
+        })
+        .expect("append");
+        ob.acknowledge(1).expect("acknowledge");
+        std::sync::Arc::new(tokio::sync::Mutex::new(ob))
+    };
+
+    let config = crate::config::RuntimeConfig {
+        control_plane_addr: format!("https://{}", server.addr),
+        server_name: server_name.to_string(),
+        tls_dir,
+        data_dir: temp_dir.path().join("data"),
+        run_dir: runtime_dir.clone(),
+    };
+
+    let reconnect_policy = crate::connection::ReconnectPolicy {
+        initial_delay: std::time::Duration::from_millis(20),
+        max_delay: std::time::Duration::from_millis(100),
+        backoff_factor: 1.5,
+    };
+
+    let cm = crate::connection::ConnectionManager::new(
+        config,
+        std::sync::Arc::clone(&outbox),
+        reconnect_policy,
+    );
+    let handle = cm.spawn();
+
+    // 1. Control plane receives Hello with previous_run_id = "run-crashed"
+    let hello = server.recv_agent_message().await.expect("recv hello");
+    match hello.body {
+        Some(agent_message::Body::Hello(h)) => {
+            assert_eq!(h.previous_run_id, "run-crashed");
+        }
+        other => panic!("expected Hello, got {other:?}"),
+    }
+
+    // 2. Control plane acknowledges with a new run_id
+    server
+        .send_control_message(ControlMessage {
+            ack: 0,
+            body: Some(control_message::Body::HelloAck(HelloAck {
+                run_id: "run-fresh-assignment".to_string(),
+                last_persisted_seq: 0,
+                capabilities: vec![],
+            })),
+        })
+        .await
+        .expect("send ack");
+
+    // 3. The outbox is reset to the new run without a notice. Discard and notice happen under
+    // one lock, so a new run id with an empty outbox means no notice was appended.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            {
+                let ob = outbox.lock().await;
+                if ob.run_state().run_id == "run-fresh-assignment" {
+                    assert!(ob.is_empty(), "no notice may be queued");
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("outbox was reset to the new run");
+
+    handle.shutdown();
+    server.shutdown();
+}
+
+#[tokio::test]
 async fn test_scenario_certificate_rotated() {
     let server_name = "control-plane.darkfactory.local";
     let pki = TestPki::generate(server_name).expect("pki");
@@ -8590,4 +8687,23 @@ sessions:
         .expect("run_session should succeed");
 
     assert_eq!(collector.await.unwrap(), ["new answer"]);
+}
+
+#[test]
+fn test_discarded_outbox_notice_names_the_loss_or_that_it_is_unknown() {
+    use crate::connection::discarded_outbox_notice;
+
+    assert_eq!(discarded_outbox_notice(Ok(0)), None);
+    assert_eq!(
+        discarded_outbox_notice(Ok(3)).as_deref(),
+        Some("3 unsent message(s) from the previous run were discarded")
+    );
+    // An unreadable outbox may have held unsent messages: warn without a count.
+    let unknown = discarded_outbox_notice(Err(anyhow::anyhow!("permission denied")));
+    assert!(
+        unknown
+            .as_deref()
+            .is_some_and(|m| m.contains("could not be read")),
+        "{unknown:?}"
+    );
 }

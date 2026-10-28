@@ -472,28 +472,34 @@ impl ConnectionManager {
                     tracing::warn!(
                         old_run_id = %ob.run_state().run_id,
                         new_run_id = %hello_ack.run_id,
-                        "run_id mismatch: discarding leftover outbox and emitting Notice"
+                        "run_id mismatch: discarding leftover outbox"
+                    );
+                    // Only messages the control plane never acknowledged are lost; a fully
+                    // acknowledged leftover is routine on a reused task volume.
+                    let notice = discarded_outbox_notice(
+                        ob.read_unacknowledged(0).map(|unacked| unacked.len()),
                     );
                     let _ = ob.discard(&hello_ack.run_id);
                     *self.command_filter.lock().await = CommandFilter::new();
 
-                    // Emit Notice transcript event
-                    let notice_event =
-                        crate::transcript::notice_event(df_proto::transcript::v1::Notice {
-                            level: df_proto::transcript::v1::NoticeLevel::Warning as i32,
-                            code: "runtime.outbox_discarded".to_string(),
-                            message: "Leftover outbox from previous run was discarded".to_string(),
-                        });
+                    if let Some(message) = notice {
+                        let notice_event =
+                            crate::transcript::notice_event(df_proto::transcript::v1::Notice {
+                                level: df_proto::transcript::v1::NoticeLevel::Warning as i32,
+                                code: "runtime.outbox_discarded".to_string(),
+                                message,
+                            });
 
-                    let notice_msg = AgentMessage {
-                        seq: 0,
-                        body: Some(agent_message::Body::TranscriptEvent(notice_event)),
-                    };
+                        let notice_msg = AgentMessage {
+                            seq: 0,
+                            body: Some(agent_message::Body::TranscriptEvent(notice_event)),
+                        };
 
-                    if let Ok(seq) = ob.append(notice_msg.clone()) {
-                        let mut to_send = notice_msg;
-                        to_send.seq = seq;
-                        let _ = tx_stream.send(to_send).await;
+                        if let Ok(seq) = ob.append(notice_msg.clone()) {
+                            let mut to_send = notice_msg;
+                            to_send.seq = seq;
+                            let _ = tx_stream.send(to_send).await;
+                        }
                     }
                 } else {
                     if ob.run_state().run_id.is_empty() {
@@ -650,6 +656,25 @@ impl ConnectionManager {
 
         // Shutdown while no worker was running: persist whatever is still queued
         self.drain_outbound_to_outbox(&outbound_rx_shared).await;
+    }
+}
+
+/// The notice text for a leftover outbox that is discarded, given the number of its unacknowledged
+/// messages: `None` if nothing was lost. An outbox that cannot be read may have held unsent
+/// messages, so it gets a notice without a count.
+pub(crate) fn discarded_outbox_notice(unacked: anyhow::Result<usize>) -> Option<String> {
+    match unacked {
+        Ok(0) => None,
+        Ok(n) => Some(format!(
+            "{n} unsent message(s) from the previous run were discarded"
+        )),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to read the leftover outbox before discarding it");
+            Some(
+                "The outbox of the previous run could not be read; unsent messages may have been discarded"
+                    .to_string(),
+            )
+        }
     }
 }
 
