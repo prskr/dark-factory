@@ -8,6 +8,7 @@
 //! Streams end when the session's token is due for refresh: the reconnect passes the auth
 //! middleware again, so a removed role or an ended session also ends live updates.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -16,7 +17,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use df_core::TaskId;
+use df_core::{RequestId, TaskId};
 use df_db::Notification;
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::event;
@@ -32,7 +33,7 @@ use crate::task_pages::{
     Filters, ListQuery, details_region, head_region, load_detail, pending_region, runs_region,
     task_rows,
 };
-use crate::transcript::{Change, Folder, ItemKind, render_item};
+use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
 /// Chunks of one message that arrive within this window are sent as one update.
 const COALESCE: Duration = Duration::from_millis(150);
@@ -40,7 +41,7 @@ const COALESCE: Duration = Duration::from_millis(150);
 const POLL: Duration = Duration::from_secs(5);
 /// Settling time before the task list is re-rendered after a change.
 const LIST_DEBOUNCE: Duration = Duration::from_millis(200);
-const BATCH: i64 = 500;
+pub(crate) const BATCH: i64 = 500;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct AfterQuery {
@@ -63,8 +64,13 @@ pub async fn task_events(
     let start = last_event_id(&headers).or(query.after).unwrap_or(0).max(0);
     let folder =
         Folder::new(task.persona_name.clone()).with_hidden_blocks(state.show_hidden_blocks);
+    let task_id = TaskId::from_uuid(task.id);
     let stream = DetailStream {
-        task_id: TaskId::from_uuid(task.id),
+        task_id,
+        task_key: task.key.clone(),
+        task_title: task.title.clone(),
+        requests: HashMap::new(),
+        check_requests: true,
         rx: state.notifier.subscribe(),
         state,
         start,
@@ -86,6 +92,12 @@ pub async fn task_events(
 struct DetailStream {
     state: WebState,
     task_id: TaskId,
+    task_key: String,
+    task_title: String,
+    /// Last sent markup of every request card of the task; absent until the connection sent it.
+    requests: HashMap<RequestId, String>,
+    /// Re-render the request cards at the next opportunity.
+    check_requests: bool,
     rx: broadcast::Receiver<Notification>,
     /// Events up to this id are folded silently (the client has them already).
     start: i64,
@@ -144,6 +156,11 @@ impl DetailStream {
         if self.check_regions {
             self.check_regions = false;
             partials.extend(self.changed_regions().await?);
+        }
+        // Cards are placed among the items, so wait until the fold has caught up.
+        if self.check_requests && !full {
+            self.check_requests = false;
+            partials.extend(self.changed_requests().await?);
         }
         if partials.is_empty() {
             return if full {
@@ -241,6 +258,49 @@ impl DetailStream {
         Ok(changed)
     }
 
+    /// The request cards that changed. The first send of a card by this connection removes the
+    /// card (the page may show it already) and inserts it by time, as `render_transcript` does:
+    /// before the first item it goes before ([`card_goes_before`]), else at the end. That is idempotent, so a reconnect
+    /// or a card the page raced with cannot duplicate or misplace it. It runs once the fold has
+    /// caught up with the transcript (events up to `start` are folded silently), so every
+    /// neighbour is known. Later changes morph the card in place.
+    async fn changed_requests(&mut self) -> Result<Vec<Markup>, df_db::DbError> {
+        let cards = crate::requests::task_cards(
+            &self.state,
+            self.task_id,
+            &self.task_key,
+            &self.task_title,
+        )
+        .await?;
+        let mut changed = Vec::new();
+        for card in &cards {
+            let markup = crate::requests::request_card(card, None);
+            let html = markup.0.clone();
+            let target = format!("#{}", crate::requests::card_id(card.row.id));
+            match self.requests.insert(card.row.id, html.clone()) {
+                Some(sent) if sent == html => {}
+                Some(_) => changed.push(partial(&target, "outerMorph", &markup)),
+                None => {
+                    changed.push(partial(&target, "delete", &Markup::default()));
+                    changed.push(
+                        match self
+                            .folder
+                            .items()
+                            .iter()
+                            .find(|item| card_goes_before(card.row.created_at, item.at))
+                        {
+                            Some(next) => {
+                                partial(&format!("#{}", next.dom_id), "beforebegin", &markup)
+                            }
+                            None => partial("#transcript", "beforeend", &markup),
+                        },
+                    );
+                }
+            }
+        }
+        Ok(changed)
+    }
+
     /// Waits for a notification about this task, the poll interval, or a lost connection.
     /// Returns `false` if the notifier is gone.
     async fn wait_for_change(&mut self) -> bool {
@@ -249,6 +309,7 @@ impl DetailStream {
                 Err(_) => {
                     // Safety net: a lost task notification must not leave the regions stale.
                     self.check_regions = true;
+                    self.check_requests = true;
                     return true;
                 }
                 Ok(Ok(notification)) => match notification {
@@ -264,14 +325,20 @@ impl DetailStream {
                         self.check_regions = true;
                         return true;
                     }
+                    Notification::RequestChanged { task_id, .. } if task_id == self.task_id => {
+                        self.check_requests = true;
+                        return true;
+                    }
                     Notification::Reconnected => {
                         self.check_regions = true;
+                        self.check_requests = true;
                         return true;
                     }
                     _ => {}
                 },
                 Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
                     self.check_regions = true;
+                    self.check_requests = true;
                     return true;
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => return false,

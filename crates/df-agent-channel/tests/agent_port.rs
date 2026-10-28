@@ -259,7 +259,7 @@ async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt
         assign.workspace.as_ref().expect("workspace").task_branch,
         "factory/task/DF-1"
     );
-    assert_eq!(assign.tools.len(), 5);
+    assert_eq!(assign.tools.len(), 6);
     let Some(content_block::Kind::Text(t)) = &prompt.content[0].kind else {
         anyhow::bail!("no text")
     };
@@ -662,6 +662,12 @@ async fn run_report_maps_every_outcome_to_run_state_and_task_status() -> anyhow:
             "waiting",
         ),
         (
+            WireOutcome::Blocked,
+            RunState::Succeeded,
+            RunOutcome::Blocked,
+            "blocked",
+        ),
+        (
             WireOutcome::LimitReached,
             RunState::Succeeded,
             RunOutcome::LimitReached,
@@ -805,6 +811,109 @@ async fn tool_call_and_credential_requests_are_answered_on_the_stream() -> anyho
             "{path}"
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let h = Harness::start(pool.clone()).await?;
+    let (mut runtime, bodies) = h.handshake().await?;
+    let control_message::Body::Prompt(assignment) = &bodies[3] else {
+        anyhow::bail!("no prompt")
+    };
+    // The assignment prompt is confirmed by the transcript, as the runtime does.
+    runtime.send(user_message(assignment)).await;
+    let ask = |text: &str| {
+        agent_message::Body::ToolCallRequest(ToolCallRequest {
+            call_id: uuid::Uuid::now_v7().to_string(),
+            tool_name: "ask_question".into(),
+            arguments_json: serde_json::json!({"text": text, "blocking": true}).to_string(),
+        })
+    };
+    let result_of = |msgs: Vec<df_proto::agent::v1::ControlMessage>| match msgs
+        .last()
+        .and_then(|m| m.body.clone())
+    {
+        Some(control_message::Body::ToolCallResult(r)) => Ok(r),
+        other => Err(anyhow::anyhow!("no result: {other:?}")),
+    };
+    let is_result = |m: &df_proto::agent::v1::ControlMessage| {
+        matches!(m.body, Some(control_message::Body::ToolCallResult(_)))
+    };
+
+    // First question: the run awaits input and the answer arrives as a prompt in the same run.
+    runtime.send(ask("Which database?")).await;
+    let result = result_of(runtime.recv_until(is_result).await?)?;
+    assert!(result.await_input_after_turn && !result.is_error);
+    let turn_ended = |turn: &str| {
+        agent_message::Body::TranscriptEvent(Event {
+            schema_version: 1,
+            occurred_at: None,
+            turn_id: turn.into(),
+            kind: Some(event::Kind::TurnEnded(TurnEnded::default())),
+        })
+    };
+    runtime.send(turn_ended("t1")).await;
+    runtime
+        .send(agent_message::Body::PhaseChanged(PhaseChanged {
+            phase: RunPhase::AwaitingInput as i32,
+            detail: String::new(),
+        }))
+        .await;
+    eventually(|| async { run_state(&pool, h.run_id).await == RunState::AwaitingInput }).await;
+    let first = df_db::requests::list_pending(&pool).await?.remove(0).0;
+    let peter = df_core::Principal::human(df_core::UserId::new(), "Peter");
+    df_db::requests::decide(
+        &pool,
+        &df_db::requests::ApprovalTypes::default(),
+        first.id,
+        &peter,
+        &["board-member".to_string()],
+        df_db::requests::Decision::Answer("Postgres".into()),
+    )
+    .await?;
+    let msgs = runtime
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .await?;
+    let Some(control_message::Body::Prompt(prompt)) = msgs.last().and_then(|m| m.body.clone())
+    else {
+        anyhow::bail!("no prompt");
+    };
+    assert!(format!("{:?}", prompt.content).contains("Postgres"));
+    assert_eq!(run_state(&pool, h.run_id).await, RunState::AwaitingInput);
+
+    // Second question: nobody answers; the run ends blocked and the answer starts a new run.
+    runtime
+        .send(agent_message::Body::TranscriptEvent(Event {
+            schema_version: 1,
+            occurred_at: None,
+            turn_id: "t2".into(),
+            kind: Some(event::Kind::UserMessage(UserMessage {
+                prompt_id: prompt.prompt_id.clone(),
+                author: prompt.author.clone(),
+                content: prompt.content.clone(),
+            })),
+        }))
+        .await;
+    runtime.send(ask("Which port?")).await;
+    assert!(result_of(runtime.recv_until(is_result).await?)?.await_input_after_turn);
+    runtime.send(turn_ended("t2")).await;
+    let seq = runtime.send(run_report(WireOutcome::Blocked)).await;
+    runtime.recv_until(|m| m.ack == seq).await?;
+    assert_eq!(task_status(&pool, &h).await, "blocked");
+    let second = df_db::requests::list_pending(&pool).await?.remove(0).0;
+    df_db::requests::decide(
+        &pool,
+        &df_db::requests::ApprovalTypes::default(),
+        second.id,
+        &peter,
+        &[],
+        df_db::requests::Decision::Answer("5432".into()),
+    )
+    .await?;
+    assert_eq!(task_status(&pool, &h).await, "queued");
     Ok(())
 }
 

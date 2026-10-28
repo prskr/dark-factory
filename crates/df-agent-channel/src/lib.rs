@@ -59,4 +59,7 @@ pub struct ChannelContext {
     pub secrets: Arc<dyn SecretStore>,
     pub config: Arc<ChannelConfig>,
     pub metrics: Arc<metrics::Metrics>,
+    /// The approval types of this instance, shared with the web UI. Empty until a change adds
+    /// types; the tools that raise approvals (`request_approval`) resolve them here.
+    pub approval_types: df_db::requests::ApprovalTypes,
 }

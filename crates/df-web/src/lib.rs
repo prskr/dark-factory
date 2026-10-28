@@ -10,6 +10,7 @@ pub mod components;
 mod config_pages;
 pub mod egress;
 pub mod layout;
+mod requests;
 mod responses;
 mod sse;
 mod task_pages;
@@ -54,6 +55,8 @@ pub struct WebState {
     pub services: Option<Arc<dyn egress::ServiceLookup>>,
     /// Show transcript content blocks marked `hidden` (`web.showHiddenBlocks`).
     pub show_hidden_blocks: bool,
+    /// The approval types of this instance; they define what a request asks and does.
+    pub approval_types: df_db::requests::ApprovalTypes,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.
@@ -84,6 +87,7 @@ async fn readyz(State(pool): State<PgPool>) -> (StatusCode, &'static str) {
 pub fn router(state: WebState) -> Router {
     let pages = Router::new()
         .merge(task_pages::routes())
+        .merge(requests::routes())
         .merge(config_pages::routes())
         .merge(egress::routes())
         .layer(middleware::from_fn_with_state(

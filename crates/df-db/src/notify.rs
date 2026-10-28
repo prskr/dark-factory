@@ -6,11 +6,12 @@
 //! - `transcript_event` `{task_id, id}`
 //! - `task_message_queued` `{task_id}`
 //! - `task_message_changed` `{task_id}` (a queued message was edited or removed)
+//! - `request_changed` `{task_id, request_id}`
 //! - `egress_policy` `{}`
 
 use std::time::Duration;
 
-use df_core::{RunId, TaskId};
+use df_core::{RequestId, RunId, TaskId};
 use serde::{Deserialize, Serialize};
 use sqlx::PgExecutor;
 use sqlx::postgres::{PgListener, PgPool};
@@ -25,6 +26,7 @@ pub const CHANNEL_RUN_CHANGED: &str = "run_changed";
 pub const CHANNEL_TRANSCRIPT_EVENT: &str = "transcript_event";
 pub const CHANNEL_TASK_MESSAGE_QUEUED: &str = "task_message_queued";
 pub const CHANNEL_TASK_MESSAGE_CHANGED: &str = "task_message_changed";
+pub const CHANNEL_REQUEST_CHANGED: &str = "request_changed";
 pub const CHANNEL_EGRESS_POLICY: &str = "egress_policy";
 
 pub const ALL_CHANNELS: &[&str] = &[
@@ -33,6 +35,7 @@ pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_TRANSCRIPT_EVENT,
     CHANNEL_TASK_MESSAGE_QUEUED,
     CHANNEL_TASK_MESSAGE_CHANGED,
+    CHANNEL_REQUEST_CHANGED,
     CHANNEL_EGRESS_POLICY,
 ];
 
@@ -55,6 +58,11 @@ pub enum Notification {
     },
     TaskMessageChanged {
         task_id: TaskId,
+    },
+    /// A request of the task was raised, decided or closed.
+    RequestChanged {
+        task_id: TaskId,
+        request_id: RequestId,
     },
     EgressPolicy,
     /// Emitted after the listener recovers from a connection loss so subscribers
@@ -80,6 +88,12 @@ struct TranscriptEventPayload {
 }
 
 #[derive(Serialize, Deserialize)]
+struct RequestChangedPayload {
+    task_id: TaskId,
+    request_id: RequestId,
+}
+
+#[derive(Serialize, Deserialize)]
 struct EmptyPayload {}
 
 impl Notification {
@@ -92,6 +106,7 @@ impl Notification {
             Self::TranscriptEvent { .. } => Some(CHANNEL_TRANSCRIPT_EVENT),
             Self::TaskMessageQueued { .. } => Some(CHANNEL_TASK_MESSAGE_QUEUED),
             Self::TaskMessageChanged { .. } => Some(CHANNEL_TASK_MESSAGE_CHANGED),
+            Self::RequestChanged { .. } => Some(CHANNEL_REQUEST_CHANGED),
             Self::EgressPolicy => Some(CHANNEL_EGRESS_POLICY),
             Self::Reconnected => None,
         }
@@ -111,6 +126,13 @@ impl Notification {
             Self::TranscriptEvent { task_id, id } => {
                 serde_json::to_string(&TranscriptEventPayload { task_id, id })
             }
+            Self::RequestChanged {
+                task_id,
+                request_id,
+            } => serde_json::to_string(&RequestChangedPayload {
+                task_id,
+                request_id,
+            }),
             Self::EgressPolicy => serde_json::to_string(&EmptyPayload {}),
             Self::Reconnected => Err(serde::ser::Error::custom(
                 "Notification::Reconnected is local-only and has no wire payload",
@@ -149,6 +171,13 @@ impl Notification {
             CHANNEL_TASK_MESSAGE_CHANGED => {
                 let p: TaskIdPayload = serde_json::from_str(payload)?;
                 Ok(Self::TaskMessageChanged { task_id: p.task_id })
+            }
+            CHANNEL_REQUEST_CHANGED => {
+                let p: RequestChangedPayload = serde_json::from_str(payload)?;
+                Ok(Self::RequestChanged {
+                    task_id: p.task_id,
+                    request_id: p.request_id,
+                })
             }
             CHANNEL_EGRESS_POLICY => {
                 let _: EmptyPayload = serde_json::from_str(payload)?;
@@ -312,6 +341,10 @@ mod tests {
             Notification::TranscriptEvent { task_id, id: 42 },
             Notification::TaskMessageQueued { task_id },
             Notification::TaskMessageChanged { task_id },
+            Notification::RequestChanged {
+                task_id,
+                request_id: RequestId::new(),
+            },
             Notification::EgressPolicy,
         ];
 

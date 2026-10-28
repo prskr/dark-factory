@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanitize_title};
+use df_db::requests::{Raise, RequestError, close_pending_for_task, raise_question};
 use df_db::{NewAuditEntry, Notification, publish, set_task_title, write_audit_entry};
 use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
@@ -31,6 +32,8 @@ struct Outcome {
     is_error: bool,
     text: String,
     end_run_after_turn: bool,
+    await_input_after_turn: bool,
+    structured: Option<Value>,
 }
 
 impl Outcome {
@@ -39,6 +42,8 @@ impl Outcome {
             is_error: false,
             text: text.into(),
             end_run_after_turn: false,
+            await_input_after_turn: false,
+            structured: None,
         }
     }
 
@@ -47,6 +52,8 @@ impl Outcome {
             is_error: true,
             text: text.into(),
             end_run_after_turn: false,
+            await_input_after_turn: false,
+            structured: None,
         }
     }
 }
@@ -243,8 +250,13 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
             })),
             hidden: false,
         }],
-        structured_content_json: String::new(),
+        structured_content_json: outcome
+            .structured
+            .as_ref()
+            .map(Value::to_string)
+            .unwrap_or_default(),
         end_run_after_turn: outcome.end_run_after_turn,
+        await_input_after_turn: outcome.await_input_after_turn,
     }
 }
 
@@ -339,12 +351,78 @@ async fn run_handler(
             .bind(text("summary").unwrap_or_default())
             .execute(&mut *tx)
             .await?;
+            close_pending_for_task(
+                &mut tx,
+                task_id,
+                "task-completed",
+                &Principal::agent(
+                    rc.persona.id,
+                    rc.persona.name.clone(),
+                    Some(rc.run.id),
+                    task_id,
+                ),
+            )
+            .await?;
             publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
             tx.commit().await?;
             Ok(Outcome {
-                is_error: false,
-                text: "Task completion recorded. The run ends after this turn.".to_string(),
                 end_run_after_turn: true,
+                ..Outcome::ok("Task completion recorded. The run ends after this turn.")
+            })
+        }
+        "ask_question" => {
+            let answers: Vec<String> = args
+                .get("suggested_answers")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let blocking = args
+                .get("blocking")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let actor = Principal::agent(
+                rc.persona.id,
+                rc.persona.name.clone(),
+                Some(rc.run.id),
+                task_id,
+            );
+            let from = Raise {
+                task_id,
+                run_id: Some(rc.run.id),
+                actor: &actor,
+                blocking,
+            };
+            let raised =
+                raise_question(&ctx.pool, from, &text("text").unwrap_or_default(), &answers).await;
+            Ok(match raised {
+                Ok((request, _)) => Outcome {
+                    await_input_after_turn: blocking,
+                    structured: Some(
+                        serde_json::json!({ "id": request.id, "state": request.state.as_str() }),
+                    ),
+                    ..Outcome::ok(if blocking {
+                        format!(
+                            "Question {} raised. End your turn now; the answer arrives as a message and the run waits for it for a limited time.",
+                            request.id
+                        )
+                    } else {
+                        format!(
+                            "Question {} raised. Continue your work; the answer arrives later as a message.",
+                            request.id
+                        )
+                    })
+                },
+                Err(
+                    e @ (RequestError::Invalid(_)
+                    | RequestError::TooManyPending
+                    | RequestError::UnknownType(_)),
+                ) => Outcome::error(e.to_string()),
+                Err(e) => return Err(e.into()),
             })
         }
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
@@ -402,7 +480,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 5);
+        assert_eq!(VALIDATORS.len(), 6);
     }
 
     #[tokio::test]
@@ -851,5 +929,92 @@ mod tests {
             !ok.is_error,
             "the run's tools keep working after a forge error"
         );
+    }
+
+    async fn pending_requests(pool: &PgPool) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM agent_requests WHERE state = 'pending'")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn non_blocking_question_returns_its_id_and_does_not_pause_the_run() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call(
+                "ask_question",
+                serde_json::json!({"text": "Should I also update the docs?", "suggested_answers": ["yes", "no"]}),
+            ),
+        )
+        .await;
+        assert!(!res.is_error, "{}", message(&res));
+        assert!(!res.await_input_after_turn && !res.end_run_after_turn);
+        let structured: Value = serde_json::from_str(&res.structured_content_json).unwrap();
+        assert_eq!(structured["state"], "pending");
+        assert!(structured["id"].is_string());
+        assert_eq!(pending_requests(&pool).await, 1);
+    }
+
+    #[tokio::test]
+    async fn blocking_question_awaits_input_after_the_turn() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call(
+                "ask_question",
+                serde_json::json!({"text": "Which?", "blocking": true}),
+            ),
+        )
+        .await;
+        assert!(res.await_input_after_turn);
+        assert!(!res.end_run_after_turn);
+    }
+
+    #[tokio::test]
+    async fn too_many_questions_is_an_error_the_agent_can_read() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        for i in 0..21 {
+            let res = execute(
+                &env.ctx,
+                &rc,
+                call("ask_question", serde_json::json!({"text": format!("q{i}")})),
+            )
+            .await;
+            assert_eq!(res.is_error, i == 20, "{}", message(&res));
+            if res.is_error {
+                assert!(message(&res).contains("too many pending requests"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn completing_the_task_closes_its_pending_questions() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        execute(
+            &env.ctx,
+            &rc,
+            call("ask_question", serde_json::json!({"text": "Which?"})),
+        )
+        .await;
+        execute(
+            &env.ctx,
+            &rc,
+            call("complete_task", serde_json::json!({"summary": "Done."})),
+        )
+        .await;
+        assert_eq!(pending_requests(&pool).await, 0);
+        let reason: String = sqlx::query_scalar("SELECT close_reason FROM agent_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(reason, "task-completed");
     }
 }

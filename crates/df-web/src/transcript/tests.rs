@@ -47,7 +47,7 @@ fn fold(events: &[StoredEvent]) -> Folder {
 }
 
 fn render_all(folder: &Folder) -> String {
-    render_transcript(folder.items())
+    render_transcript(folder.items(), &[])
         .into_string()
         .replace("><", ">\n<")
 }
@@ -457,4 +457,11 @@ fn message_ids_restart_per_run_and_stay_separate_items() {
     assert_eq!(texts, ["first", "second"]);
     let ids: std::collections::HashSet<_> = folder.items().iter().map(|i| &i.dom_id).collect();
     assert_eq!(ids.len(), folder.items().len(), "dom ids must be unique");
+}
+
+#[test]
+fn a_card_goes_before_an_item_recorded_at_the_same_time() {
+    assert!(card_goes_before(at(5), at(5)));
+    assert!(card_goes_before(at(5), at(6)));
+    assert!(!card_goes_before(at(6), at(5)));
 }

@@ -1,0 +1,179 @@
+{
+  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question. The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
+  "version": 2,
+  "tools": [
+    {
+      "name": "update_pull_request",
+      "title": "Update pull request",
+      "description": "Change the title and/or description of this task's pull request. You don't open pull requests yourself: a draft pull request is opened automatically after your first commits are pushed (the runtime pushes after every turn that produced new commits). If it doesn't exist yet, the values you set are stored and used when it is opened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "New title, without any draft or WIP marker."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "New description in Markdown. Replaces the current description."
+          }
+        },
+        "minProperties": 1,
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "comment_on_issue",
+      "title": "Comment on issue",
+      "description": "Add a comment to the issue linked to this task, e.g. to record findings, decisions or open questions for humans and for later tasks on the same issue. Fails if the task has no linked issue. Comments are public to everyone with access to the issue; never include secrets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "description": "Comment text in Markdown."
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "report_progress",
+      "title": "Report progress",
+      "description": "Set a short status line for this task, shown to humans in Dark Factory and mirrored to the linked issue according to project settings. Use it at meaningful milestones (e.g. 'reproduced the bug', 'tests pass'), not after every step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "One or two sentences, plain text."
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "set_task_title",
+      "title": "Set task title",
+      "description": "Give this task a short title (at most 80 characters, plain text) that says what it is about. Call it once, at the start. If a person or an earlier call already set a title, the call changes nothing and says so.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plain text, at most 80 characters; line breaks become spaces."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "complete_task",
+      "title": "Complete task",
+      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: ask it with ask_question instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "What was done and anything reviewers should know, in Markdown."
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ask_question",
+      "title": "Ask a question",
+      "description": "Ask the humans of this task a question. Use blocking=false when you can continue without the answer: the answer arrives later as a message. Use blocking=true only when you cannot make progress without it: your turn then ends and the run waits for the answer for a limited time (about 10 minutes); after that the run ends as blocked and the answer starts a new run. Offer suggested_answers when the choice is among a few options. Asking the same question again while it is pending returns the existing question.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "The question in Markdown, self-contained."
+          },
+          "suggested_answers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "maxItems": 5,
+            "description": "Up to 5 short answers a human can pick with one tap."
+          },
+          "blocking": {
+            "type": "boolean",
+            "default": false,
+            "description": "True if you cannot continue without the answer."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

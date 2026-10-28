@@ -99,6 +99,10 @@ define_id!(
     ToolCallId
 );
 define_id!(
+    /// Identifier for an agent request (`agent_requests.id`).
+    RequestId
+);
+define_id!(
     /// Identifier for an egress allowlist entry (`egress_allowlist.id`).
     EgressEntryId
 );

@@ -501,19 +501,43 @@ fn notice_level(level: i32) -> String {
 }
 
 /// Renders Markdown without raw HTML: markup in the source is escaped, unsafe link schemes are
-/// dropped.
+/// dropped. The text is untrusted, so the browser must not fetch anything by itself: images
+/// become plain links and every link carries `rel="noopener noreferrer nofollow"`.
 pub fn markdown(source: &str) -> Markup {
     let mut options = comrak::Options::default();
     options.render.escape = true;
     options.render.r#unsafe = false;
-    PreEscaped(comrak::markdown_to_html(source, &options))
+    let arena = comrak::Arena::new();
+    let root = comrak::parse_document(&arena, source, &options);
+    for node in root.descendants() {
+        let mut data = node.data.borrow_mut();
+        if let comrak::nodes::NodeValue::Image(link) = &data.value {
+            data.value = comrak::nodes::NodeValue::Link(link.clone());
+        }
+    }
+    let mut html = String::new();
+    // Formatting into a `String` cannot fail.
+    let _ = comrak::format_html(root, &options, &mut html);
+    PreEscaped(html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href="))
 }
 
-/// Renders the transcript container with all `items`.
-pub fn render_transcript(items: &[Item]) -> Markup {
+/// Whether a request card raised at `card_at` goes before an item recorded at `item_at`; at the
+/// same time the card goes first. Page and stream place cards with this one rule.
+pub(crate) fn card_goes_before(card_at: DateTime<Utc>, item_at: DateTime<Utc>) -> bool {
+    card_at <= item_at
+}
+
+/// Renders the transcript container with all `items`. `cards` (a time and the markup) are
+/// merged in by time (see [`card_goes_before`]).
+pub fn render_transcript(items: &[Item], cards: &[(DateTime<Utc>, Markup)]) -> Markup {
+    let mut cards = cards.iter().peekable();
     html! {
         div id="transcript" class="flex min-w-0 flex-col gap-3" {
-            @for item in items { (render_item(item)) }
+            @for item in items {
+                @while let Some((_, card)) = cards.next_if(|(at, _)| card_goes_before(*at, item.at)) { (card) }
+                (render_item(item))
+            }
+            @for (_, card) in cards { (card) }
         }
     }
 }
@@ -591,6 +615,23 @@ fn diff_text(old: Option<&str>, new: &str) -> String {
         .map(|l| format!("-{l}\n"));
     let added = new.lines().map(|l| format!("+{l}\n"));
     removed.chain(added).collect()
+}
+
+#[cfg(test)]
+impl Item {
+    /// A completed agent message, for tests of the layout around items.
+    pub(crate) fn test_agent(id: &str, at: DateTime<Utc>) -> Self {
+        Self {
+            dom_id: id.to_string(),
+            turn_id: String::new(),
+            kind: ItemKind::Agent {
+                text: "x".to_string(),
+                complete: true,
+            },
+            author: String::new(),
+            at,
+        }
+    }
 }
 
 #[cfg(test)]

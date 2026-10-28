@@ -396,6 +396,7 @@ impl Env {
             secrets: Arc::new(secrets.clone()),
             config: Arc::new(ChannelConfig::default()),
             metrics: Arc::default(),
+            approval_types: df_db::requests::ApprovalTypes::default(),
         };
         Self {
             ctx,

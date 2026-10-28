@@ -600,6 +600,8 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let pending_cred_requests: Arc<Mutex<HashMap<String, oneshot::Sender<CredentialGrant>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let end_run_requested = Arc::new(AtomicBool::new(false));
+    // A blocking request of the current turn (`ToolCallResult.await_input_after_turn`).
+    let await_input_requested = Arc::new(AtomicBool::new(false));
     let cancelled = Arc::new(AtomicBool::new(params.cancel_requested));
     let (cancel_broadcast_tx, cancel_broadcast_rx) = broadcast::channel::<String>(16);
 
@@ -665,6 +667,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let released_inbound = Arc::clone(&released);
     let cancelled_inbound = Arc::clone(&cancelled);
     let end_run_inbound = Arc::clone(&end_run_requested);
+    let await_input_inbound = Arc::clone(&await_input_requested);
     let outbound_tx_inbound = params.outbound_tx.clone();
     let mut inbound_rx = params.inbound_rx;
 
@@ -687,6 +690,9 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                 Some(control_message::Body::ToolCallResult(res)) => {
                     if res.end_run_after_turn {
                         end_run_inbound.store(true, Ordering::SeqCst);
+                    }
+                    if res.await_input_after_turn {
+                        await_input_inbound.store(true, Ordering::SeqCst);
                     }
                     if let Some(tx) = pending_calls_inbound.lock().await.remove(&res.call_id) {
                         let _ = tx.send(res);
@@ -1035,6 +1041,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                     break;
                 }
 
+                await_input_requested.store(false, Ordering::SeqCst);
                 turn_index += 1;
                 let turn_id = format!("turn_{}", turn_index);
                 translator_mutex.lock().await.set_turn_id(&turn_id);
@@ -1277,6 +1284,11 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
                             IdleWake::Cancel => {
                                 final_outcome = RunOutcome::Cancelled;
                                 final_detail = "Run cancelled by control plane".to_string();
+                            }
+                            IdleWake::Release if await_input_requested.load(Ordering::SeqCst) => {
+                                final_outcome = RunOutcome::Blocked;
+                                final_detail =
+                                    "Nobody answered the blocking question in time".to_string();
                             }
                             IdleWake::Release => {
                                 final_outcome = RunOutcome::EndTurn;
