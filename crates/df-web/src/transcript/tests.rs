@@ -136,7 +136,7 @@ fn chunks_of_one_message_share_one_element_that_grows() {
     assert_eq!(folder.items().len(), 2);
     let html = render_item(&folder.items()[1]).into_string();
     assert!(
-        html.contains(r#"id="msg-m1""#) && html.contains("Hi there"),
+        html.contains(r#"id="msg-r1-m1""#) && html.contains("Hi there"),
         "{html}"
     );
     assert_eq!(folder.last_id(), 2);
@@ -262,7 +262,7 @@ fn undecodable_events_render_a_placeholder() {
 #[test]
 fn runtime_ids_cannot_break_out_of_dom_ids() {
     let folder = fold(&[chunk(1, "t", "a b\"#<", "x")]);
-    assert_eq!(folder.items()[1].dom_id, "msg-a_b___");
+    assert_eq!(folder.items()[1].dom_id, "msg-r1-a_b___");
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn each_run_starts_with_a_divider_before_its_first_item() {
     let second = folder.apply(&in_run(4, 2, chunk(4, "t2", "m2", "two")));
 
     let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
-    assert_eq!(ids, ["run-1", "msg-m1", "run-2", "msg-m2"]);
+    assert_eq!(ids, ["run-1", "msg-r1-m1", "run-2", "msg-r2-m2"]);
     assert_eq!(
         second
             .iter()
@@ -420,7 +420,7 @@ fn agent_writes_twice_with_a_collapsed_tool_row_between_and_css_that_hides_the_f
     folder.apply(&chunk(3, "t", "m2", "second"));
 
     let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
-    assert_eq!(ids, ["run-1", "msg-m1", "ev-2", "msg-m2"]);
+    assert_eq!(ids, ["run-1", "msg-r1-m1", "ev-2", "msg-r1-m2"]);
     let tool = render_item(&folder.items()[2]).into_string();
     assert!(
         tool.starts_with("<details ") && !tool.contains(" open"),
@@ -433,4 +433,28 @@ fn agent_writes_twice_with_a_collapsed_tool_row_between_and_css_that_hides_the_f
     // The stylesheet hides an avatar when the next item is by the same author.
     let css = crate::assets::app_css().expect("app.css is embedded");
     assert!(css.contains(":has(+[data-author=agent]) .avatar"), "{css}");
+}
+
+#[test]
+fn message_ids_restart_per_run_and_stay_separate_items() {
+    let in_run = |id, run, text| {
+        let event = json!({"schemaVersion": 1, "turnId": "turn_1", "agentMessageChunk": {"messageId": "msg-1", "content": {"text": {"text": text}}}});
+        stored_in_run(
+            id,
+            run,
+            Some(serde_json::from_value(event).expect("fixture decodes")),
+        )
+    };
+    let folder = fold(&[in_run(1, 1, "first"), in_run(2, 2, "second")]);
+    let texts: Vec<_> = folder
+        .items()
+        .iter()
+        .filter_map(|i| match &i.kind {
+            ItemKind::Agent { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["first", "second"]);
+    let ids: std::collections::HashSet<_> = folder.items().iter().map(|i| &i.dom_id).collect();
+    assert_eq!(ids.len(), folder.items().len(), "dom ids must be unique");
 }

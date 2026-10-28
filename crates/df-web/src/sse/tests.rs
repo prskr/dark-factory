@@ -135,7 +135,7 @@ async fn replay_after_an_id_has_no_gaps_and_no_duplicates() {
     assert!(
         frame
             .data
-            .contains(r##"hx-target="#msg-m1" hx-swap="outerMorph""##),
+            .contains(r##"hx-target="#msg-r1-m1" hx-swap="outerMorph""##),
         "{}",
         frame.data
     );
@@ -155,9 +155,9 @@ async fn replay_after_an_id_has_no_gaps_and_no_duplicates() {
     let e6 = f.add(6, "t2", chunk("m2", "C")).await;
     let next = sse.next().await;
     assert_eq!(next.id.as_deref(), Some(e6.to_string().as_str()));
-    assert_eq!(next.data.matches("id=\"msg-m2\"").count(), 1);
+    assert_eq!(next.data.matches("id=\"msg-r1-m2\"").count(), 1);
     assert!(
-        !next.data.contains("id=\"msg-m1\"") && !next.data.contains(&format!("id=\"ev-{e4}\""))
+        !next.data.contains("id=\"msg-r1-m1\"") && !next.data.contains(&format!("id=\"ev-{e4}\""))
     );
 }
 
@@ -181,7 +181,7 @@ async fn last_event_id_header_takes_precedence_over_the_query() {
     let frame = sse.next().await;
     assert_eq!(frame.id.as_deref(), Some(e2.to_string().as_str()));
     assert!(frame.data.contains(&format!("id=\"ev-{e2}\"")));
-    assert!(!frame.data.contains("id=\"msg-m1\""), "{}", frame.data);
+    assert!(!frame.data.contains("id=\"msg-r1-m1\""), "{}", frame.data);
 }
 
 #[tokio::test]
@@ -209,7 +209,7 @@ async fn chunks_of_one_message_are_coalesced_into_few_updates() {
     }
     let mut sse = f.events("/tasks/DF-1/events?after=0").await;
     let frame = sse.next().await;
-    assert_eq!(frame.data.matches("id=\"msg-m1\"").count(), 1);
+    assert_eq!(frame.data.matches("id=\"msg-r1-m1\"").count(), 1);
     assert!(frame.data.contains("w1 w2 w3") && frame.data.contains("w30 "));
 
     // Chunks that arrive while connected are merged into few morphs of the same element.
@@ -223,7 +223,7 @@ async fn chunks_of_one_message_are_coalesced_into_few_updates() {
         assert!(
             frame
                 .data
-                .contains(r##"hx-target="#msg-m1" hx-swap="outerMorph""##),
+                .contains(r##"hx-target="#msg-r1-m1" hx-swap="outerMorph""##),
             "{}",
             frame.data
         );
@@ -251,7 +251,7 @@ async fn message_is_rerendered_as_markdown_when_the_turn_ends() {
     assert!(
         second
             .data
-            .contains(r##"hx-target="#msg-m1" hx-swap="outerMorph""##)
+            .contains(r##"hx-target="#msg-r1-m1" hx-swap="outerMorph""##)
     );
     assert!(
         second.data.contains("<strong>bold</strong>"),

@@ -19,11 +19,11 @@ expression: render_all(&fold(&every_kind()))
 </div>
 <span class="avatar inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">P</span>
 </div>
-<details id="thought-th1" data-author="agent" class="ml-11 text-faint">
+<details id="thought-r1-th1" data-author="agent" class="ml-11 text-faint">
 <summary class="flex min-h-11 cursor-pointer items-center text-sm lg:min-h-8">Thinking</summary>
 <div class="whitespace-pre-wrap break-words text-sm">hmm</div>
 </details>
-<div id="msg-m1" data-author="agent" class="flex items-end gap-2">
+<div id="msg-r1-m1" data-author="agent" class="flex items-end gap-2">
 <span class="avatar inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">A</span>
 <div class="min-w-0 max-w-[85%] md:max-w-[75%]">
 <div class="break-words rounded-2xl rounded-bl-md bg-bubble-agent px-3 py-2 text-on-bubble-agent">
