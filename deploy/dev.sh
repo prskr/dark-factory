@@ -39,7 +39,8 @@ push_dockerfile_image() {
   case "$BUILDER" in
   buildah)
     buildah manifest rm "$ref" >/dev/null 2>&1 || true # --manifest appends to an existing list
-    buildah build --platform "$PLATFORMS" --manifest "$ref" "$IMAGES_DIR/$name" >&2
+    # --layers: Buildah caches no build steps by default, so every deploy reran npm/apt (emulated for the foreign arch)
+    buildah build --layers --platform "$PLATFORMS" --manifest "$ref" "$IMAGES_DIR/$name" >&2
     # shellcheck disable=SC2086
     buildah manifest push --all ${DARK_FACTORY_BUILDAH_PUSH_ARGS:-} --digestfile "$digestfile" "$ref" "docker://$ref" >&2
     ;;
