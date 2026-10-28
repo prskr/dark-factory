@@ -577,25 +577,24 @@ fn run_card(run: &RunView, persona_model: Option<&str>) -> Markup {
         @if run.usage.is_empty() {
             p class="text-xs text-muted" { (persona_model.unwrap_or("default model")) " · no token usage recorded" }
         }
-        @if !run.usage.is_empty() {
-            table class="w-full table-fixed border-collapse font-mono text-xs text-muted" {
-                thead { tr class="text-faint" {
-                    th scope="col" class="text-right font-medium" { "in" }
-                    th scope="col" class="text-right font-medium" { "out" }
-                    th scope="col" class="text-right font-medium" title="read / write" { "cache" }
-                } }
-                tbody {
-                    @for u in &run.usage {
-                        // The model on its own line, then its counts; the exact values are the titles.
-                        tr { td colspan="3" class="truncate pt-1 text-left" title=(u.model_id) { (u.model_id) } }
-                        tr {
-                            td class="text-right" title=(u.input_tokens) { (compact_count(u.input_tokens)) }
-                            td class="text-right" title=(u.output_tokens) { (compact_count(u.output_tokens)) }
-                            td class="text-right" title={(u.cache_read_tokens) " / " (u.cache_write_tokens)} {
-                                (compact_count(u.cache_read_tokens)) " / " (compact_count(u.cache_write_tokens))
-                            }
+        // Per model: the name on its own line, then its counts under the column header; the
+        // exact values are the titles.
+        @for u in &run.usage {
+            div {
+                p class="truncate pt-1 font-mono text-xs text-muted" title=(u.model_id) { (u.model_id) }
+                table class="w-full table-fixed border-collapse font-mono text-xs text-muted" {
+                    thead { tr class="text-faint" {
+                        th scope="col" class="text-center font-medium" { "in" }
+                        th scope="col" class="text-center font-medium" { "out" }
+                        th scope="col" class="text-center font-medium" title="read / write" { "cache" }
+                    } }
+                    tbody { tr {
+                        td class="text-center" title=(u.input_tokens) { (compact_count(u.input_tokens)) }
+                        td class="text-center" title=(u.output_tokens) { (compact_count(u.output_tokens)) }
+                        td class="text-center" title={(u.cache_read_tokens) " / " (u.cache_write_tokens)} {
+                            (compact_count(u.cache_read_tokens)) " / " (compact_count(u.cache_write_tokens))
                         }
-                    }
+                    } }
                 }
             }
         }
@@ -1097,6 +1096,12 @@ mod tests {
                 && html.contains("title=\"anthropic/claude-sonnet-5-5-20261001\""),
             "{html}"
         );
+        // The model comes before the column header, not between header and numbers.
+        let model = html
+            .find(">anthropic/claude-sonnet-5-5-20261001<")
+            .expect("model");
+        let header = html.find(">in<").expect("header");
+        assert!(model < header, "{html}");
         for cell in [
             "title=\"9437\">9.4k<",
             "title=\"182345\">182k<",
