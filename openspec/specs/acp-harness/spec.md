@@ -65,7 +65,7 @@ The runtime SHALL translate ACP updates into transcript v1 events: agent text an
 - **THEN** usage is read from the Claude Code session log for that turn
 
 ### Requirement: Run outcome
-After each turn the runtime SHALL continue with queued prompts if any; otherwise it SHALL finalize with outcome: `COMPLETED` if a tool result requested ending the run; `RATE_LIMITED` (with retry time if known) if the provider rate-limited; `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit; `CANCELLED` on `Cancel`; `FAILED` if the harness crashed. Otherwise the turn ended normally: the runtime SHALL wait as described in "Idle wait after a normal turn end" and finalize with `END_TURN` unless a prompt or `Cancel` arrives.
+After each turn the runtime SHALL continue with queued prompts if any; otherwise it SHALL finalize with outcome: `COMPLETED` if a tool result requested ending the run; `RATE_LIMITED` (with retry time if known) if the provider rate-limited; `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit; `CANCELLED` on `Cancel`; `FAILED` if the harness crashed. Otherwise the turn ended normally: the runtime SHALL wait as described in "Idle wait after a normal turn end" and, unless a prompt or `Cancel` arrives, finalize on `Release` with `BLOCKED` if the last turn had a blocking request and `END_TURN` otherwise.
 
 #### Scenario: Agent asks a question in text
 - **WHEN** the turn ends normally, no prompts are queued and the control plane sends `Release`
@@ -78,6 +78,10 @@ After each turn the runtime SHALL continue with queued prompts if any; otherwise
 #### Scenario: Subscription limit
 - **WHEN** the harness reports a provider rate limit
 - **THEN** `TurnEnded.stop_reason` is `RATE_LIMITED` and the run finalizes with `RUN_OUTCOME_RATE_LIMITED`
+
+#### Scenario: Nobody answered in time
+- **WHEN** the control plane sends `Release` after the deadline of a blocking question passed without a prompt
+- **THEN** the run finalizes with `RUN_OUTCOME_BLOCKED`
 
 ### Requirement: Budgets enforced locally
 The runtime SHALL enforce `Assign.budgets` (wall clock, output tokens, turns) by cancelling the current turn and finalizing with `LIMIT_REACHED`.
@@ -104,3 +108,14 @@ After a turn that ended normally with no queued prompts, the runtime SHALL repor
 #### Scenario: Stream lost while idle
 - **WHEN** the control plane stream drops during the wait
 - **THEN** the runtime keeps waiting and reconnects as usual; the wait ends only on `Prompt`, `Cancel`, `Release` or the budget
+
+### Requirement: Awaiting input after a blocking request
+If a turn received a tool result with `await_input_after_turn` and no prompts are queued after it, the runtime SHALL wait as in "Idle wait after a normal turn end" (`iter1-keep-alive-and-review`); a `Release` then finalizes with `BLOCKED`. A prompt SHALL start the next turn (reported as `RUN_PHASE_RUNNING`); `Cancel` SHALL finalize with `CANCELLED`.
+
+#### Scenario: Answer within the window
+- **WHEN** the run awaits input and a prompt arrives after 2 minutes with the default 10-minute deadline
+- **THEN** the runtime reports `RUN_PHASE_RUNNING` and starts a turn with that prompt
+
+#### Scenario: Blocking request and completion in one turn
+- **WHEN** a turn has both a blocking request result and `end_run_after_turn`
+- **THEN** the run finalizes with `COMPLETED` without waiting
