@@ -29,7 +29,7 @@ Each group is one commit and leaves the workspace green. TDD for the xtask check
 ## 6. Hooks and CI
 
 - [x] 6.1 Add the three checks to `pre-commit` in `lefthook.yml` (design D7); verify `lefthook run pre-commit --all-files` passes
-- [x] 6.2 Add a CI step to `.github/workflows/ci.yaml` that runs the three checks through `bazel run //:cargo --` and the xtask clippy run with the rustup toolchain (design D3); verify locally with the same commands (`bazel --bazelrc=.bazelrc.agents run //:cargo -- xtask check-crates` etc.)
+- [x] 6.2 Add a CI step to `.github/workflows/ci.yaml` that runs the three checks and the xtask clippy run with the rustup toolchain (design D3, D7); verify locally with the same commands (`cargo xtask check-crates` etc.)
 
 ## 7. Documentation and agent rules
 

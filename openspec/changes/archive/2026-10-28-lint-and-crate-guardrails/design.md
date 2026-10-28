@@ -97,7 +97,7 @@ Errors list every violation at once, each with the file and the fix.
   - `check-test-names {staged_files}` (glob `*.rs`)
   - `check-crates` (glob `Cargo.toml`, `BUILD.bazel`, `MODULE.bazel`, `tests/*.rs`)
 - **pre-push:** the xtask clippy run (D3).
-- **CI:** a step in `ci.yaml` runs all three checks without arguments through `bazel run //:cargo -- xtask …`, plus the xtask clippy run with the rustup toolchain (D3).
+- **CI:** a step in `ci.yaml` runs all three checks without arguments (`cargo xtask …`) and the xtask clippy run, both with the rustup toolchain: Bazel's cargo cannot compile xtask (D3).
 
 ### D8. Documentation and agent rules
 
