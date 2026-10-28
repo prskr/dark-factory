@@ -597,23 +597,25 @@ sessions:
     client_res.expect("client panic").expect("client error");
 
     let received = updates.lock().await.clone();
-    assert_eq!(received.len(), 2);
-
-    match &received[0] {
-        SessionUpdate::AgentMessageChunk(c) => match &c.content {
-            ContentBlock::Text(t) => assert_eq!(t.text, "Turn 1 in first run"),
-            _ => panic!("Expected text"),
-        },
-        _ => panic!("Expected AgentMessageChunk"),
-    }
-
-    match &received[1] {
-        SessionUpdate::AgentMessageChunk(c) => match &c.content {
-            ContentBlock::Text(t) => assert_eq!(t.text, "Turn 1 in second run resumed"),
-            _ => panic!("Expected text"),
-        },
-        _ => panic!("Expected AgentMessageChunk"),
-    }
+    let texts: Vec<&str> = received
+        .iter()
+        .map(|u| match u {
+            SessionUpdate::AgentMessageChunk(c) => match &c.content {
+                ContentBlock::Text(t) => t.text.as_str(),
+                _ => panic!("Expected text"),
+            },
+            _ => panic!("Expected AgentMessageChunk"),
+        })
+        .collect();
+    // The load replays the first run's turn before the resumed turn answers.
+    assert_eq!(
+        texts,
+        [
+            "Turn 1 in first run",
+            "Turn 1 in first run",
+            "Turn 1 in second run resumed"
+        ]
+    );
 }
 
 #[tokio::test]
