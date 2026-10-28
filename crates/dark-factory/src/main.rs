@@ -339,6 +339,10 @@ struct KubernetesBackend {
 
 #[async_trait::async_trait]
 impl SandboxBackend for KubernetesBackend {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "split start into startup check, wiring and spawn steps"
+    )]
     async fn start(
         self,
         cfg: &InstanceConfig,

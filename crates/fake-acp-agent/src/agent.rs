@@ -62,6 +62,10 @@ impl AgentState {
 }
 
 /// Build an ACP Agent instance wired with scripted handlers.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split build_agent into one builder per scripted handler"
+)]
 pub fn build_agent(
     state: Arc<Mutex<AgentState>>,
 ) -> Builder<

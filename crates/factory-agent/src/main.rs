@@ -23,9 +23,6 @@ pub mod workspace;
 pub mod test_harness;
 
 #[cfg(test)]
-mod idle_tests;
-
-#[cfg(test)]
 mod tests;
 
 use cli::{Cli, Command};
@@ -36,6 +33,10 @@ const ASSIGN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const HARNESS_HOOKS_PATH: &str = "/opt/factory/hooks-empty";
 
 #[tokio::main]
+#[expect(
+    clippy::too_many_lines,
+    reason = "split main into argument parsing, setup and run steps"
+)]
 async fn main() -> ExitCode {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cli = Cli::parse();

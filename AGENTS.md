@@ -138,6 +138,19 @@ Every source file should (roughly) follow this structure:
 
 `impl` blocks stay next to their type. Public items come before private helpers.
 
+Test organization:
+
+- Keep an inline `#[cfg(test)] mod tests { … }` up to about 500 lines. Beyond that, move the body to `<module>/tests.rs` and declare `#[cfg(test)] mod tests;`.
+- A test file beyond about 1,500 lines becomes a directory `tests/` with a `mod.rs` for shared fixtures and one file per topic (the module or behavior the tests exercise).
+- Name tests after the behavior they check, never after a review round or finding (`test_erase_and_expiry_drop_cached_credentials`, not `test_review_r38_…`).
+- The thresholds are guidance, not a lint.
+
+Function length:
+
+- A function has at most 100 lines (`too-many-lines-threshold` in `clippy.toml`, `clippy::too_many_lines`; comments and blank lines do not count). Cargo enables the lint through `[workspace.lints.clippy]` (plugins repeat it in their own `[lints.clippy]`), the Bazel lint run (`--config=lint`) through `clippy_flags` in `.bazelrc`.
+- Split a function that gets longer. A production function that cannot be split yet gets `#[expect(clippy::too_many_lines, reason = "…")]` naming the follow-up; use `expect`, never `allow`, so the attribute fails once the function is short enough.
+- Test modules with scenario tests opt out once at module level with `#![allow(clippy::too_many_lines, reason = "…")]` (or `#[allow]` on an inline `mod tests`), only where a test needs it.
+
 ## Traits over closures
 
 Prefer small, single-method traits over boxed closures or function pointers when a value represents a capability with a contract ("exec a command on a remote host", "persist a snapshot"). Declare the trait where it is consumed; the trait carries documentation a closure type cannot, and it is easy to fake in tests.

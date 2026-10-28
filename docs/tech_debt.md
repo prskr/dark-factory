@@ -92,7 +92,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
 | TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" state list is hard-coded in three SQL statements |
 | TD-66 | low   | `df-agent-channel` session | `start_finalizing(only_idle: bool)` takes a flag argument |
-| TD-67 | low   | `factory-agent` tests | `idle_tests.rs` rebuilds the fixture setup of `tests.rs` |
 | TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
@@ -137,7 +136,7 @@ A diverged workspace starts with `last_pushed_sha = None`. `push_after_turn` the
 
 ### TD-5 (R66). Shutdown-while-disconnected test relies on a 100 ms sleep
 
-`crates/factory-agent/src/tests.rs` (`test_review_r40_final_report_is_delivered_after_shutdown_while_disconnected`)
+`crates/factory-agent/src/tests/connection.rs` (`test_final_report_is_delivered_after_shutdown_while_disconnected`)
 
 The test sleeps 100 ms so that the manager notices the dropped stream. If the manager is still in the active session at that point, it takes the other shutdown path and the test fails. AGENTS.md: avoid timing-based tests.
 
@@ -153,7 +152,7 @@ When a tool call times out (30 min), the runner removes it from its own map, but
 
 ### TD-7 (R68). Behaviors without a test
 
-`crates/factory-agent/src/tests.rs`
+`crates/factory-agent/src/tests/`
 
 These behaviors were verified by reading the code only:
 
@@ -635,19 +634,9 @@ Swapping `#ws-detail` through the task list logs an `AbortError` in the browser 
 
 **Fix:** Split into `finalize_if_idle` and `finalize_unless_ending` around a shared lock-and-publish part.
 
-### TD-67 (S13). `idle_tests.rs` repeats the fixture setup of `tests.rs`
-
-`crates/factory-agent/src/idle_tests.rs`, `crates/factory-agent/src/tests.rs`
-
-`workspace_bin` and `start` rebuild the `target/debug/...` lookup and the `RunDriverParams` setup that `tests.rs` already has. Only `setup_test_remote_repo` is shared.
-
-**Matters when:** the fixture changes; both copies have to follow.
-
-**Fix:** One `pub(crate)` fixture builder in `tests.rs`, used by both files.
-
 ### TD-68 (S11). Keep-alive tests wait on real deadlines
 
-`crates/df-agent-channel/src/session.rs` (tests), `crates/factory-agent/src/idle_tests.rs`
+`crates/df-agent-channel/src/session/tests.rs`, `crates/factory-agent/src/tests/runner_idle.rs`
 
 The session tests use a 1 s `keepAliveSeconds` and the budget test a 3 s wall clock. `tokio::time::pause()` is not used because auto-advance would fire the idle timer during database I/O. AGENTS.md asks to avoid timing-based tests.
 
@@ -657,7 +646,7 @@ The session tests use a 1 s `keepAliveSeconds` and the budget test a 3 s wall cl
 
 ### TD-70 (S6). `hidden: false` spelled out at 48 `ContentBlock` literals
 
-`crates/` (for example `df-agent-channel/src/transcript.rs`, `df-db/src/tasks.rs`, `df-web/src/task_pages/tests.rs`, `factory-agent/src/tests.rs`)
+`crates/` (for example `df-agent-channel/src/transcript.rs`, `df-db/src/tasks.rs`, `df-web/src/task_pages/tests/`, `factory-agent/src/tests/`)
 
 Adding `ContentBlock.hidden` meant editing every hand-built block, including about six near-identical `fn text(t: &str) -> ContentBlock` test helpers.
 

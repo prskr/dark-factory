@@ -262,6 +262,10 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
 
 /// Runs the tool. Database effects use short statements and forge calls run without any open
 /// transaction.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split run_handler into database effects and forge call steps"
+)]
 async fn run_handler(
     ctx: &ChannelContext,
     rc: &RunContext,

@@ -53,6 +53,10 @@ fn config_params<'a>(
 /// - If workspace already exists: rewrite `.git/config`, fetch from remote, push unpushed commits,
 ///   fast-forward merge if remote is ahead, or detect divergence and emit notice.
 /// - Never runs `git clean`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split prepare_workspace into fresh clone and existing workspace sync paths"
+)]
 pub async fn prepare_workspace(
     git: &Git,
     repo_dir: &Path,
@@ -485,6 +489,10 @@ pub struct FinalizeParams<'a> {
 ///    verifying size cap, and force-pushing to `factory/wip/<key>`, or deletes remote WIP branch if worktree is clean.
 /// 4. Leaves agent's index, branches, and `git status` completely unchanged.
 /// 5. Assembles `RunReport`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split finalize_workspace into config rewrite, push, WIP snapshot and report steps"
+)]
 pub async fn finalize_workspace(
     git: &Git,
     params: &FinalizeParams<'_>,

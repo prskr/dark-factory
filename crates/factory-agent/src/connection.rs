@@ -337,6 +337,10 @@ impl ConnectionManager {
         true
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "split run_loop into connect, send and receive steps"
+    )]
     async fn run_loop(
         self,
         outbound_rx: mpsc::Receiver<AgentMessage>,

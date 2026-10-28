@@ -28,7 +28,7 @@ rust_test(
     # render.rs tests check the sandbox env against the runtime's configuration reference.
     compile_data = ["//crates/factory-agent:docs/configuration.md"],
     crate = ":df_k8s",
-    data = glob(["src/snapshots/*.snap"]),
+    data = glob(["src/**/snapshots/*.snap"]),
     env = {
         "INSTA_UPDATE": "no",
         "INSTA_WORKSPACE_ROOT": ".",

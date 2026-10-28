@@ -1,6 +1,11 @@
 //! The agent port end to end: a real tonic server with mTLS, a scripted runtime client, the
 //! fakes of `df-core` and a PostgreSQL database per test.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "scenario tests set up and check a whole run"
+)]
+
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;

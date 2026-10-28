@@ -350,6 +350,10 @@ pub async fn raise_approval(
 
 /// Decides a pending request (design D3). `decider` is the human, `roles` their roles for the
 /// audit entry; the caller checked `approval:decide`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split decide into validation, state update and audit steps"
+)]
 pub async fn decide(
     pool: &PgPool,
     types: &ApprovalTypes,
