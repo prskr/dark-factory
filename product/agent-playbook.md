@@ -38,6 +38,8 @@
   - Don't ask for a wider scope than the task needs; the approver decides whether it applies to the project.
   - A denied host already opens a request; add your reason to it instead of opening a second one.
 - **Blocking or not:** ask or request blocking only if you can't continue with anything else; otherwise keep working and pick up the answer when it arrives.
+  - `ask_question` with `blocking: false` (default): you continue; the answer arrives later as a message at the start of a turn. Use it for "nice to know" and for decisions you can revisit.
+  - `ask_question` with `blocking: true`: end your turn right after asking. The run waits for the answer for about 10 minutes (`runs.keepAliveSeconds`) and then ends as blocked; the answer starts a new run on the same task. Don't start work that depends on the answer.
 - **After a decision:** an approval takes effect without a restart — retry the step. A denial or an answer is final for this task; adapt the plan, don't ask again in other words. If the plan can't be completed without it, say so and complete or stop with a clear summary.
 
 ### Network and tools

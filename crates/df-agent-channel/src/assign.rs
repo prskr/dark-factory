@@ -22,7 +22,7 @@ use crate::ChannelContext;
 use crate::error::ChannelError;
 use crate::runs::RunRow;
 
-const FACTORY_TOOLS_JSON: &str = include_str!("../../../contract/mcp/factory-tools.v1.json");
+const FACTORY_TOOLS_JSON: &str = include_str!("../../../contract/mcp/factory-tools.v2.json");
 /// Upper bound of `Continuation.summary`.
 const SUMMARY_MAX_BYTES: usize = 16 * 1024;
 /// Share of the summary reserved for task title and description.
@@ -214,7 +214,7 @@ struct AnnotationsEntry {
 }
 
 static TOOL_ENTRIES: LazyLock<ToolsFile> = LazyLock::new(|| {
-    serde_json::from_str(FACTORY_TOOLS_JSON).expect("embedded factory-tools.v1.json is valid")
+    serde_json::from_str(FACTORY_TOOLS_JSON).expect("embedded factory-tools.v2.json is valid")
 });
 
 /// JSON Schema of the arguments of every factory tool, by name.
@@ -226,7 +226,7 @@ pub(crate) fn tool_input_schemas()
         .map(|t| (t.name.as_str(), &t.input_schema))
 }
 
-/// The factory tools v1 as sent in `Assign.tools`.
+/// The factory tools v2 as sent in `Assign.tools`.
 pub fn tool_descriptors() -> Vec<ToolDescriptor> {
     TOOL_ENTRIES
         .tools
@@ -522,7 +522,8 @@ mod tests {
                 "comment_on_issue",
                 "report_progress",
                 "set_task_title",
-                "complete_task"
+                "complete_task",
+                "ask_question"
             ]
         );
         let first = &tool_descriptors()[0];
@@ -582,7 +583,7 @@ mod tests {
         assert_eq!(workspace.task_branch, "factory/task/DF-1");
         assert_eq!(workspace.wip_branch, "factory/wip/DF-1");
         assert_eq!(workspace.base_branch, "main");
-        assert_eq!(assign.tools.len(), 5);
+        assert_eq!(assign.tools.len(), 6);
         assert_eq!(assign.task.expect("task").task_key, "DF-1");
         assert!(assign.continuation.is_none());
         let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {

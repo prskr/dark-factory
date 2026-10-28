@@ -5,9 +5,11 @@ use maud::{Markup, html};
 
 use super::icons::{Icon, icon, logo};
 use crate::layout::Nav;
+use crate::requests::count_badge;
 
-const SECTIONS: [(Nav, &str, &str, Icon); 6] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 7] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
+    (Nav::Requests, "/requests", "Requests", Icon::Inbox),
     (Nav::Projects, "/projects", "Projects", Icon::Projects),
     (Nav::Personas, "/personas", "Personas", Icon::Personas),
     (
@@ -75,6 +77,7 @@ pub fn rail(active: Nav, compose_href: &str) -> Markup {
                     a href=(href) aria-label=(label) title=(label) aria-current=[current.then_some("page")]
                         class={"relative flex size-11 items-center justify-center rounded-lg hover:bg-rail-hover " (if current { "bg-rail-hover text-accent before:absolute before:inset-y-2 before:-left-3.5 before:w-1 before:rounded-r-full before:bg-accent" } else { "text-rail-ink" })} {
                         (icon(glyph))
+                        @if target == Nav::Requests { (count_badge("request-count-rail", 0)) }
                     }
                 }
             }
@@ -93,6 +96,7 @@ pub fn bottom_bar(active: Nav, create: &CreateAction<'_>) -> Markup {
         nav id="mobile-menu" aria-label="Main"
             class="bottombar fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch justify-around border-t border-line bg-panel md:hidden [body[data-view=task]_&]:hidden" {
             (bar_link(active, Nav::Tasks, "/tasks", "Tasks", Icon::Tasks))
+            (bar_link(active, Nav::Requests, "/requests", "Requests", Icon::Inbox))
             div class="flex flex-1 items-center justify-center" {
                 (create_button(create, "inline-flex size-12 items-center justify-center rounded-full bg-accent text-on-accent"))
             }
@@ -106,7 +110,11 @@ fn bar_link(active: Nav, target: Nav, href: &str, label: &str, glyph: Icon) -> M
     html! {
         a href=(href) aria-current=[current.then_some("page")]
             class={"flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-xs " (if current { "text-accent-text font-medium" } else { "text-muted" })} {
-            (icon(glyph)) (label)
+            span class="relative" {
+                (icon(glyph))
+                @if target == Nav::Requests { (count_badge("request-count-bar", 0)) }
+            }
+            (label)
         }
     }
 }

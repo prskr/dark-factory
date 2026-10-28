@@ -9,6 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 df-core.workspace = true
 df-proto.workspace = true

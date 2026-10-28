@@ -12,6 +12,8 @@ pub enum Nav {
     Projects,
     Personas,
     Credentials,
+    /// Pending questions and approval requests.
+    Requests,
     /// Egress rules (desktop only).
     Allowlist,
     /// Network traffic (desktop only).
@@ -85,7 +87,11 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
                         (body)
                     }
                 }
-                @if nav != Nav::None { (bottom_bar(nav, &create_action(nav, compose_href))) }
+                @if nav != Nav::None {
+                    (bottom_bar(nav, &create_action(nav, compose_href)))
+                    // Live pending count of the navigation (and the inbox list on its page).
+                    div hx-sse:connect=(if nav == Nav::Requests { "/requests/events?list=1" } else { "/requests/events" }) hx-swap="none" {}
+                }
                 div id="composer-slot" {}
             }
         }
@@ -151,6 +157,25 @@ mod tests {
         ] {
             assert!(desktop.contains(shown), "{shown} missing on desktop");
         }
+    }
+
+    #[test]
+    fn phone_navigation_has_the_inbox_with_its_count_and_every_page_streams_it() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        let bar = nav_html(&page, "mobile-menu");
+        assert!(
+            bar.contains("href=\"/requests\"") && bar.contains("id=\"request-count-bar\""),
+            "{bar}"
+        );
+        let rail = nav_html(&page, "desktop-menu");
+        assert!(
+            rail.contains("href=\"/requests\"") && rail.contains("id=\"request-count-rail\""),
+            "{rail}"
+        );
+        assert!(page.contains("hx-sse:connect=\"/requests/events\""));
+        // The inbox page also streams its list.
+        let inbox = layout("Requests", Nav::Requests, html! {}).into_string();
+        assert!(inbox.contains("hx-sse:connect=\"/requests/events?list=1\""));
     }
 
     #[test]

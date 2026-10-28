@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use df_proto::agent::v1::{
     AgentMessage, Assign, Budgets, ControlMessage, Harness, Prompt, Release, RunOutcome, RunPhase,
-    Workspace, agent_message, control_message,
+    ToolCallResult, ToolDescriptor, Workspace, agent_message, control_message,
 };
 use df_proto::transcript::v1::event::Kind as EventKind;
 use tokio::sync::mpsc;
@@ -120,6 +120,15 @@ fn params(
             )),
             system_prompt: String::new(),
         }),
+        tools: ["ask_question", "complete_task"]
+            .map(|name| ToolDescriptor {
+                name: name.to_string(),
+                title: name.to_string(),
+                description: name.to_string(),
+                input_schema_json: "{}".to_string(),
+                ..Default::default()
+            })
+            .to_vec(),
         budgets: max_wall_clock_secs.map(|s| Budgets {
             max_wall_clock: Some(df_proto::pbjson_types::Duration {
                 seconds: s,
@@ -210,6 +219,26 @@ impl IdleRun {
         .await;
     }
 
+    /// Answers the next call of `tool` like the control plane does for `ask_question`
+    /// (`await_input` for a blocking question) and `complete_task` (`end_run`).
+    async fn answer_call(&mut self, tool: &str, await_input: bool, end_run: bool) {
+        let call_id = self
+            .next(|b| match b {
+                agent_message::Body::ToolCallRequest(r) if r.tool_name == tool => {
+                    Some(r.call_id.clone())
+                }
+                _ => None,
+            })
+            .await;
+        self.send(control_message::Body::ToolCallResult(ToolCallResult {
+            call_id,
+            await_input_after_turn: await_input,
+            end_run_after_turn: end_run,
+            ..Default::default()
+        }))
+        .await;
+    }
+
     async fn finish(self) -> RunExecutionResult {
         tokio::time::timeout(Duration::from_secs(60), self.run)
             .await
@@ -238,6 +267,77 @@ async fn follow_up_while_idle_starts_the_next_turn_in_the_same_session() {
     // The fake agent plays its scripted turns in order within one session; a second session
     // would start over with "first answer".
     assert_eq!(said, ["first answer", "second answer"]);
+}
+
+const BLOCKING_QUESTION: &str = r#"
+sessions:
+  new:
+    - - mcp:
+          server: factory
+          tool: ask_question
+          args: { text: "Which one?", blocking: true }
+      - end: end_turn
+    - - say: "thanks"
+      - end: end_turn
+"#;
+
+#[tokio::test]
+async fn release_after_a_blocking_question_ends_the_run_blocked() {
+    let Some(mut run) = start(BLOCKING_QUESTION, None) else {
+        return;
+    };
+    run.answer_call("ask_question", true, false).await;
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::Blocked);
+}
+
+#[tokio::test]
+async fn an_answer_within_the_window_starts_the_next_turn_and_the_flag_is_forgotten() {
+    let Some(mut run) = start(BLOCKING_QUESTION, None) else {
+        return;
+    };
+    run.answer_call("ask_question", true, false).await;
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Prompt(text_prompt("prompt-2")))
+        .await;
+    run.phase(RunPhase::Running).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Release(Release {})).await;
+    // The second turn asked nothing blocking.
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn cancel_while_awaiting_an_answer_ends_the_run_cancelled() {
+    let Some(mut run) = start(BLOCKING_QUESTION, None) else {
+        return;
+    };
+    run.answer_call("ask_question", true, false).await;
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Cancel(
+        df_proto::agent::v1::Cancel::default(),
+    ))
+    .await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::Cancelled);
+}
+
+#[tokio::test]
+async fn a_blocking_question_and_completion_in_one_turn_complete_the_run() {
+    let script = r#"
+sessions:
+  new:
+    - - mcp: { server: factory, tool: ask_question, args: { text: "Which?", blocking: true } }
+      - mcp: { server: factory, tool: complete_task, args: { summary: "done" } }
+      - end: end_turn
+"#;
+    let Some(mut run) = start(script, None) else {
+        return;
+    };
+    run.answer_call("ask_question", true, false).await;
+    run.answer_call("complete_task", false, true).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::Completed);
 }
 
 #[tokio::test]

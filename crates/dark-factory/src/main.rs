@@ -586,12 +586,15 @@ where
     let flows = dev
         .demo_flows()
         .or_else(|| egress_log_relay(&cfg, tls_config));
+    // One registry for the UI (deciding) and the agent channel (raising). No type yet.
+    let approval_types = df_db::requests::ApprovalTypes::default();
     let web = web_router(
         &cfg,
         &pool,
         &notifier,
         Some(df_core::ForgeKind::from_plugin(FORGE_PLUGIN)),
         EgressDeps { flows, services },
+        approval_types.clone(),
     )?;
     let ctx_policy = (pool.clone(), notifier.clone());
     let ctx = ChannelContext {
@@ -602,6 +605,7 @@ where
         secrets,
         config: Arc::new(ChannelConfig::from(&cfg)),
         metrics: Arc::default(),
+        approval_types,
     };
 
     let http_port = http_listener.local_addr()?.port();
@@ -857,6 +861,7 @@ fn web_router(
     notifier: &Arc<df_db::Notifier>,
     forge: Option<df_core::ForgeKind>,
     egress: EgressDeps,
+    approval_types: df_db::requests::ApprovalTypes,
 ) -> anyhow::Result<axum::Router> {
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
@@ -871,6 +876,7 @@ fn web_router(
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
+        approval_types,
     }))
 }
 
@@ -1097,7 +1103,14 @@ mod tests {
             extra_scopes: Vec::new(),
         });
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier, None, EgressDeps::default())?;
+        let router = web_router(
+            &cfg,
+            &pool,
+            &notifier,
+            None,
+            EgressDeps::default(),
+            df_db::requests::ApprovalTypes::default(),
+        )?;
 
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 303"), "{tasks}");
@@ -1113,7 +1126,14 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let cfg = serve_config(&pool, dir.path(), None);
         let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
-        let router = web_router(&cfg, &pool, &notifier, None, EgressDeps::default())?;
+        let router = web_router(
+            &cfg,
+            &pool,
+            &notifier,
+            None,
+            EgressDeps::default(),
+            df_db::requests::ApprovalTypes::default(),
+        )?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
         let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;

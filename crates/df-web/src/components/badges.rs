@@ -51,7 +51,7 @@ impl Tone {
         match status {
             TaskStatus::Queued => Self::Queued,
             TaskStatus::Running => Self::Running,
-            TaskStatus::Waiting => Self::Waiting,
+            TaskStatus::Waiting | TaskStatus::Blocked => Self::Waiting,
             TaskStatus::InReview => Self::Review,
             TaskStatus::Completed => Self::Completed,
             TaskStatus::RateLimited | TaskStatus::LimitReached => Self::Limited,
@@ -65,7 +65,7 @@ impl Tone {
             RunState::Running | RunState::Finalizing => Self::Running,
             RunState::Succeeded => Self::Completed,
             RunState::Failed => Self::Failed,
-            RunState::AwaitingInput | RunState::Blocked => Self::Waiting,
+            RunState::AwaitingInput => Self::Waiting,
             RunState::Pending
             | RunState::Provisioning
             | RunState::Connecting
@@ -121,6 +121,7 @@ mod tests {
             (TaskStatus::Queued, "status-queued"),
             (TaskStatus::Running, "status-running"),
             (TaskStatus::Waiting, "status-waiting"),
+            (TaskStatus::Blocked, "status-waiting"),
             (TaskStatus::InReview, "status-review"),
             (TaskStatus::Completed, "status-completed"),
             (TaskStatus::RateLimited, "status-limited"),

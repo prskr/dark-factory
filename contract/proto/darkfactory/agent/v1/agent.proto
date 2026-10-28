@@ -412,6 +412,11 @@ message ToolCallResult {
   // Set by the control plane, e.g. for complete_task: the runtime lets the
   // current turn finish and then finalizes the run instead of continuing.
   bool end_run_after_turn = 5;
+  // Set by the control plane for a blocking request (ask_question with
+  // blocking=true): after the turn the runtime waits for a prompt (phase
+  // AWAITING_INPUT) instead of finishing with END_TURN. Ignored if
+  // end_run_after_turn is set.
+  bool await_input_after_turn = 6;
 }
 
 // ---------------------------------------------------------------------------

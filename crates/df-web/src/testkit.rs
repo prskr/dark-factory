@@ -260,6 +260,7 @@ impl TestApp {
             flows,
             services,
             show_hidden_blocks,
+            approval_types: df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval)),
         };
         Self {
             router: router(state),
@@ -267,6 +268,11 @@ impl TestApp {
             idp,
             _dir: dir,
         }
+    }
+
+    /// The approval types the app was built with.
+    pub fn approval_types(&self) -> df_db::requests::ApprovalTypes {
+        df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval))
     }
 
     /// A logged-in `board-member` session: the `Cookie` header value.
@@ -578,4 +584,41 @@ pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{marker}: {html}"));
     let start = html[..at].rfind('<').unwrap();
     &html[start..start + html[start..].find('>').unwrap() + 1]
+}
+
+/// An approval type for tests: scopes task and project, applying it does nothing.
+struct FakeApproval;
+
+#[async_trait::async_trait]
+impl df_db::requests::ApprovalType for FakeApproval {
+    fn name(&self) -> &'static str {
+        "fake-approval"
+    }
+    fn validate(
+        &self,
+        _task: &df_db::TaskRow,
+        _payload: &serde_json::Value,
+    ) -> Result<(), df_db::requests::RequestError> {
+        Ok(())
+    }
+    fn fingerprint(&self, payload: &serde_json::Value) -> String {
+        payload.to_string()
+    }
+    fn scopes(&self) -> &'static [df_db::requests::Scope] {
+        &[
+            df_db::requests::Scope::Task,
+            df_db::requests::Scope::Project,
+        ]
+    }
+    async fn apply(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _request: &df_db::requests::RequestRow,
+        _scope: df_db::requests::Scope,
+    ) -> Result<(), df_db::requests::RequestError> {
+        Ok(())
+    }
+    fn describe(&self, _request: &df_db::requests::RequestRow) -> String {
+        "Fake approval".to_string()
+    }
 }

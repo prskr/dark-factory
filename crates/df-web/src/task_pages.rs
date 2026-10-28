@@ -179,6 +179,7 @@ struct Selected {
     pending: Vec<df_db::TaskMessageRow>,
     folder: Folder,
     show_hidden: bool,
+    requests: Vec<crate::requests::CardData>,
 }
 
 /// Renders the workspace page; the transcript and details columns exist only for a selected task.
@@ -246,12 +247,27 @@ fn selected_columns(s: &Selected) -> Markup {
                 x-data="{ pinned: true }"
                 x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
                 "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
-                (render_transcript(s.folder.items()))
+                (render_transcript(s.folder.items(), &timeline_cards(&s.requests)))
             }
             (message_area(key, &s.detail.persona_name, s.detail.status.as_str(), &s.pending, s.show_hidden))
         }
         (details_column(&s.detail, &s.runs))
     }
+}
+
+/// The request cards of a task with the time they were raised, for the timeline.
+fn timeline_cards(
+    requests: &[crate::requests::CardData],
+) -> Vec<(chrono::DateTime<chrono::Utc>, Markup)> {
+    requests
+        .iter()
+        .map(|card| {
+            (
+                card.row.created_at,
+                crate::requests::request_card(card, None),
+            )
+        })
+        .collect()
 }
 
 async fn task_list(
@@ -299,12 +315,18 @@ async fn task_detail(
         Ok(data) => data,
         Err(e) => return internal_error(&e),
     };
+    let requests =
+        match crate::requests::task_cards(&state, id, &data.task.key, &data.task.title).await {
+            Ok(requests) => requests,
+            Err(e) => return internal_error(&e),
+        };
     let selected = Selected {
         detail: data.task,
         runs: data.runs,
         pending: data.pending,
         folder,
         show_hidden: state.show_hidden_blocks,
+        requests,
     };
     workspace(&state, &user, &query.filters(), Some(selected)).await
 }

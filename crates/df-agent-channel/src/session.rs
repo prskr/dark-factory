@@ -341,7 +341,7 @@ impl Session {
             sqlx::query(
                 "UPDATE runs SET state = 'finalizing'
                  WHERE id = $1
-                   AND state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')",
+                   AND state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')",
             )
             .bind(self.rc.run.id.as_uuid())
             .execute(&mut *tx)

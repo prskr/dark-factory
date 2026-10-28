@@ -125,7 +125,7 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
            JOIN tasks t ON t.id = r.task_id
            JOIN projects p ON p.id = t.project_id
            WHERE r.pod_ip IS NOT NULL
-             AND r.state NOT IN ('succeeded', 'blocked', 'failed', 'cancelled')
+             AND r.state NOT IN ('succeeded', 'failed', 'cancelled')
            ORDER BY r.started_at, r.id"#
     )
     .fetch_all(pool)

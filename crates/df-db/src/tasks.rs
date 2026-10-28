@@ -252,7 +252,18 @@ pub async fn queue_message(
     content: Vec<ContentBlock>,
 ) -> Result<TaskMessageRow, DbError> {
     let mut tx = pool.begin().await?;
+    let row = queue_message_tx(&mut tx, task_id, author, content).await?;
+    tx.commit().await?;
+    Ok(row)
+}
 
+/// [`queue_message`] inside the caller's transaction; the notifications go out on commit.
+pub async fn queue_message_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    author: Principal,
+    content: Vec<ContentBlock>,
+) -> Result<TaskMessageRow, DbError> {
     let prompt_id = PromptId::new();
     let author_json = serde_json::to_value(&author)?;
     let content_json = serde_json::to_value(&content)?;
@@ -264,7 +275,7 @@ pub async fn queue_message(
                 WHEN EXISTS (
                     SELECT 1 FROM runs
                     WHERE runs.task_id = tasks.id
-                      AND runs.state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')
+                      AND runs.state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')
                 ) THEN 'running'
                 ELSE 'queued'
             END,
@@ -274,7 +285,7 @@ pub async fn queue_message(
         "#,
         task_id.as_uuid()
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
 
     if updated.is_none() {
@@ -292,13 +303,11 @@ pub async fn queue_message(
         author_json,
         content_json
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
 
-    publish(&mut *tx, &Notification::TaskMessageQueued { task_id }).await?;
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-
-    tx.commit().await?;
+    publish(&mut **tx, &Notification::TaskMessageQueued { task_id }).await?;
+    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
 
     Ok(TaskMessageRow {
         id: PromptId::from_uuid(msg_row.id),
@@ -680,8 +689,8 @@ pub async fn rename_task(
 /// A board member marks a task done: it becomes `completed`, an idle run (`awaiting_input`)
 /// becomes `finalizing` so the replica holding its stream cancels it (no prompt reaches it from
 /// here on), the change is audited as `task.done` and `task_changed` and `run_changed` are
-/// published. Tasks that are `queued`, `running` or already `completed` are rejected with
-/// [`DbError::Conflict`].
+/// published. Pending agent requests of the task are closed (`task-completed`). Tasks that are
+/// `queued`, `running` or already `completed` are rejected with [`DbError::Conflict`].
 pub async fn mark_task_done(
     pool: &PgPool,
     task_id: TaskId,
@@ -715,9 +724,16 @@ pub async fn mark_task_done(
     .bind(task_id.as_uuid())
     .fetch_optional(&mut *tx)
     .await?;
-    let entry = NewAuditEntry::new(actor, Vec::new(), "task.done", "task", task_id.to_string())
-        .with_details(&serde_json::json!({ "old_status": status }))?;
+    let entry = NewAuditEntry::new(
+        actor.clone(),
+        Vec::new(),
+        "task.done",
+        "task",
+        task_id.to_string(),
+    )
+    .with_details(&serde_json::json!({ "old_status": status }))?;
     write_audit_entry(&mut *tx, &entry).await?;
+    crate::requests::close_pending_for_task(&mut tx, task_id, "task-completed", &actor).await?;
     if let Some(run_id) = idle_run {
         publish(
             &mut *tx,

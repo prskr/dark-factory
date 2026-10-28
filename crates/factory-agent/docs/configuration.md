@@ -51,7 +51,9 @@ These are compiled in and not configurable.
   rate limit, budget limit, cancel or crash), the runtime reports `AWAITING_INPUT` and keeps the
   harness session up. A `Prompt` starts the next turn in the same session (reported as `RUNNING`),
   `Cancel` ends the run `CANCELLED`, and `Release` or the end of the wall-clock budget ends it
-  `END_TURN`. The runtime has no idle timer of its own: the control plane decides when to send
+  `END_TURN`. If the turn had a blocking request (a `ToolCallResult` with `await_input_after_turn`,
+  `ask_question` with `blocking: true`), `Release` ends the run `BLOCKED` instead; the budget end
+  still gives `END_TURN`. `complete_task` in the same turn wins and ends the run `COMPLETED`. The runtime has no idle timer of its own: the control plane decides when to send
   `Release` (`runs.keepAliveSeconds`). A lost stream does not end the wait; the runtime reconnects.
 - **Shutdown.** After the final `RunReport` is queued, the runtime keeps trying to deliver queued
   messages: it flushes them over the open stream, or reconnects, for up to about 10 s plus a 5 s

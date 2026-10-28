@@ -54,6 +54,7 @@ impl StatusSet {
             ],
             Self::Waiting => &[
                 TaskStatus::Waiting,
+                TaskStatus::Blocked,
                 TaskStatus::InReview,
                 TaskStatus::LimitReached,
             ],
@@ -82,6 +83,8 @@ pub enum TaskStatus {
     Running,
     Waiting,
     /// The agent called `complete_task`; the PR waits for review.
+    /// The last run waited for an answer or approval that did not arrive in time.
+    Blocked,
     InReview,
     /// A human marked the task done.
     Completed,
@@ -94,7 +97,9 @@ impl TaskStatus {
     pub const fn group(&self) -> StatusGroup {
         match self {
             Self::Queued | Self::Running | Self::RateLimited => StatusGroup::Active,
-            Self::Waiting | Self::InReview | Self::LimitReached => StatusGroup::Waiting,
+            Self::Waiting | Self::Blocked | Self::InReview | Self::LimitReached => {
+                StatusGroup::Waiting
+            }
             Self::Completed | Self::Failed => StatusGroup::Done,
         }
     }
@@ -109,6 +114,7 @@ impl TaskStatus {
         Self::Queued,
         Self::Running,
         Self::Waiting,
+        Self::Blocked,
         Self::InReview,
         Self::Completed,
         Self::RateLimited,
@@ -121,6 +127,7 @@ impl TaskStatus {
             Self::Queued => "queued",
             Self::Running => "running",
             Self::Waiting => "waiting",
+            Self::Blocked => "blocked",
             Self::InReview => "in_review",
             Self::Completed => "completed",
             Self::RateLimited => "rate_limited",
@@ -152,6 +159,7 @@ impl FromStr for TaskStatus {
             "queued" => Ok(Self::Queued),
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
+            "blocked" => Ok(Self::Blocked),
             "in_review" => Ok(Self::InReview),
             "completed" => Ok(Self::Completed),
             "rate_limited" => Ok(Self::RateLimited),
@@ -177,7 +185,6 @@ pub enum RunState {
     AwaitingInput,
     Finalizing,
     Succeeded,
-    Blocked,
     Failed,
     Cancelled,
 }
@@ -192,7 +199,6 @@ impl RunState {
         Self::AwaitingInput,
         Self::Finalizing,
         Self::Succeeded,
-        Self::Blocked,
         Self::Failed,
         Self::Cancelled,
     ];
@@ -207,7 +213,6 @@ impl RunState {
             Self::AwaitingInput => "awaiting_input",
             Self::Finalizing => "finalizing",
             Self::Succeeded => "succeeded",
-            Self::Blocked => "blocked",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
@@ -215,10 +220,7 @@ impl RunState {
 
     /// Returns `true` if the run has reached a terminal state.
     pub const fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Succeeded | Self::Blocked | Self::Failed | Self::Cancelled
-        )
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
 }
 
@@ -249,7 +251,6 @@ impl FromStr for RunState {
             "awaiting_input" => Ok(Self::AwaitingInput),
             "finalizing" => Ok(Self::Finalizing),
             "succeeded" => Ok(Self::Succeeded),
-            "blocked" => Ok(Self::Blocked),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
             _ => Err(ParseEnumError {
@@ -398,6 +399,7 @@ mod tests {
             (TaskStatus::Queued, "queued"),
             (TaskStatus::Running, "running"),
             (TaskStatus::Waiting, "waiting"),
+            (TaskStatus::Blocked, "blocked"),
             (TaskStatus::InReview, "in_review"),
             (TaskStatus::Completed, "completed"),
             (TaskStatus::RateLimited, "rate_limited"),
@@ -427,7 +429,7 @@ mod tests {
         assert_eq!(StatusSet::Running.statuses(), [Running, RateLimited]);
         assert_eq!(
             StatusSet::Waiting.statuses(),
-            [Waiting, InReview, LimitReached]
+            [Waiting, Blocked, InReview, LimitReached]
         );
         assert_eq!(StatusSet::Done.statuses(), [Completed, Failed]);
         // The groups are made of the statuses `TaskStatus::group` assigns to them.
@@ -448,7 +450,14 @@ mod tests {
     #[test]
     fn only_idle_or_ended_statuses_can_be_marked_done() {
         use TaskStatus::*;
-        for status in [Waiting, InReview, RateLimited, LimitReached, Failed] {
+        for status in [
+            Waiting,
+            Blocked,
+            InReview,
+            RateLimited,
+            LimitReached,
+            Failed,
+        ] {
             assert!(status.can_mark_done(), "{status}");
         }
         for status in [Queued, Running, Completed] {
@@ -464,6 +473,7 @@ mod tests {
             (TaskStatus::Running, Active),
             (TaskStatus::RateLimited, Active),
             (TaskStatus::Waiting, Waiting),
+            (TaskStatus::Blocked, Waiting),
             (TaskStatus::InReview, Waiting),
             (TaskStatus::LimitReached, Waiting),
             (TaskStatus::Completed, Done),
@@ -486,7 +496,6 @@ mod tests {
             (RunState::AwaitingInput, "awaiting_input", false),
             (RunState::Finalizing, "finalizing", false),
             (RunState::Succeeded, "succeeded", true),
-            (RunState::Blocked, "blocked", true),
             (RunState::Failed, "failed", true),
             (RunState::Cancelled, "cancelled", true),
         ];

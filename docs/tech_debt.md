@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-71.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-75.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -26,6 +26,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -94,6 +95,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-67 | low   | `factory-agent` tests | `idle_tests.rs` rebuilds the fixture setup of `tests.rs` |
 | TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
+| TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
+| TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
+| TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
 
 ## Entries
 
@@ -661,10 +665,39 @@ Adding `ContentBlock.hidden` meant editing every hand-built block, including abo
 
 **Fix:** Add `ContentBlock::text(impl Into<String>)` and a hidden variant in `df-proto`, then use them at these sites.
 
+### TD-71 (S5). Request outcome and decider text is built in two places
+
+`crates/df-web/src/requests.rs` (`outcome`), `crates/df-db/src/requests.rs` (`decision_message`)
+
+Both take the decider's name from `Principal::Human` and match on `RequestState` the same way (answer, scope, comment).
+
+**Matters when:** the wording or the set of request states changes.
+
+**Fix:** Add helpers on `RequestRow` (decider name, outcome parts) and use them in both places.
+
+### TD-72 (S8). Task key and title travel as loose strings with request rows
+
+`crates/df-db/src/requests.rs` (`list_pending` returns `Vec<(RequestRow, String, String)>`), `crates/df-web/src/sse.rs`, `crates/df-web/src/requests.rs`
+
+**Matters when:** a request view needs another task field (status, project).
+
+**Fix:** Add a `TaskRef { key, title }` (or a named list row) and pass it instead of the tuple.
+
+### TD-73 (P4). Blocking-question flow has no end-to-end test
+
+`crates/df-agent-channel/tests/agent_port.rs` (`blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked`)
+
+The in-process test calls `df_db::requests::decide` directly instead of the `/requests/{id}/answer` handler. It sends `RunReport BLOCKED` itself instead of going through the control-plane `Release` deadline, and it only checks that the task is `queued`, not that a new run starts. `iter1-demo-e2e` (the `df-e2e` crate) does not exist yet, so task 6.1 stays open.
+
+**Matters when:** `iter1-demo-e2e` lands.
+
+**Fix:** Extend the e2e test as task 6.1 describes. Answer through the UI handler while the run awaits input; leave a second question unanswered until `Release`; check that answering it starts run 2.
+
 ## Accepted decisions
 
 These were reviewed and kept on purpose. Don't raise them as issues unless the stated assumption changes.
 
+- **No pending-request count on the phone task view:** below 768 px the bottom bar, and the count with it, is hidden while a task's transcript is shown (`web-ui-shell`: the message input takes its place). The task's own requests are on its timeline. Accepted after the 390 px check of `iter2-agent-requests` (2026-10-28).
 - **TurnEnded vs. trailing transcript chunks:** ordering is guaranteed. `agent-client-protocol` 3.4.0 (`concepts::ordering`) waits for each notification handler to finish before it routes the next message. The handler awaits the `outbound_tx` send, so all chunks of a turn are queued before the prompt response arrives. Revisit if the ACP crate changes its dispatch model.
 - **Late `HarnessCredentials`:** the documented order is "credentials before Assign". If credentials arrive after Assign, the runtime sends a notice and does not use them.
 - **Git config denylist instead of an allowlist:** the denylist was extended. Replace it with an allowlist once the set of config keys the control plane sends is known.

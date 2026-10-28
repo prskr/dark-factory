@@ -9,6 +9,8 @@ use thiserror::Error;
 pub enum ChannelError {
     #[error(transparent)]
     Db(#[from] DbError),
+    #[error(transparent)]
+    Request(#[from] df_db::requests::RequestError),
     #[error("database error: {0}")]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]

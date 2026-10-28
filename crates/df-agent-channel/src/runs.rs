@@ -12,7 +12,7 @@ use crate::error::ChannelError;
 // sqlx only accepts literal SQL, so shared fragments are macros expanded by `concat!`.
 macro_rules! terminal_states {
     () => {
-        "('succeeded', 'blocked', 'failed', 'cancelled')"
+        "('succeeded', 'failed', 'cancelled')"
     };
 }
 
@@ -237,7 +237,7 @@ pub async fn set_idle_tx(
     };
     let changed: Option<uuid::Uuid> = sqlx::query_scalar(
         "UPDATE runs SET state = $2
-         WHERE id = $1 AND state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')
+         WHERE id = $1 AND state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')
            AND state <> $2
          RETURNING task_id",
     )
@@ -313,10 +313,10 @@ pub const fn run_state_for(outcome: RunOutcome) -> RunState {
     match outcome {
         RunOutcome::Completed
         | RunOutcome::EndTurn
+        | RunOutcome::Blocked
         | RunOutcome::LimitReached
         | RunOutcome::RateLimited => RunState::Succeeded,
         RunOutcome::Cancelled => RunState::Cancelled,
-        RunOutcome::Blocked => RunState::Blocked,
         RunOutcome::Failed
         | RunOutcome::ProvisioningFailed
         | RunOutcome::ConnectTimeout
@@ -329,7 +329,8 @@ pub const fn run_state_for(outcome: RunOutcome) -> RunState {
 pub const fn task_status_for(outcome: RunOutcome) -> TaskStatus {
     match outcome {
         RunOutcome::Completed => TaskStatus::InReview,
-        RunOutcome::EndTurn | RunOutcome::Cancelled | RunOutcome::Blocked => TaskStatus::Waiting,
+        RunOutcome::EndTurn | RunOutcome::Cancelled => TaskStatus::Waiting,
+        RunOutcome::Blocked => TaskStatus::Blocked,
         RunOutcome::LimitReached => TaskStatus::LimitReached,
         RunOutcome::RateLimited => TaskStatus::RateLimited,
         RunOutcome::Failed
@@ -571,6 +572,44 @@ mod tests {
     fn the_agent_completing_puts_the_task_in_review() {
         assert_eq!(task_status_for(RunOutcome::Completed), TaskStatus::InReview);
         assert_eq!(run_state_for(RunOutcome::Completed), RunState::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn blocked_run_is_terminal_and_blocks_the_task() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        deliver_all(&pool, env.task.id).await;
+        let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
+        let ended = end_run(&pool, &end_with(run_id, RunOutcome::Blocked))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ended.run_state, RunState::Succeeded);
+        assert_eq!(status_of(&pool, env.task.id).await, "blocked");
+        // No further phase changes are accepted for it.
+        let mut tx = pool.begin().await.unwrap();
+        set_idle_tx(&mut tx, run_id, env.task.id, true)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let state: String = sqlx::query_scalar("SELECT state FROM runs WHERE id = $1")
+            .bind(run_id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(state, "succeeded");
+    }
+
+    #[tokio::test]
+    async fn blocked_run_with_an_undelivered_message_queues_the_task() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        // The seeded message is still undelivered.
+        let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
+        end_run(&pool, &end_with(run_id, RunOutcome::Blocked))
+            .await
+            .unwrap();
+        assert_eq!(status_of(&pool, env.task.id).await, "queued");
     }
 
     fn end_with(run_id: RunId, outcome: RunOutcome) -> RunEnd {

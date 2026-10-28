@@ -21,8 +21,8 @@ pub use domain::{
 };
 pub use forge::ForgeKind;
 pub use ids::{
-    CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RunId, TaskId, ToolCallId,
-    UserId,
+    CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RequestId, RunId, TaskId,
+    ToolCallId, UserId,
 };
 pub use keys::{KeyError, ProjectKey, TaskKey};
 pub use seams::{

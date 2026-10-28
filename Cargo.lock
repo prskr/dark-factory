@@ -1536,6 +1536,7 @@ dependencies = [
 name = "df-db"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "df-core",
  "df-proto",

@@ -8,7 +8,7 @@ Contracts for iteration 1 (milestone 2 in [`product/iterations/iteration-1.md`](
 | Agent protocol | `proto/darkfactory/agent/v1/agent.proto` | `darkfactory.agent.v1` |
 | Gateway link | `proto/darkfactory/gateway/v1/gateway.proto` | `darkfactory.gateway.v1` |
 | Integration plugins (WIT) | `wit/integrations/integrations.wit` | `darkfactory:integrations@0.1.0` |
-| Factory MCP tools | `mcp/factory-tools.v1.json` | 1 |
+| Factory MCP tools | `mcp/factory-tools.v2.json` (v1: `mcp/factory-tools.v1.json`, superseded) | 2 |
 
 `wit/integrations/deps/` holds vendored WASI WIT: `wasi:*@0.2.12` and `wasi:config@0.2.0-rc.1`, copied from the Wasmtime 46.0.0 source release.
 
@@ -33,7 +33,7 @@ Both pass with protoc 29.3 and wasm-tools 1.245.0. The factory tool file is plai
 - **Control plane → agent is idempotent, not sequenced.** Commands are keyed (`run_id`, `prompt_id`, `call_id`, `request_id`) and rebuilt from the database after every reconnect. This keeps the control plane stateless per connection, so a reconnect can land on any replica.
 - **Request/response pairs** (tool calls, Git credentials): after a reconnect the runtime re-sends pending requests with the same id; the control plane answers from its stored result. Tool calls are persisted anyway for the audit log, so retries never execute twice.
 - **Prompt delivery is confirmed by the transcript.** The `UserMessage` event carrying a `prompt_id` marks the queued message as delivered. A prompt that arrives while the runtime is finalizing stays undelivered and triggers the next run.
-- **A run waits after a normal turn end.** With no queued prompt the runtime reports `RUN_PHASE_AWAITING_INPUT` and keeps the harness session up. The control plane owns the idle deadline (last `TurnEnded` + `runs.keepAliveSeconds`) and sends `Release`; the run then ends `END_TURN`. `Prompt` starts the next turn, `Cancel` ends it `CANCELLED`. After `Release` or `Cancel` the control plane sends no more prompts on that run.
+- **A run waits after a normal turn end.** With no queued prompt the runtime reports `RUN_PHASE_AWAITING_INPUT` and keeps the harness session up. The control plane owns the idle deadline (last `TurnEnded` + `runs.keepAliveSeconds`) and sends `Release`; the run then ends `END_TURN`, or `BLOCKED` if the last turn had a blocking request (`ToolCallResult.await_input_after_turn`). `Prompt` starts the next turn, `Cancel` ends it `CANCELLED`. After `Release` or `Cancel` the control plane sends no more prompts on that run.
 - **Queued messages reach the runtime between turns.** The control plane sends a queued prompt when the run starts and after each persisted `TurnEnded`, and marks it as forwarded (`task_messages.forwarded_at`). A prompt queued while a turn is open (a persisted `TurnStarted` without a later `TurnEnded`) stays held back, so a board member can still edit or remove it. A forwarded prompt that is not yet delivered is sent again after a reconnect with the same `prompt_id`.
 
 ### Agent protocol: tool calls are typed, not raw MCP frames

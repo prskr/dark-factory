@@ -1640,6 +1640,7 @@ async fn test_scenario_pending_tool_call_resent_after_reconnect() {
                     content: vec![],
                     structured_content_json: "{\"status\":\"ok\"}".to_string(),
                     end_run_after_turn: false,
+                    await_input_after_turn: false,
                 },
             )),
         })
@@ -4673,6 +4674,7 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: false,
+                        await_input_after_turn: false,
                     })
                 }
                 "complete_task" => {
@@ -4688,6 +4690,7 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
                         }],
                         structured_content_json: r#"{"status":"completed"}"#.to_string(),
                         end_run_after_turn: true,
+                        await_input_after_turn: false,
                     })
                 }
                 _ => Err(format!("unknown tool: {name}")),
@@ -5524,6 +5527,7 @@ sessions:
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
+                        await_input_after_turn: false,
                     })),
                 };
                 let _ = inbound_tx_clone.send(res).await;
@@ -5753,6 +5757,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
                         content: Vec::new(),
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
+                        await_input_after_turn: false,
                     })),
                 };
                 let _ = inbound_tx.send(res).await;
@@ -6880,6 +6885,7 @@ sessions:
                         }],
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
+                        await_input_after_turn: false,
                     })),
                 };
                 let _ = inbound_tx2_clone.send(res).await;
@@ -7103,6 +7109,7 @@ async fn test_manual_claude_acp_run() {
                         content: vec![],
                         structured_content_json: String::new(),
                         end_run_after_turn: true,
+                        await_input_after_turn: false,
                     })),
                 };
                 let _ = inbound_tx_clone.send(res).await;
