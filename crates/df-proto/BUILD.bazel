@@ -1,8 +1,14 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files(["Cargo.toml"])
 
@@ -30,6 +36,7 @@ rust_library(
     aliases = aliases(),
     crate_name = "df_proto",
     edition = "2024",
+    lint_config = ":lints",
     deps = all_crate_deps(normal = True) + [":build_script"],
 )
 
@@ -41,5 +48,6 @@ alias(
 rust_test(
     name = "df_proto_test",
     crate = ":df_proto",
+    lint_config = ":lints",
     deps = all_crate_deps(normal_dev = True),
 )

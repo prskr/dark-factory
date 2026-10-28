@@ -1,7 +1,14 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files(["Cargo.toml"])
 
@@ -12,6 +19,7 @@ rust_library(
     crate_features = ["test-util"],
     crate_name = "df_core",
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True),
 )
@@ -25,6 +33,7 @@ rust_test(
     name = "df_core_test",
     crate = ":df_core",
     crate_features = ["test-util"],
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,

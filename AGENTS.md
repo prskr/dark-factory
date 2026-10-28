@@ -142,14 +142,24 @@ Test organization:
 
 - Keep an inline `#[cfg(test)] mod tests { … }` up to about 500 lines. Beyond that, move the body to `<module>/tests.rs` and declare `#[cfg(test)] mod tests;`.
 - A test file beyond about 1,500 lines becomes a directory `tests/` with a `mod.rs` for shared fixtures and one file per topic (the module or behavior the tests exercise).
-- Name tests after the behavior they check, never after a review round or finding (`test_erase_and_expiry_drop_cached_credentials`, not `test_review_r38_…`).
-- The thresholds are guidance, not a lint.
+- Name tests after the behavior they check, never after a review round or finding (`test_erase_and_expiry_drop_cached_credentials`, not `test_review_r38_…`). `cargo xtask check-test-names` fails for a test name with a word `finding`, `round<n>`, `r<n>` or `td<n>`.
+- Source files (`rs`, `proto`, `wit`, `bzl`, `bazel`, `sh`, `js`, `ts`, `css`, `html`, `toml`, `yaml`, `yml`) have at most 1,500 lines; `cargo xtask check-file-length` enforces it. A file over the limit needs an entry with a reason (generated code, or a tracked split) in `[workspace.metadata.file-length.allow]` of the root `Cargo.toml`; an entry for a missing file, for a file within the limit, or without a reason fails the check too.
+- The 500-line threshold for inline test modules is guidance, not a check.
 
 Function length:
 
-- A function has at most 100 lines (`too-many-lines-threshold` in `clippy.toml`, `clippy::too_many_lines`; comments and blank lines do not count). Cargo enables the lint through `[workspace.lints.clippy]` (plugins repeat it in their own `[lints.clippy]`), the Bazel lint run (`--config=lint`) through `clippy_flags` in `.bazelrc`.
+- A function has at most 100 lines (`too-many-lines-threshold` in `clippy.toml`, `clippy::too_many_lines`; comments and blank lines do not count). Lint levels are declared only in `[workspace.lints]` of the root `Cargo.toml` (plugins repeat both tables in their own `[lints]`, except that `unsafe_code` may have any level; `tools/xtask` mirrors both) and in `clippy.toml`; Bazel reads them from the manifests (`extract_cargo_lints` and `lint_config` in `BUILD.bazel`). Never add lint flags to `.bazelrc` beyond `-Dwarnings`.
 - Split a function that gets longer. A production function that cannot be split yet gets `#[expect(clippy::too_many_lines, reason = "…")]` naming the follow-up; use `expect`, never `allow`, so the attribute fails once the function is short enough.
 - Test modules with scenario tests opt out once at module level with `#![allow(clippy::too_many_lines, reason = "…")]` (or `#[allow]` on an inline `mod tests`), only where a test needs it.
+
+## Adding a crate
+
+Run `cargo xtask check-crates` when done (pre-commit hook and CI run it); it checks every item below.
+
+1. Directory `crates/<name>` with a `Cargo.toml` that has `[lints]` with `workspace = true`. A plugin (`plugins/<name>`) instead copies `[lints.rust]` and `[lints.clippy]` of the workspace into its own `Cargo.toml`, without `workspace = true` (Cargo rejects both in one manifest); `unsafe_code` only has to be present, at any level.
+2. `BUILD.bazel` with `extract_cargo_lints(name = "lints", manifest = "Cargo.toml", workspace = "//:Cargo.toml")` and `lint_config = ":lints"` on every `rust_library`, `rust_binary`, `rust_test` and `rust_shared_library`.
+3. One `rust_test` per `tests/*.rs`, plus one for the unit tests. Never tag a test `manual`: the lint run skips manual targets.
+4. `"//crates/<name>:Cargo.toml"` (or `"//plugins/<name>:Cargo.toml"`) in the `crate.from_cargo` manifests of `MODULE.bazel`, then update `MODULE.bazel.lock` (skill `rust`).
 
 ## Traits over closures
 

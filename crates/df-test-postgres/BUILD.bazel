@@ -1,8 +1,15 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 # Dev-dependency of test targets only: never add this to the deps of a library or binary.
 package(default_visibility = ["//crates:__subpackages__"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files(["Cargo.toml"])
 
@@ -12,6 +19,7 @@ rust_library(
     aliases = aliases(),
     crate_name = "df_test_postgres",
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True),
 )
@@ -20,6 +28,7 @@ rust_test(
     name = "df_test_postgres_test",
     compile_data = glob(["migrations/*.sql"]),
     crate = ":df_test_postgres",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,

@@ -1,7 +1,14 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files(["Cargo.toml"])
 
@@ -10,6 +17,7 @@ rust_binary(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
         "//crates/df-agent-channel:df_agent_channel",
@@ -34,6 +42,7 @@ rust_test(
     data = ["//plugins/forgejo"],
     edition = "2024",
     env = {"FORGEJO_PLUGIN_WASM": "$(rootpath //plugins/forgejo)"},
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -61,5 +70,6 @@ rust_test(
     data = [":dark-factory"],
     edition = "2024",
     env = {"DF_TEST_BIN": "$(rootpath :dark-factory)"},
+    lint_config = ":lints",
     deps = all_crate_deps(normal_dev = True),
 )

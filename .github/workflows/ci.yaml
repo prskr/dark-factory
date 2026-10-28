@@ -57,3 +57,18 @@ jobs:
 
       - name: Rustfmt
         run: bazel build $BAZEL_ARGS --config=fmt //crates/... //plugins/...
+
+      # xtask is its own Cargo workspace outside Bazel. Bazel's cargo cannot compile it (its toolchain has
+      # no std for the host's gnu target), so these use the rustup toolchain pinned by rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Repository checks
+        run: |
+          cargo xtask check-crates
+          cargo xtask check-file-length
+          cargo xtask check-test-names
+
+      # Neither the Bazel lint run nor the workspace clippy run covers xtask.
+      - name: Clippy (xtask)
+        run: cargo clippy --manifest-path tools/xtask/Cargo.toml --all-targets -- -D warnings

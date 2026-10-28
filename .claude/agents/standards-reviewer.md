@@ -22,6 +22,7 @@ The caller passes:
 - Read the standards files and the whole diff. Read surrounding code where a hunk alone is not enough to judge.
 - Report (a) every violation of a documented standard, citing file and rule, and (b) baseline smells you spot, naming the smell and quoting the hunk.
 - Documented standards can be hard violations. Baseline smells are always judgement calls. A documented repo standard overrides the baseline.
+- Check that every new or renamed test is named after the behavior it asserts. A name that is only a topic (`test_parser`), or that refers to a review, finding or ticket, is a finding (`cargo xtask check-test-names` only catches the numbered patterns).
 - Skip anything tooling already enforces (rustfmt, clippy, typos, machete).
 - Only report what you can point to in the diff. No speculation without evidence.
 - With a ledger: check each finding marked `fix-now` and state whether it is fixed. Don't raise findings again that are marked `tech-debt`, `cosmetic` or `rejected`.

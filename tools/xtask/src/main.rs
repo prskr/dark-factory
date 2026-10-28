@@ -3,12 +3,23 @@
 //! - `update-tools [--check]` generates `multitool.lock.json` from the latest upstream releases.
 //!   `--check` fails if the committed lock differs from what upstream would produce now.
 //!   Set `GITHUB_TOKEN` to avoid API rate limits.
+//! - `check-crates` fails when a workspace member escapes the lint, build or test setup (see
+//!   `check_crates.rs`).
+//! - `check-file-length [<file>...]` fails for source files over the line limit (see
+//!   `check_file_length.rs`).
+//! - `check-test-names [<file>...]` fails for tests named after review rounds or findings (see
+//!   `check_test_names.rs`).
 //! - `outdated [--since <rev>]` fails if a declared dependency requirement excludes the latest
 //!   crates.io release (see `outdated.rs`).
 
+mod check_crates;
+mod check_file_length;
+mod check_test_names;
+mod common;
 mod outdated;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -322,6 +333,10 @@ fn generate() -> Result<String> {
     render(tools)
 }
 
+fn owned(args: &[&str]) -> Vec<String> {
+    args.iter().map(|a| (*a).to_owned()).collect()
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args
@@ -338,7 +353,12 @@ fn main() -> Result<()> {
         }
         ["outdated"] => outdated::run(None)?,
         ["outdated", "--since", rev] => outdated::run(Some(rev))?,
-        _ => bail!("usage: cargo xtask update-tools [--check] | outdated [--since <rev>]"),
+        ["check-crates"] => check_crates::run(Path::new("."))?,
+        ["check-file-length", files @ ..] => check_file_length::run(Path::new("."), &owned(files))?,
+        ["check-test-names", files @ ..] => check_test_names::run(Path::new("."), &owned(files))?,
+        _ => bail!(
+            "usage: cargo xtask update-tools [--check] | outdated [--since <rev>] | check-crates\n       | check-file-length [<file>...]\n       | check-test-names [<file>...]"
+        ),
     }
     Ok(())
 }
@@ -512,7 +532,12 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["jq-linux-amd64", "jq-linux-arm64", "jq-macos-amd64", "jq-macos-arm64"]
+            [
+                "jq-linux-amd64",
+                "jq-linux-arm64",
+                "jq-macos-amd64",
+                "jq-macos-arm64"
+            ]
         );
     }
 
