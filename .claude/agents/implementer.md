@@ -5,6 +5,7 @@ model: sonnet
 permissionMode: acceptEdits
 skills:
   - openspec-apply-change
+  - rust
 color: green
 ---
 
