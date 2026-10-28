@@ -26,6 +26,10 @@ const WIDTH_KEY: &str = "df.traffic.graph-w";
 
 /// The Alpine component of the page. `flow` is the event shown in the details panel; `dirty`
 /// shows *Clear filters* while any filter is set.
+#[expect(
+    clippy::too_many_lines,
+    reason = "move the Alpine script of state into a static JS file"
+)]
 fn state(advanced: usize, dirty: bool) -> String {
     let adv_open = advanced > 0;
     let advanced_js = format!(

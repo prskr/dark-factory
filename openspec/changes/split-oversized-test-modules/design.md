@@ -33,12 +33,14 @@ See proposal.md for the motivation and the list of files. Constraints that shape
 | `connection.rs` | mTLS connect, control plane restart and replay, leftover outbox, certificate rotation, outage, resend after reconnect, shutdown flush (366–585, 858–1663, 8417–8563), `discarded_outbox_notice`, expired credential requests (`r16`) |
 | `outbox.rs` | sequence, ack trimming, backpressure, discard, run state (586–857), `finding_25`, `r1`, `r15`, `r26`, `r29`, `r49` |
 | `git.rs` | config denylist, planted config, hooks, non-HTTPS remote, socket mode, credential helper (1664–2102), `finding_4`, `finding_18`, `r8_r9`, `r8_r24`, `r10`, `r23`, `r38`, `r52`, `r53` |
-| `workspace.rs` | clone, prepare, push, finalize, secret files, token off the volume (2103–3716), `finding_6`, `finding_13`, `r3`, `r13`, `r41`, `r42` |
+| `workspace.rs` | clone, prepare, push, secret files, token off the volume (2103–3716), `finding_6`, `finding_13`, `r13`, `r42` |
+| `workspace_finalize.rs` | `finalize_workspace`, WIP snapshots, `r3`, `r41` (split off to stay below about 1,500 lines) |
 | `harness.rs` | session resume, permissions, prompt queue, hidden blocks (3717–4219), `r22` |
 | `transcript.rs` | ACP translation (4220–4453), `finding_16` |
 | `usage.rs` | session log usage, rate limits, budgets (4454–4568, 4778–4858), `finding_20`, `finding_21`, `r21`, `r25`, `r39` |
 | `mcp.rs` | MCP server (4569–4777) |
-| `runner.rs` | outcome priority and `run_session` scenarios (4859–6985), `r2`, `r51`, resumed session replay |
+| `runner.rs` | outcome priority and `run_session` scenarios (4859–6985), resumed session replay |
+| `runner_runtime.rs` | `run_session` against the runtime socket and MCP server, `r2`, `r51` (split off to stay below about 1,500 lines) |
 | `runner_idle.rs` | the current `idle_tests.rs`, moved unchanged |
 
 Line numbers refer to commit `d635cce`; the implementer assigns tests added later by the same rule (the module the test exercises). Helpers used by one topic move with it; helpers used by several go to `mod.rs`.
@@ -102,7 +104,7 @@ Configuration:
 - Root `Cargo.toml`: `[workspace.lints.clippy] too_many_lines = "warn"`. The pre-push hook runs clippy with `-D warnings`, so a warning blocks the push. All crates under `crates/` inherit the workspace lints. `plugins/forgejo` and `plugins/test-probe` declare their own `[lints]` (they allow `unsafe_code` for the wit-bindgen bindings) and get the same entry in their `[lints.clippy]`. `tools/xtask` is a standalone workspace that neither lint run covers; it stays out.
 - Bazel (the lint run of CI, `--config=lint`) ignores Cargo's `[lints]`. `build:lint` in `.bazelrc` gets `--@rules_rust//rust/settings:clippy.toml=//:clippy.toml` (the root `BUILD.bazel` exports the file) and `--@rules_rust//rust/settings:clippy_flags=-Dwarnings,-Dclippy::too_many_lines`. `-Dwarnings` must be in the list: rules_rust adds its default `-Dwarnings` only while `clippy_flags` is empty, so without it CI would let every clippy warning pass.
 
-Existing outliers, measured on 2026-10-28 with `cargo clippy --workspace --all-targets --all-features -- -W clippy::too_many_lines` (49 functions in total):
+Existing outliers, measured on 2026-10-28 with `cargo clippy --workspace --all-targets --all-features -- -W clippy::too_many_lines` (49 functions at that time; `run_handler` and `decide` came with `iter2-agent-requests`, merged after the first measurement, so the table has 17 production rows):
 
 | Function (file:line) | Lines |
 |---|---|
@@ -121,8 +123,10 @@ Existing outliers, measured on 2026-10-28 with `cargo clippy --workspace --all-t
 | `df-db/src/tasks.rs:108` | 115 |
 | `df-k8s/src/provider.rs:114` | 113 |
 | `df-k8s/src/reconcile.rs:182` | 106 |
+| `df-agent-channel/src/tools.rs:265` (`run_handler`) | 161 |
+| `df-db/src/requests.rs:353` (`decide`) | 104 |
 
-Each gets `#[expect(clippy::too_many_lines, reason = "…")]` naming the follow-up. `expect` instead of `allow`: it fails once the function is split, so a stale exception cannot remain. The line numbers shift with group 5 and later commits; the implementer re-runs the measurement.
+Each gets `#[expect(clippy::too_many_lines, reason = "…")]` naming its concrete follow-up (for example "split run_session into setup, turn loop and finalize steps"). `expect` instead of `allow`: it fails once the function is split, so a stale exception cannot remain. The line numbers shift with group 5 and later commits; the implementer re-runs the measurement.
 
 The other 34 are test functions (27 in `factory-agent`, 3 in `fake-acp-agent`, 1 each in `df-agent-channel` and `df-core`, 2 in the inline tests of `df-k8s` `render` and `provider`). Scenario tests are long on purpose, so test modules opt out once at module level (`#![allow(clippy::too_many_lines, reason = "scenario tests set up and check a whole run")]` in the test file, or `#[allow]` on an inline `mod tests`), only in the modules that need it.
 
@@ -137,7 +141,7 @@ Alternatives: `clippy::cognitive_complexity` measures branching instead of lengt
 - [Container-backed tests (`df-db`, `df-agent-channel`, `df-web`) cannot run without a Podman socket] → Run them locally with the socket or rely on CI; a move without code changes cannot change their result except through a missing file, which compilation catches.
 
 - [The Bazel lint flags silently weaken CI (missing `-Dwarnings`)] → Task 7.3 checks both directions: the lint run passes, and a deliberately long function and a deliberate ordinary warning fail it.
-- [`#[expect]` on 15 functions becomes permanent] → Each `reason` names its follow-up; `expect` fails once the function is short enough, which forces removing the attribute.
+- [`#[expect]` on 17 functions becomes permanent] → Each `reason` names its follow-up; `expect` fails once the function is short enough, which forces removing the attribute.
 
 ## Migration Plan
 
@@ -147,5 +151,5 @@ No deployment impact. Each commit builds and passes `cargo test --workspace`, `c
 
 - `factory-agent/src/runner.rs`: `run_session` is one 850-line function (setup, ACP connection, turn loop, idle wait, finalize). Split it into steps, using the runner tests of D1 and D3 as the safety net.
 - `dark-factory/src/main.rs`: about 970 lines of code with the configuration wiring of all subcommands.
-- The other 14 production functions of the D7 table: split them and drop their `#[expect]`, most urgently `fake-acp-agent` `agent.rs:65`, `df-k8s` `render.rs:101` and `factory-agent` `connection.rs:340`.
+- The other 16 production functions of the D7 table: split them and drop their `#[expect]`, most urgently `fake-acp-agent` `agent.rs:65`, `df-k8s` `render.rs:101` and `factory-agent` `connection.rs:340`.
 - Test files of 1,000 to 1,500 lines: `df-web/src/config_pages/tests.rs`, `df-agent-channel/tests/agent_port.rs`, `df-gateway/src/proxy/tests.rs`.

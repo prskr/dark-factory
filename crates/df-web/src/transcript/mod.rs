@@ -163,6 +163,10 @@ impl Folder {
         all
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "split apply_event into one handler per event kind"
+    )]
     fn apply_event(&mut self, stored: &StoredEvent) -> Vec<Change> {
         let Some(event) = &stored.event else {
             return vec![self.push(

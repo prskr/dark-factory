@@ -1,0 +1,2 @@
+# Function length limit enforced by `clippy::too_many_lines` (see AGENTS.md, "File structure").
+too-many-lines-threshold = 100

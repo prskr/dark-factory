@@ -583,6 +583,10 @@ async fn wait_for_input(
 }
 
 /// Runs the complete agent run lifecycle.
+#[expect(
+    clippy::too_many_lines,
+    reason = "split run_session into setup, turn loop and finalize steps"
+)]
 pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecutionResult> {
     let mut collected_notices = Vec::new();
     let mut collected_push_reports = Vec::new();

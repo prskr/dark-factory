@@ -1,5 +1,10 @@
 //! Integration and unit tests for `fake-acp-agent`.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "scenario tests set up and check a whole run"
+)]
+
 use std::sync::Arc;
 
 use agent_client_protocol::schema::ProtocolVersion;

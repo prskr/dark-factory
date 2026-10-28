@@ -1,20 +1,18 @@
 //! Runner tests for the idle wait after a normal turn end (`specs/acp-harness/spec.md`,
 //! "Idle wait after a normal turn end"), driven by the fake ACP agent.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Budgets, ControlMessage, Harness, Prompt, Release, RunOutcome, RunPhase,
-    ToolCallResult, ToolDescriptor, Workspace, agent_message, control_message,
+    AgentMessage, Budgets, ControlMessage, Prompt, Release, RunOutcome, RunPhase, ToolCallResult,
+    ToolDescriptor, agent_message, control_message,
 };
 use df_proto::transcript::v1::event::Kind as EventKind;
 use tokio::sync::mpsc;
 
-use crate::git::Git;
+use super::RunScenario;
 use crate::outbox::Outbox;
-use crate::runner::{RunDriverParams, RunExecutionResult, run_session};
-use crate::tests::setup_test_remote_repo;
+use crate::runner::{RunExecutionResult, run_session};
 
 const TWO_TURNS: &str = r#"
 sessions:
@@ -32,13 +30,7 @@ struct IdleRun {
     run: tokio::task::JoinHandle<RunExecutionResult>,
     /// Everything the runtime sent so far.
     seen: Vec<AgentMessage>,
-    _temp: tempfile::TempDir,
-}
-
-fn workspace_bin(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/debug")
-        .join(name)
+    _scenario: RunScenario,
 }
 
 /// The text of an agent message chunk, if the message is one.
@@ -74,102 +66,41 @@ fn text_prompt(id: &str) -> Prompt {
     }
 }
 
-/// Params of a run with `script` and one initial prompt, wired to the given channels. `None`
-/// when the helper binaries are not built (same convention as the other runner tests).
-fn params(
-    temp: &tempfile::TempDir,
-    script: &str,
-    max_wall_clock_secs: Option<i64>,
-    inbound_rx: mpsc::Receiver<ControlMessage>,
-    outbound_tx: mpsc::Sender<AgentMessage>,
-) -> Option<RunDriverParams> {
-    let fake_bin = workspace_bin("fake-acp-agent");
-    let mcp_bin = workspace_bin("factory-agent");
-    if !fake_bin.exists() || !mcp_bin.exists() {
-        return None;
-    }
-    let upstream = setup_test_remote_repo(temp.path());
-    let script_file = temp.path().join("script.yaml");
-    std::fs::write(&script_file, script).unwrap();
-    let repo_dir = temp.path().join("repo");
-    let runtime_dir = temp.path().join("runtime");
-    let hooks_path = temp.path().join("hooks-empty");
-    std::fs::create_dir_all(&hooks_path).unwrap();
-    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
-        Outbox::open(&runtime_dir, "run-idle", 10 * 1024 * 1024, 64 * 1024).unwrap(),
-    ));
-    let assign = Assign {
-        run_id: "run-idle".to_string(),
-        workspace: Some(Workspace {
-            repo_url: upstream.to_str().unwrap().to_string(),
-            base_branch: "main".to_string(),
-            task_branch: "factory/task/DF-1".to_string(),
-            wip_branch: "factory/wip/DF-1".to_string(),
-            ..Default::default()
-        }),
-        harness: Some(Harness {
-            kind: Some(df_proto::agent::v1::harness::Kind::Acp(
-                df_proto::agent::v1::AcpHarness {
-                    command: vec![
-                        fake_bin.to_string_lossy().to_string(),
-                        "--script".to_string(),
-                        script_file.to_string_lossy().to_string(),
-                    ],
-                    ..Default::default()
-                },
-            )),
-            system_prompt: String::new(),
-        }),
-        tools: ["ask_question", "complete_task"]
-            .map(|name| ToolDescriptor {
-                name: name.to_string(),
-                title: name.to_string(),
-                description: name.to_string(),
-                input_schema_json: "{}".to_string(),
-                ..Default::default()
-            })
-            .to_vec(),
-        budgets: max_wall_clock_secs.map(|s| Budgets {
-            max_wall_clock: Some(df_proto::pbjson_types::Duration {
-                seconds: s,
-                nanos: 0,
-            }),
-            ..Default::default()
-        }),
+/// A run with `script` and one initial prompt. `None` when the helper binaries are not built
+/// (same convention as the other runner tests).
+fn scenario(script: &str, max_wall_clock_secs: Option<i64>) -> Option<RunScenario> {
+    let tools = ["ask_question", "complete_task"].map(|name| ToolDescriptor {
+        name: name.to_string(),
+        title: name.to_string(),
+        description: name.to_string(),
+        input_schema_json: "{}".to_string(),
         ..Default::default()
-    };
-    Some(RunDriverParams {
-        assign,
-        credentials: None,
-        initial_prompts: vec![text_prompt("prompt-1")],
-        cancel_requested: false,
-        home_dir: temp.path().join("home"),
-        runtime_dir,
-        hooks_path,
-        mcp_command: mcp_bin,
-        runtime_sock_path: temp.path().join("runtime.sock"),
-        git: Git::new(&repo_dir).allow_protocols(["file", "https"]),
-        repo_dir,
-        outbox,
-        inbound_rx,
-        outbound_tx,
-        git_credentials: None,
+    });
+    let scenario = RunScenario::new("run-idle", script)?
+        .prompt("go")
+        .tools(tools.to_vec());
+    Some(match max_wall_clock_secs {
+        Some(seconds) => scenario.budgets(Budgets {
+            max_wall_clock: Some(df_proto::pbjson_types::Duration { seconds, nanos: 0 }),
+            ..Default::default()
+        }),
+        None => scenario,
     })
 }
 
 /// Starts a run with `script` and the control plane's side of its channels.
 fn start(script: &str, max_wall_clock_secs: Option<i64>) -> Option<IdleRun> {
-    let temp = tempfile::tempdir().unwrap();
+    let scenario = scenario(script, max_wall_clock_secs)?;
     let (control, inbound_rx) = mpsc::channel(100);
     let (outbound_tx, outbound) = mpsc::channel(1000);
-    let params = params(&temp, script, max_wall_clock_secs, inbound_rx, outbound_tx)?;
+    let params = scenario.params(inbound_rx, outbound_tx);
     let run = tokio::spawn(async move { run_session(params).await.unwrap() });
     Some(IdleRun {
         control,
         outbound,
         run,
         seen: Vec::new(),
-        _temp: temp,
+        _scenario: scenario,
     })
 }
 
@@ -431,15 +362,10 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
     hello(&mut server).await;
     server.send_control_message(hello_ack()).await.unwrap();
 
-    let Some(driver) = params(
-        &temp,
-        TWO_TURNS,
-        None,
-        handle.inbound_rx,
-        handle.outbound_tx.clone(),
-    ) else {
+    let Some(scenario) = scenario(TWO_TURNS, None) else {
         return;
     };
+    let driver = scenario.params(handle.inbound_rx, handle.outbound_tx.clone());
     let run = tokio::spawn(async move { run_session(driver).await.unwrap() });
 
     // The runtime is idle once it reports AWAITING_INPUT.

@@ -508,6 +508,10 @@ impl SecretStore for FakeSecretStore {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "scenario tests set up and check a whole run"
+)]
 mod tests {
     use super::*;
     use crate::ids::{CredentialRefId, PersonaId};

@@ -58,7 +58,7 @@ No direct TCP connections outside the configured proxy are permitted in the sand
 
 ## 8. Manual Verification with Real Claude ACP Adapter
 
-An integration test `test_manual_claude_acp_run` in `crates/factory-agent/src/tests.rs` is provided to manually verify `factory-agent` against the real `@agentclientprotocol/claude-agent-acp` adapter and Anthropic Claude APIs using a subscription token.
+An integration test `test_manual_claude_acp_run` in `crates/factory-agent/src/tests/runner_runtime.rs` is provided to manually verify `factory-agent` against the real `@agentclientprotocol/claude-agent-acp` adapter and Anthropic Claude APIs using a subscription token.
 
 ### Prerequisites
 
