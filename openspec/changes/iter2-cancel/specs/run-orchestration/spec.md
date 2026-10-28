@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; for a run stopped by a human, only prompts queued after the stop count. A task whose status is still `cancelled` SHALL stay `cancelled`.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. For a run stopped by a human, only prompts queued after the stop count. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome. A task whose status is still `cancelled` SHALL stay `cancelled`.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with a retry time
@@ -12,6 +12,14 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 #### Scenario: Message arrived during finalize
 - **WHEN** a message is queued while a run is finalizing and the run ends with `end_turn`
 - **THEN** the task becomes `queued` and the next run starts with that message
+
+#### Scenario: Agent completes
+- **WHEN** a run ends with outcome `completed`
+- **THEN** the task becomes `in_review`
+
+#### Scenario: Marked done while idle
+- **WHEN** a board member marks a task done while its run is `awaiting_input`
+- **THEN** the run is cancelled, its sandbox deleted, and the task stays `completed`
 
 #### Scenario: Blocked run
 - **WHEN** a run reports `RUN_OUTCOME_BLOCKED`
