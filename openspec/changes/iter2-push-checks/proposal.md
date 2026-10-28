@@ -16,6 +16,7 @@
 - **Per-project push policy** (desktop UI, audited): protected path globs, mode per check, size limit, linear history switch.
 - **`push-check-exception` approval type:** a task-branch push rejected only by approval-mode findings raises one request listing the findings. Approval creates task-scoped exceptions for exactly those finding fingerprints, which the gateway receives through `PolicyWatch`. Pending exception requests are closed when a later task-branch push is accepted.
 - **Feedback to the agent:** a push rejected by checks queues a system message (`push.rejected`) with the masked findings and what to do. It is capped at 3 consecutive rejections without an accepted push. The runtime reports `PUSH_STATUS_REJECTED_BY_CHECK` (or `REJECTED_SECRET_DETECTED`) and retries rejected commits after the next turn.
+- **PenPot:** the project board (Config page) gets the push policy form and the Requests boards (Desktop, Phone) the `push-check-exception` card with its findings, before the code changes.
 
 ## Capabilities
 
@@ -32,3 +33,4 @@
 - Code: `df-gateway` (`PushChecks` implementation), control plane (`project_push_policies` and `push_check_exceptions` tables, approval type, `push.rejected` messages), `df-web` policy form, `factory-agent` push status mapping.
 - Dependencies: secret scanning engine chosen by spike 1.1 (Kingfisher as a library, or its rule set with `regex`); `globset` for path globs if not already in the graph.
 - **Depends on** `iter2-git-proxy` (quarantine and `PushChecks` hook) and `iter2-agent-requests` (approval framework).
+- PenPot file "App Design": project board (Config page), Requests boards (Desktop, Phone); mapping rows in `docs/design-workflow.md`.

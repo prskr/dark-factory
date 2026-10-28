@@ -69,6 +69,9 @@ The runtime already parses `git push --porcelain` output per ref. A `!` line map
 
 The reason text is always the detail. "Last pushed commit" is updated only on success, so the next turn retries.
 
+### D7 — Design first in PenPot
+The boards of task 3.3 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
+
 ## Risks / Trade-offs
 
 - [False positives block a task] → secret findings are approval-gated per finding by default.

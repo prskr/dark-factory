@@ -25,6 +25,9 @@ The scheduler leader runs the retention scan once per hour. It selects tasks wit
 ### D3 — Provider
 `SandboxProvider::delete_task_volume(task: &TaskVolumeSpec)` deletes the PVC by name; Longhorn's reclaim policy removes the backing volume. Kata keeps no state outside the PVC.
 
+### D4 — Design first in PenPot
+The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
+
 ## Risks / Trade-offs
 
 - [A task reopened after its volume was deleted re-clones and rebuilds caches] → the cost of the first run; acceptable at a 7-day grace.

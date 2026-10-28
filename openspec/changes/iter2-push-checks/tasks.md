@@ -15,8 +15,9 @@
 ## 3. Control plane
 
 - [ ] 3.1 Add the migrations (design D4) and the snapshot fields, then regenerate `.sqlx`. Verify "exception reaches the gateway" with the cross-replica test setup of `iter1-egress-gateway` (container-backed; CI)
-- [ ] 3.2 Implement the `push-check-exception` approval type and the `RecordPush` reactions (design D5). Verify the "exception requests", "obsolete exception requests" and both "rejection feedback" scenarios (container-backed; CI)
-- [ ] 3.3 Add the desktop push policy form on the project page (glob validation, audit, `egress_policy` notify). Verify "policy change applies to the next push" with a handler test plus a snapshot assertion. Document the settings in the operator configuration reference
+- [ ] 3.2 Implement the `push-check-exception` approval type and the `RecordPush` reactions (design D5). Verify the "exception requests", "obsolete exception requests" and both "rejection feedback" scenarios (container-backed; CI). Render the findings on the request card as on the approved boards, verified with a rendering test
+- [ ] 3.3 PenPot (Config page): add the push policy form (protected path globs, mode per check, size limit, linear history switch) to the project board, including the invalid-glob error state, and the `push-check-exception` request card listing each finding's check, path, line and masked preview to the Requests boards (Desktop, Phone). Export the boards, get the user's approval, and add the mapping rows to `docs/design-workflow.md` (design D7)
+- [ ] 3.4 Add the desktop push policy form on the project page (glob validation, audit, `egress_policy` notify). Verify "policy change applies to the next push" with a handler test plus a snapshot assertion. Compare with the approved boards (`docs/design-workflow.md`, "Comparing a view") at 1440 px. Document the settings in the operator configuration reference
 
 ## 4. Runtime
 

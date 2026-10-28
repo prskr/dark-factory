@@ -35,6 +35,9 @@ The new run starts through the normal scheduler, which only starts runs for task
 ### D3 — UI
 Two htmx `POST` actions on the task detail. "Cancel task" uses a native `<dialog>` for confirmation (no extra JS beyond Alpine). Live updates come through the existing `run_changed`/`task_changed` SSE events.
 
+### D4 — Design first in PenPot
+The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
+
 ## Risks / Trade-offs
 
 - [Stop during a push leaves a half-pushed state] → the runtime finalizes normally; Git pushes are atomic per ref.

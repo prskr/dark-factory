@@ -14,7 +14,8 @@
 
 ## 3. UI
 
-- [ ] 3.1 Add task entries to the allowlist page and the "allow" actions to the events table rows and blocked graph nodes of the network traffic page (design D5). Verify "task entries listed", "allow for the project", "action on the table row", "graph node of one task", "graph node across tasks of one project", "graph node across projects" and "wildcard not offered" with handler tests; update the operator docs for the allowlist
+- [ ] 3.1 PenPot (Network page): add the "allow" action with its scope choices (task, project, instance; design D5) to the events table row action slot, the actions menu of the narrow table and a blocked graph node, and task entries to the allowlist board. Reuse the existing allow dialog and toast boards; the scope picker preselects task (design, Risks). Export the boards, get the user's approval, and add the mapping rows to `docs/design-workflow.md` (design D6)
+- [ ] 3.2 Add task entries to the allowlist page and the "allow" actions to the events table rows and blocked graph nodes of the network traffic page (design D5). Verify "task entries listed", "allow for the project", "action on the table row", "graph node of one task", "graph node across tasks of one project", "graph node across projects" and "wildcard not offered" with handler tests; update the operator docs for the allowlist. Compare with the approved boards (`docs/design-workflow.md`, "Comparing a view") at 1280 and 1440 px
 
 ## 4. Integration
 

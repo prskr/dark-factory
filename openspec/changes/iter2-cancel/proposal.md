@@ -10,6 +10,7 @@ A board member cannot stop an agent that went the wrong way or cancel a task tha
 - **Stop timeout:** if no `RunReport` arrives within 2 minutes after `Cancel`, the sandbox is torn down, the run ends `cancelled` with detail `stop-timeout`, and the task volume is kept.
 - **Cancel task:** new task status `cancelled`. Cancelling stops the active run as above, marks undelivered messages as discarded and closes pending requests (`task-cancelled`). The PR and the issue stay untouched. Queueing a message reopens a cancelled task (status `queued`).
 - **UI:** "Stop" on an active run and "Cancel task" (with confirmation) on the task detail, both phone-ready. Both actions are audited (`run.stop`, `task.cancel`).
+- **PenPot:** the task detail boards (Desktop, Phone) get both actions, the cancel confirmation gets its own board and `Status badge` a `cancelled` variant, before the code changes.
 
 ## Capabilities
 
@@ -26,3 +27,4 @@ None.
 
 - Code: `df-db` migration (task status `cancelled`, `runs.stop_requested_at`, prompt state `discarded`), control plane run service (stop, timeout scan), `df-web` actions. No contract change: `Cancel` and `RUN_OUTCOME_CANCELLED` already exist.
 - **Archive order:** after `iter2-agent-requests`, because both modify `Task status vocabulary` and `Run end maps to task status`; the deltas here include `blocked`.
+- PenPot file "App Design": task detail boards (Desktop, Phone), cancel confirmation board, `Status badge` component; mapping rows in `docs/design-workflow.md`.

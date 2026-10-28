@@ -12,7 +12,8 @@
 
 ## 3. UI
 
-- [ ] 3.1 Add the stop and cancel actions with confirmation and live updates (design D3). Verify "stop on a phone" and "cancel needs confirmation" with handler and rendering tests, and once by hand on a phone
+- [ ] 3.1 PenPot: add "Stop" for an active run and "Cancel task" to the task detail boards (Desktop and Phone pages), plus a board for the cancel confirmation dialog and the `cancelled` status badge (Components page, `Status badge`). Export the boards, get the user's approval, and add the mapping rows to `docs/design-workflow.md` (design D4)
+- [ ] 3.2 Add the stop and cancel actions with confirmation and live updates (design D3) with the layout of the approved boards. Verify "stop on a phone" and "cancel needs confirmation" with handler and rendering tests, and once by hand on a phone. Compare with the approved boards (`docs/design-workflow.md`, "Comparing a view") at 390 and 1440 px
 
 ## 4. Integration
 

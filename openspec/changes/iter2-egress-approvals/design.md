@@ -54,6 +54,9 @@ A blocked graph node also gets the action, but it is one `host:port` and can hav
 
 This prevents a node action from creating an entry for another run's task or project. The action posts to the allowlist handler with `host` and `port` taken from the event or node, never a wildcard.
 
+### D6 — Design first in PenPot
+The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
+
 ## Risks / Trade-offs
 
 - [Harness telemetry hosts flood the inbox with requests] → one request per task and host thanks to merging. The board member can deny, or add an instance entry, which settles all of them. Harness settings should disable telemetry (`design/egress.md` §11).

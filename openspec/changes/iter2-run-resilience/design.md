@@ -46,6 +46,9 @@ After finalize the runtime keeps the connection manager running until the outbox
 ### D6 — Concurrency limit
 `runs.maxConcurrent` (default 4) is checked in the scheduler query (D1). Counting non-terminal runs, selecting due tasks and inserting runs happen in one transaction under an instance-wide transaction advisory lock (`pg_try_advisory_xact_lock`; a replica that doesn't get it skips the tick), so two replicas can't both fill the last slot with runs for different tasks. The per-task `FOR UPDATE SKIP LOCKED` and the partial unique index stay as the per-task guard. Runs in `awaiting_input` count as active. Per-credential limits (F6) plug into the same query later.
 
+### D7 — Design first in PenPot
+The boards of task 5.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
+
 ## Risks / Trade-offs
 
 - [A rate limit without a retry time waits one hour] → acceptable for over-night use; the task page shows the time and a human message resumes earlier.

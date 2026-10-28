@@ -12,6 +12,7 @@ Dark Factory is meant to work through tasks unattended, for example over night. 
 - **Interrupted provisioning is retried (TD-18):** runs that stay `pending`/`provisioning` without a sandbox are provisioned again on the next ticks.
 - **Final report delivery (TD-2):** after finalize the runtime keeps reconnecting until its `RunReport` is acknowledged, for up to 10 minutes instead of 10 seconds. The control plane side needs no change: a pod that exits without a report ends `sandbox_lost` and is resumed as above.
 - **UI:** the task detail shows the resume time and the resume count.
+- **PenPot:** the task detail boards (Desktop, Phone) get the resume time and count before the code changes.
 
 ## Capabilities
 
@@ -30,3 +31,4 @@ None.
 - No contract change.
 - Closes TD-2 and TD-18 (`docs/tech_debt.md`); update `design/agent-run.md` §6.6 and the operator configuration reference.
 - **Archive order:** after `iter2-cancel`, because both modify `Run end maps to task status` and `Task status vocabulary` is modified by `iter2-agent-requests` and `iter2-cancel`; the deltas here include `blocked` and `cancelled`.
+- PenPot file "App Design": task detail boards (Desktop, Phone); mapping rows in `docs/design-workflow.md`.

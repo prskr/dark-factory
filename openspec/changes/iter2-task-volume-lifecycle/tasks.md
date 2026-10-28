@@ -11,7 +11,8 @@
 
 ## 3. Reset action
 
-- [ ] 3.1 Implement the reset handler with the active-run check and audit entry (design D2) and the task detail action with confirmation. Verify "reset a waiting task", "reset rejected while running" and the rendering of the confirmation
+- [ ] 3.1 PenPot: add the "Reset workspace" action to the task detail boards (Desktop and Phone pages) and a board for its confirmation, which names what is lost (design D2), and the rejection while a run is active. Export the boards, get the user's approval, and add the mapping rows to `docs/design-workflow.md` (design D4)
+- [ ] 3.2 Implement the reset handler with the active-run check and audit entry (design D2) and the task detail action with confirmation. Verify "reset a waiting task", "reset rejected while running" and the rendering of the confirmation. Compare with the approved boards (`docs/design-workflow.md`, "Comparing a view") at 390 and 1440 px
 
 ## 4. Docs
 

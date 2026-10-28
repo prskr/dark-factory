@@ -20,5 +20,6 @@
 
 ## 5. UI and docs
 
-- [ ] 5.1 Show resume time and count on the task detail (`specs/task-ui/spec.md`). Verify with a rendering test
-- [ ] 5.2 Update `design/agent-run.md` §6.6 (failure modes table: resumed outcomes) and the operator configuration reference; extend the e2e test with a rate-limited fake run that resumes without a message
+- [ ] 5.1 PenPot: add the resume time and the resume count to the task detail boards (Desktop and Phone pages) for a `rate_limited` task with a resume time and a count above 0. Export the boards, get the user's approval, and add the mapping rows to `docs/design-workflow.md` (design D7)
+- [ ] 5.2 Show resume time and count on the task detail (`specs/task-ui/spec.md`) as on the approved boards. Verify with a rendering test. Compare with the approved boards (`docs/design-workflow.md`, "Comparing a view") at 390 and 1440 px
+- [ ] 5.3 Update `design/agent-run.md` §6.6 (failure modes table: resumed outcomes) and the operator configuration reference; extend the e2e test with a rate-limited fake run that resumes without a message
