@@ -8,6 +8,15 @@ publish = false
 # Standalone workspace: keeps HTTP deps out of the product's Cargo.lock / crate_universe graph.
 [workspace]
 
+# Mirrors `[workspace.lints]` of the root Cargo.toml (a standalone workspace cannot inherit it).
+# `cargo xtask check-crates` fails when the two tables differ.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+too_many_lines = "warn"
+
 [dependencies]
 anyhow = "1"
 semver = "1.0.28"
@@ -15,3 +24,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1.8"
 ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"

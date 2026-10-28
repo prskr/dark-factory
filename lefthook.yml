@@ -41,6 +41,18 @@ pre-commit:
       glob: ['Cargo.toml', '*/Cargo.toml', '*/*/Cargo.toml']
       run: build/with_tools.sh cargo xtask outdated --since HEAD
 
+    # Every workspace member is built, tested and linted by both build systems.
+    check-crates:
+      glob: ['Cargo.toml', '**/Cargo.toml', '**/BUILD.bazel', 'MODULE.bazel', '**/tests/*.rs']
+      run: build/with_tools.sh cargo xtask check-crates
+
+    check-file-length:
+      run: build/with_tools.sh cargo xtask check-file-length {staged_files}
+
+    check-test-names:
+      glob: '*.rs'
+      run: build/with_tools.sh cargo xtask check-test-names {staged_files}
+
     image-versions:
       glob: ['deploy/images/**', 'crates/df-core/src/config.rs', 'deploy/helm/**', 'crates/df-k8s/README.md', 'crates/df-agent-channel/docs/configuration.md']
       run: deploy/images/check_versions.sh
@@ -63,6 +75,10 @@ pre-push:
   commands:
     clippy:
       run: build/with_tools.sh cargo clippy --all-targets --all-features -- -D warnings
+
+    # xtask is its own Cargo workspace, so the clippy run above does not cover it.
+    clippy-xtask:
+      run: build/with_tools.sh cargo clippy --manifest-path tools/xtask/Cargo.toml --all-targets -- -D warnings
 
     cargo-deny:
       run: build/with_tools.sh cargo deny check

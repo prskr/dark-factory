@@ -88,7 +88,7 @@ Write the user's decision to the ledger before acting on it.
 
 ## 6. Fix round
 
-- Build the fix list: ID, file:line, problem, expected fix. Include only the items the user approved. Describe the expected behavior and the test that proves it. Prescribe a mechanism only if you verified it against the code; an unverified "how" from the orchestrator becomes the next round's regression.
+- Build the fix list: ID, file:line, problem, expected fix. Include only the items the user approved. Describe the expected behavior and the test that proves it. Prescribe a mechanism only if you verified it against the code; an unverified "how" from the orchestrator becomes the next round's regression. Tests are named after the behavior they assert, never after a finding ID, round or review (`AGENTS.md`, "File structure"): the fix list says so for every test it asks for.
 - Send it to the same implementer with `SendMessage` (`Fix round <n>`). Spawn a fresh implementer, with the change name and the fix list, only if the old one is gone or its reports become incoherent.
 - Handle its report as in step 2, then go back to step 3.
 - Limit: after 3 fix rounds with blocking findings still open, stop. Show the open items and ask the user how to continue.

@@ -1,7 +1,14 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files(["Cargo.toml"])
 
@@ -12,6 +19,7 @@ rust_library(
     compile_data = ["//contract:wit_integrations"],
     crate_name = "df_plugins",
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
         "//crates/df-core:df_core",
@@ -26,6 +34,7 @@ alias(
 rust_test(
     name = "df_plugins_test",
     crate = ":df_plugins",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -51,6 +60,7 @@ rust_test(
             "FORGEJO_PLUGIN_WASM": "$(rootpath //plugins/forgejo)",
             "TEST_PROBE_WASM": "$(rootpath //plugins/test-probe)",
         },
+        lint_config = ":lints",
         proc_macro_deps = all_crate_deps(
             proc_macro = True,
             proc_macro_dev = True,
@@ -65,6 +75,7 @@ rust_test(
     )
     for name in [
         "forgejo",
+        "homelab",
         "load",
         "sandbox",
     ]

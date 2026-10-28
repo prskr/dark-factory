@@ -19,7 +19,7 @@ The size limits (1,500 lines per file) and the test naming rule are guidance in 
 - New `cargo xtask` checks run in the pre-commit hook and in CI:
   - `check-crates`: every workspace member inherits the workspace lints and has a `BUILD.bazel`; every Rust target there sets `lint_config`; every `tests/*.rs` has a Bazel test target; every member is in the `MODULE.bazel` manifest list.
   - `check-file-length`: source files over 1,500 lines fail unless they are on an allowlist with a reason, kept in the root `Cargo.toml`. An allowlist entry for a file that is no longer too long fails too.
-  - `check-test-names`: a test named after a review round, finding or tech-debt ID (`review`, `finding`, `r<n>`, `td<n>`, `round<n>`) fails.
+  - `check-test-names`: a test named after a review round, finding or tech-debt ID (`finding`, `r<n>`, `td<n>`, `round<n>`) fails.
 - Docs and agent rules:
   - `AGENTS.md`: a checklist for adding a crate, the lint rules, and the checks that enforce the size limits and the test naming rule.
   - The `rust` skill: the Bazel details of adding a crate and of the lint setup.

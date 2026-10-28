@@ -42,6 +42,7 @@ Every `rust_library`, `rust_binary`, `rust_test` and `rust_shared_library` sets 
 - **Alternative:** an xtask that generates the `clippy_flags` from `[workspace.lints]`. Rejected: it is a second source plus a generator, and it would not cover rustc lints (`unsafe_code`) or per-crate tables (the plugins).
 - **Alternative:** Bazel macros that inject `lint_config`. Rejected for now: they hide 17 one-line attributes behind a new abstraction. D4 checks that the attribute is present.
 - **Verification:** rules_rust 0.73 applies `LintsInfo` to rustc. The task verifies that the clippy aspect applies it too, with the negative checks of the spec scenarios. If the aspect ignores the clippy part, the implementer reports it as BLOCKED instead of re-adding flags to `.bazelrc`.
+- **Known gap:** `cargo_build_script` (rules_rust 0.73) has no `lint_config` attribute, so the Bazel lint run does not lint the build scripts of `df-proto` and `df-web`. `cargo clippy --all-targets` still lints them. `check-crates` (D4) does not require the attribute on build scripts.
 
 ### D2. Missing test targets
 
@@ -50,7 +51,7 @@ Every `rust_library`, `rust_binary`, `rust_test` and `rust_shared_library` sets 
 
 ### D3. xtask is linted by the pre-push hook and CI
 
-`tools/xtask/Cargo.toml` gets a `[lints]` table with the same entries as `[workspace.lints]` (it cannot inherit them across workspaces), with a comment pointing to the root table. The pre-push hook runs `cargo clippy --manifest-path tools/xtask/Cargo.toml --all-targets -- -D warnings`, and CI runs the same through `bazel run //:cargo --`. xtask stays out of Bazel: a `BUILD.bazel` for it would pull its HTTP dependencies into crate_universe, which the standalone workspace exists to prevent.
+`tools/xtask/Cargo.toml` gets a `[lints]` table with the same entries as `[workspace.lints]` (it cannot inherit them across workspaces), with a comment pointing to the root table. The pre-push hook runs `cargo clippy --manifest-path tools/xtask/Cargo.toml --all-targets -- -D warnings`, and CI runs the same with the rustup toolchain. `bazel run //:cargo -- clippy` fails with E0463, because the Bazel toolchain has no host std for build scripts. Not yet verified in CI: confirm it on the first PR. xtask stays out of Bazel: a `BUILD.bazel` for it would pull its HTTP dependencies into crate_universe, which the standalone workspace exists to prevent.
 
 ### D4. `cargo xtask check-crates`
 
@@ -58,7 +59,7 @@ The check reads files only; it runs neither Bazel nor `cargo metadata`, so it st
 
 For every directory in `crates/*` and `plugins/*` with a `Cargo.toml`:
 
-1. `crates/*` have `[lints] workspace = true`. `plugins/*` have their own `[lints.rust]` and `[lints.clippy]` tables; the check compares their clippy table with `[workspace.lints.clippy]` and fails on a missing entry, so plugins differ only in `unsafe_code`.
+1. `crates/*` have `[lints] workspace = true`. `plugins/*` have their own `[lints.rust]` and `[lints.clippy]` tables; the check compares both with `[workspace.lints.rust]` and `[workspace.lints.clippy]` and fails on a missing or different entry. `unsafe_code` only has to be present, at any level, so plugins differ only in `unsafe_code`.
 2. A `BUILD.bazel` exists, declares `extract_cargo_lints`, and each `rust_library(`, `rust_binary(`, `rust_test(` and `rust_shared_library(` call contains `lint_config`. Calls are split by scanning for these rule names at line start; good enough for buildifier-formatted files.
 3. Every `tests/<stem>.rs` is mentioned in `BUILD.bazel` as `tests/<stem>.rs` or as the string `"<stem>"` (the list comprehension of `df-plugins`).
 4. `//crates/<name>:Cargo.toml` or `//plugins/<name>:Cargo.toml` is in the `crate.from_cargo` `manifests` list of `MODULE.bazel`.
@@ -85,7 +86,7 @@ Errors list every violation at once, each with the file and the fix.
 ### D6. `cargo xtask check-test-names [<file>…]`
 
 - The check scans `.rs` files for a `#[test]` or `#[tokio::test…]` attribute, then reads the name of the next `fn`.
-- A name fails when one of its `_`-separated words matches `review`, `finding`, `round\d*`, `r\d+` or `td\d+`, case-insensitive.
+- A name fails when one of its `_`-separated words matches `finding`, `round\d+`, `r\d+` or `td\d+`, case-insensitive. Bare `review` and `round` are not forbidden: they matched legitimate names (`…_in_review`, `…_round_trips`). `test_review_r12_…` still fails through `r12`.
 - There is no allowlist; a false positive is renamed. The current tree passes, since `split-oversized-test-modules` renamed the 34 offenders.
 - The rule is a heuristic against the habit seen in the history. It does not judge whether a name describes behavior; the reviewer rule (D8) covers that.
 
@@ -96,7 +97,7 @@ Errors list every violation at once, each with the file and the fix.
   - `check-test-names {staged_files}` (glob `*.rs`)
   - `check-crates` (glob `Cargo.toml`, `BUILD.bazel`, `MODULE.bazel`, `tests/*.rs`)
 - **pre-push:** the xtask clippy run (D3).
-- **CI:** a step in `ci.yaml` runs all three checks without arguments through `bazel run //:cargo -- xtask …`, plus the xtask clippy run.
+- **CI:** a step in `ci.yaml` runs all three checks without arguments through `bazel run //:cargo -- xtask …`, plus the xtask clippy run with the rustup toolchain (D3).
 
 ### D8. Documentation and agent rules
 
@@ -110,6 +111,6 @@ Errors list every violation at once, each with the file and the fix.
 ## Risks / Trade-offs
 
 - **The text scan of `BUILD.bazel` (D4) can be fooled by unusual formatting.** → buildifier formats every `BUILD.bazel` (pre-commit hook), so the layout is stable. The check prints the target it could not match, so a false failure is obvious.
-- **The `r\d+` word in D6 can match a legitimate name.** → The match is on a whole word; a rename is cheap; there are no current matches.
+- **The word list of D6 can match a legitimate name.** → The match is on a whole word, bare `review` and `round` are not in the list, and a rename is cheap. The current tree has no matches.
 - **Enabling `lint_config` under Bazel reveals warnings Bazel did not see before.** → `cargo clippy` already enforces the same lints, so the expected count is zero. Any hit is fixed in this change.
 - **The xtask lint table can drift from the workspace table.** → `check-crates` compares the two tables, the same way as for the plugins (D4.1).

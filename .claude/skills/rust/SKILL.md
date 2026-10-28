@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel.
+description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints.
 ---
 
 # Rust in Dark Factory
@@ -42,3 +42,19 @@ Find the container socket first, as described in `AGENTS.md` ("Containers and in
 
 - **Tests hang after the container runtime restarted:** the shared PostgreSQL container (`df-test-postgres-*`, reused by all test binaries) stays exited. With the CLI of the runtime that owns `<socket>` (`podman` or `docker`), check with `<cli> ps -a --filter name=df-test-postgres` and remove it with `<cli> rm -f <name>`; testcontainers recreates it on the next run.
 - **`dark-factory` tests with plain cargo** load the Forgejo wasm plugin from `target/wasm32-wasip2/debug/`. Build it first: `cargo build --target wasm32-wasip2 -p forgejo-plugin`. Bazel (CI, release) builds it as test `data` and sets `FORGEJO_PLUGIN_WASM`; no extra step there.
+
+## Adding a crate (Bazel details)
+
+The checklist is in `AGENTS.md` ("Adding a crate"). Details that bite:
+
+- Bazel runs only what has a target. A `tests/*.rs` or a unit-test module without `rust_test` is never built, run or linted under Bazel.
+- A test that spawns a binary gets it through `data` and the path through `env` (`$(rootpath :bin)`), or through `rustc_env` when the test reads it with `env!` (`CARGO_BIN_EXE_<name>`).
+- Do not tag a target `manual`: `//crates/...` and the clippy aspect skip it, so it would escape linting. Tag a test that cannot run in Bazel `external` instead.
+- A new workspace member needs the manifest entry in `MODULE.bazel`; then regenerate `MODULE.bazel.lock` as described above.
+
+## Lints
+
+- One source: `[workspace.lints]` in the root `Cargo.toml` and `clippy.toml`. `extract_cargo_lints` turns the manifest tables into `lint_config`, which rustc and the clippy aspect (`--config=lint`) apply. `.bazelrc` keeps only `-Dwarnings`, because rules_rust drops its own once `clippy_flags` is set.
+- To add a lint, edit the workspace table (and the mirrored tables of the plugins and `tools/xtask`; `cargo xtask check-crates` compares them). Nothing else.
+- `tools/xtask` is a standalone workspace outside Bazel; its clippy run is in the pre-push hook and CI. Bazel's `//:cargo` cannot compile xtask (no host std), so CI runs its clippy and checks with the rustup toolchain.
+- Silence a lint with `#[expect(..., reason = "...")]`, not `#[allow]`; the one exception (module-level `allow` in test modules) is in `AGENTS.md`, "Function length".

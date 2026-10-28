@@ -18,8 +18,8 @@ build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:lint --output_groups=+clippy_checks
 build:lint --@rules_rust//rust/settings:clippy.toml=//:clippy.toml
 # rules_rust adds its default `-Dwarnings` only while `clippy_flags` is empty, so it is repeated here.
-# `too_many_lines` is a pedantic lint: Cargo enables it through `[workspace.lints]`, Bazel ignores that.
-build:lint --@rules_rust//rust/settings:clippy_flags=-Dwarnings,-Dclippy::too_many_lines
+# All other lint levels come from the Cargo manifests (`extract_cargo_lints` + `lint_config` in BUILD.bazel).
+build:lint --@rules_rust//rust/settings:clippy_flags=-Dwarnings
 
 build:fmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
 build:fmt --output_groups=rustfmt_checks

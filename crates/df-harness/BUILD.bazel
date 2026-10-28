@@ -1,17 +1,54 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
 
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
+
 exports_files(["Cargo.toml"])
 
-# Spike (native-harness-spike): the ACP tests spawn the cargo-built binary, so there is no
-# rust_test target.
+# Spike (native-harness-spike)
 rust_binary(
     name = "df-harness",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "df_harness_test",
+    crate = ":df-harness",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True),
+)
+
+# The smoke tests spawn the binary; `env!` is resolved at compile time, so the runfiles path goes
+# into `rustc_env`.
+rust_test(
+    name = "smoke_test",
+    srcs = ["tests/smoke.rs"],
+    data = [":df-harness"],
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    rustc_env = {"CARGO_BIN_EXE_df-harness": "$(rootpath :df-harness)"},
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
 )

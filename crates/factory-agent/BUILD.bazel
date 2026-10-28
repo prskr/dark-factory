@@ -1,8 +1,15 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("//build:empty_dir.bzl", "empty_dir")
 
 package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
 
 exports_files([
     "Cargo.toml",
@@ -19,6 +26,7 @@ rust_binary(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
         "//crates/df-proto:df_proto",
@@ -35,6 +43,7 @@ rust_test(
     compile_data = ["docs/configuration.md"],
     crate_root = "src/main.rs",
     edition = "2024",
+    lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
         proc_macro_dev = True,
@@ -54,4 +63,5 @@ rust_test(
     data = [":factory-agent"],
     edition = "2024",
     env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
+    lint_config = ":lints",
 )
