@@ -21,6 +21,7 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `runs.connectTimeoutSeconds` | no | `600` | Time from run creation until the runtime opens its stream; then the run fails with `connect_timeout`. |
 | `runs.cancelGraceSeconds` | no | `300` | Grace after the wall-clock budget. |
 | `runs.keepAliveSeconds` | no | `600` | How long a run waits for a follow-up after a normal turn end (`awaiting_input`) before the control plane sends `Release` and the run ends `end_turn`. `0` releases right after the turn. Idle time counts toward `maxWallClockSeconds`. |
+| `web.showHiddenBlocks` | no | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, e.g. the `set_task_title` request) in the task page and the queued message stack, muted and labeled "Instruction for the agent". Hidden blocks are always delivered to the harness. Read at startup; a change needs a restart. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
 

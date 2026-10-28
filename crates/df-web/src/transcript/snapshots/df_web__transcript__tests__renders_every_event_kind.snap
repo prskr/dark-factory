@@ -93,6 +93,26 @@ expression: render_all(&fold(&every_kind()))
 <span class="mr-2 text-faint">[in progress]</span>fix</li>
 </ul>
 </div>
-<div id="ev-9" class="rounded-lg px-3 py-2 text-sm bg-status-waiting-bg text-status-waiting-fg">
-<span class="mr-2 font-mono text-xs">workspace.diverged</span>branch diverged</div>
+<details id="ev-9" data-author="agent" data-system class="group ml-11">
+<summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8">
+<span class="text-muted">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M12 6V2H8"/>
+<path d="m8 18-4 4V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2Z"/>
+<path d="M2 12h2"/>
+<path d="M9 11v2"/>
+<path d="M15 11v2"/>
+<path d="M20 12h2"/>
+</svg>
+</span>
+<span class="shrink-0 font-mono text-xs text-status-waiting-fg">workspace.diverged</span>
+<span class="min-w-0 flex-1 truncate text-xs">branch diverged</span>
+<span class="text-faint transition-transform group-open:rotate-180">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="m6 9 6 6 6-6"/>
+</svg>
+</span>
+</summary>
+<div class="whitespace-pre-wrap break-words pb-3 text-sm">branch diverged</div>
+</details>
 </div>

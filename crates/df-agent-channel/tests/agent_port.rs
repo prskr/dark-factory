@@ -76,6 +76,7 @@ impl Harness {
 fn text(t: &str) -> ContentBlock {
     ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
+        hidden: false,
     }
 }
 
@@ -533,6 +534,7 @@ async fn replayed_events_do_not_move_their_blobs_again() -> anyhow::Result<()> {
                         source: Some(blob_data::Source::Inline(bytes::Bytes::from_static(b"png"))),
                     }),
                 })),
+                hidden: false,
             }),
         })),
     });

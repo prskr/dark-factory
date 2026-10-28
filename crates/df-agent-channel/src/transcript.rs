@@ -194,6 +194,7 @@ mod tests {
     fn text(t: &str) -> ContentBlock {
         ContentBlock {
             kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
+            hidden: false,
         }
     }
 
@@ -214,6 +215,7 @@ mod tests {
                             source: Some(blob_data::Source::Inline(Bytes::from_static(bytes))),
                         }),
                     })),
+                    hidden: false,
                 }),
             })),
         }

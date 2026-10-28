@@ -20,7 +20,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    let app = TestApp::new().await;
+    fixture_with(TestApp::new().await).await
+}
+
+async fn fixture_with(app: TestApp) -> Fixture {
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
     let task = new_task(&app.pool, &seed, "t").await.id;
@@ -44,6 +47,7 @@ impl Fixture {
             kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
                 df_proto::transcript::v1::TextContent { text: text.into() },
             )),
+            hidden: false,
         }];
         let (actor, _) = crate::testkit::actor();
         df_db::queue_message(&self.app.pool, self.task, actor, content)
@@ -68,6 +72,39 @@ impl Fixture {
 
 fn ended() -> serde_json::Value {
     json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}})
+}
+
+#[tokio::test]
+async fn hidden_blocks_are_labelled_in_the_stream_only_with_the_option() {
+    for (app, shown) in [
+        (TestApp::with_hidden_blocks().await, true),
+        (TestApp::new().await, false),
+    ] {
+        let f = fixture_with(app).await;
+        f.add(
+            1,
+            "t1",
+            json!({"userMessage": {"promptId": "p", "content": [
+                {"text": {"text": "Fix login"}},
+                {"hidden": true, "text": {"text": "call set_task_title"}},
+            ]}}),
+        )
+        .await;
+        let frame = f.events("/tasks/DF-1/events").await.next().await;
+        assert!(frame.data.contains("Fix login"), "{}", frame.data);
+        assert_eq!(
+            frame.data.contains("Instruction for the agent"),
+            shown,
+            "{}",
+            frame.data
+        );
+        assert_eq!(
+            frame.data.contains("call set_task_title"),
+            shown,
+            "{}",
+            frame.data
+        );
+    }
 }
 
 #[tokio::test]

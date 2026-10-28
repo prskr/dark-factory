@@ -381,11 +381,13 @@ fn convert_acp_content_block_to_proto(block: &AcpContentBlock) -> ContentBlock {
             kind: Some(ContentBlockKind::Text(TextContent {
                 text: t.text.clone(),
             })),
+            hidden: false,
         },
         _ => ContentBlock {
             kind: Some(ContentBlockKind::Text(TextContent {
                 text: String::new(),
             })),
+            hidden: false,
         },
     }
 }
@@ -400,6 +402,7 @@ fn convert_acp_tool_content_to_proto(tc: &AcpToolCallContent) -> (ToolCallConten
                         kind: Some(df_proto::transcript::v1::tool_call_content::Kind::Content(
                             ContentBlock {
                                 kind: Some(ContentBlockKind::Text(TextContent { text })),
+                                hidden: false,
                             },
                         )),
                     },
@@ -422,6 +425,7 @@ fn convert_acp_tool_content_to_proto(tc: &AcpToolCallContent) -> (ToolCallConten
                         kind: Some(ContentBlockKind::Text(TextContent {
                             text: String::new(),
                         })),
+                        hidden: false,
                     },
                 )),
             },

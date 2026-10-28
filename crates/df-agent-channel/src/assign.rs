@@ -342,6 +342,7 @@ pub async fn transcript_summary(pool: &PgPool, rc: &RunContext) -> Result<String
                 .map(|blocks| {
                     blocks
                         .iter()
+                        .filter(|b| b["hidden"].as_bool() != Some(true))
                         .filter_map(|b| b["text"]["text"].as_str())
                         .collect::<Vec<_>>()
                         .join("\n")
@@ -657,7 +658,7 @@ mod tests {
         let env = Env::new(pool.clone()).await;
         let run = env.insert_run(env.task.id, 1, "running").await;
         for (seq, (kind, payload)) in [
-            ("user_message", serde_json::json!({"userMessage": {"content": [{"text": {"text": "please fix"}}]}})),
+            ("user_message", serde_json::json!({"userMessage": {"content": [{"text": {"text": "please fix"}}, {"hidden": true, "text": {"text": "secret instruction"}}]}})),
             ("agent_message_chunk", serde_json::json!({"agentMessageChunk": {"messageId": "m", "content": {"text": {"text": "on "}}}})),
             ("agent_message_chunk", serde_json::json!({"agentMessageChunk": {"messageId": "m", "content": {"text": {"text": "it"}}}})),
         ]
@@ -680,6 +681,7 @@ mod tests {
         let summary = transcript_summary(&pool, &rc).await?;
         assert!(summary.contains("User: please fix"), "{summary}");
         assert!(summary.contains("Agent: on it"), "{summary}");
+        assert!(!summary.contains("secret instruction"), "{summary}");
         Ok(())
     }
 

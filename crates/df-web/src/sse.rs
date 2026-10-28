@@ -61,13 +61,15 @@ pub async fn task_events(
         Err(e) => return internal_error(&e),
     };
     let start = last_event_id(&headers).or(query.after).unwrap_or(0).max(0);
+    let folder =
+        Folder::new(task.persona_name.clone()).with_hidden_blocks(state.show_hidden_blocks);
     let stream = DetailStream {
         task_id: TaskId::from_uuid(task.id),
         rx: state.notifier.subscribe(),
         state,
         start,
         cursor: 0,
-        folder: Folder::new(task.persona_name.clone()),
+        folder,
         check_regions: true,
         regions: [String::new(), String::new(), String::new(), String::new()],
         settle: None,
@@ -220,6 +222,7 @@ impl DetailStream {
                 &data.task.persona_name,
                 data.task.status.as_str(),
                 &data.pending,
+                self.state.show_hidden_blocks,
                 None,
             ),
         ];

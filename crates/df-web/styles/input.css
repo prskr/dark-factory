@@ -277,14 +277,15 @@
   }
 }
 
-/* Tool rows: a line above and below, consecutive calls share one. Live appends regroup without
-   re-rendering. */
+/* Tool and notice rows: a line above and below, consecutive rows share one. Live appends regroup
+   without re-rendering. */
 @layer components {
-  [data-tool] {
+  [data-tool],
+  [data-system] {
     border-top: 1px solid var(--color-line);
     border-bottom: 1px solid var(--color-line);
   }
-  [data-tool] + [data-tool] {
+  :is([data-tool], [data-system]) + :is([data-tool], [data-system]) {
     border-top-width: 0;
   }
 }

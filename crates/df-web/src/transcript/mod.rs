@@ -34,7 +34,9 @@ pub enum ItemKind {
     User {
         prompt_id: String,
         author: String,
-        text: String,
+        /// Text parts as `(text, hidden)`; hidden parts are only present with
+        /// `web.showHiddenBlocks`.
+        parts: Vec<(String, bool)>,
     },
     Agent {
         text: String,
@@ -117,6 +119,8 @@ pub struct Folder {
     now: DateTime<Utc>,
     /// Changes of dividers pushed while folding the current event.
     carry: Vec<Change>,
+    /// Keep hidden content blocks in user messages (`web.showHiddenBlocks`).
+    show_hidden: bool,
 }
 
 impl Folder {
@@ -126,6 +130,13 @@ impl Folder {
             agent_name: agent_name.into(),
             ..Self::default()
         }
+    }
+
+    /// Keeps hidden content blocks of user messages, for debugging prompts.
+    #[must_use]
+    pub fn with_hidden_blocks(mut self, show_hidden: bool) -> Self {
+        self.show_hidden = show_hidden;
+        self
     }
 
     pub fn items(&self) -> &[Item] {
@@ -168,14 +179,17 @@ impl Folder {
             event::Kind::TurnStarted(_) => Vec::new(),
             event::Kind::UserMessage(m) => {
                 let author = m.author.as_ref().map_or_else(String::new, author_name);
-                let text = blocks_text(&m.content);
+                let parts = block_parts(&m.content, self.show_hidden);
+                if parts.is_empty() {
+                    return Vec::new();
+                }
                 vec![self.push(
                     format!("ev-{}", stored.id),
                     turn,
                     ItemKind::User {
                         prompt_id: m.prompt_id.clone(),
                         author,
-                        text,
+                        parts,
                     },
                 )]
             }
@@ -403,8 +417,22 @@ fn author_name(p: &df_proto::transcript::v1::Principal) -> String {
     }
 }
 
-pub(crate) fn blocks_text(blocks: &[ContentBlock]) -> String {
-    blocks.iter().map(block_text).collect::<Vec<_>>().join("\n")
+/// The text of `blocks` as `(text, hidden)`; hidden blocks only with `show_hidden`.
+fn block_parts(blocks: &[ContentBlock], show_hidden: bool) -> Vec<(String, bool)> {
+    blocks
+        .iter()
+        .filter(|b| show_hidden || !b.hidden)
+        .map(|b| (block_text(b), b.hidden))
+        .collect()
+}
+
+/// The text of `blocks`, hidden blocks only with `show_hidden`.
+pub(crate) fn blocks_text(blocks: &[ContentBlock], show_hidden: bool) -> String {
+    block_parts(blocks, show_hidden)
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn block_text(block: &ContentBlock) -> String {
@@ -505,8 +533,8 @@ pub fn render_item(item: &Item) -> Markup {
         ItemKind::User {
             prompt_id,
             author,
-            text,
-        } => c::user_message(id, prompt_id, author, item.at, text),
+            parts,
+        } => c::user_message(id, prompt_id, author, item.at, parts),
         ItemKind::Agent { text, complete } => {
             let body = if *complete {
                 markdown(text)

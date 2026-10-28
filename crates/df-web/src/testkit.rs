@@ -225,6 +225,20 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
+        Self::build(forge, flows, services, false).await
+    }
+
+    /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
+    pub async fn with_hidden_blocks() -> Self {
+        Self::build(Some(df_core::ForgeKind::Forgejo), None, None, true).await
+    }
+
+    async fn build(
+        forge: Option<df_core::ForgeKind>,
+        flows: Option<Arc<dyn crate::egress::FlowSource>>,
+        services: Option<Arc<dyn crate::egress::ServiceLookup>>,
+        show_hidden_blocks: bool,
+    ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
         let dir = tempfile::tempdir().unwrap();
@@ -245,6 +259,7 @@ impl TestApp {
             forge,
             flows,
             services,
+            show_hidden_blocks,
         };
         Self {
             router: router(state),

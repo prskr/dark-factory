@@ -301,6 +301,10 @@ message ContentBlock {
     ResourceLink resource_link = 3;
     EmbeddedResource resource = 4;
   }
+  // Delivered to the harness but not shown in the task UI (unless the instance
+  // option web.showHiddenBlocks is set) and left out of continuation summaries.
+  // Set by system code only, e.g. the title instruction of an assignment prompt.
+  bool hidden = 10;
 }
 
 message TextContent {

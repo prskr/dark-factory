@@ -48,6 +48,7 @@ fn chunk_text(msg: &AgentMessage) -> Option<&str> {
             Some(EventKind::AgentMessageChunk(c)) => match &c.content {
                 Some(df_proto::transcript::v1::ContentBlock {
                     kind: Some(df_proto::transcript::v1::content_block::Kind::Text(t)),
+                    ..
                 }) => Some(t.text.as_str()),
                 _ => None,
             },
@@ -67,6 +68,7 @@ fn text_prompt(id: &str) -> Prompt {
                     text: "go".to_string(),
                 },
             )),
+            hidden: false,
         }],
         queued_at: None,
     }
