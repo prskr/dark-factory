@@ -204,7 +204,7 @@ async fn detail_lists_runs_with_outcome_retry_time_and_token_counts_per_model() 
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(html.contains("rate limited"), "{html}");
     assert!(html.contains("window exhausted") && html.contains("retry at 2026-10-23 08:30:00 UTC"));
-    // One card per run: number, status badge, a table with the tokens per model.
+    // One card per run: number, status badge, per model its name and a table with its tokens.
     let runs = &html[html.find("id=\"runs\"").unwrap()..];
     let card = &runs[..runs.find("</li>").unwrap()];
     assert!(card.contains(">#1<"), "{card}");
@@ -212,13 +212,12 @@ async fn detail_lists_runs_with_outcome_retry_time_and_token_counts_per_model() 
         card.contains("<time datetime=\"") && card.contains("class=\"ml-auto"),
         "{card}"
     );
-    let table = &html[html.find("<th scope=\"col\"").unwrap()..];
-    let table = &table[..table.find("</table>").unwrap()];
     for cell in [
         ">opus<", ">150<", ">14<", ">6 / 2<", ">haiku<", ">9<", ">7<", ">3 / 1<",
     ] {
-        assert!(table.contains(cell), "{cell}: {table}");
+        assert!(card.contains(cell), "{cell}: {card}");
     }
+    assert_eq!(card.matches("<table").count(), 2, "{card}");
     assert!(card.contains("href=\"#run-1\""), "{card}");
 }
 
