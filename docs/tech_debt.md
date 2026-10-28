@@ -25,7 +25,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-69 to TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -93,7 +93,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-66 | low   | `df-agent-channel` session | `start_finalizing(only_idle: bool)` takes a flag argument |
 | TD-67 | low   | `factory-agent` tests | `idle_tests.rs` rebuilds the fixture setup of `tests.rs` |
 | TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
-| TD-69 | low   | `df-web` | Queued stack shows hidden text as plain text, no label or muted style |
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
 
 ## Entries
@@ -651,16 +650,6 @@ The session tests use a 1 s `keepAliveSeconds` and the budget test a 3 s wall cl
 **Matters when:** CI is slow enough that a deadline passes before the test reaches its assertion, or the suite gets longer.
 
 **Fix:** Inject a clock into the idle deadline computation, then drive it with a paused runtime.
-
-### TD-69 (SP1, R2-4). Queued stack shows hidden text as plain text
-
-`crates/df-web/src/task_pages/view.rs:372`, `crates/df-web/src/sse.rs:225`
-
-With `web.showHiddenBlocks` on, `pending_region` joins hidden blocks into the queued row without the label or muted style, although the spec says hidden blocks are shown "in both places". No handler test covers the pending-region flag path.
-
-**Matters when:** a non-human principal can queue messages with hidden blocks. Today only human messages are queued and humans create visible blocks only, so the path is unreachable.
-
-**Fix:** Render hidden parts in the queued row with the label and muted style, or relax the spec to "transcript only" (`/opsx:update`). Add a handler test for the pending-region path.
 
 ### TD-70 (S6). `hidden: false` spelled out at 48 `ContentBlock` literals
 

@@ -418,21 +418,12 @@ fn author_name(p: &df_proto::transcript::v1::Principal) -> String {
 }
 
 /// The text of `blocks` as `(text, hidden)`; hidden blocks only with `show_hidden`.
-fn block_parts(blocks: &[ContentBlock], show_hidden: bool) -> Vec<(String, bool)> {
+pub(crate) fn block_parts(blocks: &[ContentBlock], show_hidden: bool) -> Vec<(String, bool)> {
     blocks
         .iter()
         .filter(|b| show_hidden || !b.hidden)
         .map(|b| (block_text(b), b.hidden))
         .collect()
-}
-
-/// The text of `blocks`, hidden blocks only with `show_hidden`.
-pub(crate) fn blocks_text(blocks: &[ContentBlock], show_hidden: bool) -> String {
-    block_parts(blocks, show_hidden)
-        .into_iter()
-        .map(|(text, _)| text)
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn block_text(block: &ContentBlock) -> String {

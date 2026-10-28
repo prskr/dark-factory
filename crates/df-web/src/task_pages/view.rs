@@ -18,7 +18,7 @@ use crate::components::{
     tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
-use crate::transcript::blocks_text;
+use crate::transcript::block_parts;
 
 const CHIP_SELECT: &str =
     "min-h-11 rounded-[10px] border border-line bg-panel px-3 text-sm text-muted lg:min-h-8";
@@ -347,9 +347,12 @@ pub fn pending_region(
     show_hidden: bool,
     error: Option<&str>,
 ) -> Markup {
-    let queued: Vec<&TaskMessageRow> = messages
+    // A message of only hidden blocks has nothing to show without the option: no row, no count.
+    let queued: Vec<(&TaskMessageRow, Vec<(String, bool)>)> = messages
         .iter()
         .filter(|m| matches!(m.author, Principal::Human { .. }))
+        .map(|m| (m, block_parts(&m.content, show_hidden)))
+        .filter(|(_, parts)| !parts.is_empty())
         .collect();
     let padding = if queued.is_empty() && error.is_none() {
         ""
@@ -368,8 +371,8 @@ pub fn pending_region(
                 p class="text-xs text-muted" { (queued.len()) " queued · " (reader) }
                 // Three rows of the queued item (`h-11 lg:h-9`) and two 4 px gaps; the list scrolls beyond.
                 div class="flex max-h-[calc(3*2.75rem+2*0.25rem)] flex-col gap-1 overflow-y-auto lg:max-h-[calc(3*2.25rem+2*0.25rem)]" {
-                    @for m in queued {
-                        (queued_message(key, &m.id.to_string(), &blocks_text(&m.content, show_hidden), m.queued_at, queued_state(m, task_status)))
+                    @for (m, parts) in &queued {
+                        (queued_message(key, &m.id.to_string(), parts, m.queued_at, queued_state(m, task_status)))
                     }
                 }
             }
@@ -1016,6 +1019,44 @@ mod tests {
         );
         let on = pending_region("DF-1", "Linus", "running", &[message], true, None).into_string();
         assert!(on.contains("secret text"), "{on}");
+        // The hidden part is labelled and muted, as in the transcript.
+        assert!(
+            on.contains("data-hidden") && on.contains("Instruction for the agent"),
+            "{on}"
+        );
+        assert!(
+            !off.contains("data-hidden") && !off.contains("Instruction"),
+            "{off}"
+        );
+    }
+
+    #[test]
+    fn queued_stack_skips_messages_with_only_hidden_blocks_unless_the_option_is_on() {
+        use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+        let mut hidden_only = queued(1).remove(0);
+        hidden_only.content = vec![ContentBlock {
+            kind: Some(content_block::Kind::Text(TextContent {
+                text: "secret text".into(),
+            })),
+            hidden: true,
+        }];
+        let shown = queued(1).remove(0);
+        let both = [hidden_only, shown];
+        let off = pending_region("DF-1", "Linus", "running", &both, false, None).into_string();
+        assert!(
+            off.contains("1 queued") && !off.contains("secret text"),
+            "{off}"
+        );
+        assert_eq!(off.matches("data-queued-id").count(), 1, "{off}");
+        let on = pending_region("DF-1", "Linus", "running", &both, true, None).into_string();
+        assert!(on.contains("2 queued"), "{on}");
+        assert_eq!(on.matches("data-queued-id").count(), 2, "{on}");
+        let only =
+            pending_region("DF-1", "Linus", "running", &both[..1], false, None).into_string();
+        assert!(
+            !only.contains("queued") && !only.contains("data-queued-id"),
+            "{only}"
+        );
     }
 
     #[test]
