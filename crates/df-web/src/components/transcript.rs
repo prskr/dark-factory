@@ -121,16 +121,34 @@ pub enum QueuedState {
 pub fn queued_message(
     key: &str,
     id: &str,
-    text: &str,
+    parts: &[(String, bool)],
     queued_at: DateTime<Utc>,
     state: QueuedState,
 ) -> Markup {
     let editable = state == QueuedState::Editable;
+    let text = parts
+        .iter()
+        .map(|(text, _)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     html! {
         div id={"queued-" (id)} data-queued-id=(id)
             ":class"={"editing === '" (id) "' ? 'border-accent-text bg-accent-soft' : 'border-line-strong bg-app'"}
             class="flex shrink-0 items-center gap-2 rounded-[10px] border border-dashed px-3 h-11 lg:h-9" {
-            div class="min-w-0 flex-1 truncate text-sm" title=(text) { (text) }
+            div class="min-w-0 flex-1 truncate text-sm" title=(text) {
+                @for (part, hidden) in parts {
+                    @if *hidden {
+                        // Inline: the row is one truncated line, so no rule or padding as in the bubble.
+                        span data-hidden class="text-muted" {
+                            span class="text-xs text-faint" { "Instruction for the agent: " }
+                            (part)
+                        }
+                    } @else {
+                        (part)
+                    }
+                    " "
+                }
+            }
             div class="shrink-0 text-xs text-faint" {
                 time datetime=(queued_at.to_rfc3339()) { (clock(queued_at)) }
                 @match state {
@@ -140,7 +158,7 @@ pub fn queued_message(
                 }
             }
             @if editable {
-                button type="button" aria-label="Edit queued message" data-text=(text)
+                button type="button" aria-label="Edit queued message" data-text=(&text)
                     "x-on:click"={"if (!editing) saved = draft; editing = '" (id) "'; draft = $el.dataset.text; $nextTick(() => $refs.message.focus())"}
                     class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                 button type="button" aria-label="Remove queued message"
@@ -323,8 +341,14 @@ mod tests {
 
     #[test]
     fn queued_messages_offer_edit_and_remove_only_while_held_back() {
-        let held =
-            queued_message("DF-1", "abc", "later <b>", at(), QueuedState::Editable).into_string();
+        let held = queued_message(
+            "DF-1",
+            "abc",
+            &[("later <b>".into(), false)],
+            at(),
+            QueuedState::Editable,
+        )
+        .into_string();
         assert!(
             held.contains("later &lt;b&gt;") && held.contains("<time"),
             "{held}"
@@ -368,14 +392,20 @@ mod tests {
         let sent = queued_message(
             "DF-1",
             "abc",
-            "later",
+            &[("later".into(), false)],
             at(),
             QueuedState::WaitingForDelivery,
         )
         .into_string();
         assert!(sent.contains("waiting for delivery") && !sent.contains("sent to the agent"));
-        let ended =
-            queued_message("DF-1", "abc", "later", at(), QueuedState::NotDelivered).into_string();
+        let ended = queued_message(
+            "DF-1",
+            "abc",
+            &[("later".into(), false)],
+            at(),
+            QueuedState::NotDelivered,
+        )
+        .into_string();
         assert!(
             ended.contains("not delivered, sent with the next run"),
             "{ended}"
