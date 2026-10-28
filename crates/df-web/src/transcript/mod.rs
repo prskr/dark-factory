@@ -195,12 +195,13 @@ impl Folder {
             }
             event::Kind::AgentMessageChunk(c) => {
                 let text = c.content.as_ref().map(block_text).unwrap_or_default();
-                let dom_id = format!("msg-{}", dom_safe(&c.message_id));
+                // Message ids restart with every run.
+                let dom_id = format!("msg-r{}-{}", self.run, dom_safe(&c.message_id));
                 vec![self.append_stream(dom_id, turn, &text, false)]
             }
             event::Kind::AgentThoughtChunk(c) => {
                 let text = c.content.as_ref().map(block_text).unwrap_or_default();
-                let dom_id = format!("thought-{}", dom_safe(&c.message_id));
+                let dom_id = format!("thought-r{}-{}", self.run, dom_safe(&c.message_id));
                 vec![self.append_stream(dom_id, turn, &text, true)]
             }
             event::Kind::ToolCall(t) => {
