@@ -681,8 +681,8 @@ pub fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Choices) 
     html! {
         form id="composer-form" class="space-y-2" hx-post="/tasks" hx-target="this" hx-swap="outerHTML"
             x-data={"{ issue: '" (values.issue_number.trim().chars().filter(char::is_ascii_digit).collect::<String>()) "', linking: false }"}
-            x-init="try { const d = JSON.parse(localStorage.getItem('df.composer') ?? '{}'); const pick = (el, v) => { if (!el.dataset.explicit && v && [...el.options].some(o => o.value === v)) el.value = v }; pick($refs.project, d.project); pick($refs.persona, d.persona) } catch (e) {}"
-            "x-on:submit"="try { localStorage.setItem('df.composer', JSON.stringify({ project: $refs.project.value, persona: $refs.persona.value })) } catch (e) {}"
+            x-init="(() => { try { const d = JSON.parse(localStorage.getItem('df.composer') ?? '{}'); const pick = (el, v) => { if (!el.dataset.explicit && v && [...el.options].some(o => o.value === v)) el.value = v }; pick($refs.project, d.project); pick($refs.persona, d.persona) } catch (e) {} })()"
+            "x-on:submit"="(() => { try { localStorage.setItem('df.composer', JSON.stringify({ project: $refs.project.value, persona: $refs.persona.value })) } catch (e) {} })()"
             "x-on:keydown.ctrl.enter.prevent"="$el.requestSubmit()" "x-on:keydown.meta.enter.prevent"="$el.requestSubmit()" {
             (form_error(errors))
             div class="flex flex-wrap items-center gap-2 px-1" {
