@@ -103,7 +103,7 @@ Task list, new-task composer and task detail SHALL be usable at 390 px width: no
 - **THEN** only that code block scrolls horizontally
 
 #### Scenario: New task on a phone
-- **WHEN** New task is tapped in the bottom bar at 390 px width
+- **WHEN** the floating New task button is tapped at 390 px width
 - **THEN** the composer opens as a bottom sheet over the task list
 
 ### Requirement: Task workspace layout
