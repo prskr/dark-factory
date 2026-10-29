@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-75.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-76.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -27,6 +27,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-75: discussion during `split-long-functions` (`df-web`, 2026-10-29), after the Alpine components moved to `crates/df-web/assets/`.
 
 ## Summary
 
@@ -97,6 +98,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
 | TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
 | TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
+| TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
 
 ## Entries
 
@@ -681,6 +683,21 @@ The in-process test calls `df_db::requests::decide` directly instead of the `/re
 **Matters when:** `iter1-demo-e2e` lands.
 
 **Fix:** Extend the e2e test as task 6.1 describes. Answer through the UI handler while the run awaits input; leave a second question unanswered until `Release`; check that answering it starts run 2.
+
+### TD-75. Component scripts are plain, unminified JavaScript
+
+`crates/df-web/assets/*.js` (`COMPONENT_SCRIPTS` in `crates/df-web/src/layout.rs`)
+
+The Alpine components are served as written: no types, no minification. Today that is two files of about 13 KB raw, compressed and cached by content hash, so minification alone would save 2 to 3 KB on a first load.
+
+**Matters when:** the components grow beyond a few files or tens of KB, or their logic gets complex enough that type errors reach the browser.
+
+**Fix (recommended):** write the components in TypeScript and compile them with `rules_swc` (aspect-build) in Bazel, which strips types and minifies in one step. Decide at the same time:
+- tests that assert on component source must read the `.ts` sources, not the served asset;
+- the plain `cargo` path (AGENTS.md, "Plain `cargo` builds") needs the compiled JS too, for example checked-in output or a `build.rs` step;
+- source maps for debugging in the browser.
+
+Update the "Web UI scripts" rule in `AGENTS.md` with the result.
 
 ## Accepted decisions
 
