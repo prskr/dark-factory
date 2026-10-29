@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::testkit::{TestApp, form, header_str, post_request, text};
 
 fn query_param(url: &str, name: &str) -> String {
-    openidconnect::url::Url::parse(url)
+    url::Url::parse(url)
         .unwrap()
         .query_pairs()
         .find(|(k, _)| k == name)

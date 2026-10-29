@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Bytes of one request, from the sandbox's point of view.
 #[derive(Debug, Default)]
-pub struct Traffic {
+pub(crate) struct Traffic {
     /// Sandbox to destination.
     pub sent: AtomicU64,
     /// Destination to sandbox.
@@ -19,24 +19,24 @@ pub struct Traffic {
 }
 
 impl Traffic {
-    pub fn sent(&self) -> u64 {
+    pub(crate) fn sent(&self) -> u64 {
         self.sent.load(Ordering::Relaxed)
     }
 
-    pub fn received(&self) -> u64 {
+    pub(crate) fn received(&self) -> u64 {
         self.received.load(Ordering::Relaxed)
     }
 }
 
 /// A connection to the destination that counts what is written to it (`sent`) and read from it
 /// (`received`).
-pub struct Counted<T> {
+pub(crate) struct Counted<T> {
     inner: T,
     traffic: Arc<Traffic>,
 }
 
 impl<T> Counted<T> {
-    pub fn new(inner: T, traffic: Arc<Traffic>) -> Self {
+    pub(crate) fn new(inner: T, traffic: Arc<Traffic>) -> Self {
         Self { inner, traffic }
     }
 }
@@ -83,7 +83,7 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for Counted<T> {
 
 /// Which counter of [`Traffic`] a [`Metered`] body adds to.
 #[derive(Debug, Clone, Copy)]
-pub enum Direction {
+pub(crate) enum Direction {
     Sent,
     Received,
 }
@@ -92,7 +92,7 @@ type OnEnd = Box<dyn FnOnce(&Traffic) + Send + Sync>;
 
 /// An HTTP body that counts the data passing through it. `on_end` runs when the body is dropped,
 /// whether it was read to its end or abandoned.
-pub struct Metered<B> {
+pub(crate) struct Metered<B> {
     inner: B,
     traffic: Arc<Traffic>,
     direction: Direction,
@@ -100,7 +100,7 @@ pub struct Metered<B> {
 }
 
 impl<B> Metered<B> {
-    pub fn new(inner: B, traffic: Arc<Traffic>, direction: Direction) -> Self {
+    pub(crate) fn new(inner: B, traffic: Arc<Traffic>, direction: Direction) -> Self {
         Self {
             inner,
             traffic,
@@ -109,7 +109,7 @@ impl<B> Metered<B> {
         }
     }
 
-    pub fn on_end(mut self, on_end: impl FnOnce(&Traffic) + Send + Sync + 'static) -> Self {
+    pub(crate) fn on_end(mut self, on_end: impl FnOnce(&Traffic) + Send + Sync + 'static) -> Self {
         self.on_end = Some(Box::new(on_end));
         self
     }

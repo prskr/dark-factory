@@ -5,7 +5,7 @@ use http::uri::{Authority, Scheme, Uri};
 use secrecy::{ExposeSecret, SecretString};
 
 /// Outgoing requests of one plugin instance: HTTPS to one authority, with the host's credential.
-pub struct HttpPolicy {
+pub(crate) struct HttpPolicy {
     authority: Authority,
     credential: SecretString,
     /// Test servers speak plain HTTP; production policies never set this.
@@ -14,7 +14,7 @@ pub struct HttpPolicy {
 
 impl HttpPolicy {
     /// Allows requests to the authority of `base_url`.
-    pub fn for_base_url(base_url: &str, credential: SecretString) -> Result<Self, String> {
+    pub(crate) fn for_base_url(base_url: &str, credential: SecretString) -> Result<Self, String> {
         let uri: Uri = base_url
             .parse()
             .map_err(|e| format!("invalid base URL `{base_url}`: {e}"))?;
@@ -30,14 +30,14 @@ impl HttpPolicy {
     }
 
     /// Also allows `http` (for tests against a local mock server).
-    pub fn allow_plain_http(mut self) -> Self {
+    pub(crate) fn allow_plain_http(mut self) -> Self {
         self.allow_plain_http = true;
         self
     }
 
     /// Checks scheme and authority of `uri`, then sets `Authorization` in `headers`, replacing
     /// whatever the plugin sent.
-    pub fn admit(&self, uri: &Uri, headers: &mut HeaderMap) -> Result<(), Denied> {
+    pub(crate) fn admit(&self, uri: &Uri, headers: &mut HeaderMap) -> Result<(), Denied> {
         let scheme = uri.scheme().cloned().unwrap_or(Scheme::HTTPS);
         if scheme != Scheme::HTTPS && !(self.allow_plain_http && scheme == Scheme::HTTP) {
             return Err(Denied::Scheme);
@@ -52,7 +52,7 @@ impl HttpPolicy {
         }
         // Forgejo token format.
         let mut value = HeaderValue::try_from(format!("token {}", self.credential.expose_secret()))
-            .map_err(|_| Denied::Credential)?;
+            .map_err(|_invalid_header| Denied::Credential)?;
         value.set_sensitive(true);
         headers.insert(AUTHORIZATION, value);
         Ok(())
@@ -61,7 +61,7 @@ impl HttpPolicy {
 
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Denied {
+pub(crate) enum Denied {
     Scheme,
     Host,
     Credential,

@@ -12,7 +12,7 @@
 //! starts a new container.
 //!
 //! Tests never share a database. Databases older than [`STALE_AFTER`] (the creation time is in the
-//! UUIDv7 of the name) are dropped when a test binary starts, so databases of tests that are still
+//! `UUIDv7` of the name) are dropped when a test binary starts, so databases of tests that are still
 //! running in another binary survive. `DROP DATABASE` has no `FORCE`, which protects a test that
 //! runs longer than the grace period.
 //!
@@ -58,7 +58,7 @@ const TEMPLATE_TMP_PREFIX: &str = "df_tpl_tmp_";
 /// How test databases are cloned from the template: `FILE_COPY` or `WAL_LOG` (PostgreSQL 15+).
 const CLONE_STRATEGY: &str = "FILE_COPY";
 /// Databases older than this are dropped when a test binary starts.
-const STALE_AFTER: Duration = Duration::from_secs(15 * 60);
+const STALE_AFTER: Duration = Duration::from_mins(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const START_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
@@ -110,6 +110,10 @@ fn template_name(migrator: &Migrator) -> String {
 
 /// Calls `attempt` until it succeeds or `timeout` has passed, pausing `pause` in between. Returns
 /// the first error if it never succeeds (a later one is usually a consequence of it).
+#[expect(
+    clippy::print_stderr,
+    reason = "test utility: tests have no tracing subscriber"
+)]
 async fn retry_for<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
     timeout: Duration,
     pause: Duration,
@@ -264,12 +268,15 @@ impl TestServer {
             }
         }
         // Lost the race, or gave up: the template must exist either way.
-        let _ = execute(
+        execute(
             &admin,
             &format!("ALTER DATABASE \"{tmp}\" IS_TEMPLATE false"),
         )
-        .await;
-        let _ = execute(&admin, &format!("DROP DATABASE \"{tmp}\"")).await;
+        .await
+        .ok(); // another test binary may have cleaned it up already
+        execute(&admin, &format!("DROP DATABASE \"{tmp}\""))
+            .await
+            .ok(); // same as above
         assert!(
             database_exists(&admin, &name).await,
             "could not create the template database {name}"
@@ -333,15 +340,18 @@ async fn drop_stale_databases(admin: &PgPool) {
         let is_stale = |prefix| created_at(&name, prefix).is_some_and(|created| created < cutoff);
         if is_stale(TEMPLATE_TMP_PREFIX) {
             // A build that died after marking the database as template; templates cannot be dropped.
-            let _ = execute(
+            execute(
                 admin,
                 &format!("ALTER DATABASE \"{name}\" IS_TEMPLATE false"),
             )
-            .await;
+            .await
+            .ok(); // another test binary may have dropped it already
         } else if !is_stale(DATABASE_PREFIX) {
             continue;
         }
-        let _ = execute(admin, &format!("DROP DATABASE \"{name}\"")).await;
+        execute(admin, &format!("DROP DATABASE \"{name}\""))
+            .await
+            .ok(); // another test binary may have dropped it already
     }
 }
 
@@ -372,13 +382,11 @@ mod tests {
         let value = retry_for(Duration::from_secs(5), Duration::from_millis(1), || {
             calls += 1;
             let n = calls;
-            async move {
-                if n < 3 {
-                    Err(format!("error {n}"))
-                } else {
-                    Ok(n)
-                }
-            }
+            std::future::ready(if n < 3 {
+                Err(format!("error {n}"))
+            } else {
+                Ok(n)
+            })
         })
         .await?;
         assert_eq!(value, 3);
@@ -426,7 +434,7 @@ mod tests {
         Ok(())
     }
 
-    /// Name of a database created `age` ago, as `drop_stale_databases` reads it from the UUIDv7.
+    /// Name of a database created `age` ago, as `drop_stale_databases` reads it from the `UUIDv7`.
     fn aged_name(prefix: &str, age: Duration) -> String {
         let at = SystemTime::now() - age;
         let since_epoch = at.duration_since(UNIX_EPOCH).expect("after the epoch");

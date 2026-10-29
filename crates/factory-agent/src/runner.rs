@@ -45,9 +45,11 @@ pub(crate) const LOG_FIELD_MAX_BYTES: usize = 512;
 const HARNESS_EXIT_GRACE: Duration = Duration::from_secs(5);
 /// How long to wait for the harness to answer a prompt after it was sent a `session/cancel`.
 const CANCEL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Stands in for "no wall-clock budget": a timer that effectively never fires (one year).
+const NO_DEADLINE: Duration = Duration::from_hours(8760);
 
 /// Logs that a prompt reached the runtime (id only, never the content).
-pub(crate) fn log_prompt_received(p: &df_proto::agent::v1::Prompt) {
+pub(crate) fn log_prompt_received(p: &Prompt) {
     tracing::info!(prompt_id = %p.prompt_id, "prompt received");
 }
 
@@ -67,7 +69,7 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
                     tracing::info!(turn_id, prompt_id = %m.prompt_id, "user message delivered");
                 }
                 Some(Kind::AgentMessageChunk(c)) => {
-                    let (text, cut) = chunk_text(&c.content);
+                    let (text, cut) = chunk_text(c.content.as_ref());
                     tracing::debug!(
                         turn_id,
                         message_id = %c.message_id,
@@ -77,7 +79,7 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
                     );
                 }
                 Some(Kind::AgentThoughtChunk(c)) => {
-                    let (text, cut) = chunk_text(&c.content);
+                    let (text, cut) = chunk_text(c.content.as_ref());
                     tracing::debug!(
                         turn_id,
                         message_id = %c.message_id,
@@ -297,12 +299,13 @@ impl<T> Drop for AbortOnDrop<T> {
 /// manager is gone, which the run can't act on, so the result is ignored.
 async fn send_body(outbound_tx: &mpsc::Sender<AgentMessage>, body: agent_message::Body) {
     log_outbound(&body);
-    let _ = outbound_tx
+    outbound_tx
         .send(AgentMessage {
             seq: 0,
             body: Some(body),
         })
-        .await;
+        .await
+        .ok();
 }
 
 /// Reports how long `operation` took, measured from `started` (`RuntimeTiming`). Reported in whole
@@ -326,9 +329,9 @@ async fn send_timing(
 
 /// The text of a chunk cut to [`LOG_FIELD_MAX_BYTES`] and whether it was cut; empty for
 /// non-text content.
-fn chunk_text(block: &Option<df_proto::transcript::v1::ContentBlock>) -> (&str, bool) {
+fn chunk_text(block: Option<&df_proto::transcript::v1::ContentBlock>) -> (&str, bool) {
     use df_proto::transcript::v1::content_block;
-    match block.as_ref().and_then(|b| b.kind.as_ref()) {
+    match block.and_then(|b| b.kind.as_ref()) {
         Some(content_block::Kind::Text(t)) => truncate_utf8(&t.text, LOG_FIELD_MAX_BYTES),
         _ => ("", false),
     }
@@ -436,7 +439,7 @@ async fn wait_for_input(
         released,
         cancelled,
     } = signals;
-    let budget = tokio::time::sleep(remaining.unwrap_or(Duration::from_secs(86400 * 365)));
+    let budget = tokio::time::sleep(remaining.unwrap_or(NO_DEADLINE));
     tokio::pin!(budget);
     loop {
         // Register for wakeups before checking the state, so none is lost in between.
@@ -454,7 +457,7 @@ async fn wait_for_input(
             return IdleWake::Release;
         }
         tokio::select! {
-            _ = &mut notified => {}
+            () = &mut notified => {}
             recv = recv_cancel(cancel_rx) => match recv {
                 Ok(_reason) => {
                     cancelled.store(true, Ordering::SeqCst);
@@ -463,7 +466,7 @@ async fn wait_for_input(
                 Err(broadcast::error::RecvError::Closed) => *cancel_rx = None,
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
             },
-            _ = &mut budget => return IdleWake::BudgetEnded,
+            () = &mut budget => return IdleWake::BudgetEnded,
         }
     }
 }
@@ -612,7 +615,7 @@ async fn handle_control_message(
         }
         Some(control_message::Body::Cancel(c)) => {
             shared.cancelled.store(true, Ordering::SeqCst);
-            let _ = cancel_tx.send(c.reason);
+            cancel_tx.send(c.reason).ok(); // receiver may be gone
         }
         Some(control_message::Body::ToolCallResult(res)) => {
             if res.end_run_after_turn {
@@ -622,7 +625,7 @@ async fn handle_control_message(
                 shared.await_input_requested.store(true, Ordering::SeqCst);
             }
             if let Some(tx) = shared.pending_tool_calls.lock().await.remove(&res.call_id) {
-                let _ = tx.send(res);
+                tx.send(res).ok(); // receiver may be gone
             }
         }
         Some(control_message::Body::CredentialGrant(grant)) => {
@@ -632,7 +635,7 @@ async fn handle_control_message(
                 .await
                 .remove(&grant.request_id)
             {
-                let _ = tx.send(grant);
+                tx.send(grant).ok(); // receiver may be gone
             }
         }
         // HarnessCredentials must precede Assign; the harness environment is already built
@@ -747,7 +750,7 @@ async fn spawn_harness(ctx: &RunContext) -> Result<HarnessProcess, String> {
     };
     tracing::info!(harness = %harness_cmd, "harness started");
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        let _ = child.kill().await;
+        child.kill().await.ok();
         return Err("Failed to capture harness stdio".to_string());
     };
     Ok(HarnessProcess {
@@ -764,7 +767,7 @@ async fn stop_harness(child: &mut tokio::process::Child) {
         .await
         .is_err()
     {
-        let _ = child.kill().await;
+        child.kill().await.ok();
     }
 }
 
@@ -882,7 +885,9 @@ async fn record_initial_pushed_sha(ctx: &RunContext, prepare: &PrepareResult) ->
             .clone()
             .or_else(|| Some(prepare.head_sha.clone()))
     };
-    let _ = ctx.outbox.lock().await.set_last_pushed_sha(sha.clone());
+    if let Err(error) = ctx.outbox.lock().await.set_last_pushed_sha(sha.clone()) {
+        tracing::warn!(error = %error, "failed to persist the last pushed sha");
+    }
     sha
 }
 
@@ -918,11 +923,14 @@ async fn setup_harness_session(
         emit_notice(&ctx.outbound_tx, n.clone()).await;
     }
     // Persist harness session id in outbox (Finding 22)
-    let _ = ctx
+    if let Err(error) = ctx
         .outbox
         .lock()
         .await
-        .set_harness_session_id(Some(setup.session_id.clone()));
+        .set_harness_session_id(Some(setup.session_id.clone()))
+    {
+        tracing::warn!(error = %error, "failed to persist the harness session id");
+    }
     Ok(setup)
 }
 
@@ -1098,10 +1106,7 @@ impl Turns {
             .block_task();
         tokio::pin!(prompt_fut);
 
-        let remaining_wall_clock = self
-            .budget
-            .remaining_wall_clock()
-            .unwrap_or(Duration::from_secs(86400 * 365));
+        let remaining_wall_clock = self.budget.remaining_wall_clock().unwrap_or(NO_DEADLINE);
         let deadline = tokio::time::sleep(remaining_wall_clock);
         tokio::pin!(deadline);
 
@@ -1126,26 +1131,24 @@ impl Turns {
                         needs_cancel = self.shared.cancelled.load(Ordering::SeqCst);
                     }
                 },
-                _ = &mut deadline => {
+                () = &mut deadline => {
                     wall_clock_exceeded = true;
                     needs_cancel = true;
                 }
             }
         }
 
-        let res = match prompt_res {
-            Some(res) => res,
-            None => {
-                let _ = cx
-                    .send_notification(CancelNotification::new(SessionId::new(&*self.session_id)));
-                match tokio::time::timeout(CANCEL_RESPONSE_TIMEOUT, &mut prompt_fut).await {
-                    Ok(res) => res,
-                    Err(_) => {
-                        let mut err = agent_client_protocol::Error::internal_error();
-                        err.message = "timed out waiting for prompt response after cancel".into();
-                        Err(err)
-                    }
-                }
+        let res = if let Some(res) = prompt_res {
+            res
+        } else {
+            cx.send_notification(CancelNotification::new(SessionId::new(&*self.session_id)))
+                .ok();
+            if let Ok(res) = tokio::time::timeout(CANCEL_RESPONSE_TIMEOUT, &mut prompt_fut).await {
+                res
+            } else {
+                let mut err = agent_client_protocol::Error::internal_error();
+                err.message = "timed out waiting for prompt response after cancel".into();
+                Err(err)
             }
         };
         (res, wall_clock_exceeded)
@@ -1219,12 +1222,15 @@ impl Turns {
             send_timing(tx, RuntimeOperation::Push, push_started, ok).await;
         }
         if let Ok(Some(pr)) = push_result {
-            let _ = self
+            if let Err(error) = self
                 .ctx
                 .outbox
                 .lock()
                 .await
-                .set_last_pushed_sha(self.last_pushed_sha.clone());
+                .set_last_pushed_sha(self.last_pushed_sha.clone())
+            {
+                tracing::warn!(error = %error, "failed to persist the last pushed sha");
+            }
             self.shared.push_reports.lock().await.push(pr.clone());
             send_body(tx, agent_message::Body::PushReport(pr)).await;
         }
@@ -1325,11 +1331,14 @@ async fn finalize_run(
         }
     };
 
-    let _ = ctx
+    if let Err(error) = ctx
         .outbox
         .lock()
         .await
-        .set_last_pushed_sha(loop_outcome.last_pushed_sha.clone());
+        .set_last_pushed_sha(loop_outcome.last_pushed_sha.clone())
+    {
+        tracing::warn!(error = %error, "failed to persist the last pushed sha");
+    }
 
     let run_report = final_run_report(finalize_res.run_report, &loop_outcome);
     collected
@@ -1359,8 +1368,10 @@ async fn finalize_run(
 /// The workspace report of the finalize step completed with the outcome of the turn loop.
 fn final_run_report(mut run_report: RunReport, loop_outcome: &TurnLoopOutcome) -> RunReport {
     run_report.outcome = loop_outcome.end.outcome as i32;
-    run_report.detail = loop_outcome.end.detail.clone();
-    run_report.harness_session_id = loop_outcome.session_id.clone();
+    run_report.detail.clone_from(&loop_outcome.end.detail);
+    run_report
+        .harness_session_id
+        .clone_from(&loop_outcome.session_id);
     if let Some(retry_dur) = loop_outcome.end.retry_after {
         let retry_timestamp = chrono::Utc::now()
             + chrono::Duration::from_std(retry_dur).unwrap_or(chrono::Duration::hours(1));

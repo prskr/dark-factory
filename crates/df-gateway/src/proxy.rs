@@ -41,7 +41,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 /// Time open tunnels get to record their events when the proxy stops.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
-/// Time a client has to send its ClientHello after the tunnel was established.
+/// Time a client has to send its `ClientHello` after the tunnel was established.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const PROXY_HEADERS: [HeaderName; 2] = [
     HeaderName::from_static("proxy-connection"),
@@ -62,7 +62,7 @@ impl Dialer for TcpDialer {
     async fn dial(&self, destination: SocketAddr) -> std::io::Result<TcpStream> {
         tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(destination))
             .await
-            .map_err(|_| std::io::ErrorKind::TimedOut)?
+            .map_err(|_elapsed| std::io::ErrorKind::TimedOut)?
     }
 }
 
@@ -171,7 +171,8 @@ impl Proxy {
             while tasks.join_next().await.is_some() {}
             while connections.join_next().await.is_some() {}
         };
-        let _ = tokio::time::timeout(SHUTDOWN_DRAIN, drained).await;
+        // A timeout only means the drain gave up; the tasks are aborted next.
+        tokio::time::timeout(SHUTDOWN_DRAIN, drained).await.ok();
         tasks.abort_all();
         connections.abort_all();
     }
@@ -377,8 +378,7 @@ impl Proxy {
         flow: &mut Flow,
         traffic: &Arc<Traffic>,
     ) -> Result<(), (&'static str, Verdict)> {
-        let upstream_failed = ("upstream-failed", Verdict::Allowed);
-        let mut client = TokioIo::new(upgrade.await.map_err(|_| upstream_failed)?);
+        let mut client = TokioIo::new(upgrade.await.map_err(failed_with_allowed)?);
         let hello = tokio::time::timeout(HELLO_TIMEOUT, sni::read_first_record(&mut client))
             .await
             .ok()
@@ -392,12 +392,12 @@ impl Proxy {
         let upstream = self
             .dial(host, destination)
             .await
-            .map_err(|_| upstream_failed)?;
+            .map_err(failed_with_allowed)?;
         let mut upstream = Counted::new(upstream, traffic.clone());
         upstream
             .write_all(&hello)
             .await
-            .map_err(|_| upstream_failed)?;
+            .map_err(failed_with_allowed)?;
         flow.opened(&self.flows);
         copy_bidirectional(&mut client, &mut upstream)
             .await
@@ -498,15 +498,13 @@ impl Proxy {
     /// Resolves `host` and returns the address to connect to. A name with any blocked address is
     /// refused as a whole, so a mixed answer cannot be used to reach an internal address.
     async fn resolve(&self, host: &str) -> Result<IpAddr, Refusal> {
-        let addresses = match self.resolver.resolve(host).await {
-            Ok(addresses) if !addresses.is_empty() => addresses,
-            _ => {
-                return Err(Refusal {
-                    status: StatusCode::BAD_GATEWAY,
-                    verdict: Verdict::Allowed,
-                    reason: "resolve-failed",
-                });
-            }
+        let addresses = self.resolver.resolve(host).await.unwrap_or_default();
+        let Some(&first) = addresses.first() else {
+            return Err(Refusal {
+                status: StatusCode::BAD_GATEWAY,
+                verdict: Verdict::Allowed,
+                reason: "resolve-failed",
+            });
         };
         if addresses.iter().any(|ip| self.blocked.contains(*ip)) {
             return Err(Refusal {
@@ -515,7 +513,7 @@ impl Proxy {
                 reason: "private-destination",
             });
         }
-        Ok(addresses[0])
+        Ok(first)
     }
 
     /// Sends `request` (origin form) to `destination` over a fresh connection and waits for the
@@ -532,11 +530,11 @@ impl Proxy {
             let stream = self
                 .dial(host, destination)
                 .await
-                .map_err(|_| "upstream-failed")?;
+                .map_err(|error| upstream_failed(&error))?;
             let (mut sender, connection) =
                 hyper::client::conn::http1::handshake(TokioIo::new(stream))
                     .await
-                    .map_err(|_| "upstream-failed")?;
+                    .map_err(|error| upstream_failed(&error))?;
             let stop = root.clone();
             let driver = async move {
                 tokio::select! {
@@ -546,15 +544,18 @@ impl Proxy {
                     },
                 }
             };
-            connection_task = Some(self.spawn(driver).map_err(|_| SHUTDOWN.reason)?);
+            connection_task = Some(
+                self.spawn(driver)
+                    .map_err(|_shutting_down| SHUTDOWN.reason)?,
+            );
             sender
                 .send_request(request)
                 .await
-                .map_err(|_| "upstream-failed")
+                .map_err(|error| upstream_failed(&error))
         };
         let result = tokio::time::timeout(UPSTREAM_TIMEOUT, exchange)
             .await
-            .map_err(|_| "upstream-timeout")
+            .map_err(|_elapsed| "upstream-timeout")
             .and_then(|result| result);
         if result.is_err()
             && let Some(task) = connection_task
@@ -815,11 +816,21 @@ impl Tunnels {
                     other => other.reason(),
                 };
                 // Set once: the first reason stays.
-                let _ = tunnel.reason.set(reason);
+                tunnel.reason.set(reason).ok();
                 tunnel.cancel.cancel();
             }
         }
     }
+}
+
+/// The reason label for a failed upstream step; the client only sees the label, the cause is logged.
+fn upstream_failed(error: &dyn std::fmt::Display) -> &'static str {
+    tracing::debug!(%error, "upstream exchange failed");
+    "upstream-failed"
+}
+
+fn failed_with_allowed(error: impl std::fmt::Display) -> (&'static str, Verdict) {
+    (upstream_failed(&error), Verdict::Allowed)
 }
 
 #[cfg(test)]

@@ -118,7 +118,10 @@ fn inner<'a>(html: &'a str, open: &str, end: &str) -> Option<&'a str> {
 
 /// A viewer without project hosts.
 fn new_viewer(filter: Filter) -> Viewer {
-    Viewer::new(filter, Default::default())
+    Viewer::new(
+        filter,
+        crate::components::project_host::ProjectHosts::default(),
+    )
 }
 
 fn live(filter: Filter, batch: &[FlowEvent]) -> Option<String> {

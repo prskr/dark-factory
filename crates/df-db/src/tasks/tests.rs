@@ -15,10 +15,10 @@ async fn seed_project_and_persona(
     let persona_id = PersonaId::new();
 
     sqlx::query(
-        r#"
+        r"
             INSERT INTO projects (id, key, name, repo_url, image, base_branch)
             VALUES ($1, $2, $3, $4, $5, 'main')
-            "#,
+            ",
     )
     .bind(project_id.as_uuid())
     .bind(project_key.as_str())
@@ -29,10 +29,10 @@ async fn seed_project_and_persona(
     .await?;
 
     sqlx::query(
-        r#"
+        r"
             INSERT INTO personas (id, name, system_prompt, harness)
             VALUES ($1, $2, $3, 'claude-code')
-            "#,
+            ",
     )
     .bind(persona_id.as_uuid())
     .bind(persona_name)
@@ -630,7 +630,7 @@ async fn mark_done_takes_the_run_lock_before_the_task_lock() {
         let id = task.id;
         tokio::spawn(async move { mark_task_done(&pool, id, human()).await })
     };
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let waiting: i64 = sqlx::query_scalar(
                 "SELECT count(*) FROM pg_stat_activity
@@ -642,7 +642,7 @@ async fn mark_done_takes_the_run_lock_before_the_task_lock() {
             if waiting > 0 {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await

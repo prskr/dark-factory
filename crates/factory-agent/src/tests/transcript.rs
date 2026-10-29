@@ -146,7 +146,7 @@ fn test_scenario_large_tool_output() {
                     }
                     _ => panic!("Expected text content block"),
                 },
-                _ => panic!("Expected content kind"),
+                ToolCallContentKind::Diff(_) => panic!("Expected content kind"),
             }
         }
         _ => panic!("Expected ToolCallUpdate"),

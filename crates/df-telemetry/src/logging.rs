@@ -36,12 +36,8 @@ impl LogFormat {
 pub fn init_tracing(format: LogFormat, extra: Option<BoxedLayer>) {
     let raw = std::env::var("RUST_LOG").ok();
     // Fails only when a subscriber is already installed, which is fine.
-    let _ = tracing::dispatcher::set_global_default(build(
-        format,
-        raw.as_deref(),
-        std::io::stdout,
-        extra,
-    ));
+    tracing::dispatcher::set_global_default(build(format, raw.as_deref(), std::io::stdout, extra))
+        .ok();
 }
 
 /// Builds the dispatcher for the `RUST_LOG` value `raw`. An invalid value falls back to `info`

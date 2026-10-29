@@ -20,10 +20,11 @@ pub enum IdentityError {
 /// The SAN must have the shape `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>`; whether the
 /// pod exists and belongs to a run is decided by `SandboxProvider::resolve_identity`.
 pub fn pod_uri_san(der: &[u8]) -> Result<String, IdentityError> {
-    let (_, cert) = parse_x509_certificate(der).map_err(|_| IdentityError::Unparsable)?;
+    let (_, cert) =
+        parse_x509_certificate(der).map_err(|_parse_error| IdentityError::Unparsable)?;
     let san = cert
         .subject_alternative_name()
-        .map_err(|_| IdentityError::Unparsable)?
+        .map_err(|_parse_error| IdentityError::Unparsable)?
         .ok_or(IdentityError::NoPodSan)?;
     san.value
         .general_names

@@ -111,7 +111,7 @@ async fn test_outbox_ack_trimming_deletes_segments() {
     let outbox_dir = runtime_dir.join("outbox");
     let seg_count = std::fs::read_dir(&outbox_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
         .count();
     assert!(
@@ -130,7 +130,7 @@ async fn test_outbox_ack_trimming_deletes_segments() {
 
     let remaining_seg_count = std::fs::read_dir(&outbox_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
         .count();
     assert!(

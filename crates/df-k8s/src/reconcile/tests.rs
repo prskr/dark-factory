@@ -1,4 +1,4 @@
-//! Tests of the NetworkPolicy reconciliation.
+//! Tests of the `NetworkPolicy` reconciliation.
 
 use super::*;
 use crate::provider::K8sSandboxProvider;
@@ -60,7 +60,9 @@ impl ClusterTargetsProvider for DynamicTargetsProvider {
 #[tokio::test]
 #[ignore = "requires live dev cluster"]
 async fn test_reconciliation_live_cluster() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let client = Client::try_default().await.expect("cluster connection");
     let live = crate::test_support::live_config();
     let config = ProvisioningConfig {
@@ -149,9 +151,9 @@ async fn test_reconciliation_live_cluster() {
     provider.teardown(spec.run_id).await.expect("teardown run");
     let pvcs: Api<PersistentVolumeClaim> =
         Api::namespaced(client.clone(), &config.sandbox.namespace);
-    let _ = pvcs
-        .delete(&task.volume_name, &kube::api::DeleteParams::default())
-        .await;
+    pvcs.delete(&task.volume_name, &kube::api::DeleteParams::default())
+        .await
+        .ok(); // best-effort cleanup
 }
 
 /// Task 4.1: the real reconcile loop reverts a manual policy edit and picks up a new target
@@ -165,7 +167,9 @@ async fn test_reconciliation_live_cluster() {
 #[tokio::test]
 #[ignore = "requires dev cluster"]
 async fn policy_loop_live_reverts_manual_edit_and_adds_new_target() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let client = Client::try_default().await.expect("cluster connection");
     let config = crate::test_support::live_config();
     let targets = Arc::new(DynamicTargetsProvider::default());
@@ -200,16 +204,17 @@ async fn policy_loop_live_reverts_manual_edit_and_adds_new_target() {
     .await;
 
     // Cleanup runs whatever happened above.
-    let _ = provider.teardown(spec.run_id).await;
+    provider.teardown(spec.run_id).await.ok();
     let netpols: Api<NetworkPolicy> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-    let _ = netpols
+    netpols
         .delete("run-df-889-1", &kube::api::DeleteParams::default())
-        .await;
+        .await
+        .unwrap();
     let pvcs: Api<PersistentVolumeClaim> =
         Api::namespaced(client.clone(), &config.sandbox.namespace);
-    let _ = pvcs
-        .delete(&task.volume_name, &kube::api::DeleteParams::default())
-        .await;
+    pvcs.delete(&task.volume_name, &kube::api::DeleteParams::default())
+        .await
+        .ok(); // best-effort cleanup
 
     outcome.expect("policy loop scenario");
 }
@@ -276,7 +281,7 @@ async fn drive_policy_loop(
 ) -> Result<(), ProviderError> {
     let netpols: Api<NetworkPolicy> = Api::namespaced(client.clone(), &config.sandbox.namespace);
     let initial = expected_egress(client, config, &targets).await?;
-    if initial.as_array().is_none_or(|rules| rules.is_empty()) {
+    if initial.as_array().is_none_or(Vec::is_empty) {
         return Err(ProviderError::Backend(
             "provisioned policy has no egress rules".into(),
         ));
@@ -341,7 +346,9 @@ async fn drive_policy_loop(
     .await;
 
     stop_tx.send_replace(true);
-    let _ = tokio::time::timeout(Duration::from_secs(40), loop_task).await;
+    tokio::time::timeout(Duration::from_secs(40), loop_task)
+        .await
+        .ok();
     scenario
 }
 
@@ -490,7 +497,7 @@ fn test_config() -> ProvisioningConfig {
 }
 
 /// Answers the API calls of one reconcile pass: a list with one active run, and any
-/// NetworkPolicy patch.
+/// `NetworkPolicy` patch.
 fn spawn_api_responder(
     mut handle: tower_test::mock::Handle<http::Request<kube::client::Body>, http::Response<String>>,
 ) {
@@ -568,7 +575,7 @@ async fn closed_notification_channel_does_not_spin_the_reconcile_loop() {
     // only when a timer or channel wakes it.
     let polls = Arc::new(AtomicUsize::new(0));
     let counted = polls.clone();
-    let loop_handle = tokio::spawn(futures::future::poll_fn(move |cx| {
+    let loop_handle = tokio::spawn(future::poll_fn(move |cx| {
         counted.fetch_add(1, Ordering::SeqCst);
         reconcile.as_mut().poll(cx)
     }));
@@ -725,7 +732,7 @@ async fn leader_election_rejects_non_positive_lease_duration() {
 #[tokio::test]
 async fn forward_changes_notifies_on_changes_and_survives_errors() {
     let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-    let changes = futures::stream::iter(vec![
+    let changes = stream::iter(vec![
         Ok(false),
         Err(watcher::Error::NoResourceVersion),
         Ok(true),
@@ -739,7 +746,7 @@ async fn forward_changes_notifies_on_changes_and_survives_errors() {
 #[tokio::test]
 async fn forward_changes_does_not_block_on_a_full_channel() {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    let changes = futures::stream::iter((0..10).map(|_| Ok(true)));
+    let changes = stream::iter((0..10).map(|_| Ok(true)));
     tokio::time::timeout(Duration::from_secs(1), forward_changes(changes, tx))
         .await
         .expect("try_send never blocks");

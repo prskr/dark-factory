@@ -2,7 +2,7 @@
 
 use crate::host::{issues, pull_requests as prs, wit};
 
-pub fn repo(r: &df_core::RepoRef) -> wit::RepoRef {
+pub(crate) fn repo(r: &df_core::RepoRef) -> wit::RepoRef {
     wit::RepoRef {
         owner: r.owner.clone(),
         name: r.name.clone(),
@@ -16,21 +16,21 @@ fn from_repo(r: wit::RepoRef) -> df_core::RepoRef {
     }
 }
 
-pub fn pull_request_ref(repo_ref: &df_core::RepoRef, number: u64) -> wit::PullRequestRef {
+pub(crate) fn pull_request_ref(repo_ref: &df_core::RepoRef, number: u64) -> wit::PullRequestRef {
     wit::PullRequestRef {
         repo: repo(repo_ref),
         number,
     }
 }
 
-pub fn issue_ref(repo_ref: &df_core::RepoRef, number: u64) -> wit::IssueRef {
+pub(crate) fn issue_ref(repo_ref: &df_core::RepoRef, number: u64) -> wit::IssueRef {
     wit::IssueRef {
         repo: repo(repo_ref),
         number,
     }
 }
 
-pub fn new_pull_request(r: df_core::NewPullRequest) -> prs::NewPullRequest {
+pub(crate) fn new_pull_request(r: df_core::NewPullRequest) -> prs::NewPullRequest {
     prs::NewPullRequest {
         repo: repo(&r.repo),
         head: r.head,
@@ -41,7 +41,7 @@ pub fn new_pull_request(r: df_core::NewPullRequest) -> prs::NewPullRequest {
     }
 }
 
-pub fn pull_request_update(c: df_core::PullRequestUpdate) -> prs::PullRequestUpdate {
+pub(crate) fn pull_request_update(c: df_core::PullRequestUpdate) -> prs::PullRequestUpdate {
     prs::PullRequestUpdate {
         title: c.title,
         body: c.body,
@@ -49,7 +49,7 @@ pub fn pull_request_update(c: df_core::PullRequestUpdate) -> prs::PullRequestUpd
     }
 }
 
-pub fn from_pull_request(p: prs::PullRequest) -> df_core::PullRequest {
+pub(crate) fn from_pull_request(p: prs::PullRequest) -> df_core::PullRequest {
     df_core::PullRequest {
         id: df_core::PullRequestRef {
             repo: from_repo(p.id.repo),
@@ -70,7 +70,7 @@ pub fn from_pull_request(p: prs::PullRequest) -> df_core::PullRequest {
     }
 }
 
-pub fn from_issue(i: issues::Issue) -> df_core::Issue {
+pub(crate) fn from_issue(i: issues::Issue) -> df_core::Issue {
     df_core::Issue {
         id: df_core::IssueRef {
             repo: from_repo(i.id.repo),
@@ -87,14 +87,14 @@ pub fn from_issue(i: issues::Issue) -> df_core::Issue {
     }
 }
 
-pub fn from_comment(c: issues::Comment) -> df_core::Comment {
+pub(crate) fn from_comment(c: issues::Comment) -> df_core::Comment {
     df_core::Comment {
         id: c.id,
         url: c.url,
     }
 }
 
-pub fn from_error(e: wit::Error) -> df_core::IntegrationError {
+pub(crate) fn from_error(e: wit::Error) -> df_core::IntegrationError {
     use df_core::IntegrationError as E;
     match e {
         wit::Error::NotFound(m) => E::NotFound(m),

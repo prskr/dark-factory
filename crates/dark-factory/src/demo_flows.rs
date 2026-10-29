@@ -37,7 +37,7 @@ const TARGETS: [(&str, u32, Option<&str>, &str); 9] = [
 
 /// Which script `--demo-flows` plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum DemoMode {
+pub(crate) enum DemoMode {
     /// A mix of allowed, denied and open connections, a gap and several runs.
     Script,
     /// 10,000 events from a few runs, to see how the page copes with a full buffer.
@@ -45,19 +45,19 @@ pub enum DemoMode {
 }
 
 /// Replays a fixed backlog to every viewer, then adds an event every few seconds.
-pub struct DemoFlows {
+pub(crate) struct DemoFlows {
     backlog: Vec<FlowEvent>,
     interval: Duration,
 }
 
 impl DemoFlows {
-    pub fn new(mode: DemoMode) -> Self {
+    pub(crate) fn new(mode: DemoMode) -> Self {
         let count = match mode {
             DemoMode::Script => 40,
             DemoMode::Bulk => BULK_EVENTS,
         };
         let mut backlog: Vec<FlowEvent> = (0..count)
-            .map(|index| event(index, (count - index) as i64 * 5))
+            .map(|index| event(index, i64::try_from(count - index).unwrap_or_default() * 5))
             .collect();
         if mode == DemoMode::Script {
             // A tunnel that is still open, and a viewer that lost events.
@@ -114,6 +114,10 @@ fn now() -> Timestamp {
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "the indices are reduced modulo the length of non-empty constant arrays"
+)]
 fn event(index: usize, seconds_ago: i64) -> FlowEvent {
     let (run_id, task_key, run_number, project_key) = RUNS[index % RUNS.len()];
     let (host, port, rule, reason) = TARGETS[(index * 7 + index / 3) % TARGETS.len()];
@@ -148,7 +152,7 @@ fn event(index: usize, seconds_ago: i64) -> FlowEvent {
         bytes_out: 1_200 + 37 * index as u64,
         bytes_in: 48_000 + 911 * index as u64,
         duration: Some(ProtoDuration {
-            seconds: 1 + (index % 90) as i64,
+            seconds: 1 + i64::try_from(index % 90).unwrap_or_default(),
             nanos: 250_000_000,
         }),
         ..Default::default()

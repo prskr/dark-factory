@@ -3,6 +3,12 @@
 //! With `DF_HARNESS_LIVE_BASE_URL` / `DF_HARNESS_LIVE_API_KEY` / `DF_HARNESS_LIVE_MODEL` set,
 //! `live_endpoint_streams_thoughts_and_text` also runs against the real spike endpoint.
 
+#![expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "helper functions of an integration test"
+)]
+
 use std::process::Stdio;
 
 use serde_json::{Value, json};
@@ -31,14 +37,14 @@ async fn fake_endpoint(replies: Vec<Reply>) -> String {
             n += 1;
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 1 << 20];
-                let _ = sock.read(&mut buf).await;
+                let _request = sock.read(&mut buf).await.unwrap_or(0);
                 let resp = match reply {
                     Reply::Plain(status, ct, ref body) => format!(
                         "HTTP/1.1 {status}\r\ncontent-type: {ct}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
                     ),
                 };
-                let _ = sock.write_all(resp.as_bytes()).await;
+                sock.write_all(resp.as_bytes()).await.ok();
             });
         }
     });
@@ -46,7 +52,11 @@ async fn fake_endpoint(replies: Vec<Reply>) -> String {
 }
 
 fn sse_body(chunks: &[Value]) -> String {
-    let mut s: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+    let mut s = chunks
+        .iter()
+        .map(|c| format!("data: {c}\n\n"))
+        .collect::<Vec<_>>()
+        .concat();
     s.push_str("data: [DONE]\n\n");
     s
 }
@@ -81,7 +91,7 @@ struct Client {
 }
 
 impl Client {
-    async fn start(base_url: &str, api_key: &str, model: &str) -> anyhow::Result<Self> {
+    fn start(base_url: &str, api_key: &str, model: &str) -> anyhow::Result<Self> {
         let mut child = Command::new(env!("CARGO_BIN_EXE_df-harness"))
             .env("DF_HARNESS_BASE_URL", base_url)
             .env("DF_HARNESS_API_KEY", api_key)
@@ -163,7 +173,7 @@ impl Client {
 }
 
 async fn one_prompt(base_url: &str) -> anyhow::Result<Client> {
-    let mut c = Client::start(base_url, "k", "m").await?;
+    let mut c = Client::start(base_url, "k", "m")?;
     let sid = c.new_session().await?;
     let id = c.prompt_request(&sid, "hi").await?;
     c.response(id).await?;
@@ -242,7 +252,7 @@ async fn cancel_during_a_tool_call_ends_the_turn_as_cancelled() -> anyhow::Resul
         json!({"command":"sleep 60"}),
     ))])
     .await;
-    let mut c = Client::start(&url, "k", "m").await?;
+    let mut c = Client::start(&url, "k", "m")?;
     let sid = c.new_session().await?;
     let id = c.prompt_request(&sid, "hi").await?;
     c.read_until(|v| v["params"]["update"]["sessionUpdate"] == "tool_call")
@@ -261,7 +271,7 @@ async fn failing_prompt_keeps_its_error_message() -> anyhow::Result<()> {
         json!({"command":"sleep 60"}),
     ))])
     .await;
-    let mut c = Client::start(&url, "k", "m").await?;
+    let mut c = Client::start(&url, "k", "m")?;
     let sid = c.new_session().await?;
     let first = c.prompt_request(&sid, "hi").await?;
     c.read_until(|v| v["params"]["update"]["sessionUpdate"] == "tool_call")
@@ -311,7 +321,7 @@ async fn live_endpoint_streams_thoughts_and_text() -> anyhow::Result<()> {
     ) else {
         return Ok(());
     };
-    let mut c = Client::start(&url, &key, &model).await?;
+    let mut c = Client::start(&url, &key, &model)?;
     let sid = c.new_session().await?;
     let id = c.prompt_request(&sid, "Say hello in one word.").await?;
     c.response(id).await?;

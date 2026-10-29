@@ -1,4 +1,4 @@
-//! Reads the TLS ClientHello of a tunnel and extracts its SNI.
+//! Reads the TLS `ClientHello` of a tunnel and extracts its SNI.
 
 use std::io;
 
@@ -13,25 +13,28 @@ const RECORD_HEADER: usize = 5;
 const MAX_RECORD: usize = 16 * 1024;
 const SNI_HOST_NAME: SNIType = SNIType(0);
 
-/// Reads the first TLS record from `stream`, the one that carries the ClientHello. The bytes are
+/// Reads the first TLS record from `stream`, the one that carries the `ClientHello`. The bytes are
 /// returned unmodified so they can be forwarded.
-pub async fn read_first_record<R: AsyncRead + Unpin>(stream: &mut R) -> io::Result<Vec<u8>> {
-    let mut record = vec![0; RECORD_HEADER];
-    stream.read_exact(&mut record).await?;
-    let len = usize::from(u16::from_be_bytes([record[3], record[4]]));
-    if record[0] != 0x16 || len > MAX_RECORD {
+pub(crate) async fn read_first_record<R: AsyncRead + Unpin>(stream: &mut R) -> io::Result<Vec<u8>> {
+    let mut header = [0; RECORD_HEADER];
+    stream.read_exact(&mut header).await?;
+    let [content_type, _, _, len_high, len_low] = header;
+    let len = usize::from(u16::from_be_bytes([len_high, len_low]));
+    if content_type != 0x16 || len > MAX_RECORD {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "not a TLS handshake record",
         ));
     }
-    record.resize(RECORD_HEADER + len, 0);
-    stream.read_exact(&mut record[RECORD_HEADER..]).await?;
+    let mut payload = vec![0; len];
+    stream.read_exact(&mut payload).await?;
+    let mut record = header.to_vec();
+    record.extend(payload);
     Ok(record)
 }
 
-/// The host name of the SNI extension of the ClientHello in `record`, lower case.
-pub fn server_name(record: &[u8]) -> Option<String> {
+/// The host name of the SNI extension of the `ClientHello` in `record`, lower case.
+pub(crate) fn server_name(record: &[u8]) -> Option<String> {
     let (_, plaintext) = parse_tls_plaintext(record).ok()?;
     let extensions = plaintext.msg.iter().find_map(|msg| match msg {
         TlsMessage::Handshake(TlsMessageHandshake::ClientHello(hello)) => hello.ext,

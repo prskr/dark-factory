@@ -115,7 +115,10 @@ async fn detail_renders_the_transcript_escaped_and_connects_after_the_last_event
         )),
         "{html}"
     );
-    assert!(app.get("/tasks/DF-99", &cookie).await.status() == StatusCode::NOT_FOUND);
+    assert_eq!(
+        app.get("/tasks/DF-99", &cookie).await.status(),
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

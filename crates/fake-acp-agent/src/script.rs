@@ -24,8 +24,9 @@ impl<'de> Deserialize<'de> for Script {
         }
 
         match ScriptFormat::deserialize(deserializer)? {
-            ScriptFormat::Wrapped { sessions } => Ok(Script { sessions }),
-            ScriptFormat::SessionsDirect(sessions) => Ok(Script { sessions }),
+            ScriptFormat::Wrapped { sessions } | ScriptFormat::SessionsDirect(sessions) => {
+                Ok(Script { sessions })
+            }
             ScriptFormat::TurnsOnly(new) => Ok(Script {
                 sessions: Sessions {
                     new,

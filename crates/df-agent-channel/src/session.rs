@@ -46,7 +46,7 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 /// Time granted to the forge work after a push report or the end of a run.
 const FORGE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Longest timer armed for a deadline; `tokio::time::sleep` panics on durations it cannot add.
-const MAX_TIMER: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+const MAX_TIMER: Duration = Duration::from_hours(8760);
 
 type Outbound = mpsc::Sender<Result<ControlMessage, Status>>;
 
@@ -558,9 +558,9 @@ impl Session {
                     tools::run_ended(&call.call_id)
                 };
                 // The runtime re-sends unanswered calls after a reconnect.
-                let _ = out
-                    .send(Ok(control(control_message::Body::ToolCallResult(result))))
-                    .await;
+                out.send(Ok(control(control_message::Body::ToolCallResult(result))))
+                    .await
+                    .ok();
             });
         }
         for request in effects.credentials {
@@ -571,9 +571,9 @@ impl Session {
                 } else {
                     credentials::run_ended(request.request_id)
                 };
-                let _ = out
-                    .send(Ok(control(control_message::Body::CredentialGrant(grant))))
-                    .await;
+                out.send(Ok(control(control_message::Body::CredentialGrant(grant))))
+                    .await
+                    .ok();
             });
         }
         for push in effects.pushes {
@@ -662,8 +662,9 @@ async fn persist_batch(
         sqlx::query("UPDATE runs SET last_persisted_seq = $2 WHERE id = $1")
             .bind(rc.run.id.as_uuid())
             .bind(
-                i64::try_from(applied.last)
-                    .map_err(|_| ChannelError::InvalidData("seq out of range".into()))?,
+                i64::try_from(applied.last).map_err(|_out_of_range| {
+                    ChannelError::InvalidData("seq out of range".into())
+                })?,
             )
             .execute(&mut *tx)
             .await?;
@@ -735,7 +736,7 @@ async fn lock_run_and_task(
     // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task (see `lock_task`).
     lock_task(tx, rc.task.id).await?;
     u64::try_from(stored)
-        .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))
+        .map_err(|_negative| ChannelError::InvalidData("negative last_persisted_seq".into()))
 }
 
 /// What applying the messages of a batch has produced so far.

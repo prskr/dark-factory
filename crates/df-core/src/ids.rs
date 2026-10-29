@@ -1,4 +1,4 @@
-//! UUIDv7 identifier newtypes for Dark Factory domain entities.
+//! `UUIDv7` identifier newtypes for Dark Factory domain entities.
 
 use std::fmt;
 use std::str::FromStr;
@@ -16,7 +16,7 @@ macro_rules! define_id {
         pub struct $name(pub Uuid);
 
         impl $name {
-            /// Generates a new time-ordered UUIDv7 identifier.
+            /// Generates a new time-ordered `UUIDv7` identifier.
             pub fn new() -> Self {
                 Self(Uuid::now_v7())
             }

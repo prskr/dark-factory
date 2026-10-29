@@ -152,6 +152,7 @@ impl TlsReloader {
     }
 
     /// Looks at the files at most every `interval` (default: 10 s).
+    #[must_use]
     pub fn check_every(mut self, interval: Duration) -> Self {
         self.check_every = interval;
         self
@@ -183,7 +184,7 @@ impl TlsReloader {
                     current.acceptor = acceptor;
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "keeping the previous agent port TLS material")
+                    tracing::warn!(error = %e, "keeping the previous agent port TLS material");
                 }
             },
             Ok(_) => {}
@@ -284,7 +285,7 @@ async fn accept_loop(
             match handshake {
                 Ok(Ok(stream)) => {
                     // The receiver is gone when the server stopped.
-                    let _ = accepted.send(Ok(stream)).await;
+                    accepted.send(Ok(stream)).await.ok(); // receiver may be gone
                 }
                 Ok(Err(e)) => tracing::debug!(error = %e, %remote, "TLS handshake failed"),
                 Err(_) => tracing::debug!(%remote, "TLS handshake timed out"),
@@ -355,7 +356,7 @@ impl AgentChannel for AgentService {
             .and_then(|certs| certs.first().cloned());
         let run = authenticate(
             &self.ctx,
-            client_cert.as_ref().map(|cert| cert.as_ref()),
+            client_cert.as_ref().map(AsRef::as_ref),
             request.remote_addr().map(|addr| addr.ip()),
         )
         .await?;
@@ -367,7 +368,7 @@ impl AgentChannel for AgentService {
         self.spawn_session(async move {
             if let Err(status) = session::run(ctx, run, inbound, tx.clone(), stop).await {
                 // Best effort: the peer may already be gone.
-                let _ = tx.send(Err(status)).await;
+                tx.send(Err(status)).await.ok(); // receiver may be gone
             }
         });
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -409,7 +410,7 @@ mod tests {
     impl Drop for DropSignal {
         fn drop(&mut self) {
             if let Some(tx) = self.0.take() {
-                let _ = tx.send(());
+                tx.send(()).ok(); // receiver may be gone
             }
         }
     }

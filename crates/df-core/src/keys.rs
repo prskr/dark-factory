@@ -139,11 +139,11 @@ impl FromStr for TaskKey {
         {
             return Err(KeyError::InvalidTaskKey(s.to_string()));
         }
-        let project =
-            ProjectKey::from_str(proj_part).map_err(|_| KeyError::InvalidTaskKey(s.to_string()))?;
+        let project = ProjectKey::from_str(proj_part)
+            .map_err(|_invalid| KeyError::InvalidTaskKey(s.to_string()))?;
         let number: u64 = num_part
             .parse()
-            .map_err(|_| KeyError::InvalidTaskKey(s.to_string()))?;
+            .map_err(|_invalid| KeyError::InvalidTaskKey(s.to_string()))?;
         Self::new(project, number)
     }
 }

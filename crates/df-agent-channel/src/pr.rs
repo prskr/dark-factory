@@ -83,7 +83,7 @@ pub async fn on_run_end(
         }
         Ok(_) => {}
         Err(e) => {
-            tracing::warn!(error = %e, task_id = %rc.task.id, "failed to load completion summary")
+            tracing::warn!(error = %e, task_id = %rc.task.id, "failed to load completion summary");
         }
     }
 }
@@ -110,25 +110,24 @@ async fn try_ensure_draft(
     }
     let (head, base) = (current.task_branch(), current.project.base_branch.clone());
     let project = current.project.id;
-    let pr = match ctx
+    let pr = if let Some(pr) = ctx
         .forge
         .find_open_pull_request(&project, &head, &base)
         .await?
     {
-        Some(pr) => pr,
-        None => {
-            let request = new_pull_request(current, head.clone(), base.clone())?;
-            match ctx.forge.create_pull_request(&project, request).await {
-                Ok(pr) => pr,
-                Err(IntegrationError::Conflict(_)) => ctx
-                    .forge
-                    .find_open_pull_request(&project, &head, &base)
-                    .await?
-                    .ok_or_else(|| {
-                        ChannelError::InvalidData("conflicting pull request vanished".into())
-                    })?,
-                Err(e) => return Err(e.into()),
-            }
+        pr
+    } else {
+        let request = new_pull_request(current, head.clone(), base.clone())?;
+        match ctx.forge.create_pull_request(&project, request).await {
+            Ok(pr) => pr,
+            Err(IntegrationError::Conflict(_)) => ctx
+                .forge
+                .find_open_pull_request(&project, &head, &base)
+                .await?
+                .ok_or_else(|| {
+                    ChannelError::InvalidData("conflicting pull request vanished".into())
+                })?,
+            Err(e) => return Err(e.into()),
         }
     };
     record_pr(&ctx.pool, current.task.id, &pr).await?;
@@ -178,8 +177,9 @@ pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
 }
 
 async fn record_pr(pool: &PgPool, task_id: TaskId, pr: &PullRequest) -> Result<(), ChannelError> {
-    let number = i64::try_from(pr.id.number)
-        .map_err(|_| ChannelError::InvalidData("pull request number out of range".into()))?;
+    let number = i64::try_from(pr.id.number).map_err(|_out_of_range| {
+        ChannelError::InvalidData("pull request number out of range".into())
+    })?;
     let mut tx = pool.begin().await?;
     let updated = sqlx::query(
         "UPDATE tasks SET pr_number = $2, pr_url = $3, updated_at = now()

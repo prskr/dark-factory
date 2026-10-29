@@ -25,22 +25,19 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     /// Load runtime configuration from environment variables.
     pub fn from_env() -> anyhow::Result<Self> {
-        let control_plane_addr = std::env::var(ENV_CONTROL_PLANE_ADDR).map_err(|_| {
+        let control_plane_addr = std::env::var(ENV_CONTROL_PLANE_ADDR).map_err(|_not_set| {
             anyhow::anyhow!("missing required environment variable {ENV_CONTROL_PLANE_ADDR}")
         })?;
-        let server_name = std::env::var(ENV_CONTROL_PLANE_SERVER_NAME).map_err(|_| {
+        let server_name = std::env::var(ENV_CONTROL_PLANE_SERVER_NAME).map_err(|_not_set| {
             anyhow::anyhow!("missing required environment variable {ENV_CONTROL_PLANE_SERVER_NAME}")
         })?;
 
         let tls_dir = std::env::var(ENV_TLS_DIR)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(DEFAULT_TLS_DIR));
+            .map_or_else(|_| PathBuf::from(DEFAULT_TLS_DIR), PathBuf::from);
         let data_dir = std::env::var(ENV_DATA_DIR)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(DEFAULT_DATA_DIR));
+            .map_or_else(|_| PathBuf::from(DEFAULT_DATA_DIR), PathBuf::from);
         let run_dir = std::env::var(ENV_RUN_DIR)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(DEFAULT_RUN_DIR));
+            .map_or_else(|_| PathBuf::from(DEFAULT_RUN_DIR), PathBuf::from);
 
         Ok(Self {
             control_plane_addr: Self::normalize_addr(&control_plane_addr),

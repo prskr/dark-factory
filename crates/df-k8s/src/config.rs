@@ -72,12 +72,14 @@ impl ProvisioningConfig {
     }
 
     /// Sets the image per harness name.
+    #[must_use]
     pub fn with_harness_images(mut self, harness_images: BTreeMap<String, String>) -> Self {
         self.harness_images = harness_images;
         self
     }
 
     /// Sets the log format passed to sandboxes (`DF_LOG_FORMAT`).
+    #[must_use]
     pub fn with_log_format(mut self, log_format: LogFormat) -> Self {
         self.log_format = log_format;
         self

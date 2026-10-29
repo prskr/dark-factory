@@ -1,4 +1,4 @@
-//! Lease leader election and active run NetworkPolicy reconciliation.
+//! Lease leader election and active run `NetworkPolicy` reconciliation.
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{MicroTime, ObjectMeta};
-use kube::api::{Api, Patch, PatchParams};
+use kube::api::{Api, Patch, PatchParams, PostParams};
 use kube::runtime::{WatchStreamExt as _, watcher};
 use kube::{Client, Resource, ResourceExt};
 use tokio::sync::watch;
@@ -31,7 +31,7 @@ use crate::render::render_network_policy;
 pub const DEFAULT_LEASE_DURATION_SECONDS: i32 = 15;
 
 /// Notifications arriving within this window of the first one are served by a single reconcile
-/// pass (with `anyNamespace`, every EndpointSlice change in the cluster notifies).
+/// pass (with `anyNamespace`, every `EndpointSlice` change in the cluster notifies).
 const NOTIFY_DEBOUNCE: Duration = Duration::from_secs(1);
 
 /// Attempts to acquire or renew a Kubernetes coordination Lease.
@@ -46,12 +46,9 @@ pub async fn try_acquire_or_renew_lease(
     let now = k8s_openapi::jiff::Timestamp::now();
     let micro_now = MicroTime(now);
 
-    let get_res = match tokio::time::timeout(K8S_API_TIMEOUT, leases.get(lease_name)).await {
-        Ok(res) => res,
-        Err(_) => {
-            warn!(lease_name, "timeout querying lease");
-            return Ok(false);
-        }
+    let Ok(get_res) = tokio::time::timeout(K8S_API_TIMEOUT, leases.get(lease_name)).await else {
+        warn!(lease_name, "timeout querying lease");
+        return Ok(false);
     };
 
     match get_res {
@@ -75,20 +72,17 @@ pub async fn try_acquire_or_renew_lease(
                 spec.lease_duration_seconds = Some(duration_seconds);
                 spec.renew_time = Some(micro_now);
 
-                match tokio::time::timeout(
+                if let Ok(res) = tokio::time::timeout(
                     K8S_API_TIMEOUT,
-                    leases.replace(lease_name, &Default::default(), &lease),
+                    leases.replace(lease_name, &PostParams::default(), &lease),
                 )
                 .await
                 {
-                    Ok(res) => {
-                        res?;
-                        Ok(true)
-                    }
-                    Err(_) => {
-                        warn!(lease_name, "timeout renewing lease");
-                        Ok(false)
-                    }
+                    res?;
+                    Ok(true)
+                } else {
+                    warn!(lease_name, "timeout renewing lease");
+                    Ok(false)
                 }
             } else {
                 Ok(false)
@@ -110,17 +104,14 @@ pub async fn try_acquire_or_renew_lease(
                     ..Default::default()
                 }),
             };
-            let create_res = match tokio::time::timeout(
+            let Ok(create_res) = tokio::time::timeout(
                 K8S_API_TIMEOUT,
-                leases.create(&Default::default(), &lease),
+                leases.create(&PostParams::default(), &lease),
             )
             .await
-            {
-                Ok(res) => res,
-                Err(_) => {
-                    warn!(lease_name, "timeout creating lease");
-                    return Ok(false);
-                }
+            else {
+                warn!(lease_name, "timeout creating lease");
+                return Ok(false);
             };
             match create_res {
                 Ok(_) => Ok(true),
@@ -157,7 +148,7 @@ pub async fn release_lease(
         spec.renew_time = None; // Reset renew_time so successors immediately see it expired without waiting
         let replace_res = tokio::time::timeout(
             K8S_API_TIMEOUT,
-            leases.replace(lease_name, &Default::default(), &lease),
+            leases.replace(lease_name, &PostParams::default(), &lease),
         )
         .await;
         match replace_res {
@@ -179,7 +170,7 @@ pub async fn release_lease(
     Ok(())
 }
 
-/// Reconciles all active runs' NetworkPolicies in `config.sandbox.namespace`.
+/// Reconciles all active runs' `NetworkPolicies` in `config.sandbox.namespace`.
 pub async fn reconcile_active_runs(
     client: &Client,
     config: &ProvisioningConfig,
@@ -223,7 +214,7 @@ async fn list_instance_sandboxes(
     }
 }
 
-/// Renders the NetworkPolicy of a run from its Sandbox. `None` (after a warning) if the Sandbox
+/// Renders the `NetworkPolicy` of a run from its Sandbox. `None` (after a warning) if the Sandbox
 /// lacks the labels, the cluster targets can't be fetched, or the policy has no name: the run is
 /// skipped and keeps its existing policy.
 async fn render_run_policy(
@@ -280,7 +271,7 @@ async fn render_run_policy(
     Some((run_id, netpol))
 }
 
-/// Server-side applies the NetworkPolicy. False (after a warning) if that failed.
+/// Server-side applies the `NetworkPolicy`. False (after a warning) if that failed.
 async fn apply_network_policy(
     netpols: &Api<NetworkPolicy>,
     run_id: RunId,
@@ -349,7 +340,7 @@ pub async fn run_leader_election(
                         // Notify that we are stepping down
                         publish_leadership(&leader_tx, false);
                         // Best-effort release lease so successor can acquire quickly
-                        let _ = release_lease(&client, &namespace, &lease_name, &identity).await;
+                        release_lease(&client, &namespace, &lease_name, &identity).await.ok();
                     }
                     return Ok(());
                 }
@@ -373,7 +364,7 @@ pub async fn run_leader_election(
     }
 }
 
-/// Watches Services and EndpointSlices in the cluster-target namespaces (every namespace with
+/// Watches Services and `EndpointSlices` in the cluster-target namespaces (every namespace with
 /// `any_namespace`) and sends a notification on `notify` whenever one changed, so the policies
 /// follow the targets. Watch errors are logged; the watchers retry with backoff on their own.
 ///
@@ -511,7 +502,7 @@ where
     K: Resource + Clone + serde::de::DeserializeOwned + Debug + Send + 'static,
     K::DynamicType: Default,
 {
-    watcher::watcher(api, watcher::Config::default())
+    watcher(api, watcher::Config::default())
         .default_backoff()
         .map(|res| {
             res.map(|event| {
@@ -533,7 +524,7 @@ async fn forward_changes(
         match res {
             // A full channel already has a reconcile pending.
             Ok(true) => {
-                let _ = notify.try_send(());
+                notify.try_send(()).ok(); // receiver may be gone
             }
             Ok(false) => {}
             Err(err) => warn!(error = %err, "cluster target watch error"),

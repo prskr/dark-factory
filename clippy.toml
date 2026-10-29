@@ -1,2 +1,18 @@
 # Function length limit enforced by `clippy::too_many_lines` (see AGENTS.md, "File structure").
 too-many-lines-threshold = 100
+
+# Test code may unwrap, panic, index, print and use `dbg!` (see AGENTS.md, "Tests").
+allow-unwrap-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+# Block nesting limit of `clippy::excessive_nesting`; measured hits before the refactoring:
+# threshold 4: 106 (51 production / 55 test), 5: 25 (12 / 13), 6: 6 (5 / 1); see AGENTS.md,
+# "File structure".
+excessive-nesting-threshold = 5
+
+# Tests and tools use `tempfile` for temporary files (AGENTS.md, "Tests").
+disallowed-methods = [
+    { path = "std::env::temp_dir", reason = "use `tempfile`; never write to fixed paths" },
+]

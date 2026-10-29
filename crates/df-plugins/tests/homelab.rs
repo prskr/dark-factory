@@ -16,7 +16,7 @@ use std::time::Duration;
 use df_core::{ForgeClient, NewPullRequest, ProjectId, PullRequestUpdate, RepoRef};
 
 fn var(name: &str) -> anyhow::Result<String> {
-    std::env::var(name).map_err(|_| anyhow::anyhow!("{name} is not set"))
+    std::env::var(name).map_err(|_not_set| anyhow::anyhow!("{name} is not set"))
 }
 
 #[tokio::test]

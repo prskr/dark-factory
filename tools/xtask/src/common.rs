@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 /// Fails with all `violations` listed, or succeeds when there are none.
-pub fn report(task: &str, violations: &[String]) -> Result<()> {
+pub(crate) fn report(task: &str, violations: &[String]) -> Result<()> {
     if violations.is_empty() {
         return Ok(());
     }
@@ -18,7 +18,7 @@ pub fn report(task: &str, violations: &[String]) -> Result<()> {
 }
 
 /// The given `files`, or every tracked file (`git ls-files`) when none are given.
-pub fn files_or_tracked(root: &Path, files: &[String]) -> Result<Vec<String>> {
+pub(crate) fn files_or_tracked(root: &Path, files: &[String]) -> Result<Vec<String>> {
     if !files.is_empty() {
         return Ok(files.to_vec());
     }
@@ -37,13 +37,13 @@ pub fn files_or_tracked(root: &Path, files: &[String]) -> Result<Vec<String>> {
         .collect())
 }
 
-pub fn read_toml(path: &Path) -> Result<toml::Table> {
+pub(crate) fn read_toml(path: &Path) -> Result<toml::Table> {
     let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
     text.parse().with_context(|| path.display().to_string())
 }
 
 /// Follows `path` through nested tables.
-pub fn lookup<'a>(table: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Value> {
+pub(crate) fn lookup<'a>(table: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Value> {
     let (first, rest) = path.split_first()?;
     rest.iter()
         .try_fold(table.get(*first)?, |v, key| v.get(*key))

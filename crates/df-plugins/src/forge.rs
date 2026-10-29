@@ -53,6 +53,7 @@ impl PluginForgeClient {
     }
 
     /// Lets plugins reach `http://` base URLs; for tests against a local mock server.
+    #[must_use]
     pub fn allow_plain_http(mut self) -> Self {
         self.allow_plain_http = true;
         self

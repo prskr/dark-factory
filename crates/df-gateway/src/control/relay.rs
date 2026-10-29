@@ -236,11 +236,12 @@ impl Session {
     async fn wait_for_backlog(&self) {
         let mut pending = self.merged.pending.subscribe();
         // A timeout is no failure: the viewer starts with what has arrived.
-        let _ = tokio::time::timeout_at(
+        tokio::time::timeout_at(
             self.backlog_deadline,
             pending.wait_for(|pending| *pending == 0),
         )
-        .await;
+        .await
+        .ok();
     }
 }
 
@@ -302,13 +303,13 @@ impl Merged {
         }
         // Sent under the lock, so a viewer sees every event once, in the backlog or live.
         // An error only means nobody is watching.
-        let _ = self.live.send(event);
+        self.live.send(event).ok(); // receiver may be gone
     }
 
     fn forward(&self, event: FlowEvent) {
         let _guard = self.buffer.lock().unwrap_or_else(PoisonError::into_inner);
         // An error only means nobody is watching.
-        let _ = self.live.send(event);
+        self.live.send(event).ok(); // receiver may be gone
     }
 
     fn subscribe(&self) -> (Vec<FlowEvent>, broadcast::Receiver<FlowEvent>) {

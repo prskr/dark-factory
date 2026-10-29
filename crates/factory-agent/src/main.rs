@@ -33,13 +33,19 @@ mod tests;
 use cli::{Cli, Command};
 
 /// How long `run` waits for the control plane to send `Assign`.
-const ASSIGN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const ASSIGN_TIMEOUT: Duration = Duration::from_mins(10);
 /// `core.hooksPath` for the agent's git: the empty, read-only hooks directory from the image.
 const HARNESS_HOOKS_PATH: &str = "/opt/factory/hooks-empty";
 
 #[tokio::main]
+#[expect(
+    clippy::print_stderr,
+    reason = "the mcp and git-credential subcommands report errors on stderr"
+)]
 async fn main() -> ExitCode {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(cli.log_format).await,
@@ -132,9 +138,17 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
 
     let res = runner::run_session(driver_params).await;
     // Let the connection manager flush the final reports before the process exits
-    let _ = shutdown_tx.send(true);
+    shutdown_tx.send(true).ok();
     if let Some(task) = conn_task {
-        let _ = tokio::time::timeout(Duration::from_secs(30), task).await;
+        match tokio::time::timeout(Duration::from_secs(30), task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "connection manager failed during the final flush");
+            }
+            Err(_elapsed) => {
+                tracing::warn!("connection manager did not finish the final flush in time");
+            }
+        }
     }
 
     match res {

@@ -63,12 +63,9 @@ impl Scheduler {
                     Ok(_) => {}
                     Err(RecvError::Closed) => break,
                 },
-                event = events.next() => match event {
-                    Some(event) => self.handle_event_logged(event).await,
-                    None => {
-                        tracing::warn!("sandbox event stream ended; scheduler continues on ticks only");
-                        events = futures::stream::pending().boxed();
-                    }
+                event = events.next() => if let Some(event) = event { self.handle_event_logged(event).await } else {
+                    tracing::warn!("sandbox event stream ended; scheduler continues on ticks only");
+                    events = futures::stream::pending().boxed();
                 },
                 Some(_) = provisions.join_next() => {}
             }

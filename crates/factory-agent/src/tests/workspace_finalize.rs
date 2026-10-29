@@ -1,6 +1,6 @@
 //! Workspace push, finalize, secret files and token handling.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -48,83 +48,98 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
     std::fs::create_dir_all(&empty_hooks).expect("create hooks");
 
     // 1. Initialize bare remote repository
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args(["init", "--bare", remote_dir.to_str().unwrap()])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Make initial commit on main and factory/task/DF-1
     let seed_dir = temp_dir.path().join("seed");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             seed_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.name", "Seed"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.email", "seed@example.com"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     std::fs::write(seed_dir.join("main.txt"), "Main").expect("write main");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "main.txt"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "-m", "main"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:main"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "factory/task/DF-1"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:factory/task/DF-1"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Clone locally
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             local_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
+        .await
+        .unwrap();
     let git = Git::new(&local_dir)
         .allow_protocols(["https", "file"])
         .with_hooks_empty_dir(&empty_hooks);
-    let _ = git.run_cmd(&["config", "commit.gpgsign", "false"]).await;
-    let _ = git.run_cmd(&["config", "user.name", "Bot"]).await;
-    let _ = git
-        .run_cmd(&["config", "user.email", "bot@example.com"])
-        .await;
-    let _ = git.run_cmd(&["checkout", "factory/task/DF-1"]).await;
+    git.run_cmd(&["config", "commit.gpgsign", "false"])
+        .await
+        .unwrap();
+    git.run_cmd(&["config", "user.name", "Bot"]).await.unwrap();
+    git.run_cmd(&["config", "user.email", "bot@example.com"])
+        .await
+        .unwrap();
+    git.run_cmd(&["checkout", "factory/task/DF-1"])
+        .await
+        .unwrap();
 
     let workspace = Workspace {
         repo_url: format!("file://{}", remote_dir.display()),
@@ -140,12 +155,12 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
 
     // 2. Turn 1 produces 2 new commits
     std::fs::write(local_dir.join("c1.txt"), "1").unwrap();
-    let _ = git.run_cmd(&["add", "c1.txt"]).await;
-    let _ = git.run_cmd(&["commit", "-m", "commit 1"]).await;
+    git.run_cmd(&["add", "c1.txt"]).await.unwrap();
+    git.run_cmd(&["commit", "-m", "commit 1"]).await.unwrap();
 
     std::fs::write(local_dir.join("c2.txt"), "2").unwrap();
-    let _ = git.run_cmd(&["add", "c2.txt"]).await;
-    let _ = git.run_cmd(&["commit", "-m", "commit 2"]).await;
+    git.run_cmd(&["add", "c2.txt"]).await.unwrap();
+    git.run_cmd(&["commit", "-m", "commit 2"]).await.unwrap();
 
     let res = push_after_turn(&git, &workspace, &mut last_pushed_sha)
         .await
@@ -166,16 +181,18 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
     // 3. Remote moves ahead non-fast-forward:
     // Seed repo pushes a commit
     std::fs::write(seed_dir.join("seed_change.txt"), "seed").unwrap();
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "seed_change.txt"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "-m", "seed pushed"])
         .output()
-        .await;
+        .await
+        .unwrap();
     let seed_push = tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "--force", "origin", "HEAD:factory/task/DF-1"])
@@ -186,8 +203,8 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
 
     // Local makes another commit
     std::fs::write(local_dir.join("c3.txt"), "3").unwrap();
-    let _ = git.run_cmd(&["add", "c3.txt"]).await;
-    let _ = git.run_cmd(&["commit", "-m", "commit 3"]).await;
+    git.run_cmd(&["add", "c3.txt"]).await.unwrap();
+    git.run_cmd(&["commit", "-m", "commit 3"]).await.unwrap();
 
     // Push after turn must be rejected as non-fast-forward
     let res3 = push_after_turn(&git, &workspace, &mut last_pushed_sha)
@@ -218,81 +235,96 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
     std::fs::create_dir_all(&empty_hooks).expect("create hooks");
 
     // Initialize bare remote repo with main and factory/task/DF-1
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args(["init", "--bare", remote_dir.to_str().unwrap()])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     let seed_dir = temp_dir.path().join("seed");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             seed_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.name", "Seed"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.email", "seed@example.com"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     std::fs::write(seed_dir.join("main.txt"), "Initial main").unwrap();
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "main.txt"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "-m", "init"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:main"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "factory/task/DF-1"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:factory/task/DF-1"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Clone into local_dir
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             local_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
+        .await
+        .unwrap();
     let git = Git::new(&local_dir)
         .allow_protocols(["https", "file"])
         .with_hooks_empty_dir(&empty_hooks);
-    let _ = git.run_cmd(&["config", "commit.gpgsign", "false"]).await;
-    let _ = git.run_cmd(&["config", "user.name", "Bot"]).await;
-    let _ = git
-        .run_cmd(&["config", "user.email", "bot@example.com"])
-        .await;
-    let _ = git.run_cmd(&["checkout", "factory/task/DF-1"]).await;
+    git.run_cmd(&["config", "commit.gpgsign", "false"])
+        .await
+        .unwrap();
+    git.run_cmd(&["config", "user.name", "Bot"]).await.unwrap();
+    git.run_cmd(&["config", "user.email", "bot@example.com"])
+        .await
+        .unwrap();
+    git.run_cmd(&["checkout", "factory/task/DF-1"])
+        .await
+        .unwrap();
 
     let workspace = Workspace {
         repo_url: format!("file://{}", remote_dir.display()),
@@ -380,93 +412,110 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
     std::fs::create_dir_all(&empty_hooks).expect("create hooks");
 
     // Bare remote repo
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args(["init", "--bare", remote_dir.to_str().unwrap()])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     let seed_dir = temp_dir.path().join("seed");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             seed_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.name", "Seed"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.email", "seed@example.com"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     std::fs::write(seed_dir.join("main.txt"), "Main").unwrap();
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "main.txt"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "-m", "init"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:main"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "factory/task/DF-1"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:factory/task/DF-1"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Push an existing factory/wip/DF-1 branch to remote
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "factory/wip/DF-1"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:factory/wip/DF-1"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Clone into local_dir
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             local_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
+        .await
+        .unwrap();
     let git = Git::new(&local_dir)
         .allow_protocols(["https", "file"])
         .with_hooks_empty_dir(&empty_hooks);
-    let _ = git.run_cmd(&["config", "commit.gpgsign", "false"]).await;
-    let _ = git.run_cmd(&["config", "user.name", "Bot"]).await;
-    let _ = git
-        .run_cmd(&["config", "user.email", "bot@example.com"])
-        .await;
-    let _ = git.run_cmd(&["checkout", "factory/task/DF-1"]).await;
+    git.run_cmd(&["config", "commit.gpgsign", "false"])
+        .await
+        .unwrap();
+    git.run_cmd(&["config", "user.name", "Bot"]).await.unwrap();
+    git.run_cmd(&["config", "user.email", "bot@example.com"])
+        .await
+        .unwrap();
+    git.run_cmd(&["checkout", "factory/task/DF-1"])
+        .await
+        .unwrap();
 
     let workspace = Workspace {
         repo_url: format!("file://{}", remote_dir.display()),
@@ -516,8 +565,7 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
     let has_remote_wip = git
         .run_cmd(&["rev-parse", "--verify", "origin/factory/wip/DF-1"])
         .await
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     assert!(
         !has_remote_wip,
         "remote WIP branch must be deleted on clean worktree"
@@ -538,80 +586,95 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
     std::fs::create_dir_all(&runtime_dir).expect("create runtime dir");
     std::fs::create_dir_all(&empty_hooks).expect("create hooks");
 
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args(["init", "--bare", remote_dir.to_str().unwrap()])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     let seed_dir = temp_dir.path().join("seed");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             seed_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.name", "Seed"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.email", "seed@example.com"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     std::fs::write(seed_dir.join("main.txt"), "Main").unwrap();
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "main.txt"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "-m", "init"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:main"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "factory/task/DF-1"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["push", "origin", "HEAD:factory/task/DF-1"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .args([
             "clone",
             remote_dir.to_str().unwrap(),
             local_dir.to_str().unwrap(),
         ])
         .output()
-        .await;
+        .await
+        .unwrap();
     let git = Git::new(&local_dir)
         .allow_protocols(["https", "file"])
         .with_hooks_empty_dir(&empty_hooks);
-    let _ = git.run_cmd(&["config", "commit.gpgsign", "false"]).await;
-    let _ = git.run_cmd(&["config", "user.name", "Bot"]).await;
-    let _ = git
-        .run_cmd(&["config", "user.email", "bot@example.com"])
-        .await;
-    let _ = git.run_cmd(&["checkout", "factory/task/DF-1"]).await;
+    git.run_cmd(&["config", "commit.gpgsign", "false"])
+        .await
+        .unwrap();
+    git.run_cmd(&["config", "user.name", "Bot"]).await.unwrap();
+    git.run_cmd(&["config", "user.email", "bot@example.com"])
+        .await
+        .unwrap();
+    git.run_cmd(&["checkout", "factory/task/DF-1"])
+        .await
+        .unwrap();
 
     let workspace = Workspace {
         repo_url: format!("file://{}", remote_dir.display()),
@@ -653,6 +716,25 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
     );
     assert_eq!(res.notices.len(), 1);
     assert_eq!(res.notices[0].code, "wip.size_cap_exceeded");
+}
+
+fn scan_dir_for_secret(dir: &std::path::Path, secret: &str) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_dir_for_secret(&path, secret);
+            } else if path.is_file() {
+                let content = std::fs::read(&path).unwrap_or_default();
+                let content_str = String::from_utf8_lossy(&content);
+                assert!(
+                    !content_str.contains(secret),
+                    "Secret token found in file: {}",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -704,10 +786,10 @@ async fn test_scenario_token_stays_off_the_volume() {
 
     // Environment contains the credentials
     assert_eq!(
-        env.get("CLAUDE_CODE_OAUTH_TOKEN").map(|s| s.as_str()),
+        env.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str),
         Some(secret_token)
     );
-    assert_eq!(env.get("FOO").map(|s| s.as_str()), Some("bar"));
+    assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
 
     // Settings written to /data/home/.claude/settings.json
     let settings_path = home_dir.join(".claude").join("settings.json");
@@ -726,24 +808,6 @@ async fn test_scenario_token_stays_off_the_volume() {
     );
 
     // Verify token NEVER lands on disk under /data
-    fn scan_dir_for_secret(dir: &std::path::Path, secret: &str) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    scan_dir_for_secret(&path, secret);
-                } else if path.is_file() {
-                    let content = std::fs::read(&path).unwrap_or_default();
-                    let content_str = String::from_utf8_lossy(&content);
-                    assert!(
-                        !content_str.contains(secret),
-                        "Secret token found in file: {}",
-                        path.display()
-                    );
-                }
-            }
-        }
-    }
 
     scan_dir_for_secret(&data_dir, secret_token);
 }
@@ -843,7 +907,7 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
     let res = finalize_workspace(&git, &params, &mut last_pushed_sha)
         .await
         .expect("finalize");
-    assert!(!res.run_report.workspace.unwrap().wip_sha.is_empty());
+    assert_ne!(res.run_report.workspace.unwrap().wip_sha, "");
 
     assert_eq!(
         std::fs::read_to_string(local.join(".env.example")).unwrap(),
@@ -903,7 +967,7 @@ async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
         .await
         .expect("finalize");
     let wip_sha = res.run_report.workspace.unwrap().wip_sha;
-    assert!(!wip_sha.is_empty());
+    assert_ne!(wip_sha, "");
 
     let files = git
         .git_output(&["ls-tree", "-r", "-z", "--name-only", &wip_sha])

@@ -380,7 +380,12 @@ fn the_row_limit_is_a_view_setting_with_fixed_choices() {
 #[test]
 fn the_backlog_sends_only_the_newest_rows_up_to_the_limit() {
     let backlog: Vec<_> = (1..=150)
-        .map(|i| flow(allowed(&format!("h{i}.com"), "DF", i), i as u64))
+        .map(|i| {
+            flow(
+                allowed(&format!("h{i}.com"), "DF", i),
+                u64::try_from(i).unwrap(),
+            )
+        })
         .collect();
     let body = new_viewer(filter_from_query("rows=100")).backlog_message(&backlog);
     let rows = part(&body, "#flows tbody").unwrap();
@@ -395,7 +400,12 @@ fn the_backlog_sends_only_the_newest_rows_up_to_the_limit() {
 fn a_flow_whose_row_was_trimmed_closes_as_a_new_row() {
     // Flow 1 is open and the oldest of 100 rows: the next new row pushes it out of the table.
     let mut backlog = vec![flow(opened("a.example.com", "DF", 1), 1)];
-    backlog.extend((2..=100).map(|i| flow(allowed(&format!("h{i}.com"), "DF", i), i as u64)));
+    backlog.extend((2..=100).map(|i| {
+        flow(
+            allowed(&format!("h{i}.com"), "DF", i),
+            u64::try_from(i).unwrap(),
+        )
+    }));
     let mut viewer = new_viewer(filter_from_query("rows=100"));
     let body = viewer.backlog_message(&backlog);
     assert_eq!(

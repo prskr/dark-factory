@@ -34,7 +34,7 @@ impl SecretStore for K8sSecretStore {
         let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.instance_namespace);
         let fetched = tokio::time::timeout(K8S_API_TIMEOUT, secrets.get(&r.secret_name))
             .await
-            .map_err(|_| {
+            .map_err(|_elapsed| {
                 SecretError::Backend(format!("timeout reading secret `{}`", r.secret_name))
             })?;
         let secret = match fetched {

@@ -42,7 +42,7 @@ struct ActiveSegment {
 }
 
 pub struct Outbox {
-    outbox_dir: PathBuf,
+    dir: PathBuf,
     run_file_path: PathBuf,
     run_state: RunState,
     max_bytes: u64,
@@ -115,7 +115,7 @@ impl Outbox {
         closed_segments.sort_by(|a, b| a.path.cmp(&b.path));
 
         let mut outbox = Self {
-            outbox_dir,
+            dir: outbox_dir,
             run_file_path,
             run_state: run_state.clone(),
             max_bytes,
@@ -191,11 +191,11 @@ impl Outbox {
         self.active_segment = None;
         self.closed_segments.clear();
         self.total_bytes = 0;
-        if self.outbox_dir.exists() {
-            for entry in std::fs::read_dir(&self.outbox_dir)? {
+        if self.dir.exists() {
+            for entry in std::fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 if entry.file_type()?.is_file() {
-                    let _ = std::fs::remove_file(entry.path());
+                    std::fs::remove_file(entry.path()).ok(); // best-effort cleanup
                 }
             }
         }
@@ -225,7 +225,7 @@ impl Outbox {
         self.append_encoded(seq, encoded, msg_len)
     }
 
-    /// Appends an already-encoded message and advances sequence and total_bytes.
+    /// Appends an already-encoded message and advances sequence and `total_bytes`.
     fn append_encoded(&mut self, seq: u64, encoded: Vec<u8>, msg_len: u64) -> anyhow::Result<u64> {
         // Check if we need to rollover active segment
         let need_new_segment = match &self.active_segment {
@@ -298,8 +298,8 @@ impl Outbox {
                 break;
             }
             tokio::select! {
-                _ = &mut notified => {}
-                _ = wait_stop(&mut stop) => break,
+                () = &mut notified => {}
+                () = wait_stop(&mut stop) => break,
             }
         }
 
@@ -324,7 +324,7 @@ impl Outbox {
         }
 
         let seg_name = format!("seg_{first_seq:016x}.log");
-        let path = self.outbox_dir.join(seg_name);
+        let path = self.dir.join(seg_name);
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
 
         self.active_segment = Some(ActiveSegment {
@@ -368,7 +368,7 @@ impl Outbox {
         // can't make a restart reuse seqs the control plane already persisted.
         self.save_run_state()?;
         for (path, bytes) in to_delete {
-            let _ = std::fs::remove_file(path);
+            std::fs::remove_file(path).ok(); // best-effort cleanup
             self.total_bytes = self.total_bytes.saturating_sub(bytes);
         }
 
@@ -399,8 +399,8 @@ impl Outbox {
 
     fn list_segment_files(&self) -> anyhow::Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
-        if self.outbox_dir.exists() {
-            for entry in std::fs::read_dir(&self.outbox_dir)? {
+        if self.dir.exists() {
+            for entry in std::fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file() && path.extension().is_some_and(|ext| ext == "log") {
@@ -420,7 +420,7 @@ impl Outbox {
         let mut messages = Vec::new();
         let mut cursor = Cursor::new(&buffer);
 
-        while (cursor.position() as usize) < buffer.len() {
+        while usize::try_from(cursor.position()).is_ok_and(|pos| pos < buffer.len()) {
             match AgentMessage::decode_length_delimited(&mut cursor) {
                 Ok(msg) => messages.push(msg),
                 Err(_) => {
@@ -438,7 +438,7 @@ impl Outbox {
 async fn wait_stop(stop: &mut Option<&mut watch::Receiver<bool>>) {
     match stop {
         Some(rx) => {
-            let _ = rx.wait_for(|stopped| *stopped).await;
+            rx.wait_for(|stopped| *stopped).await.ok();
         }
         None => std::future::pending::<()>().await,
     }

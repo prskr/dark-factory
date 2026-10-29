@@ -1,6 +1,6 @@
 //! Runtime scenarios around `run_session`: timings, `complete_task`, full runtime, resumed sessions.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -121,7 +121,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
         let mut n = 0;
         while let Ok((mut sock, _)) = listener.accept().await {
             let mut buf = vec![0u8; 1 << 20];
-            let _ = sock.read(&mut buf).await;
+            let _request = sock.read(&mut buf).await.unwrap_or(0);
             let chunks = if n == 0 {
                 vec![
                     serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"mcp__factory__complete_task","arguments":"{\"summary\":\"done\"}"}}]},"finish_reason":null}]}),
@@ -134,13 +134,17 @@ async fn test_df_harness_complete_task_ends_run_completed() {
                 ]
             };
             n += 1;
-            let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+            let mut body = chunks
+                .iter()
+                .map(|c| format!("data: {c}\n\n"))
+                .collect::<Vec<_>>()
+                .concat();
             body.push_str("data: [DONE]\n\n");
             let resp = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
             );
-            let _ = sock.write_all(resp.as_bytes()).await;
+            sock.write_all(resp.as_bytes()).await.ok();
         }
     });
 
@@ -212,7 +216,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
     }];
 
     let (inbound_tx, inbound_rx) = mpsc::channel(100);
-    let (outbound_tx, mut outbound_rx) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<AgentMessage>(100);
     let cp_task = tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {
             if let Some(agent_message::Body::ToolCallRequest(req)) = msg.body
@@ -229,7 +233,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
                         await_input_after_turn: false,
                     })),
                 };
-                let _ = inbound_tx.send(res).await;
+                inbound_tx.send(res).await.ok();
             }
         }
     });
@@ -303,11 +307,12 @@ async fn test_scenario_full_runtime_two_runs_on_single_data_dir() {
         .expect("git init bare");
     assert!(out.status.success());
 
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&upstream_repo)
         .args(["config", "http.receivepack", "true"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     // Seed initial commit into bare repo
     let seed_dir = temp_dir.path().join("seed");
@@ -322,33 +327,38 @@ async fn test_scenario_full_runtime_two_runs_on_single_data_dir() {
         .expect("clone seed");
     assert!(out.status.success());
 
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.name", "Seed User"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["config", "user.email", "seed@example.com"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["checkout", "-b", "main"])
         .output()
-        .await;
+        .await
+        .unwrap();
 
     std::fs::write(seed_dir.join("README.md"), "# Project Root\n").expect("write README");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["add", "README.md"])
         .output()
-        .await;
+        .await
+        .unwrap();
     let out = tokio::process::Command::new("git")
         .current_dir(&seed_dir)
         .args(["commit", "--no-gpg-sign", "-m", "Initial commit"])
@@ -460,7 +470,7 @@ sessions:
 
     let (inbound_tx1, inbound_rx1) = mpsc::channel(100);
     inbound_tx1.try_send(release_message()).unwrap();
-    let (outbound_tx1, mut outbound_rx1) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    let (outbound_tx1, mut outbound_rx1) = mpsc::channel::<AgentMessage>(100);
 
     let run1_messages = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let run1_messages_clone = std::sync::Arc::clone(&run1_messages);
@@ -498,11 +508,8 @@ sessions:
 
     // Verify Run 1 outcome and reports
     assert_eq!(result1.outcome, RunOutcome::EndTurn);
-    assert_eq!(
-        result1.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::EndTurn as i32
-    );
-    assert!(!result1.run_report.harness_session_id.is_empty());
+    assert_eq!(result1.run_report.outcome, RunOutcome::EndTurn as i32);
+    assert_ne!(result1.run_report.harness_session_id, "");
     let session_id_1 = result1.run_report.harness_session_id.clone();
 
     // Verify Run 1 pushed task branch to remote
@@ -615,7 +622,7 @@ sessions:
     }];
 
     let (inbound_tx2, inbound_rx2) = mpsc::channel(100);
-    let (outbound_tx2, mut outbound_rx2) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    let (outbound_tx2, mut outbound_rx2) = mpsc::channel::<AgentMessage>(100);
 
     let run2_messages = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let run2_messages_clone = std::sync::Arc::clone(&run2_messages);
@@ -645,7 +652,7 @@ sessions:
                         await_input_after_turn: false,
                     })),
                 };
-                let _ = inbound_tx2_clone.send(res).await;
+                inbound_tx2_clone.send(res).await.ok();
             }
         }
     });
@@ -679,10 +686,7 @@ sessions:
 
     // Verify Run 2 outcome and reports
     assert_eq!(result2.outcome, RunOutcome::Completed);
-    assert_eq!(
-        result2.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::Completed as i32
-    );
+    assert_eq!(result2.run_report.outcome, RunOutcome::Completed as i32);
     assert_eq!(
         result2.run_report.harness_session_id, session_id_1,
         "Run 2 must load session from run 1"
@@ -849,16 +853,16 @@ async fn test_manual_claude_acp_run() {
         queued_at: None,
     }];
 
-    let (inbound_tx, inbound_rx) = mpsc::channel::<df_proto::agent::v1::ControlMessage>(100);
-    let (outbound_tx, mut outbound_rx) = mpsc::channel::<df_proto::agent::v1::AgentMessage>(100);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<ControlMessage>(100);
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<AgentMessage>(100);
 
     let inbound_tx_clone = inbound_tx.clone();
     let cp_task = tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {
-            if let Some(df_proto::agent::v1::agent_message::Body::ToolCallRequest(req)) = msg.body
+            if let Some(agent_message::Body::ToolCallRequest(req)) = msg.body
                 && req.tool_name == "complete_task"
             {
-                let res = df_proto::agent::v1::ControlMessage {
+                let res = ControlMessage {
                     ack: 0,
                     body: Some(control_message::Body::ToolCallResult(ToolCallResult {
                         call_id: req.call_id,
@@ -869,7 +873,7 @@ async fn test_manual_claude_acp_run() {
                         await_input_after_turn: false,
                     })),
                 };
-                let _ = inbound_tx_clone.send(res).await;
+                inbound_tx_clone.send(res).await.ok();
             }
         }
     });
@@ -1024,7 +1028,7 @@ async fn test_credential_grant_delivered_during_prepare() {
         while let Some(msg) = outbound_rx.recv().await {
             if let Some(agent_message::Body::CredentialRequest(req)) = msg.body {
                 asked += 1;
-                let _ = inbound_tx
+                inbound_tx
                     .send(ControlMessage {
                         ack: 0,
                         body: Some(control_message::Body::CredentialGrant(CredentialGrant {
@@ -1036,7 +1040,8 @@ async fn test_credential_grant_delivered_during_prepare() {
                             })),
                         })),
                     })
-                    .await;
+                    .await
+                    .ok();
             }
         }
         asked

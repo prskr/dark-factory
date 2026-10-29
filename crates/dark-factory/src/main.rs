@@ -117,7 +117,10 @@ impl DevOptions {
     }
 
     #[cfg(not(feature = "dev-tools"))]
-    #[allow(clippy::unused_self)]
+    #[expect(
+        clippy::unused_self,
+        reason = "same signature as the dev-tools variant"
+    )]
     fn demo_flows(self) -> Option<Arc<dyn df_web::egress::FlowSource>> {
         None
     }
@@ -126,7 +129,9 @@ impl DevOptions {
 #[tokio::main]
 async fn main() -> ExitCode {
     // Ignored on purpose: an already installed provider is fine.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let cli = Cli::parse();
     // `migrate` is a short-lived job: no telemetry.
     let component = match cli.command {
@@ -367,7 +372,7 @@ where
 /// Resolves once `stop` was set.
 async fn stopped(mut stop: watch::Receiver<bool>) {
     // An error means the sender is gone, which is a stop as well.
-    let _ = stop.wait_for(|stop| *stop).await;
+    stop.wait_for(|stop| *stop).await.ok();
 }
 
 pub(crate) async fn until_stopped(
@@ -438,7 +443,7 @@ async fn run_gateway_command(
     });
     let result = df_gateway::gateway::run(
         settings,
-        tokio::sync::watch::channel(None).0,
+        watch::channel(None).0,
         outside,
         health_listener,
         proxy_listener,
@@ -462,7 +467,7 @@ where
     F: std::future::Future<Output = ()>,
 {
     tokio::select! {
-        _ = shutdown => {
+        () = shutdown => {
             info!("received shutdown signal; terminating {component} listeners");
             if !grace.is_zero() {
                 let finished = async { while listeners.join_next().await.is_some() {} };
@@ -582,7 +587,7 @@ fn flush_budget(signalled: Option<Instant>, now: Instant, grace: Duration) -> Du
 async fn wait_for_shutdown_signal(signalled: Signalled) {
     wait_for_signal().await;
     // Ignored on purpose: only the first signal starts the clock.
-    let _ = signalled.set(Instant::now());
+    signalled.set(Instant::now()).ok();
 }
 
 async fn wait_for_signal() {
@@ -644,7 +649,7 @@ mod tests {
         .unwrap();
         match cli.command {
             Command::Serve { dev } => dev,
-            other => unreachable!("`serve` parsed as {other:?}"),
+            other => panic!("`serve` parsed as {other:?}"),
         }
     }
 
@@ -789,7 +794,7 @@ mod tests {
             stopped(stop_rx).await;
             // Work that outlasts the shutdown signal.
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let _ = done_tx.send(());
+            done_tx.send(()).ok();
         });
 
         let shutdown = async move {
@@ -806,12 +811,13 @@ mod tests {
     /// `cargo build --target wasm32-wasip2 -p forgejo-plugin`. Tests don't build it themselves, see
     /// `docs/development.md`.
     fn forgejo_component() -> PathBuf {
-        let path = std::env::var_os("FORGEJO_PLUGIN_WASM")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
+        let path = std::env::var_os("FORGEJO_PLUGIN_WASM").map_or_else(
+            || {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../../target/wasm32-wasip2/debug/forgejo_plugin.wasm")
-            });
+            },
+            PathBuf::from,
+        );
         assert!(
             path.exists(),
             "missing {}: run `cargo build --target wasm32-wasip2 -p forgejo-plugin` first",
@@ -820,11 +826,7 @@ mod tests {
         path
     }
 
-    fn serve_config(
-        pool: &sqlx::PgPool,
-        dir: &std::path::Path,
-        tls: Option<&str>,
-    ) -> InstanceConfig {
+    fn serve_config(pool: &PgPool, dir: &std::path::Path, tls: Option<&str>) -> InstanceConfig {
         let options = pool.connect_options();
         std::fs::write(dir.join("db-password"), "postgres\n").unwrap();
         let tls = tls.unwrap_or_default();
@@ -843,8 +845,9 @@ mod tests {
 
     #[tokio::test]
     async fn serve_runs_the_agent_port_next_to_the_ui_port() -> anyhow::Result<()> {
-        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         use df_agent_channel::testing::{POD_SAN, RuntimeClient, TestPki, TestServer};
+
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
 
         let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
         let dir = tempfile::tempdir()?;
@@ -870,7 +873,7 @@ mod tests {
             internal,
             DevOptions::default(),
             async {
-                let _ = stopped.await;
+                stopped.await.ok();
             },
         ));
 
@@ -1018,7 +1021,7 @@ mod tests {
             internal,
             DevOptions::default(),
             async {
-                let _ = stopped.await;
+                stopped.await.ok();
             },
         ));
 

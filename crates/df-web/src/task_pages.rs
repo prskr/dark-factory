@@ -27,7 +27,7 @@ use crate::layout::{View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
 use crate::transcript::{Folder, render_transcript};
-pub use view::{
+pub(crate) use view::{
     Choices, Filters, TaskForm, details_region, head_region, list_column, pending_region,
     runs_region, task_rows,
 };
@@ -36,7 +36,7 @@ use view::{composer_dialog, composer_form, details_column, message_area};
 /// How many transcript rows the detail page renders at once.
 const PAGE_BATCH: i64 = 1000;
 
-pub fn routes() -> Router<WebState> {
+pub(crate) fn routes() -> Router<WebState> {
     Router::new()
         .route("/", get(|| async { Redirect::to("/tasks") }))
         .route("/tasks", get(task_list).post(task_create))
@@ -55,25 +55,28 @@ pub fn routes() -> Router<WebState> {
 
 /// The query of the list pages.
 #[derive(Debug, Default, Deserialize)]
-pub struct ListQuery {
+pub(crate) struct ListQuery {
     status: Option<String>,
     project: Option<String>,
 }
 
 impl ListQuery {
-    pub fn filters(&self) -> Filters {
+    pub(crate) fn filters(&self) -> Filters {
         Filters::new(self.status.as_deref(), self.project.as_deref())
     }
 }
 
 /// Loads everything the stream and the page render for one task.
-pub struct DetailData {
+pub(crate) struct DetailData {
     pub task: TaskDetail,
     pub runs: Vec<RunView>,
     pub pending: Vec<df_db::TaskMessageRow>,
 }
 
-pub async fn load_detail(state: &WebState, task: TaskDetail) -> Result<DetailData, df_db::DbError> {
+pub(crate) async fn load_detail(
+    state: &WebState,
+    task: TaskDetail,
+) -> Result<DetailData, df_db::DbError> {
     let id = TaskId::from_uuid(task.id);
     let (runs, pending) = tokio::try_join!(
         df_db::task_views::list_runs(&state.pool, id),
@@ -88,13 +91,13 @@ pub async fn load_detail(state: &WebState, task: TaskDetail) -> Result<DetailDat
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct TitleForm {
+pub(crate) struct TitleForm {
     title: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct MessageForm {
+pub(crate) struct MessageForm {
     message: String,
 }
 
@@ -548,7 +551,7 @@ async fn queued_target(
     let task = task_by_key(state, key).await?;
     let prompt = id
         .parse::<PromptId>()
-        .map_err(|_| Box::new(not_found("The message")))?;
+        .map_err(|_invalid_id| Box::new(not_found("The message")))?;
     Ok((task, prompt))
 }
 

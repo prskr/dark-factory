@@ -280,21 +280,21 @@ impl Folder {
                     .to_string(),
             })
             .collect();
-        match self.plans.get(&turn) {
-            Some(&index) => {
-                // `plans` only holds indices of pushed items, which are never removed.
-                self.items[index].kind = ItemKind::Plan(entries);
-                vec![Change {
-                    index,
-                    added: false,
-                }]
-            }
-            None => {
-                let change = self.push(format!("ev-{id}"), turn.clone(), ItemKind::Plan(entries));
-                self.plans.insert(turn, change.index);
-                vec![change]
-            }
+        // `plans` only holds indices of pushed items, which are never removed.
+        let known = self
+            .plans
+            .get(&turn)
+            .and_then(|&index| Some((index, self.items.get_mut(index)?)));
+        if let Some((index, item)) = known {
+            item.kind = ItemKind::Plan(entries);
+            return vec![Change {
+                index,
+                added: false,
+            }];
         }
+        let change = self.push(format!("ev-{id}"), turn.clone(), ItemKind::Plan(entries));
+        self.plans.insert(turn, change.index);
+        vec![change]
     }
 
     /// The turn is over: its agent messages are complete and get rendered as Markdown.
@@ -527,8 +527,7 @@ pub fn markdown(source: &str) -> Markup {
         }
     }
     let mut html = String::new();
-    // Formatting into a `String` cannot fail.
-    let _ = comrak::format_html(root, &options, &mut html);
+    comrak::format_html(root, &options, &mut html).expect("formatting into a String cannot fail");
     PreEscaped(html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href="))
 }
 

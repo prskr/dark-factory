@@ -17,7 +17,7 @@ use crate::runtime_socket::RuntimeHandler;
 /// Cached credentials are refreshed this long before their stated expiry.
 const CREDENTIAL_EXPIRY_MARGIN_SECS: i64 = 30;
 /// Upper bound for a factory tool call to be answered by the control plane.
-const TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const TOOL_CALL_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// Checks if a credential request target matches the assigned workspace repository URL (Finding 4).
 pub fn matches_repo_url(repo_url: &str, protocol: &str, host: &str, path: &str) -> bool {
@@ -228,12 +228,11 @@ impl RuntimeHandler for DriverRuntimeHandler {
         }
 
         // `end_run_after_turn` is recorded by the inbound loop before the result is delivered here
-        match tokio::time::timeout(TOOL_CALL_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|_| "tool call was dropped or aborted".to_string()),
-            Err(_) => {
-                self.pending_tool_calls.lock().await.remove(&call_id);
-                Err(format!("tool call timed out after {TOOL_CALL_TIMEOUT:?}"))
-            }
+        if let Ok(result) = tokio::time::timeout(TOOL_CALL_TIMEOUT, rx).await {
+            result.map_err(|_closed| "tool call was dropped or aborted".to_string())
+        } else {
+            self.pending_tool_calls.lock().await.remove(&call_id);
+            Err(format!("tool call timed out after {TOOL_CALL_TIMEOUT:?}"))
         }
     }
 }

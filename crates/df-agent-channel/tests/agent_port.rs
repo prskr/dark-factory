@@ -1,9 +1,14 @@
 //! The agent port end to end: a real tonic server with mTLS, a scripted runtime client, the
 //! fakes of `df-core` and a PostgreSQL database per test.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
+)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "helper functions of an integration test"
 )]
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -126,7 +131,7 @@ async fn count(pool: &PgPool, sql: &'static str) -> i64 {
 async fn eventually<F, Fut>(mut check: F)
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
+    Fut: Future<Output = bool>,
 {
     for _ in 0..200 {
         if check().await {
@@ -162,7 +167,7 @@ async fn tls_handshake_fails_without_a_client_certificate() -> anyhow::Result<()
         Ok(channel) => RuntimeClient::open(channel)
             .await
             .map(|_| ())
-            .map_err(|_| ()),
+            .map_err(|_error| ()),
     };
     assert!(outcome.is_err());
     Ok(())
@@ -178,7 +183,7 @@ async fn tls_handshake_fails_with_a_certificate_from_another_ca() -> anyhow::Res
         Ok(channel) => RuntimeClient::open(channel)
             .await
             .map(|_| ())
-            .map_err(|_| ()),
+            .map_err(|_error| ()),
     };
     assert!(outcome.is_err());
     Ok(())
@@ -486,7 +491,7 @@ async fn cancel_is_sent_when_the_wall_clock_budget_and_grace_are_over() -> anyho
     let mut config = ChannelConfig::default();
     config.runs.max_wall_clock_seconds = 0;
     config.runs.cancel_grace_seconds = 0;
-    env.ctx.config = std::sync::Arc::new(config);
+    env.ctx.config = Arc::new(config);
     let run_id = env.running_run().await;
     let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
     let client = pki.pod_client(POD_SAN).map_err(anyhow::Error::from_boxed)?;
@@ -523,8 +528,9 @@ async fn a_message_with_an_unknown_body_keeps_its_place_in_the_sequence() -> any
 
 #[tokio::test]
 async fn replayed_events_do_not_move_their_blobs_again() -> anyhow::Result<()> {
-    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     use df_proto::transcript::v1::{BlobData, ImageContent, blob_data};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let image = agent_message::Body::TranscriptEvent(Event {
         schema_version: 1,
@@ -594,7 +600,7 @@ async fn rotated_tls_material_is_served_without_a_restart() -> anyhow::Result<()
         Ok(channel) => RuntimeClient::open(channel)
             .await
             .map(|_| ())
-            .map_err(|_| ()),
+            .map_err(|_error| ()),
     };
     assert!(outcome.is_err());
     before.send(agent_text("still connected")).await;
@@ -952,7 +958,7 @@ async fn missing_harness_secret_fails_the_run_naming_the_reference() -> anyhow::
 
 /// Collects everything the `tracing` macros emit while it is the default subscriber.
 #[derive(Clone, Default)]
-struct LogCapture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+struct LogCapture(Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl std::io::Write for LogCapture {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -1022,10 +1028,11 @@ async fn secret_values_never_appear_in_logs() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
-    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     use df_agent_channel::Scheduler;
     use df_core::SandboxEvent;
     use df_core::testing::ForgeCall;
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
 
     let env = Env::new(pool.clone()).await;
     let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
@@ -1038,7 +1045,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     let scheduler_task = tokio::spawn(async move {
         looping
             .run(async {
-                let _ = stopped.await;
+                stopped.await.ok();
             })
             .await;
     });
@@ -1142,7 +1149,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
         .expect("Assign");
     let continuation = assign.continuation.expect("continuation");
     assert_eq!(continuation.harness_session_id, "session-1");
-    assert!(!continuation.summary.is_empty());
+    assert_ne!(continuation.summary, "");
 
     // Only one pull request was ever created, and the provider saw two sandboxes.
     let creates = env
@@ -1153,7 +1160,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
         .count();
     assert_eq!(creates, 1);
     assert_eq!(provisions(&env), 2);
-    let _ = stop.send(());
+    stop.send(()).ok();
     scheduler_task.await?;
     Ok(())
 }
@@ -1177,5 +1184,4 @@ async fn env_task_status(pool: &PgPool, env: &Env) -> String {
         .unwrap()
 }
 
-#[allow(dead_code)]
 fn _context_type_is_public(_: &ChannelContext) {}

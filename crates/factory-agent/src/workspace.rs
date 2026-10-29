@@ -94,8 +94,7 @@ impl PrepareResult {
 async fn ref_exists(git: &Git, rev: &str) -> bool {
     git.run_cmd(&["rev-parse", "--verify", rev])
         .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Fresh workspace: blobless clone without checkout, runtime-owned config, task branch checkout
@@ -330,6 +329,10 @@ async fn push_task_branch(
 ///
 /// Follows `specs/workspace-lifecycle/spec.md`:
 /// "drop paths matching the secret-file denylist (.env*, *.pem, *.key, id_*, ...)"
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "`lower` is lower case already; `Path::extension` misses names like `.pem`"
+)]
 pub fn is_secret_file(path_str: &str) -> bool {
     let file_name = match path_str.rfind('/') {
         Some(idx) => &path_str[idx + 1..],
@@ -430,15 +433,13 @@ pub struct FinalizeResult {
 
 /// Computes the total recursive disk size of a directory in bytes.
 /// Does NOT follow symlinks to avoid directory traversal or infinite loops (Finding 13).
-pub fn compute_dir_size(dir: &std::path::Path) -> u64 {
+pub fn compute_dir_size(dir: &Path) -> u64 {
     let mut total = 0;
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if let Ok(ft) = entry.file_type() {
-                if ft.is_symlink() {
-                    continue;
-                } else if ft.is_dir() {
+                if ft.is_dir() {
                     total += compute_dir_size(&path);
                 } else if ft.is_file()
                     && let Ok(meta) = entry.metadata()
@@ -451,11 +452,7 @@ pub fn compute_dir_size(dir: &std::path::Path) -> u64 {
     total
 }
 
-async fn run_with_wip_index(
-    git: &Git,
-    wip_index: &std::path::Path,
-    args: &[&str],
-) -> anyhow::Result<String> {
+async fn run_with_wip_index(git: &Git, wip_index: &Path, args: &[&str]) -> anyhow::Result<String> {
     let mut cmd = git.build_command();
     cmd.env("GIT_INDEX_FILE", wip_index);
     // File names like `prod[1].key` are paths, not globs
@@ -519,12 +516,12 @@ pub async fn finalize_workspace(
     // 3. WIP snapshot via separate index
     let wip_index = params.runtime_dir.join("wip.index");
     if wip_index.exists() {
-        let _ = std::fs::remove_file(&wip_index);
+        std::fs::remove_file(&wip_index).ok(); // best-effort cleanup
     }
     let wip = snapshot_wip(git, params, &wip_index).await?;
     push_reports.extend(wip.push_reports);
     if wip_index.exists() {
-        let _ = std::fs::remove_file(&wip_index);
+        std::fs::remove_file(&wip_index).ok(); // best-effort cleanup
     }
 
     let run_report = RunReport {

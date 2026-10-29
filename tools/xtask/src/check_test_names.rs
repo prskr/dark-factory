@@ -13,10 +13,13 @@ use anyhow::Result;
 
 use crate::common;
 
-pub fn run(root: &Path, files: &[String]) -> Result<()> {
+pub(crate) fn run(root: &Path, files: &[String]) -> Result<()> {
     let files = common::files_or_tracked(root, files)?;
     let mut violations = Vec::new();
-    for file in files.iter().filter(|f| f.ends_with(".rs")) {
+    for file in files
+        .iter()
+        .filter(|f| Path::new(f).extension().is_some_and(|ext| ext == "rs"))
+    {
         // Unreadable means deleted in the index; nothing to check.
         let Ok(source) = std::fs::read_to_string(root.join(file)) else {
             continue;

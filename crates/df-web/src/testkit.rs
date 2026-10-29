@@ -105,7 +105,7 @@ impl TokenResponder {
 
 impl Respond for TokenResponder {
     fn respond(&self, request: &MockRequest) -> ResponseTemplate {
-        let form: Vec<(String, String)> = openidconnect::url::form_urlencoded::parse(&request.body)
+        let form: Vec<(String, String)> = url::form_urlencoded::parse(&request.body)
             .into_owned()
             .collect();
         let field = |name: &str| form.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
@@ -147,7 +147,7 @@ impl Respond for TokenResponder {
 }
 
 impl Idp {
-    pub async fn start() -> Self {
+    pub(crate) async fn start() -> Self {
         let server = MockServer::start().await;
         let issuer = server.uri();
         let key = CoreRsaPrivateSigningKey::from_pem(
@@ -199,7 +199,7 @@ impl Idp {
         Self { server, state }
     }
 
-    pub fn set(&self, f: impl FnOnce(&mut IdpState)) {
+    pub(crate) fn set(&self, f: impl FnOnce(&mut IdpState)) {
         f(&mut self.state.lock().unwrap());
     }
 }
@@ -212,15 +212,15 @@ pub(crate) struct TestApp {
 }
 
 impl TestApp {
-    pub async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         Self::with_forge(Some(df_core::ForgeKind::Forgejo)).await
     }
 
-    pub async fn with_forge(forge: Option<df_core::ForgeKind>) -> Self {
+    pub(crate) async fn with_forge(forge: Option<df_core::ForgeKind>) -> Self {
         Self::with_egress(forge, None, None).await
     }
 
-    pub async fn with_egress(
+    pub(crate) async fn with_egress(
         forge: Option<df_core::ForgeKind>,
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
@@ -229,7 +229,7 @@ impl TestApp {
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
-    pub async fn with_hidden_blocks() -> Self {
+    pub(crate) async fn with_hidden_blocks() -> Self {
         Self::build(Some(df_core::ForgeKind::Forgejo), None, None, true).await
     }
 
@@ -271,22 +271,22 @@ impl TestApp {
     }
 
     /// The approval types the app was built with.
-    pub fn approval_types(&self) -> df_db::requests::ApprovalTypes {
+    pub(crate) fn approval_types() -> df_db::requests::ApprovalTypes {
         df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval))
     }
 
     /// A logged-in `board-member` session: the `Cookie` header value.
-    pub async fn login(&self) -> String {
+    pub(crate) async fn login(&self) -> String {
         crate::auth::testing::seed_session(&self.pool, &["board-member"], 3600, Some("refresh-0"))
             .await
             .0
     }
 
-    pub async fn send(&self, request: Request<Body>) -> Response<Body> {
+    pub(crate) async fn send(&self, request: Request<Body>) -> Response<Body> {
         self.router.clone().oneshot(request).await.unwrap()
     }
 
-    pub async fn get(&self, uri: &str, cookie: &str) -> Response<Body> {
+    pub(crate) async fn get(&self, uri: &str, cookie: &str) -> Response<Body> {
         self.send(
             Request::get(uri)
                 .header(header::COOKIE, cookie)
@@ -297,7 +297,7 @@ impl TestApp {
     }
 
     /// A `GET` as htmx sends it (with the `HX-Request` header), for fragments.
-    pub async fn get_htmx(&self, uri: &str, cookie: &str) -> Response<Body> {
+    pub(crate) async fn get_htmx(&self, uri: &str, cookie: &str) -> Response<Body> {
         self.send(
             Request::get(uri)
                 .header(header::COOKIE, cookie)
@@ -309,19 +309,19 @@ impl TestApp {
     }
 
     /// A form post as htmx sends it (with the `HX-Request` header).
-    pub async fn post(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
+    pub(crate) async fn post(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
         self.send(post_request(uri, body, cookie, true)).await
     }
 
     /// A `PATCH` with a form body as htmx sends it.
-    pub async fn patch(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
+    pub(crate) async fn patch(&self, uri: &str, body: &str, cookie: &str) -> Response<Body> {
         let mut request = post_request(uri, body, cookie, true);
         *request.method_mut() = axum::http::Method::PATCH;
         self.send(request).await
     }
 
     /// A `DELETE` as htmx sends it.
-    pub async fn delete(&self, uri: &str, cookie: &str) -> Response<Body> {
+    pub(crate) async fn delete(&self, uri: &str, cookie: &str) -> Response<Body> {
         let mut request = post_request(uri, "", cookie, true);
         *request.method_mut() = axum::http::Method::DELETE;
         self.send(request).await
@@ -353,7 +353,7 @@ pub(crate) fn header_str<'a>(response: &'a Response<Body>, name: &str) -> &'a st
 
 /// Url-encodes `key=value` pairs.
 pub(crate) fn form(pairs: &[(&str, &str)]) -> String {
-    openidconnect::url::form_urlencoded::Serializer::new(String::new())
+    url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(pairs)
         .finish()
 }
@@ -450,7 +450,7 @@ pub(crate) async fn insert_run(
     id
 }
 
-/// Stores a transcript event (`kind` is the snake_case name of the event's oneof field) and
+/// Stores a transcript event (`kind` is the `snake_case` name of the event's oneof field) and
 /// publishes the notification the writer publishes. Returns the event id.
 pub(crate) async fn add_event(
     pool: &PgPool,
@@ -508,6 +508,26 @@ pub(crate) struct Frame {
     pub data: String,
 }
 
+/// The event in `raw` (lines up to the blank line); `None` without data, such as a keep-alive.
+fn parse_frame(raw: &str) -> Option<Frame> {
+    let mut id = None;
+    let mut data: Option<String> = None;
+    for line in raw.lines() {
+        if let Some(value) = line.strip_prefix("id: ") {
+            id = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("data: ") {
+            match &mut data {
+                Some(data) => {
+                    data.push('\n');
+                    data.push_str(value);
+                }
+                None => data = Some(value.to_string()),
+            }
+        }
+    }
+    data.map(|data| Frame { id, data })
+}
+
 /// Reads the events of an SSE response.
 pub(crate) struct SseReader {
     body: axum::body::BodyDataStream,
@@ -515,7 +535,7 @@ pub(crate) struct SseReader {
 }
 
 impl SseReader {
-    pub fn new(response: Response<Body>) -> Self {
+    pub(crate) fn new(response: Response<Body>) -> Self {
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         Self {
             body: response.into_body().into_data_stream(),
@@ -523,32 +543,24 @@ impl SseReader {
         }
     }
 
+    /// The first complete event in the buffer, if any; keep-alives are skipped.
+    fn take_frame(&mut self) -> Option<Frame> {
+        while let Some(end) = self.buf.find("\n\n") {
+            let raw: String = self.buf.drain(..end + 2).collect();
+            if let Some(frame) = parse_frame(&raw) {
+                return Some(frame);
+            }
+        }
+        None
+    }
+
     /// The next event; panics if none arrives within `timeout`.
-    pub async fn next_within(&mut self, timeout: std::time::Duration) -> Frame {
+    pub(crate) async fn next_within(&mut self, timeout: std::time::Duration) -> Frame {
         use futures::StreamExt;
         tokio::time::timeout(timeout, async {
             loop {
-                while let Some(end) = self.buf.find("\n\n") {
-                    let raw: String = self.buf.drain(..end + 2).collect();
-                    let mut frame = Frame {
-                        id: None,
-                        data: String::new(),
-                    };
-                    let mut has_data = false;
-                    for line in raw.lines() {
-                        if let Some(id) = line.strip_prefix("id: ") {
-                            frame.id = Some(id.to_string());
-                        } else if let Some(data) = line.strip_prefix("data: ") {
-                            if has_data {
-                                frame.data.push('\n');
-                            }
-                            frame.data.push_str(data);
-                            has_data = true;
-                        }
-                    }
-                    if has_data {
-                        return frame;
-                    }
+                if let Some(frame) = self.take_frame() {
+                    return frame;
                 }
                 let chunk = self
                     .body
@@ -563,12 +575,12 @@ impl SseReader {
         .expect("timed out waiting for an event")
     }
 
-    pub async fn next(&mut self) -> Frame {
+    pub(crate) async fn next(&mut self) -> Frame {
         self.next_within(std::time::Duration::from_secs(5)).await
     }
 
     /// Whether the server ends the stream within `timeout`; events before the end are skipped.
-    pub async fn ends_within(&mut self, timeout: std::time::Duration) -> bool {
+    pub(crate) async fn ends_within(&mut self, timeout: std::time::Duration) -> bool {
         use futures::StreamExt;
         tokio::time::timeout(timeout, async { while self.body.next().await.is_some() {} })
             .await
@@ -583,7 +595,7 @@ pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
         .find(marker)
         .unwrap_or_else(|| panic!("{marker}: {html}"));
     let start = html[..at].rfind('<').unwrap();
-    &html[start..start + html[start..].find('>').unwrap() + 1]
+    &html[start..=(start + html[start..].find('>').unwrap())]
 }
 
 /// An approval type for tests: scopes task and project, applying it does nothing.

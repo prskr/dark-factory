@@ -1,6 +1,12 @@
-#![allow(dead_code)] // each test binary uses a subset
 //! Shared fixtures: plugin components, fake project directory and a client wired to them.
 
+#![expect(dead_code, reason = "each test binary uses a subset")]
+#![expect(
+    clippy::panic,
+    reason = "a missing plugin build is a setup error of the test"
+)]
+
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,19 +16,20 @@ use df_core::testing::FakeSecretStore;
 use df_core::{CredentialRef, CredentialRefId, IntegrationError, ProjectId};
 use df_plugins::{ForgeTarget, PluginForgeClient, PluginHost, ProjectDirectory};
 
-pub const TOKEN: &str = "s3cret-token";
+pub(crate) const TOKEN: &str = "s3cret-token";
 
 /// A prebuilt plugin component: `env_var` (set by Bazel), else the output of
 /// `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin`. The tests don't
 /// build components themselves, see the README.
-pub fn component(env_var: &str, file: &str) -> Vec<u8> {
-    let path = std::env::var_os(env_var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+pub(crate) fn component(env_var: &str, file: &str) -> Vec<u8> {
+    let path = std::env::var_os(env_var).map_or_else(
+        || {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../target/wasm32-wasip2/debug")
                 .join(file)
-        });
+        },
+        PathBuf::from,
+    );
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
             "reading {}: {e}; run `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin` first",
@@ -31,15 +38,15 @@ pub fn component(env_var: &str, file: &str) -> Vec<u8> {
     })
 }
 
-pub fn forgejo() -> Vec<u8> {
+pub(crate) fn forgejo() -> Vec<u8> {
     component("FORGEJO_PLUGIN_WASM", "forgejo_plugin.wasm")
 }
 
-pub fn probe() -> Vec<u8> {
+pub(crate) fn probe() -> Vec<u8> {
     component("TEST_PROBE_WASM", "test_probe_plugin.wasm")
 }
 
-pub struct FixedDirectory {
+pub(crate) struct FixedDirectory {
     pub repo_url: String,
 }
 
@@ -58,9 +65,9 @@ impl ProjectDirectory for FixedDirectory {
     }
 }
 
-pub type Client = PluginForgeClient;
+pub(crate) type Client = PluginForgeClient;
 
-pub fn client(
+pub(crate) fn client(
     component: &[u8],
     repo_url: &str,
     timeout: Duration,
@@ -69,7 +76,7 @@ pub fn client(
     client_with_token(component, repo_url, TOKEN, timeout, memory_limit)
 }
 
-pub fn client_with_token(
+pub(crate) fn client_with_token(
     component: &[u8],
     repo_url: &str,
     token: &str,
@@ -84,6 +91,6 @@ pub fn client_with_token(
             repo_url: repo_url.into(),
         }),
         Arc::new(secrets),
-        Default::default(),
+        BTreeMap::default(),
     ))
 }

@@ -22,7 +22,7 @@ const MODEL_MAX_BYTES: usize = 64;
 const MODEL_MAX_VALUES: usize = 32;
 const OVERFLOW_LABEL: &str = "other";
 /// Longest plausible runtime operation; longer (and zero) durations are counted as rejected.
-const MAX_RUNTIME_DURATION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const MAX_RUNTIME_DURATION: Duration = Duration::from_hours(168);
 
 /// Run durations: minutes to a day.
 const RUN_DURATION_BOUNDS: [f64; 12] = [
@@ -313,11 +313,12 @@ pub mod probe {
     use std::collections::HashSet;
 
     use opentelemetry::metrics::{Meter, MeterProvider as _};
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::data::{
+        AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
+    };
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 
     /// A meter provider with an in-memory exporter.
-    #[allow(missing_debug_implementations)]
     pub struct Probe {
         provider: SdkMeterProvider,
         exporter: InMemoryMetricExporter,
@@ -349,16 +350,17 @@ pub mod probe {
             self.exporter.reset();
             self.provider.force_flush().expect("flush metrics");
             let mut out = Vec::new();
-            for resource in self
+            let finished = self
                 .exporter
                 .get_finished_metrics()
-                .expect("finished metrics")
-            {
-                for scope in resource.scope_metrics() {
-                    for metric in scope.metrics().filter(|m| m.name() == name) {
-                        collect(metric.data(), &mut out);
-                    }
-                }
+                .expect("finished metrics");
+            let metrics = finished
+                .iter()
+                .flat_map(ResourceMetrics::scope_metrics)
+                .flat_map(ScopeMetrics::metrics)
+                .filter(|m| m.name() == name);
+            for metric in metrics {
+                collect(metric.data(), &mut out);
             }
             out
         }
@@ -386,6 +388,10 @@ pub mod probe {
         }
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "test probe: counts are compared as floats"
+    )]
     fn collect(data: &AggregatedMetrics, out: &mut Vec<(Vec<(String, String)>, f64)>) {
         macro_rules! points {
             ($data:expr, $convert:expr) => {

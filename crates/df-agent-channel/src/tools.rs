@@ -679,7 +679,7 @@ mod tests {
             _: &df_core::ProjectId,
             _: df_core::NewPullRequest,
         ) -> Result<df_core::PullRequest, IntegrationError> {
-            unreachable!("not used")
+            panic!("not used")
         }
         async fn find_open_pull_request(
             &self,
@@ -687,7 +687,7 @@ mod tests {
             _: &str,
             _: &str,
         ) -> Result<Option<df_core::PullRequest>, IntegrationError> {
-            unreachable!("not used")
+            panic!("not used")
         }
         async fn update_pull_request(
             &self,
@@ -695,14 +695,14 @@ mod tests {
             _: u64,
             _: PullRequestUpdate,
         ) -> Result<df_core::PullRequest, IntegrationError> {
-            unreachable!("not used")
+            panic!("not used")
         }
         async fn get_issue(
             &self,
             _: &df_core::ProjectId,
             _: u64,
         ) -> Result<df_core::Issue, IntegrationError> {
-            unreachable!("not used")
+            panic!("not used")
         }
         async fn add_issue_comment(
             &self,

@@ -65,8 +65,9 @@ pub async fn insert(
     run_id: RunId,
     event: &PreparedEvent,
 ) -> Result<Option<i64>, ChannelError> {
-    let seq = i64::try_from(event.seq)
-        .map_err(|_| ChannelError::InvalidData("sequence number out of range".into()))?;
+    let seq = i64::try_from(event.seq).map_err(|_out_of_range| {
+        ChannelError::InvalidData("sequence number out of range".into())
+    })?;
     let id: Option<i64> = sqlx::query_scalar(
         "INSERT INTO transcript_events
              (task_id, run_id, seq, schema_version, occurred_at, kind, payload)
@@ -244,7 +245,7 @@ mod tests {
         let blobs = PgBlobStore::new(pool);
         let mut event = image_event(b"shot");
         let Some(event::Kind::AgentMessageChunk(chunk)) = event.kind.take() else {
-            unreachable!("built by image_event")
+            panic!("built by image_event")
         };
         event.kind = Some(event::Kind::ToolCall(df_proto::transcript::v1::ToolCall {
             tool_call_id: "tc".into(),

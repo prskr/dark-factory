@@ -20,7 +20,7 @@ fn advisory_lock_subkey(schema: &str) -> i32 {
         hash ^= u32::from(*b);
         hash = hash.wrapping_mul(16_777_619);
     }
-    hash as i32
+    hash.cast_signed()
 }
 
 /// Validates and quotes a PostgreSQL identifier (such as a database name that may contain
@@ -56,12 +56,16 @@ pub async fn run_migrate(cfg: &DatabaseConfig) -> Result<(), DbError> {
     let res = run_migrate_locked(cfg, &pool, &quoted_db_name, schema, app_role).await;
     pool.close().await;
 
-    let _ = sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+    if let Err(error) = sqlx::query("SELECT pg_advisory_unlock($1, $2)")
         .bind(MIGRATE_LOCK_NAMESPACE)
         .bind(subkey)
         .execute(&mut lock_conn)
-        .await;
-    let _ = lock_conn.close().await;
+        .await
+    {
+        // Closing the connection below releases the lock as well.
+        tracing::warn!(error = %error, "failed to release the migration lock");
+    }
+    lock_conn.close().await.ok(); // the migration result below is what matters
 
     res
 }
@@ -220,16 +224,18 @@ mod tests {
         let schema = format!("df_schema_{suffix}");
 
         // Clean up any leftover roles from previous runs
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP ROLE IF EXISTS \"{app_role}\""
         )))
         .execute(superuser_pool)
-        .await;
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        .await
+        .ok(); // best effort: parallel test binaries share the server
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP ROLE IF EXISTS \"{owner_role}\""
         )))
         .execute(superuser_pool)
-        .await;
+        .await
+        .ok(); // best effort: parallel test binaries share the server
 
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE ROLE \"{owner_role}\" LOGIN PASSWORD 'owner-pass' CREATEROLE"
@@ -261,35 +267,40 @@ mod tests {
         owner_role: &str,
         app_role: &str,
     ) {
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE"
         )))
         .execute(superuser_pool)
-        .await;
+        .await
+        .ok(); // best effort: parallel test binaries share the server
         let (db_name,): (String,) = sqlx::query_as("SELECT current_database()")
             .fetch_one(superuser_pool)
             .await
             .unwrap();
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "REVOKE ALL PRIVILEGES ON DATABASE \"{db_name}\" FROM \"{app_role}\""
         )))
         .execute(superuser_pool)
-        .await;
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        .await
+        .ok(); // best effort: parallel test binaries share the server
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "REVOKE ALL PRIVILEGES ON DATABASE \"{db_name}\" FROM \"{owner_role}\""
         )))
         .execute(superuser_pool)
-        .await;
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        .await
+        .ok(); // best effort: parallel test binaries share the server
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP ROLE IF EXISTS \"{app_role}\""
         )))
         .execute(superuser_pool)
-        .await;
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        .await
+        .ok(); // best effort: parallel test binaries share the server
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP ROLE IF EXISTS \"{owner_role}\""
         )))
         .execute(superuser_pool)
-        .await;
+        .await
+        .ok(); // best effort: parallel test binaries share the server
     }
 
     #[tokio::test]

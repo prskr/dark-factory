@@ -87,10 +87,11 @@ fn serve_control_plane(addr: SocketAddr, initial: PolicyUpdate) -> ControlPlane 
     };
     let signal = stop.clone().cancelled_owned();
     let task = tokio::spawn(async move {
-        let _ = tonic::transport::Server::builder()
+        tonic::transport::Server::builder()
             .add_service(GatewayPolicyServer::new(service))
             .serve_with_incoming_shutdown(TcpListenerStream::new(listener), signal)
-            .await;
+            .await
+            .ok();
     });
     ControlPlane { stop, task }
 }
@@ -107,10 +108,7 @@ async fn start_gateway(control_plane: SocketAddr) -> Result<Running> {
     start_gateway_with(control_plane, Arc::default()).await
 }
 
-async fn start_gateway_with(
-    control_plane: SocketAddr,
-    metrics: Arc<crate::metrics::Metrics>,
-) -> Result<Running> {
+async fn start_gateway_with(control_plane: SocketAddr, metrics: Arc<Metrics>) -> Result<Running> {
     let health = TcpListener::bind("127.0.0.1:0").await?;
     let proxy = TcpListener::bind("127.0.0.1:0").await?;
     let tail = TcpListener::bind("127.0.0.1:0").await?;
@@ -266,7 +264,7 @@ async fn the_applied_policy_version_is_exported() -> Result<()> {
     let control_plane = free.local_addr()?;
     drop(free);
     let _control_plane = serve_control_plane(control_plane, snapshot(7, &["api.anthropic.com"]));
-    let metrics = Arc::new(crate::metrics::Metrics::new(&probe.meter()));
+    let metrics = Arc::new(Metrics::new(&probe.meter()));
     let gateway = start_gateway_with(control_plane, metrics).await?;
 
     wait_for_policy(&gateway, |policy| {

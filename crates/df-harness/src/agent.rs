@@ -53,7 +53,7 @@ struct Session {
 
 type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
-pub async fn run_stdio(cli: Cli) -> anyhow::Result<()> {
+pub(crate) async fn run_stdio(cli: Cli) -> anyhow::Result<()> {
     let model = Arc::new(model(&cli));
     let provider = Arc::new(OpenAiCompletionsProvider::with_models_without_env_api_key(
         "df-endpoint",
@@ -213,7 +213,8 @@ async fn run_prompt(
     let mut rx = agent.subscribe();
     let send = |update| {
         // Best-effort: the client may already be gone.
-        let _ = cx.send_notification(SessionNotification::new(session.clone(), update));
+        cx.send_notification(SessionNotification::new(session.clone(), update))
+            .ok();
     };
     let chunk = |s: String| ContentChunk::new(ContentBlock::Text(TextContent::new(s)));
     let run = agent.prompt(text);
@@ -257,7 +258,7 @@ async fn run_prompt(
             ..
         } => {
             send(SessionUpdate::UsageUpdate(UsageUpdate::new(
-                m.usage.total_tokens.max(0) as u64,
+                u64::try_from(m.usage.total_tokens).unwrap_or_default(),
                 context_window,
             )));
             last = m.stop_reason;

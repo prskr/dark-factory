@@ -1,5 +1,13 @@
 //! Generated Protobuf and gRPC bindings for Dark Factory contracts.
-#![allow(clippy::all, clippy::pedantic)]
+#![expect(
+    clippy::all,
+    clippy::pedantic,
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    clippy::map_err_ignore,
+    unused_qualifications,
+    reason = "generated code"
+)]
 
 pub use pbjson_types;
 

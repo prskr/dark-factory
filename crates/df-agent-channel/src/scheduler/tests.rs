@@ -455,7 +455,7 @@ async fn run_loop_starts_runs_on_notification_and_applies_events() {
     let handle = tokio::spawn(async move {
         scheduler
             .run(async {
-                let _ = stop_rx.await;
+                stop_rx.await.ok();
             })
             .await;
     });
@@ -519,6 +519,6 @@ async fn run_loop_starts_runs_on_notification_and_applies_events() {
             .unwrap(),
         "running"
     );
-    let _ = stop_tx.send(());
+    stop_tx.send(()).ok();
     handle.await.unwrap();
 }

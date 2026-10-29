@@ -180,26 +180,30 @@ async fn test_malicious_hook_scenario() {
     // 3. Make an initial commit
     let file_path = local_dir.join("README.md");
     std::fs::write(&file_path, "test").expect("write file");
-    let _ = tokio::process::Command::new("git")
+    tokio::process::Command::new("git")
         .current_dir(&local_dir)
         .args(["config", "commit.gpgsign", "false"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&local_dir)
         .args(["config", "user.name", "Test User"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&local_dir)
         .args(["config", "user.email", "test@example.com"])
         .output()
-        .await;
-    let _ = tokio::process::Command::new("git")
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
         .current_dir(&local_dir)
         .args(["add", "README.md"])
         .output()
-        .await;
+        .await
+        .unwrap();
     let out = tokio::process::Command::new("git")
         .current_dir(&local_dir)
         .args(["commit", "-m", "init"])
@@ -706,7 +710,7 @@ async fn answer_credential_request(
         .await
         .remove(&req.request_id)
         .expect("pending request");
-    let _ = tx.send(CredentialGrant {
+    tx.send(CredentialGrant {
         request_id: req.request_id,
         result: Some(credential_grant::Result::Git(GitCredential {
             username: username.to_string(),
@@ -714,7 +718,8 @@ async fn answer_credential_request(
             expires_at: expires_at
                 .map(|seconds| df_proto::pbjson_types::Timestamp { seconds, nanos: 0 }),
         })),
-    });
+    })
+    .ok();
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-//! Pure functions rendering Kubernetes PVCs, agent-sandbox Sandboxes, and NetworkPolicies.
+//! Pure functions rendering Kubernetes PVCs, agent-sandbox Sandboxes, and `NetworkPolicies`.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -427,7 +427,7 @@ pub fn render_network_policy(
         .metadata
         .name
         .clone()
-        .unwrap_or_else(|| format!("run-{}", run_id));
+        .unwrap_or_else(|| format!("run-{run_id}"));
 
     let mut labels = BTreeMap::new();
     labels.insert(
@@ -597,8 +597,8 @@ fn cluster_target_rule(target: &ResolvedClusterTarget) -> Option<NetworkPolicyEg
         .iter()
         .map(|ip| {
             let cidr = match ip {
-                IpAddr::V4(_) => format!("{}/32", ip),
-                IpAddr::V6(_) => format!("{}/128", ip),
+                IpAddr::V4(_) => format!("{ip}/32"),
+                IpAddr::V6(_) => format!("{ip}/128"),
             };
             NetworkPolicyPeer {
                 ip_block: Some(IPBlock { cidr, except: None }),

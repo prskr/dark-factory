@@ -52,7 +52,7 @@ impl Fixture {
         let agent = self.agent();
         raise_approval(
             &self.app.pool,
-            &self.app.approval_types(),
+            &TestApp::approval_types(),
             self.from(&agent),
             "fake-approval",
             json!({"what": reason}),

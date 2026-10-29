@@ -127,7 +127,7 @@ pub(crate) struct Replica {
 }
 
 impl Replica {
-    pub async fn start(pool: &PgPool, pki: &TestPki) -> Result<Self> {
+    pub(super) async fn start(pool: &PgPool, pki: &TestPki) -> Result<Self> {
         let dir = tempfile::tempdir()?;
         let files = pki
             .write_peer_tls(dir.path(), CONTROL_PLANE)
@@ -142,7 +142,9 @@ impl Replica {
             .debounce(Duration::from_millis(10));
         let served = stop.clone();
         let task = tokio::spawn(async move {
-            let _ = serve_policy(service, incoming, Some(GATEWAY.into()), served).await;
+            serve_policy(service, incoming, Some(GATEWAY.into()), served)
+                .await
+                .ok();
         });
         Ok(Self {
             addr,
@@ -152,9 +154,9 @@ impl Replica {
         })
     }
 
-    pub async fn stop(self) {
+    pub(super) async fn stop(self) {
         self.stop.cancel();
-        let _ = self.task.await;
+        self.task.await.ok();
     }
 }
 

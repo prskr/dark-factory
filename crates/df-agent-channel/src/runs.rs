@@ -74,8 +74,9 @@ impl TryFrom<RunRecord> for RunRow {
             outcome: r.outcome.map(|o| o.parse()).transpose()?,
             detail: r.detail,
             pod_ip: r.pod_ip,
-            last_persisted_seq: u64::try_from(r.last_persisted_seq)
-                .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))?,
+            last_persisted_seq: u64::try_from(r.last_persisted_seq).map_err(|_negative| {
+                ChannelError::InvalidData("negative last_persisted_seq".into())
+            })?,
             harness_session_id: r.harness_session_id,
             started_at: r.started_at,
             connected_at: r.connected_at,

@@ -13,7 +13,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            let _ = fs::remove_file(&dst_path);
+            fs::remove_file(&dst_path).ok(); // best-effort cleanup
             fs::copy(&src_path, &dst_path)?;
         }
     }
@@ -55,16 +55,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Ok(pregenerated) = env::var("TAILWIND_APP_CSS") {
         let src = resolve_path(&pregenerated, &manifest_dir);
-        let _ = fs::remove_file(&app_css_out);
+        fs::remove_file(&app_css_out).ok(); // best-effort cleanup
         fs::copy(&src, &app_css_out)?;
         return Ok(());
     }
 
     let input_css = manifest_dir.join("styles/input.css");
-    let tailwind_bin = env::var("TAILWIND_BIN")
-        .ok()
-        .map(|p| resolve_path(&p, &manifest_dir))
-        .unwrap_or_else(|| PathBuf::from("tailwindcss"));
+    let tailwind_bin = env::var("TAILWIND_BIN").ok().map_or_else(
+        || PathBuf::from("tailwindcss"),
+        |p| resolve_path(&p, &manifest_dir),
+    );
 
     let status = Command::new(&tailwind_bin)
         .current_dir(&manifest_dir)

@@ -1,6 +1,6 @@
 //! Tests of the Kubernetes sandbox provider.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -78,7 +78,7 @@ fn test_resolve_identity_scenarios() {
         },
         status: None,
     };
-    sb_writer.apply_watcher_event(&kube::runtime::watcher::Event::Apply(sandbox));
+    sb_writer.apply_watcher_event(&watcher::Event::Apply(sandbox));
 
     // Seed Pod
     let pod = Pod {
@@ -101,7 +101,7 @@ fn test_resolve_identity_scenarios() {
         }),
         ..Default::default()
     };
-    pod_writer.apply_watcher_event(&kube::runtime::watcher::Event::Apply(pod));
+    pod_writer.apply_watcher_event(&watcher::Event::Apply(pod));
 
     // Scenario: Valid peer
     let valid_peer = PeerIdentity {
@@ -214,7 +214,7 @@ fn test_map_pod_event() {
         container_statuses: Some(vec![ContainerStatus {
             name: "agent".to_string(),
             image: "bad:tag".to_string(),
-            image_id: "".to_string(),
+            image_id: String::new(),
             ready: false,
             restart_count: 0,
             state: Some(ContainerState {
@@ -252,7 +252,9 @@ fn test_map_pod_event() {
 #[tokio::test]
 #[ignore = "requires live dev cluster"]
 async fn test_provider_live_cluster_integration() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let client = Client::try_default().await.expect("cluster connection");
     let config = crate::test_support::live_config();
 
@@ -338,13 +340,13 @@ async fn test_provider_live_cluster_integration() {
         .teardown(second.run_id)
         .await
         .expect("teardown run 2");
-    let _ = pvcs
-        .delete(&task.volume_name, &DeleteParams::default())
-        .await;
+    pvcs.delete(&task.volume_name, &DeleteParams::default())
+        .await
+        .ok(); // best-effort cleanup
 }
 
 /// Resolves a Service whose port `grpc` has the named targetPort `grpc-internal`, answering
-/// the EndpointSlice list with a port called `slice_port_name`.
+/// the `EndpointSlice` list with a port called `slice_port_name`.
 async fn resolve_named_target_port(
     slice_port_name: &str,
 ) -> Result<ResolvedClusterTarget, ResolveError> {

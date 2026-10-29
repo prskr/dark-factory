@@ -11,13 +11,13 @@ use crate::wasi::io::streams::StreamError;
 /// `blocking-write-and-flush` accepts at most 4096 bytes per call.
 const WRITE_CHUNK: usize = 4096;
 
-pub struct WasiTransport {
+pub(crate) struct WasiTransport {
     scheme: Scheme,
     authority: String,
 }
 
 impl WasiTransport {
-    pub fn new(base_url: &str) -> Result<Self, Error> {
+    pub(crate) fn new(base_url: &str) -> Result<Self, Error> {
         let (scheme, rest) = base_url
             .split_once("://")
             .ok_or_else(|| Error::Config(format!("`base-url` has no scheme: {base_url}")))?;
