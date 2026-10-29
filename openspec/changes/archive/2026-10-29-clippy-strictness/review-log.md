@@ -66,4 +66,17 @@ Round 3 findings: none (both axes). S19+SP9 and SP10 verified fixed.
 - Bazel `--lockfile_mode=error --config=lint //crates/... //plugins/...`: ok
 - Tech debt: TD-76 (SP7). S18 moved to cosmetic by user decision.
 - Container-backed tests not run in any round (Podman socket refused connections): df-db, df-agent-channel, df-web testkit/auth/SSE, df-gateway `control::tests`, dark-factory `serve`, df-test-postgres. CI must cover them.
-- Status: done (no blocking finding open)
+- Status: done (no blocking finding open); container tests later failed, see Round 4
+
+## Round 4 (2026-10-29, after squash and archive)
+
+- Trigger: the user's run of the container-backed tests (socket back up). Under Bazel every PostgreSQL test failed; under cargo the df-db migrate tests failed.
+- Cause: when `let_underscore_must_use` was fixed, best-effort `let _ =` cleanups became `.unwrap()`. `df-test-postgres` `drop_stale_databases` and the lost-race template cleanup panic with `3D000` when a parallel test binary already dropped the database; the `df-db` migrate test cleanup panics with `2BP01`.
+
+| ID | Axis | Class | Where | Finding | Decision | Status |
+|----|------|-------|-------|---------|----------|--------|
+| T1 | Tests | Blocking | `df-test-postgres/src/lib.rs`, `df-db/src/migrate.rs` tests, `df-k8s` ignored cluster tests | best-effort cleanups turned into `.unwrap()` | restore `.ok()` with reason; sweep all removed `let _ =` | fixed (fixup 448d971, squashed) |
+
+- Implementer: fixup 448d971. cargo tests with the socket pass in df-test-postgres, df-db, df-agent-channel, df-web, df-gateway, dark-factory and df-k8s. `bazel test //crates/... //plugins/...` passes 26/26. clippy, fmt, machete and the xtask checks pass.
+- Process fix: the implement-change skill now runs skipped container tests before finishing and never records `done` without them.
+- Status: done
