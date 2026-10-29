@@ -273,7 +273,7 @@ pub(crate) fn list_column(
                     }
                 }
             }
-            div class="min-h-0 flex-1 overflow-y-auto" {
+            div class="min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0" {
                 div hx-sse:connect=(events) hx-swap="none" {}
                 (task_rows(items, current, filters))
             }

@@ -53,7 +53,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 
 | Page | Content |
 |---|---|
-| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Button`, `Task row`, `Request card` |
+| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card` |
 | Desktop | Main workspace and its variants |
 | Phone | Phone boards |
 | Flows (filter, new task) | Project filter, new task composer |
@@ -127,6 +127,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Desktop / Requests · inbox | `/requests` | manual seed (not built): pending approval, blocking question with suggested answers, question without | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
 | Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
+| Config / Phone · projects | `/projects` | projects (not built) | 390 |
+| Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |
 | Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |
 
 The remaining boards follow the same pattern.

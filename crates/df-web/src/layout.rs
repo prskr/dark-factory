@@ -3,7 +3,7 @@
 use maud::{DOCTYPE, Markup, html};
 
 use crate::assets::asset_url;
-use crate::components::{CreateAction, bottom_bar, rail};
+use crate::components::{CreateAction, bottom_bar, floating_create, rail};
 
 /// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
 /// Alpine starts.
@@ -91,12 +91,13 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
                 "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
                     @if nav != Nav::None { (rail(nav, compose_href)) }
-                    main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "w-full px-4 py-4 pb-20 md:px-10 md:py-8 md:pb-8" })} {
+                    main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "w-full px-4 py-4 pb-38 md:px-10 md:py-8 md:pb-8" })} {
                         (body)
                     }
                 }
                 @if nav != Nav::None {
-                    (bottom_bar(nav, &create_action(nav, compose_href)))
+                    (bottom_bar(nav))
+                    (floating_create(&create_action(nav, compose_href)))
                     // Live pending count of the navigation (and the inbox list on its page).
                     div hx-sse:connect=(if nav == Nav::Requests { "/requests/events?list=1" } else { "/requests/events" }) hx-swap="none" {}
                 }
@@ -106,7 +107,7 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
     }
 }
 
-/// What the bottom bar's create action does on this screen: a project on Projects, a task
+/// What the floating create action does on this screen: a project on Projects, a task
 /// everywhere else.
 fn create_action(nav: Nav, compose_href: &str) -> CreateAction<'_> {
     match nav {
@@ -231,14 +232,29 @@ mod tests {
     #[test]
     fn create_action_follows_the_screen() {
         let projects = layout("P", Nav::Projects, html! {}).into_string();
-        let bar = nav_html(&projects, "mobile-menu");
+        assert!(!nav_html(&projects, "mobile-menu").contains("hx-get"));
+        let button = floating_button(&projects);
         assert!(
-            bar.contains("aria-label=\"New project\"") && bar.contains("hx-get=\"/projects/new\"")
+            button.contains("aria-label=\"New project\"")
+                && button.contains("hx-get=\"/projects/new\"")
         );
         // The rail keeps the new-task action on every page.
         assert!(projects.contains("aria-label=\"New task\""));
         let tasks = layout("T", Nav::Tasks, html! {}).into_string();
-        assert!(nav_html(&tasks, "mobile-menu").contains("aria-label=\"New task\""));
+        assert!(floating_button(&tasks).contains("aria-label=\"New task\""));
+    }
+
+    /// The floating create button: the `fixed` button after the bottom bar.
+    fn floating_button(page: &str) -> &str {
+        let bar = page.find("id=\"mobile-menu\"").unwrap();
+        let rest = &page[bar + page[bar..].find("</nav>").unwrap()..];
+        &rest[..rest.find("</button>").unwrap()]
+    }
+
+    #[test]
+    fn main_pads_the_bottom_for_the_bar_and_the_floating_button_on_phones() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        assert!(page.contains("pb-38 md:px-10 md:py-8 md:pb-8"), "{page}");
     }
 
     #[test]
@@ -300,10 +316,10 @@ mod tests {
         let page = layout("T", Nav::Tasks, html! {}).into_string();
         let bar = nav_html(&page, "mobile-menu");
         assert!(bar.contains("md:hidden"), "bottom bar only below 768 px");
-        for label in ["Tasks", "Projects"] {
+        for label in ["Tasks", "Requests", "Projects"] {
             assert!(bar.contains(label), "{label}");
         }
-        assert!(bar.contains("aria-label=\"New task\""));
+        assert!(!bar.contains("aria-label=\"New task\""));
         // The rail is hidden below 768 px.
         assert!(page.contains("class=\"sticky top-0 hidden h-dvh"), "{page}");
     }

@@ -35,6 +35,7 @@
   --on-accent: #0c0a09;
   --accent-text: #00691a;
   --accent-soft: #dcfce7;
+  --fab-shadow: rgb(12 10 9 / 0.18);
   --danger: #b91c1c;
   --danger-soft: #fee2e2;
   --bubble-me: #e7e5e4;
@@ -116,6 +117,7 @@
   --color-on-accent: var(--on-accent);
   --color-accent-text: var(--accent-text);
   --color-accent-soft: var(--accent-soft);
+  --shadow-fab: 0 4px 12px var(--fab-shadow);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-bubble-me: var(--bubble-me);

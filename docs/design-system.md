@@ -30,6 +30,7 @@ Defined once in `styles/input.css`: CSS variables in `:root` (light), redefined 
 | `on-accent` | `#0c0a09` | `#0c0a09` | text on `accent` |
 | `accent-text` | `#00691a` | `#5cff8a` | links, active navigation, selection, focus ring |
 | `accent-soft` | `#dcfce7` | `#052e16` | selected row, avatar, own messages |
+| `fab-shadow` | `#0c0a09` at 18 % | same | shadow of the floating create button (`shadow-fab`: `0 4px 12px`); on the near-black dark `app` it barely shows, the accent fill carries the button |
 | `danger` | `#b91c1c` | `#fca5a5` | error text |
 | `danger-soft` | `#fee2e2` | `#450a0a` | error and notice background |
 | `bubble-me` | `#e7e5e4` | `#44403c` | bubble of a board member's message |
@@ -94,7 +95,7 @@ Inter (variable, Latin) for text, JetBrains Mono (variable, Latin) for task keys
 
 - Spacing: Tailwind's 4 px scale; gaps between related controls 8 px (`gap-2`), blocks 12-16 px (`space-y-3`, `p-4`).
 - Radius: inputs and buttons 8 px (`rounded-lg`), cards and dialogs 16 px (`rounded-2xl`), chips and badges full (`rounded-full`).
-- Breakpoints: below 768 px phone layout (bottom bar, one screen at a time); `md` 768 px (rail, list and transcript side by side, details as a panel over the transcript, so a browser split screen keeps the desktop shell); `lg` 1024 px (smaller touch targets); `xl` 1280 px (details become a column).
+- Breakpoints: below 768 px phone layout (bottom bar with a floating create button, one screen at a time); `md` 768 px (rail, list and transcript side by side, details as a panel over the transcript, so a browser split screen keeps the desktop shell); `lg` 1024 px (smaller touch targets); `xl` 1280 px (details become a column).
 
 ## Icons
 
@@ -200,7 +201,7 @@ Do: keep the stack and the input in one Alpine scope (`draft`, `saved`, `editing
 
 ## Patterns
 
-- **Page shell.** Rail (desktop) or bottom bar (phone) around `main`. Pages outside the navigation (errors) use `Nav::None`.
+- **Page shell.** Rail (desktop) or bottom bar (phone) around `main`. The phone bottom bar holds Tasks, Requests (count badge) and Projects at equal widths. The create action of the screen (New task, "New project" on Projects) is a separate round button (`floating_create`, 56 px, `accent`, shadow `shadow-fab`, plus icon 28 px, stroke 3) fixed 16 px from the right edge and 16 px above the bar, below 768 px only; it hides on the transcript screen like the bar. `main` pads 152 px at the bottom on phones (bar 64 + gap 16 + button 56 + gap 16), and the task list's own scrolling list 88 px, so the last row stays reachable. Pages outside the navigation (errors) use `Nav::None`.
 - **Three-column workspace.** List, transcript, details (`/tasks`, `/tasks/{key}`, one template). `body[data-view=list|task]` says which screen a phone shows. Selecting a task is an `hx-get` of the page with `hx-select="#ws-detail"` and `hx-push-url`: the list and its stream stay untouched, the old detail stream closes with the replaced region.
 - **List and detail on phones.** The list is a screen of its own; the transcript has a back link and the details open as a bottom sheet.
 - **Composer details.** The project chip and the filter menu trigger are 10 px rounded rectangles; the assignee picker has no border; Create task uses the arrow-up icon; the text has no outline and the card shows focus with a stronger neutral border (`focus-within:border-line-strong`, no accent; the transcript message box does the same, both are `border-line` at rest); the close button has no hover background.
