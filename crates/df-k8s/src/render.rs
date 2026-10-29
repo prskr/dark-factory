@@ -98,10 +98,6 @@ pub fn render_pvc(task: &TaskVolumeSpec, config: &ProvisioningConfig) -> Persist
 }
 
 /// Renders the agent-sandbox `Sandbox` CRD object for a run.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split render_sandbox into one builder per resource section"
-)]
 pub fn render_sandbox(
     spec: &RunSandboxSpec,
     cluster_targets: &[ResolvedClusterTarget],
@@ -121,7 +117,64 @@ pub fn render_sandbox(
         spec.task_key.to_string().to_lowercase(),
         spec.run_number
     );
+    let labels = sandbox_labels(spec, config);
+    let (host_aliases, no_proxy_entries) = cluster_target_networking(cluster_targets, config);
+    let (volume_mounts, volumes) = agent_volumes(spec, config)?;
 
+    let pod_template_spec = SandboxPodTemplateSpec {
+        runtime_class_name: config.sandbox.runtime_class_name.clone(),
+        automount_service_account_token: Some(false),
+        service_account_name: Some(config.sandbox.service_account_name.clone()),
+        security_context: Some(SandboxPodTemplateSpecSecurityContext {
+            run_as_non_root: Some(true),
+            run_as_user: Some(1000),
+            run_as_group: Some(1000),
+            fs_group: Some(1000),
+            seccomp_profile: Some(SandboxPodTemplateSpecSecurityContextSeccompProfile {
+                r#type: "RuntimeDefault".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        host_aliases: if host_aliases.is_empty() {
+            None
+        } else {
+            Some(host_aliases)
+        },
+        containers: vec![agent_container(
+            spec,
+            agent_env(config, &no_proxy_entries.join(",")),
+            volume_mounts,
+        )],
+        volumes: Some(volumes),
+        ..Default::default()
+    };
+
+    Ok(Sandbox {
+        metadata: ObjectMeta {
+            name: Some(name),
+            namespace: Some(config.sandbox.namespace.clone()),
+            labels: Some(labels.clone()),
+            ..Default::default()
+        },
+        spec: SandboxSpec {
+            operating_mode: Some(SandboxOperatingMode::Running),
+            shutdown_policy: Some(SandboxShutdownPolicy::Retain),
+            pod_template: SandboxPodTemplate {
+                metadata: Some(SandboxPodTemplateMetadata {
+                    labels: Some(labels),
+                    ..Default::default()
+                }),
+                spec: pod_template_spec,
+            },
+            ..Default::default()
+        },
+        status: None,
+    })
+}
+
+/// Labels of the Sandbox and its pod: the user labels plus the reserved system labels.
+fn sandbox_labels(spec: &RunSandboxSpec, config: &ProvisioningConfig) -> BTreeMap<String, String> {
     let mut labels = BTreeMap::new();
     // User labels are merged first so reserved system labels cannot be overridden
     for (k, v) in &spec.labels {
@@ -151,8 +204,14 @@ pub fn render_sandbox(
         "dark-factory.io/persona".to_string(),
         spec.persona_id.to_string(),
     );
+    labels
+}
 
-    // Host aliases for cluster targets
+/// Host aliases for the cluster targets and the `NO_PROXY` entries (control plane and targets).
+fn cluster_target_networking(
+    cluster_targets: &[ResolvedClusterTarget],
+    config: &ProvisioningConfig,
+) -> (Vec<SandboxPodTemplateSpecHostAliases>, Vec<String>) {
     let mut host_aliases = Vec::new();
     let mut no_proxy_entries = vec![config.control_plane_ip.to_string()];
 
@@ -174,100 +233,71 @@ pub fn render_sandbox(
             });
         }
     }
+    (host_aliases, no_proxy_entries)
+}
 
+/// Environment of the agent container: proxy settings, control plane address and logging.
+fn agent_env(
+    config: &ProvisioningConfig,
+    no_proxy: &str,
+) -> Vec<SandboxPodTemplateSpecContainersEnv> {
     let proxy_url = format!("http://{}:{}", config.gateway_ip, config.gateway_proxy_port);
-    let no_proxy_str = no_proxy_entries.join(",");
-
-    let env = vec![
-        SandboxPodTemplateSpecContainersEnv {
-            name: "HTTP_PROXY".to_string(),
-            value: Some(proxy_url.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "HTTPS_PROXY".to_string(),
-            value: Some(proxy_url.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "http_proxy".to_string(),
-            value: Some(proxy_url.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "https_proxy".to_string(),
-            value: Some(proxy_url),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "NO_PROXY".to_string(),
-            value: Some(no_proxy_str.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "no_proxy".to_string(),
-            value: Some(no_proxy_str),
-            ..Default::default()
-        },
-        // Names and meaning: crates/factory-agent/docs/configuration.md.
-        SandboxPodTemplateSpecContainersEnv {
-            name: "DF_CONTROL_PLANE_ADDR".to_string(),
-            value: Some(format!(
-                "{}:{}",
-                config.control_plane_ip, config.control_plane_port
-            )),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "DF_CONTROL_PLANE_SERVER_NAME".to_string(),
-            value: Some(config.control_plane_tls_server_name.clone()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "DF_LOG_FORMAT".to_string(),
-            value: Some(config.log_format.as_str().to_string()),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersEnv {
-            name: "RUST_LOG".to_string(),
-            value: Some(config.sandbox.log_level.clone()),
-            ..Default::default()
-        },
-    ];
-
-    let mut volume_mounts = vec![
-        SandboxPodTemplateSpecContainersVolumeMounts {
-            name: "factory-runtime".to_string(),
-            mount_path: "/opt/factory".to_string(),
-            read_only: Some(true),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersVolumeMounts {
-            name: "tls".to_string(),
-            mount_path: "/run/factory/tls".to_string(),
-            read_only: Some(true),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersVolumeMounts {
-            name: "task-data".to_string(),
-            mount_path: "/data".to_string(),
-            ..Default::default()
-        },
-        SandboxPodTemplateSpecContainersVolumeMounts {
-            name: "tmpfs".to_string(),
-            mount_path: "/run/factory".to_string(),
-            ..Default::default()
-        },
-    ];
-
-    let mut volumes = vec![SandboxPodTemplateSpecVolumes {
-        name: "factory-runtime".to_string(),
-        image: Some(SandboxPodTemplateSpecVolumesImage {
-            reference: Some(config.sandbox.runtime_image.clone()),
-            pull_policy: Some("IfNotPresent".to_string()),
-        }),
+    let var = |name: &str, value: String| SandboxPodTemplateSpecContainersEnv {
+        name: name.to_string(),
+        value: Some(value),
         ..Default::default()
-    }];
+    };
+    vec![
+        var("HTTP_PROXY", proxy_url.clone()),
+        var("HTTPS_PROXY", proxy_url.clone()),
+        var("http_proxy", proxy_url.clone()),
+        var("https_proxy", proxy_url),
+        var("NO_PROXY", no_proxy.to_string()),
+        var("no_proxy", no_proxy.to_string()),
+        // Names and meaning: crates/factory-agent/docs/configuration.md.
+        var(
+            "DF_CONTROL_PLANE_ADDR",
+            format!("{}:{}", config.control_plane_ip, config.control_plane_port),
+        ),
+        var(
+            "DF_CONTROL_PLANE_SERVER_NAME",
+            config.control_plane_tls_server_name.clone(),
+        ),
+        var("DF_LOG_FORMAT", config.log_format.as_str().to_string()),
+        var("RUST_LOG", config.sandbox.log_level.clone()),
+    ]
+}
+
+/// Volume mounts of the agent container and the volumes of the pod.
+fn agent_volumes(
+    spec: &RunSandboxSpec,
+    config: &ProvisioningConfig,
+) -> Result<
+    (
+        Vec<SandboxPodTemplateSpecContainersVolumeMounts>,
+        Vec<SandboxPodTemplateSpecVolumes>,
+    ),
+    RenderError,
+> {
+    let mount = |name: &str, path: &str, read_only: Option<bool>| {
+        SandboxPodTemplateSpecContainersVolumeMounts {
+            name: name.to_string(),
+            mount_path: path.to_string(),
+            read_only,
+            ..Default::default()
+        }
+    };
+    let mut volume_mounts = vec![
+        mount("factory-runtime", "/opt/factory", Some(true)),
+        mount("tls", "/run/factory/tls", Some(true)),
+        mount("task-data", "/data", None),
+        mount("tmpfs", "/run/factory", None),
+    ];
+
+    let mut volumes = vec![image_volume(
+        "factory-runtime".to_string(),
+        &config.sandbox.runtime_image,
+    )];
 
     // Below /opt/harness/<harness> so the mount does not hide other content of /opt/harness.
     if let Some(harness) = &spec.harness {
@@ -279,59 +309,11 @@ pub fn render_sandbox(
                     harness: harness.clone(),
                 })?;
         let name = format!("harness-{harness}");
-        volume_mounts.push(SandboxPodTemplateSpecContainersVolumeMounts {
-            name: name.clone(),
-            mount_path: format!("/opt/harness/{harness}"),
-            read_only: Some(true),
-            ..Default::default()
-        });
-        volumes.push(SandboxPodTemplateSpecVolumes {
-            name,
-            image: Some(SandboxPodTemplateSpecVolumesImage {
-                reference: Some(image.clone()),
-                pull_policy: Some("IfNotPresent".to_string()),
-            }),
-            ..Default::default()
-        });
+        volume_mounts.push(mount(&name, &format!("/opt/harness/{harness}"), Some(true)));
+        volumes.push(image_volume(name, image));
     }
 
-    let mut csi_attrs = BTreeMap::new();
-    csi_attrs.insert(
-        "csi.cert-manager.io/issuer-name".to_string(),
-        config.sandbox.issuer_name.clone(),
-    );
-    csi_attrs.insert(
-        "csi.cert-manager.io/issuer-kind".to_string(),
-        config.sandbox.issuer_kind.clone(),
-    );
-    csi_attrs.insert(
-        "csi.cert-manager.io/issuer-group".to_string(),
-        config.sandbox.issuer_group.clone(),
-    );
-    csi_attrs.insert(
-        "csi.cert-manager.io/uri-sans".to_string(),
-        "spiffe://dark-factory/ns/${POD_NAMESPACE}/pod/${POD_NAME}/${POD_UID}".to_string(),
-    );
-    csi_attrs.insert(
-        "csi.cert-manager.io/duration".to_string(),
-        config.sandbox.certificate_duration.clone(),
-    );
-    csi_attrs.insert(
-        "csi.cert-manager.io/renew-before".to_string(),
-        config.sandbox.certificate_renew_before.clone(),
-    );
-
-    volumes.push(SandboxPodTemplateSpecVolumes {
-        name: "tls".to_string(),
-        csi: Some(SandboxPodTemplateSpecVolumesCsi {
-            driver: "csi.cert-manager.io".to_string(),
-            read_only: Some(true),
-            volume_attributes: Some(csi_attrs),
-            ..Default::default()
-        }),
-        ..Default::default()
-    });
-
+    volumes.push(tls_volume(config));
     volumes.push(SandboxPodTemplateSpecVolumes {
         name: "task-data".to_string(),
         persistent_volume_claim: Some(SandboxPodTemplateSpecVolumesPersistentVolumeClaim {
@@ -340,7 +322,6 @@ pub fn render_sandbox(
         }),
         ..Default::default()
     });
-
     volumes.push(SandboxPodTemplateSpecVolumes {
         name: "tmpfs".to_string(),
         empty_dir: Some(SandboxPodTemplateSpecVolumesEmptyDir {
@@ -349,8 +330,69 @@ pub fn render_sandbox(
         }),
         ..Default::default()
     });
+    Ok((volume_mounts, volumes))
+}
 
-    let agent_container = SandboxPodTemplateSpecContainers {
+/// A volume that mounts an OCI image.
+fn image_volume(name: String, reference: &str) -> SandboxPodTemplateSpecVolumes {
+    SandboxPodTemplateSpecVolumes {
+        name,
+        image: Some(SandboxPodTemplateSpecVolumesImage {
+            reference: Some(reference.to_string()),
+            pull_policy: Some("IfNotPresent".to_string()),
+        }),
+        ..Default::default()
+    }
+}
+
+/// The CSI volume that issues the pod certificate through cert-manager.
+fn tls_volume(config: &ProvisioningConfig) -> SandboxPodTemplateSpecVolumes {
+    let sandbox = &config.sandbox;
+    let csi_attrs = BTreeMap::from([
+        (
+            "csi.cert-manager.io/issuer-name".to_string(),
+            sandbox.issuer_name.clone(),
+        ),
+        (
+            "csi.cert-manager.io/issuer-kind".to_string(),
+            sandbox.issuer_kind.clone(),
+        ),
+        (
+            "csi.cert-manager.io/issuer-group".to_string(),
+            sandbox.issuer_group.clone(),
+        ),
+        (
+            "csi.cert-manager.io/uri-sans".to_string(),
+            "spiffe://dark-factory/ns/${POD_NAMESPACE}/pod/${POD_NAME}/${POD_UID}".to_string(),
+        ),
+        (
+            "csi.cert-manager.io/duration".to_string(),
+            sandbox.certificate_duration.clone(),
+        ),
+        (
+            "csi.cert-manager.io/renew-before".to_string(),
+            sandbox.certificate_renew_before.clone(),
+        ),
+    ]);
+    SandboxPodTemplateSpecVolumes {
+        name: "tls".to_string(),
+        csi: Some(SandboxPodTemplateSpecVolumesCsi {
+            driver: "csi.cert-manager.io".to_string(),
+            read_only: Some(true),
+            volume_attributes: Some(csi_attrs),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// The agent container: unprivileged, all capabilities dropped.
+fn agent_container(
+    spec: &RunSandboxSpec,
+    env: Vec<SandboxPodTemplateSpecContainersEnv>,
+    volume_mounts: Vec<SandboxPodTemplateSpecContainersVolumeMounts>,
+) -> SandboxPodTemplateSpecContainers {
+    SandboxPodTemplateSpecContainers {
         name: "agent".to_string(),
         image: Some(spec.image.clone()),
         command: Some(vec![
@@ -370,61 +412,10 @@ pub fn render_sandbox(
             ..Default::default()
         }),
         ..Default::default()
-    };
-
-    let pod_template_spec = SandboxPodTemplateSpec {
-        runtime_class_name: config.sandbox.runtime_class_name.clone(),
-        automount_service_account_token: Some(false),
-        service_account_name: Some(config.sandbox.service_account_name.clone()),
-        security_context: Some(SandboxPodTemplateSpecSecurityContext {
-            run_as_non_root: Some(true),
-            run_as_user: Some(1000),
-            run_as_group: Some(1000),
-            fs_group: Some(1000),
-            seccomp_profile: Some(SandboxPodTemplateSpecSecurityContextSeccompProfile {
-                r#type: "RuntimeDefault".to_string(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }),
-        host_aliases: if host_aliases.is_empty() {
-            None
-        } else {
-            Some(host_aliases)
-        },
-        containers: vec![agent_container],
-        volumes: Some(volumes),
-        ..Default::default()
-    };
-
-    Ok(Sandbox {
-        metadata: ObjectMeta {
-            name: Some(name),
-            namespace: Some(config.sandbox.namespace.clone()),
-            labels: Some(labels.clone()),
-            ..Default::default()
-        },
-        spec: SandboxSpec {
-            operating_mode: Some(SandboxOperatingMode::Running),
-            shutdown_policy: Some(SandboxShutdownPolicy::Retain),
-            pod_template: SandboxPodTemplate {
-                metadata: Some(SandboxPodTemplateMetadata {
-                    labels: Some(labels),
-                    ..Default::default()
-                }),
-                spec: pod_template_spec,
-            },
-            ..Default::default()
-        },
-        status: None,
-    })
+    }
 }
 
 /// Renders the per-run `NetworkPolicy` owned by the Sandbox.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split render_network_policy into ingress and egress rule builders"
-)]
 pub fn render_network_policy(
     run_id: RunId,
     task_key: &TaskKey,
@@ -462,175 +453,6 @@ pub fn render_network_policy(
         });
     }
 
-    let mut egress_rules = Vec::new();
-
-    // 1. Control plane rule
-    let mut cp_ns_selector = BTreeMap::new();
-    cp_ns_selector.insert(
-        "kubernetes.io/metadata.name".to_string(),
-        config.sandbox.instance_namespace.clone(),
-    );
-    let mut cp_pod_selector = BTreeMap::new();
-    cp_pod_selector.insert(
-        "app.kubernetes.io/component".to_string(),
-        "control-plane".to_string(),
-    );
-
-    egress_rules.push(NetworkPolicyEgressRule {
-        to: Some(vec![NetworkPolicyPeer {
-            namespace_selector: Some(LabelSelector {
-                match_labels: Some(cp_ns_selector),
-                ..Default::default()
-            }),
-            pod_selector: Some(LabelSelector {
-                match_labels: Some(cp_pod_selector),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }]),
-        ports: Some(vec![NetworkPolicyPort {
-            protocol: Some("TCP".to_string()),
-            port: Some(IntOrString::Int(i32::from(config.control_plane_port))),
-            ..Default::default()
-        }]),
-    });
-
-    // 2. Gateway rule
-    let mut gw_ns_selector = BTreeMap::new();
-    gw_ns_selector.insert(
-        "kubernetes.io/metadata.name".to_string(),
-        config.sandbox.instance_namespace.clone(),
-    );
-    let mut gw_pod_selector = BTreeMap::new();
-    gw_pod_selector.insert(
-        "app.kubernetes.io/component".to_string(),
-        "gateway".to_string(),
-    );
-
-    egress_rules.push(NetworkPolicyEgressRule {
-        to: Some(vec![NetworkPolicyPeer {
-            namespace_selector: Some(LabelSelector {
-                match_labels: Some(gw_ns_selector),
-                ..Default::default()
-            }),
-            pod_selector: Some(LabelSelector {
-                match_labels: Some(gw_pod_selector),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }]),
-        ports: Some(vec![NetworkPolicyPort {
-            protocol: Some("TCP".to_string()),
-            port: Some(IntOrString::Int(i32::from(config.gateway_proxy_port))),
-            ..Default::default()
-        }]),
-    });
-
-    // 3. Cluster targets
-    let mut has_allow_dns = false;
-
-    for target in cluster_targets {
-        if target.allow_dns {
-            has_allow_dns = true;
-        }
-
-        if target.target_ports.is_empty() {
-            // A rule without ports would allow every port; the resolver never returns such a
-            // target, so fail closed if one gets here anyway.
-            continue;
-        }
-        let ports: Vec<NetworkPolicyPort> = target
-            .target_ports
-            .iter()
-            .map(|&p| NetworkPolicyPort {
-                protocol: Some("TCP".to_string()),
-                port: Some(IntOrString::Int(i32::from(p))),
-                ..Default::default()
-            })
-            .collect();
-
-        if let Some(ref sel) = target.pod_selector {
-            let mut target_ns_sel = BTreeMap::new();
-            target_ns_sel.insert(
-                "kubernetes.io/metadata.name".to_string(),
-                target.namespace.clone(),
-            );
-
-            egress_rules.push(NetworkPolicyEgressRule {
-                to: Some(vec![NetworkPolicyPeer {
-                    namespace_selector: Some(LabelSelector {
-                        match_labels: Some(target_ns_sel),
-                        ..Default::default()
-                    }),
-                    pod_selector: Some(LabelSelector {
-                        match_labels: Some(sel.clone()),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }]),
-                ports: Some(ports),
-            });
-        } else if !target.endpoint_ips.is_empty() {
-            // Service without selector -> ipBlocks /32 for IPv4, /128 for IPv6
-            let peers: Vec<NetworkPolicyPeer> = target
-                .endpoint_ips
-                .iter()
-                .map(|ip| {
-                    let cidr = match ip {
-                        IpAddr::V4(_) => format!("{}/32", ip),
-                        IpAddr::V6(_) => format!("{}/128", ip),
-                    };
-                    NetworkPolicyPeer {
-                        ip_block: Some(IPBlock { cidr, except: None }),
-                        ..Default::default()
-                    }
-                })
-                .collect();
-
-            egress_rules.push(NetworkPolicyEgressRule {
-                to: Some(peers),
-                ports: Some(ports),
-            });
-        }
-    }
-
-    // 4. DNS if allow_dns is set
-    if has_allow_dns {
-        let mut dns_ns = BTreeMap::new();
-        dns_ns.insert(
-            "kubernetes.io/metadata.name".to_string(),
-            "kube-system".to_string(),
-        );
-        let mut dns_pod = BTreeMap::new();
-        dns_pod.insert("k8s-app".to_string(), "kube-dns".to_string());
-
-        egress_rules.push(NetworkPolicyEgressRule {
-            to: Some(vec![NetworkPolicyPeer {
-                namespace_selector: Some(LabelSelector {
-                    match_labels: Some(dns_ns),
-                    ..Default::default()
-                }),
-                pod_selector: Some(LabelSelector {
-                    match_labels: Some(dns_pod),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }]),
-            ports: Some(vec![
-                NetworkPolicyPort {
-                    protocol: Some("UDP".to_string()),
-                    port: Some(IntOrString::Int(53)),
-                    ..Default::default()
-                },
-                NetworkPolicyPort {
-                    protocol: Some("TCP".to_string()),
-                    port: Some(IntOrString::Int(53)),
-                    ..Default::default()
-                },
-            ]),
-        });
-    }
-
     let mut pod_match_labels = BTreeMap::new();
     pod_match_labels.insert("dark-factory.io/run-id".to_string(), run_id.to_string());
 
@@ -653,9 +475,141 @@ pub fn render_network_policy(
             }),
             policy_types: Some(vec!["Ingress".to_string(), "Egress".to_string()]),
             ingress: None,
-            egress: Some(egress_rules),
+            egress: Some(egress_rules(cluster_targets, config)),
         }),
     }
+}
+
+/// The egress rules: control plane, gateway, the cluster targets and, if a target allows DNS,
+/// the cluster DNS. Ingress is denied by having no rule.
+fn egress_rules(
+    cluster_targets: &[ResolvedClusterTarget],
+    config: &ProvisioningConfig,
+) -> Vec<NetworkPolicyEgressRule> {
+    let instance_namespace = &config.sandbox.instance_namespace;
+    let mut rules = vec![
+        component_rule(
+            instance_namespace,
+            "app.kubernetes.io/component",
+            "control-plane",
+            vec![tcp_port(config.control_plane_port)],
+        ),
+        component_rule(
+            instance_namespace,
+            "app.kubernetes.io/component",
+            "gateway",
+            vec![tcp_port(config.gateway_proxy_port)],
+        ),
+    ];
+    rules.extend(cluster_targets.iter().filter_map(cluster_target_rule));
+
+    if cluster_targets.iter().any(|target| target.allow_dns) {
+        rules.push(component_rule(
+            "kube-system",
+            "k8s-app",
+            "kube-dns",
+            vec![
+                NetworkPolicyPort {
+                    protocol: Some("UDP".to_string()),
+                    port: Some(IntOrString::Int(53)),
+                    ..Default::default()
+                },
+                NetworkPolicyPort {
+                    protocol: Some("TCP".to_string()),
+                    port: Some(IntOrString::Int(53)),
+                    ..Default::default()
+                },
+            ],
+        ));
+    }
+    rules
+}
+
+fn tcp_port(port: u16) -> NetworkPolicyPort {
+    NetworkPolicyPort {
+        protocol: Some("TCP".to_string()),
+        port: Some(IntOrString::Int(i32::from(port))),
+        ..Default::default()
+    }
+}
+
+/// A rule that allows `ports` to the pods labeled `label=value` in `namespace`.
+fn component_rule(
+    namespace: &str,
+    label: &str,
+    value: &str,
+    ports: Vec<NetworkPolicyPort>,
+) -> NetworkPolicyEgressRule {
+    namespaced_pods_rule(
+        namespace,
+        BTreeMap::from([(label.to_string(), value.to_string())]),
+        ports,
+    )
+}
+
+fn namespaced_pods_rule(
+    namespace: &str,
+    pod_labels: BTreeMap<String, String>,
+    ports: Vec<NetworkPolicyPort>,
+) -> NetworkPolicyEgressRule {
+    NetworkPolicyEgressRule {
+        to: Some(vec![NetworkPolicyPeer {
+            namespace_selector: Some(LabelSelector {
+                match_labels: Some(BTreeMap::from([(
+                    "kubernetes.io/metadata.name".to_string(),
+                    namespace.to_string(),
+                )])),
+                ..Default::default()
+            }),
+            pod_selector: Some(LabelSelector {
+                match_labels: Some(pod_labels),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }]),
+        ports: Some(ports),
+    }
+}
+
+/// The rule for one cluster target: its pods if the Service has a selector, else its endpoint IPs.
+/// `None` if the target allows nothing (no ports, or neither selector nor endpoints).
+fn cluster_target_rule(target: &ResolvedClusterTarget) -> Option<NetworkPolicyEgressRule> {
+    if target.target_ports.is_empty() {
+        // A rule without ports would allow every port; the resolver never returns such a
+        // target, so fail closed if one gets here anyway.
+        return None;
+    }
+    let ports: Vec<NetworkPolicyPort> = target.target_ports.iter().map(|&p| tcp_port(p)).collect();
+
+    if let Some(selector) = &target.pod_selector {
+        return Some(namespaced_pods_rule(
+            &target.namespace,
+            selector.clone(),
+            ports,
+        ));
+    }
+    if target.endpoint_ips.is_empty() {
+        return None;
+    }
+    // Service without selector -> ipBlocks /32 for IPv4, /128 for IPv6
+    let peers: Vec<NetworkPolicyPeer> = target
+        .endpoint_ips
+        .iter()
+        .map(|ip| {
+            let cidr = match ip {
+                IpAddr::V4(_) => format!("{}/32", ip),
+                IpAddr::V6(_) => format!("{}/128", ip),
+            };
+            NetworkPolicyPeer {
+                ip_block: Some(IPBlock { cidr, except: None }),
+                ..Default::default()
+            }
+        })
+        .collect();
+    Some(NetworkPolicyEgressRule {
+        to: Some(peers),
+        ports: Some(ports),
+    })
 }
 
 #[cfg(test)]

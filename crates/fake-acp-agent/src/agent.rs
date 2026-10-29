@@ -1,16 +1,16 @@
 //! ACP Agent implementation for `fake-acp-agent`.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, Content, ContentBlock, ContentChunk, Error,
     InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse, McpServer,
-    NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
-    PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
-    TextContent, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
+    McpServerStdio, NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority,
+    PlanEntryStatus, PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate,
+    StopReason, TextContent, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, UsageUpdate,
 };
 use agent_client_protocol::{
@@ -20,7 +20,7 @@ use rmcp::ServiceExt;
 use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
 
-use crate::script::{EndStep, Script, Step};
+use crate::script::{EndStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn, UsageStep};
 
 /// Tracks active session state.
 #[derive(Debug, Clone)]
@@ -62,10 +62,6 @@ impl AgentState {
 }
 
 /// Build an ACP Agent instance wired with scripted handlers.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split build_agent into one builder per scripted handler"
-)]
 pub fn build_agent(
     state: Arc<Mutex<AgentState>>,
 ) -> Builder<
@@ -74,7 +70,6 @@ pub fn build_agent(
         <agent_client_protocol::role::acp::Agent as agent_client_protocol::role::Role>::Counterpart,
     >,
 > {
-    let _state_init = Arc::clone(&state);
     let state_new = Arc::clone(&state);
     let state_load = Arc::clone(&state);
     let state_prompt = Arc::clone(&state);
@@ -87,11 +82,7 @@ pub fn build_agent(
             async move |req: InitializeRequest,
                         responder: Responder<InitializeResponse>,
                         _cx: ConnectionTo<Client>| {
-                let mut caps = AgentCapabilities::new();
-                caps = caps.load_session(true);
-                let response =
-                    InitializeResponse::new(req.protocol_version).agent_capabilities(caps);
-                responder.respond(response)
+                handle_initialize(req, responder)
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -99,25 +90,7 @@ pub fn build_agent(
             async move |req: NewSessionRequest,
                         responder: Responder<NewSessionResponse>,
                         _cx: ConnectionTo<Client>| {
-                let session_uuid = Uuid::now_v7().to_string();
-                let session_id = SessionId::new(&*session_uuid);
-
-                let mut st = state_new.lock().await;
-                let _ = std::fs::create_dir_all(&st.session_dir);
-                let _ = std::fs::write(st.session_dir.join(&session_uuid), "");
-
-                st.sessions.insert(
-                    session_uuid.clone(),
-                    SessionState {
-                        session_id: session_id.clone(),
-                        cwd: req.cwd,
-                        is_loaded: false,
-                        turn_index: 0,
-                        mcp_servers: req.mcp_servers,
-                    },
-                );
-
-                responder.respond(NewSessionResponse::new(session_id))
+                handle_new_session(&state_new, req, responder).await
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -125,40 +98,7 @@ pub fn build_agent(
             async move |req: LoadSessionRequest,
                         responder: Responder<LoadSessionResponse>,
                         cx: ConnectionTo<Client>| {
-                let session_id_str = req.session_id.to_string();
-                let mut st = state_load.lock().await;
-
-                let session_file = st.session_dir.join(&session_id_str);
-                if !session_file.exists() && !st.sessions.contains_key(&session_id_str) {
-                    return responder.respond_with_error(
-                        Error::invalid_params().data("session not found"),
-                    );
-                }
-
-                st.sessions.insert(
-                    session_id_str.clone(),
-                    SessionState {
-                        session_id: req.session_id.clone(),
-                        cwd: req.cwd,
-                        is_loaded: true,
-                        turn_index: 0,
-                        mcp_servers: req.mcp_servers,
-                    },
-                );
-
-                // Like real adapters, replay the history before answering the load. The script
-                // has no recording of it, so the `Say` steps of the first-run turns stand in.
-                for step in st.script.sessions.new.iter().flat_map(|turn| &turn.steps) {
-                    if let Step::Say(text) = step {
-                        let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text.clone())));
-                        let _ = cx.send_notification(SessionNotification::new(
-                            req.session_id.clone(),
-                            SessionUpdate::AgentMessageChunk(chunk),
-                        ));
-                    }
-                }
-
-                responder.respond(LoadSessionResponse::new())
+                handle_load_session(&state_load, req, responder, &cx).await
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -166,305 +106,9 @@ pub fn build_agent(
             async move |req: PromptRequest,
                         responder: Responder<PromptResponse>,
                         cx: ConnectionTo<Client>| {
-                let state_prompt_task = Arc::clone(&state_prompt);
+                let state = Arc::clone(&state_prompt);
                 let cx_task = cx.clone();
-                cx.spawn(async move {
-                    let session_id_str = req.session_id.to_string();
-                    let mut st = state_prompt_task.lock().await;
-
-                    let is_loaded = match st.sessions.get(&session_id_str) {
-                        Some(s) => s.is_loaded,
-                        None => {
-                            return responder.respond_with_error(
-                                Error::invalid_params().data("session not found"),
-                            );
-                        }
-                    };
-
-                    let turns = if is_loaded {
-                        st.script.sessions.loaded.clone()
-                    } else {
-                        st.script.sessions.new.clone()
-                    };
-
-                    let cancel_notify = Arc::clone(&st.cancel_notify);
-                    let cancelled = Arc::clone(&st.cancelled);
-                    let session = st.sessions.get_mut(&session_id_str).unwrap();
-                    let session_cwd = session.cwd.clone();
-                    let session_mcp_servers = session.mcp_servers.clone();
-                    let turn = if session.turn_index < turns.len() {
-                        let t = turns[session.turn_index].clone();
-                        session.turn_index += 1;
-                        t
-                    } else {
-                        return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                    };
-
-                    drop(st);
-
-                    let mut stop_reason = StopReason::EndTurn;
-
-                    for step in turn.steps {
-                        match step {
-                            Step::Say(text) => {
-                                let chunk =
-                                    ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::AgentMessageChunk(chunk),
-                                ));
-                            }
-                            Step::Think(thought) => {
-                                let chunk =
-                                    ContentChunk::new(ContentBlock::Text(TextContent::new(thought)));
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::AgentThoughtChunk(chunk),
-                                ));
-                            }
-                            Step::ToolCall(tool_step) => {
-                                let call_id = ToolCallId::new(&*tool_step.id);
-                                let title = tool_step
-                                    .title
-                                    .unwrap_or_else(|| "Tool Call".to_string());
-                                let mut call = ToolCall::new(call_id.clone(), title);
-                                if let Some(name) = tool_step.name {
-                                    call.name = Some(name);
-                                }
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::ToolCall(call),
-                                ));
-
-                                let mut update_fields = ToolCallUpdateFields::new();
-                                if let Some(out) = tool_step.output {
-                                    update_fields = update_fields.content(vec![
-                                        ToolCallContent::Content(Content::new(ContentBlock::Text(
-                                            TextContent::new(out.to_string()),
-                                        ))),
-                                    ]);
-                                }
-                                let status = match tool_step.status.as_deref() {
-                                    Some("failed") => ToolCallStatus::Failed,
-                                    Some("in_progress") => ToolCallStatus::InProgress,
-                                    _ => ToolCallStatus::Completed,
-                                };
-                                update_fields = update_fields.status(status);
-                                let update = ToolCallUpdate::new(call_id, update_fields);
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::ToolCallUpdate(update),
-                                ));
-                            }
-                            Step::Plan(plan_step) => {
-                                let entries = plan_step
-                                    .entries
-                                    .into_iter()
-                                    .map(|e| {
-                                        let status = match e.status.as_str() {
-                                            "completed" => PlanEntryStatus::Completed,
-                                            "in_progress" => PlanEntryStatus::InProgress,
-                                            _ => PlanEntryStatus::Pending,
-                                        };
-                                        PlanEntry::new(e.content, PlanEntryPriority::Medium, status)
-                                    })
-                                    .collect();
-                                let plan = Plan::new(entries);
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::Plan(plan),
-                                ));
-                            }
-                            Step::Usage(usage_step) => {
-                                let used = usage_step.used.unwrap_or(
-                                    usage_step.input_tokens.unwrap_or(0)
-                                        + usage_step.output_tokens.unwrap_or(0),
-                                );
-                                let size = usage_step.size.unwrap_or(200_000);
-                                let usage = UsageUpdate::new(used, size);
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::UsageUpdate(usage),
-                                ));
-                            }
-                            Step::Shell(cmd) => {
-                                let output = tokio::process::Command::new("sh")
-                                    .arg("-c")
-                                    .arg(&cmd)
-                                    .current_dir(&session_cwd)
-                                    .output()
-                                    .await;
-                                match output {
-                                    Ok(out) => {
-                                        if !out.status.success() {
-                                            let stderr = String::from_utf8_lossy(&out.stderr);
-                                            eprintln!(
-                                                "fake-acp-agent: shell command '{cmd}' exited with {}: {stderr}",
-                                                out.status
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "fake-acp-agent: failed to execute shell command '{cmd}': {e}"
-                                        );
-                                    }
-                                }
-                            }
-                            Step::Mcp(mcp_step) => {
-                                let matched_server = session_mcp_servers.iter().find_map(|s| match s {
-                                    McpServer::Stdio(stdio) if stdio.name == mcp_step.server => {
-                                        Some(stdio.clone())
-                                    }
-                                    _ => None,
-                                });
-
-                                let call_id = ToolCallId::new(&*format!("call_{}", Uuid::now_v7()));
-                                let tool_title =
-                                    format!("mcp__{}__{}", mcp_step.server, mcp_step.tool);
-                                let mut call = ToolCall::new(call_id.clone(), tool_title);
-                                call.name =
-                                    Some(format!("mcp__{}__{}", mcp_step.server, mcp_step.tool));
-
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::ToolCall(call),
-                                ));
-
-                                let (tool_result_text, status) = if let Some(stdio) = matched_server {
-                                    let mut child_cmd = tokio::process::Command::new(&stdio.command);
-                                    child_cmd.args(&stdio.args);
-                                    for env in &stdio.env {
-                                        child_cmd.env(&env.name, &env.value);
-                                    }
-                                    child_cmd.stdin(std::process::Stdio::piped());
-                                    child_cmd.stdout(std::process::Stdio::piped());
-                                    // Don't leave the MCP server running after the call
-                                    child_cmd.kill_on_drop(true);
-
-                                    match child_cmd.spawn() {
-                                        Ok(mut child) => {
-                                            let child_stdout = child.stdout.take();
-                                            let child_stdin = child.stdin.take();
-
-                                            if let (Some(stdout), Some(stdin)) =
-                                                (child_stdout, child_stdin)
-                                            {
-                                                match ().serve((stdout, stdin)).await {
-                                                    Ok(client) => {
-                                                        let mut params =
-                                                            rmcp::model::CallToolRequestParams::new(
-                                                                mcp_step.tool.clone(),
-                                                            );
-                                                        if let serde_json::Value::Object(map) =
-                                                            mcp_step.args
-                                                        {
-                                                            params = params.with_arguments(map);
-                                                        }
-                                                        match client.call_tool(params).await {
-                                                            Ok(res) => {
-                                                                let json_str =
-                                                                    serde_json::to_string(&res)
-                                                                        .unwrap_or_default();
-                                                                (json_str, ToolCallStatus::Completed)
-                                                            }
-                                                            Err(e) => (
-                                                                format!("Tool call failed: {e}"),
-                                                                ToolCallStatus::Failed,
-                                                            ),
-                                                        }
-                                                    }
-                                                    Err(e) => (
-                                                        format!(
-                                                            "Failed to connect to MCP server: {e}"
-                                                        ),
-                                                        ToolCallStatus::Failed,
-                                                    ),
-                                                }
-                                            } else {
-                                                (
-                                                    "Failed to capture stdio".to_string(),
-                                                    ToolCallStatus::Failed,
-                                                )
-                                            }
-                                        }
-                                        Err(e) => (
-                                            format!("Failed to spawn MCP server '{}': {e}", stdio.name),
-                                            ToolCallStatus::Failed,
-                                        ),
-                                    }
-                                } else {
-                                    (
-                                        format!(
-                                            "MCP server '{}' not found in session",
-                                            mcp_step.server
-                                        ),
-                                        ToolCallStatus::Failed,
-                                    )
-                                };
-
-                                let mut update_fields = ToolCallUpdateFields::new();
-                                update_fields = update_fields.content(vec![
-                                    ToolCallContent::Content(Content::new(ContentBlock::Text(
-                                        TextContent::new(tool_result_text),
-                                    ))),
-                                ]);
-                                update_fields = update_fields.status(status);
-                                let update = ToolCallUpdate::new(call_id, update_fields);
-                                let _ = cx_task.send_notification(SessionNotification::new(
-                                    req.session_id.clone(),
-                                    SessionUpdate::ToolCallUpdate(update),
-                                ));
-                            }
-                            Step::End(end_step) => match end_step {
-                                EndStep::EndTurn => {
-                                    stop_reason = StopReason::EndTurn;
-                                }
-                                EndStep::Cancelled => {
-                                    stop_reason = StopReason::Cancelled;
-                                }
-                                EndStep::MaxTokens => {
-                                    stop_reason = StopReason::MaxTokens;
-                                }
-                                EndStep::MaxTurnRequests => {
-                                    stop_reason = StopReason::MaxTurnRequests;
-                                }
-                                EndStep::Refusal => {
-                                    stop_reason = StopReason::Refusal;
-                                }
-                                EndStep::Crash => {
-                                    std::process::exit(1);
-                                }
-                                EndStep::Hang => {
-                                    // Register for the wakeup before checking the flag, so a cancel
-                                    // arriving in between is not lost.
-                                    let notified = cancel_notify.notified();
-                                    tokio::pin!(notified);
-                                    notified.as_mut().enable();
-                                    if !cancelled.load(Ordering::SeqCst) {
-                                        notified.await;
-                                    }
-                                    stop_reason = StopReason::Cancelled;
-                                }
-                                EndStep::RateLimited(rl) => {
-                                    let seconds = rl.retry_after_seconds.unwrap_or(3600);
-                                    return responder.respond_with_error(
-                                        Error::internal_error().data(serde_json::json!({
-                                            "error": "rate_limited",
-                                            "retry_after_seconds": seconds,
-                                            "message": format!("Rate limit exceeded. Retry after {seconds} seconds.")
-                                        })),
-                                    );
-                                }
-                            },
-                        }
-                    }
-
-                    // A cancel only applies to the prompt it was sent for. Resetting here, not at the
-                    // start, keeps a cancel that arrives before this task is scheduled.
-                    cancelled.store(false, Ordering::SeqCst);
-                    responder.respond(PromptResponse::new(stop_reason))
-                })
+                cx.spawn(async move { handle_prompt(&state, req, responder, &cx_task).await })
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -477,6 +121,391 @@ pub fn build_agent(
             },
             agent_client_protocol::on_receive_notification!(),
         )
+}
+
+fn handle_initialize(
+    req: InitializeRequest,
+    responder: Responder<InitializeResponse>,
+) -> Result<(), agent_client_protocol::Error> {
+    let caps = AgentCapabilities::new().load_session(true);
+    responder.respond(InitializeResponse::new(req.protocol_version).agent_capabilities(caps))
+}
+
+async fn handle_new_session(
+    state: &Mutex<AgentState>,
+    req: NewSessionRequest,
+    responder: Responder<NewSessionResponse>,
+) -> Result<(), agent_client_protocol::Error> {
+    let session_uuid = Uuid::now_v7().to_string();
+    let session_id = SessionId::new(&*session_uuid);
+
+    let mut st = state.lock().await;
+    let _ = std::fs::create_dir_all(&st.session_dir);
+    let _ = std::fs::write(st.session_dir.join(&session_uuid), "");
+
+    st.sessions.insert(
+        session_uuid,
+        SessionState {
+            session_id: session_id.clone(),
+            cwd: req.cwd,
+            is_loaded: false,
+            turn_index: 0,
+            mcp_servers: req.mcp_servers,
+        },
+    );
+
+    responder.respond(NewSessionResponse::new(session_id))
+}
+
+async fn handle_load_session(
+    state: &Mutex<AgentState>,
+    req: LoadSessionRequest,
+    responder: Responder<LoadSessionResponse>,
+    cx: &ConnectionTo<Client>,
+) -> Result<(), agent_client_protocol::Error> {
+    let session_id_str = req.session_id.to_string();
+    let mut st = state.lock().await;
+
+    let session_file = st.session_dir.join(&session_id_str);
+    if !session_file.exists() && !st.sessions.contains_key(&session_id_str) {
+        return responder.respond_with_error(Error::invalid_params().data("session not found"));
+    }
+
+    st.sessions.insert(
+        session_id_str,
+        SessionState {
+            session_id: req.session_id.clone(),
+            cwd: req.cwd,
+            is_loaded: true,
+            turn_index: 0,
+            mcp_servers: req.mcp_servers,
+        },
+    );
+
+    // Like real adapters, replay the history before answering the load. The script
+    // has no recording of it, so the `Say` steps of the first-run turns stand in.
+    for step in st.script.sessions.new.iter().flat_map(|turn| &turn.steps) {
+        if let Step::Say(text) = step {
+            send_update(cx, &req.session_id, text_chunk_update(text.clone(), false));
+        }
+    }
+
+    responder.respond(LoadSessionResponse::new())
+}
+
+/// What a scripted turn needs besides its steps.
+struct TurnContext {
+    session_id: SessionId,
+    cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
+    cancel_notify: Arc<Notify>,
+    cancelled: Arc<AtomicBool>,
+}
+
+/// How a step affects the rest of the turn.
+enum StepOutcome {
+    Continue,
+    /// The turn ends with this stop reason.
+    Stop(StopReason),
+    /// The prompt fails with a rate-limit error.
+    RateLimited {
+        retry_after_seconds: u64,
+    },
+}
+
+async fn handle_prompt(
+    state: &Mutex<AgentState>,
+    req: PromptRequest,
+    responder: Responder<PromptResponse>,
+    cx: &ConnectionTo<Client>,
+) -> Result<(), agent_client_protocol::Error> {
+    let (turn, ctx) = match take_next_turn(state, &req.session_id).await {
+        NextTurn::Missing => {
+            return responder.respond_with_error(Error::invalid_params().data("session not found"));
+        }
+        NextTurn::Exhausted => {
+            return responder.respond(PromptResponse::new(StopReason::EndTurn));
+        }
+        NextTurn::Turn(turn, ctx) => (turn, ctx),
+    };
+
+    let mut stop_reason = StopReason::EndTurn;
+    for step in turn.steps {
+        match play_step(step, &ctx, cx).await {
+            StepOutcome::Continue => {}
+            StepOutcome::Stop(reason) => stop_reason = reason,
+            StepOutcome::RateLimited {
+                retry_after_seconds,
+            } => {
+                return responder.respond_with_error(Error::internal_error().data(
+                    serde_json::json!({
+                        "error": "rate_limited",
+                        "retry_after_seconds": retry_after_seconds,
+                        "message": format!(
+                            "Rate limit exceeded. Retry after {retry_after_seconds} seconds."
+                        )
+                    }),
+                ));
+            }
+        }
+    }
+
+    // A cancel only applies to the prompt it was sent for. Resetting here, not at the
+    // start, keeps a cancel that arrives before this task is scheduled.
+    ctx.cancelled.store(false, Ordering::SeqCst);
+    responder.respond(PromptResponse::new(stop_reason))
+}
+
+/// The next scripted turn of a session.
+enum NextTurn {
+    /// The session is unknown.
+    Missing,
+    /// The script has no turn left for the session.
+    Exhausted,
+    Turn(Turn, TurnContext),
+}
+
+/// Takes the next scripted turn of the session (the first-run or the loaded script) and advances
+/// its turn index.
+async fn take_next_turn(state: &Mutex<AgentState>, session_id: &SessionId) -> NextTurn {
+    let session_id_str = session_id.to_string();
+    let mut st = state.lock().await;
+
+    let Some(is_loaded) = st.sessions.get(&session_id_str).map(|s| s.is_loaded) else {
+        return NextTurn::Missing;
+    };
+    let turns = if is_loaded {
+        st.script.sessions.loaded.clone()
+    } else {
+        st.script.sessions.new.clone()
+    };
+    let cancel_notify = Arc::clone(&st.cancel_notify);
+    let cancelled = Arc::clone(&st.cancelled);
+    let Some(session) = st.sessions.get_mut(&session_id_str) else {
+        return NextTurn::Missing;
+    };
+    let Some(turn) = turns.get(session.turn_index).cloned() else {
+        return NextTurn::Exhausted;
+    };
+    session.turn_index += 1;
+    NextTurn::Turn(
+        turn,
+        TurnContext {
+            session_id: session_id.clone(),
+            cwd: session.cwd.clone(),
+            mcp_servers: session.mcp_servers.clone(),
+            cancel_notify,
+            cancelled,
+        },
+    )
+}
+
+/// Sends a session update to the client; a closed connection is not an error for the script.
+fn send_update(cx: &ConnectionTo<Client>, session_id: &SessionId, update: SessionUpdate) {
+    let _ = cx.send_notification(SessionNotification::new(session_id.clone(), update));
+}
+
+/// A text chunk of the agent's message, or of its thoughts if `thought`.
+fn text_chunk_update(text: String, thought: bool) -> SessionUpdate {
+    let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
+    if thought {
+        SessionUpdate::AgentThoughtChunk(chunk)
+    } else {
+        SessionUpdate::AgentMessageChunk(chunk)
+    }
+}
+
+/// Plays one step of a turn.
+async fn play_step(step: Step, ctx: &TurnContext, cx: &ConnectionTo<Client>) -> StepOutcome {
+    match step {
+        Step::Say(text) => send_update(cx, &ctx.session_id, text_chunk_update(text, false)),
+        Step::Think(thought) => send_update(cx, &ctx.session_id, text_chunk_update(thought, true)),
+        Step::ToolCall(tool_step) => play_tool_call(tool_step, ctx, cx),
+        Step::Plan(plan_step) => play_plan(plan_step, ctx, cx),
+        Step::Usage(usage_step) => play_usage(&usage_step, ctx, cx),
+        Step::Shell(cmd) => run_shell(&cmd, &ctx.cwd).await,
+        Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
+        Step::End(end_step) => return play_end(end_step, ctx).await,
+    }
+    StepOutcome::Continue
+}
+
+fn play_tool_call(tool_step: ToolCallStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let call_id = ToolCallId::new(&*tool_step.id);
+    let title = tool_step.title.unwrap_or_else(|| "Tool Call".to_string());
+    let mut call = ToolCall::new(call_id.clone(), title);
+    if let Some(name) = tool_step.name {
+        call.name = Some(name);
+    }
+    send_update(cx, &ctx.session_id, SessionUpdate::ToolCall(call));
+
+    let mut update_fields = ToolCallUpdateFields::new();
+    if let Some(out) = tool_step.output {
+        update_fields = update_fields.content(vec![text_content(out.to_string())]);
+    }
+    let status = match tool_step.status.as_deref() {
+        Some("failed") => ToolCallStatus::Failed,
+        Some("in_progress") => ToolCallStatus::InProgress,
+        _ => ToolCallStatus::Completed,
+    };
+    let update = ToolCallUpdate::new(call_id, update_fields.status(status));
+    send_update(cx, &ctx.session_id, SessionUpdate::ToolCallUpdate(update));
+}
+
+fn text_content(text: String) -> ToolCallContent {
+    ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new(text))))
+}
+
+fn play_plan(plan_step: PlanStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let entries = plan_step
+        .entries
+        .into_iter()
+        .map(|e| {
+            let status = match e.status.as_str() {
+                "completed" => PlanEntryStatus::Completed,
+                "in_progress" => PlanEntryStatus::InProgress,
+                _ => PlanEntryStatus::Pending,
+            };
+            PlanEntry::new(e.content, PlanEntryPriority::Medium, status)
+        })
+        .collect();
+    send_update(cx, &ctx.session_id, SessionUpdate::Plan(Plan::new(entries)));
+}
+
+fn play_usage(usage_step: &UsageStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let used = usage_step
+        .used
+        .unwrap_or(usage_step.input_tokens.unwrap_or(0) + usage_step.output_tokens.unwrap_or(0));
+    let size = usage_step.size.unwrap_or(200_000);
+    let usage = UsageUpdate::new(used, size);
+    send_update(cx, &ctx.session_id, SessionUpdate::UsageUpdate(usage));
+}
+
+/// Runs a shell command in the session's working directory; failures are only logged.
+async fn run_shell(cmd: &str, cwd: &Path) {
+    let output = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .output()
+        .await;
+    match output {
+        Ok(out) if !out.status.success() => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!(
+                "fake-acp-agent: shell command '{cmd}' exited with {}: {stderr}",
+                out.status
+            );
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("fake-acp-agent: failed to execute shell command '{cmd}': {e}");
+        }
+    }
+}
+
+/// Reports a tool call to a stdio MCP server of the session and its result.
+async fn play_mcp(mcp_step: McpStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let matched_server = ctx.mcp_servers.iter().find_map(|s| match s {
+        McpServer::Stdio(stdio) if stdio.name == mcp_step.server => Some(stdio.clone()),
+        _ => None,
+    });
+
+    let call_id = ToolCallId::new(&*format!("call_{}", Uuid::now_v7()));
+    let tool_title = format!("mcp__{}__{}", mcp_step.server, mcp_step.tool);
+    let mut call = ToolCall::new(call_id.clone(), tool_title.clone());
+    call.name = Some(tool_title);
+    send_update(cx, &ctx.session_id, SessionUpdate::ToolCall(call));
+
+    let (tool_result_text, status) = match matched_server {
+        Some(stdio) => call_mcp_tool(&stdio, &mcp_step).await,
+        None => (
+            format!("MCP server '{}' not found in session", mcp_step.server),
+            ToolCallStatus::Failed,
+        ),
+    };
+
+    let update_fields = ToolCallUpdateFields::new()
+        .content(vec![text_content(tool_result_text)])
+        .status(status);
+    let update = ToolCallUpdate::new(call_id, update_fields);
+    send_update(cx, &ctx.session_id, SessionUpdate::ToolCallUpdate(update));
+}
+
+/// Starts the MCP server, calls the tool of `mcp_step` and returns the result text and status.
+async fn call_mcp_tool(stdio: &McpServerStdio, mcp_step: &McpStep) -> (String, ToolCallStatus) {
+    let mut child_cmd = tokio::process::Command::new(&stdio.command);
+    child_cmd.args(&stdio.args);
+    for env in &stdio.env {
+        child_cmd.env(&env.name, &env.value);
+    }
+    child_cmd.stdin(std::process::Stdio::piped());
+    child_cmd.stdout(std::process::Stdio::piped());
+    // Don't leave the MCP server running after the call
+    child_cmd.kill_on_drop(true);
+
+    let mut child = match child_cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            return (
+                format!("Failed to spawn MCP server '{}': {e}", stdio.name),
+                ToolCallStatus::Failed,
+            );
+        }
+    };
+    let (Some(stdout), Some(stdin)) = (child.stdout.take(), child.stdin.take()) else {
+        return (
+            "Failed to capture stdio".to_string(),
+            ToolCallStatus::Failed,
+        );
+    };
+    let client = match ().serve((stdout, stdin)).await {
+        Ok(client) => client,
+        Err(e) => {
+            return (
+                format!("Failed to connect to MCP server: {e}"),
+                ToolCallStatus::Failed,
+            );
+        }
+    };
+    let mut params = rmcp::model::CallToolRequestParams::new(mcp_step.tool.clone());
+    if let serde_json::Value::Object(map) = &mcp_step.args {
+        params = params.with_arguments(map.clone());
+    }
+    match client.call_tool(params).await {
+        Ok(res) => (
+            serde_json::to_string(&res).unwrap_or_default(),
+            ToolCallStatus::Completed,
+        ),
+        Err(e) => (format!("Tool call failed: {e}"), ToolCallStatus::Failed),
+    }
+}
+
+/// Plays an `end` step: the stop reason of the turn, a crash, a hang until cancelled, or a rate
+/// limit error.
+async fn play_end(end_step: EndStep, ctx: &TurnContext) -> StepOutcome {
+    match end_step {
+        EndStep::EndTurn => StepOutcome::Stop(StopReason::EndTurn),
+        EndStep::Cancelled => StepOutcome::Stop(StopReason::Cancelled),
+        EndStep::MaxTokens => StepOutcome::Stop(StopReason::MaxTokens),
+        EndStep::MaxTurnRequests => StepOutcome::Stop(StopReason::MaxTurnRequests),
+        EndStep::Refusal => StepOutcome::Stop(StopReason::Refusal),
+        EndStep::Crash => std::process::exit(1),
+        EndStep::Hang => {
+            // Register for the wakeup before checking the flag, so a cancel
+            // arriving in between is not lost.
+            let notified = ctx.cancel_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if !ctx.cancelled.load(Ordering::SeqCst) {
+                notified.await;
+            }
+            StepOutcome::Stop(StopReason::Cancelled)
+        }
+        EndStep::RateLimited(rl) => StepOutcome::RateLimited {
+            retry_after_seconds: rl.retry_after_seconds.unwrap_or(3600),
+        },
+    }
 }
 
 /// Run the fake ACP agent over standard I/O until connection close.

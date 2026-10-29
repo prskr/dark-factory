@@ -11,7 +11,7 @@ Iteration 1 is done. This change pays down that debt before iteration 2 adds mor
 ## What Changes
 
 - **Splits:** each of the 17 functions is split into steps of at most 100 lines, and its `#[expect(clippy::too_many_lines)]` is removed. The split named in the attribute's `reason` is the starting point.
-- **`df-web` traffic page:** the Alpine component in `egress/log/page.rs` moves from a Rust format string into a static JS asset.
+- **`df-web` traffic page:** the Alpine component in `egress/log/page.rs` moves from a Rust format string into a static JS asset, and so does the workspace state of the task pages (`WORKSPACE_STATE`).
 - **`dark-factory/src/main.rs`** (1,459 lines): the sandbox backend wiring (`SandboxBackend`, `KubernetesBackend`, `DbClusterTargetsProvider`, `K8sServices`, `resolve_cluster_ips`) moves into its own module while `KubernetesBackend::start` is split.
 - **Behavior:** unchanged. Existing tests are the safety net. Where a path a split touches has no test, a characterization test is written first.
 - **End state:** no production function carries `#[expect(clippy::too_many_lines)]`. Module-level opt-outs in test modules stay.
@@ -29,5 +29,5 @@ None. Pure refactor (`skip_specs: true`).
 ## Impact
 
 - Production code of `factory-agent`, `fake-acp-agent`, `df-k8s`, `df-agent-channel`, `df-db`, `df-web` and `dark-factory`
-- `df-web/assets/` (new JS asset for the traffic page)
+- `df-web/assets/` (new JS assets for the traffic page and the task workspace); `AGENTS.md` (rule for scripts in `df-web`)
 - **Order:** implement after `lint-and-crate-guardrails` and before `clippy-strictness`, so the strictness fixes land on the split functions and are not done twice.

@@ -2,7 +2,10 @@
 
 use df_proto::gateway::v1::{FlowEvent, Phase};
 
-use super::{allowed, app_with_egress, denied, filter_from_query, flow, live, new_viewer, part};
+use super::{
+    allowed, app_with_egress, component_script, denied, filter_from_query, flow, live, new_viewer,
+    part,
+};
 use crate::egress::log::{Filter, VerdictFilter};
 use crate::testkit::{SseReader, text};
 
@@ -445,12 +448,9 @@ async fn the_rows_choice_sits_in_the_filter_bar_and_the_page_trims_the_table() {
     );
     assert!(page.contains("<tbody data-limit=\"1000\">"), "{page}");
     // Live rows past the limit are dropped from the bottom after every swap.
-    assert!(page.contains("tbody.rows.length &gt; limit"), "{page}");
+    assert!(component_script().contains("tbody.rows.length > limit"));
     // Clear filters resets the persona choice, not the row limit.
-    assert!(
-        page.contains("input[type=text], select[name=persona]')"),
-        "{page}"
-    );
+    assert!(component_script().contains("input[type=text], select[name=persona]')"));
     let default = text(app.get("/egress/log", &cookie).await).await;
     assert!(
         default.contains("<option value=\"500\" selected>")

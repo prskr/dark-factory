@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use df_proto::agent::v1::agent_channel_client::AgentChannelClient;
-use df_proto::agent::v1::{AgentMessage, ControlMessage, Hello, agent_message, control_message};
+use df_proto::agent::v1::{
+    AgentMessage, ControlMessage, Hello, HelloAck, agent_message, control_message,
+};
 use tokio::sync::{Mutex, mpsc, watch};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -337,10 +339,8 @@ impl ConnectionManager {
         true
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "split run_loop into connect, send and receive steps"
-    )]
+    /// Connects to the control plane until shutdown: handshake, replay, serve the stream, back
+    /// off after a drop.
     async fn run_loop(
         self,
         outbound_rx: mpsc::Receiver<AgentMessage>,
@@ -351,7 +351,7 @@ impl ConnectionManager {
         let outbound_rx_shared = Arc::new(tokio::sync::Mutex::new(outbound_rx));
 
         let mut flush_deadline: Option<Instant> = None;
-        'outer: loop {
+        loop {
             if self
                 .should_stop(&shutdown_rx, &mut flush_deadline, &outbound_rx_shared)
                 .await
@@ -359,82 +359,7 @@ impl ConnectionManager {
                 break;
             }
 
-            // 1. Reload certificates on every connect attempt (supporting cert rotation)
-            let tls_files = match TlsFiles::load_from_dir(&self.config.tls_dir) {
-                Ok(files) => files,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to load TLS files, backing off");
-                    backoff(
-                        &mut shutdown_rx,
-                        &mut current_delay,
-                        &self.reconnect_policy,
-                        flush_deadline,
-                    )
-                    .await;
-                    continue;
-                }
-            };
-
-            // 2. Connect to control plane
-            let mut client = match with_timeout(connect_channel(
-                &self.config.control_plane_addr,
-                &self.config.server_name,
-                &tls_files,
-            ))
-            .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(error = %e, "connection to control plane failed, backing off");
-                    backoff(
-                        &mut shutdown_rx,
-                        &mut current_delay,
-                        &self.reconnect_policy,
-                        flush_deadline,
-                    )
-                    .await;
-                    continue;
-                }
-            };
-
-            // 3. Open bidirectional stream
-            let (tx_stream, rx_stream) = mpsc::channel(100);
-            let response = match with_timeout(async {
-                client
-                    .connect(ReceiverStream::new(rx_stream))
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(error = %e, "bidirectional stream connect failed, backing off");
-                    backoff(
-                        &mut shutdown_rx,
-                        &mut current_delay,
-                        &self.reconnect_policy,
-                        flush_deadline,
-                    )
-                    .await;
-                    continue;
-                }
-            };
-            let mut in_stream = response.into_inner();
-
-            // 4. Send Hello
-            let previous_run_id = self.outbox.lock().await.run_state().run_id.clone();
-            let hello = AgentMessage {
-                seq: 0,
-                body: Some(agent_message::Body::Hello(Hello {
-                    runtime_version: env!("CARGO_PKG_VERSION").to_string(),
-                    capabilities: vec!["darkfactory.agent.v1".to_string()],
-                    previous_run_id,
-                })),
-            };
-
-            if tx_stream.send(hello).await.is_err() {
-                tracing::warn!("failed to send Hello over stream, backing off");
+            let Some(mut handshake) = self.connect_and_handshake().await else {
                 backoff(
                     &mut shutdown_rx,
                     &mut current_delay,
@@ -443,209 +368,21 @@ impl ConnectionManager {
                 )
                 .await;
                 continue;
-            }
-
-            // 5. Receive HelloAck
-            let hello_ack = match tokio::time::timeout(HANDSHAKE_TIMEOUT, in_stream.next()).await {
-                Ok(Some(Ok(ControlMessage {
-                    body: Some(control_message::Body::HelloAck(ack)),
-                    ..
-                }))) => ack,
-                _ => {
-                    tracing::warn!(
-                        "expected HelloAck as first message from control plane, backing off"
-                    );
-                    backoff(
-                        &mut shutdown_rx,
-                        &mut current_delay,
-                        &self.reconnect_policy,
-                        flush_deadline,
-                    )
-                    .await;
-                    continue;
-                }
             };
-
             // Handshake succeeded; reset backoff
             current_delay = self.reconnect_policy.initial_delay;
 
-            // 6. Handle HelloAck: check run-id mismatch and replay unacknowledged messages
-            {
-                let mut ob = self.outbox.lock().await;
-                if !ob.run_state().run_id.is_empty() && ob.run_state().run_id != hello_ack.run_id {
-                    tracing::warn!(
-                        old_run_id = %ob.run_state().run_id,
-                        new_run_id = %hello_ack.run_id,
-                        "run_id mismatch: discarding leftover outbox"
-                    );
-                    // Only messages the control plane never acknowledged are lost; a fully
-                    // acknowledged leftover is routine on a reused task volume.
-                    let notice = discarded_outbox_notice(
-                        ob.read_unacknowledged(0).map(|unacked| unacked.len()),
-                    );
-                    let _ = ob.discard(&hello_ack.run_id);
-                    *self.command_filter.lock().await = CommandFilter::new();
-
-                    if let Some(message) = notice {
-                        let notice_event =
-                            crate::transcript::notice_event(df_proto::transcript::v1::Notice {
-                                level: df_proto::transcript::v1::NoticeLevel::Warning as i32,
-                                code: "runtime.outbox_discarded".to_string(),
-                                message,
-                            });
-
-                        let notice_msg = AgentMessage {
-                            seq: 0,
-                            body: Some(agent_message::Body::TranscriptEvent(notice_event)),
-                        };
-
-                        if let Ok(seq) = ob.append(notice_msg.clone()) {
-                            let mut to_send = notice_msg;
-                            to_send.seq = seq;
-                            let _ = tx_stream.send(to_send).await;
-                        }
-                    }
-                } else {
-                    if ob.run_state().run_id.is_empty() {
-                        let _ = ob.discard(&hello_ack.run_id);
-                    }
-                    // Replay all unacknowledged messages after HelloAck.last_persisted_seq
-                    let mut unacked_msgs = Vec::new();
-                    if let Ok(unacked) = ob.read_unacknowledged(hello_ack.last_persisted_seq) {
-                        for msg in &unacked {
-                            if tx_stream.send(msg.clone()).await.is_err() {
-                                break;
-                            }
-                        }
-                        unacked_msgs = unacked;
-                    }
-
-                    // Re-send any pending tool call or credential requests waiting for responses
-                    let pending = self
-                        .command_filter
-                        .lock()
-                        .await
-                        .pending_requests_to_resend();
-                    for msg in pending {
-                        let already_replayed =
-                            unacked_msgs.iter().any(|u| match (&u.body, &msg.body) {
-                                (
-                                    Some(agent_message::Body::ToolCallRequest(u_req)),
-                                    Some(agent_message::Body::ToolCallRequest(m_req)),
-                                ) => u_req.call_id == m_req.call_id,
-                                (
-                                    Some(agent_message::Body::CredentialRequest(u_req)),
-                                    Some(agent_message::Body::CredentialRequest(m_req)),
-                                ) => u_req.request_id == m_req.request_id,
-                                _ => false,
-                            });
-                        if !already_replayed && let Ok(seq) = ob.append(msg.clone()) {
-                            let mut to_send = msg;
-                            to_send.seq = seq;
-                            let _ = tx_stream.send(to_send).await;
-                        }
-                    }
-                }
-            }
-
-            // 7. Active session loop with concurrent inbound and outbound tasks (Finding 2)
-            let (disconnect_tx, mut disconnect_rx) = mpsc::channel::<()>(1);
-            let (stop_tx, mut stop_rx) = watch::channel(false);
-            let mut out_worker = {
-                let outbox = Arc::clone(&self.outbox);
-                let command_filter = Arc::clone(&self.command_filter);
-                let outbound_rx = Arc::clone(&outbound_rx_shared);
-                let tx_stream = tx_stream.clone();
-                let disconnect_tx = disconnect_tx.clone();
-                tokio::spawn(async move {
-                    loop {
-                        // Only the wait for the next message can be interrupted by `stop`; a message
-                        // that was taken off the channel is always persisted. Once stopped, the
-                        // worker keeps going until the channel is empty.
-                        let msg = {
-                            let mut rx = outbound_rx.lock().await;
-                            if *stop_rx.borrow() {
-                                rx.try_recv().ok()
-                            } else {
-                                tokio::select! {
-                                    msg = rx.recv() => msg,
-                                    _ = stop_rx.changed() => rx.try_recv().ok(),
-                                }
-                            }
-                        };
-                        match msg {
-                            Some(msg) => {
-                                command_filter.lock().await.track_outgoing_request(&msg);
-                                match Outbox::append_or_stop(&outbox, msg.clone(), &mut stop_rx)
-                                    .await
-                                {
-                                    Ok(seq) => {
-                                        let mut to_send = msg;
-                                        to_send.seq = seq;
-                                        if tx_stream.send(to_send).await.is_err() {
-                                            let _ = disconnect_tx.send(()).await;
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(error = %e, "failed to append message to outbox");
-                                    }
-                                }
-                            }
-                            None => {
-                                // Stopped, or the runner dropped its sender
-                                if !*stop_rx.borrow() {
-                                    let _ = disconnect_tx.send(()).await;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                })
-            };
-
-            loop {
-                tokio::select! {
-                    _ = wait_shutdown(&mut shutdown_rx) => {
-                        // Flush queued messages (e.g. the final RunReport) and give the control
-                        // plane a bounded time to acknowledge them before the process exits.
-                        let _ = stop_tx.send(true);
-                        let drain = async {
-                            let _ = (&mut out_worker).await;
-                            while !self.outbox.lock().await.is_empty() {
-                                match in_stream.next().await {
-                                    Some(Ok(msg)) => self.handle_inbound(msg, &inbound_tx).await,
-                                    _ => break,
-                                }
-                            }
-                        };
-                        if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, drain).await.is_err() {
-                            tracing::warn!("timed out flushing outbox at shutdown");
-                            out_worker.abort();
-                        }
-                        break 'outer;
-                    }
-                    _ = disconnect_rx.recv() => {
-                        break;
-                    }
-                    inbound_item = in_stream.next() => {
-                        match inbound_item {
-                            Some(Ok(msg)) => self.handle_inbound(msg, &inbound_tx).await,
-                            _ => {
-                                tracing::info!("control plane stream ended or dropped");
-                                break; // Break to reconnect
-                            }
-                        }
-                    }
-                }
-            }
-            // Let the worker finish the message it is handling so it is persisted for replay
-            let _ = stop_tx.send(true);
-            if tokio::time::timeout(WORKER_STOP_TIMEOUT, &mut out_worker)
-                .await
-                .is_err()
-            {
-                out_worker.abort();
+            self.sync_outbox(&handshake.ack, &handshake.tx_stream).await;
+            let end = self
+                .serve_stream(
+                    &mut handshake,
+                    &outbound_rx_shared,
+                    &inbound_tx,
+                    &mut shutdown_rx,
+                )
+                .await;
+            if matches!(end, StreamEnd::Shutdown) {
+                break;
             }
 
             // Apply backoff before reconnecting after an unexpected drop
@@ -661,6 +398,313 @@ impl ConnectionManager {
         // Shutdown while no worker was running: persist whatever is still queued
         self.drain_outbound_to_outbox(&outbound_rx_shared).await;
     }
+
+    /// Reloads the certificates (supporting rotation), connects, opens the bidirectional stream
+    /// and exchanges `Hello` and `HelloAck`. `None` after a logged failure: the caller backs off.
+    async fn connect_and_handshake(&self) -> Option<Handshake> {
+        let tls_files = TlsFiles::load_from_dir(&self.config.tls_dir)
+            .inspect_err(|e| tracing::warn!(error = %e, "failed to load TLS files, backing off"))
+            .ok()?;
+
+        let mut client = with_timeout(connect_channel(
+            &self.config.control_plane_addr,
+            &self.config.server_name,
+            &tls_files,
+        ))
+        .await
+        .inspect_err(
+            |e| tracing::warn!(error = %e, "connection to control plane failed, backing off"),
+        )
+        .ok()?;
+
+        let (tx_stream, rx_stream) = mpsc::channel(100);
+        let response = with_timeout(async {
+            client
+                .connect(ReceiverStream::new(rx_stream))
+                .await
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .inspect_err(
+            |e| tracing::warn!(error = %e, "bidirectional stream connect failed, backing off"),
+        )
+        .ok()?;
+        let mut in_stream = response.into_inner();
+
+        let previous_run_id = self.outbox.lock().await.run_state().run_id.clone();
+        let hello = AgentMessage {
+            seq: 0,
+            body: Some(agent_message::Body::Hello(Hello {
+                runtime_version: env!("CARGO_PKG_VERSION").to_string(),
+                capabilities: vec!["darkfactory.agent.v1".to_string()],
+                previous_run_id,
+            })),
+        };
+        if tx_stream.send(hello).await.is_err() {
+            tracing::warn!("failed to send Hello over stream, backing off");
+            return None;
+        }
+
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, in_stream.next()).await {
+            Ok(Some(Ok(ControlMessage {
+                body: Some(control_message::Body::HelloAck(ack)),
+                ..
+            }))) => Some(Handshake {
+                tx_stream,
+                in_stream,
+                ack,
+            }),
+            _ => {
+                tracing::warn!(
+                    "expected HelloAck as first message from control plane, backing off"
+                );
+                None
+            }
+        }
+    }
+
+    /// Handles `HelloAck`: discards a leftover outbox of another run, or replays the messages
+    /// the control plane has not persisted plus the pending requests.
+    async fn sync_outbox(&self, hello_ack: &HelloAck, tx_stream: &mpsc::Sender<AgentMessage>) {
+        let mut ob = self.outbox.lock().await;
+        if !ob.run_state().run_id.is_empty() && ob.run_state().run_id != hello_ack.run_id {
+            self.discard_leftover_outbox(&mut ob, &hello_ack.run_id, tx_stream)
+                .await;
+            return;
+        }
+        if ob.run_state().run_id.is_empty() {
+            let _ = ob.discard(&hello_ack.run_id);
+        }
+        // Replay all unacknowledged messages after HelloAck.last_persisted_seq
+        let mut unacked_msgs = Vec::new();
+        if let Ok(unacked) = ob.read_unacknowledged(hello_ack.last_persisted_seq) {
+            for msg in &unacked {
+                if tx_stream.send(msg.clone()).await.is_err() {
+                    break;
+                }
+            }
+            unacked_msgs = unacked;
+        }
+
+        // Re-send any pending tool call or credential requests waiting for responses
+        let pending = self
+            .command_filter
+            .lock()
+            .await
+            .pending_requests_to_resend();
+        for msg in pending {
+            if !is_replayed(&unacked_msgs, &msg)
+                && let Ok(seq) = ob.append(msg.clone())
+            {
+                let mut to_send = msg;
+                to_send.seq = seq;
+                let _ = tx_stream.send(to_send).await;
+            }
+        }
+    }
+
+    /// Discards the outbox of the previous run and tells the control plane if messages were lost.
+    async fn discard_leftover_outbox(
+        &self,
+        ob: &mut Outbox,
+        new_run_id: &str,
+        tx_stream: &mpsc::Sender<AgentMessage>,
+    ) {
+        tracing::warn!(
+            old_run_id = %ob.run_state().run_id,
+            new_run_id = %new_run_id,
+            "run_id mismatch: discarding leftover outbox"
+        );
+        // Only messages the control plane never acknowledged are lost; a fully
+        // acknowledged leftover is routine on a reused task volume.
+        let notice =
+            discarded_outbox_notice(ob.read_unacknowledged(0).map(|unacked| unacked.len()));
+        let _ = ob.discard(new_run_id);
+        *self.command_filter.lock().await = CommandFilter::new();
+
+        if let Some(message) = notice {
+            let notice_event = crate::transcript::notice_event(df_proto::transcript::v1::Notice {
+                level: df_proto::transcript::v1::NoticeLevel::Warning as i32,
+                code: "runtime.outbox_discarded".to_string(),
+                message,
+            });
+            let notice_msg = AgentMessage {
+                seq: 0,
+                body: Some(agent_message::Body::TranscriptEvent(notice_event)),
+            };
+            if let Ok(seq) = ob.append(notice_msg.clone()) {
+                let mut to_send = notice_msg;
+                to_send.seq = seq;
+                let _ = tx_stream.send(to_send).await;
+            }
+        }
+    }
+
+    /// Runs the active session with concurrent inbound and outbound tasks until the stream drops
+    /// or shutdown is requested.
+    async fn serve_stream(
+        &self,
+        handshake: &mut Handshake,
+        outbound_rx: &Arc<Mutex<mpsc::Receiver<AgentMessage>>>,
+        inbound_tx: &mpsc::Sender<ControlMessage>,
+        shutdown_rx: &mut watch::Receiver<bool>,
+    ) -> StreamEnd {
+        let (disconnect_tx, mut disconnect_rx) = mpsc::channel::<()>(1);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let mut out_worker = self.spawn_send_worker(
+            Arc::clone(outbound_rx),
+            handshake.tx_stream.clone(),
+            disconnect_tx,
+            stop_rx,
+        );
+
+        loop {
+            tokio::select! {
+                _ = wait_shutdown(shutdown_rx) => {
+                    self.flush_at_shutdown(
+                        &stop_tx,
+                        &mut out_worker,
+                        &mut handshake.in_stream,
+                        inbound_tx,
+                    )
+                    .await;
+                    return StreamEnd::Shutdown;
+                }
+                _ = disconnect_rx.recv() => {
+                    break;
+                }
+                inbound_item = handshake.in_stream.next() => {
+                    match inbound_item {
+                        Some(Ok(msg)) => self.handle_inbound(msg, inbound_tx).await,
+                        _ => {
+                            tracing::info!("control plane stream ended or dropped");
+                            break; // Break to reconnect
+                        }
+                    }
+                }
+            }
+        }
+        // Let the worker finish the message it is handling so it is persisted for replay
+        let _ = stop_tx.send(true);
+        if tokio::time::timeout(WORKER_STOP_TIMEOUT, &mut out_worker)
+            .await
+            .is_err()
+        {
+            out_worker.abort();
+        }
+        StreamEnd::Dropped
+    }
+
+    /// Starts the worker that persists outbound messages in the outbox and sends them on the
+    /// stream. It signals `disconnect_tx` when the stream is gone.
+    fn spawn_send_worker(
+        &self,
+        outbound_rx: Arc<Mutex<mpsc::Receiver<AgentMessage>>>,
+        tx_stream: mpsc::Sender<AgentMessage>,
+        disconnect_tx: mpsc::Sender<()>,
+        mut stop_rx: watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
+        let outbox = Arc::clone(&self.outbox);
+        let command_filter = Arc::clone(&self.command_filter);
+        tokio::spawn(async move {
+            loop {
+                // Only the wait for the next message can be interrupted by `stop`; a message
+                // that was taken off the channel is always persisted. Once stopped, the
+                // worker keeps going until the channel is empty.
+                let msg = {
+                    let mut rx = outbound_rx.lock().await;
+                    if *stop_rx.borrow() {
+                        rx.try_recv().ok()
+                    } else {
+                        tokio::select! {
+                            msg = rx.recv() => msg,
+                            _ = stop_rx.changed() => rx.try_recv().ok(),
+                        }
+                    }
+                };
+                let Some(msg) = msg else {
+                    // Stopped, or the runner dropped its sender
+                    if !*stop_rx.borrow() {
+                        let _ = disconnect_tx.send(()).await;
+                    }
+                    break;
+                };
+                command_filter.lock().await.track_outgoing_request(&msg);
+                match Outbox::append_or_stop(&outbox, msg.clone(), &mut stop_rx).await {
+                    Ok(seq) => {
+                        let mut to_send = msg;
+                        to_send.seq = seq;
+                        if tx_stream.send(to_send).await.is_err() {
+                            let _ = disconnect_tx.send(()).await;
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to append message to outbox");
+                    }
+                }
+            }
+        })
+    }
+
+    /// Flushes queued messages (e.g. the final RunReport) and gives the control plane a bounded
+    /// time to acknowledge them before the process exits.
+    async fn flush_at_shutdown(
+        &self,
+        stop_tx: &watch::Sender<bool>,
+        out_worker: &mut tokio::task::JoinHandle<()>,
+        in_stream: &mut tonic::Streaming<ControlMessage>,
+        inbound_tx: &mpsc::Sender<ControlMessage>,
+    ) {
+        let _ = stop_tx.send(true);
+        let drain = async {
+            let _ = (&mut *out_worker).await;
+            while !self.outbox.lock().await.is_empty() {
+                match in_stream.next().await {
+                    Some(Ok(msg)) => self.handle_inbound(msg, inbound_tx).await,
+                    _ => break,
+                }
+            }
+        };
+        if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, drain)
+            .await
+            .is_err()
+        {
+            tracing::warn!("timed out flushing outbox at shutdown");
+            out_worker.abort();
+        }
+    }
+}
+
+/// An open stream to the control plane after the Hello exchange.
+struct Handshake {
+    tx_stream: mpsc::Sender<AgentMessage>,
+    in_stream: tonic::Streaming<ControlMessage>,
+    ack: HelloAck,
+}
+
+/// Why [`ConnectionManager::serve_stream`] returned.
+enum StreamEnd {
+    /// Shutdown was requested and the outbox was flushed.
+    Shutdown,
+    /// The stream dropped; reconnect.
+    Dropped,
+}
+
+/// True if `msg` (a pending tool call or credential request) was already replayed as one of the
+/// unacknowledged outbox `messages`.
+fn is_replayed(messages: &[AgentMessage], msg: &AgentMessage) -> bool {
+    messages.iter().any(|u| match (&u.body, &msg.body) {
+        (
+            Some(agent_message::Body::ToolCallRequest(u_req)),
+            Some(agent_message::Body::ToolCallRequest(m_req)),
+        ) => u_req.call_id == m_req.call_id,
+        (
+            Some(agent_message::Body::CredentialRequest(u_req)),
+            Some(agent_message::Body::CredentialRequest(m_req)),
+        ) => u_req.request_id == m_req.request_id,
+        _ => false,
+    })
 }
 
 /// The notice text for a leftover outbox that is discarded, given the number of its unacknowledged

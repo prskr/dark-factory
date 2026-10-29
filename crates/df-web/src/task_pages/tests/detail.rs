@@ -298,11 +298,14 @@ async fn details_can_be_collapsed_to_a_strip_that_is_remembered() {
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
 
     // The state is read and written in try/catch, defaults to expanded and applies to the workspace.
+    let script = crate::assets::script_source("workspace.js");
     assert!(
-        html.contains("localStorage.getItem('df.details.collapsed') === '1'"),
-        "{html}"
+        script.contains(
+            "try { this.collapsed = localStorage.getItem('df.details.collapsed') === '1' }"
+        )
     );
-    assert!(html.contains("try { localStorage.setItem('df.details.collapsed'"));
+    assert!(script.contains("try { localStorage.setItem('df.details.collapsed'"));
+    assert!(html.contains("x-data=\"workspace\""), "{html}");
     assert!(html.contains(":data-collapsed=\"collapsed\""));
     // Hide in the header, show in the strip, both named.
     assert!(
@@ -351,16 +354,16 @@ async fn the_details_sheet_closes_with_escape_the_backdrop_and_the_button() {
         "{html}"
     );
     // A cancelled pointer (no click follows) resets `dragged`; only pointerup sets it.
-    let state = crate::task_pages::WORKSPACE_STATE;
+    let script = crate::assets::script_source("workspace.js");
     let method = |name: &str| {
-        let start = state.find(&format!("{name}(e) {{")).expect(name);
-        let rest = &state[start..];
-        &rest[..rest.find("\n  },").unwrap_or(rest.len())]
+        let start = script.find(&format!("{name}(e) {{")).expect(name);
+        let rest = &script[start..];
+        &rest[..rest.find("\n    },").unwrap_or(rest.len())]
     };
     assert!(method("sheetDragCancel").contains("this.dragged = false"));
     assert!(method("sheetDragEnd").contains("this.dragged = d.moved"));
     assert!(!method("sheetDragCancel").contains("d.moved"));
-    assert!(html.contains("sheetToggle()") && html.contains("setPointerCapture"));
+    assert!(html.contains("sheetToggle()") && script.contains("setPointerCapture"));
 }
 
 #[tokio::test]

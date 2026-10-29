@@ -105,17 +105,47 @@ fn text_block(text: String, hidden: bool) -> ContentBlock {
 /// and queues the initial `task.assigned` prompt in the same transaction.
 ///
 /// Publishes `task_changed` and `task_message_queued` notifications transactionally.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split create_task into numbering, insert, prompt enqueue and notify steps"
-)]
 pub async fn create_task(
     pool: &PgPool,
     input: NewTask,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
     let mut tx = pool.begin().await?;
+    let (task_key, number) = allocate_task_key(&mut tx, input.project_id).await?;
+    let user_title = input.title.as_deref().and_then(sanitize_title);
+    let task_row = insert_task(&mut tx, &input, task_key, number, user_title.as_deref()).await?;
+    let message_row = enqueue_assignment_prompt(
+        &mut tx,
+        task_row.id,
+        user_title.as_deref(),
+        &task_row.description,
+    )
+    .await?;
 
-    // Lock the project row and allocate the next gap-free task number.
+    publish(
+        &mut *tx,
+        &Notification::TaskChanged {
+            task_id: task_row.id,
+        },
+    )
+    .await?;
+    publish(
+        &mut *tx,
+        &Notification::TaskMessageQueued {
+            task_id: task_row.id,
+        },
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok((task_row, message_row))
+}
+
+/// Locks the project row and allocates the next gap-free task number. Returns the task key and
+/// the number.
+async fn allocate_task_key(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: ProjectId,
+) -> Result<(TaskKey, i64), DbError> {
     let project_alloc = sqlx::query!(
         r#"
         UPDATE projects
@@ -124,11 +154,11 @@ pub async fn create_task(
         WHERE id = $1
         RETURNING key, next_task_number - 1 AS "allocated_number!"
         "#,
-        input.project_id.as_uuid()
+        project_id.as_uuid()
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?
-    .ok_or_else(|| DbError::NotFound(format!("project `{}` not found", input.project_id)))?;
+    .ok_or_else(|| DbError::NotFound(format!("project `{project_id}` not found")))?;
 
     let project_key =
         ProjectKey::new(project_alloc.key).map_err(|e| DbError::InvalidData(e.to_string()))?;
@@ -136,10 +166,20 @@ pub async fn create_task(
         .map_err(|_| DbError::InvalidData("negative task number".into()))?;
     let task_key =
         TaskKey::new(project_key, number).map_err(|e| DbError::InvalidData(e.to_string()))?;
+    Ok((task_key, project_alloc.allocated_number))
+}
 
-    let user_title = input.title.as_deref().and_then(sanitize_title);
-    let (title, title_source) = match &user_title {
-        Some(title) => (title.clone(), TitleSource::User),
+/// Inserts the queued task. Without a usable `user_title` the title is a placeholder derived from
+/// the description.
+async fn insert_task(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &NewTask,
+    task_key: TaskKey,
+    allocated_number: i64,
+    user_title: Option<&str>,
+) -> Result<TaskRow, DbError> {
+    let (title, title_source) = match user_title {
+        Some(title) => (title.to_string(), TitleSource::User),
         None => (
             placeholder_title(&input.description).unwrap_or_else(|| FALLBACK_TITLE.to_string()),
             TitleSource::Placeholder,
@@ -165,7 +205,7 @@ pub async fn create_task(
         "#,
         task_id.as_uuid(),
         input.project_id.as_uuid(),
-        project_alloc.allocated_number,
+        allocated_number,
         key_str,
         title,
         title_source.as_str(),
@@ -175,38 +215,13 @@ pub async fn create_task(
         status.as_str(),
         created_by_uuid
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
 
-    let prompt_id = PromptId::new();
-    let author = Principal::system("task.assigned");
-    let content = format_assignment_prompt(user_title.as_deref(), &row.description);
-    let author_json = serde_json::to_value(&author)?;
-    let content_json = serde_json::to_value(&content)?;
-
-    let msg_row = sqlx::query!(
-        r#"
-        INSERT INTO task_messages (id, task_id, author, content)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at
-        "#,
-        prompt_id.as_uuid(),
-        task_id.as_uuid(),
-        author_json,
-        content_json
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-    publish(&mut *tx, &Notification::TaskMessageQueued { task_id }).await?;
-
-    tx.commit().await?;
-
-    let task_row = TaskRow {
+    Ok(TaskRow {
         id: TaskId::from_uuid(row.id),
         project_id: ProjectId::from_uuid(row.project_id),
-        number,
+        number: task_key.number(),
         key: task_key,
         title: row.title,
         title_source,
@@ -224,9 +239,37 @@ pub async fn create_task(
         created_by: row.created_by.map(UserId::from_uuid),
         created_at: row.created_at,
         updated_at: row.updated_at,
-    };
+    })
+}
 
-    let message_row = TaskMessageRow {
+/// Queues the initial `task.assigned` prompt of a new task.
+async fn enqueue_assignment_prompt(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    user_title: Option<&str>,
+    description: &str,
+) -> Result<TaskMessageRow, DbError> {
+    let prompt_id = PromptId::new();
+    let author = Principal::system("task.assigned");
+    let content = format_assignment_prompt(user_title, description);
+    let author_json = serde_json::to_value(&author)?;
+    let content_json = serde_json::to_value(&content)?;
+
+    let msg_row = sqlx::query!(
+        r#"
+        INSERT INTO task_messages (id, task_id, author, content)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at
+        "#,
+        prompt_id.as_uuid(),
+        task_id.as_uuid(),
+        author_json,
+        content_json
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(TaskMessageRow {
         id: PromptId::from_uuid(msg_row.id),
         task_id: TaskId::from_uuid(msg_row.task_id),
         author,
@@ -235,9 +278,7 @@ pub async fn create_task(
         delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
         delivered_at: msg_row.delivered_at,
         forwarded_at: None,
-    };
-
-    Ok((task_row, message_row))
+    })
 }
 
 /// Queues a message on a task.

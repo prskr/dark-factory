@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
-    ContentBlock, NoticeLevel, PlanEntryStatus, ToolCallContent, ToolCallStatus, ToolKind,
-    content_block, event, tool_call_content,
+    ContentBlock, NoticeLevel, Plan, PlanEntryStatus, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolKind, UserMessage, content_block, event, tool_call_content,
 };
 use maud::{Markup, PreEscaped, html};
 
@@ -163,10 +163,6 @@ impl Folder {
         all
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "split apply_event into one handler per event kind"
-    )]
     fn apply_event(&mut self, stored: &StoredEvent) -> Vec<Change> {
         let Some(event) = &stored.event else {
             return vec![self.push(
@@ -179,24 +175,10 @@ impl Folder {
         let Some(kind) = &event.kind else {
             return Vec::new();
         };
+        let id = stored.id;
         match kind {
             event::Kind::TurnStarted(_) => Vec::new(),
-            event::Kind::UserMessage(m) => {
-                let author = m.author.as_ref().map_or_else(String::new, author_name);
-                let parts = block_parts(&m.content, self.show_hidden);
-                if parts.is_empty() {
-                    return Vec::new();
-                }
-                vec![self.push(
-                    format!("ev-{}", stored.id),
-                    turn,
-                    ItemKind::User {
-                        prompt_id: m.prompt_id.clone(),
-                        author,
-                        parts,
-                    },
-                )]
-            }
+            event::Kind::UserMessage(m) => self.apply_user_message(id, turn, m),
             event::Kind::AgentMessageChunk(c) => {
                 let text = c.content.as_ref().map(block_text).unwrap_or_default();
                 // Message ids restart with every run.
@@ -208,96 +190,12 @@ impl Folder {
                 let dom_id = format!("thought-r{}-{}", self.run, dom_safe(&c.message_id));
                 vec![self.append_stream(dom_id, turn, &text, true)]
             }
-            event::Kind::ToolCall(t) => {
-                vec![self.upsert_tool(&turn, &t.tool_call_id, stored.id, |item| {
-                    item.title.clone_from(&t.title);
-                    item.kind = tool_kind(t.kind);
-                    item.status = tool_status(t.status);
-                    item.content = t.content.iter().filter_map(tool_content).collect();
-                    item.locations = t.locations.iter().map(location).collect();
-                    item.raw_input.clone_from(&t.raw_input_json);
-                    item.raw_output.clone_from(&t.raw_output_json);
-                    item.truncated = t.truncated;
-                })]
-            }
-            event::Kind::ToolCallUpdate(u) => {
-                vec![self.upsert_tool(&turn, &u.tool_call_id, stored.id, |item| {
-                    if let Some(title) = &u.title {
-                        item.title.clone_from(title);
-                    }
-                    if let Some(kind) = u.kind {
-                        item.kind = tool_kind(kind);
-                    }
-                    if let Some(status) = u.status {
-                        item.status = tool_status(status);
-                    }
-                    if let Some(content) = &u.content {
-                        item.content = content.items.iter().filter_map(tool_content).collect();
-                    }
-                    if let Some(locations) = &u.locations {
-                        item.locations = locations.items.iter().map(location).collect();
-                    }
-                    if let Some(raw) = &u.raw_input_json {
-                        item.raw_input.clone_from(raw);
-                    }
-                    if let Some(raw) = &u.raw_output_json {
-                        item.raw_output.clone_from(raw);
-                    }
-                    if let Some(truncated) = u.truncated {
-                        item.truncated = truncated;
-                    }
-                })]
-            }
-            event::Kind::Plan(p) => {
-                let entries = p
-                    .entries
-                    .iter()
-                    .map(|e| PlanItem {
-                        content: e.content.clone(),
-                        status: PlanEntryStatus::try_from(e.status)
-                            .map_or("unspecified", |s| plan_status(s))
-                            .to_string(),
-                    })
-                    .collect();
-                match self.plans.get(&turn) {
-                    Some(&index) => {
-                        // `plans` only holds indices of pushed items, which are never removed.
-                        self.items[index].kind = ItemKind::Plan(entries);
-                        vec![Change {
-                            index,
-                            added: false,
-                        }]
-                    }
-                    None => {
-                        let change = self.push(
-                            format!("ev-{}", stored.id),
-                            turn.clone(),
-                            ItemKind::Plan(entries),
-                        );
-                        self.plans.insert(turn, change.index);
-                        vec![change]
-                    }
-                }
-            }
-            event::Kind::TurnEnded(_) => {
-                // The turn is over: its agent messages are complete and get rendered as Markdown.
-                let mut changes: Vec<Change> = Vec::new();
-                for (index, item) in self.items.iter_mut().enumerate() {
-                    if item.turn_id == turn
-                        && let ItemKind::Agent { complete, .. } = &mut item.kind
-                        && !*complete
-                    {
-                        *complete = true;
-                        changes.push(Change {
-                            index,
-                            added: false,
-                        });
-                    }
-                }
-                changes
-            }
+            event::Kind::ToolCall(t) => vec![self.apply_tool_call(id, &turn, t)],
+            event::Kind::ToolCallUpdate(u) => vec![self.apply_tool_call_update(id, &turn, u)],
+            event::Kind::Plan(p) => self.apply_plan(id, turn, p),
+            event::Kind::TurnEnded(_) => self.complete_agent_messages(&turn),
             event::Kind::Notice(n) => vec![self.push(
-                format!("ev-{}", stored.id),
+                format!("ev-{id}"),
                 turn,
                 ItemKind::Notice {
                     level: notice_level(n.level),
@@ -306,6 +204,115 @@ impl Folder {
                 },
             )],
         }
+    }
+
+    /// A user message; one without visible parts adds nothing.
+    fn apply_user_message(&mut self, id: i64, turn: String, m: &UserMessage) -> Vec<Change> {
+        let author = m.author.as_ref().map_or_else(String::new, author_name);
+        let parts = block_parts(&m.content, self.show_hidden);
+        if parts.is_empty() {
+            return Vec::new();
+        }
+        vec![self.push(
+            format!("ev-{id}"),
+            turn,
+            ItemKind::User {
+                prompt_id: m.prompt_id.clone(),
+                author,
+                parts,
+            },
+        )]
+    }
+
+    /// A tool call announcement: sets all fields of the tool item.
+    fn apply_tool_call(&mut self, id: i64, turn: &str, t: &ToolCall) -> Change {
+        self.upsert_tool(turn, &t.tool_call_id, id, |item| {
+            item.title.clone_from(&t.title);
+            item.kind = tool_kind(t.kind);
+            item.status = tool_status(t.status);
+            item.content = t.content.iter().filter_map(tool_content).collect();
+            item.locations = t.locations.iter().map(location).collect();
+            item.raw_input.clone_from(&t.raw_input_json);
+            item.raw_output.clone_from(&t.raw_output_json);
+            item.truncated = t.truncated;
+        })
+    }
+
+    /// A tool call update: sets the fields it carries.
+    fn apply_tool_call_update(&mut self, id: i64, turn: &str, u: &ToolCallUpdate) -> Change {
+        self.upsert_tool(turn, &u.tool_call_id, id, |item| {
+            if let Some(title) = &u.title {
+                item.title.clone_from(title);
+            }
+            if let Some(kind) = u.kind {
+                item.kind = tool_kind(kind);
+            }
+            if let Some(status) = u.status {
+                item.status = tool_status(status);
+            }
+            if let Some(content) = &u.content {
+                item.content = content.items.iter().filter_map(tool_content).collect();
+            }
+            if let Some(locations) = &u.locations {
+                item.locations = locations.items.iter().map(location).collect();
+            }
+            if let Some(raw) = &u.raw_input_json {
+                item.raw_input.clone_from(raw);
+            }
+            if let Some(raw) = &u.raw_output_json {
+                item.raw_output.clone_from(raw);
+            }
+            if let Some(truncated) = u.truncated {
+                item.truncated = truncated;
+            }
+        })
+    }
+
+    /// A plan: one item per turn, replaced by later plans of the turn.
+    fn apply_plan(&mut self, id: i64, turn: String, p: &Plan) -> Vec<Change> {
+        let entries = p
+            .entries
+            .iter()
+            .map(|e| PlanItem {
+                content: e.content.clone(),
+                status: PlanEntryStatus::try_from(e.status)
+                    .map_or("unspecified", |s| plan_status(s))
+                    .to_string(),
+            })
+            .collect();
+        match self.plans.get(&turn) {
+            Some(&index) => {
+                // `plans` only holds indices of pushed items, which are never removed.
+                self.items[index].kind = ItemKind::Plan(entries);
+                vec![Change {
+                    index,
+                    added: false,
+                }]
+            }
+            None => {
+                let change = self.push(format!("ev-{id}"), turn.clone(), ItemKind::Plan(entries));
+                self.plans.insert(turn, change.index);
+                vec![change]
+            }
+        }
+    }
+
+    /// The turn is over: its agent messages are complete and get rendered as Markdown.
+    fn complete_agent_messages(&mut self, turn: &str) -> Vec<Change> {
+        let mut changes: Vec<Change> = Vec::new();
+        for (index, item) in self.items.iter_mut().enumerate() {
+            if item.turn_id == turn
+                && let ItemKind::Agent { complete, .. } = &mut item.kind
+                && !*complete
+            {
+                *complete = true;
+                changes.push(Change {
+                    index,
+                    added: false,
+                });
+            }
+        }
+        changes
     }
 
     fn push(&mut self, dom_id: String, turn_id: String, kind: ItemKind) -> Change {

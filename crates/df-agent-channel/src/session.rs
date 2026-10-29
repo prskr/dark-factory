@@ -625,159 +625,50 @@ fn control(body: control_message::Body) -> ControlMessage {
 /// Stores a batch in one transaction: drops already persisted messages, stops at a gap, applies
 /// the rest in order and advances `last_persisted_seq`.
 #[tracing::instrument(name = "agent.persist_batch", skip_all, fields(messages = batch.len()))]
-#[expect(
-    clippy::too_many_lines,
-    reason = "split persist_batch into dedupe, gap check and apply steps"
-)]
 async fn persist_batch(
     ctx: &ChannelContext,
     rc: &RunContext,
     batch: Vec<AgentMessage>,
 ) -> Result<Persisted, ChannelError> {
-    // Events a replay repeats are dropped below; don't move their blobs again. The authoritative
-    // check happens under the row lock in the transaction.
-    let already_persisted: i64 =
-        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1")
-            .bind(rc.run.id.as_uuid())
-            .fetch_one(&ctx.pool)
-            .await?;
-    let already_persisted = u64::try_from(already_persisted).unwrap_or_default();
-    let blobs = PgBlobStore::new(ctx.pool.clone());
-    let mut prepared = std::collections::HashMap::new();
-    for msg in &batch {
-        if let Some(agent_message::Body::TranscriptEvent(event)) = &msg.body
-            && msg.seq > already_persisted
-        {
-            prepared.insert(
-                msg.seq,
-                transcript::prepare(&blobs, msg.seq, event.clone()).await?,
-            );
-        }
-    }
+    let prepared = prepare_transcript_events(ctx, rc, &batch).await?;
 
     let mut tx = ctx.pool.begin().await?;
-    let stored: i64 =
-        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1 FOR UPDATE")
-            .bind(rc.run.id.as_uuid())
-            .fetch_one(&mut *tx)
-            .await?;
-    // Event ids are the task-wide cursor of the web UI's live transcript, so they must become
-    // visible in id order. The run lock alone allows another run of the same task (a lost run's
-    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task (see `lock_task`).
-    lock_task(&mut tx, rc.task.id).await?;
-    let start = u64::try_from(stored)
-        .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))?;
-    let mut last = start;
-    let mut effects = Effects::default();
-    let mut observations = Vec::new();
-    let mut gap = None;
-    let mut newest_event = None;
-    let mut busy = None;
-    let mut turn_ended = false;
-    let mut idle_changed = false;
+    let start = lock_run_and_task(&mut tx, rc).await?;
+    let mut applied = BatchApply {
+        last: start,
+        ..Default::default()
+    };
 
     for msg in batch {
-        if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= last {
+        if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= applied.last {
             continue;
         }
-        if msg.seq != last + 1 {
-            gap = Some((last + 1, msg.seq));
+        if msg.seq != applied.last + 1 {
+            applied.gap = Some((applied.last + 1, msg.seq));
             break;
         }
         // A body this version does not know (an additive change within v1) still takes its
         // place in the sequence; skipping it would make the next message look like a gap.
-        let Some(body) = msg.body else {
-            tracing::warn!(run_id = %rc.run.id, seq = msg.seq, "ignoring message without a known body");
-            last = msg.seq;
-            continue;
-        };
-        match body {
-            agent_message::Body::Hello(_) => {}
-            agent_message::Body::PhaseChanged(change) => {
-                match change.phase() {
-                    RunPhase::Preparing => {
-                        set_run_state_tx(&mut tx, rc.run.id, RunState::Preparing, None).await?;
-                    }
-                    RunPhase::Finalizing => {
-                        set_run_state_tx(&mut tx, rc.run.id, RunState::Finalizing, None).await?;
-                    }
-                    // The task row is locked above: a message queued concurrently is either
-                    // visible here or waits for this transaction.
-                    RunPhase::Running => {
-                        set_idle_tx(&mut tx, rc.run.id, rc.task.id, false).await?;
-                        idle_changed = true;
-                    }
-                    RunPhase::AwaitingInput => {
-                        set_idle_tx(&mut tx, rc.run.id, rc.task.id, true).await?;
-                        idle_changed = true;
-                    }
-                    RunPhase::Unspecified => {}
-                }
-            }
-            agent_message::Body::TranscriptEvent(raw) => {
-                if let Some(event) = prepared.get(&msg.seq)
-                    && let Some(id) =
-                        transcript::insert(&mut tx, rc.task.id, rc.run.id, event).await?
-                {
-                    newest_event = newest_event.max(Some(id));
-                    observations.extend(observe_event(&mut tx, rc, &raw).await?);
-                    match event.kind {
-                        "turn_started" => {
-                            busy = Some(true);
-                            idle_changed = true;
-                        }
-                        "turn_ended" => {
-                            busy = Some(false);
-                            turn_ended = true;
-                            idle_changed = true;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            agent_message::Body::ToolCallRequest(call) => effects.tool_calls.push(call),
-            agent_message::Body::CredentialRequest(request) => effects.credentials.push(request),
-            agent_message::Body::PushReport(push) => {
-                observations.push(Observation::Push {
-                    target: push.target(),
-                    status: push.status(),
-                });
-                effects.pushes.push(push);
-            }
-            agent_message::Body::RuntimeTiming(timing) => {
-                // Not stored: it only takes its place in the sequence.
-                observations.push(Observation::Runtime {
-                    operation: timing.operation(),
-                    duration: Duration::from_millis(timing.duration_ms),
-                    ok: timing.ok,
-                });
-            }
-            agent_message::Body::RunReport(report) => {
-                if let Some(ended) = end_run_tx(&mut tx, &run_end(rc, &report)).await? {
-                    observations.push(Observation::RunEnded {
-                        outcome: report.outcome(),
-                        duration: (Utc::now() - rc.run.started_at)
-                            .to_std()
-                            .unwrap_or_default(),
-                    });
-                    effects.run_end = Some((report, ended));
-                }
+        match msg.body {
+            Some(body) => applied.apply(&mut tx, rc, &prepared, msg.seq, body).await?,
+            None => {
+                tracing::warn!(run_id = %rc.run.id, seq = msg.seq, "ignoring message without a known body");
             }
         }
-        last = msg.seq;
+        applied.last = msg.seq;
     }
 
-    if last > start {
+    if applied.last > start {
         sqlx::query("UPDATE runs SET last_persisted_seq = $2 WHERE id = $1")
             .bind(rc.run.id.as_uuid())
             .bind(
-                i64::try_from(last)
+                i64::try_from(applied.last)
                     .map_err(|_| ChannelError::InvalidData("seq out of range".into()))?,
             )
             .execute(&mut *tx)
             .await?;
     }
-    if let Some(id) = newest_event {
+    if let Some(id) = applied.newest_event {
         publish(
             &mut *tx,
             &Notification::TranscriptEvent {
@@ -789,14 +680,175 @@ async fn persist_batch(
     }
     tx.commit().await?;
     Ok(Persisted {
-        ack: (last > start).then_some(last),
-        effects,
-        busy,
-        turn_ended,
-        idle_changed,
-        gap,
-        observations,
+        ack: (applied.last > start).then_some(applied.last),
+        effects: applied.effects,
+        busy: applied.busy,
+        turn_ended: applied.turn_ended,
+        idle_changed: applied.idle_changed,
+        gap: applied.gap,
+        observations: applied.observations,
     })
+}
+
+/// Prepares the transcript events of the batch that a replay has not persisted yet (blobs moved
+/// to the blob store), by sequence number.
+async fn prepare_transcript_events(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    batch: &[AgentMessage],
+) -> Result<std::collections::HashMap<u64, transcript::PreparedEvent>, ChannelError> {
+    // Events a replay repeats are dropped when applying; don't move their blobs again. The
+    // authoritative check happens under the row lock in the transaction.
+    let already_persisted: i64 =
+        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1")
+            .bind(rc.run.id.as_uuid())
+            .fetch_one(&ctx.pool)
+            .await?;
+    let already_persisted = u64::try_from(already_persisted).unwrap_or_default();
+    let blobs = PgBlobStore::new(ctx.pool.clone());
+    let mut prepared = std::collections::HashMap::new();
+    for msg in batch {
+        if let Some(agent_message::Body::TranscriptEvent(event)) = &msg.body
+            && msg.seq > already_persisted
+        {
+            prepared.insert(
+                msg.seq,
+                transcript::prepare(&blobs, msg.seq, event.clone()).await?,
+            );
+        }
+    }
+    Ok(prepared)
+}
+
+/// Locks the run row and then the task row, and returns the run's `last_persisted_seq`.
+async fn lock_run_and_task(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rc: &RunContext,
+) -> Result<u64, ChannelError> {
+    let stored: i64 =
+        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1 FOR UPDATE")
+            .bind(rc.run.id.as_uuid())
+            .fetch_one(&mut **tx)
+            .await?;
+    // Event ids are the task-wide cursor of the web UI's live transcript, so they must become
+    // visible in id order. The run lock alone allows another run of the same task (a lost run's
+    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task (see `lock_task`).
+    lock_task(tx, rc.task.id).await?;
+    u64::try_from(stored)
+        .map_err(|_| ChannelError::InvalidData("negative last_persisted_seq".into()))
+}
+
+/// What applying the messages of a batch has produced so far.
+#[derive(Default)]
+struct BatchApply {
+    /// Sequence number of the last message applied (or already persisted).
+    last: u64,
+    /// Task-wide id of the newest transcript event stored by the batch.
+    newest_event: Option<i64>,
+    effects: Effects,
+    observations: Vec<Observation>,
+    gap: Option<(u64, u64)>,
+    busy: Option<bool>,
+    turn_ended: bool,
+    idle_changed: bool,
+}
+
+impl BatchApply {
+    /// Applies one message body in the transaction and records its effects and observations.
+    async fn apply(
+        &mut self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        rc: &RunContext,
+        prepared: &std::collections::HashMap<u64, transcript::PreparedEvent>,
+        seq: u64,
+        body: agent_message::Body,
+    ) -> Result<(), ChannelError> {
+        match body {
+            agent_message::Body::Hello(_) => {}
+            agent_message::Body::PhaseChanged(change) => {
+                self.idle_changed |= apply_phase(tx, rc, change.phase()).await?;
+            }
+            agent_message::Body::TranscriptEvent(raw) => {
+                if let Some(event) = prepared.get(&seq)
+                    && let Some(id) = transcript::insert(tx, rc.task.id, rc.run.id, event).await?
+                {
+                    self.newest_event = self.newest_event.max(Some(id));
+                    self.observations.extend(observe_event(tx, rc, &raw).await?);
+                    match event.kind {
+                        "turn_started" => {
+                            self.busy = Some(true);
+                            self.idle_changed = true;
+                        }
+                        "turn_ended" => {
+                            self.busy = Some(false);
+                            self.turn_ended = true;
+                            self.idle_changed = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            agent_message::Body::ToolCallRequest(call) => self.effects.tool_calls.push(call),
+            agent_message::Body::CredentialRequest(request) => {
+                self.effects.credentials.push(request);
+            }
+            agent_message::Body::PushReport(push) => {
+                self.observations.push(Observation::Push {
+                    target: push.target(),
+                    status: push.status(),
+                });
+                self.effects.pushes.push(push);
+            }
+            agent_message::Body::RuntimeTiming(timing) => {
+                // Not stored: it only takes its place in the sequence.
+                self.observations.push(Observation::Runtime {
+                    operation: timing.operation(),
+                    duration: Duration::from_millis(timing.duration_ms),
+                    ok: timing.ok,
+                });
+            }
+            agent_message::Body::RunReport(report) => {
+                if let Some(ended) = end_run_tx(tx, &run_end(rc, &report)).await? {
+                    self.observations.push(Observation::RunEnded {
+                        outcome: report.outcome(),
+                        duration: (Utc::now() - rc.run.started_at)
+                            .to_std()
+                            .unwrap_or_default(),
+                    });
+                    self.effects.run_end = Some((report, ended));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Applies a phase change of the run. True if it changed whether the run is idle.
+async fn apply_phase(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rc: &RunContext,
+    phase: RunPhase,
+) -> Result<bool, ChannelError> {
+    match phase {
+        RunPhase::Preparing => {
+            set_run_state_tx(tx, rc.run.id, RunState::Preparing, None).await?;
+        }
+        RunPhase::Finalizing => {
+            set_run_state_tx(tx, rc.run.id, RunState::Finalizing, None).await?;
+        }
+        // The task row is locked by the caller: a message queued concurrently is either
+        // visible here or waits for this transaction.
+        RunPhase::Running => {
+            set_idle_tx(tx, rc.run.id, rc.task.id, false).await?;
+            return Ok(true);
+        }
+        RunPhase::AwaitingInput => {
+            set_idle_tx(tx, rc.run.id, rc.task.id, true).await?;
+            return Ok(true);
+        }
+        RunPhase::Unspecified => {}
+    }
+    Ok(false)
 }
 
 /// The observations a newly stored transcript event stands for: ended turns and tool calls that

@@ -262,175 +262,223 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
 
 /// Runs the tool. Database effects use short statements and forge calls run without any open
 /// transaction.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split run_handler into database effects and forge call steps"
-)]
 async fn run_handler(
     ctx: &ChannelContext,
     rc: &RunContext,
     tool: &str,
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
-    let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
-    let task_id = rc.task.id;
     match tool {
-        "update_pull_request" => {
-            let (title, body) = (text("title"), text("body"));
-            let pr_number: Option<i64> = sqlx::query_scalar(
-                "UPDATE tasks SET pr_title = COALESCE($2, pr_title), pr_body = COALESCE($3, pr_body),
-                     updated_at = now()
-                 WHERE id = $1 RETURNING pr_number",
-            )
-            .bind(task_id.as_uuid())
-            .bind(&title)
-            .bind(&body)
-            .fetch_one(&ctx.pool)
-            .await?;
-            let Some(number) = pr_number.and_then(|n| u64::try_from(n).ok()) else {
-                return Ok(Outcome::ok(
-                    "Saved. The pull request does not exist yet; it will use these values when it is opened.",
-                ));
-            };
-            let update = PullRequestUpdate {
-                title,
-                body,
-                draft: None,
-            };
-            Ok(
-                match ctx
-                    .forge
-                    .update_pull_request(&rc.project.id, number, update)
-                    .await
-                {
-                    Ok(_) => Outcome::ok("Pull request updated."),
-                    Err(e) => forge_error(&e),
-                },
-            )
-        }
-        "comment_on_issue" => {
-            let Some(issue) = rc.task.issue_number.and_then(|n| u64::try_from(n).ok()) else {
-                return Ok(Outcome::error("this task has no linked issue"));
-            };
-            let body = text("body").unwrap_or_default();
-            Ok(
-                match ctx
-                    .forge
-                    .add_issue_comment(&rc.project.id, issue, &body)
-                    .await
-                {
-                    Ok(comment) => Outcome::ok(format!("Comment added: {}", comment.url)),
-                    Err(e) => forge_error(&e),
-                },
-            )
-        }
-        "report_progress" => {
-            let mut tx = ctx.pool.begin().await?;
-            sqlx::query("UPDATE tasks SET status_line = $2, updated_at = now() WHERE id = $1")
-                .bind(task_id.as_uuid())
-                .bind(text("summary").unwrap_or_default())
-                .execute(&mut *tx)
-                .await?;
-            publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-            tx.commit().await?;
-            Ok(Outcome::ok("Progress recorded."))
-        }
-        "set_task_title" => {
-            let Some(title) = text("title").as_deref().and_then(sanitize_title) else {
-                return Ok(Outcome::error("the title is empty"));
-            };
-            let changed = set_task_title(&ctx.pool, task_id, &title, TitleSource::Agent).await?;
-            Ok(Outcome::ok(if changed {
-                "Title set."
-            } else {
-                "The task already has a title; it is kept."
-            }))
-        }
-        "complete_task" => {
-            let mut tx = ctx.pool.begin().await?;
-            sqlx::query(
-                "UPDATE tasks SET completion_summary = $2, updated_at = now() WHERE id = $1",
-            )
-            .bind(task_id.as_uuid())
-            .bind(text("summary").unwrap_or_default())
-            .execute(&mut *tx)
-            .await?;
-            close_pending_for_task(
-                &mut tx,
-                task_id,
-                "task-completed",
-                &Principal::agent(
-                    rc.persona.id,
-                    rc.persona.name.clone(),
-                    Some(rc.run.id),
-                    task_id,
-                ),
-            )
-            .await?;
-            publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-            tx.commit().await?;
-            Ok(Outcome {
-                end_run_after_turn: true,
-                ..Outcome::ok("Task completion recorded. The run ends after this turn.")
-            })
-        }
-        "ask_question" => {
-            let answers: Vec<String> = args
-                .get("suggested_answers")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let blocking = args
-                .get("blocking")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let actor = Principal::agent(
-                rc.persona.id,
-                rc.persona.name.clone(),
-                Some(rc.run.id),
-                task_id,
-            );
-            let from = Raise {
-                task_id,
-                run_id: Some(rc.run.id),
-                actor: &actor,
-                blocking,
-            };
-            let raised =
-                raise_question(&ctx.pool, from, &text("text").unwrap_or_default(), &answers).await;
-            Ok(match raised {
-                Ok((request, _)) => Outcome {
-                    await_input_after_turn: blocking,
-                    structured: Some(
-                        serde_json::json!({ "id": request.id, "state": request.state.as_str() }),
-                    ),
-                    ..Outcome::ok(if blocking {
-                        format!(
-                            "Question {} raised. End your turn now; the answer arrives as a message and the run waits for it for a limited time.",
-                            request.id
-                        )
-                    } else {
-                        format!(
-                            "Question {} raised. Continue your work; the answer arrives later as a message.",
-                            request.id
-                        )
-                    })
-                },
-                Err(
-                    e @ (RequestError::Invalid(_)
-                    | RequestError::TooManyPending
-                    | RequestError::UnknownType(_)),
-                ) => Outcome::error(e.to_string()),
-                Err(e) => return Err(e.into()),
-            })
-        }
+        "update_pull_request" => update_pull_request(ctx, rc, args).await,
+        "comment_on_issue" => comment_on_issue(ctx, rc, args).await,
+        "report_progress" => report_progress(ctx, rc, args).await,
+        "set_task_title" => set_title(ctx, rc, args).await,
+        "complete_task" => complete_task(ctx, rc, args).await,
+        "ask_question" => ask_question(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
+}
+
+/// The string argument `key`, if present.
+fn text_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+/// Saves the pull request title and body on the task and, if the pull request exists, on the forge.
+async fn update_pull_request(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let (title, body) = (text_arg(args, "title"), text_arg(args, "body"));
+    let pr_number: Option<i64> = sqlx::query_scalar(
+        "UPDATE tasks SET pr_title = COALESCE($2, pr_title), pr_body = COALESCE($3, pr_body),
+             updated_at = now()
+         WHERE id = $1 RETURNING pr_number",
+    )
+    .bind(rc.task.id.as_uuid())
+    .bind(&title)
+    .bind(&body)
+    .fetch_one(&ctx.pool)
+    .await?;
+    let Some(number) = pr_number.and_then(|n| u64::try_from(n).ok()) else {
+        return Ok(Outcome::ok(
+            "Saved. The pull request does not exist yet; it will use these values when it is opened.",
+        ));
+    };
+    let update = PullRequestUpdate {
+        title,
+        body,
+        draft: None,
+    };
+    Ok(
+        match ctx
+            .forge
+            .update_pull_request(&rc.project.id, number, update)
+            .await
+        {
+            Ok(_) => Outcome::ok("Pull request updated."),
+            Err(e) => forge_error(&e),
+        },
+    )
+}
+
+/// Adds a comment to the issue linked to the task.
+async fn comment_on_issue(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let Some(issue) = rc.task.issue_number.and_then(|n| u64::try_from(n).ok()) else {
+        return Ok(Outcome::error("this task has no linked issue"));
+    };
+    let body = text_arg(args, "body").unwrap_or_default();
+    Ok(
+        match ctx
+            .forge
+            .add_issue_comment(&rc.project.id, issue, &body)
+            .await
+        {
+            Ok(comment) => Outcome::ok(format!("Comment added: {}", comment.url)),
+            Err(e) => forge_error(&e),
+        },
+    )
+}
+
+/// Stores the status line of the task.
+async fn report_progress(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let task_id = rc.task.id;
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query("UPDATE tasks SET status_line = $2, updated_at = now() WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .bind(text_arg(args, "summary").unwrap_or_default())
+        .execute(&mut *tx)
+        .await?;
+    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    tx.commit().await?;
+    Ok(Outcome::ok("Progress recorded."))
+}
+
+/// Sets the title of the task unless it has one.
+async fn set_title(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let Some(title) = text_arg(args, "title").as_deref().and_then(sanitize_title) else {
+        return Ok(Outcome::error("the title is empty"));
+    };
+    let changed = set_task_title(&ctx.pool, rc.task.id, &title, TitleSource::Agent).await?;
+    Ok(Outcome::ok(if changed {
+        "Title set."
+    } else {
+        "The task already has a title; it is kept."
+    }))
+}
+
+/// Records the completion summary, closes the task's pending requests and ends the run after the
+/// turn.
+async fn complete_task(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let task_id = rc.task.id;
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query("UPDATE tasks SET completion_summary = $2, updated_at = now() WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .bind(text_arg(args, "summary").unwrap_or_default())
+        .execute(&mut *tx)
+        .await?;
+    close_pending_for_task(
+        &mut tx,
+        task_id,
+        "task-completed",
+        &Principal::agent(
+            rc.persona.id,
+            rc.persona.name.clone(),
+            Some(rc.run.id),
+            task_id,
+        ),
+    )
+    .await?;
+    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    tx.commit().await?;
+    Ok(Outcome {
+        end_run_after_turn: true,
+        ..Outcome::ok("Task completion recorded. The run ends after this turn.")
+    })
+}
+
+/// Raises a question; a blocking one makes the run wait for the answer after the turn.
+async fn ask_question(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let task_id = rc.task.id;
+    let answers: Vec<String> = args
+        .get("suggested_answers")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let blocking = args
+        .get("blocking")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let actor = Principal::agent(
+        rc.persona.id,
+        rc.persona.name.clone(),
+        Some(rc.run.id),
+        task_id,
+    );
+    let from = Raise {
+        task_id,
+        run_id: Some(rc.run.id),
+        actor: &actor,
+        blocking,
+    };
+    let raised = raise_question(
+        &ctx.pool,
+        from,
+        &text_arg(args, "text").unwrap_or_default(),
+        &answers,
+    )
+    .await;
+    Ok(match raised {
+        Ok((request, _)) => Outcome {
+            await_input_after_turn: blocking,
+            structured: Some(
+                serde_json::json!({ "id": request.id, "state": request.state.as_str() }),
+            ),
+            ..Outcome::ok(if blocking {
+                format!(
+                    "Question {} raised. End your turn now; the answer arrives as a message and the run waits for it for a limited time.",
+                    request.id
+                )
+            } else {
+                format!(
+                    "Question {} raised. Continue your work; the answer arrives later as a message.",
+                    request.id
+                )
+            })
+        },
+        Err(
+            e @ (RequestError::Invalid(_)
+            | RequestError::TooManyPending
+            | RequestError::UnknownType(_)),
+        ) => Outcome::error(e.to_string()),
+        Err(e) => return Err(e.into()),
+    })
 }
 
 /// Forge failures become results the model can act on; they never end the run.

@@ -350,10 +350,6 @@ pub async fn raise_approval(
 
 /// Decides a pending request (design D3). `decider` is the human, `roles` their roles for the
 /// audit entry; the caller checked `approval:decide`.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split decide into validation, state update and audit steps"
-)]
 pub async fn decide(
     pool: &PgPool,
     types: &ApprovalTypes,
@@ -363,68 +359,8 @@ pub async fn decide(
     decision: Decision,
 ) -> Result<RequestRow, RequestError> {
     let mut tx = pool.begin().await?;
-    // Lock order task, then request, like `raise` and `close_pending_for_task`.
-    let task_uuid: uuid::Uuid =
-        sqlx::query_scalar("SELECT task_id FROM agent_requests WHERE id = $1")
-            .bind(request_id.as_uuid())
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(RequestError::NotFound)?;
-    let task_id = TaskId::from_uuid(task_uuid);
-    lock_task(&mut tx, task_id).await?;
-    let record = sqlx::query_as::<_, RequestRecord>(concat!(
-        "SELECT ",
-        columns!(),
-        " FROM agent_requests WHERE id = $1 FOR UPDATE"
-    ))
-    .bind(request_id.as_uuid())
-    .fetch_one(&mut *tx)
-    .await?;
-    let request: RequestRow = record.try_into()?;
-    if request.state != RequestState::Pending {
-        return Err(RequestError::AlreadyDecided);
-    }
-
-    let (state, stored, action) = match (&decision, request.kind) {
-        (Decision::Answer(text), RequestKind::Question) => {
-            let text = text.trim();
-            if text.is_empty() || text.chars().count() > MAX_TEXT_CHARS {
-                return Err(RequestError::Invalid(format!(
-                    "the answer must have 1 to {MAX_TEXT_CHARS} characters"
-                )));
-            }
-            (
-                RequestState::Answered,
-                json!({ "answer": text }),
-                "request.answer",
-            )
-        }
-        (Decision::Approve(scope), RequestKind::Approval) => {
-            let approval_type = approval_type_of(types, &request)?;
-            if !approval_type.scopes().contains(scope) {
-                return Err(RequestError::ScopeNotOffered(*scope));
-            }
-            approval_type.apply(&mut tx, &request, *scope).await?;
-            (
-                RequestState::Approved,
-                json!({ "scope": scope.as_str() }),
-                "request.approve",
-            )
-        }
-        (Decision::Deny(comment), RequestKind::Approval) => {
-            let comment = comment.as_deref().map(str::trim).filter(|c| !c.is_empty());
-            (
-                RequestState::Denied,
-                json!({ "comment": comment }),
-                "request.deny",
-            )
-        }
-        _ => {
-            return Err(RequestError::Invalid(
-                "the decision does not fit the kind of the request".into(),
-            ));
-        }
-    };
+    let (task_id, request) = lock_pending_request(&mut tx, request_id).await?;
+    let (state, stored, action) = apply_decision(&mut tx, types, &request, &decision).await?;
 
     let record = sqlx::query_as::<_, RequestRecord>(concat!(
         "UPDATE agent_requests
@@ -469,6 +405,85 @@ pub async fn decide(
     .await?;
     tx.commit().await?;
     Ok(decided)
+}
+
+/// Locks the task and then the request (like `raise` and `close_pending_for_task`) and returns
+/// them if the request is still pending.
+async fn lock_pending_request(
+    tx: &mut Transaction<'_, Postgres>,
+    request_id: RequestId,
+) -> Result<(TaskId, RequestRow), RequestError> {
+    let task_uuid: uuid::Uuid =
+        sqlx::query_scalar("SELECT task_id FROM agent_requests WHERE id = $1")
+            .bind(request_id.as_uuid())
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(RequestError::NotFound)?;
+    let task_id = TaskId::from_uuid(task_uuid);
+    lock_task(tx, task_id).await?;
+    let record = sqlx::query_as::<_, RequestRecord>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM agent_requests WHERE id = $1 FOR UPDATE"
+    ))
+    .bind(request_id.as_uuid())
+    .fetch_one(&mut **tx)
+    .await?;
+    let request: RequestRow = record.try_into()?;
+    if request.state != RequestState::Pending {
+        return Err(RequestError::AlreadyDecided);
+    }
+    Ok((task_id, request))
+}
+
+/// Validates `decision` against the kind of `request` and applies an approval's effect. Returns
+/// the new state, the stored decision and the audit action.
+async fn apply_decision(
+    tx: &mut Transaction<'_, Postgres>,
+    types: &ApprovalTypes,
+    request: &RequestRow,
+    decision: &Decision,
+) -> Result<(RequestState, serde_json::Value, &'static str), RequestError> {
+    Ok(match (decision, request.kind) {
+        (Decision::Answer(text), RequestKind::Question) => {
+            let text = text.trim();
+            if text.is_empty() || text.chars().count() > MAX_TEXT_CHARS {
+                return Err(RequestError::Invalid(format!(
+                    "the answer must have 1 to {MAX_TEXT_CHARS} characters"
+                )));
+            }
+            (
+                RequestState::Answered,
+                json!({ "answer": text }),
+                "request.answer",
+            )
+        }
+        (Decision::Approve(scope), RequestKind::Approval) => {
+            let approval_type = approval_type_of(types, request)?;
+            if !approval_type.scopes().contains(scope) {
+                return Err(RequestError::ScopeNotOffered(*scope));
+            }
+            approval_type.apply(tx, request, *scope).await?;
+            (
+                RequestState::Approved,
+                json!({ "scope": scope.as_str() }),
+                "request.approve",
+            )
+        }
+        (Decision::Deny(comment), RequestKind::Approval) => {
+            let comment = comment.as_deref().map(str::trim).filter(|c| !c.is_empty());
+            (
+                RequestState::Denied,
+                json!({ "comment": comment }),
+                "request.deny",
+            )
+        }
+        _ => {
+            return Err(RequestError::Invalid(
+                "the decision does not fit the kind of the request".into(),
+            ));
+        }
+    })
 }
 
 /// Closes the pending requests of a task (for example when it completes). Runs in the caller's

@@ -425,7 +425,7 @@ async fn test_git_credential_client_get_store_erase() {
 
 #[test]
 fn test_credentials_are_scoped_to_the_task_repository() {
-    use crate::runner::matches_repo_url;
+    use crate::runtime_handler::matches_repo_url;
 
     let repo = "https://github.com/prskr/dark-factory.git";
     assert!(matches_repo_url(
@@ -633,7 +633,7 @@ fn test_rewrite_git_config_requires_real_git_dir() {
 
 #[test]
 fn test_credential_scope_requires_matching_path() {
-    use crate::runner::matches_repo_url;
+    use crate::runtime_handler::matches_repo_url;
 
     let repo = "https://github.com/org/a.git";
     assert!(matches_repo_url(repo, "https", "github.com", "org/a"));
@@ -668,14 +668,14 @@ fn cred_handler_for_test(
     repo_url: &str,
     cached: Option<(String, String)>,
 ) -> (
-    crate::runner::DriverRuntimeHandler,
+    crate::runtime_handler::DriverRuntimeHandler,
     tokio::sync::mpsc::Receiver<AgentMessage>,
     PendingCreds,
 ) {
     let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(10);
     let pending_creds =
         std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-    let handler = crate::runner::DriverRuntimeHandler::new(
+    let handler = crate::runtime_handler::DriverRuntimeHandler::new(
         repo_url.to_string(),
         Vec::new(),
         outbound_tx,
@@ -822,7 +822,7 @@ async fn test_git_credential_erase_reaches_handler_over_socket() {
 
 #[test]
 fn test_repo_url_with_userinfo_matches() {
-    use crate::runner::matches_repo_url;
+    use crate::runtime_handler::matches_repo_url;
 
     let repo = "https://x-access-token:abc@git.example.com/org/repo.git";
     assert!(matches_repo_url(

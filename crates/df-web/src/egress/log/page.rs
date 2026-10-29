@@ -24,177 +24,26 @@ const MIN_GRAPH_PANEL: u32 = MIN_WIDTH + 2 * PANEL_BORDER;
 /// Where the browser remembers the graph width.
 const WIDTH_KEY: &str = "df.traffic.graph-w";
 
-/// The Alpine component of the page. `flow` is the event shown in the details panel; `dirty`
-/// shows *Clear filters* while any filter is set.
-#[expect(
-    clippy::too_many_lines,
-    reason = "move the Alpine script of state into a static JS file"
-)]
-fn state(advanced: usize, dirty: bool) -> String {
-    let adv_open = advanced > 0;
-    let advanced_js = format!(
-        "[{}]",
-        ADVANCED_FIELDS.map(|name| format!("'{name}'")).join(", ")
-    );
-    format!(
-        r#"{{
-  paused: false,
-  reconnecting: false,
-  adv: {advanced},
-  advOpen: {adv_open},
-  dirty: {dirty},
-  w: {DEFAULT_GRAPH_WIDTH},
-  want: {DEFAULT_GRAPH_WIDTH},
-  dragging: false,
-  startX: 0,
-  startW: 0,
-  graphDragging: false,
-  gx: 0,
-  gy: 0,
-  flow: null,
-  flowId: '',
-  flowRow: null,
-  init() {{
-    try {{
-      const stored = parseInt(localStorage.getItem('{WIDTH_KEY}'), 10)
-      if (stored) this.want = stored
-    }} catch (e) {{}}
-    // The stored width may not fit this window: clamp it once the layout exists.
-    this.$nextTick(() => this.setW(this.want, false))
-    document.addEventListener('htmx:sse:error', () => {{ this.reconnecting = true }})
-    document.addEventListener('htmx:sse:after:connection', () => {{ this.reconnecting = false }})
-    document.addEventListener('htmx:after:swap', () => {{ this.swapped() }})
-  }},
-  badge() {{ return this.paused ? 'Paused' : this.reconnecting ? 'Reconnecting' : 'Live' }},
-  togglePause() {{
-    const slot = document.getElementById('sse-slot')
-    if (!slot) return
-    this.paused = !this.paused
-    if (this.paused) {{
-      // Nothing observes the removal, so the extension's cleanup would never run: stop the
-      // stream explicitly, then remove the element. A reconnect in flight has no reader yet,
-      // only the abort ends it. Cancelling the reader of an aborted stream rejects with the
-      // abort error: swallow it.
-      const sse = slot.firstElementChild && slot.firstElementChild._htmx && slot.firstElementChild._htmx.sse
-      if (sse) {{
-        if (sse.abortController) sse.abortController.abort()
-        if (sse.reader && sse.reader.cancel) sse.reader.cancel().catch(() => undefined)
-      }}
-      slot.replaceChildren()
-      this.reconnecting = false
-    }} else {{
-      const connect = document.createElement('div')
-      connect.setAttribute('hx-sse:connect', slot.dataset.url)
-      connect.setAttribute('hx-swap', 'none')
-      slot.append(connect)
-      htmx.process(connect)
-    }}
-  }},
-  swapped() {{
-    const slot = document.getElementById('sse-slot')
-    // A filter change swaps in a connected stream: that resumes.
-    if (this.paused && slot && slot.firstElementChild) this.paused = false
-    // New rows come in on top: drop the oldest past the row limit (the server does the same).
-    const tbody = document.querySelector('#flows tbody')
-    const limit = tbody ? parseInt(tbody.dataset.limit, 10) : 0
-    if (limit) while (tbody.rows.length > limit) tbody.lastElementChild.remove()
-    this.refreshFlow()
-  }},
-  advancedCount(form) {{
-    return {advanced_js}.filter((name) => form.elements[name].value.trim() !== '').length
-  }},
-  sync(form) {{
-    this.adv = this.advancedCount(form)
-    const verdict = form.querySelector('input[name=verdict]:checked')
-    this.dirty = this.adv > 0 || form.elements.q.value.trim() !== '' || (verdict && verdict.value !== 'all')
-  }},
-  clearFilters(form) {{
-    form.querySelectorAll('input[type=search], input[type=text], select[name=persona]').forEach((input) => {{ input.value = '' }})
-    form.querySelector('input[name=verdict][value=all]').checked = true
-    this.adv = 0
-    this.dirty = false
-    form.dispatchEvent(new Event('change', {{ bubbles: true }}))
-  }},
-  limits() {{
-    const total = this.$refs.split ? this.$refs.split.clientWidth : 0
-    return [{MIN_GRAPH_PANEL}, Math.max({MIN_GRAPH_PANEL}, total - {DIVIDER_WIDTH} - {MIN_TABLE_WIDTH})]
-  }},
-  // `want` is what the board member chose (and the browser remembers); `w` is what fits now.
-  // Fitting alone (`persist` false: start, window resize) never changes the remembered width.
-  setW(value, persist = true) {{
-    const [lo, hi] = this.limits()
-    this.w = Math.min(hi, Math.max(lo, Math.round(persist ? value : this.want)))
-    if (persist) {{
-      this.want = this.w
-      try {{ localStorage.setItem('{WIDTH_KEY}', String(this.want)) }} catch (e) {{}}
-    }}
-  }},
-  dragStart(e) {{
-    e.currentTarget.setPointerCapture(e.pointerId)
-    this.dragging = true
-    this.startX = e.clientX
-    this.startW = this.w
-  }},
-  dragMove(e) {{ if (this.dragging) this.setW(this.startW + e.clientX - this.startX) }},
-  dragEnd() {{ this.dragging = false }},
-  // Drag the graph background to scroll it; node cards keep their text selectable.
-  graphDragStart(e) {{
-    const box = e.currentTarget
-    if (e.button !== 0 || e.target.closest('[data-node]')) return
-    // A press on the scrollbar scrolls natively.
-    const rect = box.getBoundingClientRect()
-    if (e.clientX - rect.left - box.clientLeft >= box.clientWidth || e.clientY - rect.top - box.clientTop >= box.clientHeight) return
-    box.setPointerCapture(e.pointerId)
-    this.graphDragging = true
-    this.gx = e.clientX + box.scrollLeft
-    this.gy = e.clientY + box.scrollTop
-  }},
-  graphDragMove(e) {{
-    if (!this.graphDragging) return
-    e.currentTarget.scrollLeft = this.gx - e.clientX
-    e.currentTarget.scrollTop = this.gy - e.clientY
-  }},
-  graphDragEnd() {{ this.graphDragging = false }},
-  divKey(e) {{
-    const step = e.shiftKey ? 96 : 32
-    const [lo, hi] = this.limits()
-    const to = {{ ArrowLeft: this.w - step, ArrowRight: this.w + step, Home: lo, End: hi }}[e.key]
-    if (to === undefined) return
-    e.preventDefault()
-    this.setW(to)
-  }},
-  openDetails(button) {{
-    const row = button.closest('tr')
-    this.flowId = row.id
-    this.flowRow = row
-    this.flow = JSON.parse(row.dataset.flow)
-    this.$nextTick(() => this.$refs.closeButton.focus())
-  }},
-  rowOf() {{
-    if (this.flowId) return document.getElementById(this.flowId)
-    return this.flowRow && this.flowRow.isConnected ? this.flowRow : null
-  }},
-  refreshFlow() {{
-    if (!this.flow) return
-    const row = this.rowOf()
-    if (!row) {{ this.flow = null; return }}
-    this.flowRow = row
-    this.flow = JSON.parse(row.dataset.flow)
-  }},
-  close() {{
-    const row = this.rowOf()
-    this.flow = null
-    this.flowId = ''
-    this.flowRow = null
-    const opener = row && [...row.querySelectorAll('button')].find((b) => b.offsetParent !== null)
-    if (opener) opener.focus()
-  }},
-}}"#
-    )
+/// The argument of `egressLog(...)` in `x-data`: the server values the component needs.
+/// `flow` is the event shown in the details panel; `dirty` shows *Clear filters* while any filter
+/// is set.
+fn state_args(advanced: usize, dirty: bool) -> String {
+    serde_json::json!({
+        "advanced": advanced,
+        "dirty": dirty,
+        "defaultWidth": DEFAULT_GRAPH_WIDTH,
+        "widthKey": WIDTH_KEY,
+        "advancedFields": ADVANCED_FIELDS,
+        "minGraphPanel": MIN_GRAPH_PANEL,
+        "dividerWidth": DIVIDER_WIDTH,
+        "minTableWidth": MIN_TABLE_WIDTH,
+    })
+    .to_string()
 }
 
 /// The page; `personas` (id, name) are the choices of the persona filter, `backlog` is what the
-/// stream's first message will show.
+/// stream's first message will show. The Alpine component `egressLog` of the page is
+/// `assets/egress-log.js`; the layout loads it before Alpine.
 pub(super) fn page_body(
     filter: &Filter,
     personas: &[(String, String)],
@@ -202,7 +51,7 @@ pub(super) fn page_body(
 ) -> Markup {
     let events = format!("/egress/log/events{}", filter.query());
     html! {
-        div class="md:flex md:h-[calc(100dvh-4rem)] md:flex-col" x-data=(state(filter.advanced_count(), !filter.is_empty())) ":class"="(dragging || graphDragging) && 'select-none'" {
+        div class="md:flex md:h-[calc(100dvh-4rem)] md:flex-col" x-data={"egressLog(" (state_args(filter.advanced_count(), !filter.is_empty())) ")"} ":class"="(dragging || graphDragging) && 'select-none'" {
             (header())
             (filter_bar(filter, personas, &backlog.counts))
             (traffic(&events, filter, backlog))
@@ -379,6 +228,7 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
 mod tests {
     use super::*;
     use crate::egress::log::graph::{DEST_OFFSET, MIN_DEST_W};
+    use crate::egress::tests::component_script;
 
     #[test]
     fn the_narrowest_panel_leaves_the_destinations_their_minimum_and_the_gutter_its_own() {
@@ -392,6 +242,17 @@ mod tests {
         // The counts depend on the filter but sit outside `#traffic`, the form's swap target.
         let form = filter_bar(&Filter::default(), &[], &Counts::default()).into_string();
         assert!(form.contains(r##"hx-select-oob="#count-all,#count-blocked,#count-allowed""##));
+    }
+
+    #[test]
+    fn page_passes_the_server_values_to_the_component() {
+        let html = page();
+        let root = tag(&html, "x-data=");
+        assert!(
+            root.contains("egressLog(") && root.contains("&quot;widthKey&quot;"),
+            "{root}"
+        );
+        assert!(component_script().contains("Alpine.data('egressLog'"));
     }
 
     fn page() -> String {
@@ -419,7 +280,7 @@ mod tests {
     #[test]
     fn from_md_up_the_page_is_a_viewport_high_column_and_the_split_fills_it() {
         let html = page();
-        let root = &html[..html.find('>').unwrap()];
+        let root = tag(&html, "x-data=");
         assert!(
             root.contains("md:flex")
                 && root.contains("md:h-[calc(100dvh-4rem)]")
@@ -519,7 +380,7 @@ mod tests {
         let scroll = tag(&html, "id=\"graph-scroll\"");
         assert!(scroll.contains("pointerdown") && scroll.contains("graphDragStart"));
         assert!(scroll.contains("graphDragMove") && scroll.contains("cursor-grab"));
-        let js = state(0, false);
+        let js = component_script();
         assert!(js.contains("graphDragStart(e)") && js.contains("[data-node]"));
         // Relative to the scroll box, not to the event target (the tall graph inside it).
         assert!(js.contains("e.clientX - rect.left - box.clientLeft >= box.clientWidth"));

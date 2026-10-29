@@ -5,6 +5,10 @@ use maud::{DOCTYPE, Markup, html};
 use crate::assets::asset_url;
 use crate::components::{CreateAction, bottom_bar, rail};
 
+/// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
+/// Alpine starts.
+pub(crate) const COMPONENT_SCRIPTS: [&str; 2] = ["egress-log.js", "workspace.js"];
+
 /// The navigation entry a page belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Nav {
@@ -74,6 +78,10 @@ fn document(title: &str, nav: Nav, view: Option<View>, compose_href: &str, body:
                     href=(asset_url("fonts/inter-latin-wght-normal.woff2"));
                 script src=(asset_url("vendor/htmx.min.js")) defer {}
                 script src=(asset_url("vendor/hx-sse.min.js")) defer {}
+                // Deferred scripts run in document order, so the components register first.
+                @for script in COMPONENT_SCRIPTS {
+                    script src=(asset_url(script)) defer {}
+                }
                 script src=(asset_url("vendor/alpine.min.js")) defer {}
             }
             // On a phone, browser Back must show the screen of the URL again: the row click set
@@ -251,6 +259,16 @@ mod tests {
             "fonts/inter-latin-wght-normal.woff2",
         ] {
             assert!(page.contains(&format!("/assets/{asset}?v=")), "{asset}");
+        }
+    }
+
+    #[test]
+    fn component_scripts_load_before_alpine_starts() {
+        let page = layout("T", Nav::Tasks, html! {}).into_string();
+        let alpine = page.find("/assets/vendor/alpine.min.js?v=").unwrap();
+        for script in COMPONENT_SCRIPTS {
+            let component = page.find(&format!("/assets/{script}?v=")).expect(script);
+            assert!(component < alpine, "{script}");
         }
     }
 
