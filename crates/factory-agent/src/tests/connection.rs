@@ -1,6 +1,6 @@
 //! mTLS connect, control plane restart and replay, leftover outbox, certificate rotation, outages and shutdown flush.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -517,13 +517,12 @@ async fn test_scenario_fully_acknowledged_leftover_is_discarded_silently() {
     // one lock, so a new run id with an empty outbox means no notice was appended.
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            {
-                let ob = outbox.lock().await;
-                if ob.run_state().run_id == "run-fresh-assignment" {
-                    assert!(ob.is_empty(), "no notice may be queued");
-                    break;
-                }
+            let ob = outbox.lock().await;
+            if ob.run_state().run_id == "run-fresh-assignment" {
+                assert!(ob.is_empty(), "no notice may be queued");
+                break;
             }
+            drop(ob);
             tokio::task::yield_now().await;
         }
     })
@@ -1131,7 +1130,7 @@ async fn start_flush_test_connection(
     (handle, server, temp)
 }
 
-/// Receives messages until the RunReport arrives, acknowledges it, and returns its seq.
+/// Receives messages until the `RunReport` arrives, acknowledges it, and returns its seq.
 async fn receive_and_ack_report(server: &mut MockControlPlane) -> u64 {
     let report = loop {
         let msg = tokio::time::timeout(

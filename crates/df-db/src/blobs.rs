@@ -98,7 +98,7 @@ mod tests {
         let fetched = store.get(&hash1).await.unwrap().expect("blob should exist");
         assert_eq!(fetched.sha256, hash1);
         assert_eq!(fetched.mime_type, "image/png");
-        assert_eq!(fetched.size, payload.len() as i64);
+        assert_eq!(fetched.size, i64::try_from(payload.len()).unwrap());
         assert_eq!(fetched.data, payload);
 
         let missing = store

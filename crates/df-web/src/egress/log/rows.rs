@@ -107,6 +107,7 @@ pub(super) fn task_label(event: &FlowEvent) -> String {
 }
 
 /// How long the connection lasted: `12 ms`, `3.4 s`, `2:05`. Empty while it is open.
+#[expect(clippy::cast_precision_loss, reason = "display only")]
 pub(super) fn duration_label(event: &FlowEvent) -> String {
     let Some(duration) = event
         .duration
@@ -129,6 +130,7 @@ pub(super) fn duration_label(event: &FlowEvent) -> String {
 }
 
 /// `512 B`, `1.5 KB`, `3.2 MB`.
+#[expect(clippy::cast_precision_loss, reason = "display only")]
 pub(super) fn bytes_label(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     let value = bytes as f64;

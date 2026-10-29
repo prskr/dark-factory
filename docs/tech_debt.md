@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-76.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-77.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -28,6 +28,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-75: discussion during `split-long-functions` (`df-web`, 2026-10-29), after the Alpine components moved to `crates/df-web/assets/`.
+- Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -99,6 +100,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
 | TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
 | TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
+| TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 
 ## Entries
 
@@ -698,6 +700,16 @@ The Alpine components are served as written: no types, no minification. Today th
 - source maps for debugging in the browser.
 
 Update the "Web UI scripts" rule in `AGENTS.md` with the result.
+
+### TD-76 (SP7). Warnings for failed outbox and lock-release calls have no test
+
+`crates/factory-agent/src/connection.rs` (acknowledge, reset, discard), `crates/factory-agent/src/outbox.rs:74`, `crates/df-db/src/migrate.rs:59-68`
+
+`clippy-strictness` replaced silently dropped errors with `warn!` logs. No test checks that a failing outbox or a failed `pg_advisory_unlock` produces the warning.
+
+**Matters when:** someone has to diagnose an outbox failure from the logs.
+
+**Fix:** a test with an outbox that cannot be written (a read-only directory) asserts the warning through `df_telemetry::testing::capture`. Do the same for the unlock path in a `df_test_postgres` test.
 
 ## Accepted decisions
 

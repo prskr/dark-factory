@@ -31,6 +31,10 @@ struct SessionLogMessage {
 }
 
 #[derive(Debug, Deserialize)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "the field names are those of the JSON log"
+)]
 struct SessionLogUsage {
     #[serde(default)]
     input_tokens: u64,
@@ -158,18 +162,14 @@ impl SessionLogTracker {
 
         // Fallback: search all directories under projects/ for <session_id>.jsonl
         let projects_dir = self.home_dir.join(".claude").join("projects");
-        if let Ok(entries) = std::fs::read_dir(&projects_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    let candidate = entry.path().join(format!("{}.jsonl", self.session_id));
-                    if candidate.exists() {
-                        return candidate;
-                    }
-                }
-            }
-        }
-
-        direct
+        std::fs::read_dir(&projects_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|ft| ft.is_dir()))
+            .map(|entry| entry.path().join(format!("{}.jsonl", self.session_id)))
+            .find(|candidate| candidate.exists())
+            .unwrap_or(direct)
     }
 
     /// Mark the beginning of a turn.
@@ -183,9 +183,8 @@ impl SessionLogTracker {
             return;
         }
         self.offset_initialized = true;
-        self.current_offset = std::fs::metadata(self.session_file_path())
-            .map(|meta| meta.len())
-            .unwrap_or(0);
+        self.current_offset =
+            std::fs::metadata(self.session_file_path()).map_or(0, |meta| meta.len());
     }
 
     /// Parse token usage written since the last turn start or offset.
@@ -194,9 +193,8 @@ impl SessionLogTracker {
     /// record that is still being written is read on the next call.
     pub fn parse_turn_usage(&mut self) -> (Vec<Usage>, UsageSource) {
         let path = self.session_file_path();
-        let file = match File::open(&path) {
-            Ok(f) => f,
-            Err(_) => return (Vec::new(), UsageSource::Unspecified),
+        let Ok(file) = File::open(&path) else {
+            return (Vec::new(), UsageSource::Unspecified);
         };
 
         let mut reader = BufReader::new(file);
@@ -209,7 +207,8 @@ impl SessionLogTracker {
         }
 
         let complete_len = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-        let usage = parse_session_log(&buf[..complete_len]).unwrap_or_default();
+        let usage =
+            parse_session_log(buf.get(..complete_len).unwrap_or_default()).unwrap_or_default();
         self.current_offset += complete_len as u64;
 
         if usage.is_empty() {

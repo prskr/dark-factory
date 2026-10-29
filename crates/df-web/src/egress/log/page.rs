@@ -274,7 +274,7 @@ mod tests {
             .find(marker)
             .unwrap_or_else(|| panic!("{marker} missing"));
         let start = html[..at].rfind('<').unwrap();
-        &html[start..at + html[at..].find('>').unwrap() + 1]
+        &html[start..=(at + html[at..].find('>').unwrap())]
     }
 
     #[test]

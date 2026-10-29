@@ -1,6 +1,6 @@
 //! Tests of the Kubernetes resource rendering.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]

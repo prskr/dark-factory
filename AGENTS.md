@@ -145,12 +145,18 @@ Test organization:
 - Name tests after the behavior they check, never after a review round or finding (`test_erase_and_expiry_drop_cached_credentials`, not `test_review_r38_…`). `cargo xtask check-test-names` fails for a test name with a word `finding`, `round<n>`, `r<n>` or `td<n>`.
 - Source files (`rs`, `proto`, `wit`, `bzl`, `bazel`, `sh`, `js`, `ts`, `css`, `html`, `toml`, `yaml`, `yml`) have at most 1,500 lines; `cargo xtask check-file-length` enforces it. A file over the limit needs an entry with a reason (generated code, or a tracked split) in `[workspace.metadata.file-length.allow]` of the root `Cargo.toml`; an entry for a missing file, for a file within the limit, or without a reason fails the check too.
 - The 500-line threshold for inline test modules is guidance, not a check.
+- Blocks nest at most 5 levels deep (`excessive-nesting-threshold` in `clippy.toml`, `clippy::excessive_nesting`). Flatten with early returns, `let … else`, iterator chains or an extracted function.
 
 Function length:
 
 - A function has at most 100 lines (`too-many-lines-threshold` in `clippy.toml`, `clippy::too_many_lines`; comments and blank lines do not count). Lint levels are declared only in `[workspace.lints]` of the root `Cargo.toml` (plugins repeat both tables in their own `[lints]`, except that `unsafe_code` may have any level; `tools/xtask` mirrors both) and in `clippy.toml`; Bazel reads them from the manifests (`extract_cargo_lints` and `lint_config` in `BUILD.bazel`). Never add lint flags to `.bazelrc` beyond `-Dwarnings`.
 - Split a function that gets longer. A production function that cannot be split yet gets `#[expect(clippy::too_many_lines, reason = "…")]` naming the follow-up; use `expect`, never `allow`, so the attribute fails once the function is short enough.
-- Test modules with scenario tests opt out once at module level with `#![allow(clippy::too_many_lines, reason = "…")]` (or `#[allow]` on an inline `mod tests`), only where a test needs it.
+- Test modules with scenario tests opt out once at module level with `#![expect(clippy::too_many_lines, reason = "…")]` (or `#[expect]` on an inline `mod tests`), only where a test needs it.
+
+Lint attributes:
+
+- `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, kopium output, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
+- `clippy::pedantic` is enabled. The workspace allows `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc`, `assert_is_empty`, `needless_pass_by_value`, `similar_names` and `struct_excessive_bools`, each with a reason in the root `Cargo.toml`.
 
 ## Adding a crate
 
@@ -174,12 +180,16 @@ Always prefer returning a `Result` over panicking. `unwrap()`, `expect()`, index
 - Library code returns typed errors (`thiserror`); binaries and glue code may use `anyhow` and add context with `.context(...)`.
 - `expect("<why this cannot fail>")` is acceptable for invariants that are guaranteed by construction (for example a compiled-in regex), never for input or I/O.
 - Don't silently drop errors with `let _ =` unless ignoring is the intended behavior (for example a best-effort send on a closed channel); then say so in a short comment.
+- Lints enforce this: `clippy::unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable` and `indexing_slicing` (use `.get()`, iterators or pattern matching), `let_underscore_must_use` and `let_underscore_future` (handle the error, log it, or discard it explicitly with `.ok()` and a comment), and `map_err_ignore` (bind the error as `|_elapsed|` or include it in the new error instead of `|_|`).
+- Tests are exempt from `unwrap_used`, `panic`, `indexing_slicing`, `dbg_macro` and the print lints through `clippy.toml` (`allow-*-in-tests`). That covers `#[test]` functions and `#[cfg(test)]` code; helper functions of integration tests and test utilities (`df-test-postgres`) take a module-level `#![expect(…, reason = "…")]`. `unreachable!` is not exempt: use `panic!` in tests.
+- `expect("<why>")` stays allowed for invariants that hold by construction.
 
 ## Tests
 
+- Test code may use `unwrap()`, `panic!`, indexing, `dbg!` and print macros: `clippy.toml` sets `allow-unwrap-in-tests`, `allow-panic-in-tests`, `allow-indexing-slicing-in-tests`, `allow-dbg-in-tests` and `allow-print-in-tests`. Helper functions of integration tests and test utilities need a module-level `#![expect(…, reason = "…")]` (see "Errors over panics"). `unreachable!` is not exempt: use `panic!`.
 - Write the failing test first, then the implementation.
 - Use the standard assertion macros (`assert!`, `assert_eq!`, `assert_ne!`, `matches!`) and return `Result<()>` from tests that use `?` instead of unwrapping. `unwrap()`/`expect()` are fine in tests. Don't hand-write `if … { panic!(…) }` guards.
-- Use `#[tokio::test]` for async tests and `tempfile` for files and directories. Never write to fixed paths.
+- Use `#[tokio::test]` for async tests and `tempfile` for files and directories. Never write to fixed paths; `std::env::temp_dir` is a disallowed method (`clippy.toml`).
 - Database tests use `df_test_postgres::{migrated_pool, empty_pool, server}` (dev-dependency crate `df-test-postgres`) instead of `#[sqlx::test]`. They start a PostgreSQL container through testcontainers and therefore cannot run in a sandbox without a container socket.
 - Avoid timing-based tests (`sleep` to wait for an effect). Wait on the condition, use a channel, or use `tokio::time::pause()`.
 - When a bug is fixed, add a test that fails without the fix.
@@ -222,6 +232,7 @@ Rules for adding one:
 - Use the `tracing` macros (`info!`, `warn!`, `error!`, `debug!`) with structured fields: `tracing::warn!(error = %e, run_id = %id, "message")`. Don't interpolate values into the message.
 - Never log secrets (tokens, passwords, credential helper input) and don't log whole request/response bodies.
 - Library code only emits events. Subscriber setup belongs in the binary's `main`.
+- `clippy::print_stdout`, `print_stderr` and `dbg_macro` enforce it. A function that prints CLI output carries `#[expect(clippy::print_stdout, reason = "CLI output")]` (or `print_stderr`); there is no crate-level exemption.
 
 ## Web UI scripts (`df-web`)
 

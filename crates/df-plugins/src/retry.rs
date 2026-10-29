@@ -11,7 +11,7 @@ const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 /// Wait for rate limits without a hint and between transport retries.
 const DEFAULT_BACKOFF: Duration = Duration::from_secs(1);
 
-pub async fn with_retries<T, F, Fut>(mut call: F) -> Result<T, IntegrationError>
+pub(crate) async fn with_retries<T, F, Fut>(mut call: F) -> Result<T, IntegrationError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, IntegrationError>>,
@@ -29,7 +29,7 @@ where
         retries += 1;
         tracing::warn!(
             retries,
-            wait_ms = wait.as_millis() as u64,
+            wait_ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
             "retrying plugin call"
         );
         tokio::time::sleep(wait).await;
@@ -59,13 +59,11 @@ mod tests {
         let result = with_retries(|| {
             calls.set(calls.get() + 1);
             let first = calls.get() == 1;
-            async move {
-                if first {
-                    Err(rate_limited(Some(2)))
-                } else {
-                    Ok(7)
-                }
-            }
+            std::future::ready(if first {
+                Err(rate_limited(Some(2)))
+            } else {
+                Ok(7)
+            })
         })
         .await;
         assert_eq!(result, Ok(7));
@@ -89,18 +87,17 @@ mod tests {
     async fn caps_the_retry_after_hint() {
         let start = Instant::now();
         let calls = Cell::new(0);
-        let _ = with_retries(|| {
+        with_retries(|| {
             calls.set(calls.get() + 1);
             let first = calls.get() == 1;
-            async move {
-                if first {
-                    Err(rate_limited(Some(3600)))
-                } else {
-                    Ok(())
-                }
-            }
+            std::future::ready(if first {
+                Err(rate_limited(Some(3600)))
+            } else {
+                Ok(())
+            })
         })
-        .await;
+        .await
+        .ok();
         assert_eq!(start.elapsed(), RETRY_AFTER_CAP);
     }
 

@@ -652,7 +652,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "FILE:@@//Cargo.lock 9aa9e6fbb8ba9528971cc30f8bc3830d2e6a74d2a3f4102c765d85ffbb340dac",
-          "FILE:@@//Cargo.toml e8a809041ac17c75d4292a318e6eed8d09597307e0e960f52bc8280d0da7b094",
+          "FILE:@@//Cargo.toml 851d2836dd55cc46d0b1709dcccfa7c548f54076b548365953300e47e86937a8",
           "FILE:@@//crates/dark-factory/Cargo.toml 2c34519558b76d9ca64027d7f2ec6945e42c1ed425538fc822c7b1e966bbe03f",
           "FILE:@@//crates/df-agent-channel/Cargo.toml 39a802e7a44f0cf7c6b20e44eeb8c015c50c958ac97baa97b7b2011774cbc2ae",
           "FILE:@@//crates/df-core/Cargo.toml 430d20a981d6c277f45ec0cd5edfad76087971f75b1c45616bd52dad174ebe60",
@@ -667,8 +667,8 @@
           "FILE:@@//crates/df-web/Cargo.toml d157d19af5e263dd40c7cc04c3b8afd059879b1fab831157abe65b888de45b99",
           "FILE:@@//crates/factory-agent/Cargo.toml 6e2ba33ba2f74048e3dcea8d716006487fb5fd11d4fbd1985e09e54fa76d505c",
           "FILE:@@//crates/fake-acp-agent/Cargo.toml a1a9a7229f9fe9d2d3006c0c43fa89be63c49b4941db27d797d33c9e48b1503f",
-          "FILE:@@//plugins/forgejo/Cargo.toml 28f0bffa487487505ca8831e18df324d795fb5b211a0477bffecf1b84077d256",
-          "FILE:@@//plugins/test-probe/Cargo.toml 7d2328e40f08f74312bb6aecf414a822d4473125e8146dc92cfca131da713a50"
+          "FILE:@@//plugins/forgejo/Cargo.toml 6e23b19ce2903383c8b71605ed263c86e70b532325284b90facde77f5c66eb31",
+          "FILE:@@//plugins/test-probe/Cargo.toml 6a1e7ec9f5ae6ba5dc7acdbd1b1321035d4e647f2dcd6d7a97519da0641984c1"
         ],
         "generatedRepoSpecs": {
           "crates": {

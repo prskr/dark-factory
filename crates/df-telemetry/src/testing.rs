@@ -30,20 +30,21 @@ pub fn buffer() -> (
 /// Installs a thread-local subscriber (`filter` in `RUST_LOG` syntax) writing JSON lines to the
 /// returned buffer until the guard is dropped.
 pub fn capture(filter: &str) -> (Captured, tracing::subscriber::DefaultGuard) {
+    static SILENT_GLOBAL: std::sync::Once = std::sync::Once::new();
+
     let (captured, writer) = buffer();
     let sub = subscriber(LogFormat::Json, EnvFilter::new(filter), writer, None);
     // With a single registered dispatcher, tracing computes a callsite's interest from the
     // registering thread's default only. A parallel test without a subscriber would then
     // disable the callsite for every capture. A second (silent, global) dispatcher makes
     // tracing consult all of them.
-    static SILENT_GLOBAL: std::sync::Once = std::sync::Once::new();
     SILENT_GLOBAL.call_once(|| {
         let silent = tracing_subscriber::fmt()
             .with_max_level(tracing::level_filters::LevelFilter::OFF)
             .with_writer(std::io::sink)
             .finish();
         // Ignored on purpose: a global subscriber may already exist, which serves as well.
-        let _ = tracing::subscriber::set_global_default(silent);
+        tracing::subscriber::set_global_default(silent).ok();
     });
     (captured, tracing::subscriber::set_default(sub))
 }

@@ -1,6 +1,6 @@
 //! Integration and unit tests for `fake-acp-agent`.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -130,7 +130,7 @@ sessions:
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
@@ -198,7 +198,7 @@ sessions:
     match &received[5] {
         SessionUpdate::UsageUpdate(usage) => {
             assert_eq!(usage.used, 350);
-            assert_eq!(usage.size, 200000);
+            assert_eq!(usage.size, 200_000);
         }
         other => panic!("Expected UsageUpdate, got: {other:?}"),
     }
@@ -274,7 +274,7 @@ sessions:
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
@@ -389,7 +389,7 @@ done
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
@@ -437,13 +437,13 @@ done
 
 #[tokio::test]
 async fn test_scenario_rate_limit() {
-    let yaml = r#"
+    let yaml = r"
 sessions:
   new:
     - - end:
           rate_limited:
             retry_after_seconds: 3600
-"#;
+";
 
     let script = Script::from_yaml_str(yaml).expect("script should parse");
     let temp_session = tempfile::tempdir().expect("tempdir");
@@ -490,7 +490,7 @@ sessions:
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
@@ -595,7 +595,7 @@ sessions:
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
@@ -669,9 +669,11 @@ sessions:
                 let cancel_sender = cx.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    let _ = cancel_sender.send_notification(
-                        agent_client_protocol::schema::v1::CancelNotification::new(sid_cancel),
-                    );
+                    cancel_sender
+                        .send_notification(
+                            agent_client_protocol::schema::v1::CancelNotification::new(sid_cancel),
+                        )
+                        .ok();
                 });
 
                 let res = prompt_fut.block_task().await.expect("prompt response");
@@ -683,7 +685,7 @@ sessions:
     });
 
     let agent_task = tokio::spawn(async move {
-        let _ = agent.connect_to(peer).await;
+        agent.connect_to(peer).await.ok();
     });
 
     let (client_res, _) = tokio::join!(client_task, agent_task);

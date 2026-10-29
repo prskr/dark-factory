@@ -281,14 +281,15 @@ pub(super) fn layout(model: &Model, width: u32) -> Layout {
         let top = TOP + (content - span) / 2;
         (0..count)
             .map(|i| Placed {
-                y: top + i as u32 * pitch,
+                y: top + count_u32(i).saturating_mul(pitch),
             })
             .collect()
     };
     let sandboxes = place(model.sandboxes.len(), SANDBOX_PITCH, sandbox_span);
     let destinations = place(model.destinations.len(), DEST_PITCH, destination_span);
-    let rows = (model.sandboxes.len() as u32 * SANDBOX_PITCH)
-        .max(model.destinations.len() as u32 * DEST_PITCH);
+    let rows = count_u32(model.sandboxes.len())
+        .saturating_mul(SANDBOX_PITCH)
+        .max(count_u32(model.destinations.len()).saturating_mul(DEST_PITCH));
     let paths = model
         .edges
         .iter()
@@ -312,11 +313,16 @@ pub(super) fn layout(model: &Model, width: u32) -> Layout {
     }
 }
 
+/// A node count as pixel arithmetic operand; saturates, the counts are far below `u32::MAX`.
+fn count_u32(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
 /// Height of a column of `count` nodes: from the top of the first to the bottom of the last.
 fn span(count: usize, pitch: u32, node_height: u32) -> u32 {
     match count {
         0 => 0,
-        n => (n as u32 - 1) * pitch + node_height,
+        n => (count_u32(n) - 1).saturating_mul(pitch) + node_height,
     }
 }
 

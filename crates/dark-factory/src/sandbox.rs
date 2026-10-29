@@ -228,7 +228,7 @@ impl df_web::egress::ServiceLookup for K8sServices {
             Api::namespaced(self.client.clone(), namespace);
         tokio::time::timeout(K8S_API_TIMEOUT, api.get_opt(service))
             .await
-            .map_err(|_| LookupError::Timeout)?
+            .map_err(|_elapsed| LookupError::Timeout)?
             .map(|found| found.is_some())
             .map_err(|e| LookupError::Api(e.to_string()))
     }
@@ -287,7 +287,7 @@ async fn forward_policy_notifications(
             Ok(Notification::EgressPolicy | Notification::Reconnected) => {
                 // Ignored on purpose: a full channel means a pass is already pending,
                 // a closed one means the loop stopped.
-                let _ = n_tx_db.try_send(());
+                n_tx_db.try_send(()).ok(); // receiver may be gone
             }
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -297,7 +297,7 @@ async fn forward_policy_notifications(
                 );
                 // Ignored on purpose: a full channel means a pass is already pending,
                 // a closed one means the loop stopped.
-                let _ = n_tx_db.try_send(());
+                n_tx_db.try_send(()).ok(); // receiver may be gone
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                 break;
@@ -336,15 +336,6 @@ async fn resolve_cluster_ips(
     instance_name: &str,
     sandbox: &df_core::SandboxSectionConfig,
 ) -> anyhow::Result<(IpAddr, IpAddr)> {
-    let instance_namespace = sandbox.provisioning.instance_namespace.as_str();
-    let (configured_cp_ip, configured_gw_ip) = (
-        sandbox.endpoints.control_plane_ip,
-        sandbox.endpoints.gateway_ip,
-    );
-    let (cp_service_name, gw_service_name) = (
-        sandbox.endpoints.control_plane_service_name.as_deref(),
-        sandbox.endpoints.gateway_service_name.as_deref(),
-    );
     async fn resolve_service_ip(
         client: &Client,
         namespace: &str,
@@ -379,12 +370,21 @@ async fn resolve_cluster_ips(
             anyhow::bail!(
                 "failed to resolve cluster IP for service in namespace `{namespace}` (tried: {tried}): {err:#}"
             );
-        } else {
-            anyhow::bail!(
-                "service in namespace `{namespace}` has no valid cluster IP (tried: {tried})"
-            );
         }
+        anyhow::bail!(
+            "service in namespace `{namespace}` has no valid cluster IP (tried: {tried})"
+        );
     }
+
+    let instance_namespace = sandbox.provisioning.instance_namespace.as_str();
+    let (configured_cp_ip, configured_gw_ip) = (
+        sandbox.endpoints.control_plane_ip,
+        sandbox.endpoints.gateway_ip,
+    );
+    let (cp_service_name, gw_service_name) = (
+        sandbox.endpoints.control_plane_service_name.as_deref(),
+        sandbox.endpoints.gateway_service_name.as_deref(),
+    );
 
     let mut cp_names = Vec::new();
     if let Some(name) = cp_service_name {

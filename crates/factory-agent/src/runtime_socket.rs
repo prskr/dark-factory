@@ -42,7 +42,7 @@ pub enum RuntimeRequest {
     },
 }
 
-/// Wire representation of a ToolDescriptor exchanged over the runtime socket.
+/// Wire representation of a `ToolDescriptor` exchanged over the runtime socket.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpToolDescriptorWire {
     pub name: String,
@@ -109,7 +109,7 @@ pub async fn write_frame<W: AsyncWriteExt + Unpin, T: Serialize>(
 ) -> std::io::Result<()> {
     let bytes = serde_json::to_vec(val)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let len = bytes.len() as u32;
+    let len = frame_len(bytes.len())?;
     writer.write_all(&len.to_be_bytes()).await?;
     writer.write_all(&bytes).await?;
     writer.flush().await?;
@@ -134,6 +134,11 @@ pub async fn read_frame<R: AsyncReadExt + Unpin, T: serde::de::DeserializeOwned>
     let val: T = serde_json::from_slice(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     Ok(val)
+}
+
+/// The length prefix of a frame of `len` bytes.
+fn frame_len(len: usize) -> std::io::Result<u32> {
+    u32::try_from(len).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Handler trait for processing incoming requests on the runtime socket.
@@ -177,14 +182,15 @@ impl RuntimeSocketServer {
     ) -> std::io::Result<Self> {
         let socket_path = socket_path.into();
         if socket_path.exists() {
-            let _ = std::fs::remove_file(&socket_path);
+            std::fs::remove_file(&socket_path).ok(); // best-effort cleanup
         }
         if let Some(parent) = socket_path.parent() {
             std::fs::create_dir_all(parent)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+                // Best effort: the parent directory may belong to someone else.
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).ok();
             }
         }
 
@@ -329,9 +335,8 @@ async fn serve_connection(mut stream: UnixStream, handler: Arc<dyn RuntimeHandle
 pub fn parse_git_credential_input<R: BufRead>(reader: R) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => break,
+        let Ok(line) = line else {
+            break;
         };
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -369,7 +374,7 @@ pub async fn run_git_credential_stream<R: BufRead, W: std::io::Write>(
             if let Ok(mut stream) = UnixStream::connect(socket_path).await
                 && write_frame(&mut stream, &req).await.is_ok()
             {
-                let _ = read_frame::<_, RuntimeResponse>(&mut stream).await;
+                read_frame::<_, RuntimeResponse>(&mut stream).await.ok();
             }
             Ok(())
         }
@@ -389,19 +394,17 @@ pub async fn run_git_credential_stream<R: BufRead, W: std::io::Write>(
             write_frame(&mut stream, &req).await?;
 
             let resp: RuntimeResponse = read_frame(&mut stream).await?;
-            match resp {
-                RuntimeResponse::GitCredential {
-                    username: Some(u),
-                    password: Some(p),
-                    ..
-                } => {
-                    writeln!(writer, "username={u}")?;
-                    writeln!(writer, "password={p}")?;
-                    writer.flush()?;
-                }
-                _ => {
-                    // Denied or not found: output nothing so Git reports authentication error
-                }
+            if let RuntimeResponse::GitCredential {
+                username: Some(u),
+                password: Some(p),
+                ..
+            } = resp
+            {
+                writeln!(writer, "username={u}")?;
+                writeln!(writer, "password={p}")?;
+                writer.flush()?;
+            } else {
+                // Denied or not found: output nothing so Git reports authentication error
             }
             Ok(())
         }
@@ -417,4 +420,16 @@ pub async fn run_git_credential_client(
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     run_git_credential_stream(stdin.lock(), stdout.lock(), socket_path, operation).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_len;
+
+    #[test]
+    fn frame_length_beyond_the_u32_prefix_is_an_error() {
+        assert_eq!(frame_len(7).unwrap(), 7);
+        let err = frame_len(usize::try_from(u32::MAX).unwrap() + 1).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 }

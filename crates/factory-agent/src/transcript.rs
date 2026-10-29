@@ -326,7 +326,7 @@ impl TranscriptTranslator {
         }
     }
 
-    /// Translates turn completion with explicit Dark Factory StopReason into a `TurnEnded` event.
+    /// Translates turn completion with explicit Dark Factory `StopReason` into a `TurnEnded` event.
     pub fn translate_turn_ended_with_stop_reason(
         &mut self,
         stop_reason: StopReason,

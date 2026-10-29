@@ -44,6 +44,7 @@ impl PolicyService {
         }
     }
 
+    #[must_use]
     pub fn debounce(mut self, debounce: Duration) -> Self {
         self.debounce = debounce;
         self

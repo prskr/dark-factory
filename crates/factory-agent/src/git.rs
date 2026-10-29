@@ -179,7 +179,11 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
     out.push_str("\tfilemode = true\n");
     out.push_str("\tbare = false\n");
     out.push_str("\tlogallrefupdates = true\n");
-    out.push_str(&format!("\thooksPath = {}\n", params.hooks_path.display()));
+    out.extend([
+        "\thooksPath = ",
+        &params.hooks_path.display().to_string(),
+        "\n",
+    ]);
 
     // 2. Extra allowed config entries (filtered through denylist)
     for entry in params.extra_config {
@@ -197,21 +201,21 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
             continue;
         }
         if let Some((section, key_name)) = parse_config_key(&entry.key) {
-            out.push_str(&format!(
-                "[{}]\n\t{} = {}\n",
-                section,
-                key_name,
-                quote_config_value(&entry.value)
-            ));
+            out.extend([
+                "[",
+                &section,
+                "]\n\t",
+                &key_name,
+                " = ",
+                &quote_config_value(&entry.value),
+                "\n",
+            ]);
         }
     }
 
     // 3. Remote origin section
     out.push_str("[remote \"origin\"]\n");
-    out.push_str(&format!(
-        "\turl = {}\n",
-        quote_config_value(params.repo_url)
-    ));
+    out.extend(["\turl = ", &quote_config_value(params.repo_url), "\n"]);
     out.push_str("\tfetch = +refs/heads/*:refs/remotes/origin/*\n");
     out.push_str("\tpromisor = true\n");
     out.push_str("\tpartialclonefilter = blob:none\n");
@@ -223,22 +227,25 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
     out.push_str("\tuseHttpPath = true\n");
     out.push_str("\thelper = \n");
     if !params.credential_helper.is_empty() {
-        out.push_str(&format!(
-            "\thelper = {}\n",
-            quote_config_value(params.credential_helper)
-        ));
+        out.extend([
+            "\thelper = ",
+            &quote_config_value(params.credential_helper),
+            "\n",
+        ]);
     }
 
     // 5. User / Commit identity section
     out.push_str("[user]\n");
-    out.push_str(&format!(
-        "\tname = {}\n",
-        quote_config_value(params.commit_author_name)
-    ));
-    out.push_str(&format!(
-        "\temail = {}\n",
-        quote_config_value(params.commit_author_email)
-    ));
+    out.extend([
+        "\tname = ",
+        &quote_config_value(params.commit_author_name),
+        "\n",
+    ]);
+    out.extend([
+        "\temail = ",
+        &quote_config_value(params.commit_author_email),
+        "\n",
+    ]);
 
     out
 }
@@ -307,6 +314,7 @@ impl Git {
     }
 
     /// Sets the allowed protocols (e.g. `["https", "file"]` for tests).
+    #[must_use]
     pub fn allow_protocols<I, S>(mut self, protocols: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -317,24 +325,28 @@ impl Git {
     }
 
     /// Overrides the empty hooks directory (used for tests).
+    #[must_use]
     pub fn with_hooks_empty_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.hooks_empty_dir = path.into();
         self
     }
 
     /// Overrides the global gitconfig path (used for tests).
+    #[must_use]
     pub fn with_global_gitconfig(mut self, path: impl Into<PathBuf>) -> Self {
         self.global_gitconfig = path.into();
         self
     }
 
     /// Overrides the credential helper command (used for tests).
+    #[must_use]
     pub fn with_credential_helper(mut self, helper: impl Into<String>) -> Self {
         self.credential_helper = helper.into();
         self
     }
 
     /// Sets the runtime socket path passed via `DF_RUNTIME_SOCK`.
+    #[must_use]
     pub fn with_runtime_sock(mut self, path: impl Into<PathBuf>) -> Self {
         self.runtime_sock = Some(path.into());
         self
@@ -342,6 +354,7 @@ impl Git {
 
     /// Sets the custom CA info path passed via `GIT_SSL_CAINFO`.
     #[cfg(test)]
+    #[must_use]
     pub fn with_ssl_ca_info(mut self, path: impl Into<PathBuf>) -> Self {
         self.ssl_ca_info = Some(path.into());
         self
@@ -413,7 +426,9 @@ impl Git {
         cmd.args(args);
         let output = tokio::time::timeout(GIT_TIMEOUT, cmd.output())
             .await
-            .map_err(|_| anyhow::anyhow!("git {} timed out after {GIT_TIMEOUT:?}", args.join(" ")))?
+            .map_err(|_elapsed| {
+                anyhow::anyhow!("git {} timed out after {GIT_TIMEOUT:?}", args.join(" "))
+            })?
             .map_err(|e| anyhow::anyhow!("failed to execute git {}: {e}", args.join(" ")))?;
         Ok(output)
     }

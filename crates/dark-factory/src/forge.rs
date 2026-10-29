@@ -17,7 +17,7 @@ const MIB: u64 = 1024 * 1024;
 ///
 /// Fail-fast is the behaviour for the single supported plugin. Once several plugins can be
 /// configured, startup should only fail if no forge plugin could be loaded at all.
-pub fn load_forge_plugin(name: &str, config: &PluginConfig) -> anyhow::Result<PluginHost> {
+pub(crate) fn load_forge_plugin(name: &str, config: &PluginConfig) -> anyhow::Result<PluginHost> {
     let memory = config
         .memory_mib
         .checked_mul(MIB)
@@ -38,7 +38,7 @@ pub fn load_forge_plugin(name: &str, config: &PluginConfig) -> anyhow::Result<Pl
 }
 
 /// The [`ForgeClient`] that calls `host` for the projects in `pool`.
-pub fn forge_client(
+pub(crate) fn forge_client(
     host: PluginHost,
     config: &PluginConfig,
     pool: PgPool,

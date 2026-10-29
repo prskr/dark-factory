@@ -33,6 +33,15 @@ struct IdleRun {
     _scenario: RunScenario,
 }
 
+/// Reads agent messages until the `Hello`.
+async fn next_hello(server: &mut crate::test_harness::MockControlPlane) {
+    while let Some(msg) = server.recv_agent_message().await {
+        if matches!(msg.body, Some(agent_message::Body::Hello(_))) {
+            return;
+        }
+    }
+}
+
 /// The text of an agent message chunk, if the message is one.
 fn chunk_text(msg: &AgentMessage) -> Option<&str> {
     match &msg.body {
@@ -349,15 +358,9 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
     // Wait on conditions, not time: every step below waits for the message that proves it.
     let wait = Duration::from_secs(60);
     let hello = async |server: &mut MockControlPlane| {
-        tokio::time::timeout(wait, async {
-            while let Some(msg) = server.recv_agent_message().await {
-                if matches!(msg.body, Some(agent_message::Body::Hello(_))) {
-                    return;
-                }
-            }
-        })
-        .await
-        .expect("Hello in time");
+        tokio::time::timeout(wait, next_hello(server))
+            .await
+            .expect("Hello in time");
     };
     hello(&mut server).await;
     server.send_control_message(hello_ack()).await.unwrap();

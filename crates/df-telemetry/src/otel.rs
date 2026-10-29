@@ -304,7 +304,7 @@ impl Telemetry {
                     tracing::warn!(error = %err, "failed to flush spans");
                 }
                 // The receiver is gone after the grace period; nothing left to tell.
-                let _ = done.send(());
+                done.send(()).ok(); // receiver may be gone
             });
         if let Err(err) = spawned {
             tracing::warn!(error = %err, "failed to start the telemetry flush");
@@ -659,8 +659,7 @@ mod tests {
     }
 
     fn get(r: &Resource, k: &str) -> Option<String> {
-        r.get(&opentelemetry::Key::new(k.to_string()))
-            .map(|v| v.to_string())
+        r.get(&Key::new(k.to_string())).map(|v| v.to_string())
     }
 
     #[test]
@@ -831,8 +830,8 @@ mod tests {
         let exported = exporter.get_finished_metrics()?;
         let names: Vec<_> = exported
             .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
+            .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
+            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
             .map(|m| m.name().to_string())
             .collect();
         assert_eq!(names, ["df.test.final"]);
@@ -869,6 +868,10 @@ mod tests {
     }
 
     impl opentelemetry_sdk::trace::SpanExporter for Recording {
+        #[expect(
+            clippy::unused_async_trait_impl,
+            reason = "the trait method is async; the test exporter only records"
+        )]
         async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
             if let Ok(mut names) = self.0.lock() {
                 names.extend(batch.iter().map(|s| s.name.to_string()));

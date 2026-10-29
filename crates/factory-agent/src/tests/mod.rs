@@ -47,7 +47,7 @@ fn logged(filter: &str, body: &df_proto::agent::v1::agent_message::Body) -> Vec<
         .collect()
 }
 
-pub(crate) fn setup_test_remote_repo(temp_dir: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn setup_test_remote_repo(temp_dir: &std::path::Path) -> PathBuf {
     let upstream = temp_dir.join("upstream.git");
     // explicit branch: without `init.defaultBranch` HEAD would point to the never pushed `master`
     let status = std::process::Command::new("git")
@@ -68,26 +68,31 @@ pub(crate) fn setup_test_remote_repo(temp_dir: &std::path::Path) -> std::path::P
     assert!(status.success());
 
     std::fs::write(init_repo.join("README.md"), "# Test Workspace\n").unwrap();
-    let _ = std::process::Command::new("git")
+    std::process::Command::new("git")
         .args(["config", "user.name", "Bot"])
         .current_dir(&init_repo)
-        .status();
-    let _ = std::process::Command::new("git")
+        .status()
+        .unwrap();
+    std::process::Command::new("git")
         .args(["config", "user.email", "bot@example.com"])
         .current_dir(&init_repo)
-        .status();
-    let _ = std::process::Command::new("git")
+        .status()
+        .unwrap();
+    std::process::Command::new("git")
         .args(["config", "commit.gpgsign", "false"])
         .current_dir(&init_repo)
-        .status();
-    let _ = std::process::Command::new("git")
+        .status()
+        .unwrap();
+    std::process::Command::new("git")
         .args(["checkout", "-b", "main"])
         .current_dir(&init_repo)
-        .status();
-    let _ = std::process::Command::new("git")
+        .status()
+        .unwrap();
+    std::process::Command::new("git")
         .args(["add", "README.md"])
         .current_dir(&init_repo)
-        .status();
+        .status()
+        .unwrap();
     let status = std::process::Command::new("git")
         .args(["commit", "--no-gpg-sign", "-m", "init"])
         .current_dir(&init_repo)

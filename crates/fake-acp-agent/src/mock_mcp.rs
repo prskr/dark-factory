@@ -17,6 +17,10 @@ impl ServerHandler for MockMcpServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
     }
 
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the trait method is async; the mock answers immediately"
+    )]
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -35,6 +39,6 @@ impl ServerHandler for MockMcpServer {
 pub async fn run_stdio() -> anyhow::Result<()> {
     let transport = (tokio::io::stdin(), tokio::io::stdout());
     let running = MockMcpServer.serve(transport).await?;
-    let _ = running.waiting().await;
+    running.waiting().await?;
     Ok(())
 }

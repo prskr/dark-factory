@@ -56,10 +56,9 @@ impl TryFrom<EntryRow> for EntryRecord {
         let kind = match row.kind.as_str() {
             "http-host" => EntryKind::HttpHost {
                 host: row.host.clone().ok_or_else(|| corrupt("no host"))?,
-                port: row
-                    .port
-                    .ok_or_else(|| corrupt("no port"))
-                    .and_then(|p| port_from_db(p).map_err(|_| corrupt("invalid port")))?,
+                port: row.port.ok_or_else(|| corrupt("no port")).and_then(|p| {
+                    port_from_db(p).map_err(|_out_of_range| corrupt("invalid port"))
+                })?,
             },
             "cluster-service" => EntryKind::ClusterService {
                 namespace: row
@@ -70,7 +69,7 @@ impl TryFrom<EntryRow> for EntryRecord {
                 ports: row
                     .ports
                     .iter()
-                    .map(|p| port_from_db(*p).map_err(|_| corrupt("invalid port")))
+                    .map(|p| port_from_db(*p).map_err(|_out_of_range| corrupt("invalid port")))
                     .collect::<Result<_, _>>()?,
                 allow_dns: row.allow_dns,
             },
@@ -111,8 +110,9 @@ pub async fn next_policy_version(pool: &PgPool) -> Result<u64, DbError> {
         sqlx::query_scalar!(r#"SELECT nextval('egress_policy_version_seq') AS "version!""#)
             .fetch_one(pool)
             .await?;
-    u64::try_from(version)
-        .map_err(|_| DbError::InvalidData(format!("egress policy version {version} is negative")))
+    u64::try_from(version).map_err(|_negative| {
+        DbError::InvalidData(format!("egress policy version {version} is negative"))
+    })
 }
 
 /// Runs in a non-terminal state that have a pod address, oldest first.
@@ -259,7 +259,7 @@ pub async fn add_entry(
                 namespace,
                 service,
                 &ports,
-                allow_dns
+                *allow_dns
             )
             .execute(&mut *tx)
             .await?;
@@ -333,7 +333,7 @@ pub struct ClusterServiceRule {
 ///
 /// Instance-scoped rules always apply; project-scoped rules only for `project_key`. A stored port
 /// outside `1..=65535` fails the whole call, so a corrupt row is not silently dropped from a
-/// NetworkPolicy.
+/// `NetworkPolicy`.
 pub async fn list_cluster_services(
     pool: &PgPool,
     project_key: Option<&str>,

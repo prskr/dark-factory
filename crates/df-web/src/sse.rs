@@ -44,12 +44,12 @@ const LIST_DEBOUNCE: Duration = Duration::from_millis(200);
 pub(crate) const BATCH: i64 = 500;
 
 #[derive(Debug, Default, Deserialize)]
-pub struct AfterQuery {
+pub(crate) struct AfterQuery {
     after: Option<i64>,
 }
 
 /// `GET /tasks/{key}/events`.
-pub async fn task_events(
+pub(crate) async fn task_events(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Path(key): Path<String>,
@@ -349,7 +349,7 @@ impl DetailStream {
 
 /// `GET /tasks/events?status=..&project=..`: re-renders the rows of the filtered list when a task
 /// changes, so a task that no longer matches the filter leaves it.
-pub async fn task_list_events(
+pub(crate) async fn task_list_events(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<ListQuery>,

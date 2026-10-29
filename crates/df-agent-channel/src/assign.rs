@@ -331,32 +331,41 @@ pub async fn transcript_summary(pool: &PgPool, rc: &RunContext) -> Result<String
     // (speaker, message id, text); consecutive chunks of one agent message are merged.
     let mut messages: Vec<(&'static str, String, String)> = Vec::new();
     for (kind, payload) in rows.into_iter().rev() {
-        let (speaker, body) = if kind == "user_message" {
-            ("User", &payload["userMessage"])
+        let (speaker, root) = if kind == "user_message" {
+            ("User", "/userMessage")
         } else {
-            ("Agent", &payload["agentMessageChunk"])
+            ("Agent", "/agentMessageChunk")
         };
+        let body = payload.pointer(root);
         let text = match speaker {
-            "User" => body["content"]
-                .as_array()
+            "User" => body
+                .and_then(|body| body.get("content"))
+                .and_then(serde_json::Value::as_array)
                 .map(|blocks| {
                     blocks
                         .iter()
-                        .filter(|b| b["hidden"].as_bool() != Some(true))
-                        .filter_map(|b| b["text"]["text"].as_str())
+                        .filter(|b| {
+                            b.get("hidden").and_then(serde_json::Value::as_bool) != Some(true)
+                        })
+                        .filter_map(|b| b.pointer("/text/text").and_then(serde_json::Value::as_str))
                         .collect::<Vec<_>>()
                         .join("\n")
                 })
                 .unwrap_or_default(),
-            _ => body["content"]["text"]["text"]
-                .as_str()
+            _ => body
+                .and_then(|body| body.pointer("/content/text/text"))
+                .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
         };
         if text.is_empty() {
             continue;
         }
-        let message_id = body["messageId"].as_str().unwrap_or_default().to_string();
+        let message_id = body
+            .and_then(|body| body.get("messageId"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         match messages.last_mut() {
             Some((s, id, acc)) if speaker == "Agent" && *s == "Agent" && *id == message_id => {
                 acc.push_str(&text);

@@ -32,7 +32,7 @@ pub(super) use viewer::Viewer;
 /// Events sent to the browser in one message while a backlog is being replayed.
 const CHUNK: usize = 200;
 
-pub async fn page(State(state): State<WebState>, Query(filter): Query<Filter>) -> Response {
+pub(super) async fn page(State(state): State<WebState>, Query(filter): Query<Filter>) -> Response {
     let Some(flows) = &state.flows else {
         return crate::auth::error_page(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -74,7 +74,7 @@ async fn collect_backlog(
 }
 
 /// `GET /egress/log/events`: the viewer's rows, graph and counts as `<hx-partial>` messages.
-pub async fn events(
+pub(super) async fn events(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Query(filter): Query<Filter>,

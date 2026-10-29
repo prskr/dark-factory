@@ -30,7 +30,7 @@ const ALLOWLIST: &str = "/egress/allowlist";
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct HostForm {
+pub(super) struct HostForm {
     project: String,
     host: String,
     port: String,
@@ -38,7 +38,7 @@ pub struct HostForm {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct ServiceForm {
+pub(super) struct ServiceForm {
     project: String,
     namespace: String,
     service: String,
@@ -330,12 +330,15 @@ fn service_form(options: &[(String, String)], values: &ServiceForm, errors: &For
 /// Query of the rules page.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct ListQuery {
+pub(super) struct ListQuery {
     /// `host:port`: the rows of that target are highlighted.
     highlight: String,
 }
 
-pub async fn list(State(state): State<WebState>, Query(query): Query<ListQuery>) -> Response {
+pub(super) async fn list(
+    State(state): State<WebState>,
+    Query(query): Query<ListQuery>,
+) -> Response {
     let entries = match df_db::list_entries(&state.pool).await {
         Ok(entries) => entries,
         Err(e) => return internal_error(&e),
@@ -349,7 +352,7 @@ pub async fn list(State(state): State<WebState>, Query(query): Query<ListQuery>)
     )
 }
 
-pub async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Response {
+pub(super) async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Response {
     if !crate::auth::is_htmx(&headers) {
         return Redirect::to(ALLOWLIST).into_response();
     }
@@ -362,7 +365,7 @@ pub async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Resp
     }
 }
 
-pub async fn new_service(State(state): State<WebState>, headers: HeaderMap) -> Response {
+pub(super) async fn new_service(State(state): State<WebState>, headers: HeaderMap) -> Response {
     if !crate::auth::is_htmx(&headers) {
         return Redirect::to(ALLOWLIST).into_response();
     }
@@ -407,7 +410,7 @@ async fn save(
     }
 }
 
-pub async fn add_host(
+pub(super) async fn add_host(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Form(form): Form<HostForm>,
@@ -427,7 +430,7 @@ pub async fn add_host(
     .await
 }
 
-pub async fn add_service(
+pub(super) async fn add_service(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Form(form): Form<ServiceForm>,
@@ -498,7 +501,7 @@ async fn show_again(
     }
 }
 
-pub async fn remove(
+pub(super) async fn remove(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<Uuid>,

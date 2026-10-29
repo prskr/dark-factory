@@ -443,7 +443,7 @@ async fn apply_decision(
     types: &ApprovalTypes,
     request: &RequestRow,
     decision: &Decision,
-) -> Result<(RequestState, serde_json::Value, &'static str), RequestError> {
+) -> Result<(RequestState, Value, &'static str), RequestError> {
     Ok(match (decision, request.kind) {
         (Decision::Answer(text), RequestKind::Question) => {
             let text = text.trim();

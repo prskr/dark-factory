@@ -34,7 +34,7 @@ const HARNESS: &str = df_core::CLAUDE_CODE_HARNESS;
 
 /// The forms are fragments that open as a modal over their list; a plain browser request for one
 /// (no `HX-Request` header) goes to the list instead.
-pub fn routes() -> Router<WebState> {
+pub(crate) fn routes() -> Router<WebState> {
     Router::new()
         .route(
             "/credentials",
@@ -60,7 +60,7 @@ pub fn routes() -> Router<WebState> {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct CredentialForm {
+pub(crate) struct CredentialForm {
     name: String,
     secret_name: String,
     secret_key: String,
@@ -68,7 +68,7 @@ pub struct CredentialForm {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct ProjectForm {
+pub(crate) struct ProjectForm {
     key: String,
     name: String,
     repo_url: String,
@@ -81,7 +81,7 @@ pub struct ProjectForm {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct PersonaForm {
+pub(crate) struct PersonaForm {
     name: String,
     system_prompt: String,
     model: String,

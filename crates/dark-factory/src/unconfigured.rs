@@ -1,7 +1,7 @@
 //! Placeholders for the sandbox provider and secret store that fail every operation, for
 //! `serve --no-cluster` and tests of the control plane that do not talk to a cluster.
 
-pub mod sandbox_placeholders {
+pub(crate) mod sandbox_placeholders {
     use async_trait::async_trait;
     use df_core::{
         CredentialRef, PeerIdentity, ProviderError, RunId, RunSandboxSpec, SandboxEvent,
@@ -12,7 +12,7 @@ pub mod sandbox_placeholders {
 
     const NOT_CONFIGURED: &str = "no sandbox provider is configured in this build";
 
-    pub struct UnconfiguredSandboxProvider;
+    pub(crate) struct UnconfiguredSandboxProvider;
 
     #[async_trait]
     impl SandboxProvider for UnconfiguredSandboxProvider {
@@ -37,7 +37,7 @@ pub mod sandbox_placeholders {
         }
     }
 
-    pub struct UnconfiguredSecretStore;
+    pub(crate) struct UnconfiguredSecretStore;
 
     #[async_trait]
     impl SecretStore for UnconfiguredSecretStore {

@@ -55,6 +55,8 @@ The checklist is in `AGENTS.md` ("Adding a crate"). Details that bite:
 ## Lints
 
 - One source: `[workspace.lints]` in the root `Cargo.toml` and `clippy.toml`. `extract_cargo_lints` turns the manifest tables into `lint_config`, which rustc and the clippy aspect (`--config=lint`) apply. `.bazelrc` keeps only `-Dwarnings`, because rules_rust drops its own once `clippy_flags` is set.
-- To add a lint, edit the workspace table (and the mirrored tables of the plugins and `tools/xtask`; `cargo xtask check-crates` compares them). Nothing else.
+- To add a lint, edit the workspace table (and the mirrored tables of the plugins and `tools/xtask`; `cargo xtask check-crates` compares them). Nothing else. Enable a lint only once the tree is clean under it.
+- Lint options live in `clippy.toml`: the test exemptions (`allow-unwrap-in-tests`, `allow-panic-in-tests`, `allow-indexing-slicing-in-tests`, `allow-dbg-in-tests`, `allow-print-in-tests`), `excessive-nesting-threshold` and `disallowed-methods` (`std::env::temp_dir`).
 - `tools/xtask` is a standalone workspace outside Bazel; its clippy run is in the pre-push hook and CI. Bazel's `//:cargo` cannot compile xtask (no host std), so CI runs its clippy and checks with the rustup toolchain.
-- Silence a lint with `#[expect(..., reason = "...")]`, not `#[allow]`; the one exception (module-level `allow` in test modules) is in `AGENTS.md`, "Function length".
+- Silence a lint with `#[expect(..., reason = "...")]`, never `#[allow]` (`clippy::allow_attributes` fails the build). Generated code (`df-proto`, `crd.rs` from kopium, `wit_bindgen::generate!`) expects the lints it triggers. `crd.rs` is kopium output kept verbatim; its lints are expected on `mod crd` in `df-k8s/src/lib.rs`, so regenerating needs no manual edit.
+- A macro that expands to `#[allow]` (seen with `sqlx::query!` and a `&bool` as the last bind argument) trips `allow_attributes`; dereference or wrap the argument.

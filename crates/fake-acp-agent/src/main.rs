@@ -25,6 +25,7 @@ pub struct Cli {
 }
 
 #[tokio::main]
+#[expect(clippy::print_stderr, reason = "CLI output")]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -40,7 +41,10 @@ async fn main() -> ExitCode {
         Some(path) => match script::Script::load_from_path(&path) {
             Ok(s) => Some(s),
             Err(err) => {
-                eprintln!("fake-acp-agent: failed to load script from {path:?}: {err}");
+                eprintln!(
+                    "fake-acp-agent: failed to load script from {}: {err}",
+                    path.display()
+                );
                 return ExitCode::FAILURE;
             }
         },

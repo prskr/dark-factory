@@ -78,10 +78,11 @@ impl Pod {
             open: open.clone(),
         };
         let server = tokio::spawn(async move {
-            let _ = tonic::transport::Server::builder()
+            tonic::transport::Server::builder()
                 .add_service(GatewayLogServer::new(service))
                 .serve_with_incoming(TcpListenerStream::new(listener))
-                .await;
+                .await
+                .ok();
         });
         Self {
             address,
@@ -330,7 +331,7 @@ fn a_replayed_event_older_than_a_full_buffer_is_neither_stored_nor_sent() {
         }),
         ..Default::default()
     };
-    for second in 1000..1000 + BUFFER_EVENTS as i64 {
+    for second in 1000..1000 + i64::try_from(BUFFER_EVENTS).unwrap() {
         merged.insert(at(second));
     }
     let (before, mut live) = merged.subscribe();
@@ -593,5 +594,5 @@ fn merged_drops_expired_events_on_subscribe_and_on_insert() {
 fn a_zero_maximum_age_is_raised_to_one_second() {
     let relay = Relay::new(Arc::new(FakeDirectory::default()), Duration::from_secs(1))
         .with_max_age(Duration::ZERO);
-    assert_eq!(relay.max_age, crate::flow::MIN_MAX_AGE);
+    assert_eq!(relay.max_age, MIN_MAX_AGE);
 }

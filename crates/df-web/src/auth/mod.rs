@@ -360,7 +360,7 @@ pub(crate) fn is_htmx(headers: &HeaderMap) -> bool {
 }
 
 fn urlencode(value: &str) -> String {
-    openidconnect::url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
 fn now_unix() -> i64 {

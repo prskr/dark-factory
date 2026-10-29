@@ -165,7 +165,7 @@ where
 {
     let server = McpBridgeServer::new(socket_path.to_path_buf());
     let running = server.serve((reader, writer)).await?;
-    let _ = running.waiting().await;
+    running.waiting().await?;
     Ok(())
 }
 

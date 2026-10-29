@@ -19,7 +19,7 @@ use df_proto::transcript::v1::{
     content_block::Kind as ContentBlockKind, event::Kind as EventKind,
 };
 
-/// Async I/O compatibility wrapper for Tokio AsyncRead into futures AsyncRead.
+/// Async I/O compatibility wrapper for Tokio `AsyncRead` into futures `AsyncRead`.
 pub struct TokioAsyncReadCompat<T>(pub T);
 
 impl<T: tokio::io::AsyncRead + Unpin> futures::AsyncRead for TokioAsyncReadCompat<T> {
@@ -37,7 +37,7 @@ impl<T: tokio::io::AsyncRead + Unpin> futures::AsyncRead for TokioAsyncReadCompa
     }
 }
 
-/// Async I/O compatibility wrapper for Tokio AsyncWrite into futures AsyncWrite.
+/// Async I/O compatibility wrapper for Tokio `AsyncWrite` into futures `AsyncWrite`.
 pub struct TokioAsyncWriteCompat<T>(pub T);
 
 impl<T: tokio::io::AsyncWrite + Unpin> futures::AsyncWrite for TokioAsyncWriteCompat<T> {
@@ -348,7 +348,7 @@ pub fn extract_retry_after(text: &str) -> Option<u64> {
             let num_str: String = remainder
                 .trim_start()
                 .chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(char::is_ascii_digit)
                 .collect();
             if let Ok(sec) = num_str.parse::<u64>() {
                 return Some(sec);
@@ -365,14 +365,13 @@ pub fn parse_rate_limit(err: &agent_client_protocol::Error) -> Option<RateLimitI
         let is_rate_limited = data
             .get("error")
             .and_then(|v| v.as_str())
-            .map(|s| s == "rate_limited" || s.contains("rate_limit"))
-            .unwrap_or(false);
+            .is_some_and(|s| s == "rate_limited" || s.contains("rate_limit"));
 
         if is_rate_limited {
             let retry_sec = data
                 .get("retry_after_seconds")
                 .or_else(|| data.get("retry_after"))
-                .and_then(|v| v.as_u64());
+                .and_then(serde_json::Value::as_u64);
             let detail = data
                 .get("message")
                 .and_then(|v| v.as_str())
@@ -434,8 +433,9 @@ impl BudgetTracker {
     pub fn new(budgets: Option<&Budgets>) -> Self {
         let (max_wall_clock, max_output_tokens, max_turns) = if let Some(b) = budgets {
             let wall_clock = b.max_wall_clock.as_ref().map(|d| {
-                std::time::Duration::from_secs(d.seconds as u64)
-                    + std::time::Duration::from_nanos(d.nanos as u64)
+                // A negative budget is invalid; treat it as no time left.
+                std::time::Duration::from_secs(u64::try_from(d.seconds).unwrap_or_default())
+                    + std::time::Duration::from_nanos(u64::try_from(d.nanos).unwrap_or_default())
             });
             (wall_clock, b.max_output_tokens, b.max_turns)
         } else {
@@ -463,14 +463,8 @@ impl BudgetTracker {
 
     /// Remaining duration before wall clock budget expires.
     pub fn remaining_wall_clock(&self) -> Option<std::time::Duration> {
-        self.max_wall_clock.map(|limit| {
-            let elapsed = self.start_time.elapsed();
-            if elapsed >= limit {
-                std::time::Duration::ZERO
-            } else {
-                limit - elapsed
-            }
-        })
+        self.max_wall_clock
+            .map(|limit| limit.saturating_sub(self.start_time.elapsed()))
     }
 
     /// Records completed turn with its consumed output tokens.
@@ -595,7 +589,7 @@ pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
 
     if matches!(
         input.stop_reason,
-        Some(StopReason::MaxTokens) | Some(StopReason::MaxTurnRequests)
+        Some(StopReason::MaxTokens | StopReason::MaxTurnRequests)
     ) {
         return RunOutcomeDecision::Finalize {
             outcome: RunOutcome::LimitReached,

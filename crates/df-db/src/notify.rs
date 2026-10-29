@@ -21,6 +21,10 @@ use tracing::warn;
 
 use crate::pool::DbError;
 
+/// First wait before reconnecting the listener; doubles up to [`MAX_BACKOFF`].
+const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+const MAX_BACKOFF: Duration = Duration::from_secs(5);
+
 pub const CHANNEL_TASK_CHANGED: &str = "task_changed";
 pub const CHANNEL_RUN_CHANGED: &str = "run_changed";
 pub const CHANNEL_TRANSCRIPT_EVENT: &str = "transcript_event";
@@ -228,77 +232,7 @@ impl Notifier {
         listener.listen_all(ALL_CHANNELS.iter().copied()).await?;
 
         let (tx, _) = broadcast::channel(1024);
-        let tx_clone = tx.clone();
-        let pool_clone = pool.clone();
-
-        let task = tokio::spawn(async move {
-            let mut backoff = Duration::from_millis(100);
-            loop {
-                match listener.try_recv().await {
-                    Ok(Some(msg)) => {
-                        backoff = Duration::from_millis(100);
-                        match Notification::from_channel_and_payload(msg.channel(), msg.payload()) {
-                            Ok(notification) => {
-                                let _ = tx_clone.send(notification);
-                            }
-                            Err(err) => {
-                                warn!(
-                                    channel = msg.channel(),
-                                    payload = msg.payload(),
-                                    error = %err,
-                                    "ignoring malformed pg_notify payload"
-                                );
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        backoff = Duration::from_millis(100);
-                        warn!(
-                            "pg_notify listener reconnected after connection loss; notifying subscribers to resync"
-                        );
-                        let _ = tx_clone.send(Notification::Reconnected);
-                    }
-                    Err(err) => {
-                        if pool_clone.is_closed() {
-                            break;
-                        }
-                        warn!(
-                            error = %err,
-                            ?backoff,
-                            "pg_notify listener error; reconnecting and notifying subscribers to resync"
-                        );
-                        tokio::time::sleep(backoff).await;
-                        backoff = (backoff * 2).min(Duration::from_secs(5));
-
-                        loop {
-                            if pool_clone.is_closed() {
-                                return;
-                            }
-                            match PgListener::connect_with(&pool_clone).await {
-                                Ok(mut new_listener) => {
-                                    if let Err(listen_err) =
-                                        new_listener.listen_all(ALL_CHANNELS.iter().copied()).await
-                                    {
-                                        warn!(error = %listen_err, "failed to re-subscribe pg_notify channels");
-                                        tokio::time::sleep(backoff).await;
-                                        backoff = (backoff * 2).min(Duration::from_secs(5));
-                                        continue;
-                                    }
-                                    listener = new_listener;
-                                    let _ = tx_clone.send(Notification::Reconnected);
-                                    break;
-                                }
-                                Err(conn_err) => {
-                                    warn!(error = %conn_err, "failed to reconnect pg_notify listener");
-                                    tokio::time::sleep(backoff).await;
-                                    backoff = (backoff * 2).min(Duration::from_secs(5));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        let task = tokio::spawn(fan_out(listener, tx.clone(), pool.clone()));
 
         Ok(Self { tx, task })
     }
@@ -312,6 +246,78 @@ impl Notifier {
 impl Drop for Notifier {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+fn next_backoff(backoff: Duration) -> Duration {
+    (backoff * 2).min(MAX_BACKOFF)
+}
+
+/// Forwards the notifications of `listener` to `tx` until `pool` is closed, reconnecting after
+/// connection errors.
+async fn fan_out(mut listener: PgListener, tx: broadcast::Sender<Notification>, pool: PgPool) {
+    let mut backoff = INITIAL_BACKOFF;
+    loop {
+        match listener.try_recv().await {
+            Ok(Some(msg)) => {
+                backoff = INITIAL_BACKOFF;
+                forward(&tx, msg.channel(), msg.payload());
+            }
+            Ok(None) => {
+                backoff = INITIAL_BACKOFF;
+                warn!(
+                    "pg_notify listener reconnected after connection loss; notifying subscribers to resync"
+                );
+                tx.send(Notification::Reconnected).ok(); // receiver may be gone
+            }
+            Err(err) => {
+                if pool.is_closed() {
+                    return;
+                }
+                warn!(
+                    error = %err,
+                    ?backoff,
+                    "pg_notify listener error; reconnecting and notifying subscribers to resync"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = next_backoff(backoff);
+                let Some(new_listener) = reconnect(&pool, &mut backoff).await else {
+                    return;
+                };
+                listener = new_listener;
+                tx.send(Notification::Reconnected).ok(); // receiver may be gone
+            }
+        }
+    }
+}
+
+/// Broadcasts the notification of `payload`; a malformed payload is logged and dropped.
+fn forward(tx: &broadcast::Sender<Notification>, channel: &str, payload: &str) {
+    match Notification::from_channel_and_payload(channel, payload) {
+        Ok(notification) => {
+            tx.send(notification).ok(); // receiver may be gone
+        }
+        Err(err) => {
+            warn!(channel, payload, error = %err, "ignoring malformed pg_notify payload");
+        }
+    }
+}
+
+/// Connects a new listener, retrying with `backoff`. `None` once the pool is closed.
+async fn reconnect(pool: &PgPool, backoff: &mut Duration) -> Option<PgListener> {
+    loop {
+        if pool.is_closed() {
+            return None;
+        }
+        match PgListener::connect_with(pool).await {
+            Ok(mut listener) => match listener.listen_all(ALL_CHANNELS.iter().copied()).await {
+                Ok(()) => return Some(listener),
+                Err(error) => warn!(error = %error, "failed to re-subscribe pg_notify channels"),
+            },
+            Err(error) => warn!(error = %error, "failed to reconnect pg_notify listener"),
+        }
+        tokio::time::sleep(*backoff).await;
+        *backoff = next_backoff(*backoff);
     }
 }
 
@@ -375,13 +381,13 @@ mod tests {
 
         // Terminate the listener backend session on PostgreSQL.
         sqlx::query(
-            r#"
+            r"
             SELECT pg_terminate_backend(pid)
             FROM pg_stat_activity
             WHERE datname = current_database()
               AND pid <> pg_backend_pid()
               AND query LIKE 'LISTEN %'
-            "#,
+            ",
         )
         .execute(&pool)
         .await

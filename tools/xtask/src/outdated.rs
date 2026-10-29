@@ -37,7 +37,8 @@ struct Dep {
     spec: toml::Value,
 }
 
-pub fn run(since: Option<&str>) -> Result<()> {
+#[expect(clippy::print_stdout, clippy::print_stderr, reason = "CLI output")]
+pub(crate) fn run(since: Option<&str>) -> Result<()> {
     let root: toml::Table = std::fs::read_to_string(ROOT_MANIFEST)?.parse()?;
     let ignore = ignore_list(&root);
 

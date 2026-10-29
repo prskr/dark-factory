@@ -40,7 +40,7 @@ fn exporter() -> &'static InMemorySpanExporter {
             .build();
         let layer = tracing_opentelemetry::layer().with_tracer(provider.tracer("test"));
         // Fails only if a subscriber exists, which no test of this binary installs.
-        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer));
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer)).ok();
         exporter
     })
 }
@@ -90,7 +90,7 @@ async fn start_proxy() -> anyhow::Result<Started> {
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let task = tokio::spawn(proxy.serve(listener, async {
         // Both outcomes (signal, sender dropped) mean: stop.
-        let _ = stopped.await;
+        stopped.await.ok();
     }));
     Ok(Started {
         addr,

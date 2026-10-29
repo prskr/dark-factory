@@ -3,7 +3,7 @@
 use crate::darkfactory::integrations::types::{Error, RateLimit, UpstreamError};
 
 /// `status` is a non-2xx response; `retry_after` is the parsed `Retry-After` header in seconds.
-pub fn from_status(status: u16, retry_after: Option<u32>, body: &[u8]) -> Error {
+pub(crate) fn from_status(status: u16, retry_after: Option<u32>, body: &[u8]) -> Error {
     let message = message(body);
     match status {
         404 => Error::NotFound(message),

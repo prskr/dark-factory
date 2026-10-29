@@ -13,12 +13,12 @@ use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, JsonObject};
 use rmcp::service::{RoleClient, RunningService};
 use rpi_agent::{AgentError, AgentTool, AgentToolResult, TextContentOrImage, ToolResultPartial};
-use rpi_ai::types::{Schema, TextContent, Tool};
+use rpi_ai::types::{Schema, TextContent, TextContentType, Tool};
 use tokio::process::{Child, Command};
 use tokio_util::sync::CancellationToken;
 
 /// Bound for starting a server and listing its tools, so a hung server cannot block `session/new`.
-pub const SETUP_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bound for one tool call (still cancellable through the signal).
 const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -35,7 +35,7 @@ struct McpTool {
 }
 
 /// Spawn the stdio servers and list their tools. Non-stdio servers are skipped.
-pub async fn connect(
+pub(crate) async fn connect(
     servers: &[McpServer],
     setup_timeout: Duration,
 ) -> anyhow::Result<Vec<Arc<dyn AgentTool>>> {
@@ -61,7 +61,7 @@ pub async fn connect(
             anyhow::Ok((client, listed))
         })
         .await
-        .map_err(|_| {
+        .map_err(|_elapsed| {
             anyhow::anyhow!(
                 "mcp server {}: no answer within {setup_timeout:?}",
                 stdio.name
@@ -109,9 +109,9 @@ impl AgentTool for McpTool {
             req = req.with_arguments(args as JsonObject);
         }
         let res = tokio::select! {
-            _ = signal.cancelled() => return Err(AgentError::Abort),
+            () = signal.cancelled() => return Err(AgentError::Abort),
             res = tokio::time::timeout(CALL_TIMEOUT, self.server.client.call_tool(req)) => res
-                .map_err(|_| AgentError::tool(format!("mcp tool {} timed out", self.mcp_name)))?
+                .map_err(|_elapsed| AgentError::tool(format!("mcp tool {} timed out", self.mcp_name)))?
                 .map_err(|e| AgentError::tool(e.to_string()))?,
         };
         let text = res
@@ -119,8 +119,8 @@ impl AgentTool for McpTool {
             .iter()
             .filter_map(|c| serde_json::to_value(c).ok())
             .map(|v| {
-                v["text"]
-                    .as_str()
+                v.get("text")
+                    .and_then(serde_json::Value::as_str)
                     .map_or_else(|| v.to_string(), str::to_owned)
             })
             .collect::<Vec<_>>()
@@ -130,7 +130,7 @@ impl AgentTool for McpTool {
         }
         Ok(AgentToolResult {
             content: vec![TextContentOrImage::Text(TextContent {
-                kind: Default::default(),
+                kind: TextContentType,
                 text,
                 text_signature: None,
             })],

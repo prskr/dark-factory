@@ -1,6 +1,6 @@
 //! Harness sessions: resume, permissions, prompt queue and hidden blocks.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -49,10 +49,10 @@ async fn test_scenario_harness_resume_success() {
                 assert!(res.notices.is_empty(), "No notices on clean resume");
 
                 // When resumed, summary is NOT prepended to prompts
-                let prepend_summary = if !res.is_resumed {
-                    Some(continuation.summary.as_str())
-                } else {
+                let prepend_summary = if res.is_resumed {
                     None
+                } else {
+                    Some(continuation.summary.as_str())
                 };
                 let prompt_blocks = build_acp_prompt_blocks(
                     &[df_proto::agent::v1::Prompt {
@@ -139,10 +139,10 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                 assert_eq!(res.notices[0].code, "harness.session_resume_failed");
 
                 // When resume fails, summary IS prepended to first turn's prompts
-                let prepend_summary = if !res.is_resumed {
-                    Some(continuation.summary.as_str())
-                } else {
+                let prepend_summary = if res.is_resumed {
                     None
+                } else {
+                    Some(continuation.summary.as_str())
                 };
                 let prompt_blocks = build_acp_prompt_blocks(
                     &[df_proto::agent::v1::Prompt {
@@ -295,8 +295,8 @@ sessions:
 
     assert!(!setup_result.is_resumed);
     let session_id = setup_result.session_id;
-    assert!(!session_id.is_empty());
-    let _ = child.kill().await;
+    assert_ne!(session_id, "");
+    child.kill().await.ok();
 
     // 2. Second run: session/load with session_id
     let mut cmd2 = tokio::process::Command::new(&fake_bin);
@@ -342,7 +342,7 @@ sessions:
 
     assert!(setup_result2.is_resumed);
     assert_eq!(setup_result2.session_id, session_id);
-    let _ = child2.kill().await;
+    child2.kill().await.ok();
 }
 
 #[test]
@@ -382,15 +382,13 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
     assert_eq!(turn_1_prompts.len(), 1);
     assert_eq!(turn_1_events.len(), 2); // TurnStarted + UserMessage
 
-    let turn_started_1 = match &turn_1_events[0].kind {
-        Some(EventKind::TurnStarted(ts)) => ts,
-        _ => panic!("Expected TurnStarted event"),
+    let Some(EventKind::TurnStarted(turn_started_1)) = &turn_1_events[0].kind else {
+        panic!("Expected TurnStarted event");
     };
     assert_eq!(turn_started_1.prompt_ids, vec!["prompt-1"]);
 
-    let user_msg_1 = match &turn_1_events[1].kind {
-        Some(EventKind::UserMessage(um)) => um,
-        _ => panic!("Expected UserMessage event"),
+    let Some(EventKind::UserMessage(user_msg_1)) = &turn_1_events[1].kind else {
+        panic!("Expected UserMessage event");
     };
     assert_eq!(user_msg_1.prompt_id, "prompt-1");
 
@@ -432,21 +430,18 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
 
     // TurnStarted must list both prompt ids
     assert_eq!(turn_2_events.len(), 3); // 1 TurnStarted + 2 UserMessage
-    let turn_started_2 = match &turn_2_events[0].kind {
-        Some(EventKind::TurnStarted(ts)) => ts,
-        _ => panic!("Expected TurnStarted event"),
+    let Some(EventKind::TurnStarted(turn_started_2)) = &turn_2_events[0].kind else {
+        panic!("Expected TurnStarted event");
     };
     assert_eq!(turn_started_2.prompt_ids, vec!["prompt-2", "prompt-3"]);
 
-    let user_msg_2 = match &turn_2_events[1].kind {
-        Some(EventKind::UserMessage(um)) => um,
-        _ => panic!("Expected UserMessage 2"),
+    let Some(EventKind::UserMessage(user_msg_2)) = &turn_2_events[1].kind else {
+        panic!("Expected UserMessage 2");
     };
     assert_eq!(user_msg_2.prompt_id, "prompt-2");
 
-    let user_msg_3 = match &turn_2_events[2].kind {
-        Some(EventKind::UserMessage(um)) => um,
-        _ => panic!("Expected UserMessage 3"),
+    let Some(EventKind::UserMessage(user_msg_3)) = &turn_2_events[2].kind else {
+        panic!("Expected UserMessage 3");
     };
     assert_eq!(user_msg_3.prompt_id, "prompt-3");
 

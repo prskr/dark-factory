@@ -71,7 +71,7 @@ impl AgedEvents {
     /// is, the `opened` event of a connection that is still open is not.
     pub fn arrives_expired(&self, event: &FlowEvent, cutoff: i64) -> bool {
         // Only a late event needs the scan of the buffer.
-        if !event.time.as_ref().is_some_and(|t| t.seconds < cutoff) {
+        if event.time.as_ref().is_none_or(|t| t.seconds >= cutoff) {
             return false;
         }
         let open = open_flows(self.events.iter().chain(std::iter::once(event)));
@@ -127,7 +127,7 @@ impl FlowLog {
         buffer.events.push_back(event.clone());
         // Sent under the lock, so a subscriber sees every event exactly once, in the backlog or live.
         // An error only means nobody is subscribed.
-        let _ = self.live.send(event);
+        self.live.send(event).ok(); // receiver may be gone
     }
 
     /// The buffered events matching `filter` and a receiver of everything recorded from now on.

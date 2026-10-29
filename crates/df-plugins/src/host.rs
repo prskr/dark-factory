@@ -121,7 +121,7 @@ impl PluginHost {
             plugin = name,
             path = %path.display(),
             bytes = bytes.len(),
-            compile_ms = started.elapsed().as_millis() as u64,
+            compile_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             "plugin loaded"
         );
         Ok(host)
@@ -231,21 +231,26 @@ impl PluginHost {
         // The epoch deadline stops guest code; the timeout covers waiting on the network.
         tokio::time::timeout(self.call_timeout, invoke)
             .await
-            .map_err(|_| wit::Error::Internal("plugin call timed out".to_string()))?
+            .map_err(|_elapsed| wit::Error::Internal("plugin call timed out".to_string()))?
     }
 }
 
 impl Drop for PluginHost {
     fn drop(&mut self) {
-        let _ = self.stop_ticker.send(()); // the ticker may already be gone
+        self.stop_ticker.send(()).ok(); // the ticker may already be gone
         if let Some(ticker) = self.ticker.take() {
-            let _ = ticker.join(); // a panicked ticker has nothing left to clean up
+            ticker.join().ok(); // a panicked ticker has nothing left to clean up
         }
     }
 }
 
 /// Epoch ticks until `timeout` expires, plus one: the epoch advances at an arbitrary point within
 /// a tick, so exactly `timeout / tick` ticks could fire early. Saturates for huge timeouts.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the float is a non-negative tick count and `as` saturates"
+)]
 fn epoch_deadline(timeout: Duration) -> u64 {
     (timeout.div_duration_f64(EPOCH_TICK).ceil() as u64).saturating_add(1)
 }

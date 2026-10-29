@@ -23,7 +23,7 @@ const SOURCE_EXTENSIONS: [&str; 13] = [
     "rs", "proto", "wit", "bzl", "bazel", "sh", "js", "ts", "css", "html", "toml", "yaml", "yml",
 ];
 
-pub fn run(root: &Path, files: &[String]) -> Result<()> {
+pub(crate) fn run(root: &Path, files: &[String]) -> Result<()> {
     let files = common::files_or_tracked(root, files)?;
     common::report("check-file-length", &check(root, &files)?)
 }

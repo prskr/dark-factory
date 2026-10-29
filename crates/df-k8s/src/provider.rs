@@ -108,7 +108,7 @@ async fn resolve_call<T>(
 ///
 /// Errors are classified for [`ClusterTargetResolver`]: see [`ResolveError`].
 ///
-/// A named `targetPort` is resolved through the Service's EndpointSlices, whose port entries are
+/// A named `targetPort` is resolved through the Service's `EndpointSlices`, whose port entries are
 /// named after the Service port's `name`. If it cannot be resolved the call fails instead of
 /// guessing the Service port number.
 pub async fn resolve_cluster_target(
@@ -187,7 +187,7 @@ pub async fn resolve_cluster_target(
     })
 }
 
-/// Lists the EndpointSlices of a Service.
+/// Lists the `EndpointSlices` of a Service.
 async fn list_endpoint_slices(
     client: &Client,
     namespace: &str,
@@ -214,15 +214,18 @@ fn resolve_target_ports(
 ) -> Result<Vec<u16>, ResolveError> {
     let mut target_ports: Vec<u16> = Vec::new();
     for p in service_ports {
-        let port_num = u16::try_from(p.port)
-            .map_err(|_| ResolveError::Permanent(format!("invalid Service port: {}", p.port)))?;
+        let port_num = u16::try_from(p.port).map_err(|_out_of_range| {
+            ResolveError::Permanent(format!("invalid Service port: {}", p.port))
+        })?;
         if !configured_ports.is_empty() && !configured_ports.contains(&port_num) {
             continue;
         }
         match &p.target_port {
-            Some(IntOrString::Int(tp)) => target_ports.push(u16::try_from(*tp).map_err(|_| {
-                ResolveError::Permanent(format!("invalid numeric target port: {tp}"))
-            })?),
+            Some(IntOrString::Int(tp)) => {
+                target_ports.push(u16::try_from(*tp).map_err(|_error| {
+                    ResolveError::Permanent(format!("invalid numeric target port: {tp}"))
+                })?);
+            }
             Some(IntOrString::String(target_name)) => {
                 target_ports.extend(named_target_ports(p, target_name, endpoint_slices, name)?);
             }
@@ -248,7 +251,7 @@ fn resolve_target_ports(
     Ok(target_ports)
 }
 
-/// Resolves a named `targetPort` of the Service port `p` through the EndpointSlices.
+/// Resolves a named `targetPort` of the Service port `p` through the `EndpointSlices`.
 fn named_target_ports(
     p: &ServicePort,
     target_name: &str,
@@ -319,7 +322,7 @@ impl ClusterTargetResolver {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            last_good: Default::default(),
+            last_good: std::sync::Mutex::default(),
         }
     }
 
@@ -477,21 +480,16 @@ pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
         for cs in status.container_statuses.iter().flatten() {
             if let Some(ref state) = cs.state
                 && let Some(ref waiting) = state.waiting
+                && let Some("ErrImagePull" | "ImagePullBackOff" | "CreateContainerConfigError") =
+                    waiting.reason.as_deref()
             {
-                match waiting.reason.as_deref() {
-                    Some("ErrImagePull")
-                    | Some("ImagePullBackOff")
-                    | Some("CreateContainerConfigError") => {
-                        let msg = waiting.message.as_deref().unwrap_or_default();
-                        let reason = if msg.is_empty() {
-                            waiting.reason.clone().unwrap_or_default()
-                        } else {
-                            format!("{}: {}", waiting.reason.as_deref().unwrap_or_default(), msg)
-                        };
-                        return Some(SandboxEvent::Gone { run_id, reason });
-                    }
-                    _ => {}
-                }
+                let msg = waiting.message.as_deref().unwrap_or_default();
+                let reason = if msg.is_empty() {
+                    waiting.reason.clone().unwrap_or_default()
+                } else {
+                    format!("{}: {}", waiting.reason.as_deref().unwrap_or_default(), msg)
+                };
+                return Some(SandboxEvent::Gone { run_id, reason });
             }
         }
     }
@@ -571,14 +569,14 @@ impl K8sSandboxProvider {
 
         let (pod_store, pod_writer) = reflector::store();
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-        let pod_watcher = watcher::watcher(pod_api, watcher::Config::default().labels(&selector))
-            .default_backoff();
+        let pod_watcher =
+            watcher(pod_api, watcher::Config::default().labels(&selector)).default_backoff();
         let pod_reflector = reflector::reflector(pod_writer, pod_watcher);
 
         let (sb_store, sb_writer) = reflector::store();
         let sb_api: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-        let sb_watcher = watcher::watcher(sb_api, watcher::Config::default().labels(&selector))
-            .default_backoff();
+        let sb_watcher =
+            watcher(sb_api, watcher::Config::default().labels(&selector)).default_backoff();
         let sb_reflector = reflector::reflector(sb_writer, sb_watcher);
 
         let provider = Arc::new(Self::new(
@@ -602,7 +600,7 @@ impl K8sSandboxProvider {
     /// Emits a sandbox event to listeners.
     pub fn emit_event(&self, event: SandboxEvent) {
         // Best-effort broadcast; receivers might be closed or dropped.
-        let _ = self.events_tx.send(event);
+        self.events_tx.send(event).ok(); // receiver may be gone
     }
 }
 

@@ -22,21 +22,19 @@ fn hello() -> AgentMessage {
 }
 
 fn text_event() -> agent_message::Body {
-    agent_message::Body::TranscriptEvent(wire::Event {
+    agent_message::Body::TranscriptEvent(Event {
         schema_version: 1,
         occurred_at: None,
         turn_id: "t".into(),
-        kind: Some(wire::event::Kind::AgentMessageChunk(
-            wire::AgentMessageChunk {
-                message_id: "m".into(),
-                content: Some(wire::ContentBlock {
-                    kind: Some(wire::content_block::Kind::Text(wire::TextContent {
-                        text: "x".into(),
-                    })),
-                    hidden: false,
-                }),
-            },
-        )),
+        kind: Some(event::Kind::AgentMessageChunk(wire::AgentMessageChunk {
+            message_id: "m".into(),
+            content: Some(wire::ContentBlock {
+                kind: Some(wire::content_block::Kind::Text(wire::TextContent {
+                    text: "x".into(),
+                })),
+                hidden: false,
+            }),
+        })),
     })
 }
 
@@ -132,7 +130,7 @@ async fn transcript_writes_wait_for_the_task_lock() {
     let write =
         tokio::spawn(async move { persist_batch(&ctx, &rc, vec![msg(1, text_event())]).await });
 
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let waiting: i64 = sqlx::query_scalar(
                 "SELECT count(*) FROM pg_stat_activity
@@ -144,7 +142,7 @@ async fn transcript_writes_wait_for_the_task_lock() {
             if waiting > 0 {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
@@ -361,7 +359,7 @@ async fn serve_until(
         )
         .await
     });
-    let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let found = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(Ok(control)) = rx.recv().await {
             if control.body.as_ref().is_some_and(&wanted) {
                 return Some(Utc::now());
@@ -412,7 +410,7 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
         .unwrap();
     let task_id = env.task.id;
     let finalizing = tokio::spawn(async move { session.start_finalizing(false).await });
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let waiting: i64 = sqlx::query_scalar(
                 "SELECT count(*) FROM pg_stat_activity
@@ -424,7 +422,7 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
             if waiting > 0 {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
@@ -645,8 +643,8 @@ async fn a_hanging_forge_does_not_block_the_stream() {
     env.forge.hang_find_open_pull_request();
     let (mut session, _rx) = session_for(&env, run_id).await;
     let push = agent_message::Body::PushReport(PushReport {
-        target: df_proto::agent::v1::PushTarget::TaskBranch as i32,
-        status: df_proto::agent::v1::PushStatus::Ok as i32,
+        target: PushTarget::TaskBranch as i32,
+        status: PushStatus::Ok as i32,
         commits_ahead_of_base: 1,
         ..PushReport::default()
     });
@@ -806,8 +804,8 @@ async fn no_prompts_are_sent_once_the_run_ended() {
     assert!(!session.send_new_prompts().await.unwrap());
     assert!(rx.try_recv().is_err());
 }
-fn turn_event(kind: wire::event::Kind) -> agent_message::Body {
-    agent_message::Body::TranscriptEvent(wire::Event {
+fn turn_event(kind: event::Kind) -> agent_message::Body {
+    agent_message::Body::TranscriptEvent(Event {
         schema_version: 1,
         occurred_at: None,
         turn_id: "t".into(),
@@ -816,11 +814,11 @@ fn turn_event(kind: wire::event::Kind) -> agent_message::Body {
 }
 
 fn turn_started() -> agent_message::Body {
-    turn_event(wire::event::Kind::TurnStarted(wire::TurnStarted::default()))
+    turn_event(event::Kind::TurnStarted(wire::TurnStarted::default()))
 }
 
 fn turn_ended() -> agent_message::Body {
-    turn_event(wire::event::Kind::TurnEnded(wire::TurnEnded::default()))
+    turn_event(event::Kind::TurnEnded(wire::TurnEnded::default()))
 }
 
 /// Queues a board member's message and returns its prompt id.
@@ -1022,7 +1020,7 @@ fn timing(operation: RuntimeOperation, duration_ms: u64) -> agent_message::Body 
 }
 
 fn turn_ended_with_usage() -> agent_message::Body {
-    turn_event(wire::event::Kind::TurnEnded(wire::TurnEnded {
+    turn_event(event::Kind::TurnEnded(wire::TurnEnded {
         stop_reason: wire::StopReason::EndTurn as i32,
         usage: vec![wire::Usage {
             model_id: "claude-sonnet-5-5".into(),
@@ -1034,18 +1032,18 @@ fn turn_ended_with_usage() -> agent_message::Body {
     }))
 }
 
-fn tool_call(status: wire::ToolCallStatus) -> agent_message::Body {
-    turn_event(wire::event::Kind::ToolCall(wire::ToolCall {
+fn tool_call(status: ToolCallStatus) -> agent_message::Body {
+    turn_event(event::Kind::ToolCall(wire::ToolCall {
         tool_call_id: "call-1".into(),
-        kind: wire::ToolKind::Execute as i32,
-        origin: wire::ToolOrigin::Harness as i32,
+        kind: ToolKind::Execute as i32,
+        origin: ToolOrigin::Harness as i32,
         status: status as i32,
         ..wire::ToolCall::default()
     }))
 }
 
-fn tool_call_update(status: wire::ToolCallStatus) -> agent_message::Body {
-    turn_event(wire::event::Kind::ToolCallUpdate(wire::ToolCallUpdate {
+fn tool_call_update(status: ToolCallStatus) -> agent_message::Body {
+    turn_event(event::Kind::ToolCallUpdate(wire::ToolCallUpdate {
         tool_call_id: "call-1".into(),
         status: Some(status as i32),
         ..wire::ToolCallUpdate::default()
@@ -1099,8 +1097,8 @@ async fn every_persisted_message_is_recorded_once() {
     let run_id = env.running_run().await;
     let (mut session, _rx) = session_for(&env, run_id).await;
     let batch = vec![
-        msg(1, tool_call(wire::ToolCallStatus::InProgress)),
-        msg(2, tool_call_update(wire::ToolCallStatus::Completed)),
+        msg(1, tool_call(ToolCallStatus::InProgress)),
+        msg(2, tool_call_update(ToolCallStatus::Completed)),
         msg(3, turn_ended_with_usage()),
         msg(4, push_report()),
         msg(5, timing(RuntimeOperation::Push, 40)),

@@ -1,8 +1,8 @@
 //! Forgejo marks pull requests as work in progress by a title prefix (`WORK_IN_PROGRESS_PREFIXES`).
 
-pub const DEFAULT_PREFIXES: &str = "WIP:,[WIP]";
+pub(crate) const DEFAULT_PREFIXES: &str = "WIP:,[WIP]";
 
-pub fn parse_prefixes(list: &str) -> Vec<String> {
+pub(crate) fn parse_prefixes(list: &str) -> Vec<String> {
     list.split(',')
         .map(str::trim)
         .filter(|p| !p.is_empty())
@@ -11,7 +11,7 @@ pub fn parse_prefixes(list: &str) -> Vec<String> {
 }
 
 /// Splits a title into `(is_draft, title without marker)`, matching prefixes case-insensitively.
-pub fn split_title(title: &str, prefixes: &[String]) -> (bool, String) {
+pub(crate) fn split_title(title: &str, prefixes: &[String]) -> (bool, String) {
     let trimmed = title.trim_start();
     for prefix in prefixes {
         if let Some(head) = trimmed.get(..prefix.len())
@@ -24,7 +24,7 @@ pub fn split_title(title: &str, prefixes: &[String]) -> (bool, String) {
 }
 
 /// Title as stored in Forgejo: the first configured prefix is added for drafts.
-pub fn apply_title(title: &str, draft: bool, prefixes: &[String]) -> String {
+pub(crate) fn apply_title(title: &str, draft: bool, prefixes: &[String]) -> String {
     match prefixes.first() {
         Some(prefix) if draft => format!("{prefix} {title}"),
         _ => title.to_string(),

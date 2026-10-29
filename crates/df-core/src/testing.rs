@@ -105,7 +105,7 @@ impl FakeSandboxProvider {
 
     /// Emits a [`SandboxEvent`] to all active stream subscribers.
     pub fn emit_event(&self, event: SandboxEvent) {
-        let _ = self.events_tx.send(event);
+        self.events_tx.send(event).ok(); // no subscriber is fine
     }
 }
 
@@ -508,7 +508,7 @@ impl SecretStore for FakeSecretStore {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]

@@ -1,6 +1,6 @@
 //! The MCP server the runtime exposes to the harness.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -157,7 +157,9 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
     let (server_read, server_write) = tokio::io::split(server_io);
     let socket_path_clone = socket_path.clone();
     let _mcp_handle = tokio::spawn(async move {
-        let _ = crate::mcp::run_mcp_stream(server_read, server_write, &socket_path_clone).await;
+        crate::mcp::run_mcp_stream(server_read, server_write, &socket_path_clone)
+            .await
+            .ok();
     });
 
     let (client_read, client_write) = tokio::io::split(client_io);

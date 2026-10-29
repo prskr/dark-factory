@@ -321,3 +321,26 @@ fn test_late_usage_record_is_counted_after_mark_turn_start() {
     let (usage, _) = tracker.parse_turn_usage();
     assert_eq!(usage.iter().map(|u| u.output_tokens).sum::<u64>(), 40);
 }
+
+#[test]
+fn negative_wall_clock_budget_counts_as_exhausted() {
+    use crate::harness::BudgetTracker;
+    use df_proto::agent::v1::Budgets;
+    use df_proto::pbjson_types::Duration;
+
+    let budgets = Budgets {
+        max_wall_clock: Some(Duration {
+            seconds: -5,
+            nanos: -1,
+        }),
+        max_output_tokens: None,
+        max_turns: None,
+    };
+
+    let tracker = BudgetTracker::new(Some(&budgets));
+
+    assert_eq!(
+        tracker.remaining_wall_clock(),
+        Some(std::time::Duration::ZERO)
+    );
+}

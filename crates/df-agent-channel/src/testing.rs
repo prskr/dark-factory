@@ -173,10 +173,11 @@ impl TestServer {
         let addr = listener.local_addr()?;
         let (shutdown, stop) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
-            let _ = serve(ctx, listener, tls, async {
-                let _ = stop.await;
+            serve(ctx, listener, tls, async {
+                stop.await.ok(); // a dropped server handle stops it as well
             })
-            .await;
+            .await
+            .ok(); // the test only observes whether the task ended
         });
         Ok(Self {
             addr,
@@ -189,7 +190,7 @@ impl TestServer {
     /// Stops the server gracefully; `false` if it was still running after `within`.
     pub async fn stop(&mut self, within: Duration) -> bool {
         if let Some(tx) = self.shutdown.take() {
-            let _ = tx.send(());
+            tx.send(()).ok(); // the server may have stopped already
         }
         tokio::time::timeout(within, &mut self.task).await.is_ok()
     }
@@ -230,7 +231,7 @@ impl TestServer {
 impl Drop for TestServer {
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown.take() {
-            let _ = tx.send(());
+            tx.send(()).ok(); // the server may have stopped already
         }
         self.task.abort();
     }
@@ -286,7 +287,7 @@ impl RuntimeClient {
     /// Sends a message exactly as given (replays, gaps, large payloads).
     pub async fn send_raw(&self, msg: AgentMessage) {
         // The stream may already be closed by the server; the test then observes the status.
-        let _ = self.tx.send(msg).await;
+        self.tx.send(msg).await.ok();
     }
 
     /// Next control message; an error status ends the stream.
@@ -304,9 +305,9 @@ impl RuntimeClient {
     ) -> Result<Vec<ControlMessage>, Status> {
         let mut seen = Vec::new();
         loop {
-            let msg = tokio::time::timeout(std::time::Duration::from_secs(10), self.recv())
+            let msg = tokio::time::timeout(Duration::from_secs(10), self.recv())
                 .await
-                .map_err(|_| Status::deadline_exceeded("no matching control message"))??;
+                .map_err(|_elapsed| Status::deadline_exceeded("no matching control message"))??;
             let done = pred(&msg);
             seen.push(msg);
             if done {

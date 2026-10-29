@@ -24,7 +24,7 @@ const RUST_RULES: [&str; 4] = [
     "rust_shared_library",
 ];
 
-pub fn run(root: &Path) -> Result<()> {
+pub(crate) fn run(root: &Path) -> Result<()> {
     report("check-crates", &check(root)?)
 }
 
@@ -180,12 +180,13 @@ fn rust_rules(build: &str) -> impl Iterator<Item = Rule<'_>> {
                 continue;
             };
             let mut body = String::new();
-            let mut depth = 0i32;
+            let mut depth = 0isize;
             let mut rest = std::iter::once(line).chain(lines.by_ref().map(|(_, l)| l));
             for l in rest.by_ref() {
                 body.push_str(l);
                 body.push('\n');
-                depth += l.matches('(').count() as i32 - l.matches(')').count() as i32;
+                depth +=
+                    l.matches('(').count().cast_signed() - l.matches(')').count().cast_signed();
                 if depth <= 0 {
                     break;
                 }

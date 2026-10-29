@@ -261,11 +261,11 @@ impl GatewayConfig {
 
 /// Namespaces in which sandboxes may be granted egress to cluster Services. Mirrors the chart's
 /// `clusterTargets` value and therefore the RBAC the control plane has: it watches Services and
-/// EndpointSlices exactly there.
+/// `EndpointSlices` exactly there.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClusterTargetsConfig {
-    /// The control plane may read Services in every namespace (ClusterRole).
+    /// The control plane may read Services in every namespace (`ClusterRole`).
     pub any_namespace: bool,
     /// Namespaces it may read when `any_namespace` is `false`.
     pub namespaces: Vec<String>,
@@ -286,7 +286,7 @@ pub struct SandboxSectionConfig {
 ///
 /// This is the single place for provisioning defaults: every key missing from the YAML takes
 /// its value from [`Default`]. `storageClass` and `runtimeClassName` default to `None` (empty
-/// string counts as unset) and then fall back to the cluster's default StorageClass and runtime.
+/// string counts as unset) and then fall back to the cluster's default `StorageClass` and runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SandboxProvisioningConfig {
@@ -318,14 +318,14 @@ pub struct SandboxProvisioningConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SandboxEndpointsConfig {
-    /// Fixed control plane ClusterIP; resolved from the Service when unset.
+    /// Fixed control plane `ClusterIP`; resolved from the Service when unset.
     pub control_plane_ip: Option<std::net::IpAddr>,
-    /// Fixed gateway ClusterIP; resolved from the Service when unset.
+    /// Fixed gateway `ClusterIP`; resolved from the Service when unset.
     pub gateway_ip: Option<std::net::IpAddr>,
-    /// Service name used to look up the control plane ClusterIP. Without it, `dark-factory`
+    /// Service name used to look up the control plane `ClusterIP`. Without it, `dark-factory`
     /// tries `<instanceName>-control-plane` and `dark-factory-control-plane`.
     pub control_plane_service_name: Option<String>,
-    /// Service name used to look up the gateway ClusterIP. Without it, `dark-factory` tries
+    /// Service name used to look up the gateway `ClusterIP`. Without it, `dark-factory` tries
     /// `<instanceName>-gateway`, `<instanceName>-egress-gateway` and `dark-factory-gateway`.
     pub gateway_service_name: Option<String>,
     /// TLS server name of the control plane agent endpoint; defaults to
@@ -659,7 +659,7 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    const VALID_FIXTURE: &str = r#"
+    const VALID_FIXTURE: &str = r"
 instanceName: homelab-dev
 database:
   host: pg.dark-factory.svc
@@ -684,7 +684,7 @@ gateway:
 sandbox:
   namespace: dark-factory-sandboxes
   instanceNamespace: dark-factory
-"#;
+";
 
     #[test]
     fn auth_is_optional_and_roles_claim_defaults_to_roles() {
@@ -902,13 +902,13 @@ sandbox:
 
     #[test]
     fn run_orchestration_sections_have_defaults_and_can_be_overridden() {
-        let minimal = r#"
+        let minimal = r"
 database:
   host: pg
   database: d
   user: u
   passwordFile: /p
-"#;
+";
         let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
         assert!(cfg.agent.tls.is_none());
         assert_eq!(cfg.agent.commit_identity.name, "Dark Factory");
@@ -970,12 +970,12 @@ harness:
 
     #[test]
     fn missing_required_field_yields_error_naming_field() {
-        let missing_password_file = r#"
+        let missing_password_file = r"
 database:
   host: pg.dark-factory.svc
   database: dark_factory
   user: dark_factory_app
-"#;
+";
         let err = InstanceConfig::from_yaml_str(missing_password_file).unwrap_err();
         let msg = err.to_string();
         assert!(

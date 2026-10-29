@@ -53,10 +53,12 @@ impl AgentState {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "stable fallback dir when HOME is unset; a tempfile dir would be deleted, sessions outlive the process"
+    )]
     pub fn default_session_dir() -> PathBuf {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
+        let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
         home.join(".fake-acp").join("sessions")
     }
 }
@@ -65,10 +67,8 @@ impl AgentState {
 pub fn build_agent(
     state: Arc<Mutex<AgentState>>,
 ) -> Builder<
-    agent_client_protocol::role::acp::Agent,
-    impl HandleDispatchFrom<
-        <agent_client_protocol::role::acp::Agent as agent_client_protocol::role::Role>::Counterpart,
-    >,
+    Agent,
+    impl HandleDispatchFrom<<Agent as agent_client_protocol::role::Role>::Counterpart>,
 > {
     let state_new = Arc::clone(&state);
     let state_load = Arc::clone(&state);
@@ -126,7 +126,7 @@ pub fn build_agent(
 fn handle_initialize(
     req: InitializeRequest,
     responder: Responder<InitializeResponse>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), Error> {
     let caps = AgentCapabilities::new().load_session(true);
     responder.respond(InitializeResponse::new(req.protocol_version).agent_capabilities(caps))
 }
@@ -135,13 +135,14 @@ async fn handle_new_session(
     state: &Mutex<AgentState>,
     req: NewSessionRequest,
     responder: Responder<NewSessionResponse>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), Error> {
     let session_uuid = Uuid::now_v7().to_string();
     let session_id = SessionId::new(&*session_uuid);
 
     let mut st = state.lock().await;
-    let _ = std::fs::create_dir_all(&st.session_dir);
-    let _ = std::fs::write(st.session_dir.join(&session_uuid), "");
+    // The session file only marks the session as existing; the fake agent does not need it.
+    std::fs::create_dir_all(&st.session_dir).ok();
+    std::fs::write(st.session_dir.join(&session_uuid), "").ok();
 
     st.sessions.insert(
         session_uuid,
@@ -162,7 +163,7 @@ async fn handle_load_session(
     req: LoadSessionRequest,
     responder: Responder<LoadSessionResponse>,
     cx: &ConnectionTo<Client>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), Error> {
     let session_id_str = req.session_id.to_string();
     let mut st = state.lock().await;
 
@@ -218,7 +219,7 @@ async fn handle_prompt(
     req: PromptRequest,
     responder: Responder<PromptResponse>,
     cx: &ConnectionTo<Client>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), Error> {
     let (turn, ctx) = match take_next_turn(state, &req.session_id).await {
         NextTurn::Missing => {
             return responder.respond_with_error(Error::invalid_params().data("session not found"));
@@ -302,7 +303,8 @@ async fn take_next_turn(state: &Mutex<AgentState>, session_id: &SessionId) -> Ne
 
 /// Sends a session update to the client; a closed connection is not an error for the script.
 fn send_update(cx: &ConnectionTo<Client>, session_id: &SessionId, update: SessionUpdate) {
-    let _ = cx.send_notification(SessionNotification::new(session_id.clone(), update));
+    cx.send_notification(SessionNotification::new(session_id.clone(), update))
+        .ok();
 }
 
 /// A text chunk of the agent's message, or of its thoughts if `thought`.
@@ -382,6 +384,10 @@ fn play_usage(usage_step: &UsageStep, ctx: &TurnContext, cx: &ConnectionTo<Clien
 }
 
 /// Runs a shell command in the session's working directory; failures are only logged.
+#[expect(
+    clippy::print_stderr,
+    reason = "the fake agent reports failures on stderr, the harness captures it"
+)]
 async fn run_shell(cmd: &str, cwd: &Path) {
     let output = tokio::process::Command::new("sh")
         .arg("-c")

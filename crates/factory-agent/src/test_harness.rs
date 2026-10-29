@@ -274,14 +274,15 @@ impl MockControlPlane {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            let _ = Server::builder()
+            Server::builder()
                 .tls_config(tls_config)
                 .expect("valid server tls config")
                 .add_service(AgentChannelServer::new(service))
                 .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
-                    let _ = shutdown_rx.await;
+                    shutdown_rx.await.ok();
                 })
-                .await;
+                .await
+                .ok();
         });
 
         Ok(Self {
@@ -303,7 +304,7 @@ impl MockControlPlane {
             let res: Result<ControlMessage, Status> = Ok(msg);
             tx.send(res)
                 .await
-                .map_err(|_| anyhow::anyhow!("stream closed"))
+                .map_err(|_closed| anyhow::anyhow!("stream closed"))
         } else {
             Err(anyhow::anyhow!("no active stream"))
         }
@@ -317,7 +318,7 @@ impl MockControlPlane {
 
     pub fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+            tx.send(()).ok();
         }
     }
 }
@@ -361,40 +362,13 @@ impl LocalHttpsGitServer {
         });
 
         std::thread::spawn(move || {
-            loop {
-                if shutdown_rx.try_recv().is_ok() {
-                    break;
-                }
-                match listener.accept() {
-                    Ok((mut sock, _)) => {
-                        let config = Arc::clone(&server_config);
-                        let root = git_project_root.clone();
-                        let expected = expected_auth_header.clone();
-                        std::thread::spawn(move || {
-                            let _ = sock.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-                            let _ =
-                                sock.set_write_timeout(Some(std::time::Duration::from_secs(10)));
-                            let _ = sock.set_nonblocking(false);
-                            if let Ok(mut conn) = rustls::ServerConnection::new(config) {
-                                let mut stream = rustls::Stream::new(&mut conn, &mut sock);
-                                let _ = handle_git_http_request(
-                                    &mut stream,
-                                    &root,
-                                    expected.as_deref(),
-                                );
-                                // Responses end at EOF: GnuTLS clients reject it without close_notify.
-                                // Best effort, the client may already be gone.
-                                conn.send_close_notify();
-                                let _ = conn.complete_io(&mut sock);
-                            }
-                        });
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(_) => break,
-                }
-            }
+            accept_git_connections(
+                &listener,
+                &mut shutdown_rx,
+                &server_config,
+                &git_project_root,
+                expected_auth_header.as_deref(),
+            );
         });
 
         Ok(Self {
@@ -407,9 +381,58 @@ impl LocalHttpsGitServer {
 
     pub fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+            tx.send(()).ok();
         }
     }
+}
+
+/// Accepts connections of the git test server until `shutdown_rx` fires; each one is served on its
+/// own thread.
+fn accept_git_connections(
+    listener: &std::net::TcpListener,
+    shutdown_rx: &mut oneshot::Receiver<()>,
+    server_config: &Arc<rustls::ServerConfig>,
+    git_project_root: &Path,
+    expected_auth: Option<&str>,
+) {
+    while shutdown_rx.try_recv().is_err() {
+        match listener.accept() {
+            Ok((sock, _)) => {
+                let config = Arc::clone(server_config);
+                let root = git_project_root.to_path_buf();
+                let expected = expected_auth.map(str::to_owned);
+                std::thread::spawn(move || {
+                    if let Err(error) = serve_git_connection(sock, config, &root, expected) {
+                        tracing::warn!(error = %error, "git test server connection failed");
+                    }
+                });
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// Serves one TLS connection of the git test server.
+fn serve_git_connection(
+    mut sock: std::net::TcpStream,
+    config: Arc<rustls::ServerConfig>,
+    root: &Path,
+    expected_auth: Option<String>,
+) -> std::io::Result<()> {
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+    sock.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
+    sock.set_nonblocking(false)?;
+    let mut conn = rustls::ServerConnection::new(config).map_err(std::io::Error::other)?;
+    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
+    let handled = handle_git_http_request(&mut stream, root, expected_auth.as_deref());
+    // Responses end at EOF: GnuTLS clients reject it without close_notify, so send it even
+    // after a failed request.
+    conn.send_close_notify();
+    conn.complete_io(&mut sock).ok(); // best effort, the client may already be gone
+    handled
 }
 
 fn simple_base64_encode(data: &[u8]) -> String {
@@ -417,14 +440,14 @@ fn simple_base64_encode(data: &[u8]) -> String {
     let mut out = String::new();
     let mut i = 0;
     while i < data.len() {
-        let b0 = data[i] as u32;
+        let b0 = u32::from(data[i]);
         let b1 = if i + 1 < data.len() {
-            data[i + 1] as u32
+            u32::from(data[i + 1])
         } else {
             0
         };
         let b2 = if i + 2 < data.len() {
-            data[i + 2] as u32
+            u32::from(data[i + 2])
         } else {
             0
         };
@@ -484,10 +507,7 @@ fn handle_git_http_request<S: std::io::Read + std::io::Write>(
 
     // Check Authentication
     if let Some(expected) = expected_auth_header {
-        let auth = headers
-            .get("authorization")
-            .map(String::as_str)
-            .unwrap_or("");
+        let auth = headers.get("authorization").map_or("", String::as_str);
         if auth != expected {
             let resp = b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Git Access\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             let stream = reader.get_mut();
@@ -581,11 +601,13 @@ impl MockAcpAgent {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_load_session(mut self, allow: bool) -> Self {
         self.allow_load_session = allow;
         self
     }
 
+    #[must_use]
     pub fn with_existing_session(self, session_id: &str) -> Self {
         self.existing_sessions
             .lock()
@@ -597,11 +619,9 @@ impl MockAcpAgent {
     pub fn build(
         &self,
     ) -> Builder<
-        agent_client_protocol::role::acp::Agent,
-        impl HandleDispatchFrom<
-            <agent_client_protocol::role::acp::Agent as agent_client_protocol::role::Role>::Counterpart,
-        > + use<>,
-    >{
+        Agent,
+        impl HandleDispatchFrom<<Agent as agent_client_protocol::role::Role>::Counterpart> + use<>,
+    > {
         let allow_load = self.allow_load_session;
         let existing = Arc::clone(&self.existing_sessions);
         let mcp_servers_created = Arc::clone(&self.received_mcp_servers);

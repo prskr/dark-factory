@@ -27,7 +27,7 @@ const WRITE_BUDGET: usize = 8192;
 /// newline.
 const MAX_LINE: usize = 4096;
 
-pub struct State {
+pub(crate) struct State {
     wasi: WasiCtx,
     table: ResourceTable,
     http: WasiHttpCtx,
@@ -37,7 +37,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
+    pub(crate) fn new(
         plugin: &str,
         policy: HttpPolicy,
         settings: HashMap<String, String>,
@@ -59,7 +59,7 @@ impl State {
         }
     }
 
-    pub fn config(&mut self) -> WasiConfig<'_> {
+    pub(crate) fn config(&mut self) -> WasiConfig<'_> {
         WasiConfig::from(&self.config)
     }
 }

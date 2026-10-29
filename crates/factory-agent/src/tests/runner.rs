@@ -1,6 +1,6 @@
 //! Run outcomes and `run_session` scenarios.
 
-#![allow(
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]
@@ -176,10 +176,7 @@ sessions:
     };
     let (result, _) = scenario.release_up_front().run(|_, _| {}).await;
     assert_eq!(result.outcome, RunOutcome::EndTurn);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::EndTurn as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::EndTurn as i32);
 }
 
 #[tokio::test]
@@ -262,10 +259,7 @@ sessions:
         .run(answer_complete_task)
         .await;
     assert_eq!(result.outcome, RunOutcome::Completed);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::Completed as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::Completed as i32);
 
     // Session events appear in order; no prompt content, tool output or credentials are logged.
     let log = logs.text();
@@ -316,22 +310,19 @@ sessions:
 async fn test_scenario_outcome_provider_rate_limited() {
     use df_proto::agent::v1::RunOutcome;
 
-    let script = r#"
+    let script = r"
 sessions:
   new:
     - - end:
           rate_limited:
             retry_after_seconds: 3600
-"#;
+";
     let Some(scenario) = RunScenario::new("run-rate-limited", script) else {
         return;
     };
     let (result, _) = scenario.empty_prompt().run(|_, _| {}).await;
     assert_eq!(result.outcome, RunOutcome::RateLimited);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::RateLimited as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::RateLimited as i32);
     assert!(result.run_report.retry_after.is_some());
 }
 
@@ -390,10 +381,7 @@ sessions:
         .run(queue_prompt)
         .await;
     assert_eq!(result.outcome, RunOutcome::LimitReached);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::LimitReached as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::LimitReached as i32);
     assert!(result.run_report.detail.contains("Turn budget"));
 }
 
@@ -403,11 +391,11 @@ async fn test_scenario_outcome_wall_clock_budget_exceeded() {
     use df_proto::pbjson_types::Duration;
 
     // Agent hangs until cancelled
-    let script = r#"
+    let script = r"
 sessions:
   new:
     - - end: hang
-"#;
+";
     let Some(scenario) = RunScenario::new("run-wall-clock-limit", script) else {
         return;
     };
@@ -426,10 +414,7 @@ sessions:
         .run(|_, _| {})
         .await;
     assert_eq!(result.outcome, RunOutcome::LimitReached);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::LimitReached as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::LimitReached as i32);
     assert!(result.run_report.detail.contains("Wall clock budget"));
 }
 
@@ -439,11 +424,11 @@ async fn test_scenario_outcome_cancelled_by_control_plane() {
     use tokio::sync::mpsc;
 
     // Agent hangs until cancelled
-    let script = r#"
+    let script = r"
 sessions:
   new:
     - - end: hang
-"#;
+";
     let Some(scenario) = RunScenario::new("run-cancel", script) else {
         return;
     };
@@ -473,10 +458,7 @@ sessions:
         .await
         .expect("run_session should succeed");
     assert_eq!(result.outcome, RunOutcome::Cancelled);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::Cancelled as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::Cancelled as i32);
     cp_task.abort();
 }
 
@@ -485,20 +467,17 @@ async fn test_scenario_outcome_harness_crashed() {
     use df_proto::agent::v1::RunOutcome;
 
     // Agent executes exit(1) crash
-    let script = r#"
+    let script = r"
 sessions:
   new:
     - - end: crash
-"#;
+";
     let Some(scenario) = RunScenario::new("run-crash", script) else {
         return;
     };
     let (result, _) = scenario.empty_prompt().run(|_, _| {}).await;
     assert_eq!(result.outcome, RunOutcome::Failed);
-    assert_eq!(
-        result.run_report.outcome,
-        df_proto::agent::v1::RunOutcome::Failed as i32
-    );
+    assert_eq!(result.run_report.outcome, RunOutcome::Failed as i32);
 }
 
 /// Runs `run_session` against a directory layout in `temp` with the given workspace.

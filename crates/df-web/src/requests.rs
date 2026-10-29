@@ -37,7 +37,7 @@ const POLL: Duration = Duration::from_secs(5);
 /// Settling time before the page is re-rendered after a change.
 const DEBOUNCE: Duration = Duration::from_millis(100);
 
-pub fn routes() -> Router<WebState> {
+pub(crate) fn routes() -> Router<WebState> {
     Router::new()
         .route("/requests", get(inbox))
         .route("/requests/events", get(events))
@@ -48,7 +48,7 @@ pub fn routes() -> Router<WebState> {
 
 /// A request with what its card shows besides the row.
 #[derive(Debug, Clone)]
-pub struct CardData {
+pub(crate) struct CardData {
     pub row: RequestRow,
     pub task_key: String,
     pub task_title: String,
@@ -59,7 +59,7 @@ pub struct CardData {
 }
 
 impl CardData {
-    pub fn new(
+    pub(crate) fn new(
         types: &ApprovalTypes,
         row: RequestRow,
         task_key: String,
@@ -82,7 +82,7 @@ impl CardData {
 }
 
 /// Cards of the requests of a task (the timeline).
-pub async fn task_cards(
+pub(crate) async fn task_cards(
     state: &WebState,
     task_id: TaskId,
     key: &str,
@@ -103,12 +103,12 @@ pub async fn task_cards(
 }
 
 /// The card's DOM id.
-pub fn card_id(id: RequestId) -> String {
+pub(crate) fn card_id(id: RequestId) -> String {
     format!("request-{id}")
 }
 
 /// The pending-count badge of the navigation entry `id`; empty at zero.
-pub fn count_badge(id: &str, count: i64) -> Markup {
+pub(crate) fn count_badge(id: &str, count: i64) -> Markup {
     html! {
         span id=(id) aria-live="polite"
             class={"absolute -right-1 -top-1 min-w-5 rounded-full bg-accent px-1 text-center text-xs font-semibold text-on-accent" @if count == 0 { " hidden" }} {
@@ -118,7 +118,7 @@ pub fn count_badge(id: &str, count: i64) -> Markup {
 }
 
 /// The pending requests, or the empty state.
-pub fn request_list(cards: &[CardData]) -> Markup {
+pub(crate) fn request_list(cards: &[CardData]) -> Markup {
     html! {
         div id="request-list" class="mx-auto max-w-3xl space-y-3" {
             @if cards.is_empty() {
@@ -138,7 +138,7 @@ pub fn request_list(cards: &[CardData]) -> Markup {
 
 /// One request: what it asks, its state and, while pending, the ways to decide it. `error`
 /// is the reason the last decision failed.
-pub fn request_card(card: &CardData, error: Option<&str>) -> Markup {
+pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
     let row = &card.row;
     let id = card_id(row.id);
     let target = format!("#{id}");

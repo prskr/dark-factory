@@ -28,7 +28,7 @@ const PERSONA_SELECT: &str =
 
 /// The status filter of the task list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StatusFilter {
+pub(crate) enum StatusFilter {
     #[default]
     Active,
     Waiting,
@@ -42,7 +42,7 @@ pub enum StatusFilter {
 
 impl StatusFilter {
     /// The filters that have a chip.
-    pub const CHIPS: [Self; 4] = [Self::Active, Self::Waiting, Self::Done, Self::All];
+    pub(crate) const CHIPS: [Self; 4] = [Self::Active, Self::Waiting, Self::Done, Self::All];
     const VALUES: [Self; 6] = [
         Self::Active,
         Self::Waiting,
@@ -53,14 +53,14 @@ impl StatusFilter {
     ];
 
     /// Parses the `status` query parameter; unknown values mean the default.
-    pub fn parse(value: Option<&str>) -> Self {
+    pub(crate) fn parse(value: Option<&str>) -> Self {
         Self::VALUES
             .into_iter()
             .find(|f| Some(f.as_str()) == value)
             .unwrap_or_default()
     }
 
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Waiting => "waiting",
@@ -82,7 +82,7 @@ impl StatusFilter {
         }
     }
 
-    pub const fn group(self) -> Option<StatusSet> {
+    pub(crate) const fn group(self) -> Option<StatusSet> {
         match self {
             Self::Active => Some(StatusSet::Active),
             Self::Waiting => Some(StatusSet::Waiting),
@@ -96,20 +96,20 @@ impl StatusFilter {
 
 /// The filters of the task list; they live in the URL.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Filters {
+pub(crate) struct Filters {
     pub status: StatusFilter,
     pub project: Option<String>,
 }
 
 impl Filters {
-    pub fn new(status: Option<&str>, project: Option<&str>) -> Self {
+    pub(crate) fn new(status: Option<&str>, project: Option<&str>) -> Self {
         Self {
             status: StatusFilter::parse(status),
             project: project.filter(|p| !p.is_empty()).map(str::to_string),
         }
     }
 
-    pub fn to_db(&self) -> df_db::task_views::TaskFilter {
+    pub(crate) fn to_db(&self) -> df_db::task_views::TaskFilter {
         df_db::task_views::TaskFilter {
             group: self.status.group(),
             project_key: self.project.clone(),
@@ -117,7 +117,7 @@ impl Filters {
     }
 
     /// The query string (with `?`) of these filters; defaults are left out.
-    pub fn query(&self) -> String {
+    pub(crate) fn query(&self) -> String {
         let mut parts = Vec::new();
         if self.status != StatusFilter::default() {
             parts.push(format!("status={}", self.status.as_str()));
@@ -133,7 +133,7 @@ impl Filters {
     }
 
     /// The composer's URL; the current project filter is its default project.
-    pub fn compose_href(&self) -> String {
+    pub(crate) fn compose_href(&self) -> String {
         match &self.project {
             Some(project) => format!("/tasks/compose?project={}", url_encode(project)),
             None => "/tasks/compose".to_string(),
@@ -158,7 +158,11 @@ impl Filters {
 /// The rows of the task list; replaced as a whole when a task changes. `current` is the open
 /// task. Clicking a row swaps the transcript and details of that task in without touching the
 /// list; `aria-current` is moved by the click and ignored by the live morph (see `layout`).
-pub fn task_rows(items: &[TaskListItem], current: Option<&str>, filters: &Filters) -> Markup {
+pub(crate) fn task_rows(
+    items: &[TaskListItem],
+    current: Option<&str>,
+    filters: &Filters,
+) -> Markup {
     let query = filters.query();
     html! {
         ul id="task-rows" {
@@ -219,7 +223,7 @@ fn empty_list(filters: &Filters) -> Markup {
 
 /// The list column: title row with the project menu, status chips, the live list and its stream.
 /// `user` is the signed-in board member, shown as the profile menu on phones.
-pub fn list_column(
+pub(crate) fn list_column(
     items: &[TaskListItem],
     projects: &[ProjectFilterItem],
     filters: &Filters,
@@ -278,7 +282,7 @@ pub fn list_column(
 }
 
 /// Key, title with inline rename, status and the details button; updated live.
-pub fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
+pub(crate) fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
     let action = format!("/tasks/{}/title", task.key);
     html! {
         header id="task-head" class="border-b border-line bg-panel px-2 py-2 lg:px-4" {
@@ -339,7 +343,7 @@ fn queued_state(message: &TaskMessageRow, task_status: &str) -> QueuedState {
 /// With messages, a header reads "N queued · `persona` reads them at the next turn" ("N queued ·
 /// sent with the next run" when the task ended) above a list of single-line rows that shows at
 /// most three of them and scrolls inside itself. Without messages there is no header.
-pub fn pending_region(
+pub(crate) fn pending_region(
     key: &str,
     persona: &str,
     task_status: &str,
@@ -382,7 +386,7 @@ pub fn pending_region(
 
 /// The queued stack and the message input below the transcript. One Alpine scope holds the
 /// draft and the edit state, so the stack's buttons and the input share them (design D3).
-pub fn message_area(
+pub(super) fn message_area(
     key: &str,
     persona: &str,
     task_status: &str,
@@ -427,7 +431,7 @@ pub fn message_area(
 /// Status line, links, project, persona and branch; updated live. It also renders the narrow
 /// strip the details collapse to: status dot, links to the pull request and issue (icons with
 /// tooltips) and the control that shows the details again.
-pub fn details_region(task: &TaskDetail) -> Markup {
+pub(crate) fn details_region(task: &TaskDetail) -> Markup {
     let branch = task
         .key
         .parse::<TaskKey>()
@@ -535,7 +539,7 @@ fn strip_link(url: &str, label: &str, glyph: Icon) -> Markup {
 
 /// The runs of the task as cards (`#n`, status, start time, one line of detail and the token
 /// table per model); updated live.
-pub fn runs_region(runs: &[RunView], persona_model: Option<&str>) -> Markup {
+pub(crate) fn runs_region(runs: &[RunView], persona_model: Option<&str>) -> Markup {
     html! {
         div id="runs" class="ws-details-full ws-runs" {
             @if !runs.is_empty() {
@@ -633,7 +637,7 @@ fn run_detail(detail: &str) -> Markup {
 }
 
 /// The details panel: bottom sheet, slide-over or column depending on the width.
-pub fn details_column(task: &TaskDetail, runs: &[RunView]) -> Markup {
+pub(super) fn details_column(task: &TaskDetail, runs: &[RunView]) -> Markup {
     details_panel(
         "Details",
         html! { (details_region(task)) (runs_region(runs, task.persona_model.as_deref())) },
@@ -643,7 +647,7 @@ pub fn details_column(task: &TaskDetail, runs: &[RunView]) -> Markup {
 /// Values of the composer form.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(default)]
-pub struct TaskForm {
+pub(crate) struct TaskForm {
     pub description: String,
     pub project: String,
     pub persona: String,
@@ -651,14 +655,14 @@ pub struct TaskForm {
 }
 
 /// Projects and personas to choose from, as `(id, label)`.
-pub struct Choices {
+pub(crate) struct Choices {
     pub projects: Vec<(String, String)>,
     pub personas: Vec<(String, String)>,
 }
 
 /// The composer form. The first project/persona of the lists apply unless the values or the
 /// browser's last choice say otherwise (`x-init`).
-pub fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Choices) -> Markup {
+pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Choices) -> Markup {
     let project = if values.project.is_empty() {
         choices
             .projects
@@ -732,7 +736,7 @@ pub fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Choices) 
 
 /// The composer as a dialog without frame (bottom sheet on phones), or a hint when nothing can
 /// be chosen yet.
-pub fn composer_dialog(values: &TaskForm, errors: &FormErrors, choices: &Choices) -> Markup {
+pub(super) fn composer_dialog(values: &TaskForm, errors: &FormErrors, choices: &Choices) -> Markup {
     if choices.projects.is_empty() || choices.personas.is_empty() {
         let body = html! {
             div class="rounded-2xl border border-line bg-panel p-4 shadow-lg" {

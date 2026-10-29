@@ -219,8 +219,7 @@ impl OidcClient {
             .map_err(|e| OidcError::IdToken(e.to_string()))?;
         let new_refresh = token
             .refresh_token()
-            .map(|t| t.secret().clone())
-            .unwrap_or_else(|| refresh_token.secret().clone());
+            .map_or_else(|| refresh_token.secret().clone(), |t| t.secret().clone());
         Ok(self.identity(
             claims.issuer().to_string(),
             claims.subject().to_string(),
@@ -306,9 +305,9 @@ fn roles_from_payload(
 /// Whether the URL points at this machine (`localhost`, `127.0.0.0/8` or `::1`).
 fn is_loopback(url: &Url) -> bool {
     match url.host() {
-        Some(openidconnect::url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
-        Some(openidconnect::url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(openidconnect::url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
         None => false,
     }
 }

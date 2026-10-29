@@ -161,7 +161,7 @@ pub const INSTANCE_PERMISSIONS: &[RequiredPermission] = &[
 ];
 
 /// Required permissions checked in every cluster-target namespace (or cluster-wide with
-/// `clusterTargets.anyNamespace`): resolving Services and watching Services and EndpointSlices.
+/// `clusterTargets.anyNamespace`): resolving Services and watching Services and `EndpointSlices`.
 pub const TARGET_PERMISSIONS: &[RequiredPermission] = &[
     RequiredPermission {
         group: "",
@@ -196,7 +196,7 @@ pub enum StartupCheckError {
     #[error("configured sandbox namespace `{0}` does not exist")]
     NamespaceNotFound(String),
     /// Every missing permission of every checked namespace, each as
-    /// `<verb> <resource>[.<group>] in namespace `<ns>``.
+    /// `<verb> <resource>[.<group>] in namespace <ns>`.
     #[error("missing required permissions: {}", .missing.join("; "))]
     MissingPermissions { missing: Vec<String> },
     #[error("kubernetes API error during startup check: {0}")]
@@ -305,7 +305,7 @@ async fn check_permissions(
         let create_fut = tokio::time::timeout(K8S_API_TIMEOUT, ssar_api.create(&pp, &req));
         match create_fut.await {
             Ok(Ok(review)) => {
-                let allowed = review.status.map(|s| s.allowed).unwrap_or(false);
+                let allowed = review.status.is_some_and(|s| s.allowed);
                 if !allowed {
                     let desc = if perm.group.is_empty() {
                         format!("{} {}", perm.verb, perm.resource)
@@ -375,7 +375,7 @@ mod tests {
         );
     }
 
-    /// Answers every SelfSubjectAccessReview with `allow(namespace, resource, verb)` and records
+    /// Answers every `SelfSubjectAccessReview` with `allow(namespace, resource, verb)` and records
     /// the requested `(namespace, resource, verb)` triples.
     fn spawn_ssar_responder(
         mut handle: mock::Handle<http::Request<kube::client::Body>, http::Response<String>>,
@@ -536,9 +536,12 @@ mod tests {
     async fn startup_reports_gaps_in_every_namespace_not_only_the_first() {
         let (mock_service, handle) = mock::pair();
         let responder = spawn_ssar_responder(handle, |ns, resource, verb| {
-            !(ns == Some("sandboxes") && resource == "persistentvolumeclaims" && verb == "create")
-                && !(ns == Some("instance") && resource == "secrets")
-                && !(ns == Some("forgejo") && resource == "services" && verb == "list")
+            let denied = (ns == Some("sandboxes")
+                && resource == "persistentvolumeclaims"
+                && verb == "create")
+                || (ns == Some("instance") && resource == "secrets")
+                || (ns == Some("forgejo") && resource == "services" && verb == "list");
+            !denied
         });
         let client = Client::new(mock_service, "default");
         let targets = ClusterTargetsConfig {

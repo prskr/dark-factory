@@ -163,7 +163,7 @@ async fn allocate_task_key(
     let project_key =
         ProjectKey::new(project_alloc.key).map_err(|e| DbError::InvalidData(e.to_string()))?;
     let number = u64::try_from(project_alloc.allocated_number)
-        .map_err(|_| DbError::InvalidData("negative task number".into()))?;
+        .map_err(|_negative| DbError::InvalidData("negative task number".into()))?;
     let task_key =
         TaskKey::new(project_key, number).map_err(|e| DbError::InvalidData(e.to_string()))?;
     Ok((task_key, project_alloc.allocated_number))
@@ -762,7 +762,7 @@ pub async fn mark_task_done(
         .bind(task_id.as_uuid())
         .execute(&mut *tx)
         .await?;
-    let idle_run: Option<uuid::Uuid> = sqlx::query_scalar(
+    let idle_run: Option<Uuid> = sqlx::query_scalar(
         "UPDATE runs SET state = 'finalizing' WHERE task_id = $1 AND state = 'awaiting_input'
          RETURNING id",
     )
