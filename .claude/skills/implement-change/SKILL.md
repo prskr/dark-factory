@@ -34,7 +34,7 @@ The implementer cannot ask questions and has no judgement about the look, so the
 
 ## 2. Implement
 
-Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Pass the same status with every fix round. Remember its agent ID so later rounds can reach it with `SendMessage`.
+Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Before every fix round, probe the socket again and pass the current status: a socket can stop answering, or come back, during a run. Remember its agent ID so later rounds can reach it with `SendMessage`.
 
 When it reports:
 - `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/opsx:update` and stop.
@@ -98,19 +98,20 @@ Write the user's decision to the ledger before acting on it.
 
 When no blocking finding is open, or the user chose "Stop here" (or the fix-round limit was hit):
 
-1. **Bazel build.** Reviewers only read code. If the change touched any `Cargo.toml` or `Cargo.lock`, run `bazel --bazelrc=.bazelrc.agents build --lockfile_mode=error //crates/... //plugins/...` (see the `rust` skill). A failure goes back to the implementer as a blocking fix round.
-2. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
+1. **Container tests.** Reviewers only read code, so a container-backed test that never ran leaves the paths it covers unverified. If any implementer report lists skipped container-backed tests, probe the socket again. If one answers, send the implementer a fix round that runs them (cargo crate by crate and `bazel --bazelrc=.bazelrc.agents test //crates/... //plugins/...`, which runs test binaries in parallel); a failure is a blocking finding. If none answers, ask with `AskUserQuestion`: "Start the socket and retry (Recommended)" / "Finish untested". Never record `done` on "Finish untested": the status is `untested`, with the skipped tests listed.
+2. **Bazel build.** Reviewers only read code. If the change touched any `Cargo.toml` or `Cargo.lock`, run `bazel --bazelrc=.bazelrc.agents build --lockfile_mode=error //crates/... //plugins/...` (see the `rust` skill). A failure goes back to the implementer as a blocking fix round.
+3. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
    - the next free ID from the header, and update the "next free ID" line
    - an "Origin of TD-x to TD-y: code review of `<change>` (<date>)" line
    - a summary table row and a `### TD-n (<finding IDs>). <title>` entry: what is wrong, when it matters, how to fix it
    
    Show the user the entries before you write them.
-3. **Ledger.** Set the status to `done` only if no blocking finding is open. If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
-4. **Commit** the ledger and the tech-debt changes: `wip(<change>): review log and tech debt` (the ledger status is `done` or `stopped` as above).
-5. **Report**:
-   - status (`done` or `stopped` with the open blocking findings), tasks `n/m`, rounds run
+4. **Ledger.** Set the status to `done` only if no blocking finding is open and the container-backed tests ran (step 1). If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
+5. **Commit** the ledger and the tech-debt changes: `wip(<change>): review log and tech debt` (the ledger status is `done`, `untested` or `stopped` as above).
+6. **Report**:
+   - status (`done`, `untested` with the skipped container tests, or `stopped` with the open blocking findings), tasks `n/m`, rounds run
    - findings fixed, deferred (with TD IDs), cosmetic, rejected
-   - container tests skipped (from the implementer reports), so CI covers them
+   - container tests skipped (from the implementer reports): lead the report with them if the status is `untested`
    - next steps: squash the `wip(<change>)` commits (`git reset --soft BASE` and commit again; ask before doing this), then `/opsx:archive`. Before rebasing onto `main`, check whether commits below BASE already landed on `main` under other SHAs (`git log --oneline $(git merge-base HEAD main)..BASE`). If so, move only the squashed commit: `git rebase --onto main BASE`. The ledger is archived with the change.
 
 ## Ledger template
@@ -120,7 +121,7 @@ When no blocking finding is open, or the user chose "Stop here" (or the fix-roun
 
 - BASE: <sha>
 - Store: <id or none>
-- Status: in-progress | stopped | done
+- Status: in-progress | stopped | untested | done
 - Implementer agent: <id>
 
 ## Round 1 (<date>)
