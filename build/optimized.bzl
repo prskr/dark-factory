@@ -10,12 +10,13 @@ _opt_transition = transition(
 )
 
 def _optimized_impl(ctx):
-    return [ctx.attr.src[0][DefaultInfo]]
+    # Only the files: forwarding the `DefaultInfo` of a binary would claim its executable.
+    return [DefaultInfo(files = ctx.attr.src[0][DefaultInfo].files)]
 
 optimized = rule(
     implementation = _optimized_impl,
     attrs = {
         "src": attr.label(cfg = _opt_transition, mandatory = True),
     },
-    doc = "Forwards the files of `src`, built in opt mode (e.g. a plugin component that ships in an image).",
+    doc = "Forwards the files of `src`, built in opt mode (e.g. a binary or plugin component that ships in an image).",
 )
