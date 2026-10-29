@@ -11,7 +11,7 @@ use df_core::ids::RunId;
 use df_core::seams::{PeerIdentity, ProviderError, RunSandboxSpec, SandboxEvent, SandboxProvider};
 use futures::stream::{BoxStream, Stream};
 use futures::{StreamExt as _, future};
-use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Service};
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Service, ServicePort};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -111,10 +111,6 @@ async fn resolve_call<T>(
 /// A named `targetPort` is resolved through the Service's EndpointSlices, whose port entries are
 /// named after the Service port's `name`. If it cannot be resolved the call fails instead of
 /// guessing the Service port number.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split resolve_cluster_target into Service lookup and named port resolution via EndpointSlices"
-)]
 pub async fn resolve_cluster_target(
     client: &Client,
     namespace: &str,
@@ -158,15 +154,7 @@ pub async fn resolve_cluster_target(
 
     let needs_endpoints = pod_selector.is_none() || is_headless || has_named_target_port;
     let endpoint_slices = if needs_endpoints {
-        let slices: Api<EndpointSlice> = Api::namespaced(client.clone(), namespace);
-        let lp = kube::api::ListParams::default()
-            .labels(&format!("kubernetes.io/service-name={service}"));
-        resolve_call(
-            &format!("list EndpointSlices for `{namespace}/{service}`"),
-            slices.list(&lp),
-        )
-        .await?
-        .items
+        list_endpoint_slices(client, namespace, service).await?
     } else {
         Vec::new()
     };
@@ -174,6 +162,56 @@ pub async fn resolve_cluster_target(
     let service_ports = svc_spec
         .and_then(|s| s.ports.as_deref())
         .unwrap_or_default();
+    let target_ports = resolve_target_ports(
+        service_ports,
+        &endpoint_slices,
+        configured_ports,
+        &format!("{namespace}/{service}"),
+    )?;
+
+    let endpoint_ips = if pod_selector.is_none() || is_headless {
+        endpoint_ips(&endpoint_slices)
+    } else {
+        Vec::new()
+    };
+
+    Ok(ResolvedClusterTarget {
+        namespace: namespace.to_string(),
+        service: service.to_string(),
+        cluster_ip,
+        is_headless,
+        allow_dns,
+        pod_selector,
+        target_ports,
+        endpoint_ips,
+    })
+}
+
+/// Lists the EndpointSlices of a Service.
+async fn list_endpoint_slices(
+    client: &Client,
+    namespace: &str,
+    service: &str,
+) -> Result<Vec<EndpointSlice>, ResolveError> {
+    let slices: Api<EndpointSlice> = Api::namespaced(client.clone(), namespace);
+    let lp =
+        kube::api::ListParams::default().labels(&format!("kubernetes.io/service-name={service}"));
+    Ok(resolve_call(
+        &format!("list EndpointSlices for `{namespace}/{service}`"),
+        slices.list(&lp),
+    )
+    .await?
+    .items)
+}
+
+/// The sorted, distinct target ports of the Service ports the operator allows
+/// (`configured_ports`; empty means all). `name` is `namespace/service`, for errors.
+fn resolve_target_ports(
+    service_ports: &[ServicePort],
+    endpoint_slices: &[EndpointSlice],
+    configured_ports: &[u16],
+    name: &str,
+) -> Result<Vec<u16>, ResolveError> {
     let mut target_ports: Vec<u16> = Vec::new();
     for p in service_ports {
         let port_num = u16::try_from(p.port)
@@ -186,25 +224,7 @@ pub async fn resolve_cluster_target(
                 ResolveError::Permanent(format!("invalid numeric target port: {tp}"))
             })?),
             Some(IntOrString::String(target_name)) => {
-                // EndpointSlice ports carry the Service port's name, not the targetPort name.
-                // Pods may use different numbers for the same name (separate slices): take all.
-                let service_port_name = p.name.as_deref().unwrap_or_default();
-                let before = target_ports.len();
-                for ep in endpoint_slices
-                    .iter()
-                    .filter_map(|s| s.ports.as_ref())
-                    .flatten()
-                    .filter(|ep| ep.name.as_deref().unwrap_or_default() == service_port_name)
-                {
-                    if let Some(pt) = ep.port.and_then(|pt| u16::try_from(pt).ok()) {
-                        target_ports.push(pt);
-                    }
-                }
-                if target_ports.len() == before {
-                    return Err(ResolveError::Transient(format!(
-                        "cannot resolve named targetPort `{target_name}` of port `{service_port_name}` of service `{namespace}/{service}`: no matching EndpointSlice port"
-                    )));
-                }
+                target_ports.extend(named_target_ports(p, target_name, endpoint_slices, name)?);
             }
             None => target_ports.push(port_num),
         }
@@ -214,7 +234,7 @@ pub async fn resolve_cluster_target(
         target_ports.extend_from_slice(configured_ports);
     } else if target_ports.is_empty() {
         return Err(ResolveError::Permanent(format!(
-            "none of the configured ports {configured_ports:?} is a port of service `{namespace}/{service}`"
+            "none of the configured ports {configured_ports:?} is a port of service `{name}`"
         )));
     }
     target_ports.sort_unstable();
@@ -222,29 +242,44 @@ pub async fn resolve_cluster_target(
     if target_ports.is_empty() {
         // An empty list would render a rule that allows every port.
         return Err(ResolveError::Permanent(format!(
-            "service `{namespace}/{service}` has no ports and none are configured"
+            "service `{name}` has no ports and none are configured"
         )));
     }
+    Ok(target_ports)
+}
 
-    let mut endpoint_ips = Vec::new();
-    if pod_selector.is_none() || is_headless {
-        for slice in &endpoint_slices {
-            for ep in slice.endpoints.iter().flatten() {
-                endpoint_ips.extend(ep.addresses.iter().filter_map(|a| a.parse::<IpAddr>().ok()));
-            }
-        }
+/// Resolves a named `targetPort` of the Service port `p` through the EndpointSlices.
+fn named_target_ports(
+    p: &ServicePort,
+    target_name: &str,
+    endpoint_slices: &[EndpointSlice],
+    name: &str,
+) -> Result<Vec<u16>, ResolveError> {
+    // EndpointSlice ports carry the Service port's name, not the targetPort name.
+    // Pods may use different numbers for the same name (separate slices): take all.
+    let service_port_name = p.name.as_deref().unwrap_or_default();
+    let ports: Vec<u16> = endpoint_slices
+        .iter()
+        .filter_map(|s| s.ports.as_ref())
+        .flatten()
+        .filter(|ep| ep.name.as_deref().unwrap_or_default() == service_port_name)
+        .filter_map(|ep| ep.port.and_then(|pt| u16::try_from(pt).ok()))
+        .collect();
+    if ports.is_empty() {
+        return Err(ResolveError::Transient(format!(
+            "cannot resolve named targetPort `{target_name}` of port `{service_port_name}` of service `{name}`: no matching EndpointSlice port"
+        )));
     }
+    Ok(ports)
+}
 
-    Ok(ResolvedClusterTarget {
-        namespace: namespace.to_string(),
-        service: service.to_string(),
-        cluster_ip,
-        is_headless,
-        allow_dns,
-        pod_selector,
-        target_ports,
-        endpoint_ips,
-    })
+/// The addresses of all endpoints of the slices.
+fn endpoint_ips(endpoint_slices: &[EndpointSlice]) -> Vec<IpAddr> {
+    endpoint_slices
+        .iter()
+        .flat_map(|slice| slice.endpoints.iter().flatten())
+        .flat_map(|ep| ep.addresses.iter().filter_map(|a| a.parse::<IpAddr>().ok()))
+        .collect()
 }
 
 /// A cluster Service an egress rule allows, as configured (not yet resolved).

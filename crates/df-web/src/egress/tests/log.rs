@@ -3,7 +3,10 @@
 use axum::http::StatusCode;
 use df_proto::gateway::v1::FlowEvent;
 
-use super::{allowed, app_with_egress, denied, filter_from_query, inner, live, new_viewer, part};
+use super::{
+    allowed, app_with_egress, component_script, denied, filter_from_query, inner, live, new_viewer,
+    part,
+};
 use crate::egress::log::{Filter, VerdictFilter};
 use crate::testkit::{SseReader, TestApp, header_str, seed, text};
 
@@ -274,7 +277,7 @@ async fn the_log_page_has_header_filter_bar_and_the_stream_with_its_filters() {
     assert!(page.contains("value=\"blocked\" checked"), "{page}");
     assert!(page.contains("value=\"DF-7\""));
     // Clear filters only shows while a filter is set.
-    assert!(page.contains("dirty: true,") && page.contains("x-show=\"dirty\""));
+    assert!(page.contains("&quot;dirty&quot;:true") && page.contains("x-show=\"dirty\""));
     assert!(page.contains(">2</span>"), "advanced badge");
     // As in the design: one right-aligned row, Advanced opens an inline row below it.
     assert!(page.contains("id=\"filter-row\" class=\"flex flex-wrap items-center justify-end"));
@@ -342,7 +345,7 @@ async fn the_split_view_has_an_accessible_separator_and_the_details_panel_is_a_d
         "{page}"
     );
     assert!(
-        page.contains("df.traffic.graph-w") && page.contains("try {"),
+        page.contains("df.traffic.graph-w") && component_script().contains("try {"),
         "stored in try/catch"
     );
     // The markup does not depend on a stored value: the width is applied by Alpine.
@@ -357,40 +360,39 @@ async fn the_split_view_has_an_accessible_separator_and_the_details_panel_is_a_d
     );
     assert!(page.contains("role=\"dialog\"") && page.contains("aria-labelledby=\"flow-title\""));
     assert!(page.contains("Requests inside TLS tunnels are not inspected."));
-    assert!(page.contains("button.closest('tr')"));
-    assert!(page.contains("htmx:after:swap") && page.contains("keydown.escape.window"));
+    let script = component_script();
+    assert!(script.contains("button.closest('tr')"));
+    assert!(script.contains("htmx:after:swap") && page.contains("keydown.escape.window"));
     // Pause removes the connect element and Resume inserts it again.
     assert!(
         page.contains("id=\"sse-slot\"")
-            && page.contains("slot.replaceChildren()")
-            && page.contains("htmx.process")
+            && script.contains("slot.replaceChildren()")
+            && script.contains("htmx.process")
     );
 }
 
-#[tokio::test]
-async fn pause_stops_the_stream_explicitly_and_the_stored_width_is_clamped() {
-    let app = app_with_egress(vec![]).await;
-    let cookie = app.login().await;
-    let page = text(app.get("/egress/log", &cookie).await).await;
+#[test]
+fn pause_stops_the_stream_explicitly_and_the_stored_width_is_clamped() {
     // Nothing observes the removal of the connect element: the request is aborted by hand, which
     // also ends a reconnect that has no reader yet. Cancelling the reader of an aborted stream
     // rejects with the abort error: swallow it, or it is logged as unhandled.
-    let pause = &page[page.find("togglePause() {").unwrap()..];
+    let script = component_script();
+    let pause = &script[script.find("togglePause() {").unwrap()..];
     let abort = pause.find("abortController.abort()").unwrap();
     assert!(
         abort < pause.find("slot.replaceChildren()").unwrap(),
         "{pause}"
     );
-    assert!(pause.contains("sse.reader.cancel().catch(() =&gt; undefined)"));
+    assert!(pause.contains("sse.reader.cancel().catch(() => undefined)"));
     // The stored width is passed through the limits once the layout exists.
-    assert!(page.contains("this.$nextTick(() =&gt; this.setW(this.want, false))"));
+    assert!(script.contains("this.$nextTick(() => this.setW(this.want, false))"));
     // Only a drag, a key or a double click remembers a width; fitting does not.
-    assert!(page.contains("setW(value, persist = true)"));
+    assert!(script.contains("setW(value, persist = true)"));
     // Clamp first, then remember what is shown.
-    assert!(page.contains("Math.round(persist ? value : this.want)"));
-    assert!(page.contains("if (persist) {"));
-    assert!(page.contains("this.want = this.w"));
-    assert_eq!(page.matches("localStorage.setItem").count(), 1);
+    assert!(script.contains("Math.round(persist ? value : this.want)"));
+    assert!(script.contains("if (persist) {"));
+    assert!(script.contains("this.want = this.w"));
+    assert_eq!(script.matches("localStorage.setItem").count(), 1);
 }
 
 #[tokio::test]
@@ -398,21 +400,21 @@ async fn the_advanced_badge_follows_the_inputs_and_not_only_the_page_load() {
     let app = app_with_egress(vec![]).await;
     let cookie = app.login().await;
     let page = text(app.get("/egress/log?persona=p-1&task=DF-1", &cookie).await).await;
-    assert!(page.contains("adv: 2,"), "{page}");
+    assert!(page.contains("&quot;advanced&quot;:2"), "{page}");
     assert!(
         page.contains("x-on:input=\"sync($el)\"") && page.contains("x-on:change=\"sync($el)\""),
         "the persona select only fires change"
     );
-    assert!(page.contains("this.adv = this.advancedCount(form)"));
+    assert!(component_script().contains("this.adv = this.advancedCount(form)"));
     assert!(page.contains("x-show=\"adv &gt; 0\""));
     assert!(
-        page.contains("['persona', 'task'].filter("),
+        page.contains("&quot;advancedFields&quot;:[&quot;persona&quot;,&quot;task&quot;]"),
         "one list for both"
     );
     assert!(page.contains("x-text=\"adv\">2</span>"), "{page}");
     let none = text(app.get("/egress/log", &cookie).await).await;
     assert!(
-        none.contains("adv: 0,") && none.contains("x-cloak"),
+        none.contains("&quot;advanced&quot;:0") && none.contains("x-cloak"),
         "hidden until Alpine shows it"
     );
 }

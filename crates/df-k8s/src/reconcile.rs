@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use df_core::config::ClusterTargetsConfig;
+use df_core::ids::RunId;
 use df_core::keys::TaskKey;
 use df_core::seams::ProviderError;
 use futures::stream::{self, BoxStream};
@@ -179,10 +180,6 @@ pub async fn release_lease(
 }
 
 /// Reconciles all active runs' NetworkPolicies in `config.sandbox.namespace`.
-#[expect(
-    clippy::too_many_lines,
-    reason = "split reconcile_active_runs into list, diff and apply steps"
-)]
 pub async fn reconcile_active_runs(
     client: &Client,
     config: &ProvisioningConfig,
@@ -191,117 +188,131 @@ pub async fn reconcile_active_runs(
     let sandboxes: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
     let netpols: Api<NetworkPolicy> = Api::namespaced(client.clone(), &config.sandbox.namespace);
 
+    let mut count = 0;
+    for sb in list_instance_sandboxes(&sandboxes, config).await? {
+        if sb.metadata.deletion_timestamp.is_some() {
+            continue;
+        }
+        let Some((run_id, netpol)) = render_run_policy(&sb, targets_provider, config).await else {
+            continue;
+        };
+        if apply_network_policy(&netpols, run_id, &netpol).await {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Lists the Sandboxes that belong to this instance.
+async fn list_instance_sandboxes(
+    sandboxes: &Api<Sandbox>,
+    config: &ProvisioningConfig,
+) -> Result<Vec<Sandbox>, ProviderError> {
     let list_params = kube::api::ListParams::default().labels(&format!(
         "dark-factory.io/instance={}",
         config.instance_name
     ));
+    match tokio::time::timeout(K8S_API_TIMEOUT, sandboxes.list(&list_params)).await {
+        Ok(Ok(list)) => Ok(list.items),
+        Ok(Err(e)) => Err(ProviderError::Backend(format!(
+            "failed to list sandboxes for reconcile: {e}"
+        ))),
+        Err(_) => Err(ProviderError::Backend(
+            "timeout listing sandboxes for reconcile".to_string(),
+        )),
+    }
+}
 
-    let list_fut = tokio::time::timeout(K8S_API_TIMEOUT, sandboxes.list(&list_params));
-    let matching = match list_fut.await {
-        Ok(Ok(m)) => m,
-        Ok(Err(e)) => {
-            return Err(ProviderError::Backend(format!(
-                "failed to list sandboxes for reconcile: {e}"
-            )));
-        }
-        Err(_) => {
-            return Err(ProviderError::Backend(
-                "timeout listing sandboxes for reconcile".to_string(),
-            ));
+/// Renders the NetworkPolicy of a run from its Sandbox. `None` (after a warning) if the Sandbox
+/// lacks the labels, the cluster targets can't be fetched, or the policy has no name: the run is
+/// skipped and keeps its existing policy.
+async fn render_run_policy(
+    sb: &Sandbox,
+    targets_provider: &dyn ClusterTargetsProvider,
+    config: &ProvisioningConfig,
+) -> Option<(RunId, NetworkPolicy)> {
+    let sb_name = sb.metadata.name.as_deref().unwrap_or("<unknown>");
+    let Some(run_id) = run_id_from_metadata(&sb.metadata) else {
+        warn!(
+            sandbox = sb_name,
+            "sandbox has a missing or invalid dark-factory.io/run-id label; skipping reconcile"
+        );
+        return None;
+    };
+    let labels = sb.metadata.labels.clone().unwrap_or_default();
+
+    let Some(task_key_str) = labels.get("dark-factory.io/task-key") else {
+        warn!(
+            sandbox = sb_name,
+            "sandbox missing dark-factory.io/task-key label; skipping reconcile"
+        );
+        return None;
+    };
+    let task_key = match task_key_str.parse::<TaskKey>() {
+        Ok(k) => k,
+        Err(e) => {
+            warn!(sandbox = sb_name, task_key = task_key_str, error = %e, "invalid dark-factory.io/task-key label; skipping reconcile");
+            return None;
         }
     };
 
-    let mut count = 0;
-    for sb in matching {
-        if sb.metadata.deletion_timestamp.is_some() {
-            continue;
-        }
-
-        let sb_name = sb.metadata.name.as_deref().unwrap_or("<unknown>");
-        let Some(run_id) = run_id_from_metadata(&sb.metadata) else {
+    let project_key_str = labels.get("dark-factory.io/project").map(String::as_str);
+    let targets = match targets_provider.get_targets(project_key_str).await {
+        Ok(t) => t,
+        Err(err) => {
             warn!(
-                sandbox = sb_name,
-                "sandbox has a missing or invalid dark-factory.io/run-id label; skipping reconcile"
+                run_id = %run_id,
+                error = %err,
+                "failed to get cluster targets during reconcile; skipping run to keep existing policy"
             );
-            continue;
-        };
-        let labels = sb.metadata.labels.clone().unwrap_or_default();
+            return None;
+        }
+    };
 
-        let task_key_str = match labels.get("dark-factory.io/task-key") {
-            Some(s) => s,
-            None => {
-                warn!(
-                    sandbox = sb_name,
-                    "sandbox missing dark-factory.io/task-key label; skipping reconcile"
-                );
-                continue;
-            }
-        };
-        let task_key = match task_key_str.parse::<TaskKey>() {
-            Ok(k) => k,
-            Err(e) => {
-                warn!(sandbox = sb_name, task_key = task_key_str, error = %e, "invalid dark-factory.io/task-key label; skipping reconcile");
-                continue;
-            }
-        };
-
-        let project_key_str = labels.get("dark-factory.io/project").map(String::as_str);
-
-        let targets = match targets_provider.get_targets(project_key_str).await {
-            Ok(t) => t,
-            Err(err) => {
-                warn!(
-                    run_id = %run_id,
-                    error = %err,
-                    "failed to get cluster targets during reconcile; skipping run to keep existing policy"
-                );
-                continue;
-            }
-        };
-
-        let netpol = render_network_policy(run_id, &task_key, &sb, &targets, config);
-        let netpol_name = match netpol.name_any() {
-            name if !name.is_empty() => name,
-            _ => {
-                warn!(
-                    sandbox = sb_name,
-                    "failed to derive network policy name; skipping reconcile"
-                );
-                continue;
-            }
-        };
-
-        let patch = Patch::Apply(&netpol);
-        let params = PatchParams::apply("dark-factory").force();
-        let patch_fut = tokio::time::timeout(
-            K8S_API_TIMEOUT,
-            netpols.patch(&netpol_name, &params, &patch),
+    let netpol = render_network_policy(run_id, &task_key, sb, &targets, config);
+    if netpol.name_any().is_empty() {
+        warn!(
+            sandbox = sb_name,
+            "failed to derive network policy name; skipping reconcile"
         );
-        match patch_fut.await {
-            Ok(Ok(_)) => {
-                count += 1;
-            }
-            Ok(Err(err)) => {
-                warn!(
-                    run_id = %run_id,
-                    netpol = %netpol_name,
-                    error = %err,
-                    "failed to patch NetworkPolicy during reconcile; skipping run"
-                );
-                continue;
-            }
-            Err(_) => {
-                warn!(
-                    run_id = %run_id,
-                    netpol = %netpol_name,
-                    "timeout patching NetworkPolicy during reconcile; skipping run"
-                );
-                continue;
-            }
+        return None;
+    }
+    Some((run_id, netpol))
+}
+
+/// Server-side applies the NetworkPolicy. False (after a warning) if that failed.
+async fn apply_network_policy(
+    netpols: &Api<NetworkPolicy>,
+    run_id: RunId,
+    netpol: &NetworkPolicy,
+) -> bool {
+    let netpol_name = netpol.name_any();
+    let patch = Patch::Apply(netpol);
+    let params = PatchParams::apply("dark-factory").force();
+    let patch_fut = tokio::time::timeout(
+        K8S_API_TIMEOUT,
+        netpols.patch(&netpol_name, &params, &patch),
+    );
+    match patch_fut.await {
+        Ok(Ok(_)) => true,
+        Ok(Err(err)) => {
+            warn!(
+                run_id = %run_id,
+                netpol = %netpol_name,
+                error = %err,
+                "failed to patch NetworkPolicy during reconcile; skipping run"
+            );
+            false
+        }
+        Err(_) => {
+            warn!(
+                run_id = %run_id,
+                netpol = %netpol_name,
+                "timeout patching NetworkPolicy during reconcile; skipping run"
+            );
+            false
         }
     }
-
-    Ok(count)
 }
 
 /// Runs leader election loop renewing the Lease periodically.

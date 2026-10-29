@@ -66,10 +66,11 @@ Each step is a commit, and the `factory-agent` tests pass after each one. `run_s
 
 ### D4. Traffic page Alpine component as a static asset
 
-- **Move:** the component's JS moves to `crates/df-web/assets/egress-log.js` as `Alpine.data('egressLog', (init) => ({ … }))`. The page includes the script and passes the server values (`advanced`, `dirty`, the advanced field list, `WIDTH_KEY`) as a JSON `x-data` argument, escaped the way the page escapes other attributes today.
+- **Move:** the component's JS moves to `crates/df-web/assets/egress-log.js` as `Alpine.data('egressLog', (init) => ({ … }))`. The shared layout loads the script in `<head>`, deferred and before `alpine.min.js`, so the component is registered on `alpine:init` before Alpine starts. The page passes the server values (`advanced`, `dirty`, the advanced field list, `WIDTH_KEY`) as a JSON `x-data` argument, escaped the way the page escapes other attributes today.
 - **Benefits:** the Rust function shrinks to building that JSON, and the JS becomes editable as JS.
 - **Bazel:** the build already stages `assets/` into `OUT_DIR` and embeds it. The implementer checks that a new file reaches the embed in both cargo and Bazel, through the `data`/`compile_data` of `df-web`'s `BUILD.bazel`.
-- **Check:** an existing page test, or a new one, asserts that the page references the script and that the asset route serves it.
+- **Check:** a layout test asserts that the script is loaded before Alpine, a page test asserts the `x-data` argument, and an asset test asserts that the route serves the script as JavaScript.
+- **Same for the workspace:** `WORKSPACE_STATE` of `task_pages.rs` (54 lines with methods) moves to `assets/workspace.js` for the same reason. `AGENTS.md` ("Web UI scripts") makes this the rule: inline `x-data` holds plain data only, anything with methods is a component in `assets/`. The layout loads all components from `COMPONENT_SCRIPTS` in `layout.rs`.
 
 ### D5. `dark-factory/src/main.rs` module split
 

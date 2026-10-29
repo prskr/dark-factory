@@ -68,7 +68,7 @@ pub fn dialog_close() -> Markup {
 }
 
 /// The details of a workspace. It expects the parent to hold the workspace Alpine state
-/// (`WORKSPACE_STATE` in `task_pages`): `details` (open or not), `collapsed` with
+/// (`assets/workspace.js`): `details` (open or not), `collapsed` with
 /// `setCollapsed(value)` and, for the phone sheet, `sheet`, `dragging` and the `sheetToggle` /
 /// `sheetDrag*` methods; from 1280 px it is a permanent column that
 /// collapses to a strip. The live region inside `body` renders the strip (`ws-strip`) and marks

@@ -190,12 +190,9 @@ async fn split_screen_widths_keep_the_rail_and_the_list_next_to_the_transcript()
 }
 
 #[tokio::test]
-async fn the_workspace_state_is_a_documented_constant_with_named_pieces() {
-    use crate::task_pages::WORKSPACE_STATE;
-    assert!(
-        WORKSPACE_STATE.lines().count() > 15,
-        "written over several lines"
-    );
+async fn the_workspace_state_is_a_component_script_with_named_pieces() {
+    let script = crate::assets::script_source("workspace.js");
+    assert!(script.contains("Alpine.data('workspace'"));
     for method in [
         "setCollapsed(value)",
         "sheetToggle()",
@@ -204,20 +201,20 @@ async fn the_workspace_state_is_a_documented_constant_with_named_pieces() {
         "sheetDragEnd(e)",
         "sheetDragCancel(e)",
     ] {
-        assert!(WORKSPACE_STATE.contains(method), "{method}");
+        assert!(script.contains(method), "{method}");
     }
     // Thresholds are named values, not numbers buried in the handlers.
     for named in ["closeBelow: 0.25", "fullAbove: 0.7", "dragSlop: 4"] {
-        assert!(WORKSPACE_STATE.contains(named), "{named}");
+        assert!(script.contains(named), "{named}");
     }
     for used in ["this.closeBelow", "this.fullAbove", "this.dragSlop"] {
-        assert!(WORKSPACE_STATE.contains(used), "{used}");
+        assert!(script.contains(used), "{used}");
     }
-    // The page uses the constant.
+    // The page uses the component.
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let html = text(app.get("/tasks", &cookie).await).await;
-    assert!(html.contains("closeBelow: 0.25") && html.contains("sheetDragCancel(e)"));
+    assert!(html.contains("x-data=\"workspace\""), "{html}");
 }
 
 #[tokio::test]
@@ -255,8 +252,6 @@ async fn the_sheet_does_not_animate_while_it_is_dragged() {
         css.contains("[data-dragging=true]{transition:none"),
         "no lag behind the finger"
     );
-    assert!(
-        crate::task_pages::WORKSPACE_STATE.contains("this.dragging = true")
-            && crate::task_pages::WORKSPACE_STATE.contains("this.dragging = false")
-    );
+    let script = crate::assets::script_source("workspace.js");
+    assert!(script.contains("this.dragging = true") && script.contains("this.dragging = false"));
 }

@@ -500,3 +500,87 @@ sessions:
         df_proto::agent::v1::RunOutcome::Failed as i32
     );
 }
+
+/// Runs `run_session` against a directory layout in `temp` with the given workspace.
+async fn run_with_workspace(
+    temp: &tempfile::TempDir,
+    workspace: Option<df_proto::agent::v1::Workspace>,
+) -> crate::runner::RunExecutionResult {
+    use crate::git::Git;
+    use crate::outbox::Outbox;
+    use crate::runner::{RunDriverParams, run_session};
+    use df_proto::agent::v1::Assign;
+
+    let data = temp.path().join("data");
+    let repo_dir = data.join("repo");
+    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
+        Outbox::open(
+            &data.join("runtime"),
+            "run-early-failure",
+            1024 * 1024,
+            64 * 1024,
+        )
+        .unwrap(),
+    ));
+    let (_inbound_tx, inbound_rx) = tokio::sync::mpsc::channel(10);
+    let (outbound_tx, _outbound_rx) = tokio::sync::mpsc::channel(100);
+    let params = RunDriverParams {
+        assign: Assign {
+            run_id: "run-early-failure".to_string(),
+            task: None,
+            workspace,
+            harness: None,
+            tools: vec![],
+            budgets: None,
+            continuation: None,
+        },
+        credentials: None,
+        initial_prompts: vec![],
+        cancel_requested: false,
+        repo_dir: repo_dir.clone(),
+        home_dir: data.join("home"),
+        runtime_dir: temp.path().join("run"),
+        hooks_path: temp.path().join("hooks"),
+        mcp_command: std::path::PathBuf::from("factory-agent"),
+        runtime_sock_path: temp.path().join("run").join("runtime.sock"),
+        git: Git::new(&repo_dir),
+        outbox,
+        inbound_rx,
+        outbound_tx,
+        git_credentials: None,
+    };
+    run_session(params).await.unwrap()
+}
+
+#[tokio::test]
+async fn test_assign_without_workspace_fails_the_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let result = run_with_workspace(&temp, None).await;
+    assert_eq!(result.outcome, df_proto::agent::v1::RunOutcome::Failed);
+    assert_eq!(result.run_report.detail, "missing workspace in Assign");
+}
+
+#[tokio::test]
+async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("no-such-remote.git");
+    let workspace = df_proto::agent::v1::Workspace {
+        repo_url: format!("file://{}", missing.display()),
+        base_branch: "main".to_string(),
+        task_branch: "factory/task/DF-1".to_string(),
+        wip_branch: "factory/wip/DF-1".to_string(),
+        commit_identity: None,
+        git_hooks: vec![],
+        git_config: vec![],
+    };
+    let result = run_with_workspace(&temp, Some(workspace)).await;
+    assert_eq!(result.outcome, df_proto::agent::v1::RunOutcome::Failed);
+    assert!(
+        result
+            .run_report
+            .detail
+            .starts_with("Workspace preparation failed"),
+        "got: {}",
+        result.run_report.detail
+    );
+}

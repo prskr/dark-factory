@@ -223,6 +223,15 @@ Rules for adding one:
 - Never log secrets (tokens, passwords, credential helper input) and don't log whole request/response bodies.
 - Library code only emits events. Subscriber setup belongs in the binary's `main`.
 
+## Web UI scripts (`df-web`)
+
+JavaScript that is code lives in JS files, not in Rust strings.
+
+- Inline `x-data="{ … }"` holds plain data only: flags, strings, numbers, `null`, including values the server fills in. Short expressions in `x-on:*`, `:class` and similar attributes stay inline.
+- State with a method, getter or `init()` is an Alpine component in `crates/df-web/assets/<name>.js` that calls `Alpine.data('<name>', …)` on `alpine:init`. Add the file to `COMPONENT_SCRIPTS` in `crates/df-web/src/layout.rs`, which loads it before Alpine. Server values go in as a JSON argument (`x-data="egressLog({…})"`, escaped by maud).
+- Tests read a component's source with `crate::assets::script_source`.
+- Scripts are served as written: no bundler or minifier. Responses are compressed and cached by content hash.
+
 ## Security
 
 This project runs untrusted agent code. Treat everything the agent can influence (the repository contents, `.git`, files in the workspace, anything the harness sends) as untrusted input.

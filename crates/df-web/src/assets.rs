@@ -32,6 +32,13 @@ pub fn app_css() -> Option<Cow<'static, str>> {
     }
 }
 
+/// Source of an embedded script, for tests that check a component's code.
+#[cfg(test)]
+pub(crate) fn script_source(path: &str) -> String {
+    let file = Assets::get(path).unwrap_or_else(|| panic!("{path} is embedded"));
+    String::from_utf8(file.data.into_owned()).unwrap()
+}
+
 /// URL of an asset including its content hash, `/assets/app.css?v=1a2b3c4d`.
 pub fn asset_url(path: &str) -> String {
     match Assets::get(path) {
@@ -101,6 +108,7 @@ mod tests {
             "vendor/htmx.min.js",
             "vendor/hx-sse.min.js",
             "vendor/alpine.min.js",
+            "egress-log.js",
         ] {
             assert!(get_asset(path).is_some(), "{path}");
         }
@@ -118,6 +126,18 @@ mod tests {
         let paths =
             &rail_logo[rail_logo.find("<path").unwrap()..rail_logo.rfind("</svg>").unwrap()];
         assert!(svg.contains(paths), "logo.svg and Icon::Logo differ");
+    }
+
+    #[tokio::test]
+    async fn the_component_scripts_are_served_as_javascript() {
+        for script in crate::layout::COMPONENT_SCRIPTS {
+            let response = get_path(&format!("/assets/{script}")).await;
+            assert_eq!(response.status(), StatusCode::OK, "{script}");
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "text/javascript; charset=utf-8"
+            );
+        }
     }
 
     #[test]
