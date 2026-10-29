@@ -89,20 +89,26 @@ pub fn rail(active: Nav, compose_href: &str) -> Markup {
     }
 }
 
-/// Bottom bar below 768 px: Tasks, the create action of the screen and Projects. Personas and
+/// Bottom bar below 768 px: Tasks, Requests and Projects at equal widths. Personas and
 /// credentials are not part of it.
-pub fn bottom_bar(active: Nav, create: &CreateAction<'_>) -> Markup {
+pub fn bottom_bar(active: Nav) -> Markup {
     html! {
         nav id="mobile-menu" aria-label="Main"
-            class="bottombar fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch justify-around border-t border-line bg-panel md:hidden [body[data-view=task]_&]:hidden" {
+            class="bottombar fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-line bg-panel md:hidden [body[data-view=task]_&]:hidden" {
             (bar_link(active, Nav::Tasks, "/tasks", "Tasks", Icon::Tasks))
             (bar_link(active, Nav::Requests, "/requests", "Requests", Icon::Inbox))
-            div class="flex flex-1 items-center justify-center" {
-                (create_button(create, "inline-flex size-12 items-center justify-center rounded-full bg-accent text-on-accent"))
-            }
             (bar_link(active, Nav::Projects, "/projects", "Projects", Icon::Projects))
         }
     }
+}
+
+/// Round create button floating above the bottom bar at the right edge (phones only). Hidden on
+/// the transcript screen like the bar.
+pub fn floating_create(create: &CreateAction<'_>) -> Markup {
+    create_button(
+        create,
+        "fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-on-accent shadow-fab [&_svg]:size-7 [&_svg]:stroke-3 md:hidden [body[data-view=task]_&]:hidden",
+    )
 }
 
 fn bar_link(active: Nav, target: Nav, href: &str, label: &str, glyph: Icon) -> Markup {
@@ -204,35 +210,69 @@ mod tests {
     }
 
     #[test]
-    fn bottom_bar_shows_tasks_create_and_projects() {
-        let html = bottom_bar(Nav::Tasks, &NEW_TASK).into_string();
-        assert!(
-            html.contains("md:hidden") && html.contains("size-12") && html.contains("min-h-11")
-        );
-        assert!(
-            html.contains("aria-label=\"New task\"") && html.contains("hx-get=\"/tasks/compose\"")
-        );
-        assert!(html.contains("href=\"/tasks\"") && html.contains("href=\"/projects\""));
-        for hidden in ["/personas", "/credentials", "Log out", "logout"] {
+    fn bottom_bar_shows_tasks_requests_and_projects_without_a_create_action() {
+        let html = bottom_bar(Nav::Tasks).into_string();
+        assert!(html.contains("md:hidden") && html.contains("min-h-11"));
+        for href in ["/tasks", "/requests", "/projects"] {
+            assert!(html.contains(&format!("href=\"{href}\"")), "{href}");
+        }
+        assert_eq!(html.matches("flex-1 flex-col").count(), 3, "equal widths");
+        for hidden in ["/personas", "/credentials", "Log out", "logout", "hx-get"] {
             assert!(!html.contains(hidden), "{hidden}");
         }
         assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
     }
 
     #[test]
-    fn bottom_bar_on_projects_marks_projects_and_creates_a_project() {
-        let create = CreateAction {
-            label: "New project",
-            href: "/projects/new",
-        };
-        let html = bottom_bar(Nav::Projects, &create).into_string();
-        assert!(
-            html.contains("aria-label=\"New project\"")
-                && html.contains("hx-get=\"/projects/new\"")
-        );
+    fn bottom_bar_on_projects_marks_projects() {
+        let html = bottom_bar(Nav::Projects).into_string();
         let current = &html[html.find("aria-current").unwrap()..];
         assert!(current.starts_with("aria-current=\"page\" class=\"flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-xs text-accent-text"), "{html}");
         assert!(current.contains("Projects"));
+    }
+
+    #[test]
+    fn floating_create_is_a_round_phone_only_button_that_hides_on_the_transcript_screen() {
+        let html = floating_create(&NEW_TASK).into_string();
+        for class in [
+            "fixed",
+            "bottom-20",
+            "right-4",
+            "z-30",
+            "h-14",
+            "w-14",
+            "rounded-full",
+            "bg-accent",
+            "md:hidden",
+            "[body[data-view=task]_&amp;]:hidden",
+            "shadow-fab",
+            "[&amp;_svg]:size-7",
+            "[&amp;_svg]:stroke-3",
+        ] {
+            assert!(html.contains(class), "{class}: {html}");
+        }
+        assert!(
+            !html.contains("shadow-[") && !html.contains("rgb("),
+            "{html}"
+        );
+        assert!(
+            html.contains("aria-label=\"New task\"") && html.contains("hx-get=\"/tasks/compose\"")
+        );
+    }
+
+    #[test]
+    fn floating_create_shadow_and_plus_size_are_in_the_stylesheet() {
+        let css = crate::app_css().unwrap();
+        assert!(css.contains(".shadow-fab"), "shadow token utility");
+        assert!(css.contains("--fab-shadow"), "shadow color token");
+        assert!(
+            css.contains(r".\[\&_svg\]\:size-7 svg{"),
+            "28 px plus override rule"
+        );
+        assert!(
+            css.contains(r".\[\&_svg\]\:stroke-3 svg{"),
+            "stroke 3 plus override rule"
+        );
     }
 
     #[test]

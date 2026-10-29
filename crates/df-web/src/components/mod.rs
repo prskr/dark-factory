@@ -30,7 +30,9 @@ pub use icons::{Icon, forge_icon, icon, logo};
 pub use lists::{EmptyPanel, EmptySize, definition_list, empty_panel, empty_state, section};
 pub use overlay::{DialogStyle, details_panel, dialog, dialog_close, dialog_with};
 pub use project_host::{HostRole, ProjectHosts, issue_role, project_forge_kind, role_icon};
-pub use shell::{CreateAction, avatar, bottom_bar, initials, page_header, profile_menu, rail};
+pub use shell::{
+    CreateAction, avatar, bottom_bar, floating_create, initials, page_header, profile_menu, rail,
+};
 pub use table::{Cell, data_table, td, th, tr, tr_with_id};
 pub use transcript::QueuedState;
 

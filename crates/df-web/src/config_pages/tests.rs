@@ -985,7 +985,7 @@ async fn projects_and_credentials_share_the_table_card_that_scrolls_inside_itsel
     let page = text(app.get("/projects", &cookie).await).await;
     assert!(
         page.contains(
-            "<main class=\"min-w-0 flex-1 w-full px-4 py-4 pb-20 md:px-10 md:py-8 md:pb-8\">"
+            "<main class=\"min-w-0 flex-1 w-full px-4 py-4 pb-38 md:px-10 md:py-8 md:pb-8\">"
         ),
         "main can shrink: {page}"
     );

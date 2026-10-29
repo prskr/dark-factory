@@ -472,3 +472,16 @@ async fn in_review_has_its_own_badge_and_belongs_to_the_waiting_filter() {
     let active = text(app.get("/tasks", &cookie).await).await;
     assert!(!active.contains("review me"));
 }
+
+#[tokio::test]
+async fn the_scrolling_task_list_leaves_room_for_the_floating_create_button_on_phones_only() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let html = text(app.get("/tasks", &cookie).await).await;
+
+    let list = &html[html.find("class=\"ws-list\"").unwrap()..];
+    assert!(
+        list.contains("class=\"min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0\""),
+        "{list}"
+    );
+}
