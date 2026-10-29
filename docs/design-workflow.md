@@ -53,7 +53,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 
 | Page | Content |
 |---|---|
-| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Button`, `Task row` |
+| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Button`, `Task row`, `Request card` |
 | Desktop | Main workspace and its variants |
 | Phone | Phone boards |
 | Flows (filter, new task) | Project filter, new task composer |
@@ -105,6 +105,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 
 - Elements of the "Rejected" page are not built (request URL, query parameters, headers, response details; "Last matched" and "Matched N requests").
 - The traffic page filters by persona and task, not by sandbox, and labels sandboxes with task key and run number.
+- Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only. The scope radios use the browser's default style (no `accent-color`).
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
@@ -122,7 +123,11 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Desktop / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
 | Desktop / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Desktop / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
+| Desktop / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
+| Desktop / Requests · inbox | `/requests` | manual seed (not built): pending approval, blocking question with suggested answers, question without | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
+| Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
+| Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |
 
 The remaining boards follow the same pattern.
 
