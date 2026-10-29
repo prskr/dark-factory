@@ -14,16 +14,32 @@ LINUX_MUSL_PLATFORMS = [
     "//build/platforms:linux_arm64_musl",
 ]
 
-# The shipped component is an optimized build (~0.3 MB instead of ~6.9 MB) even without `-c opt`.
+# Shipped binaries are optimized builds even without `-c opt`: the forgejo component is
+# ~0.3 MB instead of ~6.9 MB, the control plane ~84 MB instead of ~224 MB.
 optimized(
     name = "forgejo_plugin",
     src = "//plugins/forgejo",
 )
 
+optimized(
+    name = "dark_factory",
+    src = "//crates/dark-factory",
+)
+
+optimized(
+    name = "factory_agent",
+    src = "//crates/factory-agent",
+)
+
+optimized(
+    name = "fake_acp_agent",
+    src = "//crates/fake-acp-agent",
+)
+
 image_layer(
     name = "control_plane_layer",
     srcs = {
-        "/dark-factory": "//crates/dark-factory:dark-factory",
+        "/dark-factory": ":dark_factory",
         "/plugins/forgejo.wasm": ":forgejo_plugin",
     },
     file_metadata = {
@@ -62,7 +78,7 @@ filegroup(
 image_layer(
     name = "runtime_layer",
     srcs = {
-        "/factory-agent": "//crates/factory-agent:factory-agent",
+        "/factory-agent": ":factory_agent",
         "/gitconfig": "//crates/factory-agent:image/gitconfig",
         "/hooks-empty": "//crates/factory-agent:hooks_empty",
     },
@@ -101,7 +117,7 @@ filegroup(
 image_layer(
     name = "test_project_layer",
     srcs = {
-        "/opt/harness/bin/fake-acp-agent": "//crates/fake-acp-agent:fake-acp-agent",
+        "/opt/harness/bin/fake-acp-agent": ":fake_acp_agent",
     },
     file_metadata = {
         "/opt/harness/bin/fake-acp-agent": file_metadata(mode = "0755"),

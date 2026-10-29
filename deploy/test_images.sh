@@ -59,6 +59,11 @@ verify_static_elf() {
   grep -q "ELF 64-bit LSB" <<<"$info"
   grep -q "$expected_arch_pattern" <<<"$info"
   grep -Eq "statically linked|static-pie linked" <<<"$info"
+  # the optimized build: a fastbuild binary carries debug info (~224 MB instead of ~84 MB)
+  if grep -q "with debug_info" <<<"$info"; then
+    echo "Expected an optimized build without debug info: $bin" >&2
+    exit 1
+  fi
 }
 
 echo "=== 1. Verifying multi-arch OCI indexes (amd64 + arm64) ==="
