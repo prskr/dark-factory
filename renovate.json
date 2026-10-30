@@ -2,8 +2,9 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:best-practices",
+    ":disableRateLimiting",
     ":prConcurrentLimit10",
-    ":disableRateLimiting"
+    "customManagers:githubActionsVersions"
   ],
   "postUpgradeTasks": {
     "commands": [
