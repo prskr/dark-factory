@@ -20,7 +20,7 @@ The host retries `rate-limited` after at most 30 s, up to 3 times (`crates/df-pl
 **Non-Goals:**
 - GitHub App authentication: installation tokens need minting by the host (JWT signed with the app key, token cache) and an ADR (backlog).
 - Webhooks (ADR-0015, iteration 3); `merge`, branches, checks and `list-open` (ADR-0033, ADR-0034, iteration 3).
-- Detecting draft support automatically (rejected, D2); a crate shared by the Forgejo and GitHub plugins (backlog, D4).
+- Probing a repository's visibility or plan, or remembering draft support per repository (rejected, D2); a crate shared by the Forgejo and GitHub plugins (backlog, D4).
 
 ## Decisions
 
@@ -28,15 +28,17 @@ The host retries `rate-limited` after at most 30 s, up to 3 times (`crates/df-pl
 All operations use the REST API. Only the native draft state changes through GraphQL (`markPullRequestReadyForReview`, `convertPullRequestToDraft`, with the pull request's `node_id` from the REST response), because `PATCH /repos/{o}/{r}/pulls/{n}` has no draft field. GraphQL answers HTTP 200 even on failure, so the plugin checks `errors` (D5). Rejected alternatives: everything in GraphQL (a second data model for every call); title prefixes only (no real drafts where GitHub has them).
 
 ### D2 — Draft modes
-| | `title-prefix` (default) | `native` |
-|---|---|---|
-| Create a draft | title `"<first prefix> <title>"`, no draft flag | `draft: true`, title unchanged |
-| Read | draft = native flag or a known prefix; title without prefix | same |
-| `draft: false` | remove both forms: GraphQL ready if natively draft, title without prefix | same |
-| `draft: true` on a ready pull request | add the prefix | GraphQL convert to draft |
-| New title, state unchanged | keeps the current form | same |
+| | `title-prefix` (default) | `auto` | `native` |
+|---|---|---|---|
+| Create a draft | title `"<first prefix> <title>"`, no draft flag | `draft: true`; after a 422 "Draft pull requests are not supported" once more like `title-prefix`, with a warning on stderr | `draft: true`, title unchanged |
+| Read | draft = native flag or a known prefix; title without prefix | same | same |
+| `draft: false` | remove both forms: GraphQL ready if natively draft, title without prefix | same | same |
+| `draft: true` on a ready pull request | add the prefix | add the prefix | GraphQL convert to draft |
+| New title, state unchanged | keeps the current form | same | same |
 
-`title-prefix` is the default because it works in every repository, including private repositories on GitHub Free and Pro, which have no draft pull requests. `native` is for public repositories, GitHub Team, Enterprise Cloud and Enterprise Server. Since reading recognizes both forms, operators can switch the mode while drafts are open, for example after making a repository public or moving to GitHub Team. In `native` mode GitHub's 422 "Draft pull requests are not supported" becomes `invalid-input` naming `draft-mode: title-prefix`: the control plane only logs failed PR creations as warnings, so that message is the operator's pointer. `update` reads the pull request first when title or draft changes, like Forgejo; after a GraphQL change without a title or body change it reads it again to return the final state. Rejected alternatives: automatic fallback on that 422 (depends on GitHub's message text, a failed request per pull request, hidden behaviour); `native` only (no pull requests in private Free repositories).
+`title-prefix` is the default because it works in every repository, including private repositories on GitHub Free and Pro, which have no draft pull requests, and never sends a request that fails. `native` is for public repositories, GitHub Team, Enterprise Cloud and Enterprise Server. `auto` gives native drafts wherever GitHub has them and keeps private Free and Pro repositories working, at the cost of one failed request per draft pull request there; a repository that becomes public or moves to a paid plan gets native drafts without a configuration change. Only that 422 tells reliably whether a repository supports drafts: the visibility is readable with Metadata access, the owner's plan usually not with a fine-grained token. The fallback depends on GitHub's message text; if it changes, `auto` fails like `native`. `auto` adds the prefix for `draft: true` on a ready pull request because GitHub's GraphQL error for unsupported drafts is not documented; the control plane never turns a ready pull request back into a draft. The plugin writes the warning to stderr, which the host forwards to its log (`plugin-base`).
+
+Since reading recognizes both forms, operators can switch the mode while drafts are open, for example after making a repository public or moving to GitHub Team. In `native` mode GitHub's 422 "Draft pull requests are not supported" becomes `invalid-input` naming `draft-mode: title-prefix`: the control plane only logs failed PR creations as warnings, so that message is the operator's pointer. `update` reads the pull request first when title or draft changes, like Forgejo; after a GraphQL change without a title or body change it reads it again to return the final state. Rejected alternatives: probing the visibility first (does not tell the plan, one more request per pull request); remembering draft support per repository (a fresh plugin instance per call keeps no state); `auto` as the default (a failed request per draft in the most common setup, private repositories on GitHub Free); `native` only (no pull requests in private Free repositories).
 
 ### D3 — `find-open` with server-side filters
 `GET /repos/{o}/{r}/pulls?state=open&head={o}:{branch}&base={base}&per_page=100`, then the first entry whose `head.ref` and `base.ref` match exactly. GitHub allows one open pull request per head and base, so one request suffices. Query values are percent-encoded because branches contain `/`. Rejected alternative: Forgejo's approach of listing all open pull requests page by page (one request per 100 open pull requests, rate-limit budget).
@@ -55,7 +57,7 @@ The transport returns status, `retry-after`, `x-ratelimit-remaining`, `x-ratelim
 `wasi_transport.rs` and the prefix helpers of `draft.rs` are copied from the Forgejo plugin and adapted. Each plugin generates its own WIT bindings, so a shared crate would need its own binding layer; that pays off with a third plugin.
 
 ### D5 — Error and rate-limit mapping
-The mapping is specified in `github-integration` ("Error mapping", "Rate limits"). Rate limits are checked first: 403 or 429 with `x-ratelimit-remaining: 0`, a `retry-after` header or a message naming a rate limit. The status table applies after that. 422 messages come from `message` and `errors[].message`, and "already exists" there means `conflict`. A 404 message adds that GitHub also answers 404 when the token cannot see a private repository. The wait until the reset uses the wall clock (`wasi:clocks/wall-clock`, part of `plugin-base`).
+The mapping is specified in `github-integration` ("Error mapping", "Rate limits"). Rate limits are checked first: 403 or 429 with `x-ratelimit-remaining: 0`, a `retry-after` header or a message naming a rate limit. The status table applies after that. 422 messages come from `message` and `errors[].message`, and "A pull request already exists" there means `conflict`. A 404 message adds that GitHub also answers 404 when the token cannot see a private repository. The wait until the reset uses the wall clock (`wasi:clocks/wall-clock`, part of `plugin-base`).
 
 ### D6 — Host: no early retries
 `with_retries` returns a `rate-limited` error at once when its retry-after exceeds `RETRY_AFTER_CAP` (30 s); shorter or missing hints behave as before. GitHub asks clients not to retry before the reset and may block integrations that do. Forgejo's hints are short and unaffected. Callers already handle the error: PR creation is retried at the next push report or run end, tool calls report it to the agent, and marking ready at run end logs a warning. Rejected alternatives: raising the cap (a call would block for up to an hour, longer than the callers wait, e.g. `FORGE_TIMEOUT` of 60 s); waiting inside the plugin (bounded by the call timeout).
@@ -78,19 +80,21 @@ plugins:
     hosts:
       - host: github.com
         apiUrl: https://api.github.com
-    settings: {}       # draft-mode: title-prefix (default) | native; api-version; wip-prefixes
+    settings: {}       # draft-mode: title-prefix (default) | auto | native; api-version; wip-prefixes
 ```
 Operators add GHES routes to `hosts` or drop the entry with `plugins.github: null`. The plugin name `github` maps to the GitHub icon (`ForgeKind::from_plugin`). Rejected alternative: an opt-in entry, which would send projects on github.com to the Forgejo default plugin, where they fail with confusing errors.
 
 ### D9 — Tests
-Unit tests with a fake transport cover every scenario of `github-integration`, as in the Forgejo plugin. `df-plugins` integration tests run the built component against `wiremock`, first with `base-url` from a repository URL on the mock, after `iter2-multi-forge` through a route whose `apiUrl` is the mock, with `authScheme: bearer`; the `image_component` test loads the optimized component of the plugin image. A live test (`#[ignore]`, like `tests/homelab.rs`) runs the lifecycle against scratch repositories on github.com. GitHub cannot be part of the hermetic e2e run (`iter1-demo-e2e` runs Forgejo in kind).
+Unit tests with a fake transport cover every scenario of `github-integration`, as in the Forgejo plugin. `df-plugins` integration tests run the built component against an in-process mock server (the Rust crate `wiremock`, as in `tests/forgejo.rs`; no container), first with `base-url` from a repository URL on the mock, after `iter2-multi-forge` through a route whose `apiUrl` is the mock, with `authScheme: bearer`; the `image_component` test loads the optimized component of the plugin image. A live test (`#[ignore]`, like `tests/homelab.rs`) runs the lifecycle against scratch repositories on github.com. GitHub cannot be part of the hermetic e2e run (`iter1-demo-e2e` runs Forgejo in kind).
+
+Optional (task 8.1): the mocked requests and responses are checked against a minimal extract of GitHub's OpenAPI description. `cargo xtask update-github-spec` downloads a pinned release of `github/rest-api-description`, keeps the operations the plugin names (one `operationId` constant per endpoint) and the schemas they reference, and writes `plugins/github/tests/fixtures/github-openapi.json`; `--check` fails when the extract is stale. The tests validate `received_requests()` and the mocked responses with `jsonschema` (a workspace dependency). Rejected alternatives: fetching the description with Bazel (plain `cargo test` would have none) or at test time (network). GraphQL has no such description; the live test covers its two mutations.
 
 ### D10 — Order of work
 The plugin reads `base-url` and gets the `Authorization` header injected; where both come from does not matter to it. Crate, plugin, the host's retry change and the plugin image therefore build on `main` and are implemented in parallel to `iter2-multi-forge`. Their integration tests take `base-url` from a repository URL on the mock and use today's `token` scheme, which GitHub accepts for personal access tokens. Routes, the default entry, the dev configuration and the runs against github.com follow `iter2-multi-forge`; this change is archived after it. Rejected alternative: a temporary setting for the single forge plugin plus an API URL, which `iter2-multi-forge` would remove again.
 
 ## Risks / Trade-offs
 
-- [GitHub changes the text of the duplicate or "drafts not supported" errors] → status codes stay the main signal; recorded bodies in unit tests and the live test catch changes.
+- [GitHub changes the text of the duplicate or "drafts not supported" errors] → status codes stay the main signal; recorded bodies in unit tests and the live test catch changes; `auto` then fails like `native` instead of falling back.
 - [The pinned API version is closed down] → GitHub supports a version for 24 months after its successor, and `api-version` switches without a release.
 - [In `title-prefix` mode the marker is part of the visible title and of notifications] → same as Forgejo; the README explains when to switch to `native`.
 - [A token that can read but not write gets 403 on writes] → `unauthorized` with GitHub's message, which names the missing permission.

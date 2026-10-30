@@ -25,6 +25,14 @@ The GitHub plugin implements pull requests and issues for GitHub (github.com and
 - **WHEN** `draft-mode` is `native` and GitHub answers 422 with "Draft pull requests are not supported in this repository."
 - **THEN** the result is `invalid-input` and its message names `draft-mode: title-prefix`
 
+#### Scenario: Auto mode with draft support
+- **WHEN** `draft-mode` is `auto` and `create` is called with `draft: true` for a repository that has draft pull requests
+- **THEN** GitHub receives the unchanged title with `draft: true` in one request, and the result has `draft: true`
+
+#### Scenario: Auto mode without draft support
+- **WHEN** `draft-mode` is `auto` and GitHub answers the native draft with 422 "Draft pull requests are not supported in this repository."
+- **THEN** the plugin sends the pull request once more with the title "WIP: DF-1: Fix login" and without the draft flag, logs a warning, and the result has `draft: true`
+
 ### Requirement: Find open pull request
 `find-open` SHALL return the open pull request from head into base if one exists, else none. It SHALL ask GitHub with one request filtered by head (`<owner>:<branch>`) and base, and SHALL only return a pull request whose head and base branches match exactly.
 
@@ -37,7 +45,7 @@ The GitHub plugin implements pull requests and issues for GitHub (github.com and
 - **THEN** the result is none
 
 ### Requirement: Update pull request
-`update` SHALL change only the given fields. `draft: false` SHALL remove the draft marker in either form (native draft or title prefix), `draft: true` SHALL add it in the configured draft mode, and a new title SHALL keep the current draft state in its current form.
+`update` SHALL change only the given fields. `draft: false` SHALL remove the draft marker in either form (native draft or title prefix), `draft: true` SHALL add it in the configured draft mode (the title prefix in `auto` mode), and a new title SHALL keep the current draft state in its current form.
 
 #### Scenario: Ready for review with title prefix
 - **WHEN** a pull request titled "WIP: DF-1: Fix login" is updated with `draft: false`
@@ -82,11 +90,11 @@ Pull requests SHALL be returned with state `merged` when GitHub reports a merge 
 - **THEN** `get` returns an empty body
 
 ### Requirement: Draft mode setting
-The setting `draft-mode` SHALL accept `title-prefix` (default) and `native`. The setting `wip-prefixes` SHALL list the recognized title prefixes (default `WIP:,[WIP]`), the first one marking new drafts. Any other `draft-mode` SHALL fail every call with `config` naming the value.
+The setting `draft-mode` SHALL accept `title-prefix` (default), `auto` and `native`; any other value SHALL fail every call with `config` naming it. In `auto` mode a draft SHALL be created natively, and with the title prefix when GitHub answers that the repository has no draft pull requests. The setting `wip-prefixes` SHALL list the recognized title prefixes (default `WIP:,[WIP]`), the first one marking new drafts.
 
 #### Scenario: Unknown draft mode
-- **WHEN** `draft-mode` is `auto`
-- **THEN** every call fails with `config` naming `auto`
+- **WHEN** `draft-mode` is `detect`
+- **THEN** every call fails with `config` naming `detect`
 
 #### Scenario: Custom prefix
 - **WHEN** `wip-prefixes` is `Draft:` and a draft is created in `title-prefix` mode
