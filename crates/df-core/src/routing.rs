@@ -266,8 +266,18 @@ impl ForgeServing {
     /// The kind of the serving plugin; `None` unless [`Self::Served`].
     pub fn kind(&self) -> Option<ForgeKind> {
         match self {
-            Self::Served { plugin } => Some(ForgeKind::from_plugin(plugin)),
+            Self::Served { .. } => self.plugin_kind(),
             Self::NotLoaded { .. } | Self::Unrouted => None,
+        }
+    }
+
+    /// The kind of the routed plugin, loaded or not; `None` if [`Self::Unrouted`].
+    pub fn plugin_kind(&self) -> Option<ForgeKind> {
+        match self {
+            Self::Served { plugin } | Self::NotLoaded { plugin, .. } => {
+                Some(ForgeKind::from_plugin(plugin))
+            }
+            Self::Unrouted => None,
         }
     }
 }
@@ -829,6 +839,16 @@ mod tests {
             }
         );
         assert_eq!(serving.kind(), None);
+    }
+
+    #[test]
+    fn plugin_kind_names_the_routed_plugin_whether_or_not_it_loaded() {
+        let routes = forge_routes(&["forgejo"]);
+        let not_loaded = routes.forge_for_repo_url("https://github.com/acme/web");
+        assert_eq!(not_loaded.plugin_kind(), Some(ForgeKind::GitHub));
+        let served = routes.forge_for_repo_url("https://git.example.org/acme/web");
+        assert_eq!(served.plugin_kind(), Some(ForgeKind::Forgejo));
+        assert_eq!(ForgeServing::Unrouted.plugin_kind(), None);
     }
 
     #[test]
