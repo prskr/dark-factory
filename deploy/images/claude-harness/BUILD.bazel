@@ -90,7 +90,7 @@ filegroup(
 )
 
 # The adapter version from package.json in releases, `dev` for //deploy:dev:
-# `bazel run //deploy/images/claude-harness:push --//deploy/images/claude-harness:image_tag=0.95.0`
+# `bazel run //deploy/images/claude-harness:push --//deploy/images/claude-harness:image_tag=<adapter version>`
 string_flag(
     name = "image_tag",
     build_setting_default = "dev",
