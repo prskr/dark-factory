@@ -47,11 +47,18 @@ Every run after the first SHALL carry the harness session id reported by the pre
 - **THEN** `Assign.continuation.harness_session_id` is `S` and `summary` is not empty
 
 ### Requirement: Run phases
-The run state SHALL follow `pending → provisioning → connecting → preparing → running → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages. Between turns a run SHALL move `running → awaiting_input → running` on `RUN_PHASE_AWAITING_INPUT` and `RUN_PHASE_RUNNING`. When a run becomes `awaiting_input`, its task SHALL become `waiting` unless undelivered messages exist, in which case it stays `running`; when the run is `running` again, the task SHALL be `running`. The phase update and `queue_message` SHALL serialize on the task row, so neither overwrites the other. Once the control plane has sent `Release` or `Cancel` to a run, the run SHALL be `finalizing`. The terminal state records how the run ended technically; the outcome (`completed`, `end_turn`, `blocked`, `rate_limited`, …) is stored separately, so a `blocked` run ends in state `succeeded` with outcome `blocked`.
+The run state SHALL follow `pending → provisioning → connecting → preparing → running → finalizing → succeeded | failed | cancelled`, advanced by the provider events and the runtime's `PhaseChanged` and `RunReport` messages. Between turns a run SHALL move `running → awaiting_input → running` on `RUN_PHASE_AWAITING_INPUT` and `RUN_PHASE_RUNNING`. Once the control plane has sent `Release` or `Cancel` to a run, the run SHALL be `finalizing`.
 
 #### Scenario: Phase reported
 - **WHEN** the runtime reports `RUN_PHASE_RUNNING`
 - **THEN** the run state becomes `running` and a `run_changed` notification is published
+
+#### Scenario: Awaiting input reported
+- **WHEN** the runtime reports `RUN_PHASE_AWAITING_INPUT`
+- **THEN** the run state becomes `awaiting_input` and the task detail shows that the run waits for an answer
+
+### Requirement: Task status while a run awaits input
+When a run becomes `awaiting_input`, its task SHALL become `waiting` unless undelivered messages exist, in which case it stays `running`; when the run is `running` again, the task SHALL be `running`. The phase update and `queue_message` SHALL serialize on the task row, so neither overwrites the other.
 
 #### Scenario: Idle after a turn
 - **WHEN** the runtime reports `RUN_PHASE_AWAITING_INPUT` and no message is undelivered
@@ -61,9 +68,8 @@ The run state SHALL follow `pending → provisioning → connecting → preparin
 - **WHEN** a message is queued while the turn ends and the `RUN_PHASE_AWAITING_INPUT` report is processed afterwards
 - **THEN** the run is `awaiting_input`, the task stays `running` and the message is forwarded
 
-#### Scenario: Awaiting input reported
-- **WHEN** the runtime reports `RUN_PHASE_AWAITING_INPUT`
-- **THEN** the run state becomes `awaiting_input` and the task detail shows that the run waits for an answer
+### Requirement: Run state and outcome
+The terminal state SHALL record how the run ended technically; the outcome (`completed`, `end_turn`, `blocked`, `rate_limited`, …) SHALL be stored separately, so a `blocked` run ends in state `succeeded` with outcome `blocked`.
 
 #### Scenario: Blocked run is terminal
 - **WHEN** a run in state `finalizing` reports `RUN_OUTCOME_BLOCKED`
@@ -81,7 +87,7 @@ The control plane SHALL fail a run that doesn't connect within the configured co
 - **THEN** the run fails with `sandbox_lost` and the task volume is kept
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox and set the task status: `completed`→`in_review`, `end_turn` and `cancelled`→`waiting`, any other outcome to the status of the same name. Undelivered prompts SHALL make the task `queued` instead unless the outcome is `failed` or `rate_limited`, even if a human marked it done; without them, a task marked done (`completed`) SHALL keep its status, whatever the outcome.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with a retry time
