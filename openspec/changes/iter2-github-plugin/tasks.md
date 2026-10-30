@@ -11,6 +11,7 @@
 - [ ] 2.3 `create`, `find-open`, `get` and issues (design D2, D3). Verify "Draft with title prefix", "Native draft", "Drafts unsupported", "Custom prefix", "Recover after crash" (one request, branch with `/` encoded), "No open pull request", "Merged pull request", "Empty body", "Comment on a pull request" and "Issue without body" as unit tests
 - [ ] 2.4 `update` with both draft forms and the GraphQL mutations (design D1, D2). Verify "Ready for review with title prefix", "Ready for review with native draft", "Mode switched with an open draft", "Retitle a draft" and "Already ready" as unit tests that also assert the requests sent (no GraphQL call where none is needed)
 - [ ] 2.5 Write `plugins/github/README.md` like the Forgejo one: settings as reference entries (`base-url` from the route, `draft-mode`, `wip-prefixes`, `api-version`), API calls per operation, the draft modes and when to choose `native`, token permissions (design D7) and the error mapping. Verify that every setting and error mapping in the code appears in the README
+- [ ] 2.6 `auto` draft mode (design D2): a native draft on create, after GitHub's 422 "Draft pull requests are not supported" one more request with the title prefix and without the draft flag plus a warning on stderr, the prefix for `draft: true` on a ready pull request, `wip-prefixes` required as in `title-prefix` mode; README entry. Verify "Auto mode with draft support", "Auto mode without draft support" (exactly two requests) and "Unknown draft mode" (`detect`) as unit tests
 
 ## 3. Host
 
@@ -36,8 +37,12 @@
 
 ## 7. End-to-end
 
-- [ ] 7.1 Run `tests/github_live.rs` on github.com against a private scratch repository with `title-prefix` and a public one with `native`. On the dev cluster, run a task for a project on github.com end to end: clone and push with `agent.gitUsername` and the token, draft PR after the first push, `complete_task` marks it ready and posts the summary. Record the results with the date in `plugins/github/README.md` (status line like the Forgejo README)
+- [ ] 7.1 Run `tests/github_live.rs` on github.com against a private scratch repository with `title-prefix` and `auto`, and a public one with `native`. On the dev cluster, run a task for a project on github.com end to end: clone and push with `agent.gitUsername` and the token, draft PR after the first push, `complete_task` marks it ready and posts the summary. Record the results with the date in `plugins/github/README.md` (status line like the Forgejo README)
+
+## 8. Optional: requests against GitHub's OpenAPI description
+
+- [ ] 8.1 Optional; if open at archive time, it moves to the roadmap backlog. Add `cargo xtask update-github-spec [--tag <tag>] [--check]` (design D9): pinned release tag and sha256 of `github/rest-api-description`, the operations from one `operationId` constant per endpoint in the plugin, their schemas by transitive `$ref`, sorted output in `plugins/github/tests/fixtures/github-openapi.json` (read with `include_str!`, in `compile_data` for Bazel). `tests/github.rs` validates `received_requests()` and the mocked responses with `jsonschema`. Verify that `--check` passes, that a request with an unknown query parameter fails the validation, and that a test fails when the plugin names an operation the extract lacks
 
 ## Workflow follow-up
 
-- Sections 1–5 build on `main` and run in parallel to `iter2-multi-forge` (design D10). Sections 6 and 7 start once it is archived (routing, `apiUrl`, `authScheme`, `hosts` in the chart). Archive this change after it: both modify "Plugin images" of `helm-deployment`.
+- Sections 1–5 and the optional section 8 build on `main` and run in parallel to `iter2-multi-forge` (design D10). Sections 6 and 7 start once it is archived (routing, `apiUrl`, `authScheme`, `hosts` in the chart). Archive this change after it: both modify "Plugin images" of `helm-deployment`.
