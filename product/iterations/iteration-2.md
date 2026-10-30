@@ -36,7 +36,8 @@ flowchart LR
   CA --> RR[iter2-run-resilience]
   CA --> TV[iter2-task-volume-lifecycle]
   PD[iter2-plugin-distribution] --> MF[iter2-multi-forge]
-  MF --> GH[iter2-github-plugin]
+  PD --> GH[iter2-github-plugin]
+  MF -. routes and default entry .-> GH
 ```
 
 | Change | Scope |
@@ -52,7 +53,7 @@ flowchart LR
 | `iter2-multi-forge` | Several forge plugins at once: routing by the host of the repository URL (`plugins.<name>.hosts`, one default plugin without hosts), per-route API URL, per-plugin `authScheme`, startup fails only if no forge plugin loads; the UI shows the forge per project. |
 | `iter2-github-plugin` | GitHub plugin (github.com and GitHub Enterprise Server) as its own plugin image: pull requests and issues over the REST API, draft modes `title-prefix` (default, works in private repositories on GitHub Free) and `native`, GitHub's rate limits; enabled for `github.com` in the default release. |
 
-Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`. `iter2-run-resilience` and `iter2-task-volume-lifecycle` are archived after `iter2-cancel` (they build on `cancelled` and the run-end mapping) and can be implemented any time; `iter2-run-resilience` first, it has the larger effect on unattended use. `iter2-plugin-distribution` is independent and should land early, before more plugins exist. `iter2-multi-forge` follows it and must land before a second forge plugin; `iter2-github-plugin` follows `iter2-multi-forge`.
+Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then `iter2-push-checks` and `iter2-egress-approvals`. `iter2-cancel` is independent; its "close pending requests" step lands after `iter2-agent-requests`. `iter2-run-resilience` and `iter2-task-volume-lifecycle` are archived after `iter2-cancel` (they build on `cancelled` and the run-end mapping) and can be implemented any time; `iter2-run-resilience` first, it has the larger effect on unattended use. `iter2-plugin-distribution` is independent and should land early, before more plugins exist. `iter2-multi-forge` follows it and must land before a second forge plugin is enabled. The GitHub plugin itself (component, host retry, image) is built in parallel; its routes, default entry and runs against github.com follow `iter2-multi-forge`, and `iter2-github-plugin` is archived after it.
 
 ## 4. Decisions taken for this iteration
 
