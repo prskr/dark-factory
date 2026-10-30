@@ -63,7 +63,7 @@ Sandbox pods have no image pull secret (`image.pullSecrets` reaches only the con
 
 | Image | Content | Tags |
 |---|---|---|
-| `claude-harness` | `scratch` image: static launcher `bin/claude-agent-acp` (and `bin/claude`), Node.js, `@agentclientprotocol/claude-agent-acp`, the Claude Code CLI and a bundled musl runtime | adapter version (`0.95.0`, `package.json`), `latest` |
+| `claude-harness` | `scratch` image: static launcher `bin/claude-agent-acp` (and `bin/claude`), Node.js, `@agentclientprotocol/claude-agent-acp`, the Claude Code CLI and a bundled musl runtime | adapter version (from `package.json`), `latest` |
 | `claude-project` | Debian Trixie, git, bash, curl, CA certificates, OpenSSH client, UID 1000, `/workspace` | release tag, `latest` |
 
 Prefer version tags: `latest` moves. The chart default `image.harness.claudeCode.tag` and the `df-core` default of `harness.claudeCode.image` are the adapter version; bump them together with `package.json` (`deploy/images/check_versions.sh` checks it).
@@ -79,15 +79,15 @@ Prefer version tags: `latest` moves. The chart default `image.harness.claudeCode
 
 `pnpm-workspace.yaml` keeps both musl CLI builds in the lockfile (`supportedArchitectures`) and drops the glibc, macOS and Windows builds (`ignoredOptionalDependencies`): `rules_js` selects optional dependencies by os and cpu only, so a glibc CLI (~270 MB) would otherwise land in the image.
 
-Bump the adapter:
+Renovate (`renovate.json`) bumps the adapter in one PR, "Claude harness adapter": `package.json`, `pnpm-lock.yaml` and every copy of the image tag that `deploy/images/check_versions.sh` checks (its `customManagers` cover the same files). By hand:
 
 ```bash
 cd deploy/images/claude-harness
-# edit the version in package.json, then
-pnpm install --lockfile-only     # pnpm 10 or newer
+# edit the version in package.json, then (the pnpm version comes from `packageManager`)
+pnpm install --lockfile-only
 ```
 
-Then update the copies `deploy/images/check_versions.sh` lists. Bump Node or the Bootlin release by changing the version and both `sha256` values in `MODULE.bazel` (`SHASUMS256.txt` of the Node release, `<name>.sha256` next to the Bootlin tarball).
+Then update the copies `deploy/images/check_versions.sh` lists. Renovate does not bump Node or the Bootlin release, since it cannot compute their hashes. Bump them by hand: change the version and both `sha256` values in `MODULE.bazel` (`SHASUMS256.txt` of the Node release, `<name>.sha256` next to the Bootlin tarball).
 
 ### How a project uses the harness
 

@@ -2,6 +2,7 @@
 # Fails when the copies of the harness adapter version differ. The source is the
 # @agentclientprotocol/claude-agent-acp dependency in deploy/images/claude-harness/package.json; the
 # image tag in the df-core default, the chart values and the reference documentation must equal it.
+# Renovate bumps all of them in one PR (customManagers in renovate.json cover the same files).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -22,4 +23,6 @@ for f in crates/df-core/src/config.rs crates/df-k8s/README.md crates/df-agent-ch
 done
 check deploy/helm/dark-factory/values.yaml \
   "$(awk '/^  harness:/{h=1} h&&/tag:/{print $2; exit}' deploy/helm/dark-factory/values.yaml | tr -d "' ")"
+check deploy/helm/dark-factory/README.md \
+  "$(sed -n 's/^| `image\.harness\.claudeCode\.tag` | `string` | `"\([^"]*\)"`.*/\1/p' deploy/helm/dark-factory/README.md)"
 exit "$status"

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":prConcurrentLimit10",
+    ":disableRateLimiting"
+  ],
+  "postUpgradeTasks": {
+    "commands": [
+      "bazel mod tidy"
+    ],
+    "fileFilters": [
+      "MODULE.bazel",
+      "MODULE.bazel.lock"
+    ],
+    "executionMode": "update"
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Default harness image tag (the adapter version) in code and reference docs; deploy/images/check_versions.sh lists the same copies",
+      "managerFilePatterns": [
+        "/^crates/df-core/src/config\\.rs$/",
+        "/^crates/df-k8s/README\\.md$/",
+        "/^crates/df-agent-channel/docs/configuration\\.md$/"
+      ],
+      "matchStrings": [
+        "ghcr\\.io/prskr/dark-factory/claude-harness:(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "@agentclientprotocol/claude-agent-acp",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Default harness image tag (the adapter version) of the Helm chart",
+      "managerFilePatterns": [
+        "/^deploy/helm/dark-factory/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "claudeCode:\\n\\s+repository: \\S+\\n\\s+tag: '(?<currentValue>\\d+\\.\\d+\\.\\d+)'"
+      ],
+      "depNameTemplate": "@agentclientprotocol/claude-agent-acp",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Default harness image tag (the adapter version) in the chart reference",
+      "managerFilePatterns": [
+        "/^deploy/helm/dark-factory/README\\.md$/"
+      ],
+      "matchStrings": [
+        "`image\\.harness\\.claudeCode\\.tag` \\| `string` \\| `\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"`"
+      ],
+      "depNameTemplate": "@agentclientprotocol/claude-agent-acp",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Rust version of the Bazel toolchains; must equal `channel` in rust-toolchain.toml (rust-toolchain manager)",
+      "managerFilePatterns": [
+        "/^MODULE\\.bazel$/"
+      ],
+      "matchStrings": [
+        "RUST_VERSION = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "rust-version"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR for the adapter: package.json, pnpm-lock.yaml and every copy of the image tag",
+      "matchPackageNames": [
+        "@agentclientprotocol/claude-agent-acp"
+      ],
+      "groupName": "Claude harness adapter"
+    },
+    {
+      "description": "Our own images are tagged by the release (and the harness by the adapter version above), not looked up in the registry",
+      "matchManagers": [
+        "helm-values"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/prskr/dark-factory/**"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "One PR for the Rust toolchain: rust-toolchain.toml and RUST_VERSION in MODULE.bazel",
+      "matchDatasources": [
+        "rust-version"
+      ],
+      "groupName": "Rust toolchain"
+    }
+  ]
+}
