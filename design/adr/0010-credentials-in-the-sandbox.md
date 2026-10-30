@@ -13,7 +13,7 @@ Sandboxes run untrusted model-driven code. Any credential inside a sandbox is av
 - Target state: the only credentials in a sandbox are its mTLS identity (per pod, short-lived, bound to pod UID and IP) and third-party harness authentication (e.g. a Claude subscription token).
 - No Kubernetes ServiceAccount token, no inference provider keys, no third-party MCP credentials — they stay in the gateway, which injects them into inference and upstream MCP traffic (ADR-0029, ADR-0032).
 - v1 exception: a short-lived, repo-scoped forge token served on demand by the runtime's Git credential helper, until the Git proxy (F1 in `product/context.md`) exists.
-- Accepted risk (2026-10-21): the Claude subscription token from `claude setup-token` is a long-lived static bearer token with no rotation; it is readable by everything in the sandbox for the run's lifetime. It stays until the gateway's Anthropic pass-through (roadmap iteration 3) swaps a placeholder for the real token, the same pattern as the Git proxy. Until then the egress allowlist and the SNI check limit where it can be used from the sandbox, and a leak is handled by revoking it.
+- Accepted risk (2026-10-21): the Claude subscription token from `claude setup-token` is a long-lived static bearer token with no rotation; it is readable by everything in the sandbox for the run's lifetime. It stays until the gateway's inference endpoint (`anthropic` provider kind, `iter3-inference-gateway`, `design/egress.md` §9) swaps a placeholder for the real token, the same pattern as the Git proxy. Until then the egress allowlist and the SNI check limit where it can be used from the sandbox, and a leak is handled by revoking it.
 
 ## Consequences
 

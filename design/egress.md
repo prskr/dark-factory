@@ -118,12 +118,17 @@ Comparable to Hubble: ephemeral, live, filterable — built for spotting missing
 - **Later:** a CLI (`dark-factory egress tail`).
 - **Blind spot:** connection attempts that bypass the proxy (tools ignoring proxy settings, wrong ports) are dropped by the network policy and never reach the gateway, so they don't appear in this log. In Cilium mode, Hubble shows them.
 
-## 9. Inference endpoint (later)
+## 9. Inference endpoint (planned for iteration 3, `iter3-inference-gateway`)
 
-- An OpenAI-compatible HTTP endpoint in the gateway (per-provider adapters, F5). The built-in loop uses it in full-harness mode; any ACP harness that accepts a base URL can use it too, so its provider key never enters the sandbox either.
-- The sandbox is identified by pod IP, exactly as for the egress proxy; the run's allowed models and token budget come with the `PolicyWatch` snapshot.
-- The gateway injects the provider credential, streams responses straight back to the sandbox, measures usage per request and reports it to the control plane (transcript `USAGE_SOURCE_GATEWAY`, ADR-0021). Token streams never pass through the control plane.
-- Subscription-based harnesses (Claude Code with `CLAUDE_CODE_OAUTH_TOKEN`) keep talking to their provider through the egress proxy.
+- An HTTP endpoint in the gateway for model traffic of every harness. Provider kinds:
+  - `anthropic`: Messages API pass-through, credential is a subscription token (`claude setup-token`) or an API key. Claude Code reaches it through `ANTHROPIC_BASE_URL`.
+  - `openai-compatible`: base URL, API key and extra headers (e.g. a session ID header). Used by `df-native` in full-harness mode and by any ACP harness that accepts a base URL.
+  - Further per-provider differences go into adapters (F5), later possibly WASI plugins. Candidate for the provider layer: [octolib](https://github.com/muvon/octolib) (rejected for full-harness mode in ADR-0045 because it covers only the provider layer, which is all the gateway needs). To check: whether it can handle auth, extra headers and usage extraction for streamed responses without re-encoding pass-through requests, plus dependency weight and `cargo deny`.
+- Providers are configured at instance level (kind, upstream URL, credential reference, allowed models) and referenced by personas. The harness gets the gateway as its base URL and a placeholder credential; no provider credential enters the sandbox (ADR-0010).
+- The sandbox is identified by pod IP, exactly as for the egress proxy; the run's provider route and allowed models come with the `PolicyWatch` snapshot.
+- The gateway swaps the placeholder for the provider credential, streams responses straight back to the sandbox, measures usage per request and reports it to the control plane (transcript `USAGE_SOURCE_GATEWAY`, ADR-0021). Token streams never pass through the control plane.
+- The provider hosts (e.g. `api.anthropic.com`) leave the harness's default allowlist, so the egress proxy no longer carries model traffic.
+- Later: token or cost budgets enforced per request, the factory minion in the control plane as a further client of the same provider configuration.
 
 ## 10. MCP endpoint (later)
 

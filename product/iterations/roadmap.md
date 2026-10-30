@@ -60,7 +60,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
 - **Monitors:** a task-scoped wake-up set by the agent (factory tool) or a human, for example to poll a third-party system without webhooks. A due monitor queues a system prompt (reason `monitor.wake`) through the same path as messages and routines. A wake-up due within `runs.keepAliveSeconds` extends the control plane's idle deadline (`iter1-keep-alive-and-review`), so the sandbox stays up; a later one lets the run end and starts a new run when due.
 - **Tasks starting from existing branches** and PR modes other than "create draft PR" (ADR-0025).
-- **Anthropic pass-through in the gateway:** removes the subscription token from sandboxes (ADR-0010 accepted risk). Same shape as the Git proxy: pod-IP identity, bearer swap, streaming. Depends on the `ANTHROPIC_BASE_URL` result of the iteration-1 Claude spike.
+- **Inference endpoint in the gateway (`iter3-inference-gateway`, F5, [`design/egress.md`](../../design/egress.md) §9):** provider kinds `anthropic` (subscription token or API key) and `openai-compatible`; removes model credentials from sandboxes (ADR-0010 accepted risk) and measures usage per request (ADR-0021). Same shape as the Git proxy: pod-IP identity, credential swap, streaming. Depends on the `ANTHROPIC_BASE_URL` result of the iteration-1 Claude spike.
 
 Dependency: "PR merged" dependencies and review routing need the webhooks of ADR-0015.
 
