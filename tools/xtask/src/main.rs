@@ -11,18 +11,23 @@
 //!   `check_test_names.rs`).
 //! - `outdated [--since <rev>]` fails if a declared dependency requirement excludes the latest
 //!   crates.io release (see `outdated.rs`).
+//! - `update-github-spec [--commit <sha> | --check]` writes the extract of GitHub's REST API
+//!   description the GitHub plugin is tested against, from the commit recorded in the extract or
+//!   `--commit`. `--check` fails if the committed extract is stale (see `update_github_spec.rs`).
 
 mod check_crates;
 mod check_file_length;
 mod check_test_names;
 mod common;
 mod outdated;
+mod update_github_spec;
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use update_github_spec::Mode;
 
 const LOCK_PATH: &str = "multitool.lock.json";
 const SCHEMA: &str =
@@ -365,8 +370,13 @@ fn main() -> Result<()> {
         ["check-crates"] => check_crates::run(Path::new("."))?,
         ["check-file-length", files @ ..] => check_file_length::run(Path::new("."), &owned(files))?,
         ["check-test-names", files @ ..] => check_test_names::run(Path::new("."), &owned(files))?,
+        ["update-github-spec"] => update_github_spec::run(Path::new("."), Mode::Update)?,
+        ["update-github-spec", "--check"] => update_github_spec::run(Path::new("."), Mode::Check)?,
+        ["update-github-spec", "--commit", commit] => {
+            update_github_spec::run(Path::new("."), Mode::Commit(commit))?;
+        }
         _ => bail!(
-            "usage: cargo xtask update-tools [--check] | outdated [--since <rev>] | check-crates\n       | check-file-length [<file>...]\n       | check-test-names [<file>...]"
+            "usage: cargo xtask update-tools [--check] | outdated [--since <rev>] | check-crates\n       | check-file-length [<file>...]\n       | check-test-names [<file>...]\n       | update-github-spec [--commit <sha> | --check]"
         ),
     }
     Ok(())

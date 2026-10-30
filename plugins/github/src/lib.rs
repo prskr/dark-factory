@@ -15,6 +15,8 @@ wit_bindgen::generate!({
 mod api;
 mod draft;
 mod error;
+#[cfg(test)]
+mod operations;
 mod settings;
 mod wasi_transport;
 

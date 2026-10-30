@@ -2,7 +2,7 @@
 
 - BASE: 8456277390bc7df407c7f18b7f6273a648a3bb8c (after the PR #42 review the branch was rebased onto 4cbae25, which adds task 2.6 and optional task 8.1)
 - Store: none
-- Status: in progress (sections 1–5, 6.1, 6.2, 6.4, 6.5 done; 6.3 and 7.1 code and live parts done, dev-cluster checks open; optional section 8 in progress)
+- Status: done except the dev-cluster checks of 6.3 and 7.1 (no cluster access)
 - Implementer agent: fresh agent per run (stateless subagents)
 - Scope: sections 1–5 (tasks 1.1–5.1); sections 6–8 on `iter2/github-plugin-routes` (section "Sections 6–7")
 - DOCKER_HOST: unix:///var/run/docker.sock
@@ -148,3 +148,31 @@ User decision: fix all as proposed; GitHub account plan is Free; default `draft-
 Fix round (one implementer per chunk): 843aa51 (default in the plugin, tests), 7ddac93 (spec, design, proposal, product, READMEs, guide), 45b24a5 (test helpers, live test), 84d405a (chart, dev deploy, guides, TD-77). Checks: cargo fmt, clippy (host, wasm), `github-plugin` 68 unit tests, `df-plugins --test github` 4, all test binaries compile, helm-unittest 70/70, `//deploy:helm_chart_test`, shellcheck, typos, `openspec validate --strict`.
 
 Live re-run with `DF_TEST_GITHUB_ISSUE` (2026-10-30): private repository with `native` (default; `ready_for_review`), `title-prefix` (`WIP:` renames) and `auto` (`ready_for_review`), public repository with `native`; all pass, issue comments present. Pull requests closed afterwards.
+
+Verification round over `249ee64...b9a0f1c` (one Standards, one Spec reviewer): all fix-now rows above fixed. New, all P3 and fixed in 194de6c: shared client helper in `tests/common` (R1–R3), bare-host route back in the chart fixture (R4), redundant chart test removed (R5), D2 repeated sentence (R6), plan wording in `api.rs` (N1), header test pinned to `title-prefix` to match its mocks (N2), task texts 2.5 and 7.1 (N3, N4), "Plugin images" requirement shortened to 497 characters (N5).
+
+## Section 8 (2026-10-30)
+
+Upstream `github/rest-api-description` has published no release since v2.1.0 (2022), which predates API version 2026-03-10: the pin is a commit (`141149d4`) plus sha256, recorded in the extract (D9 and task 8.1 updated).
+
+| Chunk | Commit | Checks |
+|---|---|---|
+| extract logic, `src/operations.rs` | c37f418 | xtask 64 tests, clippy (xtask, plugin host and wasm) |
+| `cargo xtask update-github-spec`, fixture (77 KB, 4 paths, 41 components) | 7298c2b | `--check` passes, plain run leaves the file unchanged; plugin test fails for a bogus operation `pulls/bogus` (verified, reverted); `bazel test //plugins/github/...`; typos excludes the fixture (an upstream format name), kingfisher 0 findings |
+| validation in `tests/github.rs` | 82be3ff | 16 tests incl. unknown query parameter, operation missing from the extract, wrong response field type; `df_plugins_github_test` (Bazel), `MODULE.bazel.lock` regenerated, `cargo deny check` |
+| docs | c8693f3 | plugin README section, D9, task 8.1 |
+
+Review over `194de6c...c8693f3`, one Standards and one Spec reviewer; all fix-now, fixed in 4c4a33d (plugin, host tests, Bazel), 1c0beec (xtask) and the commit after it (docs):
+
+| ID | Axis | Class | Where | Finding | Decision | Status |
+|----|------|-------|-------|---------|----------|--------|
+| S1, S3 | Standards | P1 | `tools/xtask/src/update_github_spec.rs` | private items before public ones; test constants and helpers after the tests | fix-now | fixed (1c0beec) |
+| S2, S4–S7, S9, S10 | Standards | P3 | `update_github_spec.rs` | literal instead of `SOURCE_KEY`, test hard-codes all ids, test names, hex encoding, `Option` + `bool` mode, parameter name | fix-now | fixed (1c0beec; hex with `#[expect(clippy::format_collect)]`) |
+| S8 | Standards | P3 | `update_github_spec.rs:62` | `fetch` closure instead of a trait | rejected (xtask convention, see `helm_binaries`) | rejected |
+| S11 | Standards | P1 | `plugins/github/src/lib.rs:18` | `pub mod operations` only for tests | fix-now | fixed (4c4a33d, `#[cfg(test)]`) |
+| S12, P5 | Both | P1 | `operations.rs`, README | API version guard does not say what to do | fix-now | fixed (4c4a33d, README row) |
+| S13, S14, S15 | Standards | P1 | `tests/github_openapi/mod.rs`, `BUILD.bazel` | `Result<_, String>`, unused tuple field, repeated `if name == "github"` | fix-now | fixed (4c4a33d) |
+| P1 | Spec | P1 | `tests/github.rs` | `issues/get` never requested in a host test | fix-now | fixed (4c4a33d, `closed_issue_with_a_null_body_is_read_with_its_labels`) |
+| P2 | Spec | P1 | `operations.rs` | offline test checks only ⊇, a removed operation stays in the extract | fix-now | fixed (4c4a33d, set equality) |
+| P3 | Spec | P3 | `tests/github_openapi/mod.rs:122` | path parameters and required query parameters unchecked | fix-now | fixed (4c4a33d) |
+| P4 | Spec | P3 | `tasks.md` 8.1 | CLI form and "constant per endpoint" | fix-now | fixed (docs commit) |

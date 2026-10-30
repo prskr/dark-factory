@@ -4,7 +4,8 @@ use crate::darkfactory::integrations::types::Error;
 use crate::draft;
 
 /// `X-GitHub-Api-Version` unless `api-version` is set: the current version on github.com.
-const DEFAULT_API_VERSION: &str = "2026-03-10";
+/// The REST API description extract (`cargo xtask update-github-spec`) is taken from this version.
+pub(crate) const DEFAULT_API_VERSION: &str = "2026-03-10";
 
 /// How new drafts are marked; reading recognizes both forms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

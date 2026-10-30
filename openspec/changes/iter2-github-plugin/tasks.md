@@ -42,7 +42,7 @@
 
 ## 8. Optional: requests against GitHub's OpenAPI description
 
-- [ ] 8.1 Optional; if open at archive time, it moves to the roadmap backlog. Add `cargo xtask update-github-spec [--tag <tag>] [--check]` (design D9): pinned release tag and sha256 of `github/rest-api-description`, the operations from one `operationId` constant per endpoint in the plugin, their schemas by transitive `$ref`, sorted output in `plugins/github/tests/fixtures/github-openapi.json` (read with `include_str!`, in `compile_data` for Bazel). `tests/github.rs` validates `received_requests()` and the mocked responses with `jsonschema`. Verify that `--check` passes, that a request with an unknown query parameter fails the validation, and that a test fails when the plugin names an operation the extract lacks
+- [x] 8.1 Optional; if open at archive time, it moves to the roadmap backlog. Add `cargo xtask update-github-spec [--commit <sha> | --check]` (design D9): pinned commit (no upstream release has the API version 2026-03-10) and sha256 of `github/rest-api-description`, the operations from one `operationId` per endpoint in `plugins/github/src/operations.rs`, their schemas by transitive `$ref`, sorted output in `plugins/github/tests/fixtures/github-openapi.json` (read with `include_str!`, in `compile_data` for Bazel). `tests/github.rs` validates `received_requests()` and the mocked responses with `jsonschema`. Verify that `--check` passes, that a request with an unknown query parameter fails the validation, and that a test fails when the plugin names an operation the extract lacks
 
 ## Workflow follow-up
 

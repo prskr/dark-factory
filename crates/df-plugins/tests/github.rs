@@ -1,11 +1,13 @@
 //! The GitHub component, run by the host against a mock GitHub (spec `github-integration`).
 
 mod common;
+mod github_openapi;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use df_core::{
-    ForgeClient, IntegrationError, NewPullRequest, ProjectId, PullRequestUpdate, RateLimit,
+    ForgeClient, IntegrationError, IssueState, NewPullRequest, ProjectId, PullRequestUpdate,
+    RateLimit,
 };
 use df_plugins::ForgeRouter;
 use serde_json::json;
@@ -54,16 +56,43 @@ fn ready() -> PullRequestUpdate {
     }
 }
 
-async fn mount_comment(server: &MockServer) {
+/// A mocked response of the REST operation `operation_id`, checked against GitHub's description.
+fn github_response(
+    operation_id: &str,
+    status: u16,
+    body: serde_json::Value,
+) -> anyhow::Result<ResponseTemplate> {
+    github_openapi::validate_response(operation_id, status, &body)?;
+    Ok(ResponseTemplate::new(status).set_body_json(body))
+}
+
+/// Every REST request the mock received matches an operation of GitHub's description.
+async fn assert_requests_match_the_extract(server: &MockServer) {
+    let errors: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.url.path() != "/graphql")
+        .filter_map(|request| github_openapi::validate_received(request).err())
+        .map(|err| format!("{err:#}"))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+async fn mount_comment(server: &MockServer) -> anyhow::Result<()> {
     Mock::given(method("POST"))
         .and(path("/repos/o/r/issues/7/comments"))
         .and(body_json(json!({"body": "hello"})))
-        .respond_with(
-            ResponseTemplate::new(201).set_body_json(json!({"id": 55, "html_url": "http://c/55"})),
-        )
+        .respond_with(github_response(
+            "issues/create-comment",
+            201,
+            json!({"id": 55, "html_url": "http://c/55"}),
+        )?)
         .expect(1)
         .mount(server)
         .await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -75,7 +104,11 @@ async fn title_prefix_lifecycle_marks_drafts_in_the_title() -> anyhow::Result<()
             "title": "WIP: DF-1: Fix login", "body": "body",
             "head": "factory/task/DF-1", "base": "main"
         })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(pr("WIP: DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/create",
+            201,
+            pr("WIP: DF-1: Fix login", false),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
@@ -85,22 +118,32 @@ async fn title_prefix_lifecycle_marks_drafts_in_the_title() -> anyhow::Result<()
         .and(query_param("head", "o:factory/task/DF-1"))
         .and(query_param("base", "main"))
         .and(query_param("per_page", "100"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([pr("WIP: DF-1: Fix login", false)])),
-        )
+        .respond_with(github_response(
+            "pulls/list",
+            200,
+            json!([pr("WIP: DF-1: Fix login", false)]),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path(format!("{PULLS}/7")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("WIP: DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/get",
+            200,
+            pr("WIP: DF-1: Fix login", false),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
         .and(path(format!("{PULLS}/7")))
         .and(body_json(json!({"title": "DF-1: Fix login"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/update",
+            200,
+            pr("DF-1: Fix login", false),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
@@ -110,7 +153,7 @@ async fn title_prefix_lifecycle_marks_drafts_in_the_title() -> anyhow::Result<()
         .expect(0)
         .mount(&server)
         .await;
-    mount_comment(&server).await;
+    mount_comment(&server).await?;
 
     let client = client(&server, &[("draft-mode", "title-prefix")])?;
     let project = ProjectId::new();
@@ -126,6 +169,7 @@ async fn title_prefix_lifecycle_marks_drafts_in_the_title() -> anyhow::Result<()
     assert!(!updated.draft);
     let comment = client.add_issue_comment(&project, 7, "hello").await?;
     assert_eq!(comment.id, "55");
+    assert_requests_match_the_extract(&server).await;
     Ok(())
 }
 
@@ -138,22 +182,32 @@ async fn native_lifecycle_uses_the_draft_flag_and_graphql() -> anyhow::Result<()
             "title": "DF-1: Fix login", "body": "body",
             "head": "factory/task/DF-1", "base": "main", "draft": true
         })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(pr("DF-1: Fix login", true)))
+        .respond_with(github_response(
+            "pulls/create",
+            201,
+            pr("DF-1: Fix login", true),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path(PULLS))
         .and(query_param("head", "o:factory/task/DF-1"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([pr("DF-1: Fix login", true)])),
-        )
+        .respond_with(github_response(
+            "pulls/list",
+            200,
+            json!([pr("DF-1: Fix login", true)]),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path(format!("{PULLS}/7")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login", true)))
+        .respond_with(github_response(
+            "pulls/get",
+            200,
+            pr("DF-1: Fix login", true),
+        )?)
         .up_to_n_times(1)
         .expect(1)
         .mount(&server)
@@ -168,16 +222,24 @@ async fn native_lifecycle_uses_the_draft_flag_and_graphql() -> anyhow::Result<()
         .await;
     Mock::given(method("GET"))
         .and(path(format!("{PULLS}/7")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/get",
+            200,
+            pr("DF-1: Fix login", false),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
-        .respond_with(ResponseTemplate::new(200))
+        .respond_with(github_response(
+            "pulls/update",
+            200,
+            pr("DF-1: Fix login", false),
+        )?)
         .expect(0)
         .mount(&server)
         .await;
-    mount_comment(&server).await;
+    mount_comment(&server).await?;
 
     let client = client(&server, &[])?;
     let project = ProjectId::new();
@@ -191,6 +253,7 @@ async fn native_lifecycle_uses_the_draft_flag_and_graphql() -> anyhow::Result<()
     let updated = client.update_pull_request(&project, 7, ready()).await?;
     assert!(!updated.draft);
     client.add_issue_comment(&project, 7, "hello").await?;
+    assert_requests_match_the_extract(&server).await;
     Ok(())
 }
 
@@ -206,20 +269,32 @@ async fn every_request_carries_the_github_headers_and_the_host_injected_token() 
         .and(header("x-github-api-version", "2026-03-10"))
         .and(header("authorization", token.as_str()))
         .and(header("content-type", "application/json"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(pr("WIP: DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/create",
+            201,
+            pr("WIP: DF-1: Fix login", false),
+        )?)
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path(format!("{PULLS}/7")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("WIP: DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/get",
+            200,
+            pr("WIP: DF-1: Fix login", false),
+        )?)
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login", false)))
+        .respond_with(github_response(
+            "pulls/update",
+            200,
+            pr("DF-1: Fix login", false),
+        )?)
         .mount(&server)
         .await;
-    mount_comment(&server).await;
+    mount_comment(&server).await?;
 
     let client = client(&server, &[("draft-mode", "title-prefix")])?;
     let project = ProjectId::new();
@@ -248,6 +323,39 @@ async fn every_request_carries_the_github_headers_and_the_host_injected_token() 
         assert_eq!(get("x-github-api-version"), "2026-03-10");
         assert_eq!(get("authorization"), token);
     }
+    assert_requests_match_the_extract(&server).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn closed_issue_with_a_null_body_is_read_with_its_labels() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/r/issues/9"))
+        .respond_with(github_response(
+            "issues/get",
+            200,
+            json!({
+                "number": 9, "title": "Login fails", "body": null, "state": "closed",
+                "html_url": "https://github.example/o/r/issues/9",
+                "labels": [{"name": "bug"}, {"name": "factory"}]
+            }),
+        )?)
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let issue = client(&server, &[])?
+        .get_issue(&ProjectId::new(), 9)
+        .await?;
+
+    assert_eq!(issue.id.number, 9);
+    assert_eq!(issue.title, "Login fails");
+    assert_eq!(issue.body, "");
+    assert_eq!(issue.state, IssueState::Closed);
+    assert_eq!(issue.labels, ["bug", "factory"]);
+    assert_eq!(issue.url, "https://github.example/o/r/issues/9");
+    assert_requests_match_the_extract(&server).await;
     Ok(())
 }
 
@@ -257,10 +365,13 @@ async fn rate_limit_with_a_distant_reset_is_returned_without_a_retry() -> anyhow
     let reset = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 600;
     Mock::given(method("POST"))
         .respond_with(
-            ResponseTemplate::new(403)
-                .insert_header("x-ratelimit-remaining", "0")
-                .insert_header("x-ratelimit-reset", reset.to_string().as_str())
-                .set_body_json(json!({"message": "API rate limit exceeded"})),
+            github_response(
+                "issues/create-comment",
+                403,
+                json!({"message": "API rate limit exceeded"}),
+            )?
+            .insert_header("x-ratelimit-remaining", "0")
+            .insert_header("x-ratelimit-reset", reset.to_string().as_str()),
         )
         .expect(1)
         .mount(&server)
@@ -283,5 +394,6 @@ async fn rate_limit_with_a_distant_reset_is_returned_without_a_retry() -> anyhow
         server.received_requests().await.unwrap_or_default().len(),
         1
     );
+    assert_requests_match_the_extract(&server).await;
     Ok(())
 }

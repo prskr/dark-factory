@@ -56,10 +56,20 @@ IMAGE_FORGEJO = "//deploy:forgejo_plugin"
 
 IMAGE_GITHUB = "//deploy:github_plugin"
 
+# `tests/github.rs` checks the mock traffic against the OpenAPI extract (`tests/github_openapi`).
+EXTRAS = {
+    "github": {
+        "compile_data": ["//plugins/github:tests/fixtures/github-openapi.json"],
+        "srcs": glob(["tests/github_openapi/**/*.rs"]),
+    },
+}
+
 [
     rust_test(
         name = "df_plugins_%s_test" % name,
-        srcs = ["tests/%s.rs" % name] + glob(["tests/common/**/*.rs"]),
+        srcs = ["tests/%s.rs" % name] + glob(["tests/common/**/*.rs"]) +
+               EXTRAS.get(name, {}).get("srcs", []),
+        compile_data = EXTRAS.get(name, {}).get("compile_data", []),
         crate_root = "tests/%s.rs" % name,
         data = components.values(),
         edition = "2024",
