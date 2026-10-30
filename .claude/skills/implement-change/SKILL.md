@@ -106,8 +106,9 @@ When no blocking finding is open, or the user chose "Stop here" (or the fix-roun
    - a summary table row and a `### TD-n (<finding IDs>). <title>` entry: what is wrong, when it matters, how to fix it
    
    Show the user the entries before you write them.
+   - **Deferred work.** Follow-ups that are not defects (out-of-scope items and non-goals of the change, features cut during the rounds) go to `product/iterations/roadmap.md`, not to `docs/tech_debt.md`: a backlog row (item, status, reference to the change) unless an iteration or the backlog already lists them. Show the rows to the user before you write them.
 4. **Ledger.** Set the status to `done` only if no blocking finding is open and the container-backed tests ran (step 1). If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
-5. **Commit** the ledger and the tech-debt changes: `wip(<change>): review log and tech debt` (the ledger status is `done`, `untested` or `stopped` as above).
+5. **Commit** the ledger, the tech-debt and the roadmap changes: `wip(<change>): review log and tech debt` (the ledger status is `done`, `untested` or `stopped` as above).
 6. **Report**:
    - status (`done`, `untested` with the skipped container tests, or `stopped` with the open blocking findings), tasks `n/m`, rounds run
    - findings fixed, deferred (with TD IDs), cosmetic, rejected

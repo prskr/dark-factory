@@ -30,3 +30,14 @@ schema: spec-driven
 #     archive:
 #       guidance:
 #         - Summarize the archive outcome before finishing
+
+rules:
+  proposal:
+    - Every out-of-scope item that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); an item that is not wanted says "rejected".
+  design:
+    - Every non-goal that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); a non-goal that is not wanted says "rejected".
+
+operations:
+  archive:
+    guidance:
+      - Before archiving, check the change's out-of-scope items and non-goals against product/iterations/roadmap.md. Add a backlog row (item, status, reference to the archived change) for every real follow-up that is neither in an iteration nor in the backlog, and show the rows to the user before writing them.
