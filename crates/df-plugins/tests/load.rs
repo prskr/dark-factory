@@ -7,7 +7,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use df_plugins::PluginHost;
+use df_plugins::{PluginEngine, PluginHost};
 use tracing_subscriber::fmt::MakeWriter;
 
 #[derive(Clone, Default)]
@@ -46,7 +46,13 @@ fn load_logs_name_path_size_and_compile_time() -> anyhow::Result<()> {
     let bytes = common::forgejo();
     std::fs::write(&path, &bytes)?;
 
-    PluginHost::load("forgejo", &path, Duration::from_secs(30), 64 << 20)?;
+    PluginHost::load(
+        &PluginEngine::new()?,
+        "forgejo",
+        &path,
+        Duration::from_secs(30),
+        64 << 20,
+    )?;
 
     let log = String::from_utf8(captured.0.lock().expect("lock").clone())?;
     assert!(log.contains(r#"plugin="forgejo""#), "{log}");

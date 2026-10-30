@@ -98,6 +98,13 @@ Every key in `values.yaml` is documented below:
 | `enforcement.mode` | `string` | `"kubernetes"` | Network policy enforcement backend (`"kubernetes"` for `networking.k8s.io/v1` or `"cilium"` to also grant `ciliumnetworkpolicies`). |
 | `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a release-prefixed read-only `ClusterRole`/`ClusterRoleBinding` for `services` and `endpointslices`. |
 | `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s are created when `anyNamespace` is `false`. |
+| `plugins.forgejo.image.repository` | `string` | forgejo: `"ghcr.io/prskr/dark-factory/plugin-forgejo"` | Plugin image. With an image, the control plane pod mounts it read-only as an image volume at `/plugins/<name>` and the instance config sets `plugins.<name>.path` to `/plugins/<name>/plugin.wasm`. Set `plugins.<name>.image: null` for an entry without an image. |
+| `plugins.forgejo.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
+| `plugins.forgejo.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
+| `plugins.forgejo.path` | `string` | `""` | Component file in the control plane image. Required without an image (the values schema rejects an entry naming neither), ignored with one. |
+| `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
+| `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
+| `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
 | `web.showHiddenBlocks` | `bool` | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, such as the title request) in the task UI, muted and labeled (`web.showHiddenBlocks` of the instance config). For debugging prompts. Read at startup: a change restarts the control plane. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
@@ -176,9 +183,47 @@ telemetry:
     headersSecret: otel-auth # Secret with key `headers`
 ```
 
-## Cluster targets
+## Plugins
 
-The chart does not render the control plane's `plugins` section: the image ships the Forgejo plugin at `/plugins/forgejo.wasm`, which is the default (reference: `crates/df-plugins/docs/configuration.md`).
+Each plugin ships as its own image (`FROM scratch`, one file `/plugin.wasm`). The kubelet pulls it and the control plane pod mounts it read-only as an image volume at `/plugins/<name>`; the control plane never fetches components and plugins need no PersistentVolume. The default release configures `forgejo` with `plugin-forgejo:<appVersion>`. Config reference: `crates/df-plugins/docs/configuration.md`.
+
+### Pin a plugin version
+
+```yaml
+plugins:
+  forgejo:
+    image:
+      digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+### Upgrade a plugin
+
+Set the new `plugins.forgejo.image.tag` (or `digest`) and run `helm upgrade`. The image reference is part of the pod template, so the control plane Deployment performs a rolling update; no checksum annotation and no storage are involved. A plugin that cannot be pulled keeps the new pod in `ContainerCreating` and the old pods keep serving.
+
+### Cluster without image volumes
+
+Clusters without image volume support cannot mount plugin images (no init-container fallback: a `scratch` image has no copy tool). Build a control plane image that contains the component and configure a path:
+
+```dockerfile
+FROM ghcr.io/prskr/dark-factory/control-plane:0.1.0
+COPY plugin.wasm /custom/forgejo.wasm
+```
+
+```yaml
+image:
+  controlPlane:
+    repository: registry.example.org/control-plane-with-plugin
+plugins:
+  forgejo:
+    image: null
+    path: /custom/forgejo.wasm
+```
+
+### Troubleshooting
+
+The control plane pod does not start and `kubectl describe pod` shows a failed pull of the image volume `plugin-<name>` in the pod's reason, message and events (retried with volume backoff, not reported as a container `ErrImagePull`): the plugin image or tag does not exist, the registry needs credentials (`image.pullSecrets` apply to plugin images) or the cluster has no image volume support. The `serve` process exits at startup naming the plugin and path if the component is missing or invalid.
+
+## Cluster targets
 
 `clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs. The egress allowlist page applies the same restriction when a `cluster-service` entry is saved: Services outside these namespaces are rejected.
 

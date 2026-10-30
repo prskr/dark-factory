@@ -49,6 +49,7 @@ data:
     clusterTargets:
       anyNamespace: {{ .Values.clusterTargets.anyNamespace }}
       namespaces: {{ .Values.clusterTargets.namespaces | toJson }}
+    {{- include "dark-factory.pluginsConfig" . | nindent 4 }}
     agent:
       tls:
         certFile: /etc/dark-factory/tls/tls.crt

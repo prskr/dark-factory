@@ -45,21 +45,21 @@ rust_test(
 )
 
 # Integration tests run the plugin components built by Bazel (without the variables they build
-# them with cargo).
+# them with cargo). `image_component` loads the optimized component that goes into the plugin image.
+FORGEJO = "//plugins/forgejo"
+
+PROBE = "//plugins/test-probe"
+
+IMAGE_FORGEJO = "//deploy:forgejo_plugin"
+
 [
     rust_test(
         name = "df_plugins_%s_test" % name,
         srcs = ["tests/%s.rs" % name] + glob(["tests/common/**/*.rs"]),
         crate_root = "tests/%s.rs" % name,
-        data = [
-            "//plugins/forgejo",
-            "//plugins/test-probe",
-        ],
+        data = components.values(),
         edition = "2024",
-        env = {
-            "FORGEJO_PLUGIN_WASM": "$(rootpath //plugins/forgejo)",
-            "TEST_PROBE_WASM": "$(rootpath //plugins/test-probe)",
-        },
+        env = {var: "$(rootpath %s)" % label for var, label in components.items()},
         lint_config = ":lints",
         proc_macro_deps = all_crate_deps(
             proc_macro = True,
@@ -73,10 +73,23 @@ rust_test(
             "//crates/df-core:df_core",
         ],
     )
-    for name in [
-        "forgejo",
-        "homelab",
-        "load",
-        "sandbox",
-    ]
+    for name, components in {
+        "forgejo": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+        },
+        "homelab": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+        },
+        "image_component": {"FORGEJO_PLUGIN_WASM": IMAGE_FORGEJO},
+        "load": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+        },
+        "sandbox": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+        },
+    }.items()
 ]

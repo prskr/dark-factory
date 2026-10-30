@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use df_core::{ForgeClient, IntegrationError, ProjectId};
-use df_plugins::{LoadError, PluginHost};
+use df_plugins::{LoadError, PluginEngine, PluginHost};
 use tracing_subscriber::fmt::MakeWriter;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -24,24 +24,17 @@ fn probe_client(timeout: Duration, memory: usize) -> anyhow::Result<common::Clie
 }
 
 #[test]
-fn forge_plugin_reports_both_capabilities() -> anyhow::Result<()> {
-    let host = PluginHost::from_bytes(
-        "forgejo",
-        &common::forgejo(),
-        Duration::from_secs(30),
-        64 * MIB,
-    )?;
-    let capabilities = host.capabilities();
-    assert!(capabilities.pull_requests && capabilities.issues);
-    Ok(())
-}
-
-#[test]
 fn plugin_importing_filesystem_is_refused() {
     let component = r#"(component (import "wasi:filesystem/preopens@0.2.12" (instance)))"#;
-    let err = PluginHost::from_bytes("probe", component.as_bytes(), Duration::from_secs(1), MIB)
-        .err()
-        .expect("must be refused");
+    let err = PluginHost::from_bytes(
+        &PluginEngine::new().expect("engine"),
+        "probe",
+        component.as_bytes(),
+        Duration::from_secs(1),
+        MIB,
+    )
+    .err()
+    .expect("must be refused");
     assert!(
         matches!(&err, LoadError::ForbiddenImport(name) if name == "wasi:filesystem/preopens@0.2.12"),
         "{err}"
@@ -55,10 +48,15 @@ fn plugin_importing_an_unlisted_interface_of_an_allowed_namespace_is_refused() {
         "wasi:http/incoming-handler@0.2.12",
     ] {
         let component = format!(r#"(component (import "{import}" (instance)))"#);
-        let err =
-            PluginHost::from_bytes("probe", component.as_bytes(), Duration::from_secs(1), MIB)
-                .err()
-                .expect("must be refused");
+        let err = PluginHost::from_bytes(
+            &PluginEngine::new().expect("engine"),
+            "probe",
+            component.as_bytes(),
+            Duration::from_secs(1),
+            MIB,
+        )
+        .err()
+        .expect("must be refused");
         assert!(
             matches!(&err, LoadError::ForbiddenImport(name) if name == import),
             "{err}"
@@ -68,9 +66,15 @@ fn plugin_importing_an_unlisted_interface_of_an_allowed_namespace_is_refused() {
 
 #[test]
 fn component_without_capabilities_is_refused() {
-    let err = PluginHost::from_bytes("probe", b"(component)", Duration::from_secs(1), MIB)
-        .err()
-        .expect("must be refused");
+    let err = PluginHost::from_bytes(
+        &PluginEngine::new().expect("engine"),
+        "probe",
+        b"(component)",
+        Duration::from_secs(1),
+        MIB,
+    )
+    .err()
+    .expect("must be refused");
     assert!(matches!(err, LoadError::NoCapability), "{err}");
 }
 
@@ -98,6 +102,37 @@ async fn plugin_exceeding_the_memory_limit_fails() -> anyhow::Result<()> {
     let client = probe_client(Duration::from_secs(30), 16 * MIB)?;
     let err = client.get_issue(&ProjectId::new(), 3).await.unwrap_err();
     assert!(matches!(err, IntegrationError::Internal(_)), "{err}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn runaway_call_in_one_plugin_times_out_without_affecting_another_on_a_shared_engine()
+-> anyhow::Result<()> {
+    let engine = PluginEngine::new()?;
+    let url = "https://git.example.org/o/r.git";
+    let first = common::client_on(
+        &engine,
+        &common::probe(),
+        url,
+        common::TOKEN,
+        Duration::from_secs(30),
+        64 * MIB,
+    )?;
+    let second = common::client_on(
+        &engine,
+        &common::probe(),
+        url,
+        common::TOKEN,
+        Duration::from_millis(300),
+        64 * MIB,
+    )?;
+    let project = ProjectId::new();
+    assert_eq!(first.get_issue(&project, 1).await?.body, "env=0");
+    assert_eq!(second.get_issue(&project, 1).await?.body, "env=0");
+    // The shared clock stops the runaway call of one plugin; the other keeps working.
+    let err = second.get_issue(&project, 2).await.unwrap_err();
+    assert!(matches!(err, IntegrationError::Internal(_)), "{err}");
+    assert_eq!(first.get_issue(&project, 1).await?.body, "env=0");
     Ok(())
 }
 

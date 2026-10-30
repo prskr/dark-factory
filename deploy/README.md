@@ -132,7 +132,7 @@ DARK_FACTORY_NAMESPACE=dark-factory-dev \
   bazel run //deploy:dev
 ```
 
-The Bazel images are pushed first. `claude-harness` and `claude-project` are then built from `deploy/images/` for `linux/amd64,linux/arm64` (multi-arch builds need emulation for the foreign architecture) and pushed to `${DARK_FACTORY_REGISTRY}/<image>:dev`. Helm gets `image.harness.claudeCode.repository` and the pushed `digest`, so nodes do not keep a stale `dev` under `IfNotPresent`. Both builders cache the build steps (Buildah with `--layers`), so an unchanged Dockerfile costs only the manifest push. When only Rust code changed, `DARK_FACTORY_SKIP_HARNESS_IMAGES=1` skips the harness images entirely.
+The Bazel images are pushed first. `claude-harness` and `claude-project` are then built from `deploy/images/` for `linux/amd64,linux/arm64` (multi-arch builds need emulation for the foreign architecture) and pushed to `${DARK_FACTORY_REGISTRY}/<image>:dev`. The Forgejo plugin image (`plugin-forgejo`) is pushed with the other Bazel images and Helm gets its digest as `plugins.forgejo.image.digest`. Helm gets `image.harness.claudeCode.repository` and the pushed `digest`, so nodes do not keep a stale `dev` under `IfNotPresent`. Both builders cache the build steps (Buildah with `--layers`), so an unchanged Dockerfile costs only the manifest push. When only Rust code changed, `DARK_FACTORY_SKIP_HARNESS_IMAGES=1` skips the harness images entirely.
 
 | Variable | Required | Default | Effect |
 |---|---|---|---|

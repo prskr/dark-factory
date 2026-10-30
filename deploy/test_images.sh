@@ -5,6 +5,7 @@ JQ_BIN="$(realpath "$1")"
 CONTROL_PLANE_IMAGE_DIR="$2"
 RUNTIME_IMAGE_DIR="$3"
 TEST_PROJECT_IMAGE_DIR="$4"
+PLUGIN_FORGEJO_IMAGE_DIR="$5"
 
 # the pinned jq: hosts do not necessarily ship one
 jq() { "$JQ_BIN" "$@"; }
@@ -70,6 +71,7 @@ echo "=== 1. Verifying multi-arch OCI indexes (amd64 + arm64) ==="
 verify_multiarch_index "$CONTROL_PLANE_IMAGE_DIR"
 verify_multiarch_index "$RUNTIME_IMAGE_DIR"
 verify_multiarch_index "$TEST_PROJECT_IMAGE_DIR"
+verify_multiarch_index "$PLUGIN_FORGEJO_IMAGE_DIR"
 
 for arch in amd64 arm64; do
   if [[ "$arch" == "amd64" ]]; then
@@ -81,11 +83,25 @@ for arch in amd64 arm64; do
   echo "=== 2. Verifying control_plane_image ($arch) structure and static ELF ==="
   cp_entries="$(list_oci_layer_entries_for_arch "$CONTROL_PLANE_IMAGE_DIR" "$arch")"
   grep -qxE '\./dark-factory|dark-factory' <<<"$cp_entries"
-  grep -qxE '\./plugins/forgejo\.wasm|plugins/forgejo\.wasm' <<<"$cp_entries"
+  # plugins ship as their own images
+  if grep -q '\.wasm$' <<<"$cp_entries"; then
+    echo "Expected no .wasm file in the control plane image ($arch), got:" >&2
+    echo "$cp_entries" >&2
+    exit 1
+  fi
   extract_local_layers_for_arch "$CONTROL_PLANE_IMAGE_DIR" "$arch" "$WORK_DIR/cp-$arch"
   verify_static_elf "$WORK_DIR/cp-$arch/dark-factory" "$expected_elf_arch"
+
+  echo "=== 2b. Verifying plugin_forgejo_image ($arch, scratch) content ==="
+  pl_entries="$(list_oci_layer_entries_for_arch "$PLUGIN_FORGEJO_IMAGE_DIR" "$arch" | sed 's|^\./||' | grep -v '^$' | sort)"
+  if [[ "$pl_entries" != "plugin.wasm" ]]; then
+    echo "Expected only plugin.wasm in the plugin image ($arch), got:" >&2
+    echo "$pl_entries" >&2
+    exit 1
+  fi
+  extract_local_layers_for_arch "$PLUGIN_FORGEJO_IMAGE_DIR" "$arch" "$WORK_DIR/pl-$arch"
+  plugin="$WORK_DIR/pl-$arch/plugin.wasm"
   # the optimized build; a fastbuild component is ~6.9 MB
-  plugin="$WORK_DIR/cp-$arch/plugins/forgejo.wasm"
   [[ "$(wc -c <"$plugin")" -lt 1048576 ]]
   [[ "$(head -c 4 "$plugin" | od -An -tx1 | tr -d ' ')" == "0061736d" ]]
 

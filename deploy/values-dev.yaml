@@ -22,6 +22,13 @@ image:
     tag: 'dev'
     digest: ''
 
+plugins:
+  forgejo:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-forgejo
+      tag: 'dev'
+      digest: ''
+
 database:
   host: app-cluster-18-rw.postgres.svc
   port: 5432
