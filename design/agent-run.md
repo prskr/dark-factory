@@ -147,7 +147,7 @@ Trust policy for configuration found in the repository:
 |---|---|
 | `AGENTS.md`, `CLAUDE.md` | Accepted as model instructions |
 | Repo skills (`.agents/skills`, `.claude/skills`) | Accepted unless the project disables them |
-| MCP server definitions (`.mcp.json`, …) | Not used by the runtime; can be surfaced to the control plane as a `repository-mcp-server` approval request (ADR-0038) |
+| MCP server definitions (`.mcp.json`, …) | Not used by the runtime until a `repository-mcp-server` approval (ADR-0038) activates an entry (planned for iteration 4); the runtime then starts that stdio server in the sandbox and passes it in `session/new`, without credentials from the factory (§9) |
 | Harness hooks/settings in the repo | Whatever the harness honours runs inside the sandbox only; none of the runtime's privileged operations depend on them |
 | `.dark-factory/config.toml` | Never read from the worktree. The control plane reads it from the base branch and applies only the approved version (§16) |
 | Repository Git hooks (`.githooks/`, `.pre-commit-config.yaml`, …) | Only run when a commit hook command configured in Dark Factory calls them (§7.1) |
@@ -261,6 +261,7 @@ The harness sees two MCP servers, both configured by the runtime (ADR-0027, ADR-
 
 - **`factory`** — the factory tools, which act on Dark Factory's state (iteration 1: update the PR, comment on the issue, report progress, complete the task; later: ask a question, request an approval (ADR-0038), create a task for another persona (delegation, ADR-0043), answer a question (`answer_question`), merge a subtask's PR into the task's own branch if `subtask_merge` allows it (ADR-0034), artifacts). Configured as a stdio command (`/opt/factory/factory-agent mcp`); no network listener — the subprocess connects to the parent runtime via a Unix socket on tmpfs (`/run/factory/mcp.sock`). The runtime answers `tools/list` from `Assign.tools` and forwards calls as typed tool-call messages over the agent stream; the control plane authorizes them against the task binding and executes them (database, run control, WASI plugins). Large results can be stored as artifacts and returned by reference.
 - **Gateway MCP endpoint** *(later)* — third-party MCP servers (e.g. forgejo-mcp), aggregated by the gateway over Streamable HTTP. The gateway identifies the sandbox by pod IP, injects upstream credentials, exposes only the run's tool set (enabled catalog ∩ persona grants ∩ project restrictions) and offers `search_tools` / `load_server` when that set is large. No token is needed in the sandbox.
+- **Stdio MCP servers** never run in the gateway, which would put untrusted code next to all upstream credentials. Two options: a server that needs no project context runs behind a stdio → HTTP bridge and is registered as an HTTP upstream of the gateway; a server that needs the workspace runs in the sandbox as a project-scoped server from `.mcp.json`, activated by a `repository-mcp-server` approval (§6.3). Project-scoped servers get no credentials from the factory.
 
 In full-harness mode the runtime's own loop uses both directly, without the stdio hop.
 

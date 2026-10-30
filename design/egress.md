@@ -133,6 +133,7 @@ Comparable to Hubble: ephemeral, live, filterable — built for spotting missing
 ## 10. MCP endpoint (later)
 
 - One MCP endpoint (Streamable HTTP) aggregating the third-party MCP servers a run may use (ADR-0032). The runtime registers it in the harness configuration next to its own `factory` server.
+- Upstream servers are HTTP servers with static credentials (header, bearer token). Stdio servers run behind a stdio → HTTP bridge or in the sandbox ([`agent-run.md`](agent-run.md) §9); OAuth-based servers are in the backlog.
 - Same identification (pod IP) and the same `PolicyWatch` snapshot as the proxy; the snapshot carries the run's tool set per upstream server.
 - The gateway injects upstream credentials, filters `tools/list`, rejects calls outside the tool set, and offers `search_tools` / `load_server` when the set is large.
 - Tool catalogs and their instance-level filters live in the control plane (discovery, new tools disabled by default); the gateway only receives the result.

@@ -23,7 +23,7 @@ flowchart LR
 | 1.1 | Operability | `openspec/changes/agent-session-logging`, `openspec/changes/otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | 2 | Closed Git boundary + human in the loop | [`iteration-2.md`](iteration-2.md), F1, ADR-0038 |
 | 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0043, ADR-0044, ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
-| 4 | Harnesses, tools and skills | F12, F13, ADR-0011, ADR-0021, ADR-0032 |
+| 4 | Harnesses, tools and skills | [`iteration-4.md`](iteration-4.md) (draft), F12, F13, ADR-0011, ADR-0021, ADR-0032 |
 | 5 | Configurable projects | F9, F10, F11, ADR-0010, ADR-0039 |
 | 6 | Visibility and memory | F8, ADR-0035, ADR-0038, ADR-0040 |
 
@@ -73,7 +73,7 @@ Dependency: "PR merged" dependencies and review routing need the webhooks of ADR
 What agents can use, configured in the factory and delivered without credentials in the sandbox.
 
 - **Harness registry and Generic ACP (F12):** operators register harness images (ACP registry agents as presets, adapter command, credential mapping, default egress hosts); users pick a registered harness without further setup, or "Generic ACP" with an adapter command from the project image. Model credentials only through the inference endpoint (iteration 3).
-- **Third-party MCP servers through the gateway (ADR-0032)** with tool catalogs, credential injection and the `tool-access` / `repository-mcp-server` approvals. To decide first: OAuth-based remote servers (only static credentials are designed) and stdio-only servers (no HTTP endpoint).
+- **Third-party MCP servers through the gateway (ADR-0032)** with tool catalogs, credential injection and the `tool-access` / `repository-mcp-server` approvals. HTTP servers with static credentials only; stdio servers run behind a stdio → HTTP bridge or project-scoped in the sandbox from `.mcp.json` ([`iteration-4.md`](iteration-4.md), decision 8).
 - **Skill management (F13):** built-in skills from [`agent-playbook.md`](../agent-playbook.md) (`dark-factory-basics`), instance skills, assignment per persona and project, delivery into the harness's skill directory on every run.
 - **Full permission model (ADR-0011):** admin and controller roles, instance-management operations for agents (personas, skills, tool grants, routines, projects), `instance-operation` and `harness-permission` approvals.
 - **Audit log view:** filterable list of `audit_log` entries including push records (`iter2-git-proxy`) and decided requests; desktop only (ADR-0035).
@@ -106,6 +106,8 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 |---|---|---|
 | Full-harness mode as a separate ACP binary (`df-native`); uses the inference endpoint of iteration 3 | decided | ADR-0045, context §4.1, `openspec/changes/full-harness-mode` |
 | Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; uses the provider configuration of the inference endpoint; ADR on model credentials in the control plane | decided | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7), [`design/egress.md`](../../design/egress.md) §9 |
+| OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |
+| Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
 | Subscription pools and fallback | idea | F6 |
 | MCP tools as WASI components | idea | F2 |

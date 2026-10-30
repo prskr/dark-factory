@@ -230,7 +230,7 @@ Harnesses become instance configuration instead of the fixed `claude-code` value
 - **Registered harnesses:** an operator registers a harness: id, image delivered as an image volume at `/opt/harness/<id>` (ADR-0022), adapter command, credential mapping, default egress hosts and usage source. Agents of the [ACP registry](https://agentclientprotocol.com) serve as presets, so a persona can select a known harness without further setup.
 - **Generic ACP:** a persona or project selects `generic-acp` and sets an adapter command; the adapter is part of the project image, and no harness image is mounted. This generalizes today's project `adapter_command`, which only works for `claude-code`.
 - **Credentials:** model access goes through the gateway's inference endpoint (`design/egress.md` §9); the harness gets the gateway as base URL and a placeholder credential. A harness that can't use a base URL would need its key in the sandbox and is not supported without an explicit accepted-risk decision (ADR-0010).
-- **Usage:** from ACP if the adapter reports it, from the gateway for every request through the inference endpoint; the Claude session log stays a Claude-specific fallback.
+- **Usage:** from one place, the gateway's inference endpoint. Harness-reported usage (ACP, Claude's session log) is a fallback only while a harness doesn't use the endpoint.
 
 ### F13 — Skill management (idea, 2026-10-30; planned for iteration 4)
 Skills in the `SKILL.md` format (ADR-0005) are managed in the control plane and delivered to every run.
