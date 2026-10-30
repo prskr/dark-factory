@@ -95,6 +95,7 @@ opentelemetry_sdk = { version = "0.33", default-features = false, features = ["m
 pbjson = "0.9"
 pbjson-build = "0.9"
 pbjson-types = "0.9"
+percent-encoding = "2"
 prometheus = { version = "0.14", default-features = false }
 prost = "0.14"
 prost-build = "0.14"

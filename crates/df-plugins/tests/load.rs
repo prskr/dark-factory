@@ -7,7 +7,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use df_plugins::{PluginEngine, PluginHost};
+use df_plugins::{Capabilities, PluginEngine, PluginHost};
 use tracing_subscriber::fmt::MakeWriter;
 
 #[derive(Clone, Default)]
@@ -59,5 +59,24 @@ fn load_logs_name_path_size_and_compile_time() -> anyhow::Result<()> {
     assert!(log.contains(&format!("path={}", path.display())), "{log}");
     assert!(log.contains(&format!("bytes={}", bytes.len())), "{log}");
     assert!(log.contains("compile_ms="), "{log}");
+    Ok(())
+}
+
+#[test]
+fn github_component_reports_pull_requests_and_issues() -> anyhow::Result<()> {
+    let host = PluginHost::from_bytes(
+        &PluginEngine::new()?,
+        "github",
+        &common::github(),
+        Duration::from_secs(30),
+        64 << 20,
+    )?;
+    assert_eq!(
+        host.capabilities(),
+        Capabilities {
+            pull_requests: true,
+            issues: true,
+        }
+    );
     Ok(())
 }

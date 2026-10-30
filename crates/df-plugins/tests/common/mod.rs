@@ -22,8 +22,8 @@ use df_plugins::{
 pub(crate) const TOKEN: &str = "s3cret-token";
 
 /// A prebuilt plugin component: `env_var` (set by Bazel), else the output of
-/// `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin`. The tests don't
-/// build components themselves, see the README.
+/// `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin`.
+/// The tests don't build components themselves, see the README.
 pub(crate) fn component(env_var: &str, file: &str) -> Vec<u8> {
     let path = std::env::var_os(env_var).map_or_else(
         || {
@@ -35,7 +35,7 @@ pub(crate) fn component(env_var: &str, file: &str) -> Vec<u8> {
     );
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "reading {}: {e}; run `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin` first",
+            "reading {}: {e}; run `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin` first",
             path.display()
         )
     })
@@ -43,6 +43,10 @@ pub(crate) fn component(env_var: &str, file: &str) -> Vec<u8> {
 
 pub(crate) fn forgejo() -> Vec<u8> {
     component("FORGEJO_PLUGIN_WASM", "forgejo_plugin.wasm")
+}
+
+pub(crate) fn github() -> Vec<u8> {
+    component("GITHUB_PLUGIN_WASM", "github_plugin.wasm")
 }
 
 pub(crate) fn probe() -> Vec<u8> {
@@ -158,13 +162,23 @@ pub(crate) fn router_with_config(
     config: PluginConfig,
     repo_url: &str,
 ) -> anyhow::Result<Client> {
-    let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
+    named_router("forgejo", client, config, repo_url)
+}
+
+/// Like [`router_with_config`], with `client` as the plugin `name`.
+pub(crate) fn named_router(
+    name: &str,
+    client: PluginForgeClient,
+    config: PluginConfig,
+    repo_url: &str,
+) -> anyhow::Result<Client> {
+    let plugins = BTreeMap::from([(name.to_string(), config)]);
     Ok(ForgeRouter::new(
         Arc::new(FixedDirectory {
             repo_url: repo_url.into(),
         }),
         RoutingTable::from_plugins_allowing_plain_http(&plugins)?,
-        BTreeMap::from([("forgejo".to_string(), client)]),
+        BTreeMap::from([(name.to_string(), client)]),
     ))
 }
 

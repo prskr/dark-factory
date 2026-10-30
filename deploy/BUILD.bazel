@@ -22,6 +22,11 @@ optimized(
 )
 
 optimized(
+    name = "github_plugin",
+    src = "//plugins/github",
+)
+
+optimized(
     name = "dark_factory",
     src = "//crates/dark-factory",
 )
@@ -107,6 +112,41 @@ filegroup(
 filegroup(
     name = "plugin_forgejo_oci_layout",
     srcs = [":plugin_forgejo_image"],
+    output_group = "oci_layout",
+)
+
+image_layer(
+    name = "plugin_github_layer",
+    srcs = {
+        "/plugin.wasm": ":github_plugin",
+    },
+    file_metadata = {
+        "/plugin.wasm": file_metadata(mode = "0644"),
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "plugin_github_manifest",
+    layers = [":plugin_github_layer"],
+)
+
+image_index(
+    name = "plugin_github_image",
+    manifests = [":plugin_github_manifest"],
+    platforms = LINUX_MUSL_PLATFORMS,
+    tags = ["oci_image"],
+)
+
+filegroup(
+    name = "plugin_github_digest",
+    srcs = [":plugin_github_image"],
+    output_group = "digest",
+)
+
+filegroup(
+    name = "plugin_github_oci_layout",
+    srcs = [":plugin_github_image"],
     output_group = "oci_layout",
 )
 
@@ -212,6 +252,16 @@ image_push(
 )
 
 image_push(
+    name = "push_plugin_github",
+    build_settings = {"TAG": ":image_tag"},
+    image = ":plugin_github_image",
+    registry = "ghcr.io",
+    repository = "prskr/dark-factory/plugin-github",
+    tag = "{{.TAG}}",
+    tool_cfg = "target",
+)
+
+image_push(
     name = "push_runtime",
     build_settings = {"TAG": ":image_tag"},
     image = ":runtime_image",
@@ -236,6 +286,7 @@ multi_deploy(
     operations = [
         ":push_control_plane",
         ":push_plugin_forgejo",
+        ":push_plugin_github",
         ":push_runtime",
         ":push_test_project",
     ],
@@ -285,10 +336,12 @@ sh_test(
         "$(location :runtime_oci_layout)",
         "$(location :test_project_oci_layout)",
         "$(location :plugin_forgejo_oci_layout)",
+        "$(location :plugin_github_oci_layout)",
     ],
     data = [
         ":control_plane_oci_layout",
         ":plugin_forgejo_oci_layout",
+        ":plugin_github_oci_layout",
         ":runtime_oci_layout",
         ":test_project_oci_layout",
         "@multitool//tools/jq",
