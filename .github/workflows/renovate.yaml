@@ -1,0 +1,60 @@
+name: Renovate
+
+# Self-hosted Renovate on the runner (not the official action's container): the post-upgrade task
+# `bazel mod tidy` (renovate.json) needs Bazel. Lockfiles are updated with the runner's tools
+# (binarySource=global): pnpm, cargo (rustup installs the toolchain of rust-toolchain.toml) and Bazel.
+on:
+  schedule:
+    # daily; before 04:00 UTC, so Monday runs fall into the window of the weekly lock file maintenance
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    env:
+      # renovate: datasource=npm depName=renovate
+      RENOVATE_VERSION: 44.198.1
+      # renovate: datasource=npm depName=pnpm
+      PNPM_VERSION: 12.16.1
+    steps:
+      # only for the cache keys of setup-bazel; Renovate clones the repository itself
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # writes ~/.bazelrc (repository cache), which also applies to Renovate's clone
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # pnpm switches to the version of `packageManager` in a package.json itself
+      - name: Install pnpm
+        run: npm install --global "pnpm@$PNPM_VERSION"
+
+      - name: Renovate
+        run: npx --yes "renovate@$RENOVATE_VERSION"
+        env:
+          # Fine-grained PAT (contents, pull requests, issues, workflows: read and write). Not a GitHub
+          # App installation token (expires after one hour), not GITHUB_TOKEN (its pull requests trigger
+          # no CI runs).
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          RENOVATE_BINARY_SOURCE: global
+          RENOVATE_ALLOWED_COMMANDS: '["^bazel mod tidy$"]'
+          LOG_LEVEL: info

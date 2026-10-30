@@ -246,3 +246,19 @@ are `cargo update`'s job and are not reported.
 The pre-commit hook `outdated-deps` runs when a `Cargo.toml` is staged. If crates.io cannot be reached it
 prints a warning and passes. When you bump the Rust version, change `rust-toolchain.toml` and `versions` in
 `MODULE.bazel` together.
+
+### Renovate
+
+Renovate (`renovate.json`) opens the update PRs. It runs self-hosted in `.github/workflows/renovate.yaml`
+(daily at 03:17 UTC, or "Run workflow" for a manual run) through `npx` on the runner, not in the official
+action's container: the post-upgrade task `bazel mod tidy` needs Bazel and keeps `MODULE.bazel.lock` in
+step with Bazel module, Cargo and pnpm updates. The harness adapter is bumped in one PR together with
+every copy of its image tag (`deploy/README.md`, "What the harness image is built from"). The run time
+falls into the window of the weekly lock file maintenance (before 04:00 UTC on Monday); Rust toolchain
+updates change `rust-toolchain.toml` and `RUST_VERSION` in `MODULE.bazel` in one PR.
+
+| Setting | Required | Default | Effect |
+|---|---|---|---|
+| secret `RENOVATE_TOKEN` | yes | none | Fine-grained PAT with read and write access to contents, pull requests, issues and workflows; renew it before it expires. A GitHub App installation token does not work (it expires after one hour), and neither does `GITHUB_TOKEN` (pull requests it opens trigger no CI runs). |
+| `RENOVATE_VERSION`, `PNPM_VERSION` (workflow `env`) | yes | pinned | Renovate and pnpm versions on the runner; Renovate bumps them itself (`customManagers:githubActionsVersions`). |
+| `RENOVATE_ALLOWED_COMMANDS` (workflow `env`) | yes | `["^bazel mod tidy$"]` | Commands `postUpgradeTasks` may run; extend it together with `renovate.json`. |
