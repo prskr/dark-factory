@@ -11,9 +11,11 @@ CP_DIGEST_FILE="$2"
 RT_DIGEST_FILE="$3"
 TP_DIGEST_FILE="$4"
 PF_DIGEST_FILE="$5"
-CHART_FILE="$6"
-VALUES_DEV_FILE="$7"
-shift 7
+HARNESS_PUSH="$6"
+HARNESS_DIGEST_FILE="$7"
+CHART_FILE="$8"
+VALUES_DEV_FILE="$9"
+shift 9
 
 CHART_DIR="$(dirname "$CHART_FILE")"
 
@@ -30,12 +32,16 @@ CP_DIGEST="$(tr -d '[:space:]' < "$CP_DIGEST_FILE")"
 RT_DIGEST="$(tr -d '[:space:]' < "$RT_DIGEST_FILE")"
 TP_DIGEST="$(tr -d '[:space:]' < "$TP_DIGEST_FILE")"
 PF_DIGEST="$(tr -d '[:space:]' < "$PF_DIGEST_FILE")"
+HARNESS_REPO="${REGISTRY}/claude-harness"
+HARNESS_DIGEST="$(tr -d '[:space:]' < "$HARNESS_DIGEST_FILE")"
 
 echo "=== Pushing multi-arch OCI images to ${REGISTRY} ==="
 # shellcheck disable=SC2086
 "$PUSH_IMAGES" ${DARK_FACTORY_PUSH_ARGS:-}
+# shellcheck disable=SC2086
+"$HARNESS_PUSH" ${DARK_FACTORY_PUSH_ARGS:-}
 
-# Builds deploy/images/<name> for amd64 and arm64, pushes ${REGISTRY}/<name>:dev and prints the digest.
+# Builds deploy/images/<name> (Dockerfile) for amd64 and arm64, pushes ${REGISTRY}/<name>:dev and prints the digest.
 push_dockerfile_image() {
   local name="$1" ref="${REGISTRY}/$1:dev" digestfile
   digestfile="$(mktemp)"
@@ -63,17 +69,13 @@ push_dockerfile_image() {
   rm -f "$digestfile"
 }
 
-HARNESS_REPO="${REGISTRY}/claude-harness"
-HARNESS_DIGEST=""
-if [[ "${DARK_FACTORY_SKIP_HARNESS_IMAGES:-0}" != "1" ]]; then
-  echo "=== Building and pushing the Dockerfile images (claude-harness, claude-project) ==="
+if [[ "${DARK_FACTORY_SKIP_PROJECT_IMAGE:-0}" != "1" ]]; then
+  echo "=== Building and pushing the Dockerfile image (claude-project) ==="
   IMAGES_DIR="${BUILD_WORKSPACE_DIRECTORY:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}/deploy/images"
   PLATFORMS="linux/amd64,linux/arm64"
   BUILDER="${DARK_FACTORY_IMAGE_BUILDER:-$(command -v buildah >/dev/null && echo buildah || echo docker)}"
-  HARNESS_DIGEST="$(push_dockerfile_image claude-harness)"
   PROJECT_DIGEST="$(push_dockerfile_image claude-project)"
-  [[ -n "$HARNESS_DIGEST" && -n "$PROJECT_DIGEST" ]] || { echo "no digest for a pushed image" >&2; exit 1; }
-  echo "Harness Image:       ${HARNESS_REPO}@${HARNESS_DIGEST}"
+  [[ -n "$PROJECT_DIGEST" ]] || { echo "no digest for the pushed project image" >&2; exit 1; }
   echo "Project Image:       ${REGISTRY}/claude-project@${PROJECT_DIGEST}"
 fi
 
@@ -81,16 +83,11 @@ echo "Control Plane Image: ${CP_REPO}@${CP_DIGEST}"
 echo "Runtime Image:       ${RT_REPO}@${RT_DIGEST}"
 echo "Test Project Image:  ${TP_REPO}@${TP_DIGEST}"
 echo "Forgejo Plugin Image: ${PF_REPO}@${PF_DIGEST}"
+echo "Harness Image:       ${HARNESS_REPO}@${HARNESS_DIGEST}"
 
 if [[ "${DARK_FACTORY_PUSH_ONLY:-0}" == "1" ]]; then
   echo "DARK_FACTORY_PUSH_ONLY=1 set; skipping helm upgrade."
   exit 0
-fi
-
-harness_args=()
-if [[ -n "$HARNESS_DIGEST" ]]; then
-  harness_args=(--set "image.harness.claudeCode.repository=${HARNESS_REPO}"
-    --set "image.harness.claudeCode.digest=${HARNESS_DIGEST}")
 fi
 
 echo "=== Running helm upgrade --install ${RELEASE} in namespace ${NAMESPACE} ==="
@@ -106,6 +103,7 @@ helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --set "image.testProject.digest=${TP_DIGEST}" \
   --set "plugins.forgejo.image.repository=${PF_REPO}" \
   --set "plugins.forgejo.image.digest=${PF_DIGEST}" \
-  ${harness_args[@]+"${harness_args[@]}"} \
+  --set "image.harness.claudeCode.repository=${HARNESS_REPO}" \
+  --set "image.harness.claudeCode.digest=${HARNESS_DIGEST}" \
   --wait \
   --timeout 3m "$@"

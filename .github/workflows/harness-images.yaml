@@ -1,11 +1,13 @@
 name: Harness images
 
-# Builds the harness image and the reference project image for amd64 and runs their structure
-# checks (openspec change harness-images, design D9/D10). The release workflow publishes them.
+# Checks the harness image (Bazel: structure of both architectures, ACP handshake) and builds the
+# reference project image for amd64 and runs its checks (openspec change harness-images, design
+# D9/D10). The release workflow publishes them.
 on:
   pull_request:
     paths:
       - "deploy/images/**"
+      - "MODULE.bazel"
       - ".github/workflows/harness-images.yaml"
       - ".github/actions/check-image/**"
       - "crates/df-core/src/config.rs"
@@ -16,6 +18,7 @@ on:
     branches: [main]
     paths:
       - "deploy/images/**"
+      - "MODULE.bazel"
       - ".github/workflows/harness-images.yaml"
       - ".github/actions/check-image/**"
       - "crates/df-core/src/config.rs"
@@ -27,12 +30,12 @@ permissions:
   contents: read
 
 jobs:
-  images:
+  harness:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [claude-harness, claude-project]
+    env:
+      BAZEL_ARGS: >-
+        --config=cache --config=ci --config=linux-amd64-musl
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -41,9 +44,27 @@ jobs:
       - name: Versions agree
         run: deploy/images/check_versions.sh
 
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Structure (amd64, arm64)
+        run: bazel test $BAZEL_ARGS //deploy/images/claude-harness:structure_test
+
+      - name: ACP handshake (amd64)
+        run: bazel run $BAZEL_ARGS //deploy/images/claude-harness:handshake
+
+  project:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
       - uses: ./.github/actions/check-image
         with:
-          image: ${{ matrix.image }}
+          image: claude-project
 
   chart-kube-version:
     runs-on: ubuntu-latest

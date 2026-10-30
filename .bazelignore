@@ -1,2 +1,3 @@
 target
 apm_modules
+deploy/images/claude-harness/node_modules
