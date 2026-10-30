@@ -42,6 +42,27 @@ fails as `upstream` until the project's URL is updated.
 | issues `get` | `GET .../issues/{number}` |
 | issues `add-comment` | `POST .../issues/{number}/comments` (pull request numbers work as issue numbers) |
 
+`src/operations.rs` lists these REST calls by GitHub's `operationId`. The host tests
+(`crates/df-plugins/tests/github.rs`) check every request and mocked response against
+`tests/fixtures/github-openapi.json`, an extract of GitHub's OpenAPI description with only these
+operations and the components they reference; a request to an operation missing from the list fails.
+Mocked responses are checked without `required`, since they carry only the fields the plugin reads.
+GraphQL has no description; the live test covers the two mutations.
+
+| Task | Command |
+|---|---|
+| Regenerate the extract after changing `src/operations.rs` | `cargo xtask update-github-spec` |
+| Move to a newer upstream commit | `cargo xtask update-github-spec --commit <sha>` |
+| Change the default `api-version` | update `DESCRIPTION_PATH`, then `cargo xtask update-github-spec --commit <sha>` (a run without `--commit` reuses the recorded file) |
+| Fail if the extract is stale | `cargo xtask update-github-spec --check` |
+
+The extract records its source in `x-dark-factory-source`: the commit of
+`github/rest-api-description`, the file for the default `api-version`
+(`descriptions-next/api.github.com/api.github.com.2026-03-10.json`, `DESCRIPTION_PATH` in
+`tools/xtask/src/update_github_spec.rs`) and its sha256. A run without `--commit` fails when the
+downloaded file no longer matches that sha256. The upstream repository has published no release since
+v2.1.0 (2022), which predates API version 2026-03-10, so the pin is a commit.
+
 ## Draft modes
 
 | | `native` (default) | `title-prefix` | `auto` |

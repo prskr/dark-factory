@@ -10,7 +10,10 @@ extract_cargo_lints(
     workspace = "//:Cargo.toml",
 )
 
-exports_files(["Cargo.toml"])
+exports_files([
+    "Cargo.toml",
+    "tests/fixtures/github-openapi.json",
+])
 
 rust_library(
     name = "github_plugin_lib",
@@ -39,7 +42,10 @@ rust_shared_library(
 
 rust_test(
     name = "github_plugin_test",
-    compile_data = ["//contract:wit_integrations"],
+    compile_data = [
+        "tests/fixtures/github-openapi.json",
+        "//contract:wit_integrations",
+    ],
     crate = ":github_plugin_lib",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(

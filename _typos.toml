@@ -6,6 +6,8 @@ extend-exclude = [
     "crates/df-web/assets/vendor/**",
     # Generated Tailwind output.
     "crates/df-web/assets/app.css",
+    # Generated extract of GitHub's REST API description (upstream words such as `repo.nwo`).
+    "plugins/github/tests/fixtures/github-openapi.json",
 ]
 
 [default]
