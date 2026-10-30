@@ -35,10 +35,10 @@ impl FormErrors {
 }
 
 /// Classes of text inputs, selects and textareas; 16 px text so phones do not zoom on focus.
-pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-base text-ink placeholder:text-faint lg:min-h-10";
+pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-base text-ink placeholder:text-faint lg:min-h-10";
 
 /// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
-const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-2 font-mono text-base text-muted lg:min-h-10";
+const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";
 
 /// A labelled control with an optional hint and the field's error.
 pub fn field(
@@ -224,6 +224,16 @@ fn described_by(name: &str, has_hint: bool, errors: &FormErrors) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_classes_pad_so_the_desktop_height_stays_40px() {
+        // 6 + 6 padding + 24 line + 2 border = 38 px, so `lg:min-h-10` sets the height.
+        for class in [INPUT_CLASS, READONLY_INPUT_CLASS] {
+            let classes: Vec<_> = class.split(' ').collect();
+            assert!(classes.contains(&"py-1.5"), "{class}");
+            assert!(!classes.contains(&"py-2"), "{class}");
+        }
+    }
 
     #[test]
     fn field_shows_label_hint_and_error() {

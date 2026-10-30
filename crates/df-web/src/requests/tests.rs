@@ -196,6 +196,18 @@ async fn one_tap_on_a_suggested_answer_answers_the_question() {
 }
 
 #[tokio::test]
+async fn card_inputs_use_the_shared_input_class() {
+    let f = fixture().await;
+    f.ask("Postgres?", &[]).await;
+    f.approval("needs it").await;
+    let page = f.page("/requests").await;
+    for name in ["name=\"answer\"", "name=\"comment\""] {
+        let tag = crate::testkit::tag_around(&page, name);
+        assert!(tag.contains(crate::components::forms::INPUT_CLASS), "{tag}");
+    }
+}
+
+#[tokio::test]
 async fn approving_offers_the_scopes_narrowest_first_and_rejects_others() {
     let f = fixture().await;
     let id = f.approval("needs it").await;

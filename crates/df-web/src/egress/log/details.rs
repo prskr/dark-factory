@@ -3,7 +3,7 @@
 
 use maud::{Markup, html};
 
-use crate::components::{Icon, icon};
+use crate::components::{ICON_BUTTON_CLASS, Icon, icon};
 
 /// Fixed text of the panel about what it cannot show.
 const TLS_NOTE: &str = "Requests inside TLS tunnels are not inspected.";
@@ -54,7 +54,7 @@ pub(super) fn panel() -> Markup {
                     p class="text-xs text-faint" { span "x-text"="flow && flow.time" {} " UTC" }
                 }
                 button type="button" "x-on:click"="close()" "x-ref"="closeButton" aria-label="Close request details" title="Close"
-                    class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-sunk hover:text-ink" {
+                    class=(ICON_BUTTON_CLASS) {
                     (icon(Icon::Close))
                 }
             }
@@ -112,6 +112,13 @@ mod tests {
         "upstream-timeout",
         "tunnel-error",
     ];
+
+    #[test]
+    fn the_close_button_is_the_icon_button() {
+        let html = panel().into_string();
+        let close = crate::testkit::tag_around(&html, "aria-label=\"Close request details\"");
+        assert!(close.contains(ICON_BUTTON_CLASS), "{close}");
+    }
 
     #[test]
     fn every_documented_reason_has_an_explanation() {

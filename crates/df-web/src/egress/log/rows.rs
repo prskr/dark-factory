@@ -7,7 +7,9 @@ use serde_json::json;
 
 use super::details::reason_explanation;
 use super::filter::is_blocked;
-use crate::components::{HostIconSize, Icon, ProjectHosts, Tone, host_icon, icon, tone_badge};
+use crate::components::{
+    HostIconSize, ICON_BUTTON_CLASS, Icon, ProjectHosts, Tone, host_icon, icon, tone_badge,
+};
 
 const CELL: &str = "px-3 py-3";
 
@@ -249,7 +251,7 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
                 div class="relative @[680px]:hidden" x-data="{ menu: false }" "x-on:keydown.escape"="menu = false" "x-on:click.outside"="menu = false" {
                     button type="button" aria-haspopup="true" ":aria-expanded"="menu" "x-on:click"="menu = !menu"
                         aria-label={"Actions for " (target) " at " (time)}
-                        class="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-sunk hover:text-ink" {
+                        class=(ICON_BUTTON_CLASS) {
                         (icon(Icon::Ellipsis))
                     }
                     div x-show="menu" x-cloak class="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-line bg-panel p-1 text-left shadow-lg" data-slot="row-menu" {
@@ -309,6 +311,13 @@ mod tests {
             flow_id: 3,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_narrow_row_menu_trigger_is_the_icon_button() {
+        let html = row(&event(Verdict::Allowed, Phase::Closed)).into_string();
+        let trigger = crate::testkit::tag_around(&html, "aria-label=\"Actions for ");
+        assert!(trigger.contains(ICON_BUTTON_CLASS), "{trigger}");
     }
 
     #[test]

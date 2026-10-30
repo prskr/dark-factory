@@ -530,7 +530,7 @@ fn strip_link(url: &str, label: &str, glyph: Icon) -> Markup {
     if url.starts_with("https://") || url.starts_with("http://") {
         html! {
             a href=(url) aria-label=(label) title=(label) rel="noopener noreferrer" target="_blank"
-                class="inline-flex size-9 items-center justify-center rounded-lg text-accent-text hover:bg-sunk" { (icon(glyph)) }
+                class={(ICON_BUTTON_CLASS) " text-accent-text!"} { (icon(glyph)) }
         }
     } else {
         html! {}
@@ -692,7 +692,7 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
                 (choice_select(CHIP_SELECT, "Project", "project", &choices.projects, project, !values.project.is_empty(), errors))
                 span x-show="issue" x-cloak class="inline-flex items-center gap-1 rounded-[10px] bg-accent-soft pl-3 text-xs text-accent-text" {
                     "Issue " span class="font-mono" { "#" span x-text="issue" {} }
-                    button type="button" aria-label="Remove linked issue" "x-on:click"="issue = ''" class="inline-flex size-11 items-center justify-center lg:size-6" { (icon(Icon::Close)) }
+                    button type="button" aria-label="Remove linked issue" "x-on:click"="issue = ''" class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
                 }
                 div class="ml-auto" { (dialog_close()) }
             }
