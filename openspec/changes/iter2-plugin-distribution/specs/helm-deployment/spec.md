@@ -21,6 +21,13 @@ For each entry under `plugins.<name>` with an image, the chart SHALL mount that 
 - **WHEN** a plugin entry has neither an image nor a path
 - **THEN** rendering fails with a message naming the plugin
 
+### Requirement: Plugin names
+Plugin names under `plugins` SHALL be lowercase DNS labels of at most 54 characters, so that the volume name `plugin-<name>` is a valid DNS label.
+
+#### Scenario: Invalid plugin name
+- **WHEN** a plugin entry is named `My_Plugin`
+- **THEN** rendering fails with a values schema error naming the plugin
+
 ### Requirement: Plugin upgrades without storage
 A changed plugin image reference SHALL roll the control plane pods. Plugins SHALL NOT require persistent volumes, and the control plane SHALL stay a Deployment with rolling updates.
 

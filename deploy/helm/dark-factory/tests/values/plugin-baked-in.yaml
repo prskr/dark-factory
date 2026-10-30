@@ -1,0 +1,6 @@
+plugins:
+  forgejo:
+    image: null
+    path: /custom/forgejo.wasm
+    settings:
+      wip-prefixes: "WIP:"

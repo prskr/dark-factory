@@ -14,7 +14,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use df_core::testing::FakeSecretStore;
 use df_core::{CredentialRef, CredentialRefId, IntegrationError, ProjectId};
-use df_plugins::{ForgeTarget, PluginForgeClient, PluginHost, ProjectDirectory};
+use df_plugins::{ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory};
 
 pub(crate) const TOKEN: &str = "s3cret-token";
 
@@ -83,10 +83,29 @@ pub(crate) fn client_with_token(
     timeout: Duration,
     memory_limit: usize,
 ) -> anyhow::Result<Client> {
+    client_on(
+        &PluginEngine::new()?,
+        component,
+        repo_url,
+        token,
+        timeout,
+        memory_limit,
+    )
+}
+
+/// Like [`client_with_token`], on a shared engine.
+pub(crate) fn client_on(
+    engine: &PluginEngine,
+    component: &[u8],
+    repo_url: &str,
+    token: &str,
+    timeout: Duration,
+    memory_limit: usize,
+) -> anyhow::Result<Client> {
     let secrets = FakeSecretStore::new();
     secrets.insert("forge-token", "token", token);
     Ok(PluginForgeClient::new(
-        PluginHost::from_bytes("forgejo", component, timeout, memory_limit)?,
+        PluginHost::from_bytes(engine, "forgejo", component, timeout, memory_limit)?,
         Arc::new(FixedDirectory {
             repo_url: repo_url.into(),
         }),

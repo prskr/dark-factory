@@ -12,4 +12,4 @@ mod retry;
 mod state;
 
 pub use forge::{ForgeTarget, PluginForgeClient, ProjectDirectory};
-pub use host::{Capabilities, LoadError, PluginHost};
+pub use host::{Capabilities, LoadError, PluginEngine, PluginHost};

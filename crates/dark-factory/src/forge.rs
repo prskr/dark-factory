@@ -7,7 +7,7 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use df_core::{ForgeClient, IntegrationError, PluginConfig, ProjectId, SecretStore};
 use df_db::PgPool;
-use df_plugins::{ForgeTarget, PluginForgeClient, PluginHost, ProjectDirectory};
+use df_plugins::{ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory};
 
 const MIB: u64 = 1024 * 1024;
 
@@ -17,13 +17,18 @@ const MIB: u64 = 1024 * 1024;
 ///
 /// Fail-fast is the behaviour for the single supported plugin. Once several plugins can be
 /// configured, startup should only fail if no forge plugin could be loaded at all.
-pub(crate) fn load_forge_plugin(name: &str, config: &PluginConfig) -> anyhow::Result<PluginHost> {
+pub(crate) fn load_forge_plugin(
+    engine: &PluginEngine,
+    name: &str,
+    config: &PluginConfig,
+) -> anyhow::Result<PluginHost> {
     let memory = config
         .memory_mib
         .checked_mul(MIB)
         .and_then(|bytes| usize::try_from(bytes).ok())
         .with_context(|| format!("`plugins.{name}.memoryMib` is too large"))?;
     PluginHost::load(
+        engine,
         name,
         &config.path,
         Duration::from_secs(config.call_timeout_seconds),
@@ -78,7 +83,7 @@ mod tests {
     fn memory_limit_overflow_is_a_config_error() {
         let mut config = PluginConfig::new("/nonexistent/forgejo.wasm");
         config.memory_mib = u64::MAX;
-        let err = load_forge_plugin("forgejo", &config)
+        let err = load_forge_plugin(&PluginEngine::new().expect("engine"), "forgejo", &config)
             .err()
             .expect("must fail");
         assert!(
@@ -90,7 +95,7 @@ mod tests {
     #[test]
     fn missing_component_is_reported_with_its_path() {
         let config = PluginConfig::new("/nonexistent/forgejo.wasm");
-        let err = load_forge_plugin("forgejo", &config)
+        let err = load_forge_plugin(&PluginEngine::new().expect("engine"), "forgejo", &config)
             .err()
             .expect("must fail");
         let message = format!("{err:#}");

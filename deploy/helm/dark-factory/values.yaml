@@ -145,6 +145,25 @@ clusterTargets:
   anyNamespace: false
   namespaces: []
 
+# Integration plugins (WebAssembly components). The control plane loads each entry from `path`. An
+# entry with an `image` is mounted as a read-only image volume at /plugins/<name> and loaded from
+# /plugins/<name>/plugin.wasm; a changed image reference rolls the control plane. Without an
+# `image` (`image: null`), `path` is required, e.g. for a custom control plane image that contains
+# the component. Image volumes need Kubernetes >= 1.36.
+plugins:
+  forgejo:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-forgejo
+      # Empty: the chart's appVersion.
+      tag: ''
+      digest: ''
+    # Component path; required without an image, ignored with one.
+    path: ''
+    callTimeoutSeconds: 30
+    memoryMib: 64
+    # Handed to the plugin unchanged (Forgejo: wip-prefixes, see plugins/forgejo/README.md).
+    settings: {}
+
 runs:
   # Seconds a run stays up after a normal turn end (task "waiting") before it is released.
   # 0 releases right after the turn.

@@ -96,6 +96,13 @@ spec:
             - name: tls
               mountPath: /etc/dark-factory/tls
               readOnly: true
+            {{- range $name, $plugin := .Values.plugins }}
+            {{- if $plugin.image }}
+            - name: plugin-{{ $name }}
+              mountPath: /plugins/{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -119,3 +126,11 @@ spec:
         - name: tls
           secret:
             secretName: {{ include "dark-factory.fullname" . }}-control-plane-tls
+        {{- range $name, $plugin := .Values.plugins }}
+        {{- if $plugin.image }}
+        - name: plugin-{{ $name }}
+          image:
+            reference: {{ include "dark-factory.plugin.image" (dict "plugin" $plugin "Chart" $.Chart) | quote }}
+            pullPolicy: {{ $.Values.image.pullPolicy }}
+        {{- end }}
+        {{- end }}

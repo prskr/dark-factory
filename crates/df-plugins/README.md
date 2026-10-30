@@ -36,8 +36,11 @@ sequenceDiagram
     F->>F: retry rate-limited / transport (max 3)
 ```
 
-- One Wasmtime `Engine` per plugin; its compiled component is shared by all calls. Every call gets a fresh `Store` and
-  instance, so no state leaks between calls or projects.
+- One Wasmtime `Engine` (`PluginEngine`, one epoch clock thread) shared by all plugins; each plugin's compiled
+  component is shared by all its calls. Every call gets a fresh `Store` and instance, so no state leaks between calls
+  or projects.
+- Load cost (Forgejo plugin, image build, dev cluster, 2026-10-30): `bytes=345564` (≈ 337 KiB), `compile_ms=351`,
+  from the `plugin loaded` log line of a control plane pod.
 - WASI is linked without capabilities: no preopened directories, environment, arguments, sockets or
   stdin/stdout. Stderr lines are logged via `tracing` (`plugin=forgejo`).
 - At load time imports are checked against an allow-list of namespaces (`wasi:http`, `wasi:config`,

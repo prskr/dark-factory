@@ -10,9 +10,10 @@ PUSH_IMAGES="$1"
 CP_DIGEST_FILE="$2"
 RT_DIGEST_FILE="$3"
 TP_DIGEST_FILE="$4"
-CHART_FILE="$5"
-VALUES_DEV_FILE="$6"
-shift 6
+PF_DIGEST_FILE="$5"
+CHART_FILE="$6"
+VALUES_DEV_FILE="$7"
+shift 7
 
 CHART_DIR="$(dirname "$CHART_FILE")"
 
@@ -23,10 +24,12 @@ NAMESPACE="${DARK_FACTORY_NAMESPACE:-dark-factory-dev}"
 CP_REPO="${REGISTRY}/control-plane"
 RT_REPO="${REGISTRY}/runtime"
 TP_REPO="${REGISTRY}/test-project"
+PF_REPO="${REGISTRY}/plugin-forgejo"
 
 CP_DIGEST="$(tr -d '[:space:]' < "$CP_DIGEST_FILE")"
 RT_DIGEST="$(tr -d '[:space:]' < "$RT_DIGEST_FILE")"
 TP_DIGEST="$(tr -d '[:space:]' < "$TP_DIGEST_FILE")"
+PF_DIGEST="$(tr -d '[:space:]' < "$PF_DIGEST_FILE")"
 
 echo "=== Pushing multi-arch OCI images to ${REGISTRY} ==="
 # shellcheck disable=SC2086
@@ -77,6 +80,7 @@ fi
 echo "Control Plane Image: ${CP_REPO}@${CP_DIGEST}"
 echo "Runtime Image:       ${RT_REPO}@${RT_DIGEST}"
 echo "Test Project Image:  ${TP_REPO}@${TP_DIGEST}"
+echo "Forgejo Plugin Image: ${PF_REPO}@${PF_DIGEST}"
 
 if [[ "${DARK_FACTORY_PUSH_ONLY:-0}" == "1" ]]; then
   echo "DARK_FACTORY_PUSH_ONLY=1 set; skipping helm upgrade."
@@ -100,6 +104,8 @@ helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --set "image.runtime.digest=${RT_DIGEST}" \
   --set "image.testProject.repository=${TP_REPO}" \
   --set "image.testProject.digest=${TP_DIGEST}" \
+  --set "plugins.forgejo.image.repository=${PF_REPO}" \
+  --set "plugins.forgejo.image.digest=${PF_DIGEST}" \
   ${harness_args[@]+"${harness_args[@]}"} \
   --wait \
   --timeout 3m "$@"

@@ -225,6 +225,11 @@
         }
       }
     },
+    "plugins": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z]([-a-z0-9]{0,52}[a-z0-9])?$" },
+      "additionalProperties": { "$ref": "#/$defs/plugin" }
+    },
     "runs": {
       "type": "object",
       "properties": {
@@ -360,6 +365,21 @@
     }
   ],
   "$defs": {
+    "plugin": {
+      "type": "object",
+      "properties": {
+        "image": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/imageRef" }] },
+        "path": { "type": "string" },
+        "callTimeoutSeconds": { "type": "integer", "minimum": 1 },
+        "memoryMib": { "type": "integer", "minimum": 1 },
+        "settings": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["image"], "properties": { "image": { "$ref": "#/$defs/imageRef" } } },
+        { "required": ["path"], "properties": { "path": { "minLength": 1 } } }
+      ]
+    },
     "imageRef": {
       "type": "object",
       "required": ["repository", "tag", "digest"],

@@ -28,13 +28,14 @@ plugins:
     memoryMib: 64
     settings: {}
 ```
+Plugin names are lowercase DNS labels of at most 54 characters (values schema `propertyNames`: `^[a-z]([-a-z0-9]{0,52}[a-z0-9])?$`), so the volume name `plugin-<name>` stays a valid DNS label (≤ 63) and an invalid name fails at `helm install` instead of at the API server.
 With an image: volume `plugin-<name>` (`image.reference`, `pullPolicy` from `image.pullPolicy`, existing `imagePullSecrets` apply) mounted read-only at `/plugins/<name>`, config path `/plugins/<name>/plugin.wasm`. Without: config only, `path` required (`fail` in the template). Image references in the pod template make a plugin change roll the Deployment without a checksum annotation. Removing the `forgejo` entry fails at control plane startup (iter1: no forge plugin → `serve` exits), so the chart doesn't need its own check.
 
 ### D3 — No init-container fallback
 The runtime's `initContainer` delivery runs `cp` inside the runtime image. A `scratch` plugin image has no copy tool, and adding a shell or busybox to every plugin image enlarges what has to be trusted. Clusters without image volumes set `image: null` and `path` and build `FROM control-plane` + `COPY plugin.wasm`. This is documented in the chart README as a scenario.
 
 ### D4 — Control plane defaults and shared Engine
-The compiled-in default path becomes `/plugins/forgejo/plugin.wasm` (the chart layout), so a config without `plugins` matches a default release. `PluginHost::load` takes a shared `Engine` (created once in `serve`, same `Config`: epoch interruption) instead of creating one per plugin; the epoch ticker then runs once for all plugins. Small, and keeps per-plugin overhead to the compiled code.
+The compiled-in default path becomes `/plugins/forgejo/plugin.wasm` (the chart layout), so a config without `plugins` matches a default release. `PluginHost::load` takes a shared `PluginEngine` (created once in `serve`: the Wasmtime `Engine` with epoch interruption plus one epoch clock thread, which stops with the last clone) instead of creating an engine per plugin; the epoch ticker then runs once for all plugins. Small, and keeps per-plugin overhead to the compiled code.
 
 ## Risks / Trade-offs
 

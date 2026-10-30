@@ -276,3 +276,31 @@ sandboxes anyway).
       port: {{ .Values.telemetry.metrics.port }}
 {{- end }}
 {{- end }}
+
+{{/*
+Plugin image reference of the entry `.plugin` (supports digest or tag; an empty tag is the appVersion)
+*/}}
+{{- define "dark-factory.plugin.image" -}}
+{{- $img := .plugin.image -}}
+{{- if $img.digest }}
+{{- printf "%s@%s" $img.repository $img.digest }}
+{{- else }}
+{{- printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) }}
+{{- end }}
+{{- end }}
+
+{{/*
+The `plugins:` section of the instance configuration
+*/}}
+{{- define "dark-factory.pluginsConfig" -}}
+{{- if .Values.plugins }}
+plugins:
+  {{- range $name, $plugin := .Values.plugins }}
+  {{ $name | quote }}:
+    path: {{ ternary (printf "/plugins/%s/plugin.wasm" $name) $plugin.path (not (empty $plugin.image)) | quote }}
+    callTimeoutSeconds: {{ $plugin.callTimeoutSeconds | default 30 }}
+    memoryMib: {{ $plugin.memoryMib | default 64 }}
+    settings: {{ $plugin.settings | default dict | toJson }}
+  {{- end }}
+{{- end }}
+{{- end }}

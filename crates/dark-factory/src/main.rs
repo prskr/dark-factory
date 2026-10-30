@@ -285,8 +285,9 @@ where
         .plugins
         .get(FORGE_PLUGIN)
         .cloned()
-        .unwrap_or_else(|| df_core::PluginConfig::new("/plugins/forgejo.wasm"));
-    let forge_host = forge::load_forge_plugin(FORGE_PLUGIN, &forgejo)?;
+        .unwrap_or_else(|| df_core::PluginConfig::new("/plugins/forgejo/plugin.wasm"));
+    let plugin_engine = df_plugins::PluginEngine::new()?;
+    let forge_host = forge::load_forge_plugin(&plugin_engine, FORGE_PLUGIN, &forgejo)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 

@@ -11,7 +11,7 @@ The build SHALL produce: the control plane image (only the `dark-factory` binary
 
 #### Scenario: Plugin image content
 - **WHEN** the Forgejo plugin image is inspected
-- **THEN** it contains `/plugin.wasm` and nothing else, the file is smaller than 1 MiB and `wasm-tools component wit` shows exports `pull-requests` and `issues`
+- **THEN** it contains `/plugin.wasm` and nothing else, the file is smaller than 1 MiB and the host reports capabilities `pull-requests` and `issues` when loading it
 
 #### Scenario: Control plane image without plugins
 - **WHEN** the control plane image is inspected

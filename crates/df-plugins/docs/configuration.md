@@ -7,7 +7,7 @@ the plugin as `wasi:config/store`.
 ```yaml
 plugins:
   forgejo:
-    path: /plugins/forgejo.wasm
+    path: /plugins/forgejo/plugin.wasm
     callTimeoutSeconds: 30
     memoryMib: 64
     settings:
@@ -22,17 +22,18 @@ plugins:
 | `plugins.<name>.settings` | no | `{}` | String map handed to the plugin unchanged. The host adds `base-url` (from the project) and it wins over a configured one. Keys are documented by the plugin (Forgejo: `wip-prefixes`, see `plugins/forgejo/README.md`). |
 
 The control plane currently uses the entry `forgejo` for forge calls; without it, it looks for
-`/plugins/forgejo.wasm`, where the control plane image (`//deploy:control_plane_image`) ships the
-component built from `//plugins/forgejo`. The Helm chart does not render a `plugins` section, so
-deployments use that default.
+`/plugins/forgejo/plugin.wasm`. The Helm chart renders the section from its `plugins.*` values and
+mounts each plugin image (`//deploy:plugin_forgejo_image`, one file `/plugin.wasm`) as an image volume
+at `/plugins/<name>` (`deploy/helm/dark-factory/README.md`, "Plugins"). All plugins share one
+Wasmtime engine and epoch clock.
 
 `serve` refuses to start if the component is missing or invalid (the error names the plugin and
 path). This changes once several plugins can be configured: startup will then fail only if no forge
 plugin could be loaded. Selecting a plugin per project comes with a second forge.
 
 Loading is logged at `info` ("plugin loaded") with the fields `plugin` (name under `plugins`), `path`,
-`bytes` (component size) and `compile_ms` (load time: everything after the file read, i.e. engine setup,
-import validation, compilation and pre-instantiation). Use it to see what the plugin costs at startup.
+`bytes` (component size) and `compile_ms` (load time: everything after the file read, i.e. import
+validation, compilation and pre-instantiation; the shared engine is created once before). Use it to see what the plugin costs at startup.
 
 Plugin stderr is logged at `info` with the fields `plugin` (the name under `plugins`) and `line`;
 lines longer than 4 KiB are split.
