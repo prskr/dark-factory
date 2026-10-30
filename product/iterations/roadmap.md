@@ -47,7 +47,8 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
 - **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
 - **Plugin distribution (`iter2-plugin-distribution`, ADR-0018):** plugins as OCI images mounted into the control plane via image volumes; the control plane image no longer bundles plugins.
-- **Several forges side by side (`iter2-multi-forge`):** each project goes to the forge plugin that claims the host of its repository URL (no plugin per project); per-plugin API URL and `Authorization` scheme; a broken plugin no longer stops the control plane.
+- **Several forges side by side (`iter2-multi-forge`):** each project goes to the forge plugin that claims the host of its repository URL (no plugin per project); per-plugin API URL and `Authorization` scheme; a broken plugin no longer stops the control plane; the UI shows the forge per project.
+- **GitHub plugin (`iter2-github-plugin`):** pull requests and issues on github.com and GitHub Enterprise Server, draft pull requests through a title prefix (default, works in private repositories on GitHub Free) or GitHub's native drafts; enabled for `github.com` in the default release.
 - **Gateway readiness and Git retries:** gateway pods are ready only after the first policy snapshot; the runtime retries transient Git failures (folded into `iter1-egress-gateway` and `iter2-git-proxy`).
 
 Dependency: approval-gated push checks need the `push-check-exception` approval, so both ship together.
@@ -60,7 +61,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Tasks based on another task's branch (ADR-0041):** `base_task` at task creation, prepare fast-forwards task branches without own commits to their base.
 - **Task tree, subtask branches and merging (ADR-0034, no group tasks)**, questions to the parent task's agent (`ask_question` addressed to the parent, `answer_question`; escalation along the parent chain, ADR-0043), incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Sub-tasks with a progress bar and the sub-tasks with their status), and task rows with sub-tasks get a done/total chip (design canvas, "Later" row).
 - **Branch rewrites, fan-out and merge triggers (ADR-0033).**
-- **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the Forgejo plugin, filtering, debouncing and routing of CI, review and issue-mention events.
+- **Inbound events (ADR-0015):** webhook endpoint, `handle-webhook` in the forge plugins (Forgejo, GitHub), filtering, debouncing and routing of CI, review and issue-mention events.
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
 - **Monitors:** a task-scoped wake-up set by the agent (factory tool) or a human, for example to poll a third-party system without webhooks. A due monitor queues a system prompt (reason `monitor.wake`) through the same path as messages and routines. A wake-up due within `runs.keepAliveSeconds` extends the control plane's idle deadline (`iter1-keep-alive-and-review`), so the sandbox stays up; a later one lets the run end and starts a new run when due.
 - **Tasks starting from existing branches** and PR modes other than "create draft PR" (ADR-0025).
@@ -123,7 +124,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
-| GitHub plugin, SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |
+| SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |
+| GitHub App authentication for the GitHub plugin: installation tokens minted and cached by the host (JWT signed with the app key); needs an ADR | idea | `openspec/changes/iter2-github-plugin` |
+| Shared crate for forge plugins (HTTP transport, draft prefixes), once a third forge plugin exists | idea | `openspec/changes/iter2-github-plugin` (D4) |
 | Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
 | WASI 0.3 guests for plugins | idea | ADR-0002 |
 | Separate UIDs for runtime and harness | idea | [`design/agent-run.md`](../../design/agent-run.md) §17 |

@@ -12,7 +12,8 @@
 - **Authorization scheme per plugin:** `plugins.<name>.authScheme` (`token`, default, or `bearer`) replaces the hard-coded Forgejo format. The plugin still never sees the credential.
 - **Startup:** `serve` fails only if no forge plugin could be loaded. A plugin that fails to load is logged and skipped; projects on hosts it claims fail with a `config` error naming it and are never sent to the default plugin. Contradicting routes (a host claimed twice, two default plugins) fail startup.
 - **Routing table logged** at startup (host → plugin), so operators see where projects go.
-- **Chart:** `plugins.<name>.hosts` and `authScheme` are rendered into the instance config.
+- **Forge per project in the UI:** the project list, the egress host icons and the project form hint show the plugin that serves the project's repository host instead of one forge for the whole instance. A project whose host no loaded plugin serves shows the generic Git icon.
+- **Chart:** `plugins.<name>.hosts` and `authScheme` are rendered into the instance config and accepted by the values schema.
 
 ## Capabilities
 
@@ -21,11 +22,12 @@
 
 ### Modified Capabilities
 - `plugin-host`: allowed host and `base-url` come from the route's API URL; the `Authorization` scheme is configurable; startup fails only if no forge plugin loads.
+- `configuration-management`: the forge shown for a project and in the project form comes from the route of its repository host instead of the instance's single forge integration.
 - `helm-deployment`: plugin entries render `hosts` and `authScheme`.
 
 ## Impact
 
-- `crates/df-core` (plugin config: `hosts`, `authScheme`), `crates/df-plugins` (router `ForgeClient`, HTTP policy scheme, `base-url` from the route), `crates/dark-factory` (load all configured plugins, startup rule), Helm chart (values, schema, config template, unit tests, README), `crates/df-plugins/docs/configuration.md`.
+- `crates/df-core` (plugin config: `hosts`, `authScheme`; routing table shared by router and web UI), `crates/df-plugins` (router `ForgeClient`, HTTP policy scheme, `base-url` from the route), `crates/dark-factory` (load all configured plugins, startup rule), `crates/df-web` (forge per project), Helm chart (values, schema, config template, unit tests, README), `crates/df-plugins/docs/configuration.md`.
 - No database or contract change. Existing single-plugin configs keep their behaviour.
-- A GitHub plugin itself, issue-only trackers and SSH repository URLs are out of scope.
-- Depends on `iter1-integration-plugins` (introduces `plugin-host`) and `iter2-plugin-distribution` (per-plugin images, shared `Engine`, plugin values in the chart) being archived first.
+- The GitHub plugin follows in `iter2-github-plugin` (iteration 2). Out of scope: issue-only trackers and SSH repository URLs (backlog).
+- Depends on `iter1-integration-plugins` (introduces `plugin-host`) and `iter2-plugin-distribution` (per-plugin images, shared `PluginEngine`, plugin values in the chart), both archived.
