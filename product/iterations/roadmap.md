@@ -124,7 +124,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
-| SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |
+| SSH repository URLs, issue-only trackers | idea | `openspec/changes/archive/2026-10-30-iter2-multi-forge` |
 | GitHub App authentication for the GitHub plugin: installation tokens minted and cached by the host (JWT signed with the app key); needs an ADR | idea | `openspec/changes/iter2-github-plugin` |
 | Shared crate for forge plugins (HTTP transport, draft prefixes), once a third forge plugin exists | idea | `openspec/changes/iter2-github-plugin` (D4) |
 | Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
