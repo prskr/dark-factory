@@ -6,6 +6,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
+use df_core::routing::{ForgeRoutes, ForgeServing};
 use df_core::{CredentialRef, ForgeKind, StatusSet};
 use df_db::DbError;
 use df_db::catalog::{
@@ -543,29 +544,49 @@ struct ForgeFeedback {
     hint: String,
 }
 
-/// The integration the typed URLs map to (design D5): the instance's one integration serves every
-/// valid HTTPS repository; an issue tracker on the repository's host uses it too.
-fn forge_feedback(forge: Option<&ForgeKind>, repo_url: &str, issue_url: &str) -> ForgeFeedback {
-    let host = repository_host(repo_url);
-    let served = forge.filter(|_| host.is_some());
+/// The integration the typed URLs map to through the routing table (design D7); an issue tracker
+/// on the repository's host uses it too.
+fn forge_feedback(forges: &ForgeRoutes, repo_url: &str, issue_url: &str) -> ForgeFeedback {
+    let serving = match repository_host(repo_url) {
+        Some(_) => forges.forge_for_repo_url(repo_url.trim()),
+        None => ForgeServing::Unrouted,
+    };
+    let served = serving.kind();
     // A typed but unparsable tracker URL still shows the issue icon.
     let issue_icon = if issue_url.trim().is_empty() {
         html! {}
     } else {
-        let role =
-            issue_role(served, repo_url, issue_url).map_or(HostRole::IssueTracker, |(_, r)| r);
+        let role = issue_role(served.as_ref(), repo_url, issue_url)
+            .map_or(HostRole::IssueTracker, |(_, r)| r);
         role_icon(&role)
     };
-    let hint = match served {
-        Some(kind) => format!(
+    let label = |plugin: &str| ForgeKind::from_plugin(plugin).label().to_string();
+    let hint = match &serving {
+        ForgeServing::Served { plugin } => format!(
             "Served by the {} integration; pull requests and issues use it.",
-            kind.label()
+            label(plugin)
         ),
-        None => "No forge integration applies: pull request and issue features are unavailable."
-            .to_string(),
+        ForgeServing::NotLoaded {
+            plugin,
+            default: false,
+        } => format!(
+            "The {} integration claims this host but is not loaded: pull request and issue features are unavailable.",
+            label(plugin)
+        ),
+        ForgeServing::NotLoaded {
+            plugin,
+            default: true,
+        } => format!(
+            "The default {} integration is not loaded: pull request and issue features are unavailable.",
+            label(plugin)
+        ),
+        ForgeServing::Unrouted => {
+            "No forge integration applies: pull request and issue features are unavailable."
+                .to_string()
+        }
     };
     ForgeFeedback {
-        repo_icon: forge_icon(served),
+        repo_icon: forge_icon(served.as_ref()),
         issue_icon,
         hint,
     }
@@ -611,11 +632,11 @@ fn project_form(
     values: &ProjectForm,
     errors: &FormErrors,
     credentials: &[CredentialRef],
-    forge: Option<&ForgeKind>,
+    forges: &ForgeRoutes,
     submit: &str,
     editing: bool,
 ) -> Markup {
-    let feedback = forge_feedback(forge, &values.repo_url, &values.issue_tracker_url);
+    let feedback = forge_feedback(forges, &values.repo_url, &values.issue_tracker_url);
     html! {
         form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
             (form_error(errors))
@@ -678,7 +699,7 @@ async fn project_forge(State(state): State<WebState>, RawQuery(query): RawQuery)
             .unwrap_or_default()
     };
     let feedback = forge_feedback(
-        state.forge.as_ref(),
+        &state.forges,
         &value("repo_url"),
         &value("issue_tracker_url"),
     );
@@ -759,7 +780,7 @@ fn count_link(project: &str, status: &str, label: &str, count: i64, dot: Option<
 fn projects_region(
     projects: &[ProjectRecord],
     counts: &[ProjectStatusCount],
-    forge: Option<&ForgeKind>,
+    forges: &ForgeRoutes,
     user: &str,
 ) -> Markup {
     html! {
@@ -804,7 +825,7 @@ fn projects_region(
                                     }))
                                     (td(Cell::Mono, html! {
                                         span class="inline-flex min-w-0 items-center gap-2" {
-                                            (forge_icon(project_forge_kind(forge, p)))
+                                            (forge_icon(project_forge_kind(forges, p).as_ref()))
                                             span class="truncate" { (p.repo_url) }
                                         }
                                     }))
@@ -828,7 +849,7 @@ fn projects_region(
                                         class="inline-flex min-h-11 items-center gap-0.5 text-[13px] font-medium text-accent-text" { "Tasks" (icon(Icon::ChevronRight)) }
                                 }
                                 div class="flex items-center gap-2 font-mono text-xs text-muted" {
-                                    (forge_icon(project_forge_kind(forge, p)))
+                                    (forge_icon(project_forge_kind(forges, p).as_ref()))
                                     span class="truncate" { (p.repo_url) }
                                 }
                                 div class="flex flex-wrap gap-x-3.5" {
@@ -851,12 +872,7 @@ async fn projects_markup(state: &WebState, user: &str) -> Result<Markup, Box<Res
         df_db::task_views::project_status_counts(&state.pool)
     )
     .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(projects_region(
-        &projects,
-        &counts,
-        state.forge.as_ref(),
-        user,
-    ))
+    Ok(projects_region(&projects, &counts, &state.forges, user))
 }
 
 async fn projects_list(
@@ -884,7 +900,7 @@ async fn project_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             &new_project_values(),
             &FormErrors::default(),
             &credentials,
-            state.forge.as_ref(),
+            &state.forges,
             "Create project",
             false,
         ),
@@ -914,7 +930,7 @@ async fn project_edit(
             &project_values(&project),
             &FormErrors::default(),
             &credentials,
-            state.forge.as_ref(),
+            &state.forges,
             "Save project",
             true,
         ),
@@ -1016,7 +1032,7 @@ async fn save_project(
         &form,
         &errors,
         &credentials,
-        state.forge.as_ref(),
+        &state.forges,
         submit,
         existing.is_some(),
     ))

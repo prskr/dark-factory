@@ -525,6 +525,12 @@ pub struct PluginConfig {
     /// interpret them; the plugin documents its keys. `base-url` is set by the host and wins.
     #[serde(default)]
     pub settings: BTreeMap<String, String>,
+    /// Forge hosts this plugin serves. Empty marks the default plugin.
+    #[serde(default)]
+    pub hosts: Vec<HostRoute>,
+    /// How the host sends the forge credential.
+    #[serde(default)]
+    pub auth_scheme: AuthSchemeSetting,
 }
 
 impl PluginConfig {
@@ -534,7 +540,61 @@ impl PluginConfig {
             call_timeout_seconds: default_plugin_call_timeout(),
             memory_mib: default_plugin_memory_mib(),
             settings: BTreeMap::new(),
+            hosts: Vec::new(),
+            auth_scheme: AuthSchemeSetting::default(),
         }
+    }
+}
+
+/// A `hosts` entry of a plugin: a plain host (`ghe.example.org`) or `{host, apiUrl}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HostRoute {
+    /// Host only; the API URL defaults to `https://<host>`.
+    Host(String),
+    /// Host with an explicit API URL.
+    WithApiUrl(HostWithApiUrl),
+}
+
+/// The `{host, apiUrl}` form of a `hosts` entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostWithApiUrl {
+    /// `name[:port]` of the forge.
+    pub host: String,
+    /// Base URL of the forge API.
+    pub api_url: String,
+}
+
+/// Authorization scheme of the forge credential header.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthScheme {
+    /// `Authorization: token <credential>`.
+    #[default]
+    Token,
+    /// `Authorization: Bearer <credential>`.
+    Bearer,
+}
+
+/// `authScheme` as configured. An unknown value is kept and rejected when the routing table is
+/// built, so the error can name the plugin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AuthSchemeSetting {
+    Known(AuthScheme),
+    Unknown(String),
+}
+
+impl Default for AuthSchemeSetting {
+    fn default() -> Self {
+        Self::Known(AuthScheme::default())
+    }
+}
+
+impl From<AuthScheme> for AuthSchemeSetting {
+    fn from(scheme: AuthScheme) -> Self {
+        Self::Known(scheme)
     }
 }
 
@@ -729,6 +789,65 @@ sandbox:
                 .plugins
                 .is_empty()
         );
+    }
+
+    fn plugin(yaml_body: &str) -> Result<PluginConfig, ConfigError> {
+        let yaml = format!("{VALID_FIXTURE}plugins:\n  github:\n    path: /g.wasm\n{yaml_body}");
+        Ok(InstanceConfig::from_yaml_str(&yaml)?.plugins["github"].clone())
+    }
+
+    #[test]
+    fn plugin_hosts_accept_a_plain_string() {
+        let cfg = plugin("    hosts:\n      - ghe.example.org\n").unwrap();
+        assert_eq!(cfg.hosts, [HostRoute::Host("ghe.example.org".into())]);
+    }
+
+    #[test]
+    fn plugin_hosts_accept_host_with_api_url() {
+        let cfg = plugin(
+            "    hosts:\n      - host: github.com\n        apiUrl: https://api.github.com\n      - ghe.example.org\n",
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.hosts,
+            [
+                HostRoute::WithApiUrl(HostWithApiUrl {
+                    host: "github.com".into(),
+                    api_url: "https://api.github.com".into(),
+                }),
+                HostRoute::Host("ghe.example.org".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn plugin_host_with_api_url_rejects_unknown_keys() {
+        for entry in [
+            "      - host: a\n        api: b\n",
+            "      - host: a\n        apiUrl: https://b\n        api: c\n",
+        ] {
+            assert!(plugin(&format!("    hosts:\n{entry}")).is_err(), "{entry}");
+        }
+    }
+
+    #[test]
+    fn plugin_auth_scheme_accepts_bearer() {
+        let cfg = plugin("    authScheme: bearer\n").unwrap();
+        assert_eq!(cfg.auth_scheme, AuthScheme::Bearer.into());
+    }
+
+    #[test]
+    fn plugin_unknown_auth_scheme_is_kept_for_the_routing_table_to_reject() {
+        let cfg = plugin("    authScheme: basic\n").unwrap();
+        assert_eq!(cfg.auth_scheme, AuthSchemeSetting::Unknown("basic".into()));
+    }
+
+    #[test]
+    fn plugin_without_hosts_and_auth_scheme_is_default_with_token() {
+        let cfg = plugin("").unwrap();
+        assert!(cfg.hosts.is_empty());
+        assert_eq!(cfg.auth_scheme, AuthScheme::Token.into());
+        assert_eq!(cfg, PluginConfig::new("/g.wasm"));
     }
 
     #[test]

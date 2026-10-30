@@ -6,13 +6,14 @@ pub mod forge;
 pub mod host;
 pub mod ids;
 pub mod keys;
+pub mod routing;
 pub mod seams;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod title;
 
 pub use config::{
-    AuthConfig, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
+    AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
     InstanceConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
     SandboxSectionConfig,
 };

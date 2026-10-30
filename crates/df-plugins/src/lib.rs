@@ -9,7 +9,9 @@ mod forge;
 mod host;
 mod policy;
 mod retry;
+mod router;
 mod state;
 
-pub use forge::{ForgeTarget, PluginForgeClient, ProjectDirectory};
+pub use forge::PluginForgeClient;
 pub use host::{Capabilities, LoadError, PluginEngine, PluginHost};
+pub use router::{ForgeRouter, ForgeTarget, ProjectDirectory};

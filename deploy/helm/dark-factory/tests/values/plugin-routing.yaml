@@ -1,0 +1,9 @@
+plugins:
+  github:
+    image: null
+    path: /custom/github.wasm
+    hosts:
+      - host: github.com
+        apiUrl: https://api.github.com
+      - ghe.example.org
+    authScheme: bearer

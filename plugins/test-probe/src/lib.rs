@@ -32,6 +32,8 @@ pub const OWN_AUTHORIZATION: u64 = 5;
 /// `GET http://<repo owner>/`, the owner standing in for a `host:port`; fails with `transport` if
 /// the host denies it.
 pub const OTHER_HOST: u64 = 6;
+/// The configured `base-url` as body.
+pub const BASE_URL: u64 = 7;
 
 /// Minimal blocking `GET` over `wasi:http`; returns the status code.
 fn get(base_url: &str, path: &str, authorization: Option<&str>) -> Result<u16, Error> {
@@ -100,6 +102,10 @@ impl IssuesGuest for Probe {
                 get(&base_url, "/echo", Some("Bearer fake"))?.to_string()
             }
             OTHER_HOST => get(&format!("http://{}", id.repo.owner), "/", None)?.to_string(),
+            BASE_URL => wasi::config::store::get("base-url")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
             _ => String::new(),
         };
         Ok(Issue {

@@ -117,38 +117,37 @@ mod tests {
     }
 
     fn with_projects(
-        forge: df_core::ForgeKind,
+        plugin: &str,
         projects: &[df_db::catalog::ProjectRecord],
         host: &str,
     ) -> String {
-        let hosts = ProjectHosts::from_projects(Some(&forge), projects);
+        let hosts = ProjectHosts::from_projects(&crate::testkit::default_forge(plugin), projects);
         host_icon(host, HostIconSize::Table, &hosts).into_string()
     }
 
     #[test]
     fn project_hosts_show_the_forge_icons_and_the_issue_icon() {
-        use df_core::ForgeKind;
         let forgejo = [project(
             "https://git.example.internal/o/r.git",
             Some("https://jira.example.com/DF"),
             true,
         )];
         assert!(
-            with_projects(ForgeKind::Forgejo, &forgejo, "git.example.internal")
+            with_projects("forgejo", &forgejo, "git.example.internal")
                 .contains("data-host-icon=\"forge-forgejo\"")
         );
         assert!(
-            with_projects(ForgeKind::Forgejo, &forgejo, "jira.example.com")
+            with_projects("forgejo", &forgejo, "jira.example.com")
                 .contains("data-host-icon=\"issue\"")
         );
         let github = [project("https://code.example.org/o/r.git", None, true)];
         assert!(
-            with_projects(ForgeKind::GitHub, &github, "code.example.org")
+            with_projects("github", &github, "code.example.org")
                 .contains("data-host-icon=\"forge-github\"")
         );
         let plain = [project("https://code.example.org/o/r.git", None, false)];
         assert!(
-            with_projects(ForgeKind::GitHub, &plain, "code.example.org")
+            with_projects("github", &plain, "code.example.org")
                 .contains("data-host-icon=\"forge-git\"")
         );
     }
@@ -156,9 +155,9 @@ mod tests {
     #[test]
     fn a_project_host_beats_the_monogram_but_only_for_that_exact_host() {
         let projects = [project("https://github.com/o/r.git", None, true)];
-        let github = with_projects(df_core::ForgeKind::GitHub, &projects, "github.com");
+        let github = with_projects("github", &projects, "github.com");
         assert!(github.contains("data-host-icon=\"forge-github\"") && !github.contains(">GH<"));
-        let api = with_projects(df_core::ForgeKind::GitHub, &projects, "api.github.com");
+        let api = with_projects("github", &projects, "api.github.com");
         assert!(api.contains("data-host-icon=\"GH\""));
     }
 

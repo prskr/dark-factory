@@ -6,6 +6,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, Response, header};
 use df_core::AuthConfig;
+use df_core::PluginConfig;
+use df_core::config::HostRoute;
+use df_core::routing::{ForgeRoutes, RoutingTable};
 use http_body_util::BodyExt;
 use openidconnect::core::{
     CoreGenderClaim, CoreJsonWebKeySet, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
@@ -211,30 +214,53 @@ pub(crate) struct TestApp {
     _dir: tempfile::TempDir,
 }
 
+/// Routes of the plugins `(name, hosts)`, an entry without hosts being the default; `loaded` are
+/// the plugins that loaded.
+pub(crate) fn forge_routes(plugins: &[(&str, &[&str])], loaded: &[&str]) -> ForgeRoutes {
+    let configs = plugins
+        .iter()
+        .map(|(name, hosts)| {
+            let mut config = PluginConfig::new(format!("/plugins/{name}.wasm"));
+            config.hosts = hosts
+                .iter()
+                .map(|host| HostRoute::Host((*host).to_string()))
+                .collect();
+            ((*name).to_string(), config)
+        })
+        .collect();
+    let table = RoutingTable::from_plugins(&configs).unwrap();
+    ForgeRoutes::new(table, loaded.iter().map(|name| (*name).to_string()))
+}
+
+/// Routes with `plugin` as the loaded default plugin: it serves every HTTPS repository.
+pub(crate) fn default_forge(plugin: &str) -> ForgeRoutes {
+    forge_routes(&[(plugin, &[])], &[plugin])
+}
+
 impl TestApp {
     pub(crate) async fn new() -> Self {
-        Self::with_forge(Some(df_core::ForgeKind::Forgejo)).await
+        Self::with_forges(default_forge("forgejo")).await
     }
 
-    pub(crate) async fn with_forge(forge: Option<df_core::ForgeKind>) -> Self {
-        Self::with_egress(forge, None, None).await
+    pub(crate) async fn with_forges(forges: ForgeRoutes) -> Self {
+        Self::with_egress(forges, None, None).await
     }
 
     pub(crate) async fn with_egress(
-        forge: Option<df_core::ForgeKind>,
+        forges: ForgeRoutes,
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
-        Self::build(forge, flows, services, false).await
+        Self::build(forges, flows, services, false).await
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
     pub(crate) async fn with_hidden_blocks() -> Self {
-        Self::build(Some(df_core::ForgeKind::Forgejo), None, None, true).await
+        Self::build(default_forge("forgejo"), None, None, true).await
     }
 
     async fn build(
-        forge: Option<df_core::ForgeKind>,
+        forges: ForgeRoutes,
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
         show_hidden_blocks: bool,
@@ -256,7 +282,7 @@ impl TestApp {
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
             oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
             pool: pool.clone(),
-            forge,
+            forges,
             flows,
             services,
             show_hidden_blocks,

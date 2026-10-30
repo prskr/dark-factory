@@ -6,7 +6,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use df_core::{ForgeClient, IntegrationError, ProjectId};
+use df_core::{AuthScheme, ForgeClient, IntegrationError, PluginConfig, ProjectId};
 use df_plugins::{LoadError, PluginEngine, PluginHost};
 use tracing_subscriber::fmt::MakeWriter;
 use wiremock::matchers::{method, path};
@@ -178,13 +178,12 @@ async fn plugin_stderr_is_forwarded_to_the_log() -> anyhow::Result<()> {
 }
 
 fn http_probe_client(server: &MockServer) -> anyhow::Result<common::Client> {
-    Ok(common::client(
+    common::client(
         &common::probe(),
         &format!("{}/o/r.git", server.uri()),
         Duration::from_secs(30),
         64 * MIB,
-    )?
-    .allow_plain_http())
+    )
 }
 
 #[tokio::test]
@@ -213,6 +212,44 @@ async fn host_replaces_an_authorization_header_set_by_the_plugin() -> anyhow::Re
     Ok(())
 }
 
+#[tokio::test]
+async fn bearer_scheme_of_the_plugin_config_sends_a_bearer_authorization_header()
+-> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/echo"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let mut config = PluginConfig::new("/forgejo.wasm");
+    config.auth_scheme = AuthScheme::Bearer.into();
+    let client = common::router_with_config(
+        common::plugin_client(
+            &PluginEngine::new()?,
+            &common::probe(),
+            common::TOKEN,
+            Duration::from_secs(30),
+            64 * MIB,
+        )?,
+        config,
+        &format!("{}/o/r.git", server.uri()),
+    )?;
+    let issue = client.get_issue(&ProjectId::new(), 5).await?;
+    assert_eq!(issue.body, "200");
+    let requests = server.received_requests().await.unwrap_or_default();
+    let authorization: Vec<_> = requests[0]
+        .headers
+        .get_all("authorization")
+        .iter()
+        .collect();
+    assert_eq!(authorization.len(), 1);
+    assert_eq!(
+        authorization[0].as_bytes(),
+        format!("Bearer {}", common::TOKEN).as_bytes()
+    );
+    Ok(())
+}
+
 #[tokio::test(start_paused = true)]
 async fn request_to_another_host_fails_as_transport_error() -> anyhow::Result<()> {
     let server = MockServer::start().await;
@@ -225,7 +262,6 @@ async fn request_to_another_host_fails_as_transport_error() -> anyhow::Result<()
         Duration::from_secs(30),
         64 * MIB,
     )?
-    .allow_plain_http()
     .get_issue(&ProjectId::new(), 6)
     .await
     .unwrap_err();

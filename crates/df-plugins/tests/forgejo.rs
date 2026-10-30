@@ -8,6 +8,7 @@ use std::time::Duration;
 use df_core::{
     ForgeClient, IntegrationError, NewPullRequest, ProjectId, PullRequestState, PullRequestUpdate,
 };
+use df_plugins::PluginEngine;
 use serde_json::json;
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -16,13 +17,12 @@ const MIB: usize = 1024 * 1024;
 const PULLS: &str = "/api/v1/repos/o/r/pulls";
 
 fn client(server: &MockServer) -> anyhow::Result<common::Client> {
-    Ok(common::client(
+    common::client(
         &common::forgejo(),
         &format!("{}/o/r.git", server.uri()),
         Duration::from_secs(30),
         64 * MIB,
-    )?
-    .allow_plain_http())
+    )
 }
 
 fn pr(title: &str) -> serde_json::Value {
@@ -223,14 +223,21 @@ async fn rate_limited_comment_is_retried_after_the_hint() -> anyhow::Result<()> 
 #[tokio::test(start_paused = true)]
 async fn plain_http_is_denied_without_opening_a_connection() -> anyhow::Result<()> {
     let server = MockServer::start().await;
-    let client = common::client(
-        &common::forgejo(),
+    let client = common::https_only_router(
+        common::plugin_client(
+            &PluginEngine::new()?,
+            &common::forgejo(),
+            common::TOKEN,
+            Duration::from_secs(30),
+            64 * MIB,
+        )?,
         &format!("{}/o/r.git", server.uri()),
-        Duration::from_secs(30),
-        64 * MIB,
     )?;
     let err = client.get_issue(&ProjectId::new(), 3).await.unwrap_err();
-    assert!(matches!(err, IntegrationError::Transport(_)), "{err}");
+    assert!(
+        matches!(&err, IntegrationError::Config(m) if m.contains("is not HTTPS")),
+        "{err}"
+    );
     assert!(
         server
             .received_requests()

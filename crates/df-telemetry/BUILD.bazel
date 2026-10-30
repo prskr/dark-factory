@@ -28,7 +28,8 @@ rust_library(
     name = "df_telemetry",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
-    crate_features = _FULL,
+    # With `test-util`, like `df_core`: the control plane tests share this crate with df-k8s.
+    crate_features = _TEST,
     crate_name = "df_telemetry",
     edition = "2024",
     lint_config = ":lints",

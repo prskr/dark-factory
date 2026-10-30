@@ -1,5 +1,6 @@
 //! Which outgoing HTTP requests a plugin instance may make, and the credential they carry.
 
+use df_core::AuthScheme;
 use http::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use http::uri::{Authority, Scheme, Uri};
 use secrecy::{ExposeSecret, SecretString};
@@ -8,13 +9,18 @@ use secrecy::{ExposeSecret, SecretString};
 pub(crate) struct HttpPolicy {
     authority: Authority,
     credential: SecretString,
+    auth_scheme: AuthScheme,
     /// Test servers speak plain HTTP; production policies never set this.
     allow_plain_http: bool,
 }
 
 impl HttpPolicy {
-    /// Allows requests to the authority of `base_url`.
-    pub(crate) fn for_base_url(base_url: &str, credential: SecretString) -> Result<Self, String> {
+    /// Allows requests to the authority of `base_url`, sending `credential` with `auth_scheme`.
+    pub(crate) fn for_base_url(
+        base_url: &str,
+        credential: SecretString,
+        auth_scheme: AuthScheme,
+    ) -> Result<Self, String> {
         let uri: Uri = base_url
             .parse()
             .map_err(|e| format!("invalid base URL `{base_url}`: {e}"))?;
@@ -25,6 +31,7 @@ impl HttpPolicy {
         Ok(Self {
             authority,
             credential,
+            auth_scheme,
             allow_plain_http: false,
         })
     }
@@ -50,9 +57,13 @@ impl HttpPolicy {
         {
             return Err(Denied::Host);
         }
-        // Forgejo token format.
-        let mut value = HeaderValue::try_from(format!("token {}", self.credential.expose_secret()))
-            .map_err(|_invalid_header| Denied::Credential)?;
+        let prefix = match self.auth_scheme {
+            AuthScheme::Token => "token",
+            AuthScheme::Bearer => "Bearer",
+        };
+        let mut value =
+            HeaderValue::try_from(format!("{prefix} {}", self.credential.expose_secret()))
+                .map_err(|_invalid_header| Denied::Credential)?;
         value.set_sensitive(true);
         headers.insert(AUTHORIZATION, value);
         Ok(())
@@ -71,8 +82,17 @@ pub(crate) enum Denied {
 mod tests {
     use super::*;
 
+    fn policy_with(scheme: AuthScheme) -> HttpPolicy {
+        HttpPolicy::for_base_url(
+            "https://git.example.org",
+            SecretString::from("s3cret"),
+            scheme,
+        )
+        .unwrap()
+    }
+
     fn policy() -> HttpPolicy {
-        HttpPolicy::for_base_url("https://git.example.org", SecretString::from("s3cret")).unwrap()
+        policy_with(AuthScheme::Token)
     }
 
     fn uri(s: &str) -> Uri {
@@ -86,6 +106,18 @@ mod tests {
             .admit(&uri("https://git.example.org/api/v1/x"), &mut headers)
             .unwrap();
         assert_eq!(headers[AUTHORIZATION], "token s3cret");
+        assert!(headers[AUTHORIZATION].is_sensitive());
+    }
+
+    #[test]
+    fn bearer_scheme_injects_a_sensitive_bearer_credential() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("token fake"));
+        policy_with(AuthScheme::Bearer)
+            .admit(&uri("https://git.example.org/api/v3/x"), &mut headers)
+            .unwrap();
+        assert_eq!(headers.get_all(AUTHORIZATION).iter().count(), 1);
+        assert_eq!(headers[AUTHORIZATION], "Bearer s3cret");
         assert!(headers[AUTHORIZATION].is_sensitive());
     }
 
@@ -122,15 +154,22 @@ mod tests {
     #[test]
     fn plain_http_only_when_enabled() {
         let mut headers = HeaderMap::new();
-        let p = HttpPolicy::for_base_url("http://127.0.0.1:8080", SecretString::from("t"))
-            .unwrap()
-            .allow_plain_http();
+        let p = HttpPolicy::for_base_url(
+            "http://127.0.0.1:8080",
+            SecretString::from("t"),
+            AuthScheme::Token,
+        )
+        .unwrap()
+        .allow_plain_http();
         p.admit(&uri("http://127.0.0.1:8080/x"), &mut headers)
             .unwrap();
     }
 
     #[test]
     fn rejects_base_url_without_host() {
-        assert!(HttpPolicy::for_base_url("/relative", SecretString::from("t")).is_err());
+        assert!(
+            HttpPolicy::for_base_url("/relative", SecretString::from("t"), AuthScheme::Token)
+                .is_err()
+        );
     }
 }

@@ -185,7 +185,12 @@ async fn without_a_cluster_connection_services_cannot_be_added() {
 
 #[tokio::test]
 async fn a_failing_service_lookup_is_shown_to_the_board_member() {
-    let app = TestApp::with_egress(None, None, Some(Arc::new(BrokenServices))).await;
+    let app = TestApp::with_egress(
+        df_core::routing::ForgeRoutes::default(),
+        None,
+        Some(Arc::new(BrokenServices)),
+    )
+    .await;
     let cookie = app.login().await;
     let response = app
         .post(

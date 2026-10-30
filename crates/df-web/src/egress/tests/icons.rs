@@ -26,7 +26,7 @@ fn an_ip_literal_destination_shows_the_server_icon() {
 
 async fn forgejo_app(events: Vec<FlowEvent>) -> TestApp {
     TestApp::with_egress(
-        Some(df_core::ForgeKind::Forgejo),
+        crate::testkit::default_forge("forgejo"),
         Some(Arc::new(FakeFlows(events))),
         Some(Arc::new(FakeServices)),
     )
@@ -211,7 +211,7 @@ async fn a_project_host_beats_the_provider_monogram_on_a_github_instance() {
         allowed("api.github.com", "DF", 2),
     ];
     let app = TestApp::with_egress(
-        Some(df_core::ForgeKind::GitHub),
+        crate::testkit::default_forge("github"),
         Some(Arc::new(FakeFlows(events))),
         Some(Arc::new(FakeServices)),
     )
@@ -230,6 +230,46 @@ async fn a_project_host_beats_the_provider_monogram_on_a_github_instance() {
     let body = events_frame(&app, &cookie).await;
     assert_eq!(row_icon(&body, "github.com"), "forge-github");
     assert_eq!(row_icon(&body, "api.github.com"), "GH");
+}
+
+#[tokio::test]
+async fn a_host_claimed_by_a_plugin_that_did_not_load_shows_the_git_icon() {
+    let events = vec![
+        allowed("github.com", "GH", 1),
+        allowed("git.example.internal", "DF", 2),
+    ];
+    let app = TestApp::with_egress(
+        crate::testkit::forge_routes(
+            &[("github", &["github.com"]), ("forgejo", &[])],
+            &["forgejo"],
+        ),
+        Some(Arc::new(FakeFlows(events))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "GH",
+        "https://github.com/org/gh.git",
+        "",
+        &credential,
+    )
+    .await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://git.example.internal/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    let body = events_frame(&app, &cookie).await;
+    assert_eq!(row_icon(&body, "github.com"), "forge-git");
+    assert_eq!(row_icon(&body, "git.example.internal"), "forge-forgejo");
 }
 
 #[tokio::test]

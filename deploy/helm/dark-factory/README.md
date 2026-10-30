@@ -105,6 +105,8 @@ Every key in `values.yaml` is documented below:
 | `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
 | `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
+| `plugins.<name>.hosts` | `list` | unset | Forge hosts the plugin serves: a host (`ghe.example.org`) or `{host, apiUrl}` with an `https://` API URL. Written to the instance config only when set; an entry without `hosts` is the default plugin and serves every other project. See [Plugins](#plugins) for rollback. |
+| `plugins.<name>.authScheme` | `string` | unset (`token`) | `token` or `bearer`: how the control plane sends the forge credential (`Authorization: token …` / `Bearer …`). Written to the instance config only when set. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
 | `web.showHiddenBlocks` | `bool` | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, such as the title request) in the task UI, muted and labeled (`web.showHiddenBlocks` of the instance config). For debugging prompts. Read at startup: a change restarts the control plane. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
@@ -219,9 +221,34 @@ plugins:
     path: /custom/forgejo.wasm
 ```
 
+### Route forges to plugins
+
+A plugin with `hosts` serves projects on those hosts; the entry without `hosts` serves all others. Give every entry `hosts`, so a project on a forge nobody configured gets a clear `config` error instead of reaching the wrong plugin:
+
+```yaml
+plugins:
+  forgejo:
+    hosts:
+      - git.example.org
+  github:
+    image:
+      repository: registry.example.org/plugin-github
+      tag: 0.1.0
+    hosts:
+      - host: github.com
+        apiUrl: https://api.github.com
+    authScheme: bearer
+```
+
+See [Add a second forge](../../../crates/df-plugins/docs/configuration.md#add-a-second-forge) for the routing rules and the checks after a restart.
+
+Rollback: control planes before `hosts`/`authScheme` refuse to start with either key in the instance config (`deny_unknown_fields`). Remove both from every plugin entry before rolling back to such a release.
+
 ### Troubleshooting
 
-The control plane pod does not start and `kubectl describe pod` shows a failed pull of the image volume `plugin-<name>` in the pod's reason, message and events (retried with volume backoff, not reported as a container `ErrImagePull`): the plugin image or tag does not exist, the registry needs credentials (`image.pullSecrets` apply to plugin images) or the cluster has no image volume support. The `serve` process exits at startup naming the plugin and path if the component is missing or invalid.
+The control plane pod does not start and `kubectl describe pod` shows a failed pull of the image volume `plugin-<name>` in the pod's reason, message and events (retried with volume backoff, not reported as a container `ErrImagePull`): the plugin image or tag does not exist, the registry needs credentials (`image.pullSecrets` apply to plugin images) or the cluster has no image volume support.
+
+A plugin whose component is missing or invalid is logged at `error` ("forge plugin not loaded", fields `plugin`, `path`, `error`) and stays in the routing table as unavailable: its projects get a `config` error naming the plugin. `serve` exits only if no forge plugin loaded (`no forge plugin loaded: <every load error>`). Configuration errors (a host claimed by two plugins, two plugins without `hosts`, an `apiUrl` without `https://`) still stop startup. See [Startup](../../../crates/df-plugins/docs/configuration.md#startup).
 
 ## Cluster targets
 

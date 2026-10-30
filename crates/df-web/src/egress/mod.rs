@@ -48,7 +48,7 @@ pub enum LookupError {
 /// and the icons fall back to the generic ones.
 async fn project_hosts(state: &WebState) -> ProjectHosts {
     match df_db::catalog::list_projects(&state.pool).await {
-        Ok(projects) => ProjectHosts::from_projects(state.forge.as_ref(), &projects),
+        Ok(projects) => ProjectHosts::from_projects(&state.forges, &projects),
         Err(error) => {
             tracing::warn!(%error, "listing projects for the host icons");
             ProjectHosts::default()
