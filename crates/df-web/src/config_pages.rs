@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use df_core::routing::{ForgeRoutes, ForgeServing};
-use df_core::{CredentialRef, ForgeKind, StatusSet};
+use df_core::{CredentialRef, StatusSet};
 use df_db::DbError;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, PersonaRecord, ProjectInput, ProjectRecord,
@@ -527,16 +527,6 @@ fn credential_options(credentials: &[CredentialRef]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A valid HTTPS repository URL (stricter than the lenient `url_host` of the host icons, which only
-/// needs the host): scheme, host and at least an owner and a repository segment.
-fn repository_host(url: &str) -> Option<String> {
-    let url = Url::parse(url.trim()).ok()?;
-    let segments = url.path_segments()?.filter(|s| !s.is_empty()).count();
-    (url.scheme() == "https" && segments >= 2)
-        .then(|| url.host_str().map(str::to_string))
-        .flatten()
-}
-
 /// What the forge feedback of the project form shows: an icon per URL field and one hint.
 struct ForgeFeedback {
     repo_icon: Markup,
@@ -547,10 +537,7 @@ struct ForgeFeedback {
 /// The integration the typed URLs map to through the routing table (design D7); an issue tracker
 /// on the repository's host uses it too.
 fn forge_feedback(forges: &ForgeRoutes, repo_url: &str, issue_url: &str) -> ForgeFeedback {
-    let serving = match repository_host(repo_url) {
-        Some(_) => forges.forge_for_repo_url(repo_url.trim()),
-        None => ForgeServing::Unrouted,
-    };
+    let serving = forges.forge_for_repo_url(repo_url);
     let served = serving.kind();
     // A typed but unparsable tracker URL still shows the issue icon.
     let issue_icon = if issue_url.trim().is_empty() {
@@ -560,27 +547,20 @@ fn forge_feedback(forges: &ForgeRoutes, repo_url: &str, issue_url: &str) -> Forg
             .map_or(HostRole::IssueTracker, |(_, r)| r);
         role_icon(&role)
     };
-    let label = |plugin: &str| ForgeKind::from_plugin(plugin).label().to_string();
-    let hint = match &serving {
-        ForgeServing::Served { plugin } => format!(
+    let hint = match (&serving, serving.plugin_kind()) {
+        (ForgeServing::Served { .. }, Some(kind)) => format!(
             "Served by the {} integration; pull requests and issues use it.",
-            label(plugin)
+            kind.label()
         ),
-        ForgeServing::NotLoaded {
-            plugin,
-            default: false,
-        } => format!(
+        (ForgeServing::NotLoaded { default: false, .. }, Some(kind)) => format!(
             "The {} integration claims this host but is not loaded: pull request and issue features are unavailable.",
-            label(plugin)
+            kind.label()
         ),
-        ForgeServing::NotLoaded {
-            plugin,
-            default: true,
-        } => format!(
+        (ForgeServing::NotLoaded { default: true, .. }, Some(kind)) => format!(
             "The default {} integration is not loaded: pull request and issue features are unavailable.",
-            label(plugin)
+            kind.label()
         ),
-        ForgeServing::Unrouted => {
+        (ForgeServing::Unrouted, _) | (_, None) => {
             "No forge integration applies: pull request and issue features are unavailable."
                 .to_string()
         }

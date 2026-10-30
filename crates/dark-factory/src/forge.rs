@@ -1,6 +1,7 @@
 //! Loads every configured forge plugin and routes [`ForgeClient`] calls through [`ForgeRouter`].
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,10 +19,28 @@ const MIB: u64 = 1024 * 1024;
 const IMPLICIT_PLUGIN: &str = "forgejo";
 const IMPLICIT_PLUGIN_PATH: &str = "/plugins/forgejo/plugin.wasm";
 
-/// The validated routing table and the forge plugins that loaded, by name.
+/// The validated routing table, the forge plugins that loaded, by name, and those that did not.
 pub(crate) struct ForgePlugins {
     routes: RoutingTable,
     loaded: BTreeMap<String, (PluginHost, PluginConfig)>,
+    failures: Vec<LoadFailure>,
+}
+
+/// A configured forge plugin that did not load.
+#[derive(Debug, PartialEq, Eq)]
+struct LoadFailure {
+    plugin: String,
+    path: PathBuf,
+    error: String,
+}
+
+/// A route of the routing table and whether its plugin loaded.
+#[derive(Debug, PartialEq, Eq)]
+struct RouteStatus {
+    /// The claimed host; `None` for the default route.
+    host: Option<String>,
+    plugin: String,
+    available: bool,
 }
 
 /// Validates the routes of `plugins` (with no entry: the implicit Forgejo default), then loads
@@ -44,28 +63,37 @@ pub(crate) fn load_forge_plugins(
     };
     let routes = RoutingTable::from_plugins(plugins).context("invalid `plugins` configuration")?;
     let mut loaded = BTreeMap::new();
-    let mut errors = Vec::new();
+    let mut failures = Vec::new();
     for (name, config) in plugins {
         match load_forge_plugin(engine, name, config) {
             Ok(host) => {
                 loaded.insert(name.clone(), (host, config.clone()));
             }
             Err(error) => {
-                let error = format!("{error:#}");
+                let failure = LoadFailure {
+                    plugin: name.clone(),
+                    path: config.path.clone(),
+                    error: format!("{error:#}"),
+                };
                 tracing::error!(
-                    plugin = %name,
-                    path = %config.path.display(),
-                    error = %error,
+                    plugin = %failure.plugin,
+                    path = %failure.path.display(),
+                    error = %failure.error,
                     "forge plugin not loaded"
                 );
-                errors.push(error);
+                failures.push(failure);
             }
         }
     }
-    if loaded.is_empty() {
+    let plugins = ForgePlugins {
+        routes,
+        loaded,
+        failures,
+    };
+    if plugins.loaded.is_empty() {
+        let errors: Vec<&str> = plugins.failures.iter().map(|f| f.error.as_str()).collect();
         anyhow::bail!("no forge plugin loaded: {}", errors.join("; "));
     }
-    let plugins = ForgePlugins { routes, loaded };
     plugins.log_routes();
     Ok(plugins)
 }
@@ -76,22 +104,44 @@ impl ForgePlugins {
         ForgeRoutes::new(self.routes.clone(), self.loaded.keys().cloned())
     }
 
+    /// Every host route, ordered by host, then the default route, each with whether its plugin
+    /// loaded.
+    fn routing_summary(&self) -> Vec<RouteStatus> {
+        let status = |host: Option<&str>, plugin: &str| RouteStatus {
+            host: host.map(str::to_string),
+            plugin: plugin.to_string(),
+            available: self.loaded.contains_key(plugin),
+        };
+        self.routes
+            .hosts()
+            .map(|(host, route)| status(Some(host), &route.plugin))
+            .chain(
+                self.routes
+                    .default_route()
+                    .map(|route| status(None, &route.plugin)),
+            )
+            .collect()
+    }
+
     fn log_routes(&self) {
-        for (host, route) in self.routes.hosts() {
-            tracing::info!(
-                host,
-                plugin = %route.plugin,
-                available = self.loaded.contains_key(&route.plugin),
-                "forge route"
-            );
+        let summary = self.routing_summary();
+        for route in &summary {
+            if let Some(host) = &route.host {
+                tracing::info!(
+                    host = host.as_str(),
+                    plugin = %route.plugin,
+                    available = route.available,
+                    "forge route"
+                );
+            } else {
+                tracing::info!(
+                    plugin = %route.plugin,
+                    available = route.available,
+                    "default forge route"
+                );
+            }
         }
-        if let Some(route) = self.routes.default_route() {
-            tracing::info!(
-                plugin = %route.plugin,
-                available = self.loaded.contains_key(&route.plugin),
-                "default forge route"
-            );
-        } else {
+        if summary.iter().all(|route| route.host.is_some()) {
             tracing::info!("no default forge route");
         }
     }
@@ -169,11 +219,40 @@ impl ProjectDirectory for DbProjects {
 mod tests {
     use super::*;
 
+    fn engine() -> PluginEngine {
+        PluginEngine::new().expect("engine")
+    }
+
+    fn with_hosts(path: impl Into<PathBuf>, hosts: &[&str]) -> PluginConfig {
+        let mut config = PluginConfig::new(path);
+        config.hosts = hosts
+            .iter()
+            .map(|host| df_core::config::HostRoute::Host((*host).to_string()))
+            .collect();
+        config
+    }
+
+    fn forgejo_and_missing_github() -> BTreeMap<String, PluginConfig> {
+        BTreeMap::from([
+            (
+                "forgejo".to_string(),
+                PluginConfig::new(crate::tests::forgejo_component()),
+            ),
+            (
+                "github".to_string(),
+                with_hosts(
+                    "/nonexistent/github.wasm",
+                    &["github.com", "ghe.example.com"],
+                ),
+            ),
+        ])
+    }
+
     #[test]
     fn memory_limit_overflow_is_a_config_error() {
         let mut config = PluginConfig::new("/nonexistent/forgejo.wasm");
         config.memory_mib = u64::MAX;
-        let err = load_forge_plugin(&PluginEngine::new().expect("engine"), "forgejo", &config)
+        let err = load_forge_plugin(&engine(), "forgejo", &config)
             .err()
             .expect("must fail");
         assert!(
@@ -185,25 +264,12 @@ mod tests {
     #[test]
     fn missing_component_is_reported_with_its_path() {
         let config = PluginConfig::new("/nonexistent/forgejo.wasm");
-        let err = load_forge_plugin(&PluginEngine::new().expect("engine"), "forgejo", &config)
+        let err = load_forge_plugin(&engine(), "forgejo", &config)
             .err()
             .expect("must fail");
         let message = format!("{err:#}");
         assert!(message.contains("/nonexistent/forgejo.wasm"), "{message}");
         assert!(message.contains("`forgejo`"), "{message}");
-    }
-
-    fn engine() -> PluginEngine {
-        PluginEngine::new().expect("engine")
-    }
-
-    fn with_hosts(path: impl Into<std::path::PathBuf>, hosts: &[&str]) -> PluginConfig {
-        let mut config = PluginConfig::new(path);
-        config.hosts = hosts
-            .iter()
-            .map(|host| df_core::config::HostRoute::Host((*host).to_string()))
-            .collect();
-        config
     }
 
     #[test]
@@ -258,70 +324,39 @@ mod tests {
         assert_eq!(default.plugin, "forgejo");
     }
 
-    /// The fields of the captured JSON records with `message`.
-    fn events(captured: &df_telemetry::testing::Captured, message: &str) -> Vec<serde_json::Value> {
-        captured
-            .text()
-            .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-            .map(|record| record.get("fields").cloned().unwrap_or(record))
-            .filter(|fields| fields["message"] == message)
-            .collect()
-    }
-
-    fn forgejo_and_missing_github() -> BTreeMap<String, PluginConfig> {
-        BTreeMap::from([
-            (
-                "forgejo".to_string(),
-                PluginConfig::new(crate::tests::forgejo_component()),
-            ),
-            (
-                "github".to_string(),
-                with_hosts(
-                    "/nonexistent/github.wasm",
-                    &["github.com", "ghe.example.com"],
-                ),
-            ),
-        ])
-    }
-
     #[test]
-    fn missing_plugin_is_logged_as_an_error_naming_plugin_and_path() {
-        let (captured, _guard) = df_telemetry::testing::capture("error");
-        load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
-        let errors = events(&captured, "forge plugin not loaded");
-        assert_eq!(errors.len(), 1, "{}", captured.text());
-        assert_eq!(errors[0]["plugin"], "github");
-        assert_eq!(errors[0]["path"], "/nonexistent/github.wasm");
-    }
-
-    #[test]
-    fn routing_table_is_logged_once_per_route_with_availability() {
-        let (captured, _guard) = df_telemetry::testing::capture("info");
-        load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
-        let routes: Vec<_> = events(&captured, "forge route")
-            .iter()
-            .map(|f| {
-                (
-                    f["host"].clone(),
-                    f["plugin"].clone(),
-                    f["available"].clone(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            routes,
-            vec![
-                ("ghe.example.com".into(), "github".into(), false.into()),
-                ("github.com".into(), "github".into(), false.into()),
-            ],
+    fn missing_plugin_is_reported_as_a_load_failure_naming_plugin_and_path() {
+        let plugins =
+            load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
+        let [failure] = plugins.failures.as_slice() else {
+            panic!("one failure expected: {:?}", plugins.failures);
+        };
+        assert_eq!(failure.plugin, "github");
+        assert_eq!(failure.path, PathBuf::from("/nonexistent/github.wasm"));
+        assert!(
+            failure.error.contains("/nonexistent/github.wasm"),
             "{}",
-            captured.text()
+            failure.error
         );
-        let defaults = events(&captured, "default forge route");
-        assert_eq!(defaults.len(), 1, "{}", captured.text());
-        assert_eq!(defaults[0]["plugin"], "forgejo");
-        assert_eq!(defaults[0]["available"], true);
+    }
+
+    #[test]
+    fn routing_summary_lists_each_route_with_availability_and_the_default() {
+        let plugins =
+            load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
+        let route = |host: Option<&str>, plugin: &str, available| RouteStatus {
+            host: host.map(str::to_string),
+            plugin: plugin.to_string(),
+            available,
+        };
+        assert_eq!(
+            plugins.routing_summary(),
+            vec![
+                route(Some("ghe.example.com"), "github", false),
+                route(Some("github.com"), "github", false),
+                route(None, "forgejo", true),
+            ]
+        );
     }
 
     #[test]

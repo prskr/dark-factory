@@ -117,7 +117,7 @@ fn project_roles(
     repo.into_iter().chain(issue).collect()
 }
 
-/// Lenient host extraction of a project URL (the form uses the stricter `repository_host`), in
+/// Lenient host extraction of a project URL (the form uses the stricter `ForgeRoutes`), in
 /// the normalized form the lookup compares.
 fn url_host(url: &str) -> Option<String> {
     let url = Url::parse(url.trim()).ok()?;
