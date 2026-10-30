@@ -9,13 +9,13 @@ The GitHub plugin implements pull requests and issues for GitHub (github.com and
 ### Requirement: Create pull request
 `create` SHALL open a pull request from head into base with title and body. With `draft: true` it SHALL mark the pull request as draft in the configured draft mode; the result SHALL have `draft: true` and the title without any marker. An open pull request for the same head and base SHALL yield `conflict`.
 
-#### Scenario: Draft with title prefix
-- **WHEN** `create` is called with title "DF-1: Fix login" and `draft: true`, and `draft-mode` is not set
-- **THEN** GitHub receives the title "WIP: DF-1: Fix login" without the draft flag, and the result has title "DF-1: Fix login" and `draft: true`
-
 #### Scenario: Native draft
-- **WHEN** `draft-mode` is `native` and `create` is called with title "DF-1: Fix login" and `draft: true`
+- **WHEN** `create` is called with title "DF-1: Fix login" and `draft: true`, and `draft-mode` is not set
 - **THEN** GitHub receives the unchanged title with `draft: true`, and the result has `draft: true`
+
+#### Scenario: Draft with title prefix
+- **WHEN** `draft-mode` is `title-prefix` and `create` is called with title "DF-1: Fix login" and `draft: true`
+- **THEN** GitHub receives the title "WIP: DF-1: Fix login" without the draft flag, and the result has title "DF-1: Fix login" and `draft: true`
 
 #### Scenario: Duplicate
 - **WHEN** GitHub answers 422 with "A pull request already exists for o:factory/task/DF-1."
@@ -90,7 +90,7 @@ Pull requests SHALL be returned with state `merged` when GitHub reports a merge 
 - **THEN** `get` returns an empty body
 
 ### Requirement: Draft mode setting
-The setting `draft-mode` SHALL accept `title-prefix` (default), `auto` and `native`; any other value SHALL fail every call with `config` naming it. In `auto` mode a draft SHALL be created natively, and with the title prefix when GitHub answers that the repository has no draft pull requests. The setting `wip-prefixes` SHALL list the recognized title prefixes (default `WIP:,[WIP]`), the first one marking new drafts.
+The setting `draft-mode` SHALL accept `native` (default), `title-prefix` and `auto`; any other value SHALL fail every call with `config` naming it. In `auto` mode a draft SHALL be created natively, and with the title prefix when GitHub answers that the repository has no draft pull requests. The setting `wip-prefixes` SHALL list the recognized title prefixes (default `WIP:,[WIP]`), the first one marking new drafts.
 
 #### Scenario: Unknown draft mode
 - **WHEN** `draft-mode` is `detect`

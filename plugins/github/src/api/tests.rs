@@ -182,8 +182,8 @@ fn unknown_draft_mode_is_a_config_error_naming_the_value() {
 }
 
 #[test]
-fn draft_mode_defaults_to_title_prefix() -> anyhow::Result<()> {
-    assert_eq!(settings(&[])?.draft_mode, DraftMode::TitlePrefix);
+fn draft_mode_defaults_to_native() -> anyhow::Result<()> {
+    assert_eq!(settings(&[])?.draft_mode, DraftMode::Native);
     Ok(())
 }
 
@@ -213,7 +213,7 @@ fn wip_prefixes_default_to_wip_and_bracketed_wip() -> anyhow::Result<()> {
 #[test]
 fn empty_wip_prefixes_in_title_prefix_mode_is_a_config_error() {
     for value in ["", ",", " , "] {
-        let err = settings(&[("wip-prefixes", value)]).unwrap_err();
+        let err = settings(&[("draft-mode", "title-prefix"), ("wip-prefixes", value)]).unwrap_err();
         assert!(
             matches!(&err, Error::Config(m) if m.contains("wip-prefixes")),
             "{value:?}: {err:?}"
@@ -399,7 +399,7 @@ fn sent_json(fake: &Fake, index: usize) -> serde_json::Value {
 #[test]
 fn draft_in_title_prefix_mode_prefixes_the_title_without_draft_flag() -> anyhow::Result<()> {
     let fake = fake(vec![reply(201, pr_json("WIP: DF-1: Fix login", false))]);
-    let pr = github(&fake, &[]).create(&new_pr(true))?;
+    let pr = github(&fake, &[("draft-mode", "title-prefix")]).create(&new_pr(true))?;
     assert_eq!(urls(&fake), ["https://api.github.com/repos/o/r/pulls"]);
     assert_eq!(fake.requests.borrow()[0].method, Method::Post);
     assert_eq!(
@@ -416,7 +416,11 @@ fn draft_in_title_prefix_mode_prefixes_the_title_without_draft_flag() -> anyhow:
 #[test]
 fn custom_prefix_marks_new_drafts() -> anyhow::Result<()> {
     let fake = fake(vec![reply(201, pr_json("Draft: DF-1: Fix login", false))]);
-    let pr = github(&fake, &[("wip-prefixes", "Draft:")]).create(&new_pr(true))?;
+    let pr = github(
+        &fake,
+        &[("draft-mode", "title-prefix"), ("wip-prefixes", "Draft:")],
+    )
+    .create(&new_pr(true))?;
     assert_eq!(sent_json(&fake, 0)["title"], "Draft: DF-1: Fix login");
     assert!(pr.draft);
     assert_eq!(pr.title, "DF-1: Fix login");
@@ -438,7 +442,7 @@ fn ready_pull_request_keeps_its_title() -> anyhow::Result<()> {
 #[test]
 fn native_draft_sends_the_draft_flag_and_unchanged_title() -> anyhow::Result<()> {
     let fake = fake(vec![reply(201, pr_json("DF-1: Fix login", true))]);
-    let pr = github(&fake, &[("draft-mode", "native")]).create(&new_pr(true))?;
+    let pr = github(&fake, &[]).create(&new_pr(true))?;
     let body = sent_json(&fake, 0);
     assert_eq!(body["title"], "DF-1: Fix login");
     assert_eq!(body["draft"], true);
@@ -756,7 +760,8 @@ fn ready_for_review_strips_the_title_prefix() -> anyhow::Result<()> {
         reply(200, pr_json("WIP: DF-1: Fix login", false)),
         reply(200, pr_json("DF-1: Fix login", false)),
     ]);
-    let pr = github(&fake, &[]).update(&pr_ref(), &changes(None, None, Some(false)))?;
+    let pr = github(&fake, &[("draft-mode", "title-prefix")])
+        .update(&pr_ref(), &changes(None, None, Some(false)))?;
     assert_eq!(
         calls(&fake),
         [
@@ -962,7 +967,8 @@ fn draft_in_title_prefix_mode_adds_the_first_prefix() -> anyhow::Result<()> {
         reply(200, pr_json("DF-1: Fix login", false)),
         reply(200, pr_json("WIP: DF-1: Fix login", false)),
     ]);
-    let pr = github(&fake, &[]).update(&pr_ref(), &changes(None, None, Some(true)))?;
+    let pr = github(&fake, &[("draft-mode", "title-prefix")])
+        .update(&pr_ref(), &changes(None, None, Some(true)))?;
     assert_eq!(
         calls(&fake),
         [

@@ -5,5 +5,7 @@ plugins:
     hosts:
       - host: github.com
         apiUrl: https://api.github.com
-      - ghe.example.org
+      - host: ghe.example.org
+        apiUrl: https://ghe.example.org/api/v3
+      - ghe.example.net
     authScheme: bearer

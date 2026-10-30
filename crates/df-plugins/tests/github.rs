@@ -2,17 +2,12 @@
 
 mod common;
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use df_core::config::{HostRoute, HostWithApiUrl};
-use df_core::testing::FakeSecretStore;
 use df_core::{
-    AuthScheme, ForgeClient, IntegrationError, NewPullRequest, PluginConfig, ProjectId,
-    PullRequestUpdate, RateLimit,
+    ForgeClient, IntegrationError, NewPullRequest, ProjectId, PullRequestUpdate, RateLimit,
 };
-use df_plugins::{ForgeRouter, PluginEngine, PluginForgeClient, PluginHost};
+use df_plugins::ForgeRouter;
 use serde_json::json;
 use wiremock::matchers::{
     body_json, body_partial_json, body_string_contains, header, header_regex, method, path,
@@ -20,35 +15,13 @@ use wiremock::matchers::{
 };
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const MIB: usize = 1024 * 1024;
 const PULLS: &str = "/repos/o/r/pulls";
 const NODE_ID: &str = "PR_kwDO7";
 
 /// The plugin `github` serving `github.example`, whose API is the mock `server`.
 fn client(server: &MockServer, settings: &[(&str, &str)]) -> anyhow::Result<ForgeRouter> {
-    let secrets = FakeSecretStore::new();
-    secrets.insert("forge-token", "token", common::TOKEN);
-    let host = PluginHost::from_bytes(
-        &PluginEngine::new()?,
-        "github",
-        &common::github(),
-        Duration::from_secs(30),
-        64 * MIB,
-    )?;
-    let plugin = PluginForgeClient::new(
-        host,
-        Arc::new(secrets),
-        settings
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect::<BTreeMap<_, _>>(),
-    );
-    let mut config = PluginConfig::new("/github.wasm");
-    config.hosts = vec![HostRoute::WithApiUrl(HostWithApiUrl {
-        host: "github.example".into(),
-        api_url: server.uri(),
-    })];
-    config.auth_scheme = AuthScheme::Bearer.into();
+    let (plugin, config) =
+        common::github_client(common::TOKEN, "github.example", &server.uri(), settings)?;
     common::named_router("github", plugin, config, "https://github.example/o/r.git")
 }
 
@@ -139,7 +112,7 @@ async fn title_prefix_lifecycle_marks_drafts_in_the_title() -> anyhow::Result<()
         .await;
     mount_comment(&server).await;
 
-    let client = client(&server, &[])?;
+    let client = client(&server, &[("draft-mode", "title-prefix")])?;
     let project = ProjectId::new();
     let created = client.create_pull_request(&project, new_draft()).await?;
     assert!(created.draft);
@@ -206,7 +179,7 @@ async fn native_lifecycle_uses_the_draft_flag_and_graphql() -> anyhow::Result<()
         .await;
     mount_comment(&server).await;
 
-    let client = client(&server, &[("draft-mode", "native")])?;
+    let client = client(&server, &[])?;
     let project = ProjectId::new();
     let created = client.create_pull_request(&project, new_draft()).await?;
     assert!(created.draft);
@@ -248,7 +221,7 @@ async fn every_request_carries_the_github_headers_and_the_host_injected_token() 
         .await;
     mount_comment(&server).await;
 
-    let client = client(&server, &[])?;
+    let client = client(&server, &[("draft-mode", "title-prefix")])?;
     let project = ProjectId::new();
     client.create_pull_request(&project, new_draft()).await?;
     client.update_pull_request(&project, 7, ready()).await?;

@@ -73,6 +73,8 @@ cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p git
 cargo test -p df-plugins
 # Pull request lifecycle against a real Forgejo (variables: see tests/homelab.rs)
 cargo test -p df-plugins --test homelab -- --ignored
+# Pull request lifecycle against github.com (variables: see tests/github_live.rs)
+cargo test -p df-plugins --test github_live -- --ignored
 # Coverage
 cargo llvm-cov -p df-plugins --summary-only
 ```

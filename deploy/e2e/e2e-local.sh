@@ -95,7 +95,7 @@ create_cluster() {
 # Builds the images with Bazel and loads them into the node: no registry.
 load_images() {
   local name repository
-  for name in control_plane:control-plane runtime:runtime test_project:test-project plugin_forgejo:plugin-forgejo; do
+  for name in control_plane:control-plane runtime:runtime test_project:test-project plugin_forgejo:plugin-forgejo plugin_github:plugin-github; do
     repository="${name#*:}"
     "${bazel[@]}" run "//deploy:load_e2e_${name%%:*}" -- --platform "linux/$arch"
     kind load docker-image "ghcr.io/prskr/dark-factory/${repository}:e2e" --name "$cluster"

@@ -32,7 +32,7 @@ plugins:
 | `plugins.<name>.hosts` | no | `[]` | Repository hosts this plugin serves. Each entry is a string `host[:port]` or a map `{host, apiUrl}`; the map rejects unknown keys. Hosts are DNS names, IPv4 or bracketed IPv6 addresses; they are lowercased, a trailing dot and port `443` are dropped, any other port stays part of the host. A host may be claimed by one entry only. An entry without `hosts` (or with `[]`) is the default plugin; at most one is allowed. |
 | `plugins.<name>.hosts[].apiUrl` | no | `https://<host>` | API base URL for this host. Must start with `https://` and have no userinfo, query or fragment; host lowercased, port `443` and a trailing `/` dropped, the path is kept (`https://ghe.example.org/api/v3`). Becomes the plugin's `base-url` and the only authority its requests may reach. Only valid in the `{host, apiUrl}` form, which rejects unknown keys. |
 | `plugins.<name>.authScheme` | no | `token` | How the project's forge credential is sent: `token` → `Authorization: token <credential>`, `bearer` → `Authorization: Bearer <credential>`. The host sets the header on every request and replaces one set by the plugin. Applies to all hosts of the entry, the default plugin included. |
-| `plugins.<name>.settings` | no | `{}` | String map handed to the plugin unchanged. The host adds `base-url` (the route's `apiUrl`; for the default plugin scheme and authority of the project's `repo_url`) and it wins over a configured one. Keys are documented by the plugin (Forgejo: `wip-prefixes`, see `plugins/forgejo/README.md`). |
+| `plugins.<name>.settings` | no | `{}` | String map handed to the plugin unchanged. The host adds `base-url` (the route's `apiUrl`; for the default plugin scheme and authority of the project's `repo_url`) and it wins over a configured one. Keys are documented by the plugin (Forgejo: `wip-prefixes`, see `plugins/forgejo/README.md`; GitHub: `draft-mode`, `wip-prefixes`, `api-version`, see `plugins/github/README.md`). |
 
 Unknown keys fail parsing the configuration. An unknown `authScheme` value fails startup naming the
 plugin and the value (see "Startup").
@@ -174,6 +174,98 @@ Projects store no plugin name, so moving a host needs no data change.
 3. An upstream 401 or 404 instead of a `config` error usually means the project went to the default
    plugin. Check the "forge route" and "default forge route" events and add the host to the entry of
    its forge.
+
+## GitHub
+
+The `github` plugin serves github.com and GitHub Enterprise Server. Its settings, draft modes and
+error mapping: [plugins/github/README.md](../../../plugins/github/README.md). The Helm chart's default
+values route `github.com` to it.
+
+### Connect a GitHub repository
+
+1. Check the route: the startup event "forge route" for `github.com` shows `plugin=github` and
+   `available=true`. Without it, add the entry (see "Add a second forge"):
+
+   ```yaml
+   plugins:
+     github:
+       path: /plugins/github/plugin.wasm
+       authScheme: bearer
+       hosts:
+         - host: github.com
+           apiUrl: https://api.github.com
+   ```
+
+2. Create a fine-grained personal access token for an account with write access, restricted to the
+   project's repositories ("Only select repositories"), with the repository permissions Pull
+   requests read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata
+   read. A classic token needs `repo`.
+3. Store it in a Secret in the instance namespace (`sandbox.instanceNamespace`), for example
+   `kubectl -n dark-factory create secret generic github-token --from-file=token=<file with the token>`.
+4. Credentials → "New credential reference": a name, Secret name `github-token`, key `token`.
+5. Projects → "New project": repository URL `https://github.com/<owner>/<repo>.git` and that
+   credential as forge credential. The hint below the repository URL reads "Served by the GitHub
+   integration; pull requests and issues use it."
+6. Egress rules → "New egress rule": host `github.com`, port empty (443), for every project
+   (instance) or only this one. The sandbox clones and pushes over HTTPS with `agent.gitUsername`
+   and the token; the rule is needed until `iter2-git-proxy` moves Git to the gateway. API calls
+   come from the control plane, not the sandbox, and need no rule.
+
+### Use title-prefix drafts
+
+The default `draft-mode: native` creates GitHub's native draft pull requests, which also exist in
+private repositories on GitHub Free.
+
+1. Pick the mode. Use `title-prefix` when a repository or GitHub Enterprise Server instance rejects
+   native drafts (creating a draft fails with `invalid-input` naming `draft-mode: title-prefix`),
+   or for a `WIP:` marker in the title consistent with Forgejo. `auto` creates native drafts where
+   possible and falls back to the title prefix elsewhere, at the cost of one failed request per
+   draft and a warning (event "plugin stderr", `plugin=github`, level `info`).
+2. Set it in the entry's `settings` (chart: `plugins.github.settings`):
+
+   ```yaml
+   plugins:
+     github:
+       # path, authScheme, hosts unchanged
+       settings:
+         draft-mode: title-prefix   # or auto
+   ```
+
+3. Restart `serve`. Open drafts keep working: reading recognizes the title prefix and the native
+   flag.
+
+### Add GitHub Enterprise Server
+
+1. Add the host with its API URL. Settings apply to every host of an entry. A server older than the
+   default API version `2026-03-10` needs `api-version: "2022-11-28"`; in the `github` entry that
+   setting would also apply to github.com, so give the server its own entry with the same component:
+
+   ```yaml
+   plugins:
+     github:
+       path: /plugins/github/plugin.wasm
+       authScheme: bearer
+       hosts:
+         - host: github.com
+           apiUrl: https://api.github.com
+     github-enterprise:
+       path: /plugins/github/plugin.wasm
+       authScheme: bearer
+       hosts:
+         - host: ghe.example.org
+           apiUrl: https://ghe.example.org/api/v3
+       settings:
+         api-version: "2022-11-28"
+   ```
+
+   Otherwise add `{host: ghe.example.org, apiUrl: https://ghe.example.org/api/v3}` to the `github`
+   entry's `hosts`. GraphQL goes to `https://ghe.example.org/api/graphql` without further
+   configuration.
+2. Restart `serve` and check the "forge route" event for `ghe.example.org`.
+3. Connect repositories as above, with a token from the server, repository URLs
+   `https://ghe.example.org/<owner>/<repo>.git` and an egress rule for `ghe.example.org`. With a
+   separate entry, the web UI shows these projects with the generic Git icon and the hint names
+   that entry ("Served by the github-enterprise integration; …").
 
 ## Forgejo token scopes
 

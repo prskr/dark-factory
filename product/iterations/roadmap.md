@@ -48,7 +48,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
 - **Plugin distribution (`iter2-plugin-distribution`, ADR-0018):** plugins as OCI images mounted into the control plane via image volumes; the control plane image no longer bundles plugins.
 - **Several forges side by side (`iter2-multi-forge`):** each project goes to the forge plugin that claims the host of its repository URL (no plugin per project); per-plugin API URL and `Authorization` scheme; a broken plugin no longer stops the control plane; the UI shows the forge per project.
-- **GitHub plugin (`iter2-github-plugin`):** pull requests and issues on github.com and GitHub Enterprise Server, draft pull requests through a title prefix (default, works in private repositories on GitHub Free), GitHub's native drafts, or native drafts with the title prefix as fallback; enabled for `github.com` in the default release.
+- **GitHub plugin (`iter2-github-plugin`):** pull requests and issues on github.com and GitHub Enterprise Server, GitHub's native draft pull requests (default), drafts through a title prefix, or native drafts with the title prefix as fallback; enabled for `github.com` in the default release.
 - **Gateway readiness and Git retries:** gateway pods are ready only after the first policy snapshot; the runtime retries transient Git failures (folded into `iter1-egress-gateway` and `iter2-git-proxy`).
 
 Dependency: approval-gated push checks need the `push-check-exception` approval, so both ship together.

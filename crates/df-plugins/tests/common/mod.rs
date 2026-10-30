@@ -12,14 +12,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use df_core::config::{HostRoute, HostWithApiUrl};
 use df_core::routing::RoutingTable;
 use df_core::testing::FakeSecretStore;
-use df_core::{CredentialRef, CredentialRefId, IntegrationError, PluginConfig, ProjectId};
+use df_core::{
+    AuthScheme, CredentialRef, CredentialRefId, IntegrationError, PluginConfig, ProjectId,
+};
 use df_plugins::{
     ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
 };
 
 pub(crate) const TOKEN: &str = "s3cret-token";
+
+/// The environment variable `name`, or an error naming it.
+pub(crate) fn var(name: &str) -> anyhow::Result<String> {
+    std::env::var(name).map_err(|_not_set| anyhow::anyhow!("{name} is not set"))
+}
+
+/// The environment variable `name`, or `default` when it is not set.
+pub(crate) fn var_or(name: &str, default: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_not_set| default.into())
+}
 
 /// A prebuilt plugin component: `env_var` (set by Bazel), else the output of
 /// `cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin`.
@@ -142,13 +155,44 @@ pub(crate) fn plugin_client(
     timeout: Duration,
     memory_limit: usize,
 ) -> anyhow::Result<PluginForgeClient> {
-    let secrets = FakeSecretStore::new();
-    secrets.insert("forge-token", "token", token);
-    Ok(PluginForgeClient::new(
-        PluginHost::from_bytes(engine, "forgejo", component, timeout, memory_limit)?,
-        Arc::new(secrets),
+    named_plugin_client(
+        engine,
+        "forgejo",
+        component,
+        token,
+        timeout,
+        memory_limit,
         BTreeMap::default(),
-    ))
+    )
+}
+
+/// The plugin `github` reading `token` as forge credential, and its entry under `plugins`, which
+/// routes `host` to the API at `api_url` with bearer authentication.
+pub(crate) fn github_client(
+    token: &str,
+    host: &str,
+    api_url: &str,
+    settings: &[(&str, &str)],
+) -> anyhow::Result<(PluginForgeClient, PluginConfig)> {
+    let plugin = named_plugin_client(
+        &PluginEngine::new()?,
+        "github",
+        &github(),
+        token,
+        Duration::from_secs(30),
+        64 * 1024 * 1024,
+        settings
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect(),
+    )?;
+    let mut config = PluginConfig::new("/github.wasm");
+    config.hosts = vec![HostRoute::WithApiUrl(HostWithApiUrl {
+        host: host.into(),
+        api_url: api_url.into(),
+    })];
+    config.auth_scheme = AuthScheme::Bearer.into();
+    Ok((plugin, config))
 }
 
 /// A router with `client` as the default plugin `forgejo`, for projects on `repo_url`.
@@ -173,13 +217,8 @@ pub(crate) fn named_router(
     repo_url: &str,
 ) -> anyhow::Result<Client> {
     let plugins = BTreeMap::from([(name.to_string(), config)]);
-    Ok(ForgeRouter::new(
-        Arc::new(FixedDirectory {
-            repo_url: repo_url.into(),
-        }),
-        RoutingTable::from_plugins_allowing_plain_http(&plugins)?,
-        BTreeMap::from([(name.to_string(), client)]),
-    ))
+    let table = RoutingTable::from_plugins_allowing_plain_http(&plugins)?;
+    Ok(routed(name, client, table, repo_url))
 }
 
 /// Like [`router`], with the production routing table, which rejects plain HTTP.
@@ -187,12 +226,52 @@ pub(crate) fn https_only_router(
     client: PluginForgeClient,
     repo_url: &str,
 ) -> anyhow::Result<Client> {
-    let plugins = BTreeMap::from([("forgejo".to_string(), PluginConfig::new("/forgejo.wasm"))]);
-    Ok(ForgeRouter::new(
+    named_https_router(
+        "forgejo",
+        client,
+        PluginConfig::new("/forgejo.wasm"),
+        repo_url,
+    )
+}
+
+/// Like [`named_router`], with the production routing table, which rejects plain HTTP.
+pub(crate) fn named_https_router(
+    name: &str,
+    client: PluginForgeClient,
+    config: PluginConfig,
+    repo_url: &str,
+) -> anyhow::Result<Client> {
+    let plugins = BTreeMap::from([(name.to_string(), config)]);
+    let table = RoutingTable::from_plugins(&plugins)?;
+    Ok(routed(name, client, table, repo_url))
+}
+
+/// A router sending projects on `repo_url` through `table` to `client` as the plugin `name`.
+fn routed(name: &str, client: PluginForgeClient, table: RoutingTable, repo_url: &str) -> Client {
+    ForgeRouter::new(
         Arc::new(FixedDirectory {
             repo_url: repo_url.into(),
         }),
-        RoutingTable::from_plugins(&plugins)?,
-        BTreeMap::from([("forgejo".to_string(), client)]),
+        table,
+        BTreeMap::from([(name.to_string(), client)]),
+    )
+}
+
+/// The plugin `name` reading `token` as forge credential.
+fn named_plugin_client(
+    engine: &PluginEngine,
+    name: &str,
+    component: &[u8],
+    token: &str,
+    timeout: Duration,
+    memory_limit: usize,
+    settings: BTreeMap<String, String>,
+) -> anyhow::Result<PluginForgeClient> {
+    let secrets = FakeSecretStore::new();
+    secrets.insert("forge-token", "token", token);
+    Ok(PluginForgeClient::new(
+        PluginHost::from_bytes(engine, name, component, timeout, memory_limit)?,
+        Arc::new(secrets),
+        settings,
     ))
 }

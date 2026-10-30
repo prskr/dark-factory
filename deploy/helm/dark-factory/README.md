@@ -106,6 +106,15 @@ Every key in `values.yaml` is documented below:
 | `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
 | `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
+| `plugins.github.image.repository` | `string` | `"ghcr.io/prskr/dark-factory/plugin-github"` | GitHub plugin image, mounted at `/plugins/github`. Remove the whole entry with `plugins.github: null`, see [GitHub](#github). |
+| `plugins.github.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
+| `plugins.github.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
+| `plugins.github.path` | `string` | `""` | Component file in the control plane image. Required without an image, ignored with one. |
+| `plugins.github.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
+| `plugins.github.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
+| `plugins.github.authScheme` | `string` | `"bearer"` | GitHub expects `Authorization: Bearer …`. |
+| `plugins.github.hosts` | `list` | `[{host: github.com, apiUrl: https://api.github.com}]` | Routes of the GitHub plugin; add GitHub Enterprise Server hosts here. |
+| `plugins.github.settings` | `map` | `{}` | String map handed to the plugin unchanged: `draft-mode` (`native` default, `title-prefix`, `auto`), `api-version`, `wip-prefixes` (see `plugins/github/README.md`). |
 | `plugins.<name>.hosts` | `list` | unset | Forge hosts the plugin serves: a host (`ghe.example.org`) or `{host, apiUrl}` with an `https://` API URL. Written to the instance config only when set; an entry without `hosts` is the default plugin and serves every other project. See [Plugins](#plugins) for rollback. |
 | `plugins.<name>.authScheme` | `string` | unset (`token`) | `token` or `bearer`: how the control plane sends the forge credential (`Authorization: token …` / `Bearer …`). Written to the instance config only when set. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
@@ -189,7 +198,7 @@ telemetry:
 
 ## Plugins
 
-Each plugin ships as its own image (`FROM scratch`, one file `/plugin.wasm`). The kubelet pulls it and the control plane pod mounts it read-only as an image volume at `/plugins/<name>`; the control plane never fetches components and plugins need no PersistentVolume. The default release configures `forgejo` with `plugin-forgejo:<appVersion>`. Config reference: `crates/df-plugins/docs/configuration.md`.
+Each plugin ships as its own image (`FROM scratch`, one file `/plugin.wasm`). The kubelet pulls it and the control plane pod mounts it read-only as an image volume at `/plugins/<name>`; the control plane never fetches components and plugins need no PersistentVolume. The default release configures `forgejo` with `plugin-forgejo:<appVersion>` as the default plugin (no `hosts`) and `github` with `plugin-github:<appVersion>` for `github.com`. Config reference: `crates/df-plugins/docs/configuration.md`.
 
 ### Pin a plugin version
 
@@ -232,19 +241,38 @@ plugins:
   forgejo:
     hosts:
       - git.example.org
-  github:
-    image:
-      repository: registry.example.org/plugin-github
-      tag: 0.1.0
-    hosts:
-      - host: github.com
-        apiUrl: https://api.github.com
-    authScheme: bearer
 ```
+
+The default `github` entry keeps its `github.com` route, see [GitHub](#github).
 
 See [Add a second forge](../../../crates/df-plugins/docs/configuration.md#add-a-second-forge) for the routing rules and the checks after a restart.
 
-Rollback: control planes before `hosts`/`authScheme` refuse to start with either key in the instance config (`deny_unknown_fields`). Remove both from every plugin entry before rolling back to such a release.
+Rollback: control planes before `hosts`/`authScheme` refuse to start with either key in the instance config (`deny_unknown_fields`). Remove both from every plugin entry, and the `github` entry (`plugins.github: null`), before rolling back to such a release.
+
+### GitHub
+
+The default `github` entry serves `github.com` with `authScheme: bearer`. Plugin reference (settings, token permissions, errors): `plugins/github/README.md`.
+
+A GitHub Enterprise Server route in this entry must list `github.com` too, since `hosts` replaces the default list:
+
+```yaml
+plugins:
+  github:
+    hosts:
+      - host: github.com
+        apiUrl: https://api.github.com
+      - host: ghe.example.org
+        apiUrl: https://ghe.example.org/api/v3
+```
+
+Draft modes (`plugins.github.settings`) and when to use a separate entry for a server: [Use title-prefix drafts](../../../crates/df-plugins/docs/configuration.md#use-title-prefix-drafts), [Add GitHub Enterprise Server](../../../crates/df-plugins/docs/configuration.md#add-github-enterprise-server).
+
+Remove the entry when the instance does not use GitHub; projects on `github.com` then go to the default plugin:
+
+```yaml
+plugins:
+  github: null
+```
 
 ### Troubleshooting
 

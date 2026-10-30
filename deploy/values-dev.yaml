@@ -28,6 +28,11 @@ plugins:
       repository: ghcr.io/prskr/dark-factory/plugin-forgejo
       tag: 'dev'
       digest: ''
+  github:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-github
+      tag: 'dev'
+      digest: ''
 
 database:
   host: app-cluster-18-rw.postgres.svc

@@ -1138,7 +1138,7 @@ tests:
       - hasDocuments:
           count: 2
 
-  - it: mounts the Forgejo plugin image of the app version read-only by default
+  - it: mounts the Forgejo and GitHub plugin images of the app version read-only by default
     template: control-plane-deployment.yaml
     asserts:
       - contains:
@@ -1154,14 +1154,19 @@ tests:
             name: plugin-forgejo
             mountPath: /plugins/forgejo
             readOnly: true
-
-  - it: points the default plugin config at the mounted component
-    template: configmap.yaml
-    documentIndex: 0
-    asserts:
-      - matchRegex:
-          path: data["config.yaml"]
-          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}'
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-github
+            image:
+              reference: ghcr.io/prskr/dark-factory/plugin-github:0.1.0
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-github
+            mountPath: /plugins/github
+            readOnly: true
 
   - it: references the plugin image by digest when one is pinned
     template: control-plane-deployment.yaml
@@ -1181,7 +1186,7 @@ tests:
     values:
       - values/plugin-baked-in.yaml
     asserts:
-      # config, db-app, oidc and tls only; the default release has the plugin volume as a fifth
+      # config, db-app, oidc and tls only; the default release adds the two plugin volumes
       - lengthEqual:
           path: spec.template.spec.volumes
           count: 4
@@ -1219,15 +1224,49 @@ tests:
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: '  "github":\n    path: "/custom/github.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\},"ghe.example.org"\]\n    authScheme: "bearer"'
+          pattern: '  "github":\n    path: "/custom/github.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\},\{"apiUrl":"https://ghe.example.org/api/v3","host":"ghe.example.org"\},"ghe.example.net"\]\n    authScheme: "bearer"'
 
-  - it: leaves hosts and auth scheme out of the default plugin config
+  - it: keeps Forgejo the default plugin and routes github.com to GitHub by default
     template: configmap.yaml
     documentIndex: 0
     asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n'
+
+  - it: renders no GitHub plugin volume when the entry is removed
+    template: control-plane-deployment.yaml
+    values:
+      - values/plugin-github-removed.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-github
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-github
+          any: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-forgejo
+          any: true
+
+  - it: writes no GitHub plugin config when the entry is removed
+    template: configmap.yaml
+    documentIndex: 0
+    values:
+      - values/plugin-github-removed.yaml
+    asserts:
       - notMatchRegex:
           path: data["config.yaml"]
-          pattern: 'hosts:|authScheme:'
+          pattern: '"github"|hosts:|authScheme:'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"'
 
   - it: rejects an unknown plugin auth scheme
     # the values schema rejects the value before any template renders

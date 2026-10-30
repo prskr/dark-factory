@@ -166,6 +166,24 @@ plugins:
     memoryMib: 64
     # Handed to the plugin unchanged (Forgejo: wip-prefixes, see plugins/forgejo/README.md).
     settings: {}
+  # Serves github.com; add GHES routes to `hosts` or drop the entry with `plugins.github: null`.
+  github:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-github
+      # Empty: the chart's appVersion.
+      tag: ''
+      digest: ''
+    # Component path; required without an image, ignored with one.
+    path: ''
+    callTimeoutSeconds: 30
+    memoryMib: 64
+    authScheme: bearer
+    hosts:
+      - host: github.com
+        apiUrl: https://api.github.com
+    # draft-mode: native (default) | title-prefix | auto; api-version; wip-prefixes
+    # (see plugins/github/README.md).
+    settings: {}
 
 runs:
   # Seconds a run stays up after a normal turn end (task "waiting") before it is released.

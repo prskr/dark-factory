@@ -32,6 +32,11 @@ plugins:
       repository: ghcr.io/prskr/dark-factory/plugin-forgejo
       tag: 'e2e'
       digest: ''
+  github:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-github
+      tag: 'e2e'
+      digest: ''
 
 database:
   host: postgres.postgres.svc

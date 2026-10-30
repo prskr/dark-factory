@@ -13,11 +13,8 @@ mod common;
 
 use std::time::Duration;
 
+use common::{var, var_or};
 use df_core::{ForgeClient, NewPullRequest, ProjectId, PullRequestUpdate, RepoRef};
-
-fn var(name: &str) -> anyhow::Result<String> {
-    std::env::var(name).map_err(|_not_set| anyhow::anyhow!("{name} is not set"))
-}
 
 #[tokio::test]
 #[ignore = "needs a Forgejo instance, see the module docs"]
@@ -31,7 +28,7 @@ async fn draft_pull_request_lifecycle() -> anyhow::Result<()> {
     )?;
     let project = ProjectId::new();
     let head = var("DF_TEST_FORGEJO_HEAD")?;
-    let base = std::env::var("DF_TEST_FORGEJO_BASE").unwrap_or_else(|_| "main".into());
+    let base = var_or("DF_TEST_FORGEJO_BASE", "main");
     let issue: u64 = var("DF_TEST_FORGEJO_ISSUE")?.parse()?;
 
     let created = client

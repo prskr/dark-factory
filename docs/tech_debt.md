@@ -714,13 +714,13 @@ Update the "Web UI scripts" rule in `AGENTS.md` with the result.
 
 ### TD-77 (S115, S116). Plugin image targets are copied per plugin
 
-`deploy/BUILD.bazel` (`<name>_plugin`, `plugin_<name>_layer`, `_manifest`, `_image`, `_digest`, `_oci_layout`, `push_plugin_<name>`), `deploy/test_images.sh` (plugin content check)
+`deploy/BUILD.bazel` (`<name>_plugin`, `plugin_<name>_layer`, `_manifest`, `_image`, `_digest`, `_oci_layout`, `push_plugin_<name>`, `args` and `data` of `//deploy:dev`), `deploy/test_images.sh` (plugin content check), `deploy/dev.sh` (positional arguments, `PLUGIN_<NAME>_*` variables)
 
-Each plugin image repeats the same six targets and a push target with only the name changed, and the image test picks a plugin's layout directory with an `if` on its name.
+Each plugin image repeats the same six targets and a push target with only the name changed, and the image test picks a plugin's layout directory with an `if` on its name. In `deploy/dev.sh` each plugin image adds a positional argument that shifts every later index (`shift 10`), a repository variable, a digest read and two `--set` flags, plus two lines (`args`, `data`) in `//deploy:dev`.
 
 **Matters when:** a third plugin image is added, or the image layout changes (every copy has to change).
 
-**Fix:** generate the targets with a list comprehension or a small macro over the plugin names, as `crates/df-plugins/BUILD.bazel` does for its test targets, and pass `name=dir` pairs to `test_images.sh`.
+**Fix:** generate the targets with a list comprehension or a small macro over the plugin names, as `crates/df-plugins/BUILD.bazel` does for its test targets, and pass `name=dir` pairs to `test_images.sh`. Pass `name=digestfile` pairs to `dev.sh` and loop over them to emit `--set plugins.<name>.image.{repository,digest}`.
 
 ### TD-78 (S5). Plain-HTTP routing table constructor is public API
 

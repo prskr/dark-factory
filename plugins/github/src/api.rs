@@ -23,7 +23,7 @@ const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
-/// GitHub's message when a repository's plan has no draft pull requests.
+/// GitHub's message when a repository or instance rejects native drafts.
 const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -83,6 +83,7 @@ IMAGE_GITHUB = "//deploy:github_plugin"
             "TEST_PROBE_WASM": PROBE,
         },
         "github": {"GITHUB_PLUGIN_WASM": GITHUB},
+        "github_live": {"GITHUB_PLUGIN_WASM": GITHUB},
         "homelab": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,
