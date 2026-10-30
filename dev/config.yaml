@@ -25,6 +25,12 @@ agent:
 plugins:
   forgejo:
     path: target/wasm32-wasip2/debug/forgejo_plugin.wasm
+  github:
+    path: target/wasm32-wasip2/debug/github_plugin.wasm
+    authScheme: bearer
+    hosts:
+      - host: github.com
+        apiUrl: https://api.github.com
 auth:
   issuerUrl: http://127.0.0.1:5556/dex
   clientId: dark-factory

@@ -10,12 +10,13 @@ PUSH_IMAGES="$1"
 CP_DIGEST_FILE="$2"
 RT_DIGEST_FILE="$3"
 TP_DIGEST_FILE="$4"
-PF_DIGEST_FILE="$5"
-HARNESS_PUSH="$6"
-HARNESS_DIGEST_FILE="$7"
-CHART_FILE="$8"
-VALUES_DEV_FILE="$9"
-shift 9
+PLUGIN_FORGEJO_DIGEST_FILE="$5"
+PLUGIN_GITHUB_DIGEST_FILE="$6"
+HARNESS_PUSH="$7"
+HARNESS_DIGEST_FILE="$8"
+CHART_FILE="$9"
+VALUES_DEV_FILE="${10}"
+shift 10
 
 CHART_DIR="$(dirname "$CHART_FILE")"
 
@@ -26,12 +27,14 @@ NAMESPACE="${DARK_FACTORY_NAMESPACE:-dark-factory-dev}"
 CP_REPO="${REGISTRY}/control-plane"
 RT_REPO="${REGISTRY}/runtime"
 TP_REPO="${REGISTRY}/test-project"
-PF_REPO="${REGISTRY}/plugin-forgejo"
+PLUGIN_FORGEJO_REPO="${REGISTRY}/plugin-forgejo"
+PLUGIN_GITHUB_REPO="${REGISTRY}/plugin-github"
 
 CP_DIGEST="$(tr -d '[:space:]' < "$CP_DIGEST_FILE")"
 RT_DIGEST="$(tr -d '[:space:]' < "$RT_DIGEST_FILE")"
 TP_DIGEST="$(tr -d '[:space:]' < "$TP_DIGEST_FILE")"
-PF_DIGEST="$(tr -d '[:space:]' < "$PF_DIGEST_FILE")"
+PLUGIN_FORGEJO_DIGEST="$(tr -d '[:space:]' < "$PLUGIN_FORGEJO_DIGEST_FILE")"
+PLUGIN_GITHUB_DIGEST="$(tr -d '[:space:]' < "$PLUGIN_GITHUB_DIGEST_FILE")"
 HARNESS_REPO="${REGISTRY}/claude-harness"
 HARNESS_DIGEST="$(tr -d '[:space:]' < "$HARNESS_DIGEST_FILE")"
 
@@ -82,7 +85,8 @@ fi
 echo "Control Plane Image: ${CP_REPO}@${CP_DIGEST}"
 echo "Runtime Image:       ${RT_REPO}@${RT_DIGEST}"
 echo "Test Project Image:  ${TP_REPO}@${TP_DIGEST}"
-echo "Forgejo Plugin Image: ${PF_REPO}@${PF_DIGEST}"
+echo "Forgejo Plugin Image: ${PLUGIN_FORGEJO_REPO}@${PLUGIN_FORGEJO_DIGEST}"
+echo "GitHub Plugin Image: ${PLUGIN_GITHUB_REPO}@${PLUGIN_GITHUB_DIGEST}"
 echo "Harness Image:       ${HARNESS_REPO}@${HARNESS_DIGEST}"
 
 if [[ "${DARK_FACTORY_PUSH_ONLY:-0}" == "1" ]]; then
@@ -101,8 +105,10 @@ helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --set "image.runtime.digest=${RT_DIGEST}" \
   --set "image.testProject.repository=${TP_REPO}" \
   --set "image.testProject.digest=${TP_DIGEST}" \
-  --set "plugins.forgejo.image.repository=${PF_REPO}" \
-  --set "plugins.forgejo.image.digest=${PF_DIGEST}" \
+  --set "plugins.forgejo.image.repository=${PLUGIN_FORGEJO_REPO}" \
+  --set "plugins.forgejo.image.digest=${PLUGIN_FORGEJO_DIGEST}" \
+  --set "plugins.github.image.repository=${PLUGIN_GITHUB_REPO}" \
+  --set "plugins.github.image.digest=${PLUGIN_GITHUB_DIGEST}" \
   --set "image.harness.claudeCode.repository=${HARNESS_REPO}" \
   --set "image.harness.claudeCode.digest=${HARNESS_DIGEST}" \
   --wait \

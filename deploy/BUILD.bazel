@@ -313,6 +313,7 @@ multi_deploy(
         ("runtime", "runtime", "runtime"),
         ("test_project", "test_project", "test-project"),
         ("plugin_forgejo", "plugin_forgejo", "plugin-forgejo"),
+        ("plugin_github", "plugin_github", "plugin-github"),
     ]
 ]
 
@@ -330,6 +331,7 @@ sh_binary(
         "$(location :runtime_digest)",
         "$(location :test_project_digest)",
         "$(location :plugin_forgejo_digest)",
+        "$(location :plugin_github_digest)",
         "$(location //deploy/images/claude-harness:push)",
         "$(location //deploy/images/claude-harness:digest)",
         "$(location helm/dark-factory/Chart.yaml)",
@@ -341,6 +343,7 @@ sh_binary(
         ":control_plane_digest",
         ":helm_chart_files",
         ":plugin_forgejo_digest",
+        ":plugin_github_digest",
         ":push_images",
         ":runtime_digest",
         ":test_project_digest",

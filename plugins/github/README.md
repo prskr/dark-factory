@@ -19,7 +19,7 @@ Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:i
 | Key | Required | Default | Effect |
 |---|---|---|---|
 | `base-url` | yes | none | API root; REST paths are appended to it. `https://api.github.com` for github.com, `https://<host>/api/v3` for GitHub Enterprise Server. Missing, without scheme or host, or the web host `github.com` (a route without `apiUrl`) → `config` error. |
-| `draft-mode` | no | `title-prefix` | How new drafts are marked: `title-prefix`, `native` or `auto` (see below). Any other value → `config` error. |
+| `draft-mode` | no | `native` | How new drafts are marked: `native`, `title-prefix` or `auto` (see below). Any other value → `config` error. |
 | `wip-prefixes` | no | `WIP:,[WIP]` | Comma-separated work-in-progress title prefixes; the first one marks new drafts in `title-prefix` and `auto` mode, where an empty list is a `config` error. |
 | `api-version` | no | `2026-03-10` | `X-GitHub-Api-Version`. Use `2022-11-28` for older GitHub Enterprise Server releases. |
 
@@ -44,25 +44,27 @@ fails as `upstream` until the project's URL is updated.
 
 ## Draft modes
 
-| | `title-prefix` (default) | `native` | `auto` |
+| | `native` (default) | `title-prefix` | `auto` |
 |---|---|---|---|
-| Create a draft | title `"<first prefix> <title>"` | `draft: true`, title unchanged | `draft: true`; on 422 "not supported" once more like `title-prefix`, with a warning |
+| Create a draft | `draft: true`, title unchanged | title `"<first prefix> <title>"` | `draft: true`; on 422 "not supported" once more like `title-prefix`, with a warning |
 | Read | draft = native flag or a known prefix (case-insensitive); title without prefix | same | same |
 | `draft: false` | remove both forms: GraphQL ready if natively draft, title without prefix | same | same |
-| `draft: true` on a ready pull request | add the prefix | GraphQL convert to draft | add the prefix |
+| `draft: true` on a ready pull request | GraphQL convert to draft | add the prefix | add the prefix |
 | New title, state unchanged | keeps the current form | same | same |
 
-`title-prefix` works in every repository. Choose `native` for public repositories and for GitHub
-Team, Enterprise Cloud and Enterprise Server; private repositories on GitHub Free and Pro have no
-draft pull requests. There, GitHub's 422 "Draft pull requests are not supported" becomes
-`invalid-input` naming `draft-mode: title-prefix`.
+`native` is the default: GitHub has native drafts, also in private repositories on GitHub Free
+(verified on 2026-10-30). Where a repository or GitHub Enterprise Server instance rejects them,
+GitHub's 422 "Draft pull requests are not supported" becomes `invalid-input` naming
+`draft-mode: title-prefix`. Choose `title-prefix` there, or for a WIP marker in the title like the
+Forgejo plugin's; it never sends a request that fails.
 
-`auto` creates native drafts where GitHub has them. Where it answers that 422, the plugin sends the
-pull request once more with the title prefix and logs a warning naming the repository
-(`draft-mode: title-prefix` silences it). The host forwards plugin stderr at `info` level (event
-"plugin stderr"), so the warning appears there, not at `warn`. In private GitHub Free and Pro
-repositories this costs one failed request per draft pull request. `draft: true` on a ready pull
-request adds the prefix.
+`auto` is for setups where some repositories have drafts and some don't. It creates native drafts;
+where GitHub answers that 422, the plugin sends the pull request once more with the title prefix and
+logs a warning naming the repository (`draft-mode: title-prefix` silences it). The host forwards
+plugin stderr at `info` level (event "plugin stderr"), so the warning appears there, not at `warn`.
+In repositories without drafts this costs one failed request per draft pull request. The fallback
+depends on GitHub's message text; if it changes, `auto` fails like `native`. `draft: true` on a
+ready pull request adds the prefix.
 
 Switching the mode while drafts are open is safe: reading recognizes both forms.
 
@@ -72,7 +74,12 @@ A fine-grained personal access token restricted to the project's repositories, w
 read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata read. A classic
 token needs `repo`. The route sets `authScheme: bearer`; the host injects the `Authorization` header.
 
-Status: not yet verified against github.com; the live test follows with `iter2-multi-forge`.
+Status: verified against github.com (`cargo test -p df-plugins --test github_live -- --ignored`,
+2026-10-30) in a private repository of a personal account on GitHub Free with `native` (default),
+`title-prefix` and `auto`, and in a public one with `native`: creating a draft, finding it by head
+and base, retitling it (stays a draft), marking it ready and commenting on the pull request and on
+an issue all succeed. GitHub created native drafts in both repositories, so `auto` did not need its
+fallback; the unit tests cover the fallback. Not yet verified: a task end to end on the dev cluster.
 
 ## Error mapping
 

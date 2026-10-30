@@ -2,9 +2,9 @@
 
 - BASE: 8456277390bc7df407c7f18b7f6273a648a3bb8c (after the PR #42 review the branch was rebased onto 4cbae25, which adds task 2.6 and optional task 8.1)
 - Store: none
-- Status: done (sections 1–5 and task 2.6; sections 6–7 wait for `iter2-multi-forge`; optional section 8 open)
+- Status: in progress (sections 1–5, 6.1, 6.2, 6.4, 6.5 done; 6.3 and 7.1 code and live parts done, dev-cluster checks open; optional section 8 in progress)
 - Implementer agent: fresh agent per run (stateless subagents)
-- Scope: sections 1–5 (tasks 1.1–5.1); sections 6–7 wait for `iter2-multi-forge` (design D10)
+- Scope: sections 1–5 (tasks 1.1–5.1); sections 6–8 on `iter2/github-plugin-routes` (section "Sections 6–7")
 - DOCKER_HOST: unix:///var/run/docker.sock
 
 ## Implementation (2026-10-30)
@@ -108,3 +108,43 @@ User decision: Fix blocking + P1. No blocking finding open.
 | S7 | P1 | `crates/df-plugins/tests/github.rs:292` | `let … else { panic!() }` guard; `unwrap_or_default()` turns a missing `retry-after` into 0 | fix-now | fixed (pending commit) |
 
 Task 6.1 done in the same round: `tests/github.rs` routes `github.example` to the mock through `apiUrl` with `authScheme: bearer` and asserts `Authorization: Bearer`.
+
+## Sections 6–7 (2026-10-30)
+
+Branch `iter2/github-plugin-routes` from `fd5cf70` (main after PR #44).
+
+| Task | Commit | Checks |
+|---|---|---|
+| 6.2 live test | 3ed5e0b | compiles, skipped by default; Bazel `df_plugins_github_live_test` builds |
+| 6.4 chart default values | 2f1b6ea | helm-unittest, README values check |
+| 6.3 dev deploy (code) | 4bdafbf | shellcheck; dev-cluster check open (no cluster access), `bazel build --nobuild //deploy:dev` fails on macOS on main too (`musl_runtime_linux_arm64` tarball with a case-only hardlink) |
+| 6.5 dev config, configuration guide | 5365656 | serve-local steps run by hand (`just` not installed): PostgreSQL from `compose.yml` on host port 55432 because another project's container holds 5432; log `forge route host="github.com" plugin=github available=true`, `default forge route plugin=forgejo`, web UI answers 303. A LibreSSL 3.3 key in `target/local-dev` failed to parse (`agent.key`), and its v1 certificate was rejected; regenerated with OpenSSL 3 |
+| 7.1 live part | 249ee64 | `tests/github_live.rs` on github.com: private repository of a GitHub Free account with `title-prefix` (`WIP:` renames) and `auto` (native draft, `ready_for_review`), public repository with `native`; all pass. Dev-cluster run open |
+
+Review over `fd5cf70...249ee64`, one Standards and one Spec reviewer:
+
+| ID | Axis | Class | Where | Finding | Decision | Status |
+|----|------|-------|-------|---------|----------|--------|
+| P1 | Spec | P1 | `design.md` D2, `proposal.md`, READMEs | "private repositories on GitHub Free and Pro have no draft pull requests" is contradicted by the live run (GitHub Free account, private repository, native draft); GitHub's plan docs no longer list drafts as a paid feature | fix-now: user decision, default `draft-mode` becomes `native`; `title-prefix` and `auto` stay options | fixed (843aa51 code, 7ddac93 docs, spec, design) |
+| S1 | Standards | P1 | `crates/df-plugins/tests/github_live.rs:42` | client setup copied from `tests/github.rs`, `var` from `homelab.rs` | fix-now | fixed (45b24a5) |
+| S2 | Standards | P1 | `crates/df-plugins/tests/common/mod.rs:199` | `named_https_router` repeats `named_router` | fix-now | fixed (45b24a5) |
+| S3, P4 | Both | P1 | `crates/df-plugins/tests/github_live.rs:11` | `DF_TEST_GITHUB_API_URL` with the route host fixed to `github.com` | fix-now: remove the variable | fixed (45b24a5) |
+| S4 | Standards | P1 | `crates/df-plugins/tests/github_live.rs:41` | test named after the topic | fix-now | fixed (45b24a5) |
+| S5 | Standards | P1 | `deploy/dev.sh:14` | `PG_*` reads as PostgreSQL | fix-now | fixed (84d405a) |
+| S7, P7 | Both | P1 | chart README "GitHub", `configuration.md` | draft-mode and GHES explanations in four places, chart copy drifted; separate GHES entry shows the generic icon and hint | fix-now | fixed (84d405a) |
+| S8 | Standards | P1 | `deploy/helm/dark-factory/values.yaml:167` | github entry without `callTimeoutSeconds`, `memoryMib` and README rows | fix-now | fixed (84d405a) |
+| S9 | Standards | P1 | `deploy/helm/dark-factory/tests/chart_test.yaml:1132` | github assertion duplicated in two tests | fix-now | fixed (84d405a) |
+| P2 | Spec | P1 | `crates/df-plugins/tests/github_live.rs:124` | no issue comment, unlike `homelab.rs` | fix-now | fixed (45b24a5, live re-run) |
+| P3 | Spec | P1 | `crates/df-plugins/tests/github_live.rs:88` | draft form not distinguishable by the test | fix-now: module doc names the manual timeline check | fixed (45b24a5) |
+| P5 | Spec | P1 | `deploy/helm/dark-factory/tests/values/plugin-routing.yaml:7` | "Routing values" scenario with an `apiUrl` map has no test | fix-now | fixed (84d405a) |
+| P6 | Spec | P1 | `dev/config.yaml` | serve-local run not recorded | fix-now | fixed (this section) |
+| P8 | Spec | P1 | `plugins/github/README.md:79` | "mock tests cover the fallback": only the unit tests do | fix-now | fixed (7ddac93) |
+| P9 | Spec | P1 | `crates/df-plugins/README.md:74` | no command for `github_live` | fix-now | fixed (45b24a5) |
+| P10 | Spec | P1 | `crates/df-plugins/docs/configuration.md:207` | hint text differs from the UI ("Served by the GitHub integration") | fix-now | fixed (84d405a) |
+| S6 | Standards | P2 | `deploy/dev.sh:9` | positional argument per plugin image shifts all later indexes | tech-debt (TD-77) | tech-debt (TD-77 extended, 84d405a) |
+
+User decision: fix all as proposed; GitHub account plan is Free; default `draft-mode` becomes `native`.
+
+Fix round (one implementer per chunk): 843aa51 (default in the plugin, tests), 7ddac93 (spec, design, proposal, product, READMEs, guide), 45b24a5 (test helpers, live test), 84d405a (chart, dev deploy, guides, TD-77). Checks: cargo fmt, clippy (host, wasm), `github-plugin` 68 unit tests, `df-plugins --test github` 4, all test binaries compile, helm-unittest 70/70, `//deploy:helm_chart_test`, shellcheck, typos, `openspec validate --strict`.
+
+Live re-run with `DF_TEST_GITHUB_ISSUE` (2026-10-30): private repository with `native` (default; `ready_for_review`), `title-prefix` (`WIP:` renames) and `auto` (`ready_for_review`), public repository with `native`; all pass, issue comments present. Pull requests closed afterwards.

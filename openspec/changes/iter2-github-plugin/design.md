@@ -6,7 +6,7 @@ After `iter2-plugin-distribution` and `iter2-multi-forge`, plugins ship as OCI i
 
 The Forgejo plugin (`plugins/forgejo`) is the template: its logic is generic over a `Transport` and unit-tested natively, `wasi_transport.rs` maps it onto `wasi:http`, and `draft.rs` emulates drafts with title prefixes. GitHub differs where it matters:
 - its REST API lives on its own host and requires `User-Agent`, `Accept` and `X-GitHub-Api-Version`;
-- drafts exist natively, but not in private repositories on GitHub Free and Pro, and the REST API cannot change the draft state;
+- drafts exist natively, also in private repositories on GitHub Free (live run on 2026-10-30), but the REST API cannot change the draft state;
 - rate limits arrive as 403 or 429 with `x-ratelimit-*` or `retry-after`, and duplicate pull requests as 422.
 
 The host retries `rate-limited` after at most 30 s, up to 3 times (`crates/df-plugins/src/retry.rs`). Motivation: see proposal.md.
@@ -28,17 +28,17 @@ The host retries `rate-limited` after at most 30 s, up to 3 times (`crates/df-pl
 All operations use the REST API. Only the native draft state changes through GraphQL (`markPullRequestReadyForReview`, `convertPullRequestToDraft`, with the pull request's `node_id` from the REST response), because `PATCH /repos/{o}/{r}/pulls/{n}` has no draft field. GraphQL answers HTTP 200 even on failure, so the plugin checks `errors` (D5). Rejected alternatives: everything in GraphQL (a second data model for every call); title prefixes only (no real drafts where GitHub has them).
 
 ### D2 — Draft modes
-| | `title-prefix` (default) | `auto` | `native` |
+| | `native` (default) | `title-prefix` | `auto` |
 |---|---|---|---|
-| Create a draft | title `"<first prefix> <title>"`, no draft flag | `draft: true`; after a 422 "Draft pull requests are not supported" once more like `title-prefix`, with a warning on stderr | `draft: true`, title unchanged |
+| Create a draft | `draft: true`, title unchanged | title `"<first prefix> <title>"`, no draft flag | `draft: true`; after a 422 "Draft pull requests are not supported" once more like `title-prefix`, with a warning on stderr |
 | Read | draft = native flag or a known prefix; title without prefix | same | same |
 | `draft: false` | remove both forms: GraphQL ready if natively draft, title without prefix | same | same |
-| `draft: true` on a ready pull request | add the prefix | add the prefix | GraphQL convert to draft |
+| `draft: true` on a ready pull request | GraphQL convert to draft | add the prefix | add the prefix |
 | New title, state unchanged | keeps the current form | same | same |
 
-`title-prefix` is the default because it works in every repository, including private repositories on GitHub Free and Pro, which have no draft pull requests, and never sends a request that fails. `native` is for public repositories, GitHub Team, Enterprise Cloud and Enterprise Server. `auto` gives native drafts wherever GitHub has them and keeps private Free and Pro repositories working, at the cost of one failed request per draft pull request there; a repository that becomes public or moves to a paid plan gets native drafts without a configuration change. Only that 422 tells reliably whether a repository supports drafts: the visibility is readable with Metadata access, the owner's plan usually not with a fine-grained token. The fallback depends on GitHub's message text; if it changes, `auto` fails like `native`. `auto` adds the prefix for `draft: true` on a ready pull request because GitHub's GraphQL error for unsupported drafts is not documented; the control plane never turns a ready pull request back into a draft. The plugin writes the warning to stderr, which the host forwards to its log (`plugin-base`).
+`native` is the default: the live test on 2026-10-30 created a native draft in a private repository of a GitHub Free account, and GitHub's plan documentation no longer lists drafts as a paid feature. Where a repository or instance rejects native drafts, the error names the fix instead of the draft silently changing form (below). `auto` is not the default because its fallback depends on GitHub's message text; if that changes, `auto` fails like `native`. `title-prefix` is for repositories or GitHub Enterprise Server instances that reject native drafts, or for a WIP marker consistent with Forgejo; it never sends a request that fails. `auto` is for setups where some repositories have drafts and some don't, at the cost of one failed request per draft pull request in those without. Only that 422 tells reliably whether a repository supports drafts: the visibility is readable with Metadata access, the owner's plan usually not with a fine-grained token. `auto` adds the prefix for `draft: true` on a ready pull request because GitHub's GraphQL error for unsupported drafts is not documented; the control plane never turns a ready pull request back into a draft. The plugin writes the warning to stderr, which the host forwards to its log (`plugin-base`).
 
-Since reading recognizes both forms, operators can switch the mode while drafts are open, for example after making a repository public or moving to GitHub Team. In `native` mode GitHub's 422 "Draft pull requests are not supported" becomes `invalid-input` naming `draft-mode: title-prefix`: the control plane only logs failed PR creations as warnings, so that message is the operator's pointer. `update` reads the pull request first when title or draft changes, like Forgejo; after a GraphQL change without a title or body change it reads it again to return the final state. Rejected alternatives: probing the visibility first (does not tell the plan, one more request per pull request); remembering draft support per repository (a fresh plugin instance per call keeps no state); `auto` as the default (a failed request per draft in the most common setup, private repositories on GitHub Free); `native` only (no pull requests in private Free repositories).
+Since reading recognizes both forms, operators can switch the mode while drafts are open. In `native` mode GitHub's 422 "Draft pull requests are not supported" becomes `invalid-input` naming `draft-mode: title-prefix`: the control plane only logs failed PR creations as warnings, so that message is the operator's pointer. `update` reads the pull request first when title or draft changes, like Forgejo; after a GraphQL change without a title or body change it reads it again to return the final state. Rejected alternatives: probing the visibility first (does not tell the plan, one more request per pull request); remembering draft support per repository (a fresh plugin instance per call keeps no state); `auto` as the default (fallback on GitHub's message text, drafts silently change form); `title-prefix` as the default (chosen first on GitHub's documented plan limit, which the live run disproved; a marker in titles and notifications); `native` only (no fallback for repositories or instances without drafts).
 
 ### D3 — `find-open` with server-side filters
 `GET /repos/{o}/{r}/pulls?state=open&head={o}:{branch}&base={base}&per_page=100`, then the first entry whose `head.ref` and `base.ref` match exactly. GitHub allows one open pull request per head and base, so one request suffices. Query values are percent-encoded because branches contain `/`. Rejected alternative: Forgejo's approach of listing all open pull requests page by page (one request per 100 open pull requests, rate-limit budget).
@@ -80,7 +80,7 @@ plugins:
     hosts:
       - host: github.com
         apiUrl: https://api.github.com
-    settings: {}       # draft-mode: title-prefix (default) | auto | native; api-version; wip-prefixes
+    settings: {}       # draft-mode: native (default) | title-prefix | auto; api-version; wip-prefixes
 ```
 Operators add GHES routes to `hosts` or drop the entry with `plugins.github: null`. The plugin name `github` maps to the GitHub icon (`ForgeKind::from_plugin`). Rejected alternative: an opt-in entry, which would send projects on github.com to the Forgejo default plugin, where they fail with confusing errors.
 
@@ -96,7 +96,7 @@ The plugin reads `base-url` and gets the `Authorization` header injected; where 
 
 - [GitHub changes the text of the duplicate or "drafts not supported" errors] → status codes stay the main signal; recorded bodies in unit tests and the live test catch changes; `auto` then fails like `native` instead of falling back.
 - [The pinned API version is closed down] → GitHub supports a version for 24 months after its successor, and `api-version` switches without a release.
-- [In `title-prefix` mode the marker is part of the visible title and of notifications] → same as Forgejo; the README explains when to switch to `native`.
+- [Some repositories or GitHub Enterprise Server instances still reject native drafts] → in `native` mode the 422 becomes `invalid-input` naming `draft-mode: title-prefix`; `auto` falls back to the title prefix.
 - [A token that can read but not write gets 403 on writes] → `unauthorized` with GitHub's message, which names the missing permission.
 - [5,000 requests per hour per token] → the lifecycle needs a handful of requests per task; `find-open` is one request.
 - [A draft's form changes outside Dark Factory] → reading recognizes both forms, so the next update still sees a draft.

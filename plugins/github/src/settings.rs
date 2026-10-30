@@ -9,9 +9,10 @@ const DEFAULT_API_VERSION: &str = "2026-03-10";
 /// How new drafts are marked; reading recognizes both forms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DraftMode {
-    /// The first work-in-progress prefix in the title; works in every repository.
+    /// The first work-in-progress prefix in the title, for repositories or instances that reject
+    /// native drafts.
     TitlePrefix,
-    /// GitHub's draft pull requests; private repositories on GitHub Free and Pro have none.
+    /// GitHub's draft pull requests, the default.
     Native,
     /// `native`, falling back to `title-prefix` with a warning where GitHub has no drafts.
     Auto,
@@ -70,12 +71,12 @@ impl Settings {
             .ok_or_else(|| Error::Config("`base-url` is not configured".to_string()))?;
         let (rest_url, graphql_url) = endpoints(&base_url)?;
         let draft_mode = match get("draft-mode")?.as_deref() {
-            None | Some("title-prefix") => DraftMode::TitlePrefix,
-            Some("native") => DraftMode::Native,
+            None | Some("native") => DraftMode::Native,
+            Some("title-prefix") => DraftMode::TitlePrefix,
             Some("auto") => DraftMode::Auto,
             Some(other) => {
                 return Err(Error::Config(format!(
-                    "unknown `draft-mode` `{other}`: use `title-prefix`, `native` or `auto`"
+                    "unknown `draft-mode` `{other}`: use `native`, `title-prefix` or `auto`"
                 )));
             }
         };

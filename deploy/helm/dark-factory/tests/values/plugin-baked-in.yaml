@@ -4,3 +4,4 @@ plugins:
     path: /custom/forgejo.wasm
     settings:
       wip-prefixes: "WIP:"
+  github: null

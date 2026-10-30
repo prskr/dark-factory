@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Plugin images
-For each entry under `plugins.<name>` with an image, the chart SHALL mount that image read-only as an image volume at `/plugins/<name>` of the control plane pod and SHALL write `plugins.<name>.path: /plugins/<name>/plugin.wasm`, the call timeout, the memory limit, the settings and, when set, `hosts` and `authScheme` into the instance config. An entry without an image SHALL require `path` and SHALL render only the config. The default values SHALL configure `forgejo` and `github` with their plugin images of the chart's app version, `github` for `github.com`.
+For each `plugins.<name>` entry with an image, the chart SHALL mount it as a read-only image volume at `/plugins/<name>` in the control plane pod and SHALL write the path `/plugins/<name>/plugin.wasm`, call timeout, memory limit, settings and, when set, `hosts` and `authScheme` to the instance config. An entry without an image SHALL require `path` and render only the config. Default values SHALL configure `forgejo`, and `github` for `github.com`, with plugin images of the chart's app version.
 
 #### Scenario: Default release
 - **WHEN** the chart is rendered with default values
