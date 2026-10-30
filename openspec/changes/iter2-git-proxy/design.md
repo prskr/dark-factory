@@ -16,7 +16,7 @@
 **Non-Goals:**
 - Git LFS, SSH, the dumb HTTP protocol.
 - Branch rewrite policies (ADR-0033). The task branch is fast-forward only.
-- A UI for push records (audit view comes in iteration 5). Records are stored and audited.
+- A UI for push records (the audit log view comes in iteration 4, `product/iterations/roadmap.md`). Records are stored and audited.
 - Git traffic in the live egress log. Push records cover pushes; fetches are not logged per request.
 
 ## Decisions

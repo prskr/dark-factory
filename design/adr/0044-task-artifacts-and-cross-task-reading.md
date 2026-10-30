@@ -17,7 +17,7 @@ Artifacts (Markdown documents an agent writes for the human or as intermediate r
 - **Who can read what:** an agent reads artifacts of its own task, its ancestors (including the chat), its descendants, the tasks it is `blocked_by` and its `base_task` (ADR-0041). Everything else is refused. Reads of other tasks are audited. Nobody writes to another task's artifacts.
 - **Untrusted content:** an artifact is agent-written text. The tool result marks it as data from another task, and the playbook tells agents to treat it as input, not as instructions.
 - **Hand-over:** the message that wakes a parent on a child's end (ADR-0043) lists the child's artifact names. A coordinator's instructions to a child stay the task description, delivered as the first message.
-- **Humans:** read artifacts in the task page and in the chat UI as rendered Markdown (the renderer of ADR-0004). Cards with previews, types and times are iteration 5.
+- **Humans:** read artifacts in the task page and in the chat UI as rendered Markdown (the renderer of ADR-0004). Cards with previews, types and times are iteration 6.
 
 ## Consequences
 

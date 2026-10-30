@@ -83,7 +83,7 @@ To decide before the iteration starts: debounce window (ADR-0015 says 30–60 s)
 
 - Plugin-based context compaction for chats (F3).
 - Cost budgets per subtree (ADR-0034).
-- Agents deciding approvals (iteration 5).
+- Agents deciding approvals (iteration 6).
 - A read-only task mode that rejects a reviewer's pushes (ADR-0041); added only if reviewers commit in practice.
 - Heartbeats (ADR-0016).
 - Org chart between personas (`reports_to`, delegation allowlists), per-project persona rosters (ADR-0043).

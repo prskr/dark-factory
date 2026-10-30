@@ -48,7 +48,7 @@
 ## 4. Agent (in-sandbox)
 
 ### 4.1 Operation modes
-- **ACP mode**: acts as an ACP (Agent Client Protocol) client that starts an external agent/harness. Claude Code first; other ACP-compatible harnesses are a future option.
+- **ACP mode**: acts as an ACP (Agent Client Protocol) client that starts an external agent/harness. Claude Code first; other ACP-compatible harnesses through a harness registry or Generic ACP (F12).
 - **Full harness mode**: own agent loop in a separate ACP binary (`df-native`, started by the runtime like any harness, ADR-0045) using an inference provider via an OpenAI-compatible API (through the inference endpoint in the gateway Deployment, ADR-0029). Before building its tools, study existing work: output reduction for shell tools as done by tools like `rtk` (truncating/cleaning output to save context), and existing open-source harnesses (e.g. Codex CLI and goose, both Rust — check licenses before reusing code).
 
 ### 4.2 Capabilities
@@ -165,7 +165,7 @@ Decisions are recorded as Architecture Decision Records in [`design/adr/`](../de
 | [ADR-0037](../design/adr/0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
 | [ADR-0038](../design/adr/0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039 and ADR-0043) |
 | [ADR-0039](../design/adr/0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
-| [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 5) |
+| [ADR-0040](../design/adr/0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 6) |
 | [ADR-0041](../design/adr/0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3) |
 | [ADR-0043](../design/adr/0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3) |
 | [ADR-0044](../design/adr/0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3) |
@@ -204,7 +204,7 @@ Chat and task context management (summaries across runs, compaction of long empl
 ### F4 — Declarative configuration import (idea, 2026-10-16)
 A declarative format, inspired by the shape of Kubernetes custom resources but not backed by them, plus a CLI to push personas, skills, system prompts, … from a pipeline into an instance. The database stays authoritative (ADR-0020). Unlike the repository configuration (F11), the import may configure everything, including instance settings such as the image allowlist — which makes digest-pinned allowlist entries maintainable by a bot like renovate.
 
-### F5 — Inference provider abstraction (idea, 2026-10-16)
+### F5 — Inference provider abstraction (idea, 2026-10-16; endpoint planned for iteration 3)
 Most providers speak an OpenAI-compatible API but differ in details — e.g. OpenCode Go needs only an API key but also a session ID header. A small per-provider adapter layer in the inference gateway (hosted in the gateway Deployment, ADR-0029) handles auth, extra headers and usage mapping. Being per-provider HTTP glue with injected credentials, it's a natural candidate for the WASI plugin model. [octolib](https://github.com/muvon/octolib) is a candidate crate for the provider specifics (evaluation points: [`design/egress.md`](../design/egress.md) §9).
 
 ### F6 — Subscription pools and fallback (idea, 2026-10-16)
@@ -224,3 +224,17 @@ Service containers next to the agent in the sandbox pod, e.g. a PostgreSQL to de
 
 ### F11 — Repository configuration file (decided, 2026-10-19)
 Project settings maintained in the repository as `.dark-factory/config.toml`: commit hooks, lifecycle hooks (F9), non-secret environment variables, Git config entries, project image and sidecars (F10), egress hosts and named cluster targets. The control plane reads the file from the project's base branch — never from the worktree or a task branch — and a new version takes effect only after a human approves its effective diff (`project-config` approval); runs meanwhile use the last approved version. Project and sidecar images — from the repository and from the UI — must match the instance's glob-based image allowlist; an empty allowlist allows every image. Credentials, isolation settings, resources, budgets, branch and subtask policies, push checks and tool grants stay UI-only. Per task, `repo_config` selects the approved version (default), `ignore` (database settings only, e.g. for a broken config) or a pinned `ref` to test a change; subtasks inherit it. Decision: ADR-0039; details: `design/agent-run.md` §16.
+
+### F12 — Harness registry and Generic ACP (idea, 2026-10-30; planned for iteration 4)
+Harnesses become instance configuration instead of the fixed `claude-code` value (`personas.harness`, `harness.claudeCode.image`).
+- **Registered harnesses:** an operator registers a harness: id, image delivered as an image volume at `/opt/harness/<id>` (ADR-0022), adapter command, credential mapping, default egress hosts and usage source. Agents of the [ACP registry](https://agentclientprotocol.com) serve as presets, so a persona can select a known harness without further setup.
+- **Generic ACP:** a persona or project selects `generic-acp` and sets an adapter command; the adapter is part of the project image, and no harness image is mounted. This generalizes today's project `adapter_command`, which only works for `claude-code`.
+- **Credentials:** model access goes through the gateway's inference endpoint (`design/egress.md` §9); the harness gets the gateway as base URL and a placeholder credential. A harness that can't use a base URL would need its key in the sandbox and is not supported without an explicit accepted-risk decision (ADR-0010).
+- **Usage:** from ACP if the adapter reports it, from the gateway for every request through the inference endpoint; the Claude session log stays a Claude-specific fallback.
+
+### F13 — Skill management (idea, 2026-10-30; planned for iteration 4)
+Skills in the `SKILL.md` format (ADR-0005) are managed in the control plane and delivered to every run.
+- **Sources:** built-in skills shipped with Dark Factory, derived from the agent playbook (e.g. `dark-factory-basics`, given to every persona); instance skills created in the UI; repository skills (`.agents/skills`, `.claude/skills`) as today under the trust policy of `design/agent-run.md` §6.3.
+- **Assignment:** per persona (ADR-0011) and per project; a run gets the union.
+- **Delivery:** ACP has no skill concept. The skills come with `Assign`, and the runtime writes them into the harness's skill directory under `/data/home` on every run, overwriting what is on the PVC, like the harness settings. `df-native` reads the same directory.
+- **Agents changing skills** is an instance-management operation with the modes deny, requires approval and allow (ADR-0011).

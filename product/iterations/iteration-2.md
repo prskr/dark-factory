@@ -61,7 +61,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | 3 | Pushes are rejected when no push record can be written (the gateway can't reach the control plane). | Accepting unaudited pushes. |
 | 4 | Secret-scan findings are approval-gated per finding (fingerprint = rule + blob + line), so false positives can pass. Identity and ref rules are always hard rejects. | Secret findings always rejected: false positives would block the task with no way out. |
 | 5 | WIP snapshot pushes get only the secret scan and size limits, and never raise approval requests. | Same checks as the task branch: protected paths and identity make no sense for a snapshot. |
-| 6 | Task-scoped allowlist entries are pulled forward from iteration 4, because "allow for this task" is the least-privilege approval scope. Persona scope stays in iteration 4. | Instance and project scope only. |
+| 6 | Task-scoped allowlist entries are pulled forward from iteration 4, because "allow for this task" is the least-privilege approval scope. Persona scope follows in iteration 5. | Instance and project scope only. |
 | 7 | Requests and decisions are stored in their own table and rendered on the task timeline next to the transcript. Decisions reach the agent as system-authored messages. No new transcript event kinds. | Control-plane-authored transcript events: the transcript is runtime-sequenced per run today. |
 | 8 | Questions in iteration 2 are addressed to humans only. Questions to a parent task's agent come with the task tree (iteration 3, ADR-0043). | — |
 | 9 | Only `board-member` decides requests (`approval:decide` maps to it). The full permission model stays in iteration 4. | — |
@@ -85,8 +85,8 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 
 - `push-check` WASI plugins, commit signature verification (F7), Git LFS through the proxy.
 - Branch rewrite policies (ADR-0033): the proxy allows fast-forward updates of the task branch only.
-- Approval types `tool-access`, `repository-mcp-server`, `harness-permission`, `instance-operation`, `project-config` (iteration 4).
-- Agents deciding approvals, persona-scoped allowlist entries, PWA push notifications (iteration 5).
+- Approval types `tool-access`, `repository-mcp-server`, `harness-permission`, `instance-operation` (iteration 4) and `project-config` (iteration 5).
+- Persona-scoped allowlist entries (iteration 5); agents deciding approvals, PWA push notifications (iteration 6).
 - Persisting per-run egress aggregates.
 
 ## 7. Verify first (spikes)

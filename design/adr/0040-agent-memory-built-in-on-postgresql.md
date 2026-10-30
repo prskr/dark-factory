@@ -1,6 +1,6 @@
 # ADR-0040: Agent memory built in, on PostgreSQL, explicit memories first
 
-- **Status:** Accepted (planned for iteration 5)
+- **Status:** Accepted (planned for iteration 6)
 - **Date:** 2026-10-19
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0012](0012-postgresql-and-blob-store.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0028](0028-integrations-wit-capability-interfaces.md), [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md), [ADR-0038](0038-agent-questions-and-approval-requests.md)
 

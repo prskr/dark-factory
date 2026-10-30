@@ -1,6 +1,8 @@
 # Roadmap — Iterations
 
-> Grouping of the planned features into iterations, agreed on 2026-10-21. Each iteration is broken into OpenSpec changes when it starts. Architecture and decisions: [`product/context.md`](../context.md); first iteration: [`iteration-1.md`](iteration-1.md).
+> Grouping of the planned features into iterations, agreed on 2026-10-21, iteration 4 split on 2026-10-30. Each iteration is broken into OpenSpec changes when it starts. Architecture and decisions: [`product/context.md`](../context.md); first iteration: [`iteration-1.md`](iteration-1.md).
+>
+> This file is the single list of work that is thought of but not implemented: an item is either in an iteration or in the [backlog](#backlog-unscheduled). A non-goal of an OpenSpec change or ADR that is a real follow-up gets an entry here; otherwise its source says "rejected".
 
 ## Overview
 
@@ -9,9 +11,10 @@ flowchart LR
   I1[1 · Thin slice] --> I11[1.1 · Operability]
   I11 --> I2[2 · Git boundary + human in the loop]
   I2 --> I3[3 · Team workflow]
-  I3 --> I4[4 · Configurable projects and tools]
-  I4 --> I5[5 · Visibility and memory]
-  I5 -.-> B[Backlog]
+  I3 --> I4[4 · Harnesses, tools and skills]
+  I4 --> I5[5 · Configurable projects]
+  I5 --> I6[6 · Visibility and memory]
+  I6 -.-> B[Backlog]
 ```
 
 | Iteration | Theme | Main references |
@@ -20,8 +23,9 @@ flowchart LR
 | 1.1 | Operability | `openspec/changes/agent-session-logging`, `openspec/changes/otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | 2 | Closed Git boundary + human in the loop | [`iteration-2.md`](iteration-2.md), F1, ADR-0038 |
 | 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0043, ADR-0044, ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
-| 4 | Configurable projects and tools | F9, F10, F11, ADR-0011, ADR-0032, ADR-0039 |
-| 5 | Visibility and memory | F8, ADR-0021, ADR-0040 |
+| 4 | Harnesses, tools and skills | F12, F13, ADR-0011, ADR-0021, ADR-0032 |
+| 5 | Configurable projects | F9, F10, F11, ADR-0010, ADR-0039 |
+| 6 | Visibility and memory | F8, ADR-0035, ADR-0038, ADR-0040 |
 
 ## 1 — Thin vertical slice
 
@@ -64,42 +68,65 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 
 Dependency: "PR merged" dependencies and review routing need the webhooks of ADR-0015.
 
-## 4 — Configurable projects and tools
+## 4 — Harnesses, tools and skills
+
+What agents can use, configured in the factory and delivered without credentials in the sandbox.
+
+- **Harness registry and Generic ACP (F12):** operators register harness images (ACP registry agents as presets, adapter command, credential mapping, default egress hosts); users pick a registered harness without further setup, or "Generic ACP" with an adapter command from the project image. Model credentials only through the inference endpoint (iteration 3).
+- **Third-party MCP servers through the gateway (ADR-0032)** with tool catalogs, credential injection and the `tool-access` / `repository-mcp-server` approvals. To decide first: OAuth-based remote servers (only static credentials are designed) and stdio-only servers (no HTTP endpoint).
+- **Skill management (F13):** built-in skills from [`agent-playbook.md`](../agent-playbook.md) (`dark-factory-basics`), instance skills, assignment per persona and project, delivery into the harness's skill directory on every run.
+- **Full permission model (ADR-0011):** admin and controller roles, instance-management operations for agents (personas, skills, tool grants, routines, projects), `instance-operation` and `harness-permission` approvals.
+- **Audit log view:** filterable list of `audit_log` entries including push records (`iter2-git-proxy`) and decided requests; desktop only (ADR-0035).
+- **Cost and "what if" views (ADR-0021):** pricing tables in the instance configuration, versioned by date; cost per run, task, persona and project from harness and gateway usage.
+
+Dependency: API-key harnesses need the inference endpoint of iteration 3, otherwise their keys would enter the sandbox (ADR-0010).
+
+## 5 — Configurable projects
 
 - **Repository configuration file (F11, ADR-0039)** with the `project-config` approval. Needs the proxy's protection of `.dark-factory/**` (iteration 2).
 - **Workspace lifecycle hooks (F9)** and **sidecar services (F10).**
-- **Third-party MCP servers through the gateway (ADR-0032)** with tool catalogs and the `tool-access` / `repository-mcp-server` approvals.
-- **Skill management** (built-in and project skills, [`agent-playbook.md`](../agent-playbook.md)).
-- **Full permission model (ADR-0011):** admin and controller roles, instance-management operations for agents, `instance-operation` and `harness-permission` approvals.
+- **Build and test secrets** (private registries, test databases; ADR-0010 "out of scope for now"): injected by the gateway like Git, inference and MCP credentials, never stored in the sandbox. Needs an ADR.
 - **Egress:** persona allowlist scope, CIDR targets (task scope moved to iteration 2).
 
-## 5 — Visibility and memory
+## 6 — Visibility and memory
 
-- Audit log view, cost and "what if" views (ADR-0021), dashboard-wide live status.
+- Dashboard-wide live status.
 - Full-text search across tasks and transcripts.
 - Artifact cards in a details tab with a preview, title, time and type (design canvas, "Later" row); artifacts and their tools come with iteration 3 (ADR-0044).
 - **Workspace changes view (F8)**, reading from the Git proxy's mirror.
-- **Agent memory (ADR-0040)**, explicit memories with full-text search first.
+- **Agent memory (ADR-0040)**, explicit memories with full-text search first (phases 1 and 2).
 - Installable web app with push notifications (ADR-0035).
+- **Agents deciding approvals** (e.g. a CEO persona), bounded by the no-escalation rule (ADR-0038, ADR-0011). Needs the permission model of iteration 4.
 
 ## Backlog (unscheduled)
 
-| Item | Reference |
-|---|---|
-| Full-harness mode as a separate ACP binary (ADR-0045, spike decided: build) and inference gateway | context §4.1, F5, [`design/egress.md`](../../design/egress.md) §9, `openspec/changes/full-harness-mode` |
-| Subscription pools and fallback | F6 |
-| Further ACP harnesses (harness delivery is decided: one image volume per harness, ADR-0022) | context §7 |
-| MCP tools as WASI components | F2 |
-| Context compaction plugins | F3 |
-| `push-check` WASI plugins | [`design/agent-run.md`](../../design/agent-run.md) §11 |
-| Declarative configuration import | F4 |
-| Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | `openspec/changes/hide-system-prompt-blocks` |
-| Commit signing without keys in the sandbox | F7 |
-| Cilium mode, DNS server in the gateway | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
-| Separate UIDs for runtime and harness | [`design/agent-run.md`](../../design/agent-run.md) §17 |
-| LSP support | context §4.2 |
-| Cloud VM sandboxes (idea, conflicts with current non-goals) | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
-| Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | `crates/df-web/src/auth/store.rs` |
-| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; own API key in a Secret, ADR on model credentials in the control plane; provider API OpenAI-compatible, optionally also Anthropic, never Anthropic only | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7) |
-| Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. Decided: the control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | design canvas, "Later" row |
-| Remaining low-severity tech debt | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
+Status: *idea* (direction only), *decided* (decision recorded, no design), *designed* (design written).
+
+| Item | Status | Reference |
+|---|---|---|
+| Full-harness mode as a separate ACP binary (`df-native`); uses the inference endpoint of iteration 3 | decided | ADR-0045, context §4.1, `openspec/changes/full-harness-mode` |
+| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; uses the provider configuration of the inference endpoint; ADR on model credentials in the control plane | decided | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7), [`design/egress.md`](../../design/egress.md) §9 |
+| Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
+| Subscription pools and fallback | idea | F6 |
+| MCP tools as WASI components | idea | F2 |
+| Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/iter2-continuation-summary` |
+| `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/iter2-git-proxy` |
+| Declarative configuration import | idea | F4 |
+| Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
+| Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
+| Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
+| Persisted per-run egress aggregates (host, verdict, connections, bytes) | designed | [`design/egress.md`](../../design/egress.md) §8, §13 |
+| `dark-factory egress tail` CLI | idea | [`design/egress.md`](../../design/egress.md) §8 |
+| Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
+| Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
+| Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
+| Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
+| GitHub plugin, SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |
+| Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
+| WASI 0.3 guests for plugins | idea | ADR-0002 |
+| Separate UIDs for runtime and harness | idea | [`design/agent-run.md`](../../design/agent-run.md) §17 |
+| LSP support | idea | context §4.2 |
+| Cloud VM sandboxes (conflicts with current non-goals) | idea | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
+| Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | idea | `crates/df-web/src/auth/store.rs` |
+| Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. The control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | decided | design canvas, "Later" row |
+| Remaining low-severity tech debt | — | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
