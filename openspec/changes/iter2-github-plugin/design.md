@@ -63,7 +63,7 @@ The mapping is specified in `github-integration` ("Error mapping", "Rate limits"
 ### D7 — Credentials and Git
 The token is a fine-grained personal access token restricted to the project's repositories, referenced like the Forgejo token (credential reference → Secret). It needs Pull requests read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata read; a classic token needs `repo`. The route sets `authScheme: bearer`; GitHub's REST API also accepts `token`, its GraphQL documentation uses `bearer`.
 
-Git in iteration 1: the credential helper sends `agent.gitUsername` and the token. GitHub is expected to ignore the user name for tokens; task 5.2 verifies it. The instance egress allowlist needs `github.com` until `iter2-git-proxy` sends the same pair as Basic auth from the gateway; that change's spike 1.2 should also run against github.com.
+Git in iteration 1: the credential helper sends `agent.gitUsername` and the token. GitHub is expected to ignore the user name for tokens; task 7.1 verifies it. The instance egress allowlist needs `github.com` until `iter2-git-proxy` sends the same pair as Basic auth from the gateway; that change's spike 1.2 should also run against github.com.
 
 ### D8 — Packaging and default release
 `plugins/github` mirrors `plugins/forgejo`: `cdylib` + `rlib`, `rust_shared_library` for `wasm32-wasip2`. Its optimized build (`//deploy:github_plugin`) becomes the plugin image `plugin-github` exactly like `plugin-forgejo` (`iter2-plugin-distribution` D1: `scratch`, `/plugin.wasm`, an index for `linux/amd64` and `linux/arm64`, pushed with the other images, its digest passed by the dev deploy). Default chart values next to the unchanged `forgejo` entry:
@@ -83,7 +83,10 @@ plugins:
 Operators add GHES routes to `hosts` or drop the entry with `plugins.github: null`. The plugin name `github` maps to the GitHub icon (`ForgeKind::from_plugin`). Rejected alternative: an opt-in entry, which would send projects on github.com to the Forgejo default plugin, where they fail with confusing errors.
 
 ### D9 — Tests
-Unit tests with a fake transport cover every scenario of `github-integration`, as in the Forgejo plugin. `df-plugins` integration tests run the built component against `wiremock` through a route whose `apiUrl` is the mock, with `authScheme: bearer`; the `image_component` test loads the optimized component of the plugin image. A live test (`#[ignore]`, like `tests/homelab.rs`) runs the lifecycle against scratch repositories on github.com. GitHub cannot be part of the hermetic e2e run (`iter1-demo-e2e` runs Forgejo in kind).
+Unit tests with a fake transport cover every scenario of `github-integration`, as in the Forgejo plugin. `df-plugins` integration tests run the built component against `wiremock`, first with `base-url` from a repository URL on the mock, after `iter2-multi-forge` through a route whose `apiUrl` is the mock, with `authScheme: bearer`; the `image_component` test loads the optimized component of the plugin image. A live test (`#[ignore]`, like `tests/homelab.rs`) runs the lifecycle against scratch repositories on github.com. GitHub cannot be part of the hermetic e2e run (`iter1-demo-e2e` runs Forgejo in kind).
+
+### D10 — Order of work
+The plugin reads `base-url` and gets the `Authorization` header injected; where both come from does not matter to it. Crate, plugin, the host's retry change and the plugin image therefore build on `main` and are implemented in parallel to `iter2-multi-forge`. Their integration tests take `base-url` from a repository URL on the mock and use today's `token` scheme, which GitHub accepts for personal access tokens. Routes, the default entry, the dev configuration and the runs against github.com follow `iter2-multi-forge`; this change is archived after it. Rejected alternative: a temporary setting for the single forge plugin plus an API URL, which `iter2-multi-forge` would remove again.
 
 ## Risks / Trade-offs
 

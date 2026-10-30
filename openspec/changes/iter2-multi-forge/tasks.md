@@ -34,4 +34,4 @@
 
 ## Order
 
-- `iter1-integration-plugins` and `iter2-plugin-distribution` are archived (`plugin-host`, shared `PluginEngine`, plugin chart values), so this change can start. `iter2-github-plugin` follows.
+- `iter1-integration-plugins` and `iter2-plugin-distribution` are archived (`plugin-host`, shared `PluginEngine`, plugin chart values), so this change can start. `iter2-github-plugin` builds its plugin and image in parallel; its routes and default entry follow this change.

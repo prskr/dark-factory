@@ -30,4 +30,4 @@ Dark Factory works only with Forgejo, while many repositories live on GitHub, of
 - New workspace dependency `percent-encoding` (already in `Cargo.lock` through `url`).
 - No contract, database or agent protocol change.
 - Out of scope: GitHub App authentication (backlog); webhooks (iteration 3, inbound events); merge, branch and check capabilities (iteration 3, task tree and ADR-0033); SSH repository URLs and Git LFS (backlog).
-- Depends on `iter2-multi-forge` (routing by host, `apiUrl`, `authScheme`, `hosts` in the chart) being archived first; `iter2-plugin-distribution` (plugin images, `plugins.<name>` chart entries, shared `PluginEngine`) is archived.
+- Crate, plugin, the host's retry change and the plugin image build on `main` and run in parallel to `iter2-multi-forge` (design D10). The default route, the dev configuration and the runs against github.com need its routing (`hosts`, `apiUrl`, `authScheme`); this change is archived after it. `iter2-plugin-distribution` (plugin images, `plugins.<name>` chart entries, shared `PluginEngine`) is archived.
