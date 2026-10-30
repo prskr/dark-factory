@@ -71,7 +71,7 @@ fn allowed(host: &str, project: &str, second: i64) -> FlowEvent {
 
 async fn app_with_egress(events: Vec<FlowEvent>) -> TestApp {
     TestApp::with_egress(
-        None,
+        df_core::routing::ForgeRoutes::default(),
         Some(Arc::new(FakeFlows(events))),
         Some(Arc::new(FakeServices)),
     )

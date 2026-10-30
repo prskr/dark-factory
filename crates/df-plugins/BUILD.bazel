@@ -87,6 +87,10 @@ IMAGE_FORGEJO = "//deploy:forgejo_plugin"
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,
         },
+        "routing": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+        },
         "sandbox": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,

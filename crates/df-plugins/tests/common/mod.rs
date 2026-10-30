@@ -12,9 +12,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use df_core::routing::RoutingTable;
 use df_core::testing::FakeSecretStore;
-use df_core::{CredentialRef, CredentialRefId, IntegrationError, ProjectId};
-use df_plugins::{ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory};
+use df_core::{CredentialRef, CredentialRefId, IntegrationError, PluginConfig, ProjectId};
+use df_plugins::{
+    ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
+};
 
 pub(crate) const TOKEN: &str = "s3cret-token";
 
@@ -65,7 +68,26 @@ impl ProjectDirectory for FixedDirectory {
     }
 }
 
-pub(crate) type Client = PluginForgeClient;
+pub(crate) type Client = ForgeRouter;
+
+/// Projects on different repository URLs, all acting with the same forge credential.
+pub(crate) struct ProjectRepos(pub Vec<(ProjectId, String)>);
+
+#[async_trait]
+impl ProjectDirectory for ProjectRepos {
+    async fn forge_target(&self, project: &ProjectId) -> Result<ForgeTarget, IntegrationError> {
+        let (_, repo_url) = self
+            .0
+            .iter()
+            .find(|(id, _)| id == project)
+            .ok_or_else(|| IntegrationError::Config(format!("unknown project {project}")))?;
+        FixedDirectory {
+            repo_url: repo_url.clone(),
+        }
+        .forge_target(project)
+        .await
+    }
+}
 
 pub(crate) fn client(
     component: &[u8],
@@ -102,14 +124,61 @@ pub(crate) fn client_on(
     timeout: Duration,
     memory_limit: usize,
 ) -> anyhow::Result<Client> {
+    router(
+        plugin_client(engine, component, token, timeout, memory_limit)?,
+        repo_url,
+    )
+}
+
+/// The `forgejo` plugin client reading `token` as forge credential.
+pub(crate) fn plugin_client(
+    engine: &PluginEngine,
+    component: &[u8],
+    token: &str,
+    timeout: Duration,
+    memory_limit: usize,
+) -> anyhow::Result<PluginForgeClient> {
     let secrets = FakeSecretStore::new();
     secrets.insert("forge-token", "token", token);
     Ok(PluginForgeClient::new(
         PluginHost::from_bytes(engine, "forgejo", component, timeout, memory_limit)?,
+        Arc::new(secrets),
+        BTreeMap::default(),
+    ))
+}
+
+/// A router with `client` as the default plugin `forgejo`, for projects on `repo_url`.
+pub(crate) fn router(client: PluginForgeClient, repo_url: &str) -> anyhow::Result<Client> {
+    router_with_config(client, PluginConfig::new("/forgejo.wasm"), repo_url)
+}
+
+/// Like [`router`], with `config` as the plugin's entry under `plugins`.
+pub(crate) fn router_with_config(
+    client: PluginForgeClient,
+    config: PluginConfig,
+    repo_url: &str,
+) -> anyhow::Result<Client> {
+    let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
+    Ok(ForgeRouter::new(
         Arc::new(FixedDirectory {
             repo_url: repo_url.into(),
         }),
-        Arc::new(secrets),
-        BTreeMap::default(),
+        RoutingTable::from_plugins_allowing_plain_http(&plugins)?,
+        BTreeMap::from([("forgejo".to_string(), client)]),
+    ))
+}
+
+/// Like [`router`], with the production routing table, which rejects plain HTTP.
+pub(crate) fn https_only_router(
+    client: PluginForgeClient,
+    repo_url: &str,
+) -> anyhow::Result<Client> {
+    let plugins = BTreeMap::from([("forgejo".to_string(), PluginConfig::new("/forgejo.wasm"))]);
+    Ok(ForgeRouter::new(
+        Arc::new(FixedDirectory {
+            repo_url: repo_url.into(),
+        }),
+        RoutingTable::from_plugins(&plugins)?,
+        BTreeMap::from([("forgejo".to_string(), client)]),
     ))
 }

@@ -33,8 +33,6 @@ mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
-/// Name of the forge integration plugin (`plugins.forgejo`); the only one supported for now.
-const FORGE_PLUGIN: &str = "forgejo";
 
 /// When the shutdown signal arrived, set by the command that waited for it; the grace period
 /// counts from there.
@@ -278,16 +276,8 @@ where
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
     let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
-    // One forge plugin is supported for now and `serve` refuses to start without it. With several
-    // plugins this becomes: fail only if no forge plugin could be loaded. Loaded before the
-    // database connection, so a missing component fails fast without a database.
-    let forgejo = cfg
-        .plugins
-        .get(FORGE_PLUGIN)
-        .cloned()
-        .unwrap_or_else(|| df_core::PluginConfig::new("/plugins/forgejo/plugin.wasm"));
     let plugin_engine = df_plugins::PluginEngine::new()?;
-    let forge_host = forge::load_forge_plugin(&plugin_engine, FORGE_PLUGIN, &forgejo)?;
+    let forge_plugins = forge::load_forge_plugins(&plugin_engine, &cfg.plugins)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 
@@ -302,7 +292,8 @@ where
         .start(&cfg, &pool, &notifier, stop_rx.clone())
         .await?;
 
-    let forge = forge::forge_client(forge_host, &forgejo, pool.clone(), secrets.clone());
+    let forge_routes = forge_plugins.forge_routes();
+    let forge = forge::forge_client(forge_plugins, pool.clone(), secrets.clone());
     let flows = dev
         .demo_flows()
         .or_else(|| egress_log_relay(&cfg, tls_config));
@@ -312,7 +303,7 @@ where
         &cfg,
         &pool,
         &notifier,
-        Some(df_core::ForgeKind::from_plugin(FORGE_PLUGIN)),
+        forge_routes,
         EgressDeps { flows, services },
         approval_types.clone(),
     )?;
@@ -495,7 +486,7 @@ fn web_router(
     cfg: &InstanceConfig,
     pool: &PgPool,
     notifier: &Arc<df_db::Notifier>,
-    forge: Option<df_core::ForgeKind>,
+    forges: df_core::routing::ForgeRoutes,
     egress: EgressDeps,
     approval_types: df_db::requests::ApprovalTypes,
 ) -> anyhow::Result<axum::Router> {
@@ -508,7 +499,7 @@ fn web_router(
         pool: pool.clone(),
         notifier: notifier.clone(),
         oidc: Arc::new(oidc),
-        forge,
+        forges,
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
@@ -717,7 +708,7 @@ mod tests {
             &cfg,
             &pool,
             &notifier,
-            None,
+            df_core::routing::ForgeRoutes::default(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;
@@ -740,7 +731,7 @@ mod tests {
             &cfg,
             &pool,
             &notifier,
-            None,
+            df_core::routing::ForgeRoutes::default(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;
@@ -811,7 +802,7 @@ mod tests {
     /// The prebuilt Forgejo component: `FORGEJO_PLUGIN_WASM` (set by Bazel), else the output of
     /// `cargo build --target wasm32-wasip2 -p forgejo-plugin`. Tests don't build it themselves, see
     /// `docs/development.md`.
-    fn forgejo_component() -> PathBuf {
+    pub(crate) fn forgejo_component() -> PathBuf {
         let path = std::env::var_os("FORGEJO_PLUGIN_WASM").map_or_else(
             || {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))

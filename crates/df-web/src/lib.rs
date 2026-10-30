@@ -47,8 +47,9 @@ pub struct WebState {
     pub pool: PgPool,
     pub notifier: Arc<Notifier>,
     pub oidc: Arc<auth::OidcClient>,
-    /// The forge integration this instance runs, if any; projects show it by icon and name.
-    pub forge: Option<df_core::ForgeKind>,
+    /// The forge routing table with each plugin's availability; projects show their forge by icon
+    /// and name.
+    pub forges: df_core::routing::ForgeRoutes,
     /// Flow events of the egress gateways; without it the egress log page is unavailable.
     pub flows: Option<Arc<dyn egress::FlowSource>>,
     /// Checks `cluster-service` entries against the cluster; without it they cannot be added.

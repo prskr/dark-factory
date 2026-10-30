@@ -572,7 +572,7 @@ async fn project_forge_follows_the_configured_integration_and_the_credential() {
         .execute(&app.pool)
         .await
         .unwrap();
-    let plain = TestApp::with_forge(None).await;
+    let plain = TestApp::with_forges(df_core::routing::ForgeRoutes::default()).await;
     let cookie = plain.login().await;
     plain.post("/credentials", &secret, &cookie).await;
     let credential: uuid::Uuid = sqlx::query_scalar("SELECT id FROM credential_refs")
@@ -588,6 +588,150 @@ async fn project_forge_follows_the_configured_integration_and_the_credential() {
         .await;
     let html = text(plain.get("/projects", &cookie).await).await;
     assert!(html.contains("data-forge=\"git\"") && !html.contains("data-forge=\"forgejo\""));
+}
+
+/// The project list of an app with `forges` and the projects `(key, repo_url, credential)`.
+async fn project_list(
+    forges: df_core::routing::ForgeRoutes,
+    projects: &[(&str, &str, bool)],
+) -> String {
+    let app = TestApp::with_forges(forges).await;
+    let cookie = app.login().await;
+    let secret = form(&[
+        ("name", "forge"),
+        ("secret_name", "forge"),
+        ("secret_key", "token"),
+    ]);
+    app.post("/credentials", &secret, &cookie).await;
+    let credential: uuid::Uuid = sqlx::query_scalar("SELECT id FROM credential_refs")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    for (key, repo, with_credential) in projects {
+        let credential = if *with_credential {
+            credential.to_string()
+        } else {
+            String::new()
+        };
+        let body = form(&[
+            ("key", key),
+            ("name", key),
+            ("repo_url", repo),
+            ("issue_tracker_url", ""),
+            ("image", "img"),
+            ("base_branch", "main"),
+            ("forge_credential_id", &credential),
+        ]);
+        app.post("/projects", &body, &cookie).await;
+    }
+    text(app.get("/projects", &cookie).await).await
+}
+
+/// The table row of project `key`.
+fn project_row(html: &str, key: &str) -> String {
+    let at = html
+        .find(&format!(">{key}</span><span class=\"font-medium\">"))
+        .unwrap_or_else(|| panic!("{key}: {html}"));
+    let start = html[..at].rfind("<tr").unwrap();
+    html[start..start + html[start..].find("</tr>").unwrap()].to_string()
+}
+
+#[tokio::test]
+async fn two_forges_side_by_side_show_their_own_icon_per_project() {
+    let forges = crate::testkit::forge_routes(
+        &[("github", &["github.com"]), ("forgejo", &[])],
+        &["github", "forgejo"],
+    );
+    let html = project_list(
+        forges,
+        &[
+            ("DF", "https://git.example.org/peter/dark-factory.git", true),
+            ("WEB", "https://github.com/acme/web.git", true),
+            ("OPS", "https://github.com/acme/ops.git", false),
+        ],
+    )
+    .await;
+    assert!(project_row(&html, "DF").contains("data-forge=\"forgejo\""));
+    assert!(project_row(&html, "WEB").contains("data-forge=\"github\""));
+    // Without a forge credential the project is generic, whatever the route.
+    assert!(project_row(&html, "OPS").contains("data-forge=\"git\""));
+}
+
+#[tokio::test]
+async fn a_project_no_loaded_plugin_serves_shows_the_generic_git_icon() {
+    let forges = crate::testkit::forge_routes(
+        &[
+            ("github", &["github.com"]),
+            ("forgejo", &["git.example.org"]),
+        ],
+        &["forgejo"],
+    );
+    let html = project_list(
+        forges,
+        &[
+            ("WEB", "https://github.com/acme/web.git", true),
+            ("OPS", "https://code.example.com/acme/ops.git", true),
+        ],
+    )
+    .await;
+    for key in ["WEB", "OPS"] {
+        let row = project_row(&html, key);
+        assert!(row.contains("data-forge=\"git\""), "{key}: {row}");
+    }
+}
+
+#[tokio::test]
+async fn the_form_hint_names_the_integration_routed_for_the_repository_host() {
+    let forges = crate::testkit::forge_routes(
+        &[
+            ("github", &["github.com"]),
+            ("forgejo", &["git.example.org"]),
+        ],
+        &["github"],
+    );
+    let app = TestApp::with_forges(forges).await;
+    let cookie = app.login().await;
+
+    let claimed = forge_fragment(&app, &cookie, "https://github.com/acme/web.git", "").await;
+    assert!(claimed.contains("data-forge=\"github\""), "{claimed}");
+    assert!(
+        claimed.contains("Served by the GitHub integration"),
+        "{claimed}"
+    );
+
+    let not_loaded = forge_fragment(&app, &cookie, "https://git.example.org/o/r.git", "").await;
+    assert!(
+        not_loaded.contains("data-forge=\"git\"") && !not_loaded.contains("data-forge=\"forgejo\""),
+        "{not_loaded}"
+    );
+    assert!(
+        not_loaded.contains("The Forgejo integration claims this host but is not loaded"),
+        "{not_loaded}"
+    );
+
+    let unclaimed = forge_fragment(&app, &cookie, "https://code.example.com/o/r.git", "").await;
+    assert!(unclaimed.contains("data-forge=\"git\""), "{unclaimed}");
+    assert!(
+        unclaimed.contains("No forge integration applies"),
+        "{unclaimed}"
+    );
+}
+
+#[tokio::test]
+async fn the_form_hint_names_the_default_integration_that_did_not_load() {
+    let forges = crate::testkit::forge_routes(
+        &[("github", &["github.com"]), ("forgejo", &[])],
+        &["github"],
+    );
+    let app = TestApp::with_forges(forges).await;
+    let cookie = app.login().await;
+
+    let fragment = forge_fragment(&app, &cookie, "https://code.example.com/o/r.git", "").await;
+    assert!(fragment.contains("data-forge=\"git\""), "{fragment}");
+    assert!(
+        fragment.contains("The default Forgejo integration is not loaded"),
+        "{fragment}"
+    );
 }
 
 async fn forge_fragment(app: &TestApp, cookie: &str, repo: &str, issue: &str) -> String {
@@ -669,7 +813,7 @@ async fn not_an_https_repository_url_maps_to_no_integration() {
         assert!(html.contains("No forge integration applies"), "{repo}");
     }
     // An instance without integration says so for valid URLs, too.
-    let plain = TestApp::with_forge(None).await;
+    let plain = TestApp::with_forges(df_core::routing::ForgeRoutes::default()).await;
     let cookie = plain.login().await;
     let html = forge_fragment(&plain, &cookie, "https://git.example.org/o/r.git", "").await;
     assert!(html.contains("data-forge=\"git\"") && html.contains("No forge integration applies"));
@@ -1212,7 +1356,7 @@ async fn a_changed_key_and_another_error_are_both_shown_and_the_key_error_is_lin
 
 #[tokio::test]
 async fn a_tracker_on_the_host_of_an_unserved_repository_shows_the_issue_icon() {
-    let app = TestApp::with_forge(None).await;
+    let app = TestApp::with_forges(df_core::routing::ForgeRoutes::default()).await;
     let cookie = app.login().await;
     let html = forge_fragment(
         &app,

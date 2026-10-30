@@ -1172,6 +1172,62 @@ tests:
           path: data["config.yaml"]
           pattern: 'settings: \{"wip-prefixes":"WIP:"\}'
 
+  - it: writes the routing hosts and auth scheme of a plugin into the config
+    template: configmap.yaml
+    documentIndex: 0
+    values:
+      - values/plugin-routing.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "github":\n    path: "/custom/github.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\},"ghe.example.org"\]\n    authScheme: "bearer"'
+
+  - it: leaves hosts and auth scheme out of the default plugin config
+    template: configmap.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'hosts:|authScheme:'
+
+  - it: rejects an unknown plugin auth scheme
+    # the values schema rejects the value before any template renders
+    template: configmap.yaml
+    set:
+      plugins.forgejo.authScheme: basic
+    asserts:
+      - failedTemplate:
+          errorPattern: "authScheme"
+
+  - it: rejects a plugin host route without an https API URL
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+          apiUrl: http://api.github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
+  - it: rejects a plugin host route with an unknown key
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+          api: https://api.github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
+  - it: rejects a plugin host route without an API URL
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
   - it: rejects a plugin entry that has neither an image nor a path
     # the values schema rejects the entry before any template renders
     template: control-plane-deployment.yaml

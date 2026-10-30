@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use df_core::ForgeKind;
 use df_core::host::{normalize_host, strip_brackets};
+use df_core::routing::ForgeRoutes;
 use df_db::catalog::ProjectRecord;
 use maud::{Markup, html};
 use url::Url;
@@ -67,13 +68,11 @@ pub fn issue_role(
     Some((host, role))
 }
 
-/// The integration that serves `p`: the instance's `forge` when the project has a forge
-/// credential, none (generic Git) otherwise.
-pub fn project_forge_kind<'a>(
-    forge: Option<&'a ForgeKind>,
-    p: &ProjectRecord,
-) -> Option<&'a ForgeKind> {
-    forge.filter(|_| p.forge_credential_id.is_some())
+/// The integration that serves `p`: the loaded plugin routed for its repository URL when the
+/// project has a forge credential, none (generic Git) otherwise.
+pub fn project_forge_kind(forges: &ForgeRoutes, p: &ProjectRecord) -> Option<ForgeKind> {
+    p.forge_credential_id
+        .and_then(|_| forges.forge_for_repo_url(&p.repo_url).kind())
 }
 
 /// The hosts of all projects by normalized host.
@@ -81,12 +80,14 @@ pub fn project_forge_kind<'a>(
 pub struct ProjectHosts(HashMap<String, HostRole>);
 
 impl ProjectHosts {
-    /// `forge` is the instance's integration; it serves the projects with a forge credential.
-    pub fn from_projects(forge: Option<&ForgeKind>, projects: &[ProjectRecord]) -> Self {
+    /// `forges` routes the projects with a forge credential to their integration.
+    pub fn from_projects(forges: &ForgeRoutes, projects: &[ProjectRecord]) -> Self {
         let mut hosts: HashMap<String, HostRole> = HashMap::new();
         for p in projects {
-            let kind = project_forge_kind(forge, p);
-            for (host, role) in project_roles(kind, &p.repo_url, p.issue_tracker_url.as_deref()) {
+            let kind = project_forge_kind(forges, p);
+            for (host, role) in
+                project_roles(kind.as_ref(), &p.repo_url, p.issue_tracker_url.as_deref())
+            {
                 match hosts.get(&host) {
                     Some(known) if known.strength() >= role.strength() => {}
                     _ => {
@@ -145,6 +146,7 @@ pub(crate) fn test_project(repo: &str, issue: Option<&str>, credential: bool) ->
 mod tests {
     use super::test_project as project;
     use super::*;
+    use crate::testkit::default_forge;
 
     const REPO: &str = "https://git.example.internal/org/df.git";
 
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn lookup_ignores_case_a_trailing_dot_and_brackets() {
         let hosts = ProjectHosts::from_projects(
-            Some(&ForgeKind::Forgejo),
+            &default_forge("forgejo"),
             &[
                 project(REPO, None, true),
                 project("https://[2001:db8::1]/o/r.git", None, true),
@@ -234,7 +236,7 @@ mod tests {
         let served = project(REPO, None, true);
         let unserved = project(REPO, None, false);
         let tracker = project("https://other.example/o/r.git", Some(REPO), true);
-        let forge = Some(&ForgeKind::Forgejo);
+        let forge = &default_forge("forgejo");
         for projects in [[&served, &unserved], [&unserved, &served]] {
             let hosts = ProjectHosts::from_projects(forge, &projects.map(Clone::clone));
             assert_eq!(
@@ -253,7 +255,8 @@ mod tests {
 
     #[test]
     fn subdomains_and_wildcards_do_not_match() {
-        let hosts = ProjectHosts::from_projects(None, &[project(REPO, None, false)]);
+        let hosts =
+            ProjectHosts::from_projects(&ForgeRoutes::default(), &[project(REPO, None, false)]);
         assert!(hosts.get("api.git.example.internal").is_none());
         assert!(hosts.get("*.git.example.internal").is_none());
         assert!(hosts.get("example.internal").is_none());

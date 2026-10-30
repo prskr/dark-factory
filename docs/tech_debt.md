@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-77.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-80.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -29,6 +29,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-75: discussion during `split-long-functions` (`df-web`, 2026-10-29), after the Alpine components moved to `crates/df-web/assets/`.
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
 
 ## Summary
 
@@ -70,7 +71,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
 | TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
 | TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
-| TD-38 | low    | `df-plugins` forge client | Every `ForgeClient` method repeats resolve → retry → run → error mapping |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
 | TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP |
@@ -101,6 +101,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
 | TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
+| TD-78 | low    | `df-core` routing | Plain-HTTP routing table constructor for tests is public API |
+| TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
 
 ## Entries
 
@@ -405,14 +407,6 @@ The chart always sets the issuer name, so deployments are not affected. Running 
 
 **Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
 
-### TD-38 (S7). Duplicated call pipeline in `PluginForgeClient`
-
-`crates/df-plugins/src/forge.rs` (`impl ForgeClient for PluginForgeClient`)
-
-All five methods repeat `resolve` → `with_retries` → `host.run` → `convert::…` / `convert::from_error`. A new method or capability (an issue tracker plugin) copies it again, and a change to retries or error mapping must touch every copy.
-
-**Fix:** One private `call(project, |plugin, store| …)` helper that does resolve, retry, run and error mapping; the methods only build the guest call and convert the result.
-
 ### TD-39 (R2-P1). Shipped plugin component is not validated by a test
 
 `deploy/test_images.sh`, `deploy/BUILD.bazel` (`forgejo_plugin`)
@@ -710,6 +704,26 @@ Update the "Web UI scripts" rule in `AGENTS.md` with the result.
 **Matters when:** someone has to diagnose an outbox failure from the logs.
 
 **Fix:** a test with an outbox that cannot be written (a read-only directory) asserts the warning through `df_telemetry::testing::capture`. Do the same for the unlock path in a `df_test_postgres` test.
+
+### TD-78 (S5). Plain-HTTP routing table constructor is public API
+
+`crates/df-core/src/routing.rs` (`RoutingTable::from_plugins_allowing_plain_http`)
+
+The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls only `from_plugins`, but nothing stops another caller from building a table that sends forge tokens over plain HTTP.
+
+**Matters when:** a caller outside the tests uses it, for example a dev or e2e switch in the instance configuration.
+
+**Fix:** move the constructor behind the `test-util` feature (or into `df_core::testing`) once the Bazel production targets build `df_core` without `test-util`.
+
+### TD-79 (P5). Skipping a plugin without `pull-requests` has no test
+
+`crates/dark-factory/src/forge.rs` (`load_forge_plugins`)
+
+Startup logs a plugin without the `pull-requests` capability as "not a forge plugin" and skips it (design D3 of `iter2-multi-forge`). No component without `pull-requests` exists, so the path is untested.
+
+**Matters when:** the first plugin that only exports `issues` (an issue tracker) is added.
+
+**Fix:** a startup test that loads that plugin next to Forgejo and asserts it is skipped with an error event.
 
 ## Accepted decisions
 

@@ -301,6 +301,12 @@ plugins:
     callTimeoutSeconds: {{ $plugin.callTimeoutSeconds | default 30 }}
     memoryMib: {{ $plugin.memoryMib | default 64 }}
     settings: {{ $plugin.settings | default dict | toJson }}
+    {{- with $plugin.hosts }}
+    hosts: {{ toJson . }}
+    {{- end }}
+    {{- with $plugin.authScheme }}
+    authScheme: {{ quote . }}
+    {{- end }}
   {{- end }}
 {{- end }}
 {{- end }}
