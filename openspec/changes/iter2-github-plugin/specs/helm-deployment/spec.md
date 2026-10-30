@@ -29,6 +29,10 @@ For each `plugins.<name>` entry with an image, the chart SHALL mount it as a rea
 - **WHEN** the chart is rendered with default values
 - **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it is the default plugin, and `plugins.github` has `authScheme: bearer` and `hosts: [{host: github.com, apiUrl: https://api.github.com}]`
 
+#### Scenario: Default release has no hosts
+- **WHEN** the chart is rendered with default values
+- **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it serves every project on a host no other plugin claims
+
 #### Scenario: Entry removed
 - **WHEN** `plugins.github` is set to `null`
 - **THEN** no `plugin-github` volume is rendered, the instance config has no `github` entry, and projects on `github.com` go to the default plugin

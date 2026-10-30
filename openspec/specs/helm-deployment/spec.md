@@ -151,7 +151,7 @@ The chart SHALL declare `kubeVersion: ">=1.36.0-0"` and SHALL NOT offer a runtim
 - **THEN** the instance configuration has no `runtimeDelivery` key and `values.yaml` has no `sandboxNamespace.runtimeDelivery`
 
 ### Requirement: Plugin images
-For each entry under `plugins.<name>` with an image, the chart SHALL mount that image read-only as an image volume at `/plugins/<name>` of the control plane pod and SHALL write `plugins.<name>.path: /plugins/<name>/plugin.wasm`, the call timeout, the memory limit and the settings into the instance config. An entry without an image SHALL require `path` and SHALL render only the config. The default values SHALL configure `forgejo` with the Forgejo plugin image of the chart's app version.
+For each entry under `plugins.<name>` with an image, the chart SHALL mount it as a read-only image volume at `/plugins/<name>` of the control plane pod and SHALL write `plugins.<name>.path: /plugins/<name>/plugin.wasm`, call timeout, memory limit, settings and, when set, `hosts` and `authScheme` into the instance config. An entry without an image SHALL require `path` and SHALL render only the config. The default values SHALL configure `forgejo` with its plugin image of the chart's app version.
 
 #### Scenario: Default release
 - **WHEN** the chart is rendered with default values
@@ -168,6 +168,14 @@ For each entry under `plugins.<name>` with an image, the chart SHALL mount that 
 #### Scenario: Entry without image or path
 - **WHEN** a plugin entry has neither an image nor a path
 - **THEN** rendering fails with a message naming the plugin
+
+#### Scenario: Routing values
+- **WHEN** `plugins.github` sets `hosts: [{host: github.com, apiUrl: https://api.github.com}]` and `authScheme: bearer`
+- **THEN** the instance config contains both values unchanged under `plugins.github`
+
+#### Scenario: Default release has no hosts
+- **WHEN** the chart is rendered with default values
+- **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it serves every project
 
 ### Requirement: Plugin names
 Plugin names under `plugins` SHALL be lowercase DNS labels of at most 54 characters, so that the volume name `plugin-<name>` is a valid DNS label.

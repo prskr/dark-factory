@@ -126,7 +126,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Replace agent-sandbox with plain scheduled Pods, if it no longer adds anything the control plane needs | idea | `docs/demo.md` (iteration 1 spike results) |
 | CI job running the e2e suite (`just e2e-local` on Docker) | decided | `openspec/changes/archive/2026-10-31-iter1-demo-e2e/design.md` (Non-Goals) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
-| SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |
+| SSH repository URLs, issue-only trackers | idea | `openspec/changes/archive/2026-10-30-iter2-multi-forge` |
 | GitHub App authentication for the GitHub plugin: installation tokens minted and cached by the host (JWT signed with the app key); needs an ADR | idea | `openspec/changes/iter2-github-plugin` |
 | Shared crate for forge plugins (HTTP transport, draft prefixes), once a third forge plugin exists | idea | `openspec/changes/iter2-github-plugin` (D4) |
 | Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
