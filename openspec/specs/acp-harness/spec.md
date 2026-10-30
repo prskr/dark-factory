@@ -7,11 +7,7 @@ Runs an external agent (Claude Code first) through the Agent Client Protocol for
 ## Requirements
 
 ### Requirement: Harness start
-The runtime SHALL write the harness settings from `Assign` under `/data/home` (overwriting what's there), start the adapter command of `Assign` (the project's adapter command if it sets one, otherwise the harness default, by default `/opt/harness/claude-code/bin/claude-agent-acp` from the harness image volume) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment, `Assign` env and `HarnessCredentials` env, and SHALL NOT advertise ACP file-system or terminal client capabilities. Harness credentials SHALL never be written to `/data`.
-
-#### Scenario: Token stays off the volume
-- **WHEN** the harness runs with `CLAUDE_CODE_OAUTH_TOKEN`
-- **THEN** no file under `/data` contains the token value
+The runtime SHALL write the harness settings from `Assign` under `/data/home` (overwriting what's there), start the adapter command of `Assign` (the project's adapter command if it sets one, otherwise the harness default, by default `/opt/harness/claude-code/bin/claude-agent-acp` from the harness image volume) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment, `Assign` env and `HarnessCredentials` env, and SHALL NOT advertise ACP file-system or terminal client capabilities.
 
 #### Scenario: Adapter from the harness image
 - **WHEN** a run of a project without an adapter command starts
@@ -20,6 +16,13 @@ The runtime SHALL write the harness settings from `Assign` under `/data/home` (o
 #### Scenario: Adapter from the project image
 - **WHEN** a run of a project with adapter command `/opt/harness/bin/fake-acp-agent` starts
 - **THEN** the runtime starts that command
+
+### Requirement: Harness credentials stay off the volume
+Harness credentials SHALL never be written to `/data`.
+
+#### Scenario: Token stays off the volume
+- **WHEN** the harness runs with `CLAUDE_CODE_OAUTH_TOKEN`
+- **THEN** no file under `/data` contains the token value
 
 ### Requirement: Session continuity
 With `Assign.continuation.harness_session_id` set, the runtime SHALL resume via `session/load`; if loading fails or isn't supported, it SHALL start a new session and prepend `continuation.summary` to the first prompt. The factory MCP server SHALL be registered in every session.
@@ -65,11 +68,7 @@ The runtime SHALL translate ACP updates into transcript v1 events: agent text an
 - **THEN** usage is read from the Claude Code session log for that turn
 
 ### Requirement: Run outcome
-After each turn the runtime SHALL continue with queued prompts if any; otherwise it SHALL finalize with outcome: `COMPLETED` if a tool result requested ending the run; `RATE_LIMITED` (with retry time if known) if the provider rate-limited; `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit; `CANCELLED` on `Cancel`; `FAILED` if the harness crashed. Otherwise the turn ended normally: the runtime SHALL wait as described in "Idle wait after a normal turn end" and, unless a prompt or `Cancel` arrives, finalize on `Release` with `BLOCKED` if the last turn had a blocking request and `END_TURN` otherwise.
-
-#### Scenario: Agent asks a question in text
-- **WHEN** the turn ends normally, no prompts are queued and the control plane sends `Release`
-- **THEN** the run finalizes with `END_TURN`
+After each turn the runtime SHALL continue with queued prompts if any; otherwise it SHALL finalize with outcome: `COMPLETED` if a tool result requested ending the run; `RATE_LIMITED` (with retry time if known) if the provider rate-limited; `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit; `CANCELLED` on `Cancel`; `FAILED` if the harness crashed.
 
 #### Scenario: complete_task called
 - **WHEN** a `ToolCallResult` with `end_run_after_turn` arrived during the turn
@@ -78,6 +77,13 @@ After each turn the runtime SHALL continue with queued prompts if any; otherwise
 #### Scenario: Subscription limit
 - **WHEN** the harness reports a provider rate limit
 - **THEN** `TurnEnded.stop_reason` is `RATE_LIMITED` and the run finalizes with `RUN_OUTCOME_RATE_LIMITED`
+
+### Requirement: Outcome after a normal turn end
+When a turn ended normally and no prompt is queued, the runtime SHALL wait as described in "Idle wait after a normal turn end" and, unless a prompt or `Cancel` arrives, finalize on `Release` with `BLOCKED` if the last turn had a blocking request and `END_TURN` otherwise.
+
+#### Scenario: Agent asks a question in text
+- **WHEN** the turn ends normally, no prompts are queued and the control plane sends `Release`
+- **THEN** the run finalizes with `END_TURN`
 
 #### Scenario: Nobody answered in time
 - **WHEN** the control plane sends `Release` after the deadline of a blocking question passed without a prompt
