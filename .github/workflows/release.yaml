@@ -28,7 +28,7 @@ jobs:
 
       # Static musl binaries for amd64 and arm64 (see docs/development.md)
       - name: Verify images
-        run: bazel test //deploy:images_structure_test
+        run: bazel test //deploy:images_structure_test //deploy/images/claude-harness:structure_test
 
       # Version tag for release tags (v1.2.3), `dev` for manual runs from a branch
       - name: Push images
@@ -36,7 +36,20 @@ jobs:
           IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
         run: bazel run --//deploy:image_tag="$IMAGE_TAG" //deploy:push_images
 
-  # Reference images built from Dockerfiles (openspec change harness-images, design D10)
+      # The harness image is tagged with the adapter version from its package.json (`<version>-dev` for
+      # manual runs from a branch, so a release tag is never overwritten), `latest` only for release tags.
+      - name: Push harness image
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          version="$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"]' deploy/images/claude-harness/package.json)"
+          if [[ "$REF_TYPE" != tag ]]; then version+="-dev"; fi
+          bazel run --//deploy/images/claude-harness:image_tag="$version" //deploy/images/claude-harness:push
+          if [[ "$REF_TYPE" == tag ]]; then
+            bazel run --//deploy/images/claude-harness:image_tag=latest //deploy/images/claude-harness:push
+          fi
+
+  # Reference project image built from a Dockerfile (openspec change harness-images, design D10)
   harness-images:
     runs-on: ubuntu-latest
     permissions:
@@ -45,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [claude-harness, claude-project]
+        image: [claude-project]
     env:
       REGISTRY_IMAGE: ghcr.io/prskr/dark-factory/${{ matrix.image }}
     steps:
@@ -53,19 +66,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # The harness image is tagged with the adapter version (ARG of its Dockerfile; `<version>-dev` for
-      # manual runs from a branch, so a release tag is never overwritten), the project image with the
-      # release tag (`dev` for manual runs). `latest` only for release tags.
+      # The release tag (`dev` for manual runs), `latest` only for release tags
       - name: Tags
         id: tags
         run: |
-          if [[ "$MATRIX_IMAGE" == claude-harness ]]; then
-            version="$(sed -n 's/^ARG CLAUDE_AGENT_ACP_VERSION=//p' deploy/images/claude-harness/Dockerfile)"
-            if [[ "$REF_TYPE" != tag ]]; then version+="-dev"; fi
-          else
-            version="${REF_TYPE_TAG:-dev}"
-          fi
-          tags="$REGISTRY_IMAGE:$version"
+          tags="$REGISTRY_IMAGE:${REF_TYPE_TAG:-dev}"
           if [[ "$REF_TYPE" == tag ]]; then tags+=$'\n'"$REGISTRY_IMAGE:latest"; fi
           {
             echo "tags<<EOF"
@@ -73,7 +78,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
         env:
-          MATRIX_IMAGE: ${{ matrix.image }}
           REF_TYPE: ${{ github.ref_type }}
           REF_TYPE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 

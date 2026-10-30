@@ -256,6 +256,8 @@ sh_binary(
         "$(location :runtime_digest)",
         "$(location :test_project_digest)",
         "$(location :plugin_forgejo_digest)",
+        "$(location //deploy/images/claude-harness:push)",
+        "$(location //deploy/images/claude-harness:digest)",
         "$(location helm/dark-factory/Chart.yaml)",
         "$(location values-dev.yaml)",
     ],
@@ -268,6 +270,8 @@ sh_binary(
         ":push_images",
         ":runtime_digest",
         ":test_project_digest",
+        "//deploy/images/claude-harness:digest",
+        "//deploy/images/claude-harness:push",
     ],
 )
 

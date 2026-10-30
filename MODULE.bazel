@@ -9,9 +9,11 @@ module(
 RUST_VERSION = "1.99.1"
 
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "aspect_rules_js", version = "3.5.2")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "35.1")
+bazel_dep(name = "rules_cc", version = "0.2.27")
 
 bazel_dep(name = "rules_buf", version = "0.5.4", dev_dependency = True)
 
@@ -258,4 +260,62 @@ pull(
     ],
     registry = "mirror.gcr.io",
     repository = "library/buildpack-deps",
+)
+
+# Claude harness image (deploy/images/claude-harness): the ACP adapter and its npm dependencies from
+# the pnpm lockfile, Node.js from the unofficial musl builds and the musl runtime libraries (loader,
+# libstdc++, libgcc_s) from the Bootlin toolchains. Node's libstdc++ needs GCC >= 13, so the GCC 11
+# sysroot of toolchains_musl does not do.
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm_claude_harness",
+    pnpm_lock = "//deploy/images/claude-harness:pnpm-lock.yaml",
+    # the native Claude Code CLI of each architecture, at a version-free label
+    public_hoist_packages = {
+        "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": ["deploy/images/claude-harness"],
+        "@anthropic-ai/claude-agent-sdk-linux-x64-musl": ["deploy/images/claude-harness"],
+    },
+)
+use_repo(npm, "npm_claude_harness")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+NODE_VERSION = "v24.22.2"
+
+NODE_BUILD = 'exports_files(["bin/node"], visibility = ["//visibility:public"])'
+
+http_archive(
+    name = "node_linux_amd64_musl",
+    build_file_content = NODE_BUILD,
+    sha256 = "dfee3453f0557e77dfbd8f8b1c981cd7320dd6bf4e799abe007c12e8c1ab3b54",
+    strip_prefix = "node-{0}-linux-x64-musl".format(NODE_VERSION),
+    url = "https://unofficial-builds.nodejs.org/download/release/{0}/node-{0}-linux-x64-musl.tar.xz".format(NODE_VERSION),
+)
+
+http_archive(
+    name = "node_linux_arm64_musl",
+    build_file_content = NODE_BUILD,
+    sha256 = "73be937844e8b6a0199e0a9554863f7afdbcab39da7cf5edbd8e83a7001ef4fc",
+    strip_prefix = "node-{0}-linux-arm64-musl".format(NODE_VERSION),
+    url = "https://unofficial-builds.nodejs.org/download/release/{0}/node-{0}-linux-arm64-musl.tar.xz".format(NODE_VERSION),
+)
+
+BOOTLIN_RELEASE = "stable-2026.08-1"
+
+MUSL_RUNTIME_BUILD = 'exports_files(["lib/libc.so", "lib/libgcc_s.so.1", "usr/lib/libstdc++.so.6"], visibility = ["//visibility:public"])'
+
+http_archive(
+    name = "musl_runtime_linux_amd64",
+    build_file_content = MUSL_RUNTIME_BUILD,
+    sha256 = "78d3a4683d6ac47b5ee73bd5bce210b55eb93dff1b137c61298af97eb0d2b5a6",
+    strip_prefix = "x86-64--musl--{0}/x86_64-buildroot-linux-musl/sysroot".format(BOOTLIN_RELEASE),
+    url = "https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/x86-64--musl--{0}.tar.xz".format(BOOTLIN_RELEASE),
+)
+
+http_archive(
+    name = "musl_runtime_linux_arm64",
+    build_file_content = MUSL_RUNTIME_BUILD,
+    sha256 = "b388c480a48e8e9f9b99e3d14e69219c4d61e5a2424a82faecb88a015b781a60",
+    strip_prefix = "aarch64--musl--{0}/aarch64-buildroot-linux-musl/sysroot".format(BOOTLIN_RELEASE),
+    url = "https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--{0}.tar.xz".format(BOOTLIN_RELEASE),
 )
