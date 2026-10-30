@@ -60,15 +60,16 @@ configuration, per-project inputs, Forgejo token scopes).
 
 ### Retries
 
-`rate-limited` (waits `retry-after`, capped at 30 s, 1 s if absent) and `transport` (waits 1 s) are
-retried at most 3 times. All other errors are returned. `add-comment` is not idempotent; a retry can
-rarely create a duplicate comment (accepted by the contract).
+`rate-limited` waits `retry-after` (1 s if absent) and retries; a `retry-after` above 30 s is returned
+without retrying. `transport` waits 1 s. Both are retried at most 3 times. All other errors are
+returned. `add-comment` is not idempotent; a retry can rarely create a duplicate comment (accepted by
+the contract).
 
 ## Development
 
 ```bash
 # Tests use prebuilt plugin components (target wasm32-wasip2 from rust-toolchain.toml):
-cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
+cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
 cargo test -p df-plugins
 # Pull request lifecycle against a real Forgejo (variables: see tests/homelab.rs)
 cargo test -p df-plugins --test homelab -- --ignored
@@ -78,7 +79,7 @@ cargo llvm-cov -p df-plugins --summary-only
 
 The tests do not build the components themselves: that would need the `wasm32-wasip2` target and a
 nested `cargo` inside every test run (slow, and not hermetic under Bazel). They read
-`FORGEJO_PLUGIN_WASM` / `TEST_PROBE_WASM` (set by the Bazel targets from the `//plugins/...`
+`FORGEJO_PLUGIN_WASM` / `GITHUB_PLUGIN_WASM` / `TEST_PROBE_WASM` (set by the Bazel targets from the `//plugins/...`
 outputs) or, without them, `target/wasm32-wasip2/debug/*.wasm`, and fail with the build command if a
 file is missing. The test plugin `plugins/test-probe` misbehaves on request (environment dump, endless loop, memory hog,
 stderr) to test the sandbox.

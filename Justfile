@@ -60,7 +60,7 @@ build:
 # Build the WebAssembly plugin components the df-plugins and dark-factory tests load. Uses rustup's
 # cargo: the `cargo` from .bazel_env only has the host's standard library, not wasm32-wasip2.
 plugins:
-    RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
+    RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
 
 # Run all tests (or the ones matching FILTER); database tests share one `df-test-postgres` container
 test *FILTER: plugins

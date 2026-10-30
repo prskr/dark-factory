@@ -48,9 +48,13 @@ rust_test(
 # them with cargo). `image_component` loads the optimized component that goes into the plugin image.
 FORGEJO = "//plugins/forgejo"
 
+GITHUB = "//plugins/github"
+
 PROBE = "//plugins/test-probe"
 
 IMAGE_FORGEJO = "//deploy:forgejo_plugin"
+
+IMAGE_GITHUB = "//deploy:github_plugin"
 
 [
     rust_test(
@@ -78,13 +82,18 @@ IMAGE_FORGEJO = "//deploy:forgejo_plugin"
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,
         },
+        "github": {"GITHUB_PLUGIN_WASM": GITHUB},
         "homelab": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,
         },
-        "image_component": {"FORGEJO_PLUGIN_WASM": IMAGE_FORGEJO},
+        "image_component": {
+            "FORGEJO_PLUGIN_WASM": IMAGE_FORGEJO,
+            "GITHUB_PLUGIN_WASM": IMAGE_GITHUB,
+        },
         "load": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "GITHUB_PLUGIN_WASM": GITHUB,
             "TEST_PROBE_WASM": PROBE,
         },
         "routing": {

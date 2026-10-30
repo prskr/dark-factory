@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-80.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-81.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -29,7 +29,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-75: discussion during `split-long-functions` (`df-web`, 2026-10-29), after the Alpine components moved to `crates/df-web/assets/`.
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
+- Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -101,8 +103,10 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
 | TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
+| TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
 | TD-78 | low    | `df-core` routing | Plain-HTTP routing table constructor for tests is public API |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
+| TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
 
 ## Entries
 
@@ -705,6 +709,16 @@ Update the "Web UI scripts" rule in `AGENTS.md` with the result.
 
 **Fix:** a test with an outbox that cannot be written (a read-only directory) asserts the warning through `df_telemetry::testing::capture`. Do the same for the unlock path in a `df_test_postgres` test.
 
+### TD-77 (S115, S116). Plugin image targets are copied per plugin
+
+`deploy/BUILD.bazel` (`<name>_plugin`, `plugin_<name>_layer`, `_manifest`, `_image`, `_digest`, `_oci_layout`, `push_plugin_<name>`), `deploy/test_images.sh` (plugin content check)
+
+Each plugin image repeats the same six targets and a push target with only the name changed, and the image test picks a plugin's layout directory with an `if` on its name.
+
+**Matters when:** a third plugin image is added, or the image layout changes (every copy has to change).
+
+**Fix:** generate the targets with a list comprehension or a small macro over the plugin names, as `crates/df-plugins/BUILD.bazel` does for its test targets, and pass `name=dir` pairs to `test_images.sh`.
+
 ### TD-78 (S5). Plain-HTTP routing table constructor is public API
 
 `crates/df-core/src/routing.rs` (`RoutingTable::from_plugins_allowing_plain_http`)
@@ -724,6 +738,16 @@ Startup logs a plugin without the `pull-requests` capability as "not a forge plu
 **Matters when:** the first plugin that only exports `issues` (an issue tracker) is added.
 
 **Fix:** a startup test that loads that plugin next to Forgejo and asserts it is skipped with an error event.
+
+### TD-80 (S2, S3). Forge plugins copy transport and draft helpers
+
+`plugins/github/src/draft.rs` (`DEFAULT_PREFIXES`, `parse_prefixes`, `split_title`, `apply_title` and their tests), `plugins/github/src/wasi_transport.rs` (`write_body`, `read_body`, `internal`, `transport`, `WRITE_CHUNK`)
+
+Both files duplicate `plugins/forgejo/src/draft.rs` and `plugins/forgejo/src/wasi_transport.rs`.
+
+**Matters when:** a fix in one plugin has to be repeated in the other, or a third plugin copies them again.
+
+**Fix:** a small shared crate such as `plugins/forge-common`. Each plugin keeps its own WIT bindings; the shared code works on plain types.
 
 ## Accepted decisions
 

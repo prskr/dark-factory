@@ -65,13 +65,13 @@ To measure line coverage across `df-core` and `df-db`:
 cargo llvm-cov --workspace
 ```
 
-Tests of `df-plugins` and `dark-factory` use prebuilt WebAssembly plugin components and do not build them. Build them first (Bazel sets `FORGEJO_PLUGIN_WASM` / `TEST_PROBE_WASM` itself):
+Tests of `df-plugins` and `dark-factory` use prebuilt WebAssembly plugin components and do not build them. Build them first (Bazel sets `FORGEJO_PLUGIN_WASM` / `GITHUB_PLUGIN_WASM` / `TEST_PROBE_WASM` itself):
 
 ```bash
-cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin
+cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
 ```
 
-With direnv, `cargo` and `rustc` on `PATH` are the Bazel-managed wrappers from `.bazel_env/bin`, which only have the host's standard library. Build the plugins with rustup's toolchain instead, as `just plugins` does: `RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin`.
+With direnv, `cargo` and `rustc` on `PATH` are the Bazel-managed wrappers from `.bazel_env/bin`, which only have the host's standard library. Build the plugins with rustup's toolchain instead, as `just plugins` does: `RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin`.
 
 ## 4. Updating `sqlx` Offline Metadata
 

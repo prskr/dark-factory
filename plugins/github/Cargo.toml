@@ -1,0 +1,51 @@
+[package]
+name = "github-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints.rust]
+unsafe_code = "allow"
+unused_qualifications = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+too_many_lines = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+let_underscore_must_use = "warn"
+let_underscore_future = "warn"
+map_err_ignore = "warn"
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+indexing_slicing = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+dbg_macro = "warn"
+pedantic = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+assert_is_empty = "allow"
+missing_panics_doc = "allow"
+needless_pass_by_value = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+excessive_nesting = "warn"
+
+[dependencies]
+percent-encoding.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wit-bindgen.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
