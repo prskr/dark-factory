@@ -26,6 +26,7 @@ use tokio::sync::broadcast;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
+use crate::components::forms::INPUT_CLASS;
 use crate::components::{ButtonKind, EmptyPanel, EmptySize, action_class, page_header, tone_badge};
 use crate::components::{Tone, chip};
 use crate::layout::{Nav, layout};
@@ -239,7 +240,7 @@ fn actions(card: &CardData, target: &str) -> Markup {
             form hx-post=(post("answer")) hx-target=(target) hx-swap="outerHTML" class="flex gap-2" {
                 input type="text" name="answer" required maxlength="4000" autocomplete="off"
                     aria-label="Your answer" placeholder="Your answer"
-                    class="min-h-11 min-w-0 flex-1 rounded-lg border border-line-strong bg-panel px-3 text-sm lg:min-h-9";
+                    class={(INPUT_CLASS) " min-w-0 flex-1"};
                 button type="submit" class=(action_class(ButtonKind::Primary)) { "Answer" }
             }
         },
@@ -258,7 +259,7 @@ fn actions(card: &CardData, target: &str) -> Markup {
                 }
                 input type="text" name="comment" maxlength="4000" autocomplete="off"
                     aria-label="Comment (optional)" placeholder="Comment (optional)"
-                    class="min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 text-sm lg:min-h-9";
+                    class=(INPUT_CLASS);
                 div class="flex flex-wrap gap-2" {
                     // htmx 4 does not inherit target and swap from the form.
                     button type="submit" hx-post=(post("approve")) hx-target=(target) hx-swap="outerHTML"

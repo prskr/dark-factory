@@ -7,7 +7,7 @@ Reference for everything that renders in `crates/df-web`. New views (egress log,
 1. **Tokens, not colors.** A component never names a palette color (`bg-slate-900`). It uses a semantic token (`bg-panel`, `text-muted`). Both themes come from the same utilities.
 2. **One primary action per view.** Only the primary action is filled with the accent color. Everything else is secondary or ghost.
 3. **The accent is a fill, not a text color on light surfaces.** `#00ff41` has a contrast of 1.4:1 on white. Text, links and focus rings use `accent-text`; on the rail the focus ring uses `accent`, because `accent-text` on `rail` is only 2.5:1.
-4. **Phone first, desktop enhanced.** Controls are at least 44 x 44 px (`min-h-11`) and 36 px from 1024 px on (`lg:`). No hover-only interactions. No page-level horizontal scrolling; wide content scrolls in its own box.
+4. **Phone first, desktop enhanced.** Controls are at least 44 x 44 px (`min-h-11`) below 1024 px. From 1024 px (`lg:`), buttons and inputs are 40 px, icon-only buttons 36 px, menu rows and segments 36 px. No hover-only interactions. No page-level horizontal scrolling; wide content scrolls in its own box.
 5. **Server-rendered, testable.** Components are maud functions. Each has an HTML unit test; pages are asserted as HTML.
 6. **Self-contained.** Fonts, icons, scripts and styles are served by the control plane; no third-party host.
 
@@ -94,8 +94,8 @@ Inter (variable, Latin) for text, JetBrains Mono (variable, Latin) for task keys
 ## Spacing, radius, breakpoints
 
 - Spacing: Tailwind's 4 px scale; gaps between related controls 8 px (`gap-2`), blocks 12-16 px (`space-y-3`, `p-4`).
-- Radius: inputs and buttons 8 px (`rounded-lg`), cards and dialogs 16 px (`rounded-2xl`), chips and badges full (`rounded-full`).
-- Breakpoints: below 768 px phone layout (bottom bar with a floating create button, one screen at a time); `md` 768 px (rail, list and transcript side by side, details as a panel over the transcript, so a browser split screen keeps the desktop shell); `lg` 1024 px (smaller touch targets); `xl` 1280 px (details become a column).
+- Radius: inputs and icon buttons 8 px (`rounded-lg`), text buttons 10 px (`rounded-[10px]`), cards and dialogs 16 px (`rounded-2xl`), chips and badges full (`rounded-full`).
+- Breakpoints: below 768 px phone layout (bottom bar with a floating create button, one screen at a time); `md` 768 px (rail, list and transcript side by side, details as a panel over the transcript, so a browser split screen keeps the desktop shell); `lg` 1024 px (smaller touch targets: text buttons and inputs 40 px, icon buttons 36 px); `xl` 1280 px (details become a column).
 
 ## Icons
 
@@ -111,8 +111,11 @@ All in `df_web::components`; signatures abbreviated.
 
 - `ButtonKind::{Primary, Secondary, Ghost}`: filled with the accent, outlined, text only.
 - `button(kind, label)`, `submit_button(kind, label)`, `link_button(kind, href, label)`: a `type=button` button, a submit button, a link that looks like a button.
+- Buttons are 44 px high below 1024 px and 40 px from there on, radius 10 px, padding 16 px, width follows the label. Primary labels are `font-semibold`, Secondary and Ghost `font-medium`. Secondary borders use `line` (the label names the control, so the 3:1 border contrast does not apply); inputs keep `line-strong`.
+- Designed, not built (`ButtonKind` has no variants for them until a screen needs one): `Ink` (`ink` fill, inverse label `app`; a strong action on a light surface where the accent would compete with another primary action) and `Danger` (`panel` fill, `danger` border, `status-failed-fg` label; a destructive text action such as delete or revoke next to Cancel in a confirmation).
+- Radios and checkboxes use `accent-color: var(--accent-text)` (base layer of `styles/input.css`), as PenPot `color.accent-strong`.
 - `action_class(kind)`: the classes, for elements that need their own attributes (`hx-*`, `x-*`).
-- `ICON_BUTTON_CLASS`: square 44 px (36 px from 1024 px) icon-only control; needs `aria-label`.
+- `ICON_BUTTON_CLASS`: the one icon-only control (PenPot `Icon button`): ghost (no fill, `muted` icon, `sunk` fill and `ink` icon on hover), square 44 px, 36 px from 1024 px, radius 8 px, 20 px icon; needs `aria-label`. Every square icon-only control uses it (dialog close, remove, delete, details, row menu); a color variant goes on top where the design keeps an accent icon (PR / issue links of the details strip: `text-accent-text!`). Round icon controls (`ROUND_ACTION_CLASS`: Send, Create task; the composer's round "Link issue" toggle) are their own control. A chip that is itself the link (the phone project filter) is not an icon button.
 - `ROUND_ACTION_CLASS` / `ROUND_PILL_CLASS`: the round accent action inside a message box or card: an icon in a 44 px circle (Send, Create task; needs `aria-label`) and the pill with a word (Save). Use them instead of repeating the classes.
 
 Do: one primary action per view; give icon buttons an `aria-label`. Don't: use `Primary` for navigation or dismissal.
@@ -204,7 +207,7 @@ Do: keep the stack and the input in one Alpine scope (`draft`, `saved`, `editing
 - **Page shell.** Rail (desktop) or bottom bar (phone) around `main`. The phone bottom bar holds Tasks, Requests (count badge) and Projects at equal widths. The create action of the screen (New task, "New project" on Projects) is a separate round button (`floating_create`, 56 px, `accent`, shadow `shadow-fab`, plus icon 28 px, stroke 3) fixed 16 px from the right edge and 16 px above the bar, below 768 px only; it hides on the transcript screen like the bar. `main` pads 152 px at the bottom on phones (bar 64 + gap 16 + button 56 + gap 16), and the task list's own scrolling list 88 px, so the last row stays reachable. Pages outside the navigation (errors) use `Nav::None`.
 - **Three-column workspace.** List, transcript, details (`/tasks`, `/tasks/{key}`, one template). `body[data-view=list|task]` says which screen a phone shows. Selecting a task is an `hx-get` of the page with `hx-select="#ws-detail"` and `hx-push-url`: the list and its stream stay untouched, the old detail stream closes with the replaced region.
 - **List and detail on phones.** The list is a screen of its own; the transcript has a back link and the details open as a bottom sheet.
-- **Composer details.** The project chip and the filter menu trigger are 10 px rounded rectangles; the assignee picker has no border; Create task uses the arrow-up icon; the text has no outline and the card shows focus with a stronger neutral border (`focus-within:border-line-strong`, no accent; the transcript message box does the same, both are `border-line` at rest); the close button has no hover background.
+- **Composer details.** The project chip and the filter menu trigger are 10 px rounded rectangles; the assignee picker has no border; Create task uses the arrow-up icon; the text has no outline and the card shows focus with a stronger neutral border (`focus-within:border-line-strong`, no accent; the transcript message box does the same, both are `border-line` at rest); the close button is the shared icon button.
 - **New-task composer.** A `Bare` dialog: no frame, the project chip and a linked-issue chip above a rounded card that holds the description, a round `+` button on the left ("Link issue", `aria-expanded`, accent border and soft fill while open) that opens a 280 px popover below the card (label "Linked issue", a mono `#` prefix and the numeric field `issue_number`, a help sentence naming the selected project; Escape and a click outside close it; inline below the card on phones, where the bottom sheet leaves no room) and, once a number is entered, an "Issue #n" chip above the card with a remove button, the assignee picker next to the round submit button ("Create task"); there is no "Options" text.
 - **Sheets and dialogs.** A modal task (composer) is a `dialog`; context that belongs to a view (details) is a `details_panel`.
 - **Forms and validation.** `hx-post` on the form with `hx-target="this"` (or `#form`) and `outerHTML`; failure answers 422 with the form. Success answers `HX-Redirect` (the composer opens the new task) or, for configuration forms in a modal, the updated list with `HX-Retarget` and `HX-Trigger: modal-close`.

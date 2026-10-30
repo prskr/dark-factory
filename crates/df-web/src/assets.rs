@@ -102,6 +102,20 @@ mod tests {
     }
 
     #[test]
+    fn radios_and_checkboxes_use_the_accent_text_color() {
+        let css = app_css().expect("app.css is embedded");
+        let rule = css
+            .find("accent-color:var(--accent-text)")
+            .map(|at| &css[..at])
+            .and_then(|head| head.rsplit('{').nth(1))
+            .unwrap_or_default();
+        assert!(
+            rule.contains("input[type=radio]") && rule.contains("input[type=checkbox]"),
+            "{rule}"
+        );
+    }
+
+    #[test]
     fn embeds_stylesheet_and_vendored_scripts() {
         assert!(!app_css().expect("app.css is embedded").is_empty());
         for path in [

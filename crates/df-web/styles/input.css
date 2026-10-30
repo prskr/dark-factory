@@ -149,6 +149,11 @@
     background-color: var(--app);
     color: var(--ink);
   }
+  /* Checked radios and checkboxes use the accent text tone (3:1 on the panel in both themes). */
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--accent-text);
+  }
   /* Visible keyboard focus everywhere. */
   :focus-visible {
     outline: 2px solid var(--accent-text);

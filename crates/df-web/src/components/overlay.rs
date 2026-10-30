@@ -55,15 +55,11 @@ pub fn dialog_with(id: &str, title: &str, style: DialogStyle, body: Markup) -> M
     }
 }
 
-/// Like [`ICON_BUTTON_CLASS`] without a background on hover (the button sits on a card or on the
-/// backdrop).
-const CLOSE_BUTTON_CLASS: &str = "inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted hover:text-ink lg:size-9";
-
 /// The close button of a dialog; closing removes the dialog. A plain button, so it can sit inside
 /// the dialog's own form.
 pub fn dialog_close() -> Markup {
     html! {
-        button type="button" class=(CLOSE_BUTTON_CLASS) aria-label="Close" "x-on:click"="$el.closest('dialog').close()" { (icon(Icon::Close)) }
+        button type="button" class=(ICON_BUTTON_CLASS) aria-label="Close" "x-on:click"="$el.closest('dialog').close()" { (icon(Icon::Close)) }
     }
 }
 
@@ -184,9 +180,9 @@ mod tests {
     }
 
     #[test]
-    fn the_dialog_close_button_has_no_background_on_hover() {
+    fn the_dialog_close_button_is_the_icon_button() {
         let html = dialog_close().into_string();
-        assert!(!html.contains("hover:bg-"), "{html}");
+        assert!(html.contains(ICON_BUTTON_CLASS), "{html}");
     }
 
     #[test]

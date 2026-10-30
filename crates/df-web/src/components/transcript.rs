@@ -361,6 +361,10 @@ mod tests {
             held.contains("hx-delete=\"/tasks/DF-1/messages/abc\"")
                 && held.contains("aria-label=\"Remove queued message\"")
         );
+        for label in ["Edit queued message", "Remove queued message"] {
+            let button = crate::testkit::tag_around(&held, &format!("aria-label=\"{label}\""));
+            assert!(button.contains(ICON_BUTTON_CLASS), "{button}");
+        }
         assert!(
             held.contains("editing === 'abc'"),
             "highlighted while edited"

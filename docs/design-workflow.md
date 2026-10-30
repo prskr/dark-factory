@@ -53,7 +53,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 
 | Page | Content |
 |---|---|
-| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card` |
+| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance) |
 | Desktop | Main workspace and its variants |
 | Phone | Phone boards |
 | Flows (filter, new task) | Project filter, new task composer |
@@ -105,7 +105,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 
 - Elements of the "Rejected" page are not built (request URL, query parameters, headers, response details; "Last matched" and "Matched N requests").
 - The traffic page filters by persona and task, not by sandbox, and labels sandboxes with task key and run number.
-- Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only. The scope radios use the browser's default style (no `accent-color`).
+- Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 

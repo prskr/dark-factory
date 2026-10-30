@@ -329,6 +329,12 @@ async fn rule_rows_show_icon_port_scope_and_a_named_delete_button() {
         page.contains("aria-label=\"Delete egress rule nativelink/scheduler\""),
         "{page}"
     );
+    let delete =
+        crate::testkit::tag_around(&page, "aria-label=\"Delete egress rule github.com:443\"");
+    assert!(
+        delete.contains(crate::components::ICON_BUTTON_CLASS),
+        "{delete}"
+    );
 }
 
 #[tokio::test]

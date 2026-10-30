@@ -328,6 +328,14 @@ async fn details_can_be_collapsed_to_a_strip_that_is_remembered() {
             && strip.contains("href=\"https://git.example.org/o/r/pulls/9\"")
     );
     assert!(strip.contains("title=\"Issue #4\""));
+    for title in ["Pull request #9", "Issue #4"] {
+        let link = tag_around(strip, &format!("title=\"{title}\""));
+        assert!(
+            link.contains(crate::components::ICON_BUTTON_CLASS)
+                && link.contains("text-accent-text!"),
+            "{link}"
+        );
+    }
     let css = crate::app_css().unwrap();
     assert!(
         css.contains("data-collapsed=true"),

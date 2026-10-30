@@ -155,15 +155,14 @@ async fn composer_defaults_to_the_filtered_project_and_offers_the_keyboard_short
 }
 
 #[tokio::test]
-async fn composer_remove_issue_button_is_touch_sized() {
+async fn composer_remove_issue_button_is_the_icon_button() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
     let html = text(app.get("/tasks/compose", &cookie).await).await;
-    let at = html.find("aria-label=\"Remove linked issue\"").unwrap();
-    let tag = &html[at..at + 200];
+    let tag = tag_around(&html, "aria-label=\"Remove linked issue\"");
     assert!(
-        tag.contains("size-11") && tag.contains("lg:size-6"),
+        tag.contains(crate::components::actions::ICON_BUTTON_CLASS),
         "{tag}"
     );
 }
@@ -275,9 +274,9 @@ async fn the_composer_chips_are_rounded_rectangles_the_persona_has_no_border_and
         css.contains("focus-within"),
         "focus-within rule in the stylesheet"
     );
-    // The close button has no background, not even on hover.
+    // The close button is the shared icon button.
     let close = tag_around(&html, "aria-label=\"Close\"");
-    assert!(!close.contains("hover:bg-"), "{close}");
+    assert!(close.contains("hover:bg-sunk"), "{close}");
 }
 
 #[tokio::test]

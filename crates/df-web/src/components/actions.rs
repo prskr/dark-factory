@@ -1,5 +1,5 @@
 //! Buttons and links that look like buttons. Every target is at least 44 px high on screens
-//! below 1024 px (`min-h-11`) and 36 px from there on.
+//! below 1024 px (`min-h-11`) and 40 px from there on.
 
 use maud::{Markup, html};
 
@@ -18,13 +18,13 @@ pub enum ButtonKind {
 pub fn action_class(kind: ButtonKind) -> &'static str {
     match kind {
         ButtonKind::Primary => {
-            "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium lg:min-h-9 bg-accent text-on-accent hover:brightness-95"
+            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-semibold lg:min-h-10 bg-accent text-on-accent hover:brightness-95"
         }
         ButtonKind::Secondary => {
-            "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium lg:min-h-9 border border-line-strong bg-panel text-ink hover:bg-sunk"
+            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 border border-line bg-panel text-ink hover:bg-sunk"
         }
         ButtonKind::Ghost => {
-            "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium lg:min-h-9 text-muted hover:bg-sunk hover:text-ink"
+            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 text-muted hover:bg-sunk hover:text-ink"
         }
     }
 }
@@ -80,6 +80,40 @@ mod tests {
                 .into_string()
                 .contains("type=\"button\"")
         );
+    }
+
+    #[test]
+    fn actions_are_40_px_rounded_and_weighted_by_kind() {
+        for kind in [
+            ButtonKind::Primary,
+            ButtonKind::Secondary,
+            ButtonKind::Ghost,
+        ] {
+            let class = action_class(kind);
+            assert!(
+                class.contains("min-h-11")
+                    && class.contains("lg:min-h-10")
+                    && class.contains("rounded-[10px]"),
+                "{kind:?}"
+            );
+        }
+        let secondary = action_class(ButtonKind::Secondary);
+        assert!(secondary.contains("border-line ") && !secondary.contains("border-line-strong"));
+        assert!(action_class(ButtonKind::Primary).contains("font-semibold"));
+        assert!(action_class(ButtonKind::Secondary).contains("font-medium"));
+    }
+
+    #[test]
+    fn icon_buttons_are_36_px_rounded_ghosts() {
+        for part in [
+            "size-11",
+            "lg:size-9",
+            "rounded-lg",
+            "text-muted",
+            "hover:bg-sunk",
+        ] {
+            assert!(ICON_BUTTON_CLASS.contains(part), "{part}");
+        }
     }
 
     #[test]
