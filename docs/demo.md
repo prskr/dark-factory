@@ -93,7 +93,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 
 `cargo test -p df-e2e --test demo --test flow -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
 
-| Test | Scenarios (`openspec/changes/iter1-demo-e2e/specs/task-delivery/spec.md`) |
+| Test | Scenarios (`openspec/specs/task-delivery/spec.md`) |
 |---|---|
 | `login_shows_the_demo_project_on_the_board` | login, seeded project on the board |
 | `assigned_task_gets_a_draft_pr_with_the_shaped_title_and_an_issue_comment` | DF-1 with the fake agent; tools during the first run |
