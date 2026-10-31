@@ -65,7 +65,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Routines:** scheduled tasks with a fixed prompt and a fixed persona.
 - **Monitors:** a task-scoped wake-up set by the agent (factory tool) or a human, for example to poll a third-party system without webhooks. A due monitor queues a system prompt (reason `monitor.wake`) through the same path as messages and routines. A wake-up due within `runs.keepAliveSeconds` extends the control plane's idle deadline (`iter1-keep-alive-and-review`), so the sandbox stays up; a later one lets the run end and starts a new run when due.
 - **Tasks starting from existing branches** and PR modes other than "create draft PR" (ADR-0025).
-- **Inference endpoint in the gateway (`iter3-inference-gateway`, F5, [`design/egress.md`](../../design/egress.md) §9):** provider kinds `anthropic` (subscription token or API key) and `openai-compatible`; removes model credentials from sandboxes (ADR-0010 accepted risk) and measures usage per request (ADR-0021). Same shape as the Git proxy: pod-IP identity, credential swap, streaming. Depends on the `ANTHROPIC_BASE_URL` result of the iteration-1 Claude spike.
+- **Inference endpoint in the gateway (`iter3-inference-gateway`, F5, [`design/egress.md`](../../design/egress.md) §9):** provider kinds `anthropic` (subscription token or API key) and `openai-compatible`; removes model credentials from sandboxes (ADR-0010 accepted risk) and measures usage per request (ADR-0021). Same shape as the Git proxy: pod-IP identity, credential swap, streaming. The iteration-1 spike passed (placeholder token, bearer swapped by a proxy, [`docs/demo.md`](../../docs/demo.md)); still to check with the gateway: a long interactive session (OAuth refresh, account and update calls bypassing the base URL) and the Claude Code version of the project image.
 
 Dependency: "PR merged" dependencies and review routing need the webhooks of ADR-0015.
 
@@ -123,6 +123,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
+| Replace agent-sandbox with plain scheduled Pods, if it no longer adds anything the control plane needs | idea | `docs/demo.md` (iteration 1 spike results) |
 | CI job running the e2e suite (`just e2e-local` on Docker) | decided | `openspec/changes/archive/2026-10-31-iter1-demo-e2e/design.md` (Non-Goals) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
 | SSH repository URLs, issue-only trackers | idea | `openspec/changes/iter2-multi-forge` |

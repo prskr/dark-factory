@@ -157,3 +157,68 @@ c exec probe -- wget -T 5 -O- http://example.com   # bad address: DNS is denied,
 ```
 
 kindnet applies a policy a few seconds after the pod starts; a connection in the first moments can still succeed. The same image in a namespace without policy (for example `dex`) reaches `example.com`.
+
+## Manual demo with Claude Code
+
+Run on the homelab instance (`bazel run //deploy:dev`) with the Claude project image and a subscription token, the task created and followed up on a phone and on the desktop (2026-10-31).
+
+**Hosts Claude Code needs:** only `api.anthropic.com`. It is the one instance allowlist entry required for runs to work; Claude Code honours `HTTPS_PROXY`, so everything goes through the egress gateway.
+
+### Token swap via `ANTHROPIC_BASE_URL`
+
+Checked whether the subscription token can stay out of the sandbox: Claude Code gets a placeholder token and a base URL pointing at a proxy that swaps the bearer.
+
+**Result: works** (Claude Code 2.1.316, headless `claude -p` with a clean `CLAUDE_CONFIG_DIR`). All requests went to the base URL (`POST /v1/messages?beta=true`); none bypassed it.
+
+- The swap must happen before the request headers go upstream. In a streaming proxy, a hook that runs once the body streams is too late, and Anthropic answers `401 Invalid bearer token`.
+- The response streams (SSE) and must not be buffered.
+- Only `Authorization` changes. The `anthropic-beta` header passes through unchanged; it includes `oauth-2025-04-20` and `claude-code-20250219`.
+
+Proxy used for the check ([mitmproxy](https://mitmproxy.org) in reverse mode):
+
+```python
+# swap_token.py
+import os
+from mitmproxy import http
+
+PLACEHOLDER = "df-placeholder"
+REAL = os.environ["CLAUDE_REAL_TOKEN"]
+
+def requestheaders(flow: http.HTTPFlow) -> None:
+    incoming = flow.request.headers.get("authorization", "<none>")
+    swapped = incoming.strip().lower() == f"bearer {PLACEHOLDER}"
+    if swapped:
+        flow.request.headers["authorization"] = f"Bearer {REAL}"
+    print(f"{flow.request.method} {flow.request.path} swapped={swapped}")
+```
+
+```bash
+CLAUDE_REAL_TOKEN="$(tr -d '[:space:]' < ~/.claude-token)" \
+  mitmdump --mode reverse:https://api.anthropic.com -p 8080 -s swap_token.py --set stream_large_bodies=1
+CLAUDE_CONFIG_DIR=$(mktemp -d) ANTHROPIC_BASE_URL=http://127.0.0.1:8080 CLAUDE_CODE_OAUTH_TOKEN=df-placeholder \
+  claude -p "list the files in this directory and say hi"
+```
+
+Not yet checked (iteration 3, with the inference endpoint): a long interactive session (OAuth refresh, account and update calls) and the Claude Code version of the project image.
+
+## Iteration 1 spike results
+
+The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cluster (Talos, Kata) on 2026-10-31:
+
+| Spike | Result |
+|---|---|
+| Image volumes with Talos containerd and Kata | works |
+| cert-manager CSI volumes inside Kata sandboxes | works |
+| agent-sandbox passes image volumes, CSI volumes, PVCs and the runtime class through | works |
+| Claude ACP adapter: headless with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load`, token usage | works; usage is reported by the adapter |
+| Claude with `ANTHROPIC_BASE_URL` and a placeholder token | works, see above |
+| Forgejo draft/WIP PRs via API | works |
+| Bazel cross build: `ring` crypto provider, `sqlx` offline mode, migrations and assets as compile data, protoc | works; multi-arch images built daily |
+| Wasmtime with WASI 0.2.12 | works |
+| Claude Code honours `HTTPS_PROXY`; hosts it contacts | works; only `api.anthropic.com` |
+| NetworkPolicy enforcement and pod source IPs with Kata | works |
+
+### Open follow-ups
+
+- Token swap: long interactive session and the image's Claude Code version (iteration 3, inference endpoint).
+- Whether agent-sandbox still adds anything over plain scheduled Pods (roadmap backlog).
