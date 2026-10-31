@@ -43,6 +43,30 @@ pub enum ProtocolError {
     UnexpectedData,
 }
 
+/// What a forge's `report-status` answer says about a forwarded push.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForgeReport {
+    /// Why the whole push failed: the unpack error, a side-band error message or an incomplete
+    /// report.
+    pub failure: Option<String>,
+    /// Refs the forge refused (`ng` lines).
+    pub refused: Vec<String>,
+}
+
+impl ForgeReport {
+    /// Whether the forge unpacked the pack and updated every ref.
+    pub fn accepted(&self) -> bool {
+        self.failure.is_none() && self.refused.is_empty()
+    }
+
+    fn failed(reason: impl Into<String>) -> Self {
+        Self {
+            failure: Some(reason.into()),
+            refused: Vec::new(),
+        }
+    }
+}
+
 /// Parses the ref commands, the capabilities and the pack offset of a receive-pack request.
 ///
 /// The commands are small and precede the pack, so the caller passes the start of the
@@ -116,21 +140,25 @@ pub fn report_status(verdicts: &[RefVerdict], side_band: bool) -> Vec<u8> {
     wrapped
 }
 
-/// Whether a forge's `report-status` answer says every ref was updated: `unpack ok`, no `ng`
-/// line, and a complete report. With `side_band` the report is read from band 1; a fatal error
-/// (band 3) fails it.
-pub fn forge_report_ok(body: &[u8], side_band: bool) -> bool {
+/// Reads a forge's `report-status` answer: `unpack ok`, then one `ok` or `ng` line per ref. With
+/// `side_band` the report is read from band 1; a fatal error (band 3) fails the push.
+pub fn forge_report(body: &[u8], side_band: bool) -> ForgeReport {
     let demuxed;
     let report = if side_band {
         let Ok((lines, _)) = read_section(body, 0) else {
-            return false;
+            return ForgeReport::failed("incomplete side-band answer");
         };
         let mut data = Vec::new();
         for line in lines {
             match line.split_first() {
                 Some((&DATA_BAND, payload)) => data.extend_from_slice(payload),
                 Some((&PROGRESS_BAND, _)) => {}
-                _ => return false,
+                Some((_, message)) => {
+                    return ForgeReport::failed(
+                        String::from_utf8_lossy(strip_newline(message)).into_owned(),
+                    );
+                }
+                None => return ForgeReport::failed("empty side-band packet"),
             }
         }
         demuxed = data;
@@ -139,10 +167,25 @@ pub fn forge_report_ok(body: &[u8], side_band: bool) -> bool {
         body
     };
     let Ok((lines, _)) = read_section(report, 0) else {
-        return false;
+        return ForgeReport::failed("incomplete report-status");
     };
-    let mut lines = lines.into_iter().map(strip_newline);
-    lines.next() == Some(b"unpack ok".as_slice()) && lines.all(|line| !line.starts_with(b"ng "))
+    let mut lines = lines
+        .into_iter()
+        .map(|line| String::from_utf8_lossy(strip_newline(line)).into_owned());
+    let unpack = lines.next().unwrap_or_default();
+    if unpack != "unpack ok" {
+        return ForgeReport::failed(unpack);
+    }
+    let refused = lines
+        .filter_map(|line| {
+            let rest = line.strip_prefix("ng ")?;
+            Some(rest.split(' ').next().unwrap_or(rest).to_owned())
+        })
+        .collect();
+    ForgeReport {
+        failure: None,
+        refused,
+    }
 }
 
 /// Whether the client requested `side-band-64k`.
@@ -425,11 +468,18 @@ mod tests {
         let unpack_failed = body(&[&pkt("unpack index-pack failed\n"), FLUSH]);
         let truncated = pkt("unpack ok\n");
 
-        assert!(forge_report_ok(&ok, false));
-        assert!(!forge_report_ok(&ng, false));
-        assert!(!forge_report_ok(&unpack_failed, false));
-        assert!(!forge_report_ok(&truncated, false));
-        assert!(!forge_report_ok(b"", false));
+        assert!(forge_report(&ok, false).accepted());
+        let refused = forge_report(&ng, false);
+        assert_eq!(
+            (refused.failure, refused.refused),
+            (None, vec!["refs/heads/b".to_owned()])
+        );
+        assert_eq!(
+            forge_report(&unpack_failed, false).failure.as_deref(),
+            Some("unpack index-pack failed")
+        );
+        assert!(!forge_report(&truncated, false).accepted());
+        assert!(!forge_report(b"", false).accepted());
     }
 
     #[test]
@@ -457,13 +507,10 @@ mod tests {
         ]);
         let ng = body(&[&band(1, &ng_report), FLUSH]);
 
-        assert!(forge_report_ok(&ok, true));
-        assert!(!forge_report_ok(&fatal, true));
-        assert!(!forge_report_ok(&ng, true));
-        assert!(forge_report_ok(
-            &report_status(&verdicts()[..1], true),
-            true
-        ));
+        assert!(forge_report(&ok, true).accepted());
+        assert_eq!(forge_report(&fatal, true).failure.as_deref(), Some("fatal"));
+        assert_eq!(forge_report(&ng, true).refused, ["refs/heads/a"]);
+        assert!(forge_report(&report_status(&verdicts()[..1], true), true).accepted());
     }
 
     #[test]

@@ -102,6 +102,10 @@ Before checking a push the proxy SHALL fetch its mirror: if that fetch cannot re
 - **WHEN** Forgejo answers 401 to the proxy's forwarded push
 - **THEN** the proxy answers 502 without an authentication challenge and the push record has verdict `upstream-failed`
 
+#### Scenario: Forge refuses a ref
+- **WHEN** Forgejo answers a forwarded push with 200 and an `ng` line in its `report-status` (for example a pre-receive hook declined it)
+- **THEN** the proxy relays the answer, `git push` fails and the push record has verdict `upstream-failed` with reason `df:forge-refused` on the refused ref
+
 ### Requirement: Plain-HTTP forges only when allowed
 With the instance setting `forge.allowPlainHttp` on, the control plane SHALL build Git routes for `http://` repositories and the gateway SHALL connect to such upstreams without TLS. With the setting off, an `http://` repository SHALL get no Git route, and the gateway SHALL answer a route to an `http://` upstream with `502` without connecting. The sandbox SHALL use HTTPS to the gateway in both cases.
 

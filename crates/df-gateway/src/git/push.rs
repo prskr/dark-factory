@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::mirror::{MirrorError, Mirrors};
 use super::protocol::{
-    ReceivePackRequest, forge_report_ok, parse_receive_pack_request, report_status,
+    ReceivePackRequest, forge_report, parse_receive_pack_request, report_status,
     report_status_requested, side_band_requested,
 };
 use super::quarantine::{MirrorAncestry, QuarantineError, quarantine};
@@ -50,6 +50,8 @@ const CHECK_FAILED: &str = "df:check-failed";
 // ponytail: buffered to read the verdict; an answer above this fails the push even if the forge
 // took it. Tee the stream instead if hooks ever print more.
 const MAX_FORGE_ANSWER_BYTES: usize = 4 * 1024 * 1024;
+/// Reason of a ref the forge refused (`ng`), or of every ref if the whole push failed there.
+const FORGE_REFUSED: &str = "df:forge-refused";
 /// Time the forge has to send its whole answer to a push (it runs its hooks first).
 const FORGE_ANSWER_DEADLINE: Duration = Duration::from_secs(300);
 
@@ -254,7 +256,8 @@ impl Push {
             return report(&parsed, &reject_all(&verdicts, Reason::AuditUnavailable));
         }
         let response = forward(upstream, forge, request, spooled).await;
-        let (response, verdict) = forge_verdict(response, &parsed.capabilities).await;
+        let (response, verdict, verdicts) =
+            forge_verdict(response, &parsed.capabilities, verdicts).await;
         self.store(entry.record(&verdicts, verdict)).await.ok();
         response
     }
@@ -602,16 +605,18 @@ fn report(parsed: &ReceivePackRequest, verdicts: &[RefVerdict]) -> Response<Body
 
 /// The verdict of a forwarded push, read from the forge's `report-status` if the client requested
 /// one (a forge answers a refused ref with `200` and `ng`), else from the HTTP status. The answer
-/// is buffered for that and handed to the client unchanged.
+/// is buffered for that and handed to the client unchanged. Refs the forge refused (every ref if
+/// the whole push failed) get the reason [`FORGE_REFUSED`].
 async fn forge_verdict(
     response: Response<Body>,
     capabilities: &[String],
-) -> (Response<Body>, PushVerdict) {
+    verdicts: Vec<RefVerdict>,
+) -> (Response<Body>, PushVerdict, Vec<RefVerdict>) {
     if !response.status().is_success() {
-        return (response, PushVerdict::UpstreamFailed);
+        return (response, PushVerdict::UpstreamFailed, verdicts);
     }
     if !report_status_requested(capabilities) {
-        return (response, PushVerdict::Accepted);
+        return (response, PushVerdict::Accepted, verdicts);
     }
     let side_band = side_band_requested(capabilities);
     let (parts, body) = response.into_parts();
@@ -623,30 +628,47 @@ async fn forge_verdict(
         Ok(Ok(collected)) => collected.to_bytes(),
         Ok(Err(error)) => {
             tracing::warn!(%error, "reading the forge's answer to a push failed");
-            return forge_answer_failed();
+            return forge_answer_failed(verdicts);
         }
         Err(_elapsed) => {
             tracing::warn!("the forge did not finish its answer to a push in time");
-            return forge_answer_failed();
+            return forge_answer_failed(verdicts);
         }
     };
-    let verdict = if forge_report_ok(&answer, side_band) {
+    let report = forge_report(&answer, side_band);
+    let verdict = if report.accepted() {
         PushVerdict::Accepted
     } else {
-        tracing::info!("the forge refused the push");
+        tracing::info!(failure = ?report.failure, refused = ?report.refused, "the forge refused the push");
         PushVerdict::UpstreamFailed
     };
+    let verdicts = verdicts
+        .into_iter()
+        .map(|verdict| {
+            if report.failure.is_some() || report.refused.contains(&verdict.name) {
+                RefVerdict {
+                    reason: Some(Reason::Check(FORGE_REFUSED)),
+                    ..verdict
+                }
+            } else {
+                verdict
+            }
+        })
+        .collect();
     let body = Full::new(answer)
         .map_err(|never| match never {})
         .boxed_unsync();
-    (Response::from_parts(parts, body), verdict)
+    (Response::from_parts(parts, body), verdict, verdicts)
 }
 
-fn forge_answer_failed() -> (Response<Body>, PushVerdict) {
+fn forge_answer_failed(
+    verdicts: Vec<RefVerdict>,
+) -> (Response<Body>, PushVerdict, Vec<RefVerdict>) {
     let message = format!("{FORGE_UNAVAILABLE}: reading the forge's answer failed");
     (
         text(StatusCode::BAD_GATEWAY, &message),
         PushVerdict::UpstreamFailed,
+        verdicts,
     )
 }
 

@@ -929,8 +929,17 @@ async fn a_push_the_forge_refuses_is_recorded_as_upstream_failed() -> Result<()>
         stderr(&output)
     );
     assert_eq!(
-        recorder.verdicts(),
-        vec![PushVerdict::Forwarding, PushVerdict::UpstreamFailed]
+        recorder.reasons(),
+        vec![
+            (
+                PushVerdict::Forwarding,
+                vec![(branch.to_owned(), String::new())]
+            ),
+            (
+                PushVerdict::UpstreamFailed,
+                vec![(branch.to_owned(), "df:forge-refused".to_owned())]
+            ),
+        ]
     );
     assert_eq!(head_of(&fixture.forge_repo(), branch)?, None);
     Ok(())
