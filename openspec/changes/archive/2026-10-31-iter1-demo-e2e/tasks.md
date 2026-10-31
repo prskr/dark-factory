@@ -25,5 +25,5 @@
 
 ## 4. Manual demo with Claude Code
 
-- [ ] 4.1 Run the §2 demo with the Claude project image and a real subscription token, task created and followed up on a phone; use the egress log's denied-hosts view to find the hosts Claude needs and add them as instance allowlist entries; record the host list and any issues in `docs/demo.md`; run the `ANTHROPIC_BASE_URL` check of §7 once (placeholder token, a local pass-through proxy that swaps the bearer) and record whether the adapter works that way
-- [ ] 4.2 Confirm every spike in `product/iterations/iteration-1.md` §7 has a recorded result in the owning change's README; list any open follow-ups for iteration 2 in `docs/demo.md`
+- [x] 4.1 Run the §2 demo with the Claude project image and a real subscription token, task created and followed up on a phone; use the egress log's denied-hosts view to find the hosts Claude needs and add them as instance allowlist entries; record the host list and any issues in `docs/demo.md`; run the `ANTHROPIC_BASE_URL` check of §7 once (placeholder token, a local pass-through proxy that swaps the bearer) and record whether the adapter works that way
+- [x] 4.2 Confirm every spike in `product/iterations/iteration-1.md` §7 has a recorded result in the owning change's README; list any open follow-ups for iteration 2 in `docs/demo.md`
