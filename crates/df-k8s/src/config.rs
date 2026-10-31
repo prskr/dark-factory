@@ -48,6 +48,8 @@ pub struct ProvisioningConfig {
     pub harness_images: BTreeMap<String, String>,
     /// Log format the sandbox runtime is started with: the control plane's own.
     pub log_format: LogFormat,
+    /// Sets `DF_GIT_ALLOW_PLAIN_HTTP` in the sandboxes (`forge.allowPlainHttp`).
+    pub allow_plain_http: bool,
 }
 
 impl ProvisioningConfig {
@@ -68,6 +70,7 @@ impl ProvisioningConfig {
             gateway_proxy_port: gateway.proxy_port,
             harness_images: BTreeMap::new(),
             log_format: LogFormat::Text,
+            allow_plain_http: false,
         }
     }
 
@@ -82,6 +85,13 @@ impl ProvisioningConfig {
     #[must_use]
     pub fn with_log_format(mut self, log_format: LogFormat) -> Self {
         self.log_format = log_format;
+        self
+    }
+
+    /// Lets sandbox git clone over `http://` (`forge.allowPlainHttp`).
+    #[must_use]
+    pub fn with_allow_plain_http(mut self, allow: bool) -> Self {
+        self.allow_plain_http = allow;
         self
     }
 }

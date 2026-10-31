@@ -273,7 +273,8 @@ async fn provisioning_config(
         },
     )
     .with_harness_images(cfg.harness.images())
-    .with_log_format(log_format))
+    .with_log_format(log_format)
+    .with_allow_plain_http(cfg.forge.allow_plain_http))
 }
 
 /// Triggers a policy reconciliation for every database notification that changes the egress

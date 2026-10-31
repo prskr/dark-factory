@@ -1,0 +1,49 @@
+# PostgreSQL of the e2e cluster: one pod, no persistence. The owner role is the image's superuser.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17-alpine
+          env:
+            - {name: POSTGRES_USER, value: dark_factory_owner}
+            - {name: POSTGRES_PASSWORD, value: e2e-owner-password}
+            - {name: POSTGRES_DB, value: dark_factory}
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -q, -U, dark_factory_owner]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: postgres
+spec:
+  selector: {app: postgres}
+  ports:
+    - port: 5432

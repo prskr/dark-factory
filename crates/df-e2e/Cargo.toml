@@ -1,0 +1,27 @@
+[package]
+name = "df-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "End-to-end suite that drives the web UI with Playwright, and the seed program with its well-known data. Built by cargo only."
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+df-core.workspace = true
+df-db.workspace = true
+playwright-rs.workspace = true
+regex.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+df-test-postgres.workspace = true

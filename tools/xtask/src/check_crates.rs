@@ -8,8 +8,13 @@
 //! 3. Every `tests/<stem>.rs` has a Bazel target (`tests/<stem>.rs` or `"<stem>"` in `BUILD.bazel`).
 //! 4. `MODULE.bazel` lists `//<dir>:Cargo.toml` in the `crate.from_cargo` manifests.
 //!
+//! A member listed with a reason in `[workspace.metadata.check-crates.exempt]` of the root
+//! `Cargo.toml` (a crate that only `cargo` builds) skips items 2 to 4; an entry for a missing
+//! directory, for a member that has a `BUILD.bazel`, or without a reason is a violation.
+//!
 //! `tools/xtask` (a standalone workspace) must mirror `[workspace.lints]` completely.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -32,7 +37,13 @@ pub(crate) fn run(root: &Path) -> Result<()> {
 fn check(root: &Path) -> Result<Vec<String>> {
     let workspace = read_toml(&root.join("Cargo.toml"))?;
     let module = std::fs::read_to_string(root.join("MODULE.bazel")).context("MODULE.bazel")?;
+    let exempt = lookup(
+        &workspace,
+        &["workspace", "metadata", "check-crates", "exempt"],
+    )
+    .and_then(toml::Value::as_table);
     let mut out = Vec::new();
+    let mut members = BTreeSet::new();
     for parent in MEMBER_DIRS {
         let entries = match std::fs::read_dir(root.join(parent)) {
             Ok(entries) => entries,
@@ -47,15 +58,23 @@ fn check(root: &Path) -> Result<Vec<String>> {
         dirs.sort();
         for dir in dirs.iter().filter(|d| d.join("Cargo.toml").is_file()) {
             let rel = format!("{parent}/{}", file_name(dir));
+            let exempt = exempt.is_some_and(|e| e.contains_key(&rel));
             check_member(
                 root,
                 &rel,
-                parent == "crates",
+                Member {
+                    inherits: parent == "crates",
+                    exempt,
+                },
                 &workspace,
                 &module,
                 &mut out,
             )?;
+            members.insert(rel);
         }
+    }
+    for (rel, reason) in exempt.into_iter().flatten() {
+        check_exemption(root, rel, reason, members.contains(rel), &mut out);
     }
     let xtask = read_toml(&root.join("tools/xtask/Cargo.toml"))?;
     for table in ["rust", "clippy"] {
@@ -71,10 +90,42 @@ fn check(root: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// How a member directory is checked.
+struct Member {
+    /// Inherits `[workspace.lints]` (`crates/*`) instead of copying them (`plugins/*`).
+    inherits: bool,
+    /// Built by `cargo` only: no Bazel files are required.
+    exempt: bool,
+}
+
+/// An exemption needs a reason, an existing workspace member and no `BUILD.bazel`.
+fn check_exemption(
+    root: &Path,
+    rel: &str,
+    reason: &toml::Value,
+    is_member: bool,
+    out: &mut Vec<String>,
+) {
+    if !root.join(rel).join("Cargo.toml").is_file() {
+        out.push(format!("{rel}: exempt but missing; remove the entry"));
+    } else if !is_member {
+        out.push(format!(
+            "{rel}: exempt but not a workspace member (crates/* or plugins/*); remove the entry"
+        ));
+    } else if root.join(rel).join("BUILD.bazel").is_file() {
+        out.push(format!(
+            "{rel}: exempt but has a BUILD.bazel; remove the entry"
+        ));
+    }
+    if reason.as_str().is_none_or(|r| r.trim().is_empty()) {
+        out.push(format!("{rel}: exemption needs a reason"));
+    }
+}
+
 fn check_member(
     root: &Path,
     rel: &str,
-    inherits: bool,
+    member: Member,
     workspace: &toml::Table,
     module: &str,
     out: &mut Vec<String>,
@@ -82,7 +133,7 @@ fn check_member(
     let dir = root.join(rel);
     let manifest = format!("{rel}/Cargo.toml");
     let cargo = read_toml(&dir.join("Cargo.toml"))?;
-    if inherits {
+    if member.inherits {
         let ok =
             lookup(&cargo, &["lints", "workspace"]).and_then(toml::Value::as_bool) == Some(true);
         if !ok {
@@ -92,6 +143,10 @@ fn check_member(
         // Plugins may set `unsafe_code` differently (generated bindings), but must declare it.
         compare_lints(workspace, &cargo, "rust", &["unsafe_code"], &manifest, out);
         compare_lints(workspace, &cargo, "clippy", &[], &manifest, out);
+    }
+
+    if member.exempt {
+        return Ok(());
     }
 
     let manifest_label = format!("\"//{rel}:Cargo.toml\"");
@@ -480,6 +535,75 @@ too_many_lines = "warn"
         fs::remove_dir_all(dir.path().join("plugins")).unwrap();
         write(dir.path(), "plugins", "not a directory");
         assert!(check(dir.path()).is_err());
+    }
+
+    /// Adds `crates/e` (cargo only: no `BUILD.bazel`, not in `MODULE.bazel`) to the repository.
+    fn with_cargo_only_crate(dir: &tempfile::TempDir, exempt: &str) {
+        let r = dir.path();
+        write(
+            r,
+            "crates/e/Cargo.toml",
+            "[package]\nname = \"e\"\n[lints]\nworkspace = true\n",
+        );
+        write(
+            r,
+            "Cargo.toml",
+            &format!("{ROOT_MANIFEST}\n[workspace.metadata.check-crates.exempt]\n{exempt}\n"),
+        );
+    }
+
+    #[test]
+    fn exempt_crate_needs_no_bazel_files() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"crates/e\" = \"cargo only\"");
+        assert_eq!(violations(&dir), "");
+    }
+
+    #[test]
+    fn exempt_crate_must_still_inherit_the_workspace_lints() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"crates/e\" = \"cargo only\"");
+        write(
+            dir.path(),
+            "crates/e/Cargo.toml",
+            "[package]\nname = \"e\"\n",
+        );
+        assert!(violations(&dir).contains("crates/e/Cargo.toml"));
+    }
+
+    #[test]
+    fn crate_without_exemption_still_needs_bazel_files() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "");
+        assert!(violations(&dir).contains("crates/e/BUILD.bazel"));
+    }
+
+    #[test]
+    fn exemption_for_a_crate_with_a_build_file_is_stale() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"crates/a\" = \"cargo only\"");
+        assert!(violations(&dir).contains("crates/a: exempt but has a BUILD.bazel"));
+    }
+
+    #[test]
+    fn exemption_for_a_missing_crate_fails() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"crates/gone\" = \"cargo only\"");
+        assert!(violations(&dir).contains("crates/gone: exempt but missing"));
+    }
+
+    #[test]
+    fn exemption_for_a_directory_outside_the_workspace_members_fails() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"tools/xtask\" = \"cargo only\"");
+        assert!(violations(&dir).contains("tools/xtask: exempt but not a workspace member"));
+    }
+
+    #[test]
+    fn exemption_without_a_reason_fails() {
+        let dir = repo();
+        with_cargo_only_crate(&dir, "\"crates/e\" = \"\"");
+        assert!(violations(&dir).contains("crates/e: exemption needs a reason"));
     }
 
     #[test]

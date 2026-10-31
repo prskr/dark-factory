@@ -58,11 +58,14 @@ oidc:
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
   # Externally visible base URL of the UI, e.g. https://factory.example.org. The redirect URI
-  # registered in the OIDC provider is <publicUrl>/auth/callback. Empty: no `auth` section is
+  # registered in the OIDC provider is <publicUrl>/auth/callback. Plain `http://` is accepted on
+  # any host (warning at startup, session cookie without `Secure`). Empty: no `auth` section is
   # rendered: `serve` logs a warning and mounts only /healthz, /readyz and /assets/* (no web UI).
   publicUrl: ''
   # Token claim holding a flat list of roles; the UI requires `board-member` in it.
   rolesClaim: roles
+  # Scopes requested besides `openid` and `profile`, e.g. [groups, offline_access] for Dex.
+  extraScopes: []
 
 logging:
   # text | json. Applies to the control plane, gateway and migrate job; the control plane passes
@@ -168,6 +171,13 @@ runs:
   # Seconds a run stays up after a normal turn end (task "waiting") before it is released.
   # 0 releases right after the turn.
   keepAliveSeconds: 600
+
+forge:
+  # Accept `http://` repository URLs (plugin calls, sandbox git and the project form). Off, only
+  # `https://` works. The forge token travels unencrypted then, so use it for throwaway clusters
+  # (the e2e cluster) only. The control plane logs a warning at startup when it is on; changing it
+  # restarts the control plane. Sandboxes get `DF_GIT_ALLOW_PLAIN_HTTP=true`.
+  allowPlainHttp: false
 
 web:
   # Show transcript blocks marked hidden (instructions for the agent) in the task UI, muted and

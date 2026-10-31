@@ -1,0 +1,30 @@
+# Values of the Forgejo Helm chart (oci://code.forgejo.org/forgejo-helm/forgejo) for the e2e
+# cluster: SQLite, no persistence. The release is named `forgejo`, so the Service is `forgejo-http`.
+image:
+  rootless: true
+persistence:
+  enabled: false
+test:
+  enabled: false
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 512Mi}
+gitea:
+  admin:
+    username: e2e-admin
+    password: e2e-admin-password
+    email: e2e-admin@example.com
+  config:
+    server:
+      DOMAIN: forgejo-http.forgejo.svc
+      ROOT_URL: http://forgejo-http.forgejo.svc:3000/
+    database:
+      DB_TYPE: sqlite3
+    service:
+      DISABLE_REGISTRATION: true
+    session:
+      PROVIDER: memory
+    cache:
+      ADAPTER: memory
+    queue:
+      TYPE: level

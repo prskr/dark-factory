@@ -33,6 +33,8 @@ data:
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
     runs:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
+    forge:
+      allowPlainHttp: {{ .Values.forge.allowPlainHttp }}
     web:
       showHiddenBlocks: {{ .Values.web.showHiddenBlocks }}
     harness:
@@ -45,6 +47,9 @@ data:
       clientSecretFile: /run/secrets/oidc/client-secret
       publicUrl: {{ .Values.oidc.publicUrl | quote }}
       rolesClaim: {{ .Values.oidc.rolesClaim | quote }}
+      {{- if .Values.oidc.extraScopes }}
+      extraScopes: {{ .Values.oidc.extraScopes | toJson }}
+      {{- end }}
     {{- end }}
     clusterTargets:
       anyNamespace: {{ .Values.clusterTargets.anyNamespace }}

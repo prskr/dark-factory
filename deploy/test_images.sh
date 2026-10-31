@@ -137,6 +137,9 @@ for arch in amd64 arm64; do
   echo "=== 4. Verifying test_project_image ($arch) structure and static ELF ==="
   tp_entries="$(list_oci_layer_entries_for_arch "$TEST_PROJECT_IMAGE_DIR" "$arch")"
   grep -qxE '\./opt/harness/bin/fake-acp-agent|opt/harness/bin/fake-acp-agent' <<<"$tp_entries"
+  for script in demo rate-limit; do
+    grep -qxE "\./opt/harness/scripts/$script.yaml|opt/harness/scripts/$script.yaml" <<<"$tp_entries"
+  done
   extract_local_layers_for_arch "$TEST_PROJECT_IMAGE_DIR" "$arch" "$WORK_DIR/tp-$arch"
   verify_static_elf "$WORK_DIR/tp-$arch/opt/harness/bin/fake-acp-agent" "$expected_elf_arch"
 done

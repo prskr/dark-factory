@@ -466,6 +466,27 @@ tests:
           pattern: 'auth:'
         documentIndex: 1
 
+  - it: requests the extra OIDC scopes when oidc.extraScopes is set
+    template: configmap.yaml
+    set:
+      oidc.publicUrl: https://factory.example.org
+      oidc.extraScopes: [groups, offline_access]
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'extraScopes: \["groups","offline_access"\]'
+        documentIndex: 0
+
+  - it: renders no extraScopes by default
+    template: configmap.yaml
+    set:
+      oidc.publicUrl: https://factory.example.org
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'extraScopes'
+        documentIndex: 0
+
   - it: points sandbox certificates at the same issuer the chart renders
     template: configmap.yaml
     release:
@@ -639,6 +660,24 @@ tests:
       - matchRegex:
           path: data["config.yaml"]
           pattern: 'runs:\n  keepAliveSeconds: 600\n'
+        documentIndex: 0
+
+  - it: allows only https to the forge by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'forge:\n  allowPlainHttp: false\n'
+        documentIndex: 0
+
+  - it: renders forge.allowPlainHttp
+    template: configmap.yaml
+    set:
+      forge.allowPlainHttp: true
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'forge:\n  allowPlainHttp: true\n'
         documentIndex: 0
 
   - it: hides hidden transcript blocks by default

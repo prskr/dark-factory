@@ -97,9 +97,17 @@ fn required(errors: &mut FormErrors, field: &'static str, value: &str, label: &s
     value.to_string()
 }
 
-fn https_url(errors: &mut FormErrors, field: &'static str, value: &str) {
+/// Checks that `value` is a URL with a host and the scheme `https`, or `http` when
+/// `forge.allowPlainHttp` is on.
+fn forge_url(errors: &mut FormErrors, field: &'static str, value: &str, allow_plain_http: bool) {
     match Url::parse(value) {
-        Ok(url) if url.scheme() == "https" && url.host_str().is_some() => {}
+        Ok(url)
+            if (url.scheme() == "https" || (allow_plain_http && url.scheme() == "http"))
+                && url.host_str().is_some() => {}
+        _ if allow_plain_http => errors.add(
+            field,
+            "Must be an HTTP or HTTPS URL, for example https://git.example.org/o/r.git.",
+        ),
         _ => errors.add(
             field,
             "Must be an HTTPS URL, for example https://git.example.org/o/r.git.",
@@ -167,7 +175,11 @@ fn validate_credential(form: &CredentialForm) -> Result<CredentialRefInput, Form
     })
 }
 
-fn validate_project(form: &ProjectForm, credentials: &[Uuid]) -> Result<ProjectInput, FormErrors> {
+fn validate_project(
+    form: &ProjectForm,
+    credentials: &[Uuid],
+    allow_plain_http: bool,
+) -> Result<ProjectInput, FormErrors> {
     let mut errors = FormErrors::default();
     let key = form.key.trim().to_string();
     if df_core::ProjectKey::new(key.clone()).is_err() {
@@ -178,11 +190,11 @@ fn validate_project(form: &ProjectForm, credentials: &[Uuid]) -> Result<ProjectI
     }
     let name = required(&mut errors, "name", &form.name, "Name");
     let repo_url = form.repo_url.trim().to_string();
-    https_url(&mut errors, "repo_url", &repo_url);
+    forge_url(&mut errors, "repo_url", &repo_url, allow_plain_http);
     let issue_tracker_url =
         Some(form.issue_tracker_url.trim().to_string()).filter(|u| !u.is_empty());
     if let Some(url) = &issue_tracker_url {
-        https_url(&mut errors, "issue_tracker_url", url);
+        forge_url(&mut errors, "issue_tracker_url", url, allow_plain_http);
     }
     let image = required(&mut errors, "image", &form.image, "Sandbox image");
     let base_branch = required(&mut errors, "base_branch", &form.base_branch, "Base branch");
@@ -612,11 +624,12 @@ fn project_form(
     values: &ProjectForm,
     errors: &FormErrors,
     credentials: &[CredentialRef],
-    forges: &ForgeRoutes,
+    state: &WebState,
     submit: &str,
     editing: bool,
 ) -> Markup {
-    let feedback = forge_feedback(forges, &values.repo_url, &values.issue_tracker_url);
+    let feedback = forge_feedback(&state.forges, &values.repo_url, &values.issue_tracker_url);
+    let repo_hint = (!state.allow_plain_http).then_some("HTTPS only.");
     html! {
         form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
             (form_error(errors))
@@ -624,7 +637,7 @@ fn project_form(
                 (key_field(&values.key, errors, editing))
                 (text_field("Name", "name", &values.name, errors, None))
                 (full_row(html! {
-                    (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, Some("HTTPS only.")))
+                    (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
                     p id="forge-hint" aria-live="polite" class="mt-1 text-xs text-muted" { (feedback.hint) }
                 }))
                 (full_row(url_field("Issue tracker URL", "issue_tracker_url", "issue-forge", &values.issue_tracker_url, errors, &feedback.issue_icon, Some("Optional."))))
@@ -880,7 +893,7 @@ async fn project_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             &new_project_values(),
             &FormErrors::default(),
             &credentials,
-            &state.forges,
+            &state,
             "Create project",
             false,
         ),
@@ -910,7 +923,7 @@ async fn project_edit(
             &project_values(&project),
             &FormErrors::default(),
             &credentials,
-            &state.forges,
+            &state,
             "Save project",
             true,
         ),
@@ -963,7 +976,7 @@ async fn save_project(
         _ => form,
     };
     let known: Vec<Uuid> = credentials.iter().map(|c| c.id.as_uuid()).collect();
-    let mut errors = match validate_project(&form, &known) {
+    let mut errors = match validate_project(&form, &known, state.allow_plain_http) {
         Ok(input) if !key_changed => {
             let principal = user.principal();
             let actor = Actor {
@@ -1012,7 +1025,7 @@ async fn save_project(
         &form,
         &errors,
         &credentials,
-        &state.forges,
+        &state,
         submit,
         existing.is_some(),
     ))

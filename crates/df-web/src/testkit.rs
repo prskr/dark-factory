@@ -1,5 +1,6 @@
 //! Test support: an app on a test database, a mock OIDC provider and request helpers.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::Router;
@@ -251,12 +252,24 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
-        Self::build(forges, flows, services, false).await
+        Self::build(forges, flows, services, false, false).await
+    }
+
+    /// An app of an instance with `forge.allowPlainHttp` on: the routing table and the project
+    /// form accept `http://` repository URLs.
+    pub(crate) async fn with_plain_http() -> Self {
+        let configs = BTreeMap::from([(
+            "forgejo".to_string(),
+            PluginConfig::new("/plugins/forgejo.wasm"),
+        )]);
+        let table = RoutingTable::from_plugins_allowing_plain_http(&configs).unwrap();
+        let forges = ForgeRoutes::new(table, ["forgejo".to_string()]);
+        Self::build(forges, None, None, false, true).await
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
     pub(crate) async fn with_hidden_blocks() -> Self {
-        Self::build(default_forge("forgejo"), None, None, true).await
+        Self::build(default_forge("forgejo"), None, None, true, false).await
     }
 
     async fn build(
@@ -264,6 +277,7 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
         show_hidden_blocks: bool,
+        allow_plain_http: bool,
     ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
@@ -286,6 +300,7 @@ impl TestApp {
             flows,
             services,
             show_hidden_blocks,
+            allow_plain_http,
             approval_types: df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval)),
         };
         Self {

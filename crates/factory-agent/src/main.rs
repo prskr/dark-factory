@@ -122,7 +122,11 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
         credentials: startup.credentials,
         initial_prompts: startup.initial_prompts,
         cancel_requested: startup.cancel_requested,
-        git: git::Git::new(&dirs.repo),
+        git: if config::git_allows_plain_http() {
+            git::Git::new(&dirs.repo).allow_plain_http()
+        } else {
+            git::Git::new(&dirs.repo)
+        },
         runtime_sock_path: dirs.runtime.join("runtime.sock"),
         repo_dir: dirs.repo,
         home_dir: dirs.home,

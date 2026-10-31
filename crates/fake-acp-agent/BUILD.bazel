@@ -10,12 +10,15 @@ extract_cargo_lints(
     workspace = "//:Cargo.toml",
 )
 
-exports_files(["Cargo.toml"])
+exports_files(["Cargo.toml"] + glob(["scripts/*.yaml"]))
+
+SCRIPTS = glob(["scripts/*.yaml"])
 
 rust_binary(
     name = "fake-acp-agent",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
+    compile_data = SCRIPTS,
     edition = "2024",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
@@ -24,6 +27,7 @@ rust_binary(
 
 rust_test(
     name = "fake_acp_agent_test",
+    compile_data = SCRIPTS,
     crate = ":fake-acp-agent",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(

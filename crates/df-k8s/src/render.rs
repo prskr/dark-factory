@@ -247,7 +247,7 @@ fn agent_env(
         value: Some(value),
         ..Default::default()
     };
-    vec![
+    let mut env = vec![
         var("HTTP_PROXY", proxy_url.clone()),
         var("HTTPS_PROXY", proxy_url.clone()),
         var("http_proxy", proxy_url.clone()),
@@ -265,7 +265,11 @@ fn agent_env(
         ),
         var("DF_LOG_FORMAT", config.log_format.as_str().to_string()),
         var("RUST_LOG", config.sandbox.log_level.clone()),
-    ]
+    ];
+    if config.allow_plain_http {
+        env.push(var("DF_GIT_ALLOW_PLAIN_HTTP", "true".to_string()));
+    }
+    env
 }
 
 /// Volume mounts of the agent container and the volumes of the pod.

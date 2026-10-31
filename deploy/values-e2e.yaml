@@ -1,0 +1,112 @@
+# Values of the throwaway kind cluster of `just e2e-local` (deploy/e2e/, docs/demo.md): images
+# loaded into the node (no registry), no Kata, no HTTPRoute, Dex over plain http.
+# Release `dark-factory` in namespace `dark-factory`.
+instanceName: 'e2e'
+
+image:
+  pullPolicy: IfNotPresent
+  controlPlane:
+    repository: ghcr.io/prskr/dark-factory/control-plane
+    tag: 'e2e'
+    digest: ''
+  runtime:
+    repository: ghcr.io/prskr/dark-factory/runtime
+    tag: 'e2e'
+    digest: ''
+  testProject:
+    repository: ghcr.io/prskr/dark-factory/test-project
+    tag: 'e2e'
+    digest: ''
+
+# Forgejo of the cluster serves plain http (deploy/e2e/forgejo-values.yaml).
+forge:
+  allowPlainHttp: true
+
+# A run ends with its turn, so a follow-up message starts run 2 (the `loaded` session of the script).
+runs:
+  keepAliveSeconds: 0
+
+plugins:
+  forgejo:
+    image:
+      repository: ghcr.io/prskr/dark-factory/plugin-forgejo
+      tag: 'e2e'
+      digest: ''
+
+database:
+  host: postgres.postgres.svc
+  port: 5432
+  database: dark_factory
+  schema: dark_factory
+  maxConnections: 8
+  app:
+    user: dark_factory_app
+    existingSecret: dark-factory-db-app
+    passwordKey: password
+  owner:
+    user: dark_factory_owner
+    existingSecret: dark-factory-db-owner
+    passwordKey: password
+  migrate:
+    manageAppRole: true
+
+# Dex is reached through cluster DNS by the control plane and by the browser pod, so both see the
+# same issuer URL. publicUrl is the control plane Service: plain http is accepted on any host.
+oidc:
+  issuerUrl: http://dex.dex.svc:5556/dex
+  publicUrl: http://dark-factory-control-plane.dark-factory.svc:8080
+  rolesClaim: groups
+  extraScopes: [groups, offline_access]
+  clientId: dark-factory
+  existingSecret: dark-factory-oidc
+  clientSecretKey: client-secret
+
+sandboxNamespace:
+  create: true
+  name: dark-factory-sandboxes
+  runtimeClassName: ''
+  pvcSize: '1Gi'
+  resourceQuota:
+    pods: '4'
+    requestsCpu: '2'
+    requestsMemory: '2Gi'
+    limitsCpu: '4'
+    limitsMemory: '4Gi'
+    requestsStorage: '8Gi'
+    persistentVolumeClaims: '8'
+  limitRange:
+    defaultCpu: '1'
+    defaultMemory: '1Gi'
+    defaultRequestCpu: '100m'
+    defaultRequestMemory: '128Mi'
+
+enforcement:
+  mode: kubernetes
+
+# The sandbox reaches Forgejo as a cluster Service (allowlist entry from the seed).
+clusterTargets:
+  anyNamespace: false
+  namespaces:
+    - forgejo
+
+networkPolicy:
+  enabled: true
+  ingressController:
+    # The browser pod and the port-forward reach the UI from outside the release namespace.
+    allowAll: true
+
+controlPlane:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+gateway:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

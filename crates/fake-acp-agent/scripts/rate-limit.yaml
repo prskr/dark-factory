@@ -1,0 +1,12 @@
+# Script of the rate-limit scenario: run 1 hits the provider limit, the next message continues.
+sessions:
+  new:
+    - - say: "Starting."
+      - end:
+          rate_limited:
+            retry_after_seconds: 60
+    - - say: "Continuing after the rate limit."
+      - end: end_turn
+  loaded:
+    - - say: "Continuing after the rate limit."
+      - end: end_turn

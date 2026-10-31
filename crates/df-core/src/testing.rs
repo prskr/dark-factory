@@ -187,6 +187,7 @@ struct ForgeState {
     create_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     find_open_results: VecDeque<Result<Option<PullRequest>, IntegrationError>>,
     hang_find_open: bool,
+    find_open_gate: Option<Arc<tokio::sync::Semaphore>>,
     comment_gate: Option<Arc<tokio::sync::Semaphore>>,
     update_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     get_issue_results: VecDeque<Result<Issue, IntegrationError>>,
@@ -251,6 +252,14 @@ impl FakeForgeClient {
     pub fn hold_issue_comments(&self) -> Arc<tokio::sync::Semaphore> {
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
         self.state.lock().expect("lock poisoned").comment_gate = Some(gate.clone());
+        gate
+    }
+
+    /// Makes `find_open_pull_request` record the call and then wait until a permit of the returned
+    /// semaphore is added, like a slow forge.
+    pub fn hold_find_open_pull_request(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        self.state.lock().expect("lock poisoned").find_open_gate = Some(gate.clone());
         gate
     }
 
@@ -330,27 +339,40 @@ impl ForgeClient for FakeForgeClient {
         head: &str,
         base: &str,
     ) -> Result<Option<PullRequest>, IntegrationError> {
-        let hang = {
+        let (hang, gate) = {
             let mut state = self.state.lock().expect("lock poisoned");
             state.calls.push(ForgeCall::FindOpenPullRequest {
                 project_id: *p,
                 head: head.to_string(),
                 base: base.to_string(),
             });
-            state.hang_find_open
+            (state.hang_find_open, state.find_open_gate.clone())
         };
         if hang {
             return std::future::pending().await;
         }
-        let mut state = self.state.lock().expect("lock poisoned");
-        if let Some(scripted) = state.find_open_results.pop_front() {
-            return scripted;
+        // The answer reflects the forge as of the call; the gate only delays its delivery.
+        let answer = {
+            let mut state = self.state.lock().expect("lock poisoned");
+            if let Some(scripted) = state.find_open_results.pop_front() {
+                scripted
+            } else {
+                Ok(state.pull_requests.iter().find_map(|((proj, _), pr)| {
+                    (proj == p
+                        && pr.state == PullRequestState::Open
+                        && pr.head == head
+                        && pr.base == base)
+                        .then(|| pr.clone())
+                }))
+            }
+        };
+        if let Some(gate) = gate {
+            // The semaphore is never closed.
+            if let Ok(permit) = gate.acquire().await {
+                permit.forget();
+            }
         }
-        let found = state.pull_requests.iter().find_map(|((proj, _), pr)| {
-            (proj == p && pr.state == PullRequestState::Open && pr.head == head && pr.base == base)
-                .then(|| pr.clone())
-        });
-        Ok(found)
+        answer
     }
 
     async fn update_pull_request(

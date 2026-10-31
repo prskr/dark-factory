@@ -28,11 +28,11 @@ A follow-up message on a waiting task SHALL start a new run on the same task vol
 - **THEN** run 2 starts, the transcript shows the message delivered, run 2 resumes the harness session, its commit appears on the same PR and no second PR exists
 
 ### Requirement: Completion marks the PR ready
-When the agent completes the task, the PR SHALL be marked ready for review and the task status SHALL be `completed`.
+When the agent completes the task, the PR SHALL be marked ready for review, the run SHALL end `completed` and the task SHALL move to `in_review`; `completed` stays reserved for a board member marking the task done.
 
 #### Scenario: complete_task in run 2
 - **WHEN** run 2's script calls `complete_task`
-- **THEN** the task is `completed` and the PR is no longer a draft
+- **THEN** run 2 ends `completed`, the task is `in_review` and the PR is no longer a draft
 
 ### Requirement: Rate limit is resumable
 A run hitting the provider rate limit SHALL end cleanly with a visible, distinct end reason and the task SHALL continue with the next message.

@@ -324,6 +324,13 @@ impl Git {
         self
     }
 
+    /// Also allows `http://` remotes (`forge.allowPlainHttp`).
+    #[must_use]
+    pub fn allow_plain_http(mut self) -> Self {
+        self.allowed_protocols.push("http".to_string());
+        self
+    }
+
     /// Overrides the empty hooks directory (used for tests).
     #[must_use]
     pub fn with_hooks_empty_dir(mut self, path: impl Into<PathBuf>) -> Self {

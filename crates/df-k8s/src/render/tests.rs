@@ -41,6 +41,7 @@ fn test_config() -> ProvisioningConfig {
             "registry.example.org/claude-harness:0.95.0".to_string(),
         )]),
         log_format: df_telemetry::logging::LogFormat::Text,
+        allow_plain_http: false,
     }
 }
 
@@ -361,6 +362,16 @@ fn sandbox_inherits_the_control_plane_log_format() {
         sandbox_env(&test_config(), "DF_LOG_FORMAT").as_deref(),
         Some("text")
     );
+}
+
+#[test]
+fn sandbox_allows_plain_http_for_git_only_when_the_instance_does() {
+    let on = test_config().with_allow_plain_http(true);
+    assert_eq!(
+        sandbox_env(&on, "DF_GIT_ALLOW_PLAIN_HTTP").as_deref(),
+        Some("true")
+    );
+    assert_eq!(sandbox_env(&test_config(), "DF_GIT_ALLOW_PLAIN_HTTP"), None);
 }
 
 #[test]

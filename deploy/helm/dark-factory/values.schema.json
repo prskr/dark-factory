@@ -82,7 +82,8 @@
         "existingSecret": { "type": "string", "minLength": 1 },
         "clientSecretKey": { "type": "string", "minLength": 1 },
         "publicUrl": { "type": "string" },
-        "rolesClaim": { "type": "string", "minLength": 1 }
+        "rolesClaim": { "type": "string", "minLength": 1 },
+        "extraScopes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "telemetry": {
@@ -234,6 +235,12 @@
       "type": "object",
       "properties": {
         "keepAliveSeconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "forge": {
+      "type": "object",
+      "properties": {
+        "allowPlainHttp": { "type": "boolean" }
       }
     },
     "web": {

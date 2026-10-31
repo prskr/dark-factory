@@ -866,3 +866,30 @@ fn test_runtime_owned_values_are_quoted_and_validated() {
     };
     assert!(rewrite_git_config(temp.path(), &evil).is_err());
 }
+
+#[tokio::test]
+async fn http_remotes_are_refused_unless_plain_http_is_allowed() {
+    use crate::git::Git;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    // Nothing listens on port 1: an allowed protocol fails to connect instead.
+    let url = "http://127.0.0.1:1/o/r.git";
+
+    let refused = Git::new(temp_dir.path())
+        .git_output(&["ls-remote", url])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refused.contains("transport 'http' not allowed"),
+        "{refused}"
+    );
+
+    let allowed = Git::new(temp_dir.path())
+        .allow_plain_http()
+        .git_output(&["ls-remote", url])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(!allowed.contains("not allowed"), "{allowed}");
+}

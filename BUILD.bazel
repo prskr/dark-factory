@@ -32,6 +32,7 @@ bazel_env(
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],
         "jq": TOOLS["jq"],
+        "kind": TOOLS["kind"],
         "kingfisher": TOOLS["kingfisher"],
         "lefthook": TOOLS["lefthook"],
         "kube-linter": TOOLS["kube-linter"],

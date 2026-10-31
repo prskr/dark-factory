@@ -108,6 +108,22 @@ async fn try_ensure_draft(
     if current.task.pr_number.is_some() {
         return Ok(current.task.pr_number);
     }
+    // Serialize per task, also across control-plane replicas: the lock is held until the PR is
+    // recorded, so a second caller sees the PR the first one opened. It is released when `tx`
+    // ends, on every path including a dropped future. The hold is bounded by the forge calls'
+    // plugin timeouts; a waiting caller holds one pooled connection meanwhile.
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("task-pr:{}", current.task.id))
+        .execute(&mut *tx)
+        .await?;
+    let recorded: Option<i64> = sqlx::query_scalar("SELECT pr_number FROM tasks WHERE id = $1")
+        .bind(current.task.id.as_uuid())
+        .fetch_one(&mut *tx)
+        .await?;
+    if recorded.is_some() {
+        return Ok(recorded);
+    }
     let (head, base) = (current.task_branch(), current.project.base_branch.clone());
     let project = current.project.id;
     let pr = if let Some(pr) = ctx
@@ -130,7 +146,8 @@ async fn try_ensure_draft(
             Err(e) => return Err(e.into()),
         }
     };
-    record_pr(&ctx.pool, current.task.id, &pr).await?;
+    record_pr(&mut tx, current.task.id, &pr).await?;
+    tx.commit().await?;
     Ok(i64::try_from(pr.id.number).ok())
 }
 
@@ -176,11 +193,14 @@ pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
     }
 }
 
-async fn record_pr(pool: &PgPool, task_id: TaskId, pr: &PullRequest) -> Result<(), ChannelError> {
+async fn record_pr(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    pr: &PullRequest,
+) -> Result<(), ChannelError> {
     let number = i64::try_from(pr.id.number).map_err(|_out_of_range| {
         ChannelError::InvalidData("pull request number out of range".into())
     })?;
-    let mut tx = pool.begin().await?;
     let updated = sqlx::query(
         "UPDATE tasks SET pr_number = $2, pr_url = $3, updated_at = now()
          WHERE id = $1 AND pr_number IS NULL",
@@ -188,12 +208,11 @@ async fn record_pr(pool: &PgPool, task_id: TaskId, pr: &PullRequest) -> Result<(
     .bind(task_id.as_uuid())
     .bind(number)
     .bind(&pr.url)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     if updated.rows_affected() > 0 {
-        publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+        publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
     }
-    tx.commit().await?;
     Ok(())
 }
 
@@ -327,6 +346,64 @@ mod tests {
         on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
         assert_eq!(creates(&env)[0].title, "Better title");
         assert_eq!(creates(&env)[0].body, "Better body");
+    }
+
+    /// Returns once two PR lookups are in flight or an advisory lock of this database is queued.
+    async fn wait_for_overlap(forge: &df_core::testing::FakeForgeClient, pool: &PgPool) {
+        loop {
+            let finds = forge
+                .calls()
+                .iter()
+                .filter(|c| matches!(c, ForgeCall::FindOpenPullRequest { .. }))
+                .count();
+            let queued: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted \
+                 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if finds >= 2 || queued > 0 {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_push_report_and_run_end_open_one_pull_request() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let gate = env.forge.hold_find_open_pull_request();
+        let workspace = WorkspaceState {
+            task_branch_pushed: true,
+            ..WorkspaceState::default()
+        };
+        let (ctx_a, rc_a) = (env.ctx.clone(), rc.clone());
+        let push_report =
+            tokio::spawn(
+                async move { on_push_report(&ctx_a, &rc_a, &push(1, PushStatus::Ok)).await },
+            );
+        let (ctx_b, rc_b) = (env.ctx.clone(), rc.clone());
+        let run_end =
+            tokio::spawn(async move { on_run_end(&ctx_b, &rc_b, true, Some(&workspace)).await });
+
+        // Wait until both are inside the PR lookup, or one of them is queued behind the other on
+        // an advisory lock of this test's own database (the PostgreSQL server is shared); only
+        // then let the forge answer.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            wait_for_overlap(&env.forge, &pool),
+        )
+        .await
+        .expect("neither two PR lookups nor a queued advisory lock showed up within 10 s");
+        // Enough permits for every lookup either caller can make.
+        gate.add_permits(8);
+        push_report.await.unwrap();
+        run_end.await.unwrap();
+
+        assert_eq!(creates(&env).len(), 1);
+        assert_eq!(pr_number(&pool, rc.task.id).await, Some(1));
     }
 
     #[tokio::test]

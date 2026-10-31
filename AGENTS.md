@@ -60,6 +60,7 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 - `crates/df-telemetry` – logging setup (`LogFormat`, `RUST_LOG`) shared by the binaries; features `clap` (`ValueEnum`), `http` (request span middleware), `otel` (OpenTelemetry; control plane and gateway only), `test-util` (log capture)
 - `crates/factory-agent` – the sandbox runtime that runs a coding harness over ACP and talks to the control plane (see `crates/factory-agent/docs/`)
 - `crates/fake-acp-agent` – scripted ACP agent used in tests
+- `crates/df-e2e` – end-to-end suite (Playwright) and seed program for `just e2e-local`; cargo only, no Bazel targets
 - `contract/` – protobuf and WIT contracts; `plugins/forgejo` – WASM plugin
 - `deploy/` – Helm chart and image definitions; `design/`, `product/`, `openspec/` – design docs, specs and change proposals
 - `tools/xtask` – repo tooling (`cargo xtask update-tools`)
@@ -166,6 +167,8 @@ Run `cargo xtask check-crates` when done (pre-commit hook and CI run it); it che
 2. `BUILD.bazel` with `extract_cargo_lints(name = "lints", manifest = "Cargo.toml", workspace = "//:Cargo.toml")` and `lint_config = ":lints"` on every `rust_library`, `rust_binary`, `rust_test` and `rust_shared_library`.
 3. One `rust_test` per `tests/*.rs`, plus one for the unit tests. Never tag a test `manual`: the lint run skips manual targets.
 4. `"//crates/<name>:Cargo.toml"` (or `"//plugins/<name>:Cargo.toml"`) in the `crate.from_cargo` manifests of `MODULE.bazel`, then update `MODULE.bazel.lock` (skill `rust`).
+
+A crate that only `cargo` builds (`crates/df-e2e`) skips items 2 to 4 if it has an entry with a reason in `[workspace.metadata.check-crates.exempt]` of the root `Cargo.toml`. It must not have a `BUILD.bazel`.
 
 ## Traits over closures
 
