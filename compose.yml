@@ -2,7 +2,7 @@
 # docs/development.md. Tests do not use them: they start their own PostgreSQL through testcontainers.
 services:
   postgres:
-    image: docker.io/library/postgres:17-alpine
+    image: docker.io/library/postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -12,7 +12,7 @@ services:
 
   # OIDC provider for the web UI with static users (dev/dex.yaml).
   dex:
-    image: ghcr.io/dexidp/dex:v2.46.1
+    image: ghcr.io/dexidp/dex:v2.46.1@sha256:65b72ca0f4b0bf6d4ada84ec21da8851782563404ac7b8f926923d27ceced9ab
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     volumes:
       - ./dev/dex.yaml:/etc/dex/config.yaml:ro,z
@@ -24,7 +24,7 @@ services:
   # the browser reaches the web UI and Dex on 127.0.0.1 like a local browser; keep the version in
   # sync with the `playwright` entry of .mcp.json.
   playwright:
-    image: mcr.microsoft.com/playwright/mcp:v0.0.83
+    image: mcr.microsoft.com/playwright/mcp:v0.0.83@sha256:690763cbb437ee7233f538a953bb5390bf03791eb5c965b471e59d17a6132fcb
     profiles: ["design"]
     network_mode: host
     command: ["--isolated", "--host", "127.0.0.1", "--port", "8931"]
