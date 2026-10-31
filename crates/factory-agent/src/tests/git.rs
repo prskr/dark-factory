@@ -1,6 +1,4 @@
-//! Git configuration denylist, planted configuration, hooks, remotes, socket mode and the credential helper.
-
-use df_proto::agent::v1::{AgentMessage, agent_message};
+//! Git configuration denylist, planted configuration, hooks, remotes and the runtime socket mode.
 
 #[test]
 fn test_git_config_denylist() {
@@ -89,7 +87,7 @@ async fn test_planted_configuration_scenario() {
 [include]
 	path = /tmp/evil.inc
 [credential]
-	helper = store
+	helper = !evil
 "#;
     std::fs::write(git_dir.join("config"), planted_config).expect("write planted config");
 
@@ -104,16 +102,20 @@ async fn test_planted_configuration_scenario() {
         commit_author_name: "Agent Bot",
         commit_author_email: "bot@darkfactory.local",
         hooks_path,
-        credential_helper: "/opt/factory/factory-agent git-credential",
+        ssl_ca_info: Some(std::path::Path::new("/run/factory/tls/ca.crt")),
         extra_config: &[
             GitConfigEntry {
                 key: "rebase.autoStash".to_string(),
                 value: "true".to_string(),
             },
-            // Planted entry in extra_config should also be stripped by denylist
+            // Planted entries in extra_config should also be stripped by denylist
             GitConfigEntry {
                 key: "core.sshCommand".to_string(),
                 value: "malicious-ssh".to_string(),
+            },
+            GitConfigEntry {
+                key: "credential.helper".to_string(),
+                value: "!evil".to_string(),
             },
         ],
     };
@@ -131,8 +133,29 @@ async fn test_planted_configuration_scenario() {
     // Must contain the expected author identity
     assert!(new_content.contains("name = \"Agent Bot\""));
     assert!(new_content.contains("email = \"bot@darkfactory.local\""));
-    // Must contain runtime credential helper
-    assert!(new_content.contains("helper = \"/opt/factory/factory-agent git-credential\""));
+    // Only the empty helper, which resets helpers of other config scopes
+    let helpers = std::process::Command::new("git")
+        .args(["config", "--file"])
+        .arg(git_dir.join("config"))
+        .args(["--get-all", "credential.helper"])
+        .output()
+        .expect("git config");
+    assert_eq!(String::from_utf8_lossy(&helpers.stdout), "\n");
+    let ca_info_for = |url: &str| {
+        let out = std::process::Command::new("git")
+            .args(["config", "--file"])
+            .arg(git_dir.join("config"))
+            .args(["--get-urlmatch", "http.sslCAInfo", url])
+            .output()
+            .expect("git config");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    assert_eq!(
+        ca_info_for("https://git.example.org/peter/dark-factory.git"),
+        "/run/factory/tls/ca.crt\n"
+    );
+    assert_eq!(ca_info_for("https://github.com/a/b.git"), "");
+    assert!(!new_content.contains("[http]"));
     // Must contain hooksPath
     assert!(new_content.contains("hooksPath = /opt/factory/hooks-empty"));
     // Must contain allowed extra config
@@ -142,9 +165,67 @@ async fn test_planted_configuration_scenario() {
     assert!(!new_content.contains("fsmonitor"));
     assert!(!new_content.contains("insteadOf"));
     assert!(!new_content.contains("include"));
-    assert!(!new_content.contains("store"));
+    assert!(!new_content.contains("evil"));
     assert!(!new_content.contains("malicious"));
     assert!(!new_content.contains("sshCommand"));
+}
+
+#[test]
+fn test_repo_url_cannot_break_out_of_the_config_subsection() {
+    use crate::git::{GitConfigParams, render_git_config};
+
+    let urls = [
+        "https://h\"]\n[core]\n\thooksPath=/tmp/x\n[x \"/",
+        "https://h\\\"]\n[core]\n\thooksPath=/tmp/x\n[x \"/",
+        "https://h\"] [core] hooksPath=/tmp/x [x \"/",
+        "https://h\r[core]\r\thooksPath=/tmp/x/",
+        "https://h\u{0}\"]\u{b}[core]\u{c}hooksPath=/tmp/x/",
+        "https://h\\x/",
+        "https://h x/",
+    ];
+    for url in urls {
+        let params = GitConfigParams {
+            repo_url: url,
+            commit_author_name: "Agent Bot",
+            commit_author_email: "bot@darkfactory.local",
+            hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
+            ssl_ca_info: Some(std::path::Path::new("/run/factory/tls/ca.crt")),
+            extra_config: &[],
+        };
+        let rendered = render_git_config(&params);
+
+        assert!(!rendered.contains("[http"), "{url:?}: {rendered}");
+        let keys: Vec<&str> = rendered
+            .lines()
+            .filter(|l| !l.starts_with('['))
+            .filter_map(|l| l.split_once(" =").map(|(k, _)| k.trim()))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "repositoryformatversion",
+                "filemode",
+                "bare",
+                "logallrefupdates",
+                "hooksPath",
+                "url",
+                "fetch",
+                "promisor",
+                "partialclonefilter",
+                "helper",
+                "name",
+                "email"
+            ],
+            "{url:?}: {rendered}"
+        );
+        assert!(rendered.contains("hooksPath = /opt/factory/hooks-empty\n"));
+        let sections: Vec<&str> = rendered.lines().filter(|l| l.starts_with('[')).collect();
+        assert_eq!(
+            sections,
+            ["[core]", "[remote \"origin\"]", "[credential]", "[user]"],
+            "{url:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -295,16 +376,7 @@ async fn test_runtime_socket_permissions_mode_0600() {
 
     struct DummyHandler;
     #[tonic::async_trait]
-    impl RuntimeHandler for DummyHandler {
-        async fn handle_git_credential(
-            &self,
-            _p: &str,
-            _h: &str,
-            _path: &str,
-        ) -> (Option<String>, Option<String>, Option<String>) {
-            (None, None, None)
-        }
-    }
+    impl RuntimeHandler for DummyHandler {}
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let socket_path = temp_dir.path().join("runtime.sock");
@@ -329,163 +401,6 @@ async fn test_runtime_socket_permissions_mode_0600() {
     }
 }
 
-#[tokio::test]
-async fn test_git_credential_client_get_store_erase() {
-    use crate::runtime_socket::{RuntimeHandler, RuntimeSocketServer, run_git_credential_stream};
-
-    struct TestHandler {
-        deny: bool,
-    }
-
-    #[tonic::async_trait]
-    impl RuntimeHandler for TestHandler {
-        async fn handle_git_credential(
-            &self,
-            protocol: &str,
-            host: &str,
-            path: &str,
-        ) -> (Option<String>, Option<String>, Option<String>) {
-            assert_eq!(protocol, "https");
-            assert_eq!(host, "git.example.org");
-            assert_eq!(path, "peter/dark-factory.git");
-            if self.deny {
-                (None, None, Some("access denied".to_string()))
-            } else {
-                (
-                    Some("bot".to_string()),
-                    Some("secret-token-xyz".to_string()),
-                    None,
-                )
-            }
-        }
-    }
-
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let socket_path = temp_dir.path().join("runtime.sock");
-
-    let server = RuntimeSocketServer::bind(
-        &socket_path,
-        std::sync::Arc::new(TestHandler { deny: false }),
-    )
-    .expect("bind server");
-    let _handle = server.spawn();
-
-    // 1. Test "get" with valid credentials
-    let input = b"protocol=https\nhost=git.example.org\npath=peter/dark-factory.git\n\n";
-    let mut output = Vec::new();
-    run_git_credential_stream(&input[..], &mut output, &socket_path, Some("get"))
-        .await
-        .expect("run get");
-
-    let out_str = String::from_utf8(output).expect("utf8 output");
-    assert!(out_str.contains("username=bot\n"));
-    assert!(out_str.contains("password=secret-token-xyz\n"));
-
-    // 2. Test "store" is a no-op
-    let store_input =
-        b"protocol=https\nhost=git.example.org\nusername=bot\npassword=secret-token-xyz\n\n";
-    let mut store_output = Vec::new();
-    run_git_credential_stream(
-        &store_input[..],
-        &mut store_output,
-        &socket_path,
-        Some("store"),
-    )
-    .await
-    .expect("run store");
-    assert!(store_output.is_empty(), "store must be a no-op");
-
-    // 3. Test "erase" is a no-op
-    let erase_input = b"protocol=https\nhost=git.example.org\n\n";
-    let mut erase_output = Vec::new();
-    run_git_credential_stream(
-        &erase_input[..],
-        &mut erase_output,
-        &socket_path,
-        Some("erase"),
-    )
-    .await
-    .expect("run erase");
-    assert!(erase_output.is_empty(), "erase must be a no-op");
-
-    // 4. Test "get" when request is denied
-    let denied_socket = temp_dir.path().join("denied.sock");
-    let denied_server = RuntimeSocketServer::bind(
-        &denied_socket,
-        std::sync::Arc::new(TestHandler { deny: true }),
-    )
-    .expect("bind denied server");
-    let _denied_handle = denied_server.spawn();
-
-    let mut denied_output = Vec::new();
-    run_git_credential_stream(&input[..], &mut denied_output, &denied_socket, Some("get"))
-        .await
-        .expect("run denied get");
-    assert!(
-        denied_output.is_empty(),
-        "denied credentials must output nothing"
-    );
-}
-
-#[test]
-fn test_credentials_are_scoped_to_the_task_repository() {
-    use crate::runtime_handler::matches_repo_url;
-
-    let repo = "https://github.com/prskr/dark-factory.git";
-    assert!(matches_repo_url(
-        repo,
-        "https",
-        "github.com",
-        "prskr/dark-factory.git"
-    ));
-    assert!(matches_repo_url(
-        repo,
-        "https",
-        "github.com",
-        "prskr/dark-factory"
-    ));
-    assert!(
-        !matches_repo_url(repo, "https", "github.com", ""),
-        "path is required"
-    );
-
-    // Attacker host must be denied
-    assert!(!matches_repo_url(
-        repo,
-        "https",
-        "attacker.example",
-        "prskr/dark-factory.git"
-    ));
-    assert!(!matches_repo_url(
-        repo,
-        "http",
-        "github.com",
-        "prskr/dark-factory.git"
-    ));
-    assert!(!matches_repo_url(
-        repo,
-        "https",
-        "github.com",
-        "other-org/other-repo"
-    ));
-
-    // Local file URL
-    let file_repo = "file:///data/local-repo.git";
-    assert!(matches_repo_url(
-        file_repo,
-        "file",
-        "",
-        "/data/local-repo.git"
-    ));
-    assert!(matches_repo_url(file_repo, "file", "", "data/local-repo"));
-    assert!(!matches_repo_url(
-        file_repo,
-        "file",
-        "",
-        "data/different-repo"
-    ));
-}
-
 #[test]
 fn test_render_git_config_rejects_injection() {
     use crate::git::{GitConfigParams, render_git_config};
@@ -501,7 +416,7 @@ fn test_render_git_config_rejects_injection() {
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
-        credential_helper: "factory-agent git-credential",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };
@@ -517,7 +432,7 @@ fn test_render_git_config_rejects_injection() {
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries2,
         repo_url: "https://github.com/prskr/dark-factory.git",
-        credential_helper: "factory-agent git-credential",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };
@@ -533,7 +448,7 @@ fn test_render_git_config_rejects_injection() {
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries3,
         repo_url: "https://github.com/prskr/dark-factory.git",
-        credential_helper: "factory-agent git-credential",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };
@@ -584,14 +499,56 @@ fn test_render_skips_unsafe_keys_and_quotes_values() {
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
-        credential_helper: "factory-agent git-credential",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };
     let rendered = render_git_config(&params);
     assert!(!rendered.contains(".evil"));
     assert!(rendered.contains(r#"rebase = "a#b\"c\\d""#));
-    assert!(rendered.contains("useHttpPath = true"));
+    // Without a helper there is nothing to scope per path
+    assert!(!rendered.contains("useHttpPath"));
+    assert!(!rendered.contains("[http]"));
+}
+
+#[test]
+fn test_git_commands_never_run_a_prompt_program() {
+    let cmd = crate::git::Git::new("/tmp/repo").build_command();
+    let env: std::collections::HashMap<_, _> = cmd.as_std().get_envs().collect();
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("GIT_ASKPASS")),
+        Some(&Some(std::ffi::OsStr::new("")))
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("GIT_TERMINAL_PROMPT")),
+        Some(&Some(std::ffi::OsStr::new("0")))
+    );
+}
+
+#[test]
+fn test_git_commands_leave_the_ca_to_the_scoped_config() {
+    // GIT_SSL_CAINFO overrides `http.<url>.sslCAInfo`, so every host would trust only the CA.
+    let cmd = crate::git::Git::new("/tmp/repo")
+        .with_ssl_ca_info("/run/factory/tls/ca.crt")
+        .build_command();
+    let env: std::collections::HashMap<_, _> = cmd.as_std().get_envs().collect();
+    assert_eq!(env.get(std::ffi::OsStr::new("GIT_SSL_CAINFO")), Some(&None));
+}
+
+#[test]
+fn test_clone_trusts_the_ca_only_for_the_proxy_url() {
+    assert_eq!(
+        crate::git::proxy_ca_override(
+            "https://git.df.svc:8443/git/DF-1.git",
+            Some(std::path::Path::new("/run/factory/tls/ca.crt"))
+        )
+        .as_deref(),
+        Some("http.https://git.df.svc:8443/.sslCAInfo=/run/factory/tls/ca.crt")
+    );
+    assert_eq!(
+        crate::git::proxy_ca_override("https://git.df.svc:8443/git/DF-1.git", None),
+        None
+    );
 }
 
 #[test]
@@ -603,7 +560,7 @@ fn test_rewrite_git_config_requires_real_git_dir() {
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &[],
         repo_url: "https://github.com/prskr/dark-factory.git",
-        credential_helper: "",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };
@@ -636,215 +593,6 @@ fn test_rewrite_git_config_requires_real_git_dir() {
 }
 
 #[test]
-fn test_credential_scope_requires_matching_path() {
-    use crate::runtime_handler::matches_repo_url;
-
-    let repo = "https://github.com/org/a.git";
-    assert!(matches_repo_url(repo, "https", "github.com", "org/a"));
-    assert!(!matches_repo_url(repo, "https", "github.com", "attacker/b"));
-    assert!(!matches_repo_url(repo, "https", "github.com", ""));
-
-    // A local-path repo only matches the file protocol
-    assert!(!matches_repo_url(
-        "/srv/repo.git",
-        "https",
-        "evil.example",
-        "srv/repo"
-    ));
-    assert!(matches_repo_url(
-        "/srv/repo.git",
-        "file",
-        "",
-        "/srv/repo.git"
-    ));
-}
-
-type PendingCreds = std::sync::Arc<
-    tokio::sync::Mutex<
-        std::collections::HashMap<
-            String,
-            tokio::sync::oneshot::Sender<df_proto::agent::v1::CredentialGrant>,
-        >,
-    >,
->;
-
-fn cred_handler_for_test(
-    repo_url: &str,
-    cached: Option<(String, String)>,
-) -> (
-    crate::runtime_handler::DriverRuntimeHandler,
-    tokio::sync::mpsc::Receiver<AgentMessage>,
-    PendingCreds,
-) {
-    let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(10);
-    let pending_creds =
-        std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-    let handler = crate::runtime_handler::DriverRuntimeHandler::new(
-        repo_url.to_string(),
-        Vec::new(),
-        outbound_tx,
-        std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        std::sync::Arc::clone(&pending_creds),
-        std::sync::Arc::new(tokio::sync::Mutex::new(cached)),
-    );
-    (handler, outbound_rx, pending_creds)
-}
-
-/// Answers the next `CredentialRequest` on `outbound_rx` with `grant`.
-async fn answer_credential_request(
-    outbound_rx: &mut tokio::sync::mpsc::Receiver<AgentMessage>,
-    pending: &PendingCreds,
-    username: &str,
-    expires_at: Option<i64>,
-) {
-    use df_proto::agent::v1::{CredentialGrant, GitCredential, credential_grant};
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(2), outbound_rx.recv())
-        .await
-        .expect("a CredentialRequest must be sent")
-        .expect("channel open");
-    let Some(agent_message::Body::CredentialRequest(req)) = msg.body else {
-        panic!("expected CredentialRequest, got {msg:?}");
-    };
-    let tx = pending
-        .lock()
-        .await
-        .remove(&req.request_id)
-        .expect("pending request");
-    tx.send(CredentialGrant {
-        request_id: req.request_id,
-        result: Some(credential_grant::Result::Git(GitCredential {
-            username: username.to_string(),
-            password: "pw".to_string(),
-            expires_at: expires_at
-                .map(|seconds| df_proto::pbjson_types::Timestamp { seconds, nanos: 0 }),
-        })),
-    })
-    .ok();
-}
-
-#[tokio::test]
-async fn test_erase_and_expiry_drop_cached_credentials() {
-    use crate::runtime_socket::RuntimeHandler;
-
-    let repo = "https://git.example.org/org/repo.git";
-    let (handler, mut outbound_rx, pending) =
-        cred_handler_for_test(repo, Some(("old".to_string(), "pw".to_string())));
-    let handler = std::sync::Arc::new(handler);
-
-    // Cached credentials are served without asking the control plane
-    let (user, _, _) = handler
-        .handle_git_credential("https", "git.example.org", "org/repo.git")
-        .await;
-    assert_eq!(user.as_deref(), Some("old"));
-    assert!(outbound_rx.try_recv().is_err());
-
-    // `erase` drops them, so the next `get` asks again
-    handler
-        .handle_git_credential_erase("https", "git.example.org", "org/repo.git")
-        .await;
-    let h = std::sync::Arc::clone(&handler);
-    let get = tokio::spawn(async move {
-        h.handle_git_credential("https", "git.example.org", "org/repo.git")
-            .await
-    });
-    answer_credential_request(&mut outbound_rx, &pending, "fresh", None).await;
-    assert_eq!(get.await.unwrap().0.as_deref(), Some("fresh"));
-
-    // A grant that is about to expire is not served from the cache
-    handler
-        .handle_git_credential_erase("https", "git.example.org", "org/repo.git")
-        .await;
-    let h = std::sync::Arc::clone(&handler);
-    let get = tokio::spawn(async move {
-        h.handle_git_credential("https", "git.example.org", "org/repo.git")
-            .await
-    });
-    answer_credential_request(
-        &mut outbound_rx,
-        &pending,
-        "short-lived",
-        Some(chrono::Utc::now().timestamp() + 5),
-    )
-    .await;
-    assert_eq!(get.await.unwrap().0.as_deref(), Some("short-lived"));
-    let h = std::sync::Arc::clone(&handler);
-    let get = tokio::spawn(async move {
-        h.handle_git_credential("https", "git.example.org", "org/repo.git")
-            .await
-    });
-    answer_credential_request(&mut outbound_rx, &pending, "renewed", None).await;
-    assert_eq!(get.await.unwrap().0.as_deref(), Some("renewed"));
-
-    // Erase for another repository leaves the cache alone
-    handler
-        .handle_git_credential_erase("https", "git.example.org", "other/repo")
-        .await;
-    let (user, _, _) = handler
-        .handle_git_credential("https", "git.example.org", "org/repo.git")
-        .await;
-    assert_eq!(user.as_deref(), Some("renewed"));
-}
-
-#[tokio::test]
-async fn test_git_credential_erase_reaches_handler_over_socket() {
-    use crate::runtime_socket::{RuntimeHandler, RuntimeSocketServer, run_git_credential_stream};
-
-    struct Recorder(std::sync::Arc<std::sync::atomic::AtomicBool>);
-    #[tonic::async_trait]
-    impl RuntimeHandler for Recorder {
-        async fn handle_git_credential(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-        ) -> (Option<String>, Option<String>, Option<String>) {
-            (None, None, None)
-        }
-        async fn handle_git_credential_erase(&self, _: &str, host: &str, _: &str) {
-            assert_eq!(host, "git.example.org");
-            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    let temp = tempfile::tempdir().unwrap();
-    let sock = temp.path().join("runtime.sock");
-    let erased = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let server = RuntimeSocketServer::bind(
-        &sock,
-        std::sync::Arc::new(Recorder(std::sync::Arc::clone(&erased))),
-    )
-    .unwrap();
-    let _handle = server.spawn();
-
-    let input = b"protocol=https\nhost=git.example.org\npath=org/repo.git\n\n";
-    let mut out = Vec::new();
-    run_git_credential_stream(&input[..], &mut out, &sock, Some("erase"))
-        .await
-        .unwrap();
-    assert!(erased.load(std::sync::atomic::Ordering::SeqCst));
-    assert!(out.is_empty());
-}
-
-#[test]
-fn test_repo_url_with_userinfo_matches() {
-    use crate::runtime_handler::matches_repo_url;
-
-    let repo = "https://x-access-token:abc@git.example.com/org/repo.git";
-    assert!(matches_repo_url(
-        repo,
-        "https",
-        "git.example.com",
-        "org/repo"
-    ));
-    assert!(!matches_repo_url(
-        repo,
-        "https",
-        "evil.example.com",
-        "org/repo"
-    ));
-}
-
-#[test]
 fn test_runtime_owned_values_are_quoted_and_validated() {
     use crate::git::{GitConfigParams, render_git_config, rewrite_git_config};
 
@@ -852,7 +600,7 @@ fn test_runtime_owned_values_are_quoted_and_validated() {
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://git.example.org/a.git",
-        credential_helper: "helper",
+        ssl_ca_info: None,
         commit_author_name: "Team #1 Bot",
         commit_author_email: "bot@example.com",
     };
@@ -868,15 +616,12 @@ fn test_runtime_owned_values_are_quoted_and_validated() {
 }
 
 #[tokio::test]
-async fn http_remotes_are_refused_unless_plain_http_is_allowed() {
+async fn http_remotes_are_refused() {
     use crate::git::Git;
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
-    // Nothing listens on port 1: an allowed protocol fails to connect instead.
-    let url = "http://127.0.0.1:1/o/r.git";
-
     let refused = Git::new(temp_dir.path())
-        .git_output(&["ls-remote", url])
+        .git_output(&["ls-remote", "http://127.0.0.1:1/o/r.git"])
         .await
         .unwrap_err()
         .to_string();
@@ -884,12 +629,4 @@ async fn http_remotes_are_refused_unless_plain_http_is_allowed() {
         refused.contains("transport 'http' not allowed"),
         "{refused}"
     );
-
-    let allowed = Git::new(temp_dir.path())
-        .allow_plain_http()
-        .git_output(&["ls-remote", url])
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(!allowed.contains("not allowed"), "{allowed}");
 }

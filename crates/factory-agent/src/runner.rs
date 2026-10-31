@@ -15,9 +15,9 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use df_proto::agent::v1::{
-    AgentMessage, Assign, ControlMessage, CredentialGrant, HarnessCredentials, PhaseChanged,
-    Prompt, PushReport, PushStatus, RunOutcome, RunPhase, RunReport, RuntimeOperation,
-    RuntimeTiming, ToolCallResult, Workspace, agent_message, control_message,
+    AgentMessage, Assign, ControlMessage, HarnessCredentials, PhaseChanged, Prompt, PushReport,
+    PushStatus, RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallResult,
+    Workspace, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason, UsageSource};
 use tokio::sync::{Mutex, Notify, broadcast, mpsc, oneshot};
@@ -156,7 +156,6 @@ pub struct RunDriverParams {
     pub outbox: Arc<Mutex<Outbox>>,
     pub inbound_rx: mpsc::Receiver<ControlMessage>,
     pub outbound_tx: mpsc::Sender<AgentMessage>,
-    pub git_credentials: Option<(String, String)>,
 }
 
 /// Result of completing an agent run.
@@ -187,12 +186,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
             .await);
     };
 
-    let credential_helper_cmd = format!("{} git-credential", params.mcp_command.to_string_lossy());
-    let git = params
-        .git
-        .with_credential_helper(&credential_helper_cmd)
-        .with_runtime_sock(&params.runtime_sock_path);
-    let git_credentials = Arc::new(Mutex::new(params.git_credentials));
+    let git = params.git;
     let inbound_rx = params.inbound_rx;
     let ctx = Arc::new(RunContext {
         assign: params.assign,
@@ -205,12 +199,11 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         mcp_command: params.mcp_command,
         runtime_sock_path: params.runtime_sock_path,
         git,
-        credential_helper_cmd,
         outbox: params.outbox,
         outbound_tx: params.outbound_tx,
     });
 
-    let _socket_guard = match start_runtime_socket(&ctx, &shared, git_credentials) {
+    let _socket_guard = match start_runtime_socket(&ctx, &shared) {
         Ok(guard) => guard,
         Err(detail) => {
             return Ok(collected
@@ -472,7 +465,6 @@ async fn wait_for_input(
 }
 
 type PendingToolCalls = Arc<Mutex<HashMap<String, oneshot::Sender<ToolCallResult>>>>;
-type PendingCredRequests = Arc<Mutex<HashMap<String, oneshot::Sender<CredentialGrant>>>>;
 type HarnessTransport = ByteStreams<
     TokioAsyncWriteCompat<tokio::process::ChildStdin>,
     TokioAsyncReadCompat<tokio::process::ChildStdout>,
@@ -490,9 +482,8 @@ struct RunContext {
     hooks_path: PathBuf,
     mcp_command: PathBuf,
     runtime_sock_path: PathBuf,
-    /// Git with the credential helper and the runtime socket configured.
+    /// Hardened Git for the workspace, trusting the instance CA.
     git: Git,
-    credential_helper_cmd: String,
     outbox: Arc<Mutex<Outbox>>,
     outbound_tx: mpsc::Sender<AgentMessage>,
 }
@@ -501,7 +492,6 @@ struct RunContext {
 #[derive(Clone)]
 struct RunShared {
     pending_tool_calls: PendingToolCalls,
-    pending_cred_requests: PendingCredRequests,
     end_run_requested: Arc<AtomicBool>,
     /// A blocking request of the current turn (`ToolCallResult.await_input_after_turn`).
     await_input_requested: Arc<AtomicBool>,
@@ -519,7 +509,6 @@ impl RunShared {
     fn new(cancel_requested: bool) -> Self {
         Self {
             pending_tool_calls: Arc::new(Mutex::new(HashMap::new())),
-            pending_cred_requests: Arc::new(Mutex::new(HashMap::new())),
             end_run_requested: Arc::new(AtomicBool::new(false)),
             await_input_requested: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(cancel_requested)),
@@ -557,21 +546,13 @@ impl Collected {
     }
 }
 
-/// Binds the runtime socket (MCP and Git credentials of the harness). The socket is served until
-/// the returned guard is dropped.
-fn start_runtime_socket(
-    ctx: &RunContext,
-    shared: &RunShared,
-    git_credentials: Arc<Mutex<Option<(String, String)>>>,
-) -> Result<AbortOnDrop<()>, String> {
-    // Repository-scoped credential protection (Finding 4)
+/// Binds the runtime socket (factory tools for the harness MCP server). The socket is served
+/// until the returned guard is dropped.
+fn start_runtime_socket(ctx: &RunContext, shared: &RunShared) -> Result<AbortOnDrop<()>, String> {
     let handler = Arc::new(DriverRuntimeHandler::new(
-        ctx.workspace.repo_url.clone(),
         ctx.assign.tools.clone(),
         ctx.outbound_tx.clone(),
         Arc::clone(&shared.pending_tool_calls),
-        Arc::clone(&shared.pending_cred_requests),
-        git_credentials,
     ));
     let server = RuntimeSocketServer::bind(&ctx.runtime_sock_path, handler)
         .map_err(|e| format!("Failed to bind runtime socket: {e}"))?;
@@ -579,8 +560,7 @@ fn start_runtime_socket(
 }
 
 /// Starts the loop that applies control messages. It runs from the start of the run so that
-/// credential grants requested by git during the workspace prepare (clone, fetch, push) are
-/// delivered.
+/// messages arriving during the workspace prepare are applied.
 fn spawn_inbound_loop(
     mut inbound_rx: mpsc::Receiver<ControlMessage>,
     shared: &RunShared,
@@ -628,16 +608,6 @@ async fn handle_control_message(
                 tx.send(res).ok(); // receiver may be gone
             }
         }
-        Some(control_message::Body::CredentialGrant(grant)) => {
-            if let Some(tx) = shared
-                .pending_cred_requests
-                .lock()
-                .await
-                .remove(&grant.request_id)
-            {
-                tx.send(grant).ok(); // receiver may be gone
-            }
-        }
         // HarnessCredentials must precede Assign; the harness environment is already built
         Some(control_message::Body::HarnessCredentials(_)) => {
             emit_notice(
@@ -666,7 +636,7 @@ async fn prepare_phase(
         &ctx.repo_dir,
         &ctx.workspace,
         &ctx.hooks_path,
-        &ctx.credential_helper_cmd,
+        ctx.git.ssl_ca_info.as_deref(),
     )
     .await;
     send_timing(
@@ -1300,7 +1270,7 @@ async fn finalize_run(
         detail: &loop_outcome.end.detail,
         harness_session_id: &loop_outcome.session_id,
         hooks_path: &ctx.hooks_path,
-        credential_helper: &ctx.credential_helper_cmd,
+        ssl_ca_info: ctx.git.ssl_ca_info.as_deref(),
         wip_size_cap_bytes: 10 * 1024 * 1024,
         diverged,
     };

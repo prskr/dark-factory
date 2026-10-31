@@ -1040,32 +1040,6 @@ async fn test_scenario_pending_tool_call_resent_after_reconnect() {
     server.shutdown();
 }
 
-#[test]
-fn test_expired_credential_requests_are_not_resent() {
-    use crate::connection::{CREDENTIAL_REQUEST_TIMEOUT, CommandFilter};
-    use df_proto::agent::v1::CredentialRequest;
-
-    let mut filter = CommandFilter::new();
-    let old = std::time::Instant::now()
-        .checked_sub(CREDENTIAL_REQUEST_TIMEOUT + std::time::Duration::from_secs(1))
-        .expect("instant arithmetic");
-    for (id, at) in [("old", old), ("new", std::time::Instant::now())] {
-        filter.pending_credentials.insert(
-            id.to_string(),
-            (
-                at,
-                CredentialRequest {
-                    request_id: id.to_string(),
-                    kind: None,
-                },
-            ),
-        );
-    }
-    let resend = filter.pending_requests_to_resend();
-    assert_eq!(resend.len(), 1);
-    assert!(!filter.pending_credentials.contains_key("old"));
-}
-
 fn flush_test_report() -> AgentMessage {
     AgentMessage {
         seq: 0,

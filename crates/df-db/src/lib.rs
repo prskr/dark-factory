@@ -6,6 +6,7 @@ pub mod audit;
 pub mod blobs;
 pub mod catalog;
 pub mod egress;
+pub mod git_pushes;
 pub mod migrate;
 pub mod notify;
 pub mod pool;

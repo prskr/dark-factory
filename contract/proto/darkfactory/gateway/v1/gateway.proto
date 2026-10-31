@@ -8,6 +8,8 @@
 //     the sandbox registry and every run's effective allowlist. Every update is a full snapshot.
 //   * GatewayLog (served by each gateway pod): the control plane opens Tail to read the flow
 //     events of the egress proxy, buffered ones first, then live ones.
+//   * GatewayGit (served by the control plane): the Git proxy of a gateway pod records every
+//     push of a sandbox with RecordPush (iter2-git-proxy design D1).
 //
 // Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
 // gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
@@ -30,6 +32,12 @@ service GatewayLog {
   rpc Tail(TailRequest) returns (stream FlowEvent);
 }
 
+service GatewayGit {
+  // Stores or advances the record of a push. Idempotent by `push_id`; a call that would move the
+  // verdict backwards is ignored.
+  rpc RecordPush(PushRecord) returns (RecordPushResponse);
+}
+
 // ---------------------------------------------------------------------------
 // Policy
 // ---------------------------------------------------------------------------
@@ -46,6 +54,8 @@ message PolicyUpdate {
 
 message Snapshot {
   repeated SandboxEntry sandboxes = 1;
+  // Credentials of the forges the Git routes push to, keyed by `GitRoute.credential_ref`.
+  map<string, ForgeCredential> forge_credentials = 2;
 }
 
 // An active sandbox: where its traffic comes from and what it may reach.
@@ -58,6 +68,31 @@ message SandboxEntry {
   repeated HostRule hosts = 6;
   // The run's number within its task (`#2`); 0 if unknown.
   uint32 run_number = 7;
+  // The repository the run may fetch from and push to through the Git proxy; unset if none.
+  GitRoute git = 8;
+}
+
+// A run's repository behind the Git proxy. Branches are full ref names (`refs/heads/main`).
+message GitRoute {
+  // The project repository upstream, `https://` only.
+  string upstream_url = 1;
+  // The branch the task branch is based on, e.g. `refs/heads/main`.
+  string base_branch = 2;
+  // `refs/heads/factory/task/<KEY>`.
+  string task_branch = 3;
+  // `refs/heads/factory/wip/<KEY>`.
+  string wip_branch = 4;
+  // Key into `Snapshot.forge_credentials`.
+  string credential_ref = 5;
+  // Identity the agent's commits must carry (checked by iter2-push-checks).
+  string commit_name = 6;
+  string commit_email = 7;
+}
+
+// Basic auth credential for a forge. Secret: never logged; the Rust `Debug` redacts `password`.
+message ForgeCredential {
+  string username = 1;
+  string password = 2;
 }
 
 message HostRule {
@@ -151,3 +186,51 @@ message FlowEvent {
   // The run's number within its task (`#2`); 0 if unknown (an older gateway).
   uint32 run_number = 23;
 }
+
+// ---------------------------------------------------------------------------
+// Git pushes
+// ---------------------------------------------------------------------------
+
+// Outcome of a push or of one of its ref updates. A verdict only moves forward:
+// `FORWARDING` → `ACCEPTED` | `UPSTREAM_FAILED`; `REJECTED`, `ACCEPTED` and `UPSTREAM_FAILED` are
+// final.
+enum PushVerdict {
+  PUSH_VERDICT_UNSPECIFIED = 0;
+  // Passed the gateway's checks; being sent upstream.
+  PUSH_VERDICT_FORWARDING = 1;
+  // Upstream accepted it.
+  PUSH_VERDICT_ACCEPTED = 2;
+  // The gateway rejected it; nothing reached upstream.
+  PUSH_VERDICT_REJECTED = 3;
+  // Forwarding failed or upstream rejected it.
+  PUSH_VERDICT_UPSTREAM_FAILED = 4;
+}
+
+message PushRecord {
+  // UUIDv7 chosen by the gateway; idempotency key of the record.
+  string push_id = 1;
+  string run_id = 2;
+  string gateway_pod = 3;
+  // One entry per command of the push, in command order.
+  repeated RefUpdate refs = 4;
+  PushVerdict verdict = 5;
+  // Size of the pushed pack.
+  uint64 bytes = 6;
+  // From the start of the push to this verdict.
+  google.protobuf.Duration duration = 7;
+}
+
+message RefUpdate {
+  // Full ref name, e.g. `refs/heads/factory/task/DF-7`.
+  string name = 1;
+  // Hex object ids; all zeros for a create (`old_sha`) or a delete (`new_sha`).
+  string old_sha = 2;
+  string new_sha = 3;
+  PushVerdict verdict = 4;
+  // Empty unless rejected or failed: a gateway rule (`df:ref-not-allowed`,
+  // `df:non-fast-forward`, `df:other-ref-rejected`, ...) for `REJECTED`, the upstream's `ng`
+  // reason or the failure for `UPSTREAM_FAILED`.
+  string reason = 5;
+}
+
+message RecordPushResponse {}

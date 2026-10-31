@@ -284,11 +284,20 @@
         },
         "ports": {
           "type": "object",
-          "required": ["proxy", "internalGrpc", "health"],
+          "required": ["proxy", "git", "internalGrpc", "health"],
           "properties": {
             "proxy": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "git": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "internalGrpc": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "health": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "git": {
+          "type": "object",
+          "required": ["mirrorSizeLimit", "maxPushSizeBytes"],
+          "properties": {
+            "mirrorSizeLimit": { "type": "string", "minLength": 1 },
+            "maxPushSizeBytes": { "type": "integer", "minimum": 1 }
           }
         },
         "bufferSize": { "type": "integer", "minimum": 1 },

@@ -84,7 +84,8 @@ spec:
   commonName: {{ include "dark-factory.fullname" . }}-gateway
   dnsNames:
     - {{ include "dark-factory.fullname" . }}-gateway
-    - {{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}.svc
+    - {{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}
+    - {{ include "dark-factory.gateway.gitHost" . }}
     - {{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}.svc.cluster.local
     - "*.{{ include "dark-factory.fullname" . }}-gateway-headless.{{ .Release.Namespace }}.svc.cluster.local"
   usages:

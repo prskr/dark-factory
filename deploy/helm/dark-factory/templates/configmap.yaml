@@ -22,6 +22,10 @@ data:
       internalGrpcPort: {{ .Values.controlPlane.ports.internalGrpc }}
     gateway:
       proxyPort: {{ .Values.gateway.ports.proxy }}
+      gitPort: {{ .Values.gateway.ports.git }}
+      gitHost: {{ include "dark-factory.gateway.gitHost" . | quote }}
+      mirrorDir: {{ include "dark-factory.gateway.mirrorDir" . | quote }}
+      maxPushSizeBytes: {{ .Values.gateway.git.maxPushSizeBytes | int64 }}
       internalGrpcPort: {{ .Values.gateway.ports.internalGrpc }}
       healthPort: {{ .Values.gateway.ports.health }}
       controlPlaneHost: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}

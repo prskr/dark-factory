@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use df_proto::gateway::v1::{PolicyUpdate, SandboxEntry};
+use df_proto::gateway::v1::{ForgeCredential, GitRoute, PolicyUpdate, SandboxEntry};
 
 /// Reason of a denied request, as shown in the egress log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +93,8 @@ pub struct Sandbox {
 pub struct Policy {
     pub version: u64,
     sandboxes: HashMap<IpAddr, Sandbox>,
+    git_routes: HashMap<IpAddr, GitRoute>,
+    forge_credentials: HashMap<String, ForgeCredential>,
 }
 
 impl Policy {
@@ -100,20 +102,52 @@ impl Policy {
         Self {
             version,
             sandboxes: sandboxes.into_iter().collect(),
+            git_routes: HashMap::new(),
+            forge_credentials: HashMap::new(),
         }
+    }
+
+    /// Adds the repositories of the sandboxes (by pod IP) and the forge credentials they refer to.
+    #[must_use]
+    pub fn with_git(
+        mut self,
+        routes: impl IntoIterator<Item = (IpAddr, GitRoute)>,
+        credentials: impl IntoIterator<Item = (String, ForgeCredential)>,
+    ) -> Self {
+        self.git_routes = routes.into_iter().collect();
+        self.forge_credentials = credentials.into_iter().collect();
+        self
     }
 
     /// Entries whose `pod_ip` does not parse are skipped: they can never match a connection.
     pub fn from_update(update: PolicyUpdate) -> Self {
-        let entries = update.snapshot.unwrap_or_default().sandboxes;
-        Self::new(
-            update.version,
-            entries.into_iter().filter_map(sandbox_from_entry),
-        )
+        let snapshot = update.snapshot.unwrap_or_default();
+        let mut routes = Vec::new();
+        let sandboxes: Vec<_> = snapshot
+            .sandboxes
+            .into_iter()
+            .filter_map(|mut entry| {
+                let route = entry.git.take();
+                let (ip, sandbox) = sandbox_from_entry(entry)?;
+                routes.extend(route.map(|route| (ip, route)));
+                Some((ip, sandbox))
+            })
+            .collect();
+        Self::new(update.version, sandboxes).with_git(routes, snapshot.forge_credentials)
     }
 
     pub fn sandbox(&self, ip: IpAddr) -> Option<&Sandbox> {
         self.sandboxes.get(&ip)
+    }
+
+    /// The repository of the sandbox at `ip`, if its run has one.
+    pub fn git_route(&self, ip: IpAddr) -> Option<&GitRoute> {
+        self.git_routes.get(&ip)
+    }
+
+    /// The credential a [`GitRoute::credential_ref`] names.
+    pub fn forge_credential(&self, reference: &str) -> Option<&ForgeCredential> {
+        self.forge_credentials.get(reference)
     }
 }
 
@@ -353,9 +387,37 @@ mod tests {
                     run_number: 2,
                     ..Default::default()
                 }],
+                ..Default::default()
             }),
         });
         assert_eq!(policy.sandbox(POD.parse().unwrap()).unwrap().run_number, 2);
+    }
+
+    #[test]
+    fn snapshot_conversion_keeps_git_routes_and_forge_credentials() {
+        use df_proto::gateway::v1::Snapshot;
+        let route = GitRoute {
+            credential_ref: "forge".into(),
+            ..Default::default()
+        };
+        let credential = ForgeCredential {
+            username: "bot".into(),
+            password: "secret".into(),
+        };
+        let policy = Policy::from_update(PolicyUpdate {
+            version: 1,
+            snapshot: Some(Snapshot {
+                sandboxes: vec![SandboxEntry {
+                    pod_ip: POD.into(),
+                    git: Some(route.clone()),
+                    ..Default::default()
+                }],
+                forge_credentials: [("forge".to_string(), credential.clone())].into(),
+            }),
+        });
+        assert_eq!(policy.git_route(POD.parse().unwrap()), Some(&route));
+        assert_eq!(policy.forge_credential("forge"), Some(&credential));
+        assert_eq!(policy.git_route("10.9.9.9".parse().unwrap()), None);
     }
 
     #[test]
@@ -379,6 +441,7 @@ mod tests {
                     entry("not-an-ip", "x.com", 443),
                     entry("10.1.0.8", "x.com", 0),
                 ],
+                ..Default::default()
             }),
         });
         assert_eq!(policy.version, 7);

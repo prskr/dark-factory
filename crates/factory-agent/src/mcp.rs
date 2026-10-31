@@ -64,7 +64,7 @@ impl ServerHandler for McpBridgeServer {
                 let mcp_tools = tools.into_iter().map(wire_to_mcp_tool).collect();
                 Ok(ListToolsResult::with_all_items(mcp_tools))
             }
-            other => Err(McpError::internal_error(
+            other @ RuntimeResponse::McpCallTool { .. } => Err(McpError::internal_error(
                 format!("unexpected runtime socket response: {other:?}"),
                 None,
             )),
@@ -120,7 +120,7 @@ impl ServerHandler for McpBridgeServer {
 
                 Ok(CallToolResponse::Complete(res))
             }
-            other => Err(McpError::internal_error(
+            other @ RuntimeResponse::McpListTools { .. } => Err(McpError::internal_error(
                 format!("unexpected runtime socket response: {other:?}"),
                 None,
             )),

@@ -3,6 +3,7 @@
 //! Changes to entries write an audit entry and publish `egress_policy` in the transaction that
 //! changes them, so the notification reaches the gateways only for committed changes.
 
+use df_core::{CredentialRef, CredentialRefId};
 use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -93,6 +94,10 @@ pub struct ActiveRun {
     pub project_id: Uuid,
     pub project_key: String,
     pub persona_id: Uuid,
+    pub repo_url: String,
+    pub base_branch: String,
+    /// The project's forge credential, if it has one.
+    pub forge_credential: Option<CredentialRef>,
 }
 
 /// An `http-host` entry for the policy snapshot; `project_id` is `None` for instance scope.
@@ -117,19 +122,51 @@ pub async fn next_policy_version(pool: &PgPool) -> Result<u64, DbError> {
 
 /// Runs in a non-terminal state that have a pod address, oldest first.
 pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
-    Ok(sqlx::query_as!(
-        ActiveRun,
+    let rows = sqlx::query!(
         r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.key AS task_key, r.number AS run_number, p.id AS project_id,
-                  p.key AS project_key, t.persona_id
+                  p.key AS project_key, t.persona_id, p.repo_url, p.base_branch,
+                  c.id AS "credential_id?", c.name AS "credential_name?",
+                  c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
            FROM runs r
            JOIN tasks t ON t.id = r.task_id
            JOIN projects p ON p.id = t.project_id
+           LEFT JOIN credential_refs c ON c.id = p.forge_credential_id
            WHERE r.pod_ip IS NOT NULL
              AND r.state NOT IN ('succeeded', 'failed', 'cancelled')
            ORDER BY r.started_at, r.id"#
     )
     .fetch_all(pool)
-    .await?)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| ActiveRun {
+            forge_credential: match (
+                row.credential_id,
+                row.credential_name,
+                row.secret_name,
+                row.secret_key,
+            ) {
+                (Some(id), Some(name), Some(secret_name), Some(secret_key)) => {
+                    Some(CredentialRef {
+                        id: CredentialRefId::from_uuid(id),
+                        name,
+                        secret_name,
+                        secret_key,
+                    })
+                }
+                _ => None,
+            },
+            run_id: row.run_id,
+            pod_ip: row.pod_ip,
+            task_key: row.task_key,
+            run_number: row.run_number,
+            project_id: row.project_id,
+            project_key: row.project_key,
+            persona_id: row.persona_id,
+            repo_url: row.repo_url,
+            base_branch: row.base_branch,
+        })
+        .collect())
 }
 
 /// All `http-host` entries. An entry with a stored port outside `1..=65535` is skipped (and
@@ -649,6 +686,39 @@ mod tests {
         );
         assert_eq!(runs[0].run_number, 1);
         assert_eq!(runs[0].project_id, project);
+        assert_eq!(
+            (runs[0].repo_url.as_str(), runs[0].base_branch.as_str()),
+            ("https://example.test/r.git", "main")
+        );
+        assert_eq!(runs[0].forge_credential, None);
+
+        let credential = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO credential_refs (id, name, secret_name, secret_key)
+             VALUES ($1, 'forge', 'df-forge', 'token')",
+        )
+        .bind(credential)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE projects SET forge_credential_id = $1 WHERE id = $2")
+            .bind(credential)
+            .bind(project)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let reference = active_runs(&pool).await.unwrap()[0]
+            .forge_credential
+            .clone()
+            .unwrap();
+        assert_eq!(reference.id, CredentialRefId::from_uuid(credential));
+        assert_eq!(
+            (
+                reference.secret_name.as_str(),
+                reference.secret_key.as_str()
+            ),
+            ("df-forge", "token")
+        );
 
         insert_rule(&pool, "instance", None, "http-host", "x", &[]).await;
         // A corrupt port narrows the policy: the entry is left out.

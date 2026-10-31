@@ -18,9 +18,9 @@ use df_proto::transcript::v1 as transcript;
 use serde::Deserialize;
 use sqlx::PgPool;
 
-use crate::ChannelContext;
 use crate::error::ChannelError;
 use crate::runs::RunRow;
+use crate::{ChannelContext, GitProxy};
 
 const FACTORY_TOOLS_JSON: &str = include_str!("../../../contract/mcp/factory-tools.v2.json");
 /// Upper bound of `Continuation.summary`.
@@ -41,7 +41,6 @@ pub struct ProjectInfo {
     pub base_branch: String,
     /// Command that starts the adapter in the project image; empty means the harness image.
     pub adapter_command: Vec<String>,
-    pub forge_credential: Option<CredentialRef>,
 }
 
 impl ProjectInfo {
@@ -117,8 +116,6 @@ struct ProjectRecord {
     image: String,
     base_branch: String,
     adapter_command: Vec<String>,
-    #[sqlx(flatten)]
-    credential: CredentialColumns,
 }
 
 #[derive(sqlx::FromRow)]
@@ -138,10 +135,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         .ok_or_else(|| ChannelError::InvalidData(format!("task of run {} is missing", run.id)))?;
 
     let project: ProjectRecord = sqlx::query_as(
-        "SELECT p.key, p.repo_url, p.image, p.base_branch, p.adapter_command,
-                c.id AS credential_id, c.name AS credential_name, c.secret_name, c.secret_key
-         FROM projects p LEFT JOIN credential_refs c ON c.id = p.forge_credential_id
-         WHERE p.id = $1",
+        "SELECT key, repo_url, image, base_branch, adapter_command FROM projects WHERE id = $1",
     )
     .bind(task.project_id.as_uuid())
     .fetch_one(pool)
@@ -153,7 +147,6 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         image: project.image,
         base_branch: project.base_branch,
         adapter_command: project.adapter_command,
-        forge_credential: project.credential.into_ref(),
     };
 
     let persona: PersonaRecord = sqlx::query_as(
@@ -260,7 +253,7 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             title: rc.task.title.clone(),
         }),
         workspace: Some(Workspace {
-            repo_url: rc.project.repo_url.clone(),
+            repo_url: proxy_repo_url(&config.git_proxy, &rc.task.key.to_string()),
             base_branch: rc.project.base_branch.clone(),
             task_branch: rc.task_branch(),
             wip_branch: rc.wip_branch(),
@@ -291,6 +284,16 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         }),
         continuation: continuation(&ctx.pool, rc).await?,
     })
+}
+
+/// The task's repository URL on the Git proxy, `https://<host>:<port>/git/<KEY>.git`; the
+/// project's real repository URL never reaches the sandbox.
+pub fn proxy_repo_url(proxy: &GitProxy, task_key: &str) -> String {
+    if proxy.port == 443 {
+        format!("https://{}/git/{task_key}.git", proxy.host)
+    } else {
+        format!("https://{}:{}/git/{task_key}.git", proxy.host, proxy.port)
+    }
 }
 
 async fn continuation(
@@ -499,7 +502,6 @@ mod tests {
             image: "img".into(),
             base_branch: "main".into(),
             adapter_command: command.iter().map(ToString::to_string).collect(),
-            forge_credential: None,
         }
     }
 
@@ -615,6 +617,48 @@ mod tests {
                 .seconds,
             7200
         );
+        Ok(())
+    }
+
+    #[test]
+    fn proxy_url_names_the_task_on_the_gateway_and_omits_port_443() {
+        let proxy = |port| GitProxy {
+            host: "df-gateway.df.svc".into(),
+            port,
+        };
+        assert_eq!(
+            proxy_repo_url(&proxy(8443), "DF-7"),
+            "https://df-gateway.df.svc:8443/git/DF-7.git"
+        );
+        assert_eq!(
+            proxy_repo_url(&proxy(443), "DF-7"),
+            "https://df-gateway.df.svc/git/DF-7.git"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_carries_the_repository_through_the_proxy() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool.clone()).await;
+        env.ctx.config = std::sync::Arc::new(crate::ChannelConfig {
+            git_proxy: GitProxy {
+                host: "df-gateway.df.svc".into(),
+                port: 8443,
+            },
+            ..crate::ChannelConfig::default()
+        });
+        let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&pool, run_id).await?.expect("run");
+        let rc = load_run_context(&pool, run).await?;
+
+        let assign = build_assign(&env.ctx, &rc).await?;
+
+        let workspace = assign.workspace.expect("workspace");
+        assert_eq!(
+            workspace.repo_url,
+            "https://df-gateway.df.svc:8443/git/DF-1.git"
+        );
+        assert_eq!(workspace.task_branch, "factory/task/DF-1");
         Ok(())
     }
 

@@ -14,8 +14,8 @@ use df_core::{RunOutcome, RunState, TaskStatus};
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Cancel, ControlMessage, CredentialRequest, HarnessCredentials, HelloAck,
-    PushReport, Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
+    AgentMessage, Assign, Cancel, ControlMessage, HarnessCredentials, HelloAck, PushReport,
+    Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
@@ -159,7 +159,6 @@ struct Session {
 #[derive(Default)]
 struct Effects {
     tool_calls: Vec<ToolCallRequest>,
-    credentials: Vec<CredentialRequest>,
     pushes: Vec<PushReport>,
     run_end: Option<(RunReport, EndedRun)>,
 }
@@ -546,8 +545,8 @@ impl Session {
         Ok(true)
     }
 
-    /// `active`: the run had not ended when the batch arrived. Tool calls and credential requests
-    /// of an ended run are refused.
+    /// `active`: the run had not ended when the batch arrived. Tool calls of an ended run are
+    /// refused.
     async fn run_effects(&mut self, effects: Effects, active: bool) {
         for call in effects.tool_calls {
             let (ctx, rc, out) = (self.ctx.clone(), self.rc.clone(), self.out.clone());
@@ -559,19 +558,6 @@ impl Session {
                 };
                 // The runtime re-sends unanswered calls after a reconnect.
                 out.send(Ok(control(control_message::Body::ToolCallResult(result))))
-                    .await
-                    .ok();
-            });
-        }
-        for request in effects.credentials {
-            let (ctx, rc, out) = (self.ctx.clone(), self.rc.clone(), self.out.clone());
-            self.tasks.spawn(async move {
-                let grant = if active {
-                    credentials::grant(&ctx, &rc, request).await
-                } else {
-                    credentials::run_ended(request.request_id)
-                };
-                out.send(Ok(control(control_message::Body::CredentialGrant(grant))))
                     .await
                     .ok();
             });
@@ -790,9 +776,6 @@ impl BatchApply {
                 }
             }
             agent_message::Body::ToolCallRequest(call) => self.effects.tool_calls.push(call),
-            agent_message::Body::CredentialRequest(request) => {
-                self.effects.credentials.push(request);
-            }
             agent_message::Body::PushReport(push) => {
                 self.observations.push(Observation::Push {
                     target: push.target(),

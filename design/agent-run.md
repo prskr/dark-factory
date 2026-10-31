@@ -32,11 +32,12 @@
 │  Runtime (Rust, /opt/factory) ◄──► /data (task PVC)          │
 └─────┬──────────────────────────┬──────────────────┬──────────┘
       │ gRPC bidi, mTLS          │ HTTP(S) via      │ direct: cluster
-      │ (agent port)             │ HTTPS_PROXY      │ targets (e.g. RBE)
+      │ (agent port)             │ HTTPS_PROXY;     │ targets (e.g. RBE)
+      │                          │ Git: Git port    │
       ▼                          ▼                  ▼
  Control plane ──PolicyWatch──► Gateway ──► model provider, registries,
- (tools, credentials,           (egress proxy;      Forgejo (v1)
-  authorization, WASI plugins)   later Git proxy,
+ (tools, credentials,           (egress proxy,      forge (Git, with the
+  authorization, WASI plugins)   Git proxy; later   gateway's credential)
       │                          inference + MCP endpoints)
       └── WASI plugins ──► Forgejo API
 ```
@@ -208,8 +209,9 @@ Trust policy for configuration found in the repository:
 - Also removed: `.git/config.worktree`.
 - Template overrides:
   - `core.hooksPath` → the generated commit-hook directory `/run/factory/git-hooks` if commit hooks are configured, otherwise `/opt/factory/hooks-empty` (read-only image volume). The runtime's own operations always use the empty directory.
-  - remote URL from `Assign` (v1: forge; future: control plane Git proxy)
-  - credential helper: the runtime itself (v1 only)
+  - remote URL from `Assign`: the gateway's Git proxy URL `https://<gitHost>:<gitPort>/git/<task key>.git` (§11)
+  - `credential.helper` set to empty, which resets helpers from every other config scope; the sandbox holds no forge credential
+  - `[http "<proxy URL prefix>"] sslCAInfo` pointing at the CA that signs the gateway certificate, scoped to the proxy so other HTTPS remotes keep the system trust store
   - commit identity of the agent's bot account
 
 #### Configurable entries (instance and project scope)
@@ -232,11 +234,12 @@ Trust policy for configuration found in the repository:
 
 ### 7.2 Runtime Git invocations
 Always with:
-- `-c core.hooksPath=/opt/factory/hooks-empty -c core.fsmonitor=false -c credential.helper= -c credential.helper=<runtime>` (v1)
+- `-c core.hooksPath=/opt/factory/hooks-empty -c core.fsmonitor=false -c credential.helper=`
 - `-c protocol.allow=never -c protocol.https.allow=always`
 - `-c submodule.recurse=false`
 - `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/opt/factory/gitconfig` — `HOME` is on the PVC, so `~/.gitconfig` is untrusted
-- `GIT_TERMINAL_PROMPT=0`
+- `GIT_TERMINAL_PROMPT=0` and an empty `GIT_ASKPASS` (overrides `core.askPass` and `SSH_ASKPASS`): git never prompts
+- Clone, fetch and push are retried after 1 s, 5 s and 15 s on transient failures: connection errors, HTTP 503 and the gateway's 403 `df: unknown source` (the gateway has no snapshot with the new pod's IP yet). Other 403s, 502 and `[remote rejected]` are final.
 
 ### 7.3 Submodules and LFS
 - Submodules off by default; per-project opt-in with a URL allowlist.
@@ -250,11 +253,11 @@ Always with:
 | Kubernetes SA token | No | — | `automountServiceAccountToken: false` |
 | Inference provider keys | No | — | Full-harness mode uses the gateway's inference endpoint, which injects provider credentials |
 | 3rd-party MCP credentials | No | — | Only the gateway talks to upstream MCP servers (the control plane only for catalog discovery) |
-| Forge token | **v1: yes**, served on demand by the runtime's credential helper | Short-lived where Forgejo allows; scoped to the project repo | Removed by the Git proxy (§11) |
+| Forge token | No | — | The gateway's Git proxy injects it upstream (§11); the agent contract has no credential request (fields 14/16 reserved) |
 | Harness auth (e.g. Claude subscription) | Yes | Delivered per run over the stream, kept on tmpfs | Never in the pod spec. API-key-based harness auth could move to the gateway if the harness supports a base URL override |
 | Project build/test secrets (private registries, test DBs) | Out of scope for now | — | Candidate for the same proxy pattern later |
 
-Target state after the Git proxy: the mTLS identity and third-party harness auth are the only credentials in the sandbox. Removing tokens doesn't remove authority — the sandbox can still act through the control plane — so per-task authorization in the control plane is the real control.
+The mTLS identity and third-party harness auth are the only credentials in the sandbox. Removing tokens doesn't remove authority — the sandbox can still act through the control plane — so per-task authorization in the control plane is the real control.
 
 ## 9. Tools: factory server and gateway MCP endpoint
 The harness sees two MCP servers, both configured by the runtime (ADR-0027, ADR-0032):
@@ -268,20 +271,27 @@ In full-harness mode the runtime's own loop uses both directly, without the stdi
 ## 10. Network egress
 Summary; full design in [`egress.md`](egress.md) and ADR-0029.
 - Every run gets a generated network policy (`NetworkPolicy` by default, `CiliumNetworkPolicy` in Cilium mode), owned by its Sandbox and reconciled when allowlists or referenced Services change. No ingress.
-- Egress allowed to: the control plane agent port, the gateway's proxy port, and the run's **cluster targets** (e.g. an in-cluster NativeLink scheduler for Bazel RBE) and **CIDR targets**. DNS is denied unless a target needs it.
-- All HTTP(S) to the outside — the model provider, package registries, the forge in v1 — goes through the gateway's egress proxy, which enforces the run's host allowlist (instance, project, persona and task scopes). Allowlist changes reach running sandboxes within a second.
+- Egress allowed to: the control plane agent port, the gateway's proxy and Git ports, and the run's **cluster targets** (e.g. an in-cluster NativeLink scheduler for Bazel RBE) and **CIDR targets**. DNS is denied unless a target needs it.
+- All other HTTP(S) to the outside — the model provider, package registries — goes through the gateway's egress proxy, which enforces the run's host allowlist (instance, project, persona and task scopes). Allowlist changes reach running sandboxes within a second.
+- Git goes straight to the gateway's Git port (§11), not through the egress proxy: the Git host is a `hostAliases` entry and in `NO_PROXY`. The forge host is not on any sandbox allowlist.
 - The gateway's live egress log shows allowed and denied connections per run, with one-click allowlisting of denied hosts.
-
-With the Git proxy, forge access moves from the generic proxy allowlist to the dedicated Git endpoint in the gateway.
 
 **Future option — DNS server in the gateway.** Like the HTTP proxy, the gateway could also serve DNS for sandboxes (pod `dnsPolicy: None`, `dnsConfig` pointing at the gateway's ClusterIP). Details in [`egress.md`](egress.md) §12.
 
-## 11. Future option: Git smart-HTTP proxy
-Kept deliberately as a planned option. It runs in the gateway Deployment (ADR-0029), not in the control plane process; the control plane supplies the task → repository mapping over the same stream that feeds the egress allowlists.
+## 11. Git smart-HTTP proxy
+Status: **implemented** (iteration 2, `openspec/changes/iter2-git-proxy`; behaviour reference in [`crates/df-gateway/README.md`](../crates/df-gateway/README.md), "Git proxy"). It runs in the gateway Deployment (ADR-0029), not in the control plane process; the control plane supplies the task → repository route and the forge credential in the same policy snapshot that feeds the egress allowlists.
 
-- **Endpoint**: e.g. `https://<gateway>/git/<task-key>.git`, authenticated by the sandbox identity (pod IP lookup, or the per-pod mTLS certificate).
-- **Runtime change**: only the remote URL in `Assign` changes; the credential helper disappears. Designing v1 so the runtime always uses the URL it's given makes the switch transparent.
-- **Forwarding**: the gateway maps task → upstream repo and bot credential (both pushed by the control plane), forwards `info/refs`, `git-upload-pack` and `git-receive-pack`, injecting auth. Bodies are streamed, not buffered. Protocol v2 and partial-clone filters pass through.
+- **Endpoint**: `https://<gitHost>:<gitPort>/git/<task key>.git` on the gateway Service (`<fullname>-gateway.<namespace>.svc`, a `hostAliases` entry in the sandbox). The control plane sends this URL as `repo_url` in `Assign`.
+- **Identification**: by source pod IP from the snapshot (`403 df: unknown source` until the snapshot contains the pod). A sandbox may only use its own task key (`403 other-task`).
+- **Forwarding**: `info/refs`, `git-upload-pack` and `git-receive-pack` go to the task's forge repository with the credential injected; fetch bodies are streamed. Forge unreachable → `503`; forge rejects the credential (`401`/`403`) → `502` without `WWW-Authenticate`; every other forge answer is relayed with its status and body.
+- **Push path**: the body is spooled (≤ `gateway.maxPushSizeBytes`, else `413`), the mirror is refreshed, the pack is indexed into a quarantine with the mirror as alternate, then ref rules and push checks run. Only the task branch (fast-forward) and `refs/heads/factory/wip/<key>` (any update) are allowed; a push is accepted or rejected as a whole, rejections answer with `report-status` `ng <ref> df:…`.
+- **Push records**: every push attempt is stored through `GatewayGit.RecordPush` (`REJECTED`, `FORWARDING` before the first byte reaches the forge, then `ACCEPTED` / `UPSTREAM_FAILED`). Without a stored `FORWARDING` record nothing is forwarded.
+- **Retries** live in the runtime (§7.2), not in the gateway.
+
+The rest of this section describes the design and the planned extensions.
+
+- **Runtime change**: only the remote URL in `Assign` changed; the credential helper is gone.
+- **Forwarding**: the gateway maps task → upstream repo and bot credential (both pushed by the control plane), forwards `info/refs`, `git-upload-pack` and `git-receive-pack`, injecting auth. Protocol v2 and partial-clone filters pass through.
 - **Push checks (server-side hooks)**: the proxy is the only point every push passes through, so pre-receive checks belong here.
   - *Mechanism:* thin packs reference objects the push doesn't contain, so the gateway keeps a cached bare mirror per repository (rebuildable, on ephemeral or volume storage). Each push is received into a quarantine on top of the mirror, checked, and forwarded upstream only if all checks pass. Rejections go back through `report-status`, so git shows `remote rejected (reason)`. For pushes made by the runtime, the runtime feeds the rejection into the agent's next turn so it can fix the commits.
   - *Built-in checks:* ref rules (below); **secret scanning** of every pushed pack (Kingfisher or similar, live validation off) — the only secret scan, covering pushes by the runtime and by the harness alike, which a scan inside the sandbox couldn't; **commit identity** (author and committer must be the bot, so an agent can't commit as a human); **signature verification** once signing exists (§12).
@@ -446,6 +456,5 @@ Configuration from the base branch can be ahead of or behind the code on an olde
 - Divergence policy: agent rebases automatically vs human decides.
 - Separate UIDs for runtime and harness to protect `/data/runtime` and `.git/config` within the sandbox.
 - Keep-alive window length for `AwaitingInput` (responsiveness vs resource use).
-- Forgejo token scoping and expiry options for the v1 credential helper.
 - Tasks starting from existing branches (ADR-0025): prepare/finalize with a non-`factory/task/` branch.
 - [gitoxide](https://github.com/GitoxideLabs/gitoxide) instead of the Git CLI for the runtime's own operations (prepare, push, WIP snapshot): no hooks or config-triggered programs by construction, typed errors. Blocked as of 2026-10 by missing push and partial-clone (promisor) support; revisit when both exist. Until then a mixed setup would put two Git implementations on one repository, and the runtime would have to read whatever format the agent's `git` writes (index versions, extensions, reftable).

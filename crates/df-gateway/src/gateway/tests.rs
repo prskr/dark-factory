@@ -58,6 +58,7 @@ fn snapshot(version: u64, hosts: &[&str]) -> PolicyUpdate {
                     .collect(),
                 ..Default::default()
             }],
+            ..Default::default()
         }),
     }
 }

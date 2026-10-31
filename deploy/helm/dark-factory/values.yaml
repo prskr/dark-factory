@@ -191,10 +191,11 @@ runs:
   keepAliveSeconds: 600
 
 forge:
-  # Accept `http://` repository URLs (plugin calls, sandbox git and the project form). Off, only
+  # Accept `http://` repository URLs (plugin calls, the gateway's Git proxy towards the forge and
+  # the project form; sandboxes always use HTTPS to the gateway). Off, only
   # `https://` works. The forge token travels unencrypted then, so use it for throwaway clusters
-  # (the e2e cluster) only. The control plane logs a warning at startup when it is on; changing it
-  # restarts the control plane. Sandboxes get `DF_GIT_ALLOW_PLAIN_HTTP=true`.
+  # (the e2e cluster) only. The control plane and the gateway log a warning at startup when it is
+  # on; changing it restarts both.
   allowPlainHttp: false
 
 web:
@@ -227,8 +228,15 @@ gateway:
     minAvailable: 1
   ports:
     proxy: 3128
+    # Git proxy (HTTPS) for sandboxes.
+    git: 8443
     internalGrpc: 9444
     health: 8080
+  git:
+    # Size limit of the emptyDir holding the repository mirrors and push spools.
+    mirrorSizeLimit: 10Gi
+    # Pushes with a larger request body are rejected (`df:push-too-large`). 256 MiB.
+    maxPushSizeBytes: 268435456
   # Flow events of the live egress log kept in memory per gateway pod.
   bufferSize: 10000
   # Flow events older than this many seconds leave the buffers (open connections stay visible).
