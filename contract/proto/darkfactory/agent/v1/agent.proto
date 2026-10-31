@@ -56,6 +56,10 @@ service AgentChannel {
 // ---------------------------------------------------------------------------
 
 message AgentMessage {
+  // 14 was CredentialRequest: the gateway's Git proxy injects the forge credential.
+  reserved 14;
+  reserved "credential_request";
+
   // 0 for Hello, otherwise strictly increasing per run starting at 1.
   uint64 seq = 1;
 
@@ -64,7 +68,6 @@ message AgentMessage {
     PhaseChanged phase_changed = 11;
     darkfactory.transcript.v1.Event transcript_event = 12;
     ToolCallRequest tool_call_request = 13;
-    CredentialRequest credential_request = 14;
     PushReport push_report = 15;
     RunReport run_report = 16;
     RuntimeTiming runtime_timing = 17;
@@ -72,6 +75,10 @@ message AgentMessage {
 }
 
 message ControlMessage {
+  // 16 was CredentialGrant: the gateway's Git proxy injects the forge credential.
+  reserved 16;
+  reserved "credential_grant";
+
   // Highest AgentMessage.seq the control plane has persisted (cumulative).
   // A ControlMessage without a body is a pure acknowledgement.
   uint64 ack = 1;
@@ -83,7 +90,6 @@ message ControlMessage {
     Prompt prompt = 13;
     Cancel cancel = 14;
     ToolCallResult tool_call_result = 15;
-    CredentialGrant credential_grant = 16;
     Release release = 17;
   }
 }
@@ -417,40 +423,4 @@ message ToolCallResult {
   // AWAITING_INPUT) instead of finishing with END_TURN. Ignored if
   // end_run_after_turn is set.
   bool await_input_after_turn = 6;
-}
-
-// ---------------------------------------------------------------------------
-// Credentials (v1: Git only, D10)
-// ---------------------------------------------------------------------------
-
-message CredentialRequest {
-  string request_id = 1;
-
-  oneof kind {
-    GitCredentialRequest git = 10;
-  }
-}
-
-// Fields as passed to the runtime acting as Git credential helper.
-message GitCredentialRequest {
-  string protocol = 1;
-  string host = 2;
-  string path = 3;
-}
-
-message CredentialGrant {
-  string request_id = 1;
-
-  oneof result {
-    GitCredential git = 10;
-    // The request doesn't match the run's repository or isn't permitted.
-    string denied_reason = 11;
-  }
-}
-
-// Short-lived, repo-scoped forge credential. Never persisted by the runtime.
-message GitCredential {
-  string username = 1;
-  string password = 2;
-  google.protobuf.Timestamp expires_at = 3;
 }

@@ -22,7 +22,7 @@ use sandbox::{KubernetesBackend, RelayFlows, SandboxBackend, SandboxWiring};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[cfg(feature = "dev-tools")]
 mod demo_flows;
@@ -33,6 +33,8 @@ mod unconfigured;
 
 /// Time the control plane's listeners get to finish their work after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
+/// Time the gateway gets to store queued push records after its Git port stopped.
+const RECORD_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 /// When the shutdown signal arrived, set by the command that waited for it; the grace period
 /// counts from there.
@@ -308,7 +310,12 @@ where
         EgressDeps { flows, services },
         approval_types.clone(),
     )?;
-    let ctx_policy = (pool.clone(), notifier.clone());
+    let ctx_policy = PolicySources {
+        pool: pool.clone(),
+        notifier: notifier.clone(),
+        secrets: secrets.clone(),
+        git: df_gateway::control::snapshot::GitSettings::from_config(&cfg.agent, &cfg.forge),
+    };
     let ctx = ChannelContext {
         notifier,
         pool,
@@ -391,7 +398,14 @@ async fn run_gateway_command(
     let health_listener = bind_listener(cfg.gateway.health_port).await?;
     let proxy_listener = bind_listener(cfg.gateway.proxy_port).await?;
     let internal_listener = bind_listener(cfg.gateway.internal_grpc_port).await?;
+    let git_listener = bind_listener(cfg.gateway.git_port).await?;
+    let git_tls =
+        df_gateway::git::server::ServerTls::new(tls.cert_file.clone(), tls.key_file.clone());
+    // Fails at startup instead of on the first connection.
+    git_tls.acceptor().await?;
     let control_plane_name = cfg.gateway.control_plane_name(&cfg.instance_name);
+    let mirror_dir = cfg.gateway.mirror_dir.clone();
+    let max_push_size = cfg.gateway.max_push_size_bytes;
     // Kubernetes sets HOSTNAME to the pod name.
     let pod = std::env::var("HOSTNAME").unwrap_or_else(|_| "gateway".to_string());
 
@@ -401,6 +415,7 @@ async fn run_gateway_command(
         health_port = cfg.gateway.health_port,
         proxy_port = cfg.gateway.proxy_port,
         internal_grpc_port = cfg.gateway.internal_grpc_port,
+        git_port = cfg.gateway.git_port,
         "starting gateway listeners"
     );
 
@@ -434,18 +449,62 @@ async fn run_gateway_command(
         info!("received shutdown signal; stopping the gateway");
         signal.cancel();
     });
+    let (policy_tx, policy_rx) = watch::channel(None);
+    let forge_connector = gateway_forge_connector(&cfg.forge)?;
+    let upstream =
+        df_gateway::git::upstream::ForgeUpstream::from_connector(forge_connector.clone());
+    let mirrors = df_gateway::git::mirror::Mirrors::new(mirror_dir.clone(), forge_connector);
+    let recorder = Arc::new(df_gateway::git::records::GrpcRecorder::new(
+        outside.connector.clone(),
+        settings.control_plane.clone(),
+        settings.pod.clone(),
+        df_gateway::git::records::RetryPolicy::default(),
+    ));
+    let push = df_gateway::git::push::Push::new(Arc::new(mirrors), &mirror_dir, max_push_size)
+        .with_recorder(recorder.clone());
+    let git = Arc::new(df_gateway::git::server::GitEndpoint::new(
+        policy_rx,
+        Arc::new(upstream),
+        Arc::new(push),
+    ));
+    let git_task = tokio::spawn(git.serve(
+        git_listener,
+        Arc::new(git_tls),
+        shutdown.clone().cancelled_owned(),
+    ));
     let result = df_gateway::gateway::run(
         settings,
-        watch::channel(None).0,
+        policy_tx,
         outside,
         health_listener,
         proxy_listener,
         tail,
-        shutdown,
+        shutdown.clone(),
     )
     .await;
+    // The Git port stops with the rest of the gateway, also when that stopped on an error.
+    shutdown.cancel();
+    if let Err(error) = git_task.await {
+        error!(%error, "git endpoint task failed");
+    }
+    recorder.shutdown(RECORD_DRAIN_GRACE).await;
     signals.abort();
     Ok(result?)
+}
+
+/// The gateway's connection settings for the forge, with a startup warning if plain HTTP is on.
+fn gateway_forge_connector(
+    forge: &df_core::config::ForgeConfig,
+) -> anyhow::Result<df_gateway::git::upstream::ForgeConnector> {
+    if forge.allow_plain_http {
+        warn!(
+            setting = "forge.allowPlainHttp",
+            "plain HTTP allowed for Git routes: the forge credential may travel unencrypted; use it for throwaway clusters only"
+        );
+    }
+    Ok(df_gateway::git::upstream::ForgeConnector::new()
+        .context("failed to build the TLS client for the forge")?
+        .allowing_plain_http(forge.allow_plain_http))
 }
 
 /// Runs until `shutdown` resolves or a listener exits. After a shutdown the listeners get `grace`
@@ -539,22 +598,36 @@ fn egress_log_relay(
     Some(Arc::new(RelayFlows(relay)))
 }
 
+/// What `PolicyWatch` builds its snapshots from.
+struct PolicySources {
+    pool: PgPool,
+    notifier: Arc<df_db::Notifier>,
+    secrets: Arc<dyn df_core::SecretStore>,
+    git: df_gateway::control::snapshot::GitSettings,
+}
+
 /// Serves `PolicyWatch` to the gateway pods on the internal port until `stop` is set.
 async fn serve_policy_watch(
     gateway: String,
-    (pool, notifier): (PgPool, Arc<df_db::Notifier>),
+    sources: PolicySources,
     incoming: df_agent_channel::MtlsIncoming,
     stop: watch::Receiver<bool>,
 ) {
     let token = tokio_util::sync::CancellationToken::new();
-    let service = df_gateway::control::PolicyService::new(pool, notifier, token.clone());
+    let service = df_gateway::control::PolicyService::new(
+        sources.pool,
+        sources.notifier,
+        sources.secrets,
+        sources.git,
+        token.clone(),
+    );
     let cancel = token.clone();
     let canceller = async move {
         stopped(stop).await;
         cancel.cancel();
     };
     let (served, ()) = tokio::join!(
-        df_gateway::control::serve_policy(service, incoming, Some(gateway), token),
+        df_gateway::control::serve_internal(service, incoming, Some(gateway), token),
         canceller
     );
     if let Err(err) = served {

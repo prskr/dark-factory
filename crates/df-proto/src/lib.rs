@@ -32,6 +32,15 @@ pub mod gateway {
     pub mod v1 {
         tonic::include_proto!("darkfactory.gateway.v1");
         include!(concat!(env!("OUT_DIR"), "/darkfactory.gateway.v1.serde.rs"));
+
+        impl std::fmt::Debug for ForgeCredential {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("ForgeCredential")
+                    .field("username", &self.username)
+                    .field("password", &"<redacted>")
+                    .finish()
+            }
+        }
     }
 }
 
@@ -73,6 +82,59 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(serde_json::from_str::<FlowEvent>(&json).unwrap(), event);
         assert!(json.contains("VERDICT_DENIED"), "{json}");
+    }
+
+    #[test]
+    fn gateway_git_client_and_server_types_exist() {
+        use super::gateway::v1::{
+            gateway_git_client::GatewayGitClient,
+            gateway_git_server::{GatewayGit, GatewayGitServer},
+        };
+        fn _server<T: GatewayGit>(svc: T) {
+            let _ = GatewayGitServer::new(svc);
+        }
+        let _client_type: Option<GatewayGitClient<tonic::transport::Channel>> = None;
+    }
+
+    #[test]
+    fn forge_credential_debug_redacts_the_password() {
+        use super::gateway::v1::{ForgeCredential, Snapshot};
+        let credential = ForgeCredential {
+            username: "factory-bot".into(),
+            password: "s3cret-token".into(),
+        };
+        let snapshot = Snapshot {
+            forge_credentials: [("forgejo".to_owned(), credential.clone())].into(),
+            ..Default::default()
+        };
+        for debug in [format!("{credential:?}"), format!("{snapshot:#?}")] {
+            assert!(!debug.contains("s3cret-token"), "{debug}");
+            assert!(debug.contains("factory-bot"), "{debug}");
+        }
+    }
+
+    #[test]
+    fn forge_credentials_have_no_json_form() {
+        use super::gateway::v1::{ForgeCredential, PolicyUpdate, Snapshot};
+        use std::marker::PhantomData;
+
+        // Inherent consts win over the blanket trait const only when `T: Serialize` holds.
+        trait NotSerialize {
+            const SERIALIZE: bool = false;
+        }
+        struct Probe<T>(PhantomData<T>);
+        impl<T> NotSerialize for Probe<T> {}
+        impl<T: serde::Serialize> Probe<T> {
+            const SERIALIZE: bool = true;
+        }
+
+        let serializable = [
+            Probe::<super::gateway::v1::PushRecord>::SERIALIZE,
+            Probe::<ForgeCredential>::SERIALIZE,
+            Probe::<Snapshot>::SERIALIZE,
+            Probe::<PolicyUpdate>::SERIALIZE,
+        ];
+        assert_eq!(serializable, [true, false, false, false]);
     }
 
     fn base_event(kind: event::Kind) -> Event {

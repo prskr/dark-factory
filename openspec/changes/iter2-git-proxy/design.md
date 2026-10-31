@@ -25,7 +25,7 @@
 ```proto
 message SandboxEntry { …; GitRoute git = 7; }
 message GitRoute {
-  string upstream_url = 1;      // project repository, https only
+  string upstream_url = 1;      // project repository, https (http with forge.allowPlainHttp)
   string base_branch = 2; string task_branch = 3; string wip_branch = 4;
   string credential_ref = 5;    // key into Snapshot.forge_credentials
   string commit_name = 6; string commit_email = 7;  // used by iter2-push-checks
@@ -42,7 +42,7 @@ message PushRecord {
   uint64 bytes = 6; google.protobuf.Duration duration = 7;
 }
 ```
-The agent contract only marks `CredentialRequest`/`CredentialGrant` as deprecated (comments). Field numbers stay reserved.
+The agent contract drops `CredentialRequest`/`CredentialGrant` (pre-MVP, no mixed versions); field numbers 14 (`AgentMessage`) and 16 (`ControlMessage`) are reserved.
 
 *Alternative:* credentials pushed over a separate stream. Rejected because one snapshot keeps the route and its credential consistent with each other.
 
@@ -53,7 +53,7 @@ The agent contract only marks `CredentialRequest`/`CredentialGrant` as deprecate
 - hyper server with rustls (gateway certificate) on 8443. A hyper client builds upstream requests to `<upstream_url>/info/refs?service=…` and `<upstream_url>/git-upload-pack|git-receive-pack`.
 - Forwarded request headers: `Content-Type`, `Content-Encoding`, `Accept`, `Git-Protocol`, `User-Agent`. Everything else, `Authorization` in particular, is dropped. The proxy adds `Authorization: Basic <username:password>`.
 - Response bodies are streamed back unchanged. Upstream status codes are passed through, except 401/403, which become 502 with a fixed message, so that the client never sees an authentication challenge for the forge. A connection failure or timeout towards the upstream becomes 503, the same status as "no snapshot yet", so that the runtime can retry exactly the 503 cases and nothing else.
-- The upstream must be HTTPS, and redirects are not followed.
+- The upstream must be HTTPS (plain HTTP only with `forge.allowPlainHttp`, for throwaway clusters such as `just e2e-local`; the gateway checks the setting itself), and redirects are not followed.
 
 ### D4 — Ref rules
 `receive-pack` request bodies start with pkt-line ref commands (`<old> <new> <ref>\0<caps>`), followed by the pack. They are parsed with `gix-packetline`. Rules, in order:
@@ -65,7 +65,7 @@ One rejected command rejects the whole push, so the forge never sees a partially
 
 ### D5 — Spool, quarantine and mirror
 - The push body is spooled to a temp file in the mirror volume. A body larger than `maxPushSize` is rejected while reading.
-- **Mirror:** one bare repository per upstream URL (directory name = SHA-256 of the URL), created on first use. Before a push is checked, the mirror fetches `+refs/*:refs/*` from upstream with the forge credential. Fetches of the same mirror are serialized with a per-mirror `tokio::sync::Mutex`. Push spools are not serialized.
+- **Mirror:** one bare repository per upstream URL (directory name = SHA-256 of the URL), created on first use. Before a push is checked, the mirror fetches `+refs/heads/*:refs/heads/*` from upstream with the forge credential (`refs/*` would also mirror `refs/pull/*` on GitHub; the ref rules only need branches). Fetches of the same mirror are serialized with a per-mirror `tokio::sync::Mutex`. Push spools are not serialized.
   - *ponytail:* full mirror, no partial clone (gitoxide has no promisor support yet), and no eviction beyond the `emptyDir` size limit. Add LRU eviction when mirrors outgrow the volume.
 - **Quarantine:** the pack is indexed into a temp object directory with thin-pack bases resolved from the mirror (`gix-pack` bundle writing with a base-object lookup into the mirror's object database). The ancestor check and later push checks read from mirror + quarantine.
 - **Check hook:** after the ref rules, a `PushChecks` trait (single method, consumed by the Git endpoint) receives the route, the commands and the quarantine. This change ships a no-op implementation; `iter2-push-checks` provides the real one.
@@ -78,18 +78,18 @@ The control plane's `RecordPush` upserts `git_pushes` by `push_id` (one row per 
 2. **Push that passed all rules and checks:** first a call with `FORWARDING`. Only after it was stored does the gateway forward the body upstream, so no upstream side effect happens without a durable record. If this call fails after retries with backoff for up to 5 s, the push is rejected with `df:audit-unavailable` and nothing reaches upstream.
 3. **After the upstream answered:** a second call with `ACCEPTED` or `UPSTREAM_FAILED`, then the upstream response is relayed. If this call fails, the gateway keeps it in a small in-memory retry queue and still relays the upstream response; the push is not undone.
 
-*ponytail:* if the gateway pod dies before the final call succeeds, the record stays `FORWARDING`. The control plane's timeout scan marks such records older than 10 minutes as `UNKNOWN`. The record still proves that the push was attempted, and the runtime's `PushReport` shows the result on the run. Make the queue durable if this ever matters.
+*ponytail:* if the gateway pod dies before the final call succeeds, the record stays `FORWARDING`. The control plane's timeout scan marks such records older than 10 minutes as `UNKNOWN`. `UNKNOWN` is a database-only placeholder (not in the contract enum): a late `ACCEPTED` or `UPSTREAM_FAILED` from the gateway's retry queue still replaces it and writes its `git.push` audit entry. The record still proves that the push was attempted, and the runtime's `PushReport` shows the result on the run. Make the queue durable if this ever matters.
 
 ### D7 — Snapshot building
 The snapshot query joins active runs with their project's repository URL and forge credential reference. Credentials are resolved through `SecretStore` while the snapshot is built. Besides notifications, the snapshot is rebuilt every 60 s, so rotated Secrets reach gateways without a Secret watch.
 
 ### D8 — Runtime and sandbox wiring
-- `factory-agent`: the `git-credential` subcommand, its socket and the `CredentialRequest` client are deleted. The generated `.git/config` sets `credential.helper=` (empty, which resets the list) and `http.sslCAInfo=<csi volume>/ca.crt`. `GIT_TERMINAL_PROMPT=0` stays.
+- `factory-agent`: the `git-credential` subcommand, its socket and the `CredentialRequest` client are deleted. The generated `.git/config` sets `credential.helper=` (empty, which resets the list) and `http.<proxy URL>.sslCAInfo=<csi volume>/ca.crt`; the clone gets the same key with `-c`, and `GIT_SSL_CAINFO` is never set (it would override the scoped key). `GIT_TERMINAL_PROMPT=0` stays.
 - `df-k8s`: `hostAliases` for the gateway Service names → ClusterIP, those names in `NO_PROXY`, and a per-run policy egress rule to gateway pods on 8443.
 
 ## Risks / Trade-offs
 
-- [gitoxide can't resolve thin packs against a separate object database the way D5 needs] → spike 1.1. Fallback: the `git` CLI in the gateway image (`git index-pack --fix-thin` in a quarantine with `objects/info/alternates` pointing at the mirror). That adds Git to an otherwise static image.
+- [gitoxide can't resolve thin packs against a separate object database the way D5 needs] → resolved by spike 1.1 (`crates/df-gateway/README.md`, "Git proxy"): `gix-pack` indexes a thin pack with the mirror as base lookup, and the mirror fetch runs over an own hyper-based HTTP backend for `gix-transport`. The `git` CLI fallback is not needed.
 - [Mirror fetch before every push adds latency] → incremental fetches of a homelab repository take well under a second; pushes happen once per turn.
 - [Gateway in the clone path] → bodies are streamed; clones are blobless.
 - [Ancestor check against a stale mirror] → the mirror is fetched right before the check, and upstream `receive-pack` still enforces its own old-value check (lease semantics).

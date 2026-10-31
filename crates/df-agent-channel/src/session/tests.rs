@@ -659,7 +659,7 @@ async fn a_hanging_forge_does_not_block_the_stream() {
 }
 
 #[tokio::test]
-async fn tool_calls_and_credentials_are_refused_after_the_run_ended() {
+async fn tool_calls_are_refused_after_the_run_ended() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let run_id = env.running_run().await;
@@ -675,34 +675,18 @@ async fn tool_calls_and_credentials_are_refused_after_the_run_ended() {
         tool_name: "report_progress".into(),
         arguments_json: r#"{"summary":"too late"}"#.into(),
     };
-    let credential = CredentialRequest {
-        request_id: "r1".into(),
-        kind: None,
-    };
 
-    let batch = vec![
-        msg(1, agent_message::Body::ToolCallRequest(call)),
-        msg(2, agent_message::Body::CredentialRequest(credential)),
-    ];
+    let batch = vec![msg(1, agent_message::Body::ToolCallRequest(call))];
     assert!(session.handle_batch(batch).await.unwrap());
     session.drain().await;
 
-    let mut refused = (false, false);
+    let mut refused = false;
     while let Ok(Ok(control)) = rx.try_recv() {
-        match control.body {
-            Some(control_message::Body::ToolCallResult(r)) => refused.0 = r.is_error,
-            Some(control_message::Body::CredentialGrant(g)) => {
-                refused.1 = matches!(
-                    g.result,
-                    Some(df_proto::agent::v1::credential_grant::Result::DeniedReason(
-                        _
-                    ))
-                );
-            }
-            _ => {}
+        if let Some(control_message::Body::ToolCallResult(r)) = control.body {
+            refused = r.is_error;
         }
     }
-    assert_eq!(refused, (true, true));
+    assert!(refused);
     let line: String = sqlx::query_scalar("SELECT status_line FROM tasks WHERE id = $1")
         .bind(env.task.id.as_uuid())
         .fetch_one(&pool)

@@ -52,6 +52,9 @@ spec:
             - name: proxy
               containerPort: {{ .Values.gateway.ports.proxy }}
               protocol: TCP
+            - name: git
+              containerPort: {{ .Values.gateway.ports.git }}
+              protocol: TCP
             - name: internal-grpc
               containerPort: {{ .Values.gateway.ports.internalGrpc }}
               protocol: TCP
@@ -90,6 +93,8 @@ spec:
             - name: tls
               mountPath: /etc/dark-factory/tls
               readOnly: true
+            - name: git-mirrors
+              mountPath: {{ include "dark-factory.gateway.mirrorDir" . }}
       volumes:
         - name: config
           configMap:
@@ -100,3 +105,6 @@ spec:
         - name: tls
           secret:
             secretName: {{ include "dark-factory.fullname" . }}-gateway-tls
+        - name: git-mirrors
+          emptyDir:
+            sizeLimit: {{ .Values.gateway.git.mirrorSizeLimit | quote }}

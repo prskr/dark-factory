@@ -18,11 +18,14 @@ pub struct ControlPlaneEndpoint {
     pub tls_server_name: String,
 }
 
-/// Gateway egress proxy endpoint.
+/// Gateway endpoints: egress proxy and Git proxy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayEndpoint {
     pub ip: IpAddr,
     pub proxy_port: u16,
+    /// Host name of the Git proxy URL, mapped to `ip` in the sandbox's `/etc/hosts`.
+    pub git_host: String,
+    pub git_port: u16,
 }
 
 /// Settings governing the rendering and provisioning of sandboxes and task volumes: the
@@ -43,13 +46,16 @@ pub struct ProvisioningConfig {
     pub gateway_ip: IpAddr,
     /// Port of the gateway egress proxy.
     pub gateway_proxy_port: u16,
+    /// Host name of the gateway Git proxy, resolved through `hostAliases` and kept out of the
+    /// egress proxy (`NO_PROXY`).
+    pub gateway_git_host: String,
+    /// Port of the gateway Git proxy.
+    pub gateway_git_port: u16,
     /// Image per harness name (`claude-code`), mounted at `/opt/harness/<name>` in the sandbox of
     /// a run whose project has no adapter command of its own.
     pub harness_images: BTreeMap<String, String>,
     /// Log format the sandbox runtime is started with: the control plane's own.
     pub log_format: LogFormat,
-    /// Sets `DF_GIT_ALLOW_PLAIN_HTTP` in the sandboxes (`forge.allowPlainHttp`).
-    pub allow_plain_http: bool,
 }
 
 impl ProvisioningConfig {
@@ -68,9 +74,10 @@ impl ProvisioningConfig {
             control_plane_tls_server_name: control_plane.tls_server_name,
             gateway_ip: gateway.ip,
             gateway_proxy_port: gateway.proxy_port,
+            gateway_git_host: gateway.git_host,
+            gateway_git_port: gateway.git_port,
             harness_images: BTreeMap::new(),
             log_format: LogFormat::Text,
-            allow_plain_http: false,
         }
     }
 
@@ -85,13 +92,6 @@ impl ProvisioningConfig {
     #[must_use]
     pub fn with_log_format(mut self, log_format: LogFormat) -> Self {
         self.log_format = log_format;
-        self
-    }
-
-    /// Lets sandbox git clone over `http://` (`forge.allowPlainHttp`).
-    #[must_use]
-    pub fn with_allow_plain_http(mut self, allow: bool) -> Self {
-        self.allow_plain_http = allow;
         self
     }
 }
@@ -119,6 +119,8 @@ mod tests {
             GatewayEndpoint {
                 ip: "10.0.0.2".parse().unwrap(),
                 proxy_port: 3128,
+                git_host: "gw.svc".into(),
+                git_port: 8443,
             },
         );
 
@@ -129,5 +131,7 @@ mod tests {
         assert_eq!(cfg.sandbox.issuer_kind, section.issuer_kind);
         assert_eq!(cfg.control_plane_port, 9443);
         assert_eq!(cfg.gateway_proxy_port, 3128);
+        assert_eq!(cfg.gateway_git_host, "gw.svc");
+        assert_eq!(cfg.gateway_git_port, 8443);
     }
 }

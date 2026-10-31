@@ -136,11 +136,7 @@ pub fn render_sandbox(
             }),
             ..Default::default()
         }),
-        host_aliases: if host_aliases.is_empty() {
-            None
-        } else {
-            Some(host_aliases)
-        },
+        host_aliases: Some(host_aliases),
         containers: vec![agent_container(
             spec,
             agent_env(config, &no_proxy_entries.join(",")),
@@ -207,13 +203,20 @@ fn sandbox_labels(spec: &RunSandboxSpec, config: &ProvisioningConfig) -> BTreeMa
     labels
 }
 
-/// Host aliases for the cluster targets and the `NO_PROXY` entries (control plane and targets).
+/// Host aliases for the gateway Git proxy and the cluster targets, and the `NO_PROXY` entries
+/// (control plane, Git proxy and targets).
 fn cluster_target_networking(
     cluster_targets: &[ResolvedClusterTarget],
     config: &ProvisioningConfig,
 ) -> (Vec<SandboxPodTemplateSpecHostAliases>, Vec<String>) {
-    let mut host_aliases = Vec::new();
-    let mut no_proxy_entries = vec![config.control_plane_ip.to_string()];
+    let mut host_aliases = vec![SandboxPodTemplateSpecHostAliases {
+        ip: config.gateway_ip.to_string(),
+        hostnames: Some(vec![config.gateway_git_host.clone()]),
+    }];
+    let mut no_proxy_entries = vec![
+        config.control_plane_ip.to_string(),
+        config.gateway_git_host.clone(),
+    ];
 
     for target in cluster_targets {
         let fqdn = format!(
@@ -247,7 +250,7 @@ fn agent_env(
         value: Some(value),
         ..Default::default()
     };
-    let mut env = vec![
+    vec![
         var("HTTP_PROXY", proxy_url.clone()),
         var("HTTPS_PROXY", proxy_url.clone()),
         var("http_proxy", proxy_url.clone()),
@@ -265,11 +268,7 @@ fn agent_env(
         ),
         var("DF_LOG_FORMAT", config.log_format.as_str().to_string()),
         var("RUST_LOG", config.sandbox.log_level.clone()),
-    ];
-    if config.allow_plain_http {
-        env.push(var("DF_GIT_ALLOW_PLAIN_HTTP", "true".to_string()));
-    }
-    env
+    ]
 }
 
 /// Volume mounts of the agent container and the volumes of the pod.
@@ -502,7 +501,10 @@ fn egress_rules(
             instance_namespace,
             "app.kubernetes.io/component",
             "gateway",
-            vec![tcp_port(config.gateway_proxy_port)],
+            vec![
+                tcp_port(config.gateway_proxy_port),
+                tcp_port(config.gateway_git_port),
+            ],
         ),
     ];
     rules.extend(cluster_targets.iter().filter_map(cluster_target_rule));

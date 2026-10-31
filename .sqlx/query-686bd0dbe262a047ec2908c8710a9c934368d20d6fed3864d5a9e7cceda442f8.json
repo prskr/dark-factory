@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE git_pushes\n            SET refs = $2, verdict = $3, bytes = $4, duration_ms = $5, gateway_pod = $6,\n                updated_at = now()\n            WHERE push_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "686bd0dbe262a047ec2908c8710a9c934368d20d6fed3864d5a9e7cceda442f8"
+}

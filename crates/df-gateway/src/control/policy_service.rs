@@ -1,33 +1,40 @@
 //! `GatewayPolicy.PolicyWatch`: pushes the snapshot to every connected gateway pod.
 //!
 //! Each stream rebuilds the snapshot from the database after `egress_policy` and `run_changed`
-//! notifications (debounced) and sends it. All replicas receive the notifications, so a gateway
-//! gets its updates from whichever replica it is connected to.
+//! notifications (debounced) and sends it, and at the latest every [`REFRESH`], so rotated forge
+//! Secrets reach the gateways. All replicas receive the notifications, so a gateway gets its
+//! updates from whichever replica it is connected to.
 
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use df_core::SecretStore;
 use df_db::{Notification, Notifier, PgPool};
-use df_proto::gateway::v1::gateway_policy_server::{GatewayPolicy, GatewayPolicyServer};
+use df_proto::gateway::v1::gateway_policy_server::GatewayPolicy;
 use df_proto::gateway::v1::{PolicyUpdate, PolicyWatchRequest};
 use futures::{Stream, stream};
 use tokio::sync::broadcast;
+use tokio::time::{Instant, Interval, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
-use super::snapshot;
-use crate::peer::require_dns_san;
+use super::snapshot::{self, GitSettings};
 
 /// Wait after a notification before rebuilding, so a burst of changes causes one update.
 pub const DEBOUNCE: Duration = Duration::from_millis(100);
 
+/// Longest time between two snapshots of a stream, so changed Secrets (no notification) arrive.
+pub const REFRESH: Duration = Duration::from_secs(60);
+
 /// Serves `PolicyWatch` from the database.
 pub struct PolicyService {
-    pool: PgPool,
+    pub(super) pool: PgPool,
     notifier: Arc<Notifier>,
+    secrets: Arc<dyn SecretStore>,
+    git: GitSettings,
     debounce: Duration,
+    refresh: Duration,
     /// Ends the streams when the server shuts down.
     stop: CancellationToken,
 }
@@ -35,11 +42,20 @@ pub struct PolicyService {
 type UpdateStream = Pin<Box<dyn Stream<Item = Result<PolicyUpdate, Status>> + Send>>;
 
 impl PolicyService {
-    pub fn new(pool: PgPool, notifier: Arc<Notifier>, stop: CancellationToken) -> Self {
+    pub fn new(
+        pool: PgPool,
+        notifier: Arc<Notifier>,
+        secrets: Arc<dyn SecretStore>,
+        git: GitSettings,
+        stop: CancellationToken,
+    ) -> Self {
         Self {
             pool,
             notifier,
+            secrets,
+            git,
             debounce: DEBOUNCE,
+            refresh: REFRESH,
             stop,
         }
     }
@@ -47,6 +63,13 @@ impl PolicyService {
     #[must_use]
     pub fn debounce(mut self, debounce: Duration) -> Self {
         self.debounce = debounce;
+        self
+    }
+
+    /// Longest time between two snapshots of a stream (default [`REFRESH`]).
+    #[must_use]
+    pub fn refresh(mut self, refresh: Duration) -> Self {
+        self.refresh = refresh;
         self
     }
 }
@@ -64,8 +87,11 @@ impl GatewayPolicy for PolicyService {
         // Subscribed before the first snapshot is read: a change in between is not lost.
         let watch = Watch {
             pool: self.pool.clone(),
+            secrets: Arc::clone(&self.secrets),
+            git: self.git.clone(),
             changes: self.notifier.subscribe(),
             debounce: self.debounce,
+            refresh: refresh_interval(self.refresh),
             stop: self.stop.clone(),
             first: true,
         };
@@ -89,11 +115,21 @@ fn is_relevant(notification: &Notification) -> bool {
     )
 }
 
+/// Ticks every `period`, first after one period; a late tick does not cause a burst.
+fn refresh_interval(period: Duration) -> Interval {
+    let mut refresh = tokio::time::interval_at(Instant::now() + period, period);
+    refresh.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    refresh
+}
+
 /// The state of one `PolicyWatch` stream.
 struct Watch {
     pool: PgPool,
+    secrets: Arc<dyn SecretStore>,
+    git: GitSettings,
     changes: broadcast::Receiver<Notification>,
     debounce: Duration,
+    refresh: Interval,
     stop: CancellationToken,
     /// The first update is sent without waiting for a change.
     first: bool,
@@ -105,18 +141,23 @@ impl Watch {
         if !std::mem::take(&mut self.first) && !self.wait_for_change().await {
             return None;
         }
-        Some(snapshot::build(&self.pool).await.map_err(|error| {
+        let built = snapshot::build(&self.pool, self.secrets.as_ref(), &self.git).await;
+        // The period starts once the snapshot is ready, however long the build took.
+        self.refresh.reset();
+        Some(built.map_err(|error| {
             tracing::error!(%error, "failed to build the policy snapshot");
             Status::internal("policy snapshot failed")
         }))
     }
 
-    /// Waits for a relevant notification and the end of its burst. `false` if the stream should
-    /// end.
+    /// Waits for a relevant notification and the end of its burst, or for the refresh period.
+    /// `false` if the stream should end.
     async fn wait_for_change(&mut self) -> bool {
         loop {
+            // All branches are cancel-safe: a lost tick or message is covered by the rebuild.
             let received = tokio::select! {
                 () = self.stop.cancelled() => return false,
+                _ = self.refresh.tick() => return true,
                 received = self.changes.recv() => received,
             };
             match received {
@@ -136,30 +177,33 @@ impl Watch {
     }
 }
 
-/// Serves `PolicyWatch` on `incoming` until `shutdown` is cancelled. Only a peer whose
-/// certificate has the DNS name `gateway_name` may call it; `None` accepts any peer the TLS layer
-/// let in (tests without TLS).
-pub async fn serve<I, IO>(
-    service: PolicyService,
-    incoming: I,
-    gateway_name: Option<String>,
-    shutdown: CancellationToken,
-) -> Result<(), tonic::transport::Error>
-where
-    I: Stream<Item = Result<IO, std::io::Error>>,
-    IO: tokio::io::AsyncRead
-        + tokio::io::AsyncWrite
-        + tonic::transport::server::Connected
-        + Unpin
-        + Send
-        + 'static,
-{
-    let guard = move |request: Request<()>| match &gateway_name {
-        Some(name) => require_dns_san(&request, name).map(|()| request),
-        None => Ok(request),
-    };
-    Server::builder()
-        .add_service(GatewayPolicyServer::with_interceptor(service, guard))
-        .serve_with_incoming_shutdown(incoming, shutdown.cancelled_owned())
-        .await
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control::tests::{TestSecrets, git_settings};
+
+    fn watch(changes: broadcast::Receiver<Notification>) -> Watch {
+        Watch {
+            // Never connected: these tests only wait.
+            pool: PgPool::connect_lazy("postgres://unused@127.0.0.1:1/none").unwrap(),
+            secrets: Arc::new(TestSecrets::new("token")),
+            git: git_settings(),
+            changes,
+            debounce: DEBOUNCE,
+            refresh: refresh_interval(REFRESH),
+            stop: CancellationToken::new(),
+            first: false,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn without_notifications_the_watch_rebuilds_after_the_refresh_period() {
+        let (_sender, changes) = broadcast::channel(4);
+        let mut watch = watch(changes);
+        let start = Instant::now();
+        assert!(watch.wait_for_change().await);
+        assert_eq!(start.elapsed(), REFRESH);
+        assert!(watch.wait_for_change().await);
+        assert_eq!(start.elapsed(), REFRESH * 2);
+    }
 }

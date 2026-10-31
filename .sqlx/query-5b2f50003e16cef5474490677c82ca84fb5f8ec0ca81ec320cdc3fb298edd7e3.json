@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT r.task_id, t.persona_id, p.name\n        FROM runs r\n        JOIN tasks t ON t.id = r.task_id\n        JOIN personas p ON p.id = t.persona_id\n        WHERE r.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "persona_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "persona_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5b2f50003e16cef5474490677c82ca84fb5f8ec0ca81ec320cdc3fb298edd7e3"
+}

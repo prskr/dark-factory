@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64.workspace = true
 axum.workspace = true
 bytes.workspace = true
 df-agent-channel.workspace = true
@@ -18,19 +19,32 @@ df-db.workspace = true
 df-proto.workspace = true
 df-telemetry = { workspace = true, features = ["http"] }
 futures.workspace = true
+gix = { workspace = true, features = ["revision"] }
+gix-error.workspace = true
+gix-pack.workspace = true
+gix-packetline.workspace = true
+gix-transport.workspace = true
+hex.workspace = true
 hickory-resolver.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 ipnet.workspace = true
 opentelemetry.workspace = true
+rustls.workspace = true
+secrecy.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tls-parser.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+webpki-roots.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
@@ -39,11 +53,7 @@ opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 sqlx.workspace = true
-uuid.workspace = true
 df-agent-channel = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 rcgen.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tokio-rustls.workspace = true
-rustls.workspace = true

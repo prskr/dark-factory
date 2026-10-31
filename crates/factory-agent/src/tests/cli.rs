@@ -325,12 +325,5 @@ fn parses_subcommands() {
         }
     );
 
-    let cli = Cli::try_parse_from(["factory-agent", "git-credential", "get"]).unwrap();
-    assert_eq!(
-        cli.command,
-        Command::GitCredential {
-            operation: Some("get".to_string()),
-            socket: std::path::PathBuf::from("/run/factory/runtime.sock")
-        }
-    );
+    assert!(Cli::try_parse_from(["factory-agent", "git-credential", "get"]).is_err());
 }

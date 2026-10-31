@@ -6,314 +6,168 @@
 )]
 
 use super::{clone_for_workspace_test, setup_test_remote_repo};
-use crate::runtime_socket::RuntimeHandler;
+use crate::git::{Git, proxy_ca_override};
 
-fn scan_directory_for_secret(dir: &std::path::Path, secret: &[u8]) -> Vec<std::path::PathBuf> {
-    let mut found = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                found.extend(scan_directory_for_secret(&path, secret));
-            } else if path.is_file()
-                && let Ok(content) = std::fs::read(&path)
-                && content.windows(secret.len()).any(|w| w == secret)
-            {
-                found.push(path);
-            }
-        }
-    }
-    found
-}
-
-struct TestCredentialProvider {
-    user: String,
-    pass: String,
-}
-#[tonic::async_trait]
-impl RuntimeHandler for TestCredentialProvider {
-    async fn handle_git_credential(
-        &self,
-        _p: &str,
-        _h: &str,
-        _path: &str,
-    ) -> (Option<String>, Option<String>, Option<String>) {
-        (Some(self.user.clone()), Some(self.pass.clone()), None)
-    }
-}
-
-struct DeniedProvider;
-#[tonic::async_trait]
-impl RuntimeHandler for DeniedProvider {
-    async fn handle_git_credential(
-        &self,
-        _p: &str,
-        _h: &str,
-        _path: &str,
-    ) -> (Option<String>, Option<String>, Option<String>) {
-        (None, None, Some("access denied".to_string()))
-    }
+/// Bare repository `repo.git` under a fresh `git_root` for the local HTTPS server.
+fn init_bare_repo(git_root: &std::path::Path) {
+    std::fs::create_dir_all(git_root).expect("create git_root");
+    let out = std::process::Command::new("git")
+        .args(["init", "--bare", "-b", "main"])
+        .arg(git_root.join("repo.git"))
+        .output()
+        .expect("git init bare");
+    assert!(out.status.success());
 }
 
 #[tokio::test]
-async fn test_scenario_clone_from_local_https_test_server_using_credential_helper() {
-    use crate::runtime_socket::RuntimeSocketServer;
+async fn test_git_trusts_the_proxy_certificate_and_never_prompts_for_credentials() {
     use crate::test_harness::{LocalHttpsGitServer, TestPki};
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
-    let git_root = temp_dir.path().join("git_root");
-    let repo_dir = git_root.join("repo.git");
-    let data_dir = temp_dir.path().join("data");
-    let runtime_dir = temp_dir.path().join("runtime");
-    let empty_hooks = temp_dir.path().join("hooks-empty");
-    std::fs::create_dir_all(&data_dir).expect("create data dir");
-    std::fs::create_dir_all(&runtime_dir).expect("create runtime dir");
-    std::fs::create_dir_all(&empty_hooks).expect("create hooks dir");
-
-    // 1. Initialize bare git repository in git_root
-    std::fs::create_dir_all(&git_root).expect("create git_root");
-    let out = tokio::process::Command::new("git")
-        .args(["init", "--bare", "-b", "main", repo_dir.to_str().unwrap()])
-        .output()
-        .await
-        .expect("git init bare");
-    assert!(out.status.success());
-
-    // Enable receivepack / uploadpack
-    tokio::process::Command::new("git")
-        .current_dir(&repo_dir)
-        .args(["config", "http.receivepack", "true"])
-        .output()
-        .await
-        .unwrap();
-
-    // Seed initial commit into bare repo
-    let seed_dir = temp_dir.path().join("seed");
-    let out = tokio::process::Command::new("git")
-        .args([
-            "clone",
-            repo_dir.to_str().unwrap(),
-            seed_dir.to_str().unwrap(),
-        ])
-        .output()
-        .await
-        .expect("clone seed");
-    assert!(out.status.success());
-
-    tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["config", "commit.gpgsign", "false"])
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["config", "user.name", "Seed User"])
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["config", "user.email", "seed@example.com"])
-        .output()
-        .await
-        .unwrap();
-
-    std::fs::write(seed_dir.join("hello.txt"), "Dark Factory Iteration 1").expect("write file");
-    tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["add", "hello.txt"])
-        .output()
-        .await
-        .unwrap();
-    let out = tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["commit", "-m", "initial commit"])
-        .output()
-        .await
-        .expect("seed commit");
-    assert!(out.status.success());
-    let out = tokio::process::Command::new("git")
-        .current_dir(&seed_dir)
-        .args(["push", "origin", "HEAD:main"])
-        .output()
-        .await
-        .expect("seed push");
-    assert!(out.status.success());
-
-    // 2. Start LocalHttpsGitServer with required Basic auth
     let pki = TestPki::generate("localhost").expect("pki");
-    let expected_user = "bot".to_string();
-    let expected_pass = "super-secret-token-42".to_string();
-    let git_server = LocalHttpsGitServer::start(
-        &pki,
-        git_root.clone(),
-        Some((expected_user.clone(), expected_pass.clone())),
-    )
-    .expect("start https git server");
-
-    // Write CA certificate to file for Git to trust
     let ca_path = temp_dir.path().join("ca.crt");
     std::fs::write(&ca_path, &pki.ca_cert_pem).expect("write ca.crt");
+    let git = Git::new(temp_dir.path())
+        .with_hooks_empty_dir(temp_dir.path().join("hooks-empty"))
+        .with_global_gitconfig(temp_dir.path().join("gitconfig"))
+        .with_ssl_ca_info(&ca_path);
 
-    // 3. Start RuntimeSocketServer on runtime_dir/runtime.sock
-    let socket_path = runtime_dir.join("runtime.sock");
+    // Proxy certificate trusted: the instance CA, scoped to the proxy URL, verifies the server
+    let open_root = temp_dir.path().join("open");
+    init_bare_repo(&open_root);
+    let open_server = LocalHttpsGitServer::start(&pki, open_root, None).expect("start server");
+    let url = format!("https://localhost:{}/repo.git", open_server.addr.port());
+    let ca = proxy_ca_override(&url, Some(&ca_path)).expect("CA override");
+    let out = git
+        .run_cmd(&["-c", &ca, "ls-remote", &url])
+        .await
+        .expect("ls-remote");
+    assert!(
+        out.status.success(),
+        "ls-remote must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    open_server.shutdown();
 
-    let socket_server = RuntimeSocketServer::bind(
-        &socket_path,
-        std::sync::Arc::new(TestCredentialProvider {
-            user: expected_user,
-            pass: expected_pass.clone(),
-        }),
+    // No credential prompt: a 401 fails at once instead of asking for a username
+    let auth_root = temp_dir.path().join("auth");
+    init_bare_repo(&auth_root);
+    let auth_server = LocalHttpsGitServer::start(
+        &pki,
+        auth_root,
+        Some(("bot".to_string(), "secret".to_string())),
     )
-    .expect("bind socket");
-    let _socket_handle = socket_server.spawn();
-
-    // 4. Create python credential helper that communicates with runtime socket
-    let helper_path = temp_dir.path().join("git-credential-helper.py");
-    let python_helper_code = r#"#!/usr/bin/env python3
-import sys, socket, json, struct
-
-operation = sys.argv[-1] if len(sys.argv) > 1 else "get"
-if operation not in ("get",):
-    sys.exit(0)
-
-sock_path = sys.argv[1] if len(sys.argv) > 2 else os.environ.get("DF_RUNTIME_SOCK", "")
-
-fields = {}
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        break
-    if "=" in line:
-        k, v = line.split("=", 1)
-        fields[k.strip()] = v.strip()
-
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(sock_path)
-
-req = {
-    "type": "git_credential",
-    "protocol": fields.get("protocol", ""),
-    "host": fields.get("host", ""),
-    "path": fields.get("path", "")
-}
-payload = json.dumps(req).encode("utf-8")
-s.sendall(struct.pack(">I", len(payload)) + payload)
-
-len_bytes = s.recv(4)
-if len(len_bytes) == 4:
-    resp_len = struct.unpack(">I", len_bytes)[0]
-    data = b""
-    while len(data) < resp_len:
-        chunk = s.recv(resp_len - len(data))
-        if not chunk:
-            break
-        data += chunk
-    resp = json.loads(data.decode("utf-8"))
-    username = resp.get("username")
-    password = resp.get("password")
-    if username and password:
-        sys.stdout.write(f"username={username}\npassword={password}\n")
-        sys.stdout.flush()
-"#;
-    std::fs::write(&helper_path, python_helper_code).expect("write helper script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&helper_path).expect("meta").permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&helper_path, perms).expect("set permissions");
-    }
-
-    // 5. Clone repository using hardened Git with credential helper
-    let target_clone_dir = data_dir.join("repo");
-    let repo_url = format!("https://localhost:{}/repo.git", git_server.addr.port());
-    let helper_cmd = format!("{} {}", helper_path.display(), socket_path.display());
-
-    let clone_output = tokio::process::Command::new("git")
-        .arg("-c")
-        .arg(format!("core.hooksPath={}", empty_hooks.display()))
-        .arg("-c")
-        .arg("core.fsmonitor=false")
-        .arg("-c")
-        .arg("credential.helper=")
-        .arg("-c")
-        .arg(format!("credential.helper={helper_cmd}"))
-        .arg("-c")
-        .arg("protocol.allow=never")
-        .arg("-c")
-        .arg("protocol.https.allow=always")
-        .arg("-c")
-        .arg(format!("http.sslCAInfo={}", ca_path.display()))
-        .arg("-c")
-        .arg("submodule.recurse=false")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["clone", &repo_url, target_clone_dir.to_str().unwrap()])
-        .output()
-        .await
-        .expect("git clone");
-
+    .expect("start server");
+    let url = format!("https://localhost:{}/repo.git", auth_server.addr.port());
+    let ca = proxy_ca_override(&url, Some(&ca_path)).expect("CA override");
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        git.run_cmd(&["-c", &ca, "ls-remote", &url]),
+    )
+    .await
+    .expect("git must not wait for a prompt")
+    .expect("ls-remote");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        clone_output.status.success(),
-        "git clone with credential helper must succeed. Stderr: {}",
-        String::from_utf8_lossy(&clone_output.stderr)
+        stderr.contains("terminal prompts disabled"),
+        "unexpected stderr: {stderr}"
     );
-
-    // Verify cloned content
-    assert!(target_clone_dir.join("hello.txt").exists());
-    let file_content = std::fs::read_to_string(target_clone_dir.join("hello.txt")).unwrap();
-    assert_eq!(file_content, "Dark Factory Iteration 1");
-
-    // 6. Verify: NO password lands under /data
-    let leaked_files = scan_directory_for_secret(&data_dir, expected_pass.as_bytes());
-    assert!(
-        leaked_files.is_empty(),
-        "password must never land under /data, but found in: {leaked_files:?}"
-    );
-
-    // 7. Verify scenario: Denied request fails git clone
-    let denied_clone_dir = data_dir.join("denied_repo");
-    let denied_socket_path = runtime_dir.join("denied_runtime.sock");
-    let denied_socket_server =
-        RuntimeSocketServer::bind(&denied_socket_path, std::sync::Arc::new(DeniedProvider))
-            .expect("bind denied socket");
-    let _denied_handle = denied_socket_server.spawn();
-
-    let denied_helper_cmd = format!("{} {}", helper_path.display(), denied_socket_path.display());
-    let denied_output = tokio::process::Command::new("git")
-        .arg("-c")
-        .arg(format!("core.hooksPath={}", empty_hooks.display()))
-        .arg("-c")
-        .arg("core.fsmonitor=false")
-        .arg("-c")
-        .arg("credential.helper=")
-        .arg("-c")
-        .arg(format!("credential.helper={denied_helper_cmd}"))
-        .arg("-c")
-        .arg("protocol.allow=never")
-        .arg("-c")
-        .arg("protocol.https.allow=always")
-        .arg("-c")
-        .arg(format!("http.sslCAInfo={}", ca_path.display()))
-        .arg("-c")
-        .arg("submodule.recurse=false")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["clone", &repo_url, denied_clone_dir.to_str().unwrap()])
-        .output()
-        .await
-        .expect("git clone denied");
-
-    assert!(
-        !denied_output.status.success(),
-        "git clone must fail when credentials are denied"
-    );
-
-    git_server.shutdown();
+    auth_server.shutdown();
 }
 
+#[tokio::test]
+async fn test_git_rejects_a_server_certificate_from_another_ca() {
+    use crate::test_harness::{LocalHttpsGitServer, TestPki};
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let instance_pki = TestPki::generate("localhost").expect("pki");
+    let other_pki = TestPki::generate("localhost").expect("pki");
+    let ca_path = temp_dir.path().join("ca.crt");
+    std::fs::write(&ca_path, &instance_pki.ca_cert_pem).expect("write ca.crt");
+    let git = Git::new(temp_dir.path())
+        .with_hooks_empty_dir(temp_dir.path().join("hooks-empty"))
+        .with_global_gitconfig(temp_dir.path().join("gitconfig"))
+        .with_ssl_ca_info(&ca_path);
+    let root = temp_dir.path().join("root");
+    init_bare_repo(&root);
+    let server = LocalHttpsGitServer::start(&other_pki, root, None).expect("start server");
+    let url = format!("https://localhost:{}/repo.git", server.addr.port());
+
+    let ca = proxy_ca_override(&url, Some(&ca_path)).expect("CA override");
+
+    let out = git
+        .run_cmd(&["-c", &ca, "ls-remote", &url])
+        .await
+        .expect("ls-remote");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    assert!(
+        stderr.contains("certificate"),
+        "unexpected stderr: {stderr}"
+    );
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn test_fetch_trusts_the_proxy_through_the_scoped_ca_in_git_config() {
+    use crate::git::{GitConfigParams, rewrite_git_config};
+    use crate::test_harness::{LocalHttpsGitServer, TestPki};
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let pki = TestPki::generate("localhost").expect("pki");
+    let ca_path = temp_dir.path().join("ca.crt");
+    std::fs::write(&ca_path, &pki.ca_cert_pem).expect("write ca.crt");
+    let upstream = setup_test_remote_repo(&temp_dir.path().join("seed"));
+    let root = temp_dir.path().join("root");
+    let out = std::process::Command::new("git")
+        .args(["clone", "--bare"])
+        .arg(&upstream)
+        .arg(root.join("repo.git"))
+        .output()
+        .expect("git clone --bare");
+    assert!(out.status.success());
+    let server = LocalHttpsGitServer::start(&pki, root, None).expect("start server");
+    let url = format!("https://localhost:{}/repo.git", server.addr.port());
+
+    let local = temp_dir.path().join("local");
+    let out = std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .arg(&local)
+        .output()
+        .expect("git init");
+    assert!(out.status.success());
+    let hooks = temp_dir.path().join("hooks-empty");
+    rewrite_git_config(
+        &local,
+        &GitConfigParams {
+            repo_url: &url,
+            commit_author_name: "Bot",
+            commit_author_email: "bot@example.com",
+            hooks_path: &hooks,
+            ssl_ca_info: Some(&ca_path),
+            extra_config: &[],
+        },
+    )
+    .expect("rewrite config");
+    // No GIT_SSL_CAINFO: only the `[http "<proxy URL>"]` section trusts the instance CA
+    let git = Git::new(&local)
+        .with_hooks_empty_dir(&hooks)
+        .with_global_gitconfig(temp_dir.path().join("gitconfig"));
+
+    let out = git
+        .run_cmd(&["fetch", "origin", "main"])
+        .await
+        .expect("fetch");
+
+    assert!(
+        out.status.success(),
+        "fetch must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    server.shutdown();
+}
 #[tokio::test]
 async fn test_scenario_prepare_first_run() {
     use crate::git::Git;
@@ -398,15 +252,9 @@ async fn test_scenario_prepare_first_run() {
         git_config: vec![],
     };
 
-    let res = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("prepare workspace");
+    let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("prepare workspace");
 
     assert!(!res.diverged);
     assert!(res.push_report.is_none());
@@ -570,15 +418,9 @@ async fn test_scenario_prepare_volume_lost_restore_wip() {
         git_config: vec![],
     };
 
-    let res = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("prepare workspace");
+    let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("prepare workspace");
 
     assert!(!res.diverged);
 
@@ -684,15 +526,9 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
     };
 
     // First prepare (fresh clone)
-    let _ = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("initial prepare");
+    let _ = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("initial prepare");
 
     // 2. Previous run made a commit locally on the task branch but was killed before pushing!
     git.run_cmd(&["config", "commit.gpgsign", "false"])
@@ -714,15 +550,9 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
     let unpushed_sha = git.current_head().await.expect("head");
 
     // 3. Second run's prepare on the existing workspace MUST push the unpushed commits!
-    let res = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("second prepare");
+    let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("second prepare");
 
     assert!(!res.diverged);
     assert!(
@@ -776,15 +606,9 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
         .unwrap();
 
     // Third prepare: local is behind remote, must fast-forward merge cleanly
-    let res = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("third prepare ff");
+    let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("third prepare ff");
 
     assert!(!res.diverged);
     assert!(res.push_report.is_none());
@@ -891,15 +715,9 @@ async fn test_scenario_prepare_diverged() {
     };
 
     // Prepare fresh workspace
-    let _ = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("prepare");
+    let _ = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("prepare");
 
     // 2. Local creates a commit A
     git.run_cmd(&["config", "commit.gpgsign", "false"])
@@ -941,15 +759,9 @@ async fn test_scenario_prepare_diverged() {
 
     // 4. Prepare on existing workspace MUST detect divergence:
     // Both have commits the other lacks!
-    let res = prepare_workspace(
-        &git,
-        &local_dir,
-        &workspace,
-        &empty_hooks,
-        "/opt/factory/factory-agent git-credential",
-    )
-    .await
-    .expect("prepare diverged");
+    let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
+        .await
+        .expect("prepare diverged");
 
     assert!(res.diverged, "workspace must be marked diverged");
     assert!(
@@ -994,7 +806,7 @@ async fn test_prepare_recreates_missing_task_branch() {
         git_config: vec![],
     };
 
-    let res = prepare_workspace(&git, &local, &workspace, &hooks, "")
+    let res = prepare_workspace(&git, &local, &workspace, &hooks, None)
         .await
         .expect("prepare");
     assert!(!res.push_failed);

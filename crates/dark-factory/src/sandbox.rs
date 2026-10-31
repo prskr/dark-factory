@@ -270,11 +270,12 @@ async fn provisioning_config(
         df_k8s::GatewayEndpoint {
             ip: gw_ip,
             proxy_port: cfg.gateway.proxy_port,
+            git_host: cfg.gateway.git_host_name(&cfg.instance_name),
+            git_port: cfg.gateway.git_port,
         },
     )
     .with_harness_images(cfg.harness.images())
-    .with_log_format(log_format)
-    .with_allow_plain_http(cfg.forge.allow_plain_http))
+    .with_log_format(log_format))
 }
 
 /// Triggers a policy reconciliation for every database notification that changes the egress

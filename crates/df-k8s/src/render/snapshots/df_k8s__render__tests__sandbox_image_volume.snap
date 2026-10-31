@@ -1,5 +1,5 @@
 ---
-source: crates/df-k8s/src/render.rs
+source: crates/df-k8s/src/render/tests.rs
 expression: sandbox
 ---
 apiVersion: agents.x-k8s.io/v1beta1
@@ -41,9 +41,9 @@ spec:
             - name: https_proxy
               value: "http://10.105.68.86:3128"
             - name: NO_PROXY
-              value: "10.103.178.202,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
+              value: "10.103.178.202,dark-factory-gateway.dark-factory-dev.svc,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
             - name: no_proxy
-              value: "10.103.178.202,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
+              value: "10.103.178.202,dark-factory-gateway.dark-factory-dev.svc,scheduler.nativelink.svc.cluster.local,scheduler.nativelink.svc,10.96.0.50"
             - name: DF_CONTROL_PLANE_ADDR
               value: "10.103.178.202:9443"
             - name: DF_CONTROL_PLANE_SERVER_NAME
@@ -74,6 +74,9 @@ spec:
               name: harness-claude-code
               readOnly: true
       hostAliases:
+        - hostnames:
+            - dark-factory-gateway.dark-factory-dev.svc
+          ip: 10.105.68.86
         - hostnames:
             - scheduler.nativelink.svc.cluster.local
             - scheduler.nativelink.svc

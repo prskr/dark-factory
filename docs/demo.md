@@ -54,7 +54,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `image.*.tag` | `e2e`, `pullPolicy: IfNotPresent` | Images are loaded into the node. |
 | `oidc.issuerUrl`, `oidc.publicUrl` | `http://dex.dex.svc:5556/dex`, `http://dark-factory-control-plane.dark-factory.svc:8080` | Plain `http://` is accepted on any host; the control plane logs a startup warning. |
 | `oidc.rolesClaim`, `oidc.extraScopes` | `groups`, `[groups, offline_access]` | Dex returns the role as `groups`, as in local development. |
-| `forge.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, sandbox git and the project form accept `http://` repository URLs. The control plane logs a startup warning; the token travels unencrypted inside the throwaway cluster. |
+| `forge.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy and the project form accept `http://` repository URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |
 | `runs.keepAliveSeconds` | `0` | A run ends with its turn, so the follow-up message starts run 2 (the `loaded` session of the script). |
 | `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |

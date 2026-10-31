@@ -99,9 +99,6 @@ const WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long shutdown waits for queued messages to be sent and acknowledged.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long the runtime waits for a `CredentialGrant`. Pending requests older than this are not
-/// re-sent after a reconnect, because the requester has given up.
-pub const CREDENTIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Exponential backoff policy for reconnecting to the control plane.
 #[derive(Debug, Clone)]
@@ -127,10 +124,7 @@ pub struct CommandFilter {
     pub assigned_runs: std::collections::HashSet<String>,
     pub seen_prompt_ids: std::collections::HashSet<String>,
     pub seen_tool_results: std::collections::HashSet<String>,
-    pub seen_credential_grants: std::collections::HashSet<String>,
     pub pending_tool_calls: std::collections::HashMap<String, df_proto::agent::v1::ToolCallRequest>,
-    pub pending_credentials:
-        std::collections::HashMap<String, (Instant, df_proto::agent::v1::CredentialRequest)>,
 }
 
 impl CommandFilter {
@@ -152,10 +146,6 @@ impl CommandFilter {
                 self.pending_tool_calls.remove(&res.call_id);
                 self.seen_tool_results.insert(res.call_id.clone())
             }
-            Some(control_message::Body::CredentialGrant(grant)) => {
-                self.pending_credentials.remove(&grant.request_id);
-                self.seen_credential_grants.insert(grant.request_id.clone())
-            }
             Some(
                 control_message::Body::Cancel(_)
                 | control_message::Body::Release(_)
@@ -166,42 +156,23 @@ impl CommandFilter {
         }
     }
 
-    /// Track outgoing tool call or credential request expecting a response.
+    /// Track an outgoing tool call expecting a response.
     pub fn track_outgoing_request(&mut self, msg: &AgentMessage) {
-        match &msg.body {
-            Some(agent_message::Body::ToolCallRequest(req)) => {
-                self.pending_tool_calls
-                    .insert(req.call_id.clone(), req.clone());
-            }
-            Some(agent_message::Body::CredentialRequest(req)) => {
-                self.pending_credentials
-                    .insert(req.request_id.clone(), (Instant::now(), req.clone()));
-            }
-            _ => {}
+        if let Some(agent_message::Body::ToolCallRequest(req)) = &msg.body {
+            self.pending_tool_calls
+                .insert(req.call_id.clone(), req.clone());
         }
     }
 
-    /// Returns pending tool call and credential requests to be re-sent after reconnect.
-    ///
-    /// Credential requests older than [`CREDENTIAL_REQUEST_TIMEOUT`] are dropped instead.
+    /// Returns pending tool call requests to be re-sent after reconnect.
     pub fn pending_requests_to_resend(&mut self) -> Vec<AgentMessage> {
-        self.pending_credentials
-            .retain(|_, (sent_at, _)| sent_at.elapsed() < CREDENTIAL_REQUEST_TIMEOUT);
-
-        let mut list = Vec::new();
-        for req in self.pending_tool_calls.values() {
-            list.push(AgentMessage {
+        self.pending_tool_calls
+            .values()
+            .map(|req| AgentMessage {
                 seq: 0,
                 body: Some(agent_message::Body::ToolCallRequest(req.clone())),
-            });
-        }
-        for (_, req) in self.pending_credentials.values() {
-            list.push(AgentMessage {
-                seq: 0,
-                body: Some(agent_message::Body::CredentialRequest(req.clone())),
-            });
-        }
-        list
+            })
+            .collect()
     }
 }
 
@@ -289,7 +260,7 @@ impl ConnectionManager {
                 tracing::warn!(error = %error, ack = msg.ack, "failed to acknowledge outbox messages");
             }
         }
-        // Deduplicate commands: Assign, Prompt, ToolCallResult, CredentialGrant
+        // Deduplicate commands: Assign, Prompt, ToolCallResult
         if msg.body.is_some() {
             let is_fresh = self
                 .command_filter
@@ -717,19 +688,14 @@ enum StreamEnd {
     Dropped,
 }
 
-/// True if `msg` (a pending tool call or credential request) was already replayed as one of the
-/// unacknowledged outbox `messages`.
+/// True if `msg` (a pending tool call) was already replayed as one of the unacknowledged outbox
+/// `messages`.
 fn is_replayed(messages: &[AgentMessage], msg: &AgentMessage) -> bool {
-    messages.iter().any(|u| match (&u.body, &msg.body) {
-        (
-            Some(agent_message::Body::ToolCallRequest(u_req)),
-            Some(agent_message::Body::ToolCallRequest(m_req)),
-        ) => u_req.call_id == m_req.call_id,
-        (
-            Some(agent_message::Body::CredentialRequest(u_req)),
-            Some(agent_message::Body::CredentialRequest(m_req)),
-        ) => u_req.request_id == m_req.request_id,
-        _ => false,
+    let Some(agent_message::Body::ToolCallRequest(m_req)) = &msg.body else {
+        return false;
+    };
+    messages.iter().any(|u| {
+        matches!(&u.body, Some(agent_message::Body::ToolCallRequest(u_req)) if u_req.call_id == m_req.call_id)
     })
 }
 

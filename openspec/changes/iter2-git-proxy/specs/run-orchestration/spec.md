@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Assign content
-`Assign` SHALL contain the task reference, the workspace (the task's Git proxy URL `https://<gateway host>:<git port>/git/<KEY>.git` as repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
+`Assign` SHALL contain the task reference, the workspace (the task's Git proxy URL `https://<gateway host>:<git port>/git/<KEY>.git` as repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools, budgets from instance configuration and the continuation. The adapter command SHALL be the project's, if set, else the instance's `harness.claudeCode.adapterCommand`.
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects

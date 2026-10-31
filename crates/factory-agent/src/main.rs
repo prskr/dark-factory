@@ -40,7 +40,7 @@ const HARNESS_HOOKS_PATH: &str = "/opt/factory/hooks-empty";
 #[tokio::main]
 #[expect(
     clippy::print_stderr,
-    reason = "the mcp and git-credential subcommands report errors on stderr"
+    reason = "the mcp subcommand reports errors on stderr"
 )]
 async fn main() -> ExitCode {
     rustls::crypto::ring::default_provider()
@@ -52,15 +52,6 @@ async fn main() -> ExitCode {
         Command::Mcp { socket } => {
             if let Err(e) = mcp::run_mcp_stdio_server(&socket).await {
                 eprintln!("mcp server error: {e}");
-                return ExitCode::FAILURE;
-            }
-            ExitCode::SUCCESS
-        }
-        Command::GitCredential { operation, socket } => {
-            if let Err(e) =
-                runtime_socket::run_git_credential_client(&socket, operation.as_deref()).await
-            {
-                eprintln!("git-credential error: {e}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
@@ -101,6 +92,8 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     let Some(outbox) = open_outbox(&dirs.outbox_data) else {
         return ExitCode::FAILURE;
     };
+    // The gateway's Git proxy presents a certificate of the instance CA
+    let instance_ca = config.tls_dir.join("ca.crt");
 
     let mut conn_handle = connection::ConnectionManager::new(
         config,
@@ -122,11 +115,7 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
         credentials: startup.credentials,
         initial_prompts: startup.initial_prompts,
         cancel_requested: startup.cancel_requested,
-        git: if config::git_allows_plain_http() {
-            git::Git::new(&dirs.repo).allow_plain_http()
-        } else {
-            git::Git::new(&dirs.repo)
-        },
+        git: git::Git::new(&dirs.repo).with_ssl_ca_info(&instance_ca),
         runtime_sock_path: dirs.runtime.join("runtime.sock"),
         repo_dir: dirs.repo,
         home_dir: dirs.home,
@@ -137,7 +126,6 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
         outbox,
         inbound_rx: conn_handle.inbound_rx,
         outbound_tx: conn_handle.outbound_tx.clone(),
-        git_credentials: None,
     };
 
     let res = runner::run_session(driver_params).await;

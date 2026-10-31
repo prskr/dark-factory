@@ -60,7 +60,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | # | Decision | Alternatives |
 |---|---|---|
 | 1 | The proxy identifies the sandbox by source pod IP (like the egress proxy). The URL path must name the run's task. | mTLS client certificate: the harness can read the key anyway, so it adds no real protection. |
-| 2 | No "direct to forge" fallback: the credential helper is removed, and `CredentialRequest` is always denied (the message stays in the contract, deprecated). | Per-project switch between proxy and v1 helper: two paths to maintain and test. |
+| 2 | No "direct to forge" fallback: the credential helper is removed, and `CredentialRequest`/`CredentialGrant` are removed from the contract. | Per-project switch between proxy and v1 helper: two paths to maintain and test. |
 | 3 | Pushes are rejected when no push record can be written (the gateway can't reach the control plane). | Accepting unaudited pushes. |
 | 4 | Secret-scan findings are approval-gated per finding (fingerprint = rule + blob + line), so false positives can pass. Identity and ref rules are always hard rejects. | Secret findings always rejected: false positives would block the task with no way out. |
 | 5 | WIP snapshot pushes get only the secret scan and size limits, and never raise approval requests. | Same checks as the task branch: protected paths and identity make no sense for a snapshot. |
@@ -81,7 +81,7 @@ Suggested order: `iter2-git-proxy` and `iter2-agent-requests` in parallel, then 
 | Contract | Change |
 |---|---|
 | `darkfactory.gateway.v1` | Snapshot: Git route per sandbox (upstream URL, task/WIP/base branch, commit identity), forge credentials keyed by reference, push policy per project, approved exceptions per task, task-scoped host rules. New services on the control plane: `GatewayGit.RecordPush` (with findings), `GatewayEvents.ReportDenial`. |
-| `darkfactory.agent.v1` | `ToolCallResult.await_input_after_turn`; `PushStatus` `REJECTED_BY_CHECK`; `CredentialRequest` marked deprecated. |
+| `darkfactory.agent.v1` | `ToolCallResult.await_input_after_turn`; `PushStatus` `REJECTED_BY_CHECK`; `CredentialRequest`/`CredentialGrant` removed (fields 14/16 reserved). |
 | Factory tools | v2 file adds `ask_question` and `request_approval` (type `network-access` in this iteration). |
 
 ## 6. Out of scope (later iterations)

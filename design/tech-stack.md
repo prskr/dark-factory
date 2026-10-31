@@ -58,7 +58,7 @@
 | Egress proxy | tokio + hyper (`CONNECT` and plain HTTP forwarding), ClientHello SNI check (e.g. `tls-parser`), own DNS resolution with private-range blocking (`hickory-resolver`) | Decided (crates suggested) | [0029](adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Policy | In-memory snapshot from `PolicyWatch`; fail-closed until the first snapshot; no database access | Decided | [0029](adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Live egress log | In-memory ring buffer per pod, `Tail` gRPC stream | Decided | [0029](adr/0029-egress-gateway-and-generated-network-policies.md) |
-| Git smart-HTTP proxy | Ref-enforcing proxy for task branches | Later | F1 in [`product/context.md`](../product/context.md) |
+| Git smart-HTTP proxy | Ref-enforcing proxy for task branches in the gateway | Implemented (iteration 2) | [`agent-run.md`](agent-run.md) §11 |
 | Secret scanning of pushes | In the Git proxy only: Kingfisher (embedded library or subprocess, live validation off); none in the sandbox | Later (scanner suggested) | [0009](adr/0009-agent-managed-workspaces-git-durable.md) |
 | MCP endpoint | Streamable HTTP aggregating third-party MCP servers (`rmcp` server + clients); per-run tool set, credential injection, meta-tools for large sets, call records to the control plane | Later | [0032](adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) |
 | Inference endpoint | OpenAI-compatible HTTP API with per-provider adapters; sandbox identified by pod IP; usage measured and reported to the control plane | Later | [0029](adr/0029-egress-gateway-and-generated-network-policies.md), F5 in [`product/context.md`](../product/context.md) |
@@ -80,7 +80,7 @@
 | Async runtime / gRPC client | tokio, tonic + rustls (`ring`) | Decided | [0005](adr/0005-agent-runtime-stack.md), [0006](adr/0006-agent-dial-back-grpc-mtls.md) |
 | Harness protocol | `agent-client-protocol` (official Rust SDK), ACP client role | Decided | [0005](adr/0005-agent-runtime-stack.md) |
 | MCP toward the harness | `factory` server: `rmcp` over stdio (subprocess bridged to the runtime via Unix socket on tmpfs); plus the gateway's MCP endpoint registered as a second server | Decided | [0005](adr/0005-agent-runtime-stack.md), [0032](adr/0032-upstream-mcp-through-gateway-with-tool-catalog.md) |
-| Git | `git` CLI with runtime-owned `.git/config`, runtime as credential helper (v1) | Decided | [0009](adr/0009-agent-managed-workspaces-git-durable.md) |
+| Git | `git` CLI with runtime-owned `.git/config` and an empty `credential.helper`; remote is the gateway's Git proxy, which injects the forge credential | Decided | [0009](adr/0009-agent-managed-workspaces-git-durable.md) |
 | Build | Static musl binary, amd64 | Decided | [0005](adr/0005-agent-runtime-stack.md), [0024](adr/0024-build-tooling-and-dev-loop.md) |
 | Built-in loop (full-harness mode) | reqwest + SSE (or `async-openai`); study `rtk` and open-source harnesses (Codex CLI, goose) first | Later | [0005](adr/0005-agent-runtime-stack.md) |
 | LSP | `async-lsp` + `lsp-types` (after agent memory) | Later | [0005](adr/0005-agent-runtime-stack.md) |

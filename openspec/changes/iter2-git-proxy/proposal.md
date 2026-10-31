@@ -11,7 +11,7 @@ In iteration 1 the sandbox reaches the forge directly. A credential helper hands
 - **Bare mirror per repository** in the gateway (ephemeral, rebuildable). It is used for fast-forward checks and for resolving thin packs; `iter2-push-checks` builds on it.
 - **Push records**: the gateway reports every push attempt (refs, old/new SHAs, verdict, reasons) to the control plane, which stores and audits it. A push without a record is rejected (fail closed).
 - **Policy snapshot**: the gateway gets each sandbox's Git route (upstream URL, branches) and the forge credentials over `PolicyWatch`, and keeps them in memory only.
-- **Runtime**: `Assign.workspace.repo_url` is the proxy URL, and the runtime trusts the instance CA for it. **BREAKING:** the credential helper is removed. The control plane denies every `CredentialRequest`; the message stays in the contract, marked deprecated.
+- **Runtime**: `Assign.workspace.repo_url` is the proxy URL, and the runtime trusts the instance CA for it. **BREAKING:** the credential helper is removed. `CredentialRequest`/`CredentialGrant` are removed from the agent contract (field numbers reserved).
 - **Sandbox wiring**: a `hostAliases` entry for the gateway Service, `NO_PROXY` for it, and network policy egress to the gateway's Git port.
 - **Docs and seed**: remove the forge host from the instance allowlist defaults and the demo seed; update `design/agent-run.md` §8/§11.
 
@@ -31,7 +31,7 @@ In iteration 1 the sandbox reaches the forge directly. A credential helper hands
 
 ## Impact
 
-- Contract `darkfactory.gateway.v1`: `GitRoute` in `SandboxEntry`, `ForgeCredential` in `Snapshot`, new `GatewayGit.RecordPush` service on the control plane's internal port. `darkfactory.agent.v1`: `CredentialRequest`/`CredentialGrant` marked deprecated.
+- Contract `darkfactory.gateway.v1`: `GitRoute` in `SandboxEntry`, `ForgeCredential` in `Snapshot`, new `GatewayGit.RecordPush` service on the control plane's internal port. `darkfactory.agent.v1`: `CredentialRequest`/`CredentialGrant` removed, fields 14/16 reserved (**BREAKING**).
 - Code: `df-gateway` (Git endpoint, mirror, ref rules), control plane snapshot builder and `RecordPush` server, `df-db` migration `git_pushes`, `df-k8s` sandbox wiring, `factory-agent` (credential helper removed, CA config).
 - Dependencies: gitoxide crates (`gix` with the selected features, `gix-packetline`, `gix-pack`) chosen by the spike in task 1.1.
 - Chart: gateway Git port, Service port, certificate DNS names, `emptyDir` for mirrors, network policy rule from the sandbox namespace.

@@ -356,7 +356,7 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         detail: "Task completed",
         harness_session_id: "session-1",
         hooks_path: &empty_hooks,
-        credential_helper: "/opt/factory/factory-agent git-credential",
+        ssl_ca_info: None,
         wip_size_cap_bytes: 10 * 1024 * 1024,
         diverged: false,
     };
@@ -541,7 +541,7 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
         detail: "Clean finish",
         harness_session_id: "session-2",
         hooks_path: &empty_hooks,
-        credential_helper: "/opt/factory/factory-agent git-credential",
+        ssl_ca_info: None,
         wip_size_cap_bytes: 10 * 1024 * 1024,
         diverged: false,
     };
@@ -701,7 +701,7 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
         detail: "Size cap test",
         harness_session_id: "session-3",
         hooks_path: &empty_hooks,
-        credential_helper: "/opt/factory/factory-agent git-credential",
+        ssl_ca_info: None,
         wip_size_cap_bytes: 500, // 500 bytes cap!
         diverged: false,
     };
@@ -900,7 +900,7 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
         detail: "",
         harness_session_id: "",
         hooks_path: &hooks,
-        credential_helper: "",
+        ssl_ca_info: None,
         wip_size_cap_bytes: 10 * 1024 * 1024,
         diverged: false,
     };
@@ -959,7 +959,7 @@ async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
         detail: "",
         harness_session_id: "",
         hooks_path: &hooks,
-        credential_helper: "",
+        ssl_ca_info: None,
         wip_size_cap_bytes: 10 * 1024 * 1024,
         diverged: false,
     };
@@ -1020,7 +1020,7 @@ fn test_runtime_writes_do_not_follow_planted_symlinks() {
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://github.com/org/repo.git",
-        credential_helper: "",
+        ssl_ca_info: None,
         commit_author_name: "test",
         commit_author_email: "test@example.com",
     };

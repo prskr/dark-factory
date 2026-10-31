@@ -39,11 +39,18 @@ Blocked destination ranges: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0
 
 ## Policy distribution
 
-The control plane serves `PolicyWatch` on its internal port (`server.internalGrpcPort`, 9444). Every stream sends a full snapshot on connect and a new one, debounced by 100 ms, after each `egress_policy` or `run_changed` notification. All control plane replicas receive the notifications, so an allowlist change reaches a gateway through whichever replica it is connected to, typically within a second. Versions come from the database sequence `egress_policy_version_seq`. A gateway keeps enforcing its last snapshot while it is disconnected and reconnects every 2 s.
+The control plane serves `PolicyWatch` on its internal port (`server.internalGrpcPort`, 9444). Every stream sends a full snapshot on connect and a new one, debounced by 100 ms, after each `egress_policy` or `run_changed` notification, and at the latest 60 s after its previous snapshot, so a rotated forge Secret (no notification) reaches the gateways within a minute. All control plane replicas receive the notifications, so an allowlist change reaches a gateway through whichever replica it is connected to, typically within a second. Versions come from the database sequence `egress_policy_version_seq`. A gateway keeps enforcing its last snapshot while it is disconnected and reconnects every 2 s.
 
 Stored `http-host` entries with an invalid port are skipped with a warning, so a corrupt row narrows the policy instead of widening it.
 
-Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `http-host` entries of the instance and of the run's project.
+Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `http-host` entries of the instance and of the run's project, and its Git route:
+
+- upstream: the project's repository URL; a repository that is not `https://` gets no route (warning), unless it is `http://` and `forge.allowPlainHttp` is on,
+- `refs/heads/<base branch>`, `refs/heads/factory/task/<KEY>`, `refs/heads/factory/wip/<KEY>`,
+- commit identity `agent.commitIdentity`,
+- `credential_ref`: the id of the project's forge credential reference (empty without one).
+
+`forge_credentials` holds each referenced credential once: user name `agent.gitUsername`, password read through the secret store on every rebuild. A credential that cannot be read is left out with a warning (never the value); its routes stay, so the Git proxy answers their requests with its own error.
 
 ## Live log
 
@@ -78,6 +85,11 @@ Settings of the `gateway` section of the instance configuration (the chart rende
 | Key | Required | Default | Effect |
 |---|---|---|---|
 | `gateway.proxyPort` | no | `3128` | Port of the proxy for sandboxes. |
+| `gateway.gitPort` | no | `8443` | Port of the Git proxy (HTTPS) for sandboxes. The run network policy allows it to the gateway pods. |
+| `gateway.gitHost` | no | `<instanceName>-gateway` | Host name of the Git proxy URL. Sandboxes resolve it to the gateway `ClusterIP` through `hostAliases` and list it in `NO_PROXY`; the gateway certificate must carry the name. |
+| `gateway.mirrorDir` | no | `/var/lib/dark-factory/git-mirrors` | Directory of the bare mirror repositories, one per upstream URL (directory name: hex SHA-256 of the URL). The chart mounts an `emptyDir` there. |
+| `gateway.maxPushSizeBytes` | no | `268435456` | Largest push body the Git proxy accepts. |
+| `forge.allowPlainHttp` | no | `false` | The Git proxy connects to `http://` upstreams without TLS (the control plane then builds routes for them too). Off, such a route gets `502` (`df: invalid forge URL`). The gateway logs a warning at startup when it is on. Sandboxes always use HTTPS to the gateway. |
 | `gateway.internalGrpcPort` | no | `9444` | Port of `Tail` (mTLS). The control plane connects to it on every gateway pod. |
 | `gateway.healthPort` | no | `8080` | `/healthz` (always 200) and `/readyz` (200 after the first snapshot, 503 before). |
 | `gateway.controlPlaneHost` | no | `<instanceName>-control-plane` | DNS name of the control plane Service (`PolicyWatch` goes to port `server.internalGrpcPort`); its certificate must carry the name. |
@@ -96,6 +108,135 @@ The pod name in flow events is the `HOSTNAME` environment variable (the pod name
 - Snapshots are always complete; deltas are an additive change when many runs make them large.
 - Ordering across pods: events of a pod that joins later are inserted by time into the buffer, but viewers that already read past that time see them out of order.
 - The relay finds pods by DNS (no Kubernetes client); a pod becomes visible with the DNS TTL plus up to 5 s.
+
+## Git proxy
+
+Smart-HTTP endpoint for the task repository (`openspec/changes/iter2-git-proxy`, `design/agent-run.md` §11) on `gateway.gitPort`. URLs have the form `https://<gitHost>:<gitPort>/git/<task key>.git/info/refs?service=…` and `…/git-upload-pack` or `…/git-receive-pack`. The gateway identifies the sandbox by source IP, routes to the task's forge repository from the policy snapshot and injects the forge credential; the sandbox never sees it.
+
+### Behaviour
+
+| Request | Answer |
+|---|---|
+| Path is not `/git/<key>.git/info/refs?service=git-upload-pack\|git-receive-pack` or a `POST` to one of the two services | `404` |
+| No snapshot received yet | `503`, reason `no-snapshot` |
+| Source IP is no active sandbox | `403`, `unknown-source` |
+| Task key is not the sandbox's own task | `403`, `other-task` (body names the own key) |
+| Task has no repository route | `403`, `no-repository` |
+| Route names a credential missing from the snapshot | `502`, `credential-unavailable` |
+| `info/refs` or `git-upload-pack` (fetch, clone) | forwarded with the credential and the client's `Accept`, `Content-Type`, `Content-Encoding`, `Git-Protocol`, `User-Agent` headers; the forge's answer is streamed back. `info/refs` is forwarded without a request body |
+| `git-upload-pack` body larger than 64 MiB | upstream request aborted, `413`, `df:fetch-too-large` |
+| `git-upload-pack` body stalls for 30 s between frames | upstream request aborted, `408` |
+| Forge URL invalid, or `http://` without `forge.allowPlainHttp` | `502` (`df: invalid forge URL`) |
+| Forge unreachable, connect or TLS fails, no answer | `503` (`df: forge unreachable`) |
+| Forge answers `401` or `403` | `502` (`df: the forge rejected the gateway's credential`), without `WWW-Authenticate`, so git does not prompt |
+| Push body (`git-receive-pack`) larger than `gateway.maxPushSizeBytes` | `413`, `df:push-too-large`, recorded as `REJECTED` |
+| Push body cannot be read | `400` |
+| Push probe (body `0000`) | forwarded without checks or record |
+| Push commands are not valid pkt-lines | `400`, `df: malformed push` |
+| Mirror fetch before the checks: forge unreachable | `503`, recorded as `UPSTREAM_FAILED` |
+| Mirror fetch before the checks: forge answers `401` or `403` | `502`, recorded as `UPSTREAM_FAILED` |
+| Mirror fetch before the checks: forge answers another error status | `502` (`df:forge-unavailable: the forge answered the fetch with HTTP <status>`), recorded as `UPSTREAM_FAILED` |
+| Mirror fetch before the checks: `http://` route without `forge.allowPlainHttp` | `502` (`df: invalid forge URL`), recorded as `UPSTREAM_FAILED` |
+| Mirror fetch before the checks fails on the gateway (repository, negotiation) | `500` (`df:gateway-error`), recorded as `REJECTED` |
+| Pack invalid | `400`, `df: invalid pack` |
+| Spooling, quarantine or ancestry lookup fails | `500` |
+| Ref neither the task branch nor the WIP branch, or a deletion of the task branch | `200` with `report-status`: `ng <ref> df:ref-not-allowed` |
+| Task branch update that is not a fast-forward (WIP branch: any update allowed) | `ng <ref> df:non-fast-forward` |
+| A push check rejects a ref | `ng <ref> <reason of the check>` (`df:check-failed` if the checks return a wrong count) |
+| Another ref of the same push is rejected | `ng <ref> df:other-ref-rejected`; a push is accepted or rejected as a whole |
+| `FORWARDING` record cannot be stored | `ng <ref> df:audit-unavailable` for every ref; nothing reaches the forge |
+| All refs accepted | forwarded; the forge's answer (incl. its `report-status`) is relayed |
+
+Rejected pushes answer `200` with a synthesized side-band `report-status`, so git prints `! [remote rejected] <ref> (df:…)` and exits with 1.
+
+### Push
+
+```mermaid
+sequenceDiagram
+    participant S as Sandbox (git push)
+    participant G as Gateway
+    participant C as Control plane
+    participant F as Forge
+    S->>G: POST git-receive-pack
+    G->>G: spool body (≤ maxPushSizeBytes)
+    G->>F: fetch +refs/heads/* into mirror (credential)
+    G->>G: index pack into quarantine (alternates → mirror)
+    G->>G: ref rules, push checks
+    alt a ref is rejected
+        G->>C: RecordPush REJECTED
+        G-->>S: report-status ng … df:…
+    else all refs accepted
+        G->>C: RecordPush FORWARDING
+        G->>F: POST git-receive-pack (spooled body, credential)
+        F-->>G: answer
+        G->>C: RecordPush ACCEPTED / UPSTREAM_FAILED
+        G-->>S: forge answer
+    end
+```
+
+### Layout under `gateway.mirrorDir`
+
+| Path | Content | Lifetime |
+|---|---|---|
+| `<hex SHA-256 of the forge URL>/` | bare mirror, `refs/heads/*` only; one fetch at a time per mirror | kept, refreshed before every push check |
+| `spool/<temp>` | the request body of one push | removed when the request ends |
+| `quarantine/<temp>/objects/` | the indexed pack of one push; `info/alternates` points at the mirror's objects | removed after the checks; the mirror never receives pushed objects |
+
+The chart mounts an `emptyDir` there, so mirrors are rebuilt after a pod restart. `spool/` and `quarantine/` left by an earlier process are removed when the gateway starts.
+
+### Push check resources
+
+| Limit | Value | Effect |
+|---|---|---|
+| Concurrent quarantine and check jobs per pod | 4 | further pushes wait for a free slot (the wait counts towards the deadline) |
+| Single allocation while resolving deltas | 4 × `gateway.maxPushSizeBytes` | a pack needing more is rejected as invalid (`400`) |
+| Deadline for the mirror fetch, waiting, quarantining and checking one push | 10 min | `500`, `df:check-failed`; the indexing is interrupted |
+| Client disconnects during the checks | — | the indexing is interrupted and the quarantine removed |
+
+### Push records
+
+Every push is stored with the control plane through `GatewayGit.RecordPush` on its internal port (same mTLS connector as `PolicyWatch`), keyed by a gateway-chosen `UUIDv7` `push_id`; `gateway_pod` is `HOSTNAME`.
+
+| Record | Sent | If it cannot be stored |
+|---|---|---|
+| `REJECTED` | instead of forwarding; without refs if the commands could not be read (`df:malformed-push`, `df:request-timeout`, `df:unreadable-push`, `df:gateway-error` for a spool failure on the gateway, `500`) | retried for 5 s (100 ms backoff, doubling; 2 s per attempt), then logged; the client gets its rejection either way |
+| `FORWARDING` | before the first byte goes to the forge | retried for 5 s, then every ref is rejected with `df:audit-unavailable` and nothing reaches the forge |
+| `ACCEPTED` / `UPSTREAM_FAILED` | after the forge answered | retried for 5 s, then queued in memory (at most 1000 records, newer ones dropped with a warning beyond) and retried every 30 s; the forge's answer is relayed regardless. On shutdown the queue gets 5 s to drain; what is left is lost and covered by the control plane's stale-push scan |
+
+Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED`, `UNKNOWN`, connect errors and attempt timeouts are retried; any other status (for example `INVALID_ARGUMENT`) fails the record at once.
+
+The verdict after forwarding: a non-2xx answer (`503` for an unreachable forge, `502` for a rejected credential) is `UPSTREAM_FAILED`. For a 2xx answer to a client that requested `report-status`, the gateway reads the forge's report (demultiplexed from band 1 with `side-band-64k`) and records `ACCEPTED` only for `unpack ok` without any `ng` line; an `ng` (forge-side hook, branch protection, a lost lease against a stale mirror), an unpack error, a fatal band-3 message or an incomplete report is `UPSTREAM_FAILED`. To read the report, the gateway buffers the forge's answer (at most 4 MiB, within 5 min) before it relays it unchanged, so hook output reaches the client at the end; an answer that is larger, slower or breaks off becomes `502` `df:forge-unavailable` and `UPSTREAM_FAILED`. Without `report-status` (git always requests it) a 2xx answer is `ACCEPTED`.
+
+A failed mirror fetch before the checks is also recorded as `UPSTREAM_FAILED` (reason `df:forge-unavailable`): forge unreachable → `503`, credential rejected → `502`, forge answered the fetch with another error status → `502` `df:forge-unavailable: the forge answered the fetch with HTTP <status>` (the fetch answer is not relayed, it was not the client's request). Any other mirror failure (repository, URL, negotiation) is on the gateway: `REJECTED` with `df:gateway-error` (`500`).
+
+### Implementation choices (spikes, 2026-10-31)
+
+gitoxide covers everything the proxy needs in pure Rust, so the gateway image stays static and needs no `git` binary.
+
+| Need | Crate and features | Result |
+|---|---|---|
+| Ref commands of a push | `gix-packetline` (no features): `decode::streaming` returns the bytes consumed per line, so the pack offset follows directly | Commands, capabilities (first line, after the NUL, with a leading space) and the `push-options` section parsed from a body captured from a real `git push` |
+| Synthesized `report-status` | hand-written pkt-lines (`unpack ok`, `ok`/`ng <ref> <reason>`, flush), wrapped in side-band-64k band 1 plus an outer flush | git 2.54 prints `! [remote rejected] HEAD -> main (df:ref-not-allowed …)` and exits with 1. git asks for `report-status-v2`, v1 lines are accepted. Text after the reason code is printed verbatim |
+| Quarantine of a thin pack | `gix-pack` (`sha1`, `streaming-input`): `Bundle::write_to_directory` with the mirror's object database as thin-pack base lookup | A thin pack with two unresolved deltas is indexed into `<quarantine>/objects/pack`, `git verify-pack` accepts it, the mirror is unchanged |
+| Ancestry across mirror and quarantine | `gix` (`sha1`, `revision`): the mirror repository with its object database swapped for the quarantine (whose `objects/info/alternates` points at the mirror), then `merge_base` | Fast-forward and non-fast-forward cases answered correctly. `Repository` is not `Send` without `parallel`: run in `spawn_blocking` |
+| Mirror fetch with the forge credential | `gix` (`blocking-network-client`) plus `gix-transport` (`http-client`, no backend) with an own `Http` implementation on hyper 1, tokio-rustls and ring | `+refs/heads/*:refs/heads/*` fetched from github.com, `Authorization: Basic` sent with the first request. The reqwest and curl backends of gix were rejected: they bring reqwest 0.13 next to the workspace's 0.12, `aws-lc-sys` or libcurl |
+
+Rules that follow from the spikes:
+
+- The mirror fetches `+refs/heads/*:refs/heads/*` only. `refs/*` would also mirror `refs/pull/*` on GitHub (4004 refs on a small repository).
+- Credential helpers are disabled for the fetch (`with_credentials` returns an error); otherwise gix runs the configured helpers or prompts after a 401.
+- The fetch is blocking and runs in `spawn_blocking`, under the per-mirror lock.
+- Upstream TLS uses the webpki roots, like the forge requests of the plugin host.
+
+### Client behaviour (spike against Forgejo 13.0.5, git 2.54)
+
+Checked through a minimal pass-through that forwards only the D3 headers and injects the credential.
+
+- `git clone --filter=blob:none` uses protocol v2 (`Git-Protocol: version=2` on every request). Missing blobs are fetched lazily through the proxy on checkout.
+- Fetch request bodies were small and sent with `Content-Length`, without `Content-Encoding`.
+- A push larger than `http.postBuffer` (1 MiB) sends two POSTs: a probe whose body is only `0000` (`Content-Length: 4`), then the push with `Transfer-Encoding: chunked`. The proxy forwards the probe without a push record, and neither the spool nor the size limit relies on `Content-Length`.
+- Forgejo answers pushes with side-band `report-status` (v1) and band-2 messages; the relayed answer prints normally.
+- A plain-text body of a 403 or 503 is shown by git as a `remote:` line, followed by `fatal: unable to access …: The requested URL returned error: 503` and exit code 128. git does not retry a 503 by itself (not even with `http.maxRetries`), so the runtime retries it.
 
 ## Tests
 

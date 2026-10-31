@@ -23,15 +23,6 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
 
     #[tonic::async_trait]
     impl RuntimeHandler for MockMcpRuntimeHandler {
-        async fn handle_git_credential(
-            &self,
-            _protocol: &str,
-            _host: &str,
-            _path: &str,
-        ) -> (Option<String>, Option<String>, Option<String>) {
-            (None, None, None)
-        }
-
         async fn handle_mcp_list_tools(&self) -> Vec<ToolDescriptor> {
             vec![
                 ToolDescriptor {
