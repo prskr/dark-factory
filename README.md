@@ -10,8 +10,8 @@ You give Dark Factory a project (a Git repository, an issue tracker and a sandbo
 
 - **Tasks and chats**: delegate work to agents, split it into subtasks with dependencies (an implementation task, then a review task that wakes when the first one ends). One chat per agent and project.
 - **Sandboxed runs**: every run gets its own [agent-sandbox](https://agent-sandbox.sigs.k8s.io/) pod. A Rust runtime inside runs Claude Code (or another [ACP](https://agentclientprotocol.com/) harness) and connects back to the control plane over gRPC with mTLS.
-- **Git is the only durable state**: the agent clones, commits and pushes in its own workspace. The control plane opens the draft PR. Review stays in the forge.
-- **Controlled egress**: per-run network policies and a gateway proxy with host allowlists. Agents ask for more access through approval requests.
+- **Git is the only durable state for code**: the agent clones, commits and pushes in its own workspace. The control plane opens the draft PR. Review stays in the forge.
+- **Controlled egress** (planned, not yet fully enforced): per-run network policies and a gateway proxy with host allowlists. Agents will ask for more access through approval requests.
 - **Human in the loop**: one inbox for questions and approvals, an audit trail, run history and cost views (including a "what if" API price for subscription use).
 - **Integrations as WASI plugins**: issue trackers and forges (Forgejo, GitHub) run as sandboxed WebAssembly components.
 - **Web UI**: server-rendered (maud, htmx, Alpine). Starting tasks, reading transcripts and answering questions work on a phone.
@@ -31,10 +31,12 @@ Not goals: reproducing code review in the UI, multi-tenancy, other container pla
 
 Dark Factory runs untrusted agent code, so security is a design focus, not an add-on. The agent, the repository contents and everything the harness sends are treated as untrusted input.
 
-- **Isolation**: each run has its own sandbox (agent-sandbox, Kata Containers where available). Workspaces are managed inside the sandbox and are not copied back by the control plane. Git is the only durable state.
+The controls below are the design targets. Sandbox isolation, network policies, gateway allowlists and approvals are planned or still being built (see the [roadmap](product/iterations/roadmap.md)) and are not yet fully enforced.
+
+- **Isolation**: each run is to get its own sandbox (agent-sandbox, Kata Containers where available). Workspaces are managed inside the sandbox and are not copied back by the control plane. Git is the only durable state for code.
 - **Network**: sandboxes get generated network policies. Outbound traffic goes through the gateway proxy, which allows only listed hosts and keeps a live egress log.
 - **Identity**: agents connect to the control plane over mTLS and act with persona permissions. Humans sign in through OIDC.
-- **Least privilege**: new network or tool access needs an approval from a human. Which instance-management operations an agent may do is configured per instance.
+- **Least privilege**: new network or tool access will need an approval from a human. Which instance-management operations an agent may do is configured per instance.
 - **Secrets**: credentials stay in memory or in files outside the persistent volume. They are never written under `/data` and never logged.
 - **Traceability**: runs, approvals and costs go to an audit trail.
 
