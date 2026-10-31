@@ -492,6 +492,8 @@ fn test_config() -> ProvisioningConfig {
         crate::config::GatewayEndpoint {
             ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
             proxy_port: 3128,
+            git_host: "test-instance-gateway".to_string(),
+            git_port: 8443,
         },
     )
 }

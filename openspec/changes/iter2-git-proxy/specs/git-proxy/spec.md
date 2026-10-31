@@ -62,11 +62,11 @@ Rejected pushes SHALL be answered with a valid `report-status` response (side-ba
 - **THEN** `git push` prints `! [remote rejected] main (df:ref-not-allowed …)` and exits with a non-zero status
 
 ### Requirement: Push size limit
-The proxy SHALL reject a push whose request body exceeds the configured maximum push size (default 256 MiB) with reason `df:push-too-large`.
+The proxy SHALL reject a push whose request body exceeds the configured maximum push size (default 256 MiB): it SHALL answer with HTTP 413 and record the push as `rejected` with reason `df:push-too-large`, the ref commands read so far and the bytes read. Git shows only the HTTP status, not the reason.
 
 #### Scenario: Oversized push
 - **WHEN** a push body exceeds 256 MiB with the default configuration
-- **THEN** the push is rejected and nothing reaches upstream
+- **THEN** the push is answered with HTTP 413, recorded as `rejected` with `df:push-too-large`, and nothing reaches upstream
 
 ### Requirement: Every push is recorded
 For every push attempt, the proxy SHALL store a record (run, task, ref updates with old and new SHA, verdict, reasons, bytes, duration) with the control plane before answering the client. A push to forward SHALL be recorded as `forwarding` before anything reaches upstream, then updated to its final verdict. If the record cannot be stored within 5 seconds, the push SHALL be rejected with `df:audit-unavailable`.
@@ -88,12 +88,27 @@ For every push attempt, the proxy SHALL store a record (run, task, ref updates w
 - **THEN** the push is rejected with `df:audit-unavailable` and nothing reaches upstream
 
 ### Requirement: Upstream failures are reported, not hidden
-When the upstream forge is unreachable or times out, the proxy SHALL answer 503. When the upstream answers 401 or 403 to the proxy's credential, it SHALL answer 502 with a fixed message. Every other upstream response SHALL be relayed unchanged. A forwarded push that ends in either failure SHALL be recorded with verdict `upstream-failed`. 503 is the only status the proxy uses for conditions that are expected to clear by themselves (no snapshot yet, upstream unreachable).
+Before checking a push the proxy SHALL fetch its mirror: if that fetch cannot reach the forge or times out it answers 503; if the forge rejects the credential (401, 403) or answers another error, 502 with a fixed message. A forwarded request gets the same 503, or the same 502 for 401/403; every other response is relayed with status and body (headers filtered). A push failing either way is recorded `upstream-failed`. 503 is only for conditions that clear by themselves.
 
 #### Scenario: Forge down
 - **WHEN** Forgejo is unreachable during a push
 - **THEN** the proxy answers 503, `git push` fails and the push record has verdict `upstream-failed`
 
+#### Scenario: Forge error during the pre-push fetch
+- **WHEN** Forgejo answers 500 to the proxy's mirror fetch before a push is checked
+- **THEN** the proxy answers 502 with a fixed message, forwards nothing and the push record has verdict `upstream-failed`
+
 #### Scenario: Forge rejects the credential
 - **WHEN** Forgejo answers 401 to the proxy's forwarded push
 - **THEN** the proxy answers 502 without an authentication challenge and the push record has verdict `upstream-failed`
+
+### Requirement: Plain-HTTP forges only when allowed
+With the instance setting `forge.allowPlainHttp` on, the control plane SHALL build Git routes for `http://` repositories and the gateway SHALL connect to such upstreams without TLS. With the setting off, an `http://` repository SHALL get no Git route, and the gateway SHALL answer a route to an `http://` upstream with `502` without connecting. The sandbox SHALL use HTTPS to the gateway in both cases.
+
+#### Scenario: Forge over plain HTTP in a throwaway cluster
+- **WHEN** `forge.allowPlainHttp` is on and the runtime of `DF-7` pushes its task branch while the project repository is `http://forgejo-http.forgejo.svc:3000/factory/demo`
+- **THEN** the push goes over HTTPS to the gateway, and the gateway forwards it to Forgejo over plain HTTP
+
+#### Scenario: Plain HTTP not allowed
+- **WHEN** `forge.allowPlainHttp` is off and a project's repository is `http://forgejo-http.forgejo.svc:3000/factory/demo`
+- **THEN** the run gets no Git route and the gateway answers its clone with `403` (`df: no repository for this task`)

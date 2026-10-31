@@ -8,6 +8,7 @@ pub mod control;
 mod count;
 pub mod flow;
 pub mod gateway;
+pub mod git;
 pub mod health;
 pub mod link;
 pub mod metrics;

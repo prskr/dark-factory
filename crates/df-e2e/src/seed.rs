@@ -1,4 +1,5 @@
-//! The seed: credential reference, persona, projects and allowlist entries of the demo.
+//! The seed: credential reference, persona and projects of the demo. Sandboxes reach Forgejo
+//! only through the gateway's Git proxy, so there is no forge allowlist entry.
 //!
 //! Idempotent: a record is looked up by name or key and only written when it differs, so a second
 //! run changes nothing (and writes no audit entries).
@@ -10,7 +11,6 @@ use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, ProjectInput, get_project_by_key,
     list_credential_refs, list_personas, save_credential_ref, save_persona, save_project,
 };
-use df_db::{DbError, EntryKind, add_entry};
 use uuid::Uuid;
 
 use crate::data;
@@ -43,7 +43,7 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         credential,
     )
     .await?;
-    ensure_forge_entry(pool, actor).await
+    Ok(())
 }
 
 async fn ensure_credential(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
@@ -131,19 +131,4 @@ async fn ensure_project(
         .await
         .with_context(|| format!("save project {key}"))?;
     Ok(())
-}
-
-/// Sandboxes reach Forgejo as an in-cluster Service.
-async fn ensure_forge_entry(pool: &PgPool, actor: Actor<'_>) -> Result<()> {
-    let kind = EntryKind::ClusterService {
-        namespace: data::FORGE_NAMESPACE.into(),
-        service: data::FORGE_SERVICE.into(),
-        ports: vec![data::FORGE_PORT],
-        allow_dns: true,
-    };
-    match add_entry(pool, actor, None, &kind).await {
-        // The entry from an earlier run.
-        Ok(_) | Err(DbError::Conflict(_)) => Ok(()),
-        Err(e) => Err(e).context("add the Forgejo allowlist entry"),
-    }
 }

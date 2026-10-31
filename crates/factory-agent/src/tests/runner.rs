@@ -526,7 +526,6 @@ async fn run_with_workspace(
         outbox,
         inbound_rx,
         outbound_tx,
-        git_credentials: None,
     };
     run_session(params).await.unwrap()
 }

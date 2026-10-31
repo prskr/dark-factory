@@ -19,6 +19,67 @@ pub const PROXY_ENV_VARS: &[&str] = &[
 /// Upper bound for a single git invocation (clone, fetch and push talk to a remote peer).
 pub const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Delays before the retries of a clone, fetch or push that failed transiently
+/// (`specs/workspace-lifecycle/spec.md`, "Transient Git failures are retried").
+pub const GIT_RETRY_DELAYS: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(5),
+    std::time::Duration::from_secs(15),
+];
+
+/// Output markers of failures that are final even when a transient marker shows up as well:
+/// proxy or forge rejections and 502 (the forge rejected the proxy's credential). A 403 (policy)
+/// is final too, except for [`UNKNOWN_SOURCE_LINE`].
+const PERMANENT_FAILURE_MARKERS: &[&str] =
+    &["[remote rejected]", "[rejected]", "returned error: 502"];
+
+const FORBIDDEN_MARKER: &str = "returned error: 403";
+
+/// Output markers of a connection error or HTTP 503 (gateway pod without a snapshot, forge
+/// unreachable). DNS failures are not listed: the proxy host is a `hostAliases` entry.
+///
+/// Connection setup: `Failed to connect to`, `Connection refused`, `Empty reply from server`.
+/// Mid-transfer (curl errors 18, 28, 35/56, 92): `Connection reset by peer`,
+/// `Operation timed out`, `transfer closed with outstanding read data remaining`,
+/// `SSL_ERROR_SYSCALL`, `Recv failure`, `was not closed cleanly` (HTTP/2 stream reset).
+const TRANSIENT_FAILURE_MARKERS: &[&str] = &[
+    "returned error: 503",
+    "Failed to connect to",
+    "Connection refused",
+    "Connection reset by peer",
+    "Empty reply from server",
+    "Operation timed out",
+    "transfer closed with outstanding read data remaining",
+    "SSL_ERROR_SYSCALL",
+    "Recv failure",
+    "was not closed cleanly",
+];
+
+/// The 403 body the gateway sends while it has no snapshot with the sandbox's pod IP yet
+/// (`df-gateway` `git/server.rs`), as git prints it.
+const UNKNOWN_SOURCE_LINE: &str = "remote: df: unknown source";
+
+/// Returns true if the output (stdout and stderr) of a failed git network operation shows a
+/// transient failure worth retrying.
+///
+/// Only git's own lines count: `remote:` lines carry text from the server (or the repository's
+/// hooks) and must not trigger a retry. The one exception is the gateway's 403
+/// [`UNKNOWN_SOURCE_LINE`], which is transient together with git's `returned error: 403`.
+pub fn is_transient_git_failure(output: &str) -> bool {
+    let own_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("remote:"))
+        .collect();
+    let has = |marker: &str| own_lines.iter().any(|l| l.contains(marker));
+    if PERMANENT_FAILURE_MARKERS.iter().any(|m| has(m)) {
+        return false;
+    }
+    if has(FORBIDDEN_MARKER) {
+        return output.lines().any(|l| l.trim() == UNKNOWN_SOURCE_LINE);
+    }
+    TRANSIENT_FAILURE_MARKERS.iter().any(|m| has(m))
+}
+
 pub const DEFAULT_COMMIT_AUTHOR_NAME: &str = "Dark Factory Agent";
 pub const DEFAULT_COMMIT_AUTHOR_EMAIL: &str = "agent@dark-factory.internal";
 
@@ -29,7 +90,8 @@ pub struct GitConfigParams<'a> {
     pub commit_author_name: &'a str,
     pub commit_author_email: &'a str,
     pub hooks_path: &'a Path,
-    pub credential_helper: &'a str,
+    /// CA bundle that verifies the gateway's Git proxy certificate (`http.sslCAInfo`).
+    pub ssl_ca_info: Option<&'a Path>,
     pub extra_config: &'a [GitConfigEntry],
 }
 
@@ -164,9 +226,22 @@ fn parse_config_key(full_key: &str) -> Option<(String, String)> {
     (section_ok && key_ok).then(|| (section.to_string(), key.to_string()))
 }
 
-/// Quotes a config value: wraps it in double quotes and escapes `\` and `"`.
+/// Quotes a config value: wraps it in double quotes, escapes `\`, `"`, newline and tab, and drops
+/// other control characters, so the value stays on its line.
 fn quote_config_value(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut out = String::from("\"");
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Renders the runtime-owned `.git/config` contents.
@@ -220,16 +295,16 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
     out.push_str("\tpromisor = true\n");
     out.push_str("\tpartialclonefilter = blob:none\n");
 
-    // 4. Credential section
+    // 4. Credentials: the gateway's Git proxy authenticates upstream, so no helper runs here.
+    // The empty value resets helpers from any other config scope.
     out.push_str("[credential]\n");
-    // Git only passes the repository path to the helper with this set; the runtime scopes
-    // credentials to the assigned repository by path.
-    out.push_str("\tuseHttpPath = true\n");
     out.push_str("\thelper = \n");
-    if !params.credential_helper.is_empty() {
+    if let (Some(ca), Some(prefix)) = (params.ssl_ca_info, url_prefix(params.repo_url)) {
+        // Scoped to the proxy, so other HTTPS remotes keep the system trust store.
+        out.extend(["[http \"", &prefix, "\"]\n"]);
         out.extend([
-            "\thelper = ",
-            &quote_config_value(params.credential_helper),
+            "\tsslCAInfo = ",
+            &quote_config_value(&ca.display().to_string()),
             "\n",
         ]);
     }
@@ -250,14 +325,40 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
     out
 }
 
+/// `http.<proxy URL prefix>.sslCAInfo=<ca>` for `git -c`, so a clone trusts `ca` for the proxy
+/// only, before `.git/config` exists. `None` without a CA or a usable `repo_url`.
+pub fn proxy_ca_override(repo_url: &str, ca: Option<&Path>) -> Option<String> {
+    let prefix = url_prefix(repo_url)?;
+    Some(format!("http.{prefix}.sslCAInfo={}", ca?.display()))
+}
+
+/// `scheme://host[:port]/` of `url` (user info dropped), or `None` if `url` has no authority or
+/// contains characters that would need escaping in a config subsection.
+fn url_prefix(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split('/').next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let valid = |s: &str| {
+        !s.is_empty()
+            && !s
+                .chars()
+                .any(|c| c == '"' || c == '\\' || c.is_whitespace() || c.is_control())
+    };
+    (valid(scheme) && valid(host_port)).then(|| format!("{scheme}://{host_port}/"))
+}
+
 /// Replaces `.git/config` with runtime-owned configuration and deletes `.git/config.worktree`.
 ///
 /// `.git` must be a real directory inside `repo_dir`. A `gitdir:` file, a symlink or a missing
 /// `.git` is treated as tampering, because the agent could use it to redirect the write.
 pub fn rewrite_git_config(repo_dir: &Path, params: &GitConfigParams<'_>) -> std::io::Result<()> {
+    let ca = params
+        .ssl_ca_info
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     for value in [
         params.repo_url,
-        params.credential_helper,
+        &ca,
         params.commit_author_name,
         params.commit_author_email,
     ] {
@@ -293,10 +394,10 @@ pub struct Git {
     pub repo_dir: PathBuf,
     pub hooks_empty_dir: PathBuf,
     pub global_gitconfig: PathBuf,
-    pub credential_helper: String,
     pub allowed_protocols: Vec<String>,
-    pub runtime_sock: Option<PathBuf>,
     pub ssl_ca_info: Option<PathBuf>,
+    pub program: PathBuf,
+    pub retry_delays: Vec<std::time::Duration>,
 }
 
 impl Git {
@@ -306,11 +407,25 @@ impl Git {
             repo_dir: repo_dir.into(),
             hooks_empty_dir: PathBuf::from("/opt/factory/hooks-empty"),
             global_gitconfig: PathBuf::from("/opt/factory/gitconfig"),
-            credential_helper: "/opt/factory/factory-agent git-credential".to_string(),
             allowed_protocols: vec!["https".to_string()],
-            runtime_sock: None,
             ssl_ca_info: None,
+            program: PathBuf::from("git"),
+            retry_delays: GIT_RETRY_DELAYS.to_vec(),
         }
+    }
+
+    /// Overrides the git executable (used for tests).
+    #[must_use]
+    pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
+        self.program = program.into();
+        self
+    }
+
+    /// Overrides the delays between retries of transient failures (used for tests).
+    #[must_use]
+    pub fn with_retry_delays(mut self, delays: Vec<std::time::Duration>) -> Self {
+        self.retry_delays = delays;
+        self
     }
 
     /// Sets the allowed protocols (e.g. `["https", "file"]` for tests).
@@ -321,13 +436,6 @@ impl Git {
         S: Into<String>,
     {
         self.allowed_protocols = protocols.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Also allows `http://` remotes (`forge.allowPlainHttp`).
-    #[must_use]
-    pub fn allow_plain_http(mut self) -> Self {
-        self.allowed_protocols.push("http".to_string());
         self
     }
 
@@ -345,22 +453,8 @@ impl Git {
         self
     }
 
-    /// Overrides the credential helper command (used for tests).
-    #[must_use]
-    pub fn with_credential_helper(mut self, helper: impl Into<String>) -> Self {
-        self.credential_helper = helper.into();
-        self
-    }
-
-    /// Sets the runtime socket path passed via `DF_RUNTIME_SOCK`.
-    #[must_use]
-    pub fn with_runtime_sock(mut self, path: impl Into<PathBuf>) -> Self {
-        self.runtime_sock = Some(path.into());
-        self
-    }
-
-    /// Sets the custom CA info path passed via `GIT_SSL_CAINFO`.
-    #[cfg(test)]
+    /// Sets the CA bundle that verifies the proxy (the instance CA in production); written to
+    /// `http.<proxy URL>.sslCAInfo`, never to `GIT_SSL_CAINFO`.
     #[must_use]
     pub fn with_ssl_ca_info(mut self, path: impl Into<PathBuf>) -> Self {
         self.ssl_ca_info = Some(path.into());
@@ -369,7 +463,7 @@ impl Git {
 
     /// Builds a hardened `tokio::process::Command` targeting the given working directory.
     pub fn build_command_in(&self, cwd: &Path) -> tokio::process::Command {
-        let mut cmd = tokio::process::Command::new("git");
+        let mut cmd = tokio::process::Command::new(&self.program);
         cmd.current_dir(cwd);
         // A timed-out or cancelled git invocation must not keep running
         cmd.kill_on_drop(true);
@@ -378,12 +472,7 @@ impl Git {
         cmd.arg("-c")
             .arg(format!("core.hooksPath={}", self.hooks_empty_dir.display()));
         cmd.arg("-c").arg("core.fsmonitor=false");
-        cmd.arg("-c").arg("credential.useHttpPath=true");
         cmd.arg("-c").arg("credential.helper=");
-        if !self.credential_helper.is_empty() {
-            cmd.arg("-c")
-                .arg(format!("credential.helper={}", self.credential_helper));
-        }
         cmd.arg("-c").arg("protocol.allow=never");
         for proto in &self.allowed_protocols {
             cmd.arg("-c").arg(format!("protocol.{proto}.allow=always"));
@@ -394,6 +483,8 @@ impl Git {
         cmd.env("GIT_CONFIG_NOSYSTEM", "1");
         cmd.env("GIT_CONFIG_GLOBAL", &self.global_gitconfig);
         cmd.env("GIT_TERMINAL_PROMPT", "0");
+        // An empty GIT_ASKPASS also overrides core.askPass and SSH_ASKPASS: no prompt program runs.
+        cmd.env("GIT_ASKPASS", "");
 
         // Forward proxy environment variables if present
         for var in PROXY_ENV_VARS {
@@ -402,17 +493,12 @@ impl Git {
             }
         }
 
-        if let Some(sock) = &self.runtime_sock {
-            cmd.env("DF_RUNTIME_SOCK", sock);
-        } else if let Ok(val) = std::env::var("DF_RUNTIME_SOCK") {
-            cmd.env("DF_RUNTIME_SOCK", val);
-        }
+        // Git needs no runtime socket: the gateway authenticates upstream.
+        cmd.env_remove("DF_RUNTIME_SOCK");
 
-        if let Some(ca) = &self.ssl_ca_info {
-            cmd.env("GIT_SSL_CAINFO", ca);
-        } else if let Ok(val) = std::env::var("GIT_SSL_CAINFO") {
-            cmd.env("GIT_SSL_CAINFO", val);
-        }
+        // It would override the scoped `http.<proxy URL>.sslCAInfo`: other hosts keep the
+        // system trust store.
+        cmd.env_remove("GIT_SSL_CAINFO");
 
         cmd
     }
@@ -438,6 +524,80 @@ impl Git {
             })?
             .map_err(|e| anyhow::anyhow!("failed to execute git {}: {e}", args.join(" ")))?;
         Ok(output)
+    }
+
+    /// Runs a Git network operation (clone, fetch) in `cwd`, retrying transient failures.
+    pub async fn run_network_cmd_in(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<Output> {
+        self.run_with_retry(cwd, args, None).await
+    }
+
+    /// Runs a Git network operation in `self.repo_dir`, retrying transient failures.
+    pub async fn run_network_cmd(&self, args: &[&str]) -> anyhow::Result<Output> {
+        self.run_with_retry(&self.repo_dir, args, None).await
+    }
+
+    /// Runs `args` and retries it after each delay of `retry_delays` while it fails transiently.
+    ///
+    /// With a push target (`remote`, `refspec`) the remote ref is re-read before each retry; if it
+    /// already has the pushed commit, the previous attempt's response was lost after the ref
+    /// update and the push counts as successful.
+    async fn run_with_retry(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        push_target: Option<(&str, &str)>,
+    ) -> anyhow::Result<Output> {
+        let mut delays = self.retry_delays.iter();
+        loop {
+            let output = self.run_cmd_in(cwd, args).await?;
+            if output.status.success() || !is_transient_git_failure(&combined_output(&output)) {
+                return Ok(output);
+            }
+            let Some(delay) = delays.next() else {
+                return Ok(output);
+            };
+            tracing::warn!(
+                operation = args.first().copied().unwrap_or_default(),
+                delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                "transient git failure, retrying"
+            );
+            tokio::time::sleep(*delay).await;
+            if let Some((remote, refspec)) = push_target
+                && self.remote_ref_has_pushed_commit(remote, refspec).await
+            {
+                return Ok(already_pushed_output(refspec));
+            }
+        }
+    }
+
+    /// Returns true if the destination of `refspec` on `remote` already equals its source commit
+    /// (or is absent for a delete). Any failure to read either side counts as false.
+    async fn remote_ref_has_pushed_commit(&self, remote: &str, refspec: &str) -> bool {
+        let refspec = refspec.trim_start_matches('+');
+        let (src, dst) = refspec.split_once(':').unwrap_or((refspec, refspec));
+        let dst = if dst.starts_with("refs/") {
+            dst.to_string()
+        } else {
+            format!("refs/heads/{dst}")
+        };
+        let Ok(listing) = self.git_output(&["ls-remote", remote, &dst]).await else {
+            return false;
+        };
+        let remote_sha = listing
+            .lines()
+            .filter_map(|l| l.split_once('\t'))
+            .find(|(_, name)| *name == dst)
+            .map(|(sha, _)| sha.to_string());
+        if src.is_empty() {
+            return remote_sha.is_none();
+        }
+        let Ok(local_sha) = self
+            .git_output(&["rev-parse", "--verify", &format!("{src}^{{commit}}")])
+            .await
+        else {
+            return false;
+        };
+        remote_sha.as_deref() == Some(local_sha.as_str())
     }
 
     /// Runs a Git command, verifies success, and returns stdout trimmed as `String`.
@@ -483,12 +643,33 @@ impl Git {
         Ok(count)
     }
 
-    /// Pushes to a remote with an explicit refspec.
+    /// Pushes to a remote with an explicit refspec, retrying transient failures.
     pub async fn push(&self, remote: &str, refspec: &str, force: bool) -> anyhow::Result<Output> {
         let mut args = vec!["push", "--porcelain", remote, refspec];
         if force {
             args.push("--force");
         }
-        self.run_cmd(&args).await
+        self.run_with_retry(&self.repo_dir, &args, Some((remote, refspec)))
+            .await
+    }
+}
+
+/// Stdout and stderr of a git invocation (`push --porcelain` reports rejections on stdout).
+fn combined_output(output: &Output) -> String {
+    format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+/// A successful push output for a push whose ref update reached the remote before its response
+/// was lost.
+fn already_pushed_output(refspec: &str) -> Output {
+    use std::os::unix::process::ExitStatusExt;
+    Output {
+        status: std::process::ExitStatus::from_raw(0),
+        stdout: format!("=\t{refspec}\t[up to date]\nDone\n").into_bytes(),
+        stderr: Vec::new(),
     }
 }

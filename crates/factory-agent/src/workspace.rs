@@ -10,7 +10,7 @@ use df_proto::transcript::v1::{Notice, NoticeLevel};
 
 use crate::git::{
     DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Git, GitConfigParams,
-    rewrite_git_config,
+    proxy_ca_override, rewrite_git_config,
 };
 
 /// Result of preparing a workspace.
@@ -32,7 +32,7 @@ pub struct PrepareResult {
 fn config_params<'a>(
     workspace: &'a Workspace,
     hooks_path: &'a Path,
-    credential_helper: &'a str,
+    ssl_ca_info: Option<&'a Path>,
 ) -> GitConfigParams<'a> {
     let identity = workspace.commit_identity.as_ref();
     GitConfigParams {
@@ -40,7 +40,7 @@ fn config_params<'a>(
         commit_author_name: identity.map_or(DEFAULT_COMMIT_AUTHOR_NAME, |c| c.name.as_str()),
         commit_author_email: identity.map_or(DEFAULT_COMMIT_AUTHOR_EMAIL, |c| c.email.as_str()),
         hooks_path,
-        credential_helper,
+        ssl_ca_info,
         extra_config: &workspace.git_config,
     }
 }
@@ -58,9 +58,9 @@ pub async fn prepare_workspace(
     repo_dir: &Path,
     workspace: &Workspace,
     hooks_path: &Path,
-    credential_helper: &str,
+    ssl_ca_info: Option<&Path>,
 ) -> anyhow::Result<PrepareResult> {
-    let config_params = config_params(workspace, hooks_path, credential_helper);
+    let config_params = config_params(workspace, hooks_path, ssl_ca_info);
     if repo_dir.join(".git").exists() {
         sync_existing_workspace(git, repo_dir, workspace, &config_params).await
     } else {
@@ -112,19 +112,21 @@ async fn clone_workspace(
         anyhow::anyhow!("repository path {} is not valid UTF-8", repo_dir.display())
     })?;
 
-    // blobless clone with --no-checkout run in parent_dir
-    let clone_out = git
-        .run_cmd_in(
-            parent_dir,
-            &[
-                "clone",
-                "--filter=blob:none",
-                "--no-checkout",
-                &workspace.repo_url,
-                repo_dir_str,
-            ],
-        )
-        .await?;
+    // blobless clone with --no-checkout run in parent_dir; `.git/config` with the scoped CA
+    // does not exist yet
+    let mut args = Vec::new();
+    let ca = proxy_ca_override(&workspace.repo_url, config_params.ssl_ca_info);
+    if let Some(ca) = &ca {
+        args.extend(["-c", ca.as_str()]);
+    }
+    args.extend([
+        "clone",
+        "--filter=blob:none",
+        "--no-checkout",
+        &workspace.repo_url,
+        repo_dir_str,
+    ]);
+    let clone_out = git.run_network_cmd_in(parent_dir, &args).await?;
     if !clone_out.status.success() {
         let stderr = String::from_utf8_lossy(&clone_out.stderr);
         anyhow::bail!("git clone failed: {}", stderr.trim());
@@ -186,7 +188,7 @@ async fn sync_existing_workspace(
     rewrite_git_config(repo_dir, config_params)?;
 
     // Fetch base and task branch from remote (Finding 17)
-    let fetch_out = git.run_cmd(&["fetch", "origin"]).await?;
+    let fetch_out = git.run_network_cmd(&["fetch", "origin"]).await?;
     if !fetch_out.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_out.stderr);
         anyhow::bail!(
@@ -480,7 +482,7 @@ pub struct FinalizeParams<'a> {
     pub detail: &'a str,
     pub harness_session_id: &'a str,
     pub hooks_path: &'a Path,
-    pub credential_helper: &'a str,
+    pub ssl_ca_info: Option<&'a Path>,
     pub wip_size_cap_bytes: u64,
     pub diverged: bool,
 }
@@ -503,7 +505,7 @@ pub async fn finalize_workspace(
     let workspace = params.workspace;
 
     // 1. Rewrite .git/config
-    let config_params = config_params(workspace, params.hooks_path, params.credential_helper);
+    let config_params = config_params(workspace, params.hooks_path, params.ssl_ca_info);
     rewrite_git_config(params.repo_dir, &config_params)?;
 
     // 2. Push task branch if needed

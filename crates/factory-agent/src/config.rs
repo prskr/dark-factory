@@ -8,7 +8,6 @@ pub const ENV_CONTROL_PLANE_SERVER_NAME: &str = "DF_CONTROL_PLANE_SERVER_NAME";
 pub const ENV_TLS_DIR: &str = "DF_TLS_DIR";
 pub const ENV_DATA_DIR: &str = "DF_DATA_DIR";
 pub const ENV_RUN_DIR: &str = "DF_RUN_DIR";
-pub const ENV_GIT_ALLOW_PLAIN_HTTP: &str = "DF_GIT_ALLOW_PLAIN_HTTP";
 
 pub const DEFAULT_TLS_DIR: &str = "/run/factory/tls";
 pub const DEFAULT_DATA_DIR: &str = "/data";
@@ -59,12 +58,6 @@ impl RuntimeConfig {
     }
 }
 
-/// Whether git may use `http://` remotes: only the value `true` of
-/// [`ENV_GIT_ALLOW_PLAIN_HTTP`] says so.
-pub fn git_allows_plain_http() -> bool {
-    std::env::var(ENV_GIT_ALLOW_PLAIN_HTTP).is_ok_and(|v| v == "true")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,7 +80,6 @@ mod tests {
             (ENV_TLS_DIR, false),
             (ENV_DATA_DIR, false),
             (ENV_RUN_DIR, false),
-            (ENV_GIT_ALLOW_PLAIN_HTTP, false),
         ] {
             assert_eq!(documented(name), Some(required), "{name}");
         }

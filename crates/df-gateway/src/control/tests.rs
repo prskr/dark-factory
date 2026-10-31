@@ -1,16 +1,18 @@
 //! Tests of the control plane side that need PostgreSQL (testcontainers) and mutual TLS.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use df_agent_channel::testing::TestPki;
 use df_agent_channel::{TlsReloader, mtls_incoming};
 use df_core::config::AgentTlsConfig;
+use df_core::{CredentialRef, SecretError, SecretStore};
 use df_db::{Notification, Notifier, PgPool};
 use df_proto::gateway::v1::gateway_policy_client::GatewayPolicyClient;
 use df_proto::gateway::v1::{PolicyUpdate, PolicyWatchRequest};
+use secrecy::SecretString;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -18,11 +20,41 @@ use tonic::Streaming;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 use uuid::Uuid;
 
-use super::{PolicyService, serve_policy};
+use super::snapshot::{self, GitSettings};
+use super::{PolicyService, serve_internal};
 use crate::link::{GrpcConnector, MtlsConnector};
 
 const CONTROL_PLANE: &str = "df-control-plane";
 const GATEWAY: &str = "df-gateway";
+
+/// A secret store with one value for every reference; the value can be changed.
+pub(crate) struct TestSecrets(Mutex<String>);
+
+impl TestSecrets {
+    pub(crate) fn new(value: &str) -> Self {
+        Self(Mutex::new(value.into()))
+    }
+
+    fn set(&self, value: &str) {
+        *self.0.lock().unwrap() = value.into();
+    }
+}
+
+#[async_trait::async_trait]
+impl SecretStore for TestSecrets {
+    async fn get(&self, _reference: &CredentialRef) -> Result<SecretString, SecretError> {
+        Ok(SecretString::from(self.0.lock().unwrap().clone()))
+    }
+}
+
+pub(crate) fn git_settings() -> GitSettings {
+    GitSettings {
+        username: "dark-factory".into(),
+        commit_name: "Dark Factory".into(),
+        commit_email: "factory@example.test".into(),
+        allow_plain_http: false,
+    }
+}
 
 pub(crate) struct Seed {
     pub project: Uuid,
@@ -138,11 +170,17 @@ impl Replica {
         let stop = CancellationToken::new();
         // Each replica listens on its own connection, like separate pods.
         let notifier = Arc::new(Notifier::start(pool).await?);
-        let service = PolicyService::new(pool.clone(), notifier, stop.clone())
-            .debounce(Duration::from_millis(10));
+        let service = PolicyService::new(
+            pool.clone(),
+            notifier,
+            Arc::new(TestSecrets::new("token")),
+            git_settings(),
+            stop.clone(),
+        )
+        .debounce(Duration::from_millis(10));
         let served = stop.clone();
         let task = tokio::spawn(async move {
-            serve_policy(service, incoming, Some(GATEWAY.into()), served)
+            serve_internal(service, incoming, Some(GATEWAY.into()), served)
                 .await
                 .ok();
         });
@@ -228,6 +266,222 @@ async fn gateway_connects_and_receives_every_active_run_with_a_pod_ip() -> Resul
     let hosts: Vec<_> = sandbox.hosts.iter().map(|h| h.pattern.as_str()).collect();
     assert_eq!(hosts, ["api.anthropic.com", "*.crates.io"]);
     assert!(first.version > 0);
+    replica.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_has_the_git_route_of_an_active_run_and_the_current_forge_credential() -> Result<()>
+{
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let credential = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO credential_refs (id, name, secret_name, secret_key)
+         VALUES ($1, 'forge', 'df-forge', 'token')",
+    )
+    .bind(credential)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "UPDATE projects SET forge_credential_id = $1, base_branch = 'trunk' WHERE id = $2",
+    )
+    .bind(credential)
+    .bind(seed.project)
+    .execute(&pool)
+    .await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let second = insert_task(&pool, seed.project, seed.persona, 2).await?;
+    insert_run(&pool, second, 1, "running", Some("10.1.0.8")).await?;
+    let secrets = TestSecrets::new("token-1");
+
+    let first = snapshot::build(&pool, &secrets, &git_settings()).await?;
+    let snapshot = first.snapshot.unwrap();
+    let route = snapshot.sandboxes[0].git.clone().unwrap();
+    assert_eq!(route.upstream_url, "https://example.test/r.git");
+    assert_eq!(route.base_branch, "refs/heads/trunk");
+    assert_eq!(route.task_branch, "refs/heads/factory/task/DF-1");
+    assert_eq!(route.wip_branch, "refs/heads/factory/wip/DF-1");
+    assert_eq!(route.credential_ref, credential.to_string());
+    assert_eq!(
+        snapshot.sandboxes[1].git.as_ref().unwrap().credential_ref,
+        route.credential_ref
+    );
+    // Both runs share one credential.
+    assert_eq!(snapshot.forge_credentials.len(), 1);
+    let forge = &snapshot.forge_credentials[&route.credential_ref];
+    assert_eq!(
+        (forge.username.as_str(), forge.password.as_str()),
+        ("dark-factory", "token-1")
+    );
+
+    secrets.set("token-2");
+    let second = snapshot::build(&pool, &secrets, &git_settings()).await?;
+    let credentials = second.snapshot.unwrap().forge_credentials;
+    assert_eq!(credentials[&route.credential_ref].password, "token-2");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_changed_forge_secret_reaches_the_watch_after_the_refresh_period() -> Result<()> {
+    use df_proto::gateway::v1::gateway_policy_server::GatewayPolicy;
+    use futures::StreamExt;
+
+    const PERIOD: Duration = Duration::from_secs(60);
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let credential = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO credential_refs (id, name, secret_name, secret_key)
+         VALUES ($1, 'forge', 'df-forge', 'token')",
+    )
+    .bind(credential)
+    .execute(&pool)
+    .await?;
+    sqlx::query("UPDATE projects SET forge_credential_id = $1 WHERE id = $2")
+        .bind(credential)
+        .bind(seed.project)
+        .execute(&pool)
+        .await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let secrets = Arc::new(TestSecrets::new("token-1"));
+    let service = PolicyService::new(
+        pool.clone(),
+        Arc::new(Notifier::start(&pool).await?),
+        Arc::clone(&secrets) as Arc<dyn SecretStore>,
+        git_settings(),
+        CancellationToken::new(),
+    )
+    .refresh(PERIOD);
+    let mut updates = service
+        .policy_watch(tonic::Request::new(PolicyWatchRequest {
+            gateway_pod: "gw-0".into(),
+        }))
+        .await?
+        .into_inner();
+    let password = |update: &PolicyUpdate| {
+        update.snapshot.as_ref().map(|snapshot| {
+            snapshot.forge_credentials[&credential.to_string()]
+                .password
+                .clone()
+        })
+    };
+    let first = updates
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no update"))??;
+    assert_eq!(password(&first).as_deref(), Some("token-1"));
+
+    secrets.set("token-2");
+    // The period started when the first update was built; no I/O since then.
+    tokio::time::pause();
+    let early = tokio::time::timeout(
+        PERIOD.saturating_sub(Duration::from_secs(10)),
+        updates.next(),
+    )
+    .await;
+    assert!(early.is_err(), "an update before the refresh period");
+    tokio::time::advance(Duration::from_secs(20)).await;
+    tokio::time::resume();
+    let second = tokio::time::timeout(Duration::from_secs(5), updates.next())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the stream ended"))??;
+    assert_eq!(password(&second).as_deref(), Some("token-2"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn record_push_is_accepted_only_from_the_gateway_certificate() -> Result<()> {
+    use df_proto::gateway::v1::gateway_git_client::GatewayGitClient;
+    use df_proto::gateway::v1::{PushRecord, PushVerdict, RefUpdate};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let run = insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
+    let replica = Replica::start(&pool, &pki).await?;
+    let record = |push_id: Uuid| PushRecord {
+        push_id: push_id.to_string(),
+        run_id: run.to_string(),
+        gateway_pod: "gw-0".into(),
+        refs: vec![RefUpdate {
+            name: "refs/heads/factory/task/DF-1".into(),
+            old_sha: "0".repeat(40),
+            new_sha: "a".repeat(40),
+            verdict: PushVerdict::Accepted.into(),
+            reason: String::new(),
+        }],
+        verdict: PushVerdict::Accepted.into(),
+        bytes: 7,
+        duration: None,
+    };
+
+    let (files, _dir) = gateway_credentials(&pki)?;
+    let channel = gateway_connector(files)
+        .connect(&replica.addr.to_string())
+        .await?;
+    let accepted = Uuid::now_v7();
+    GatewayGitClient::new(channel)
+        .record_push(record(accepted))
+        .await?;
+
+    let pod = pki
+        .pod_client("spiffe://dark-factory/ns/sb/pod/run/uid")
+        .map_err(anyhow::Error::from_boxed)?;
+    let tls = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(&pki.ca_pem))
+        .identity(Identity::from_pem(pod.cert_pem, pod.key_pem))
+        .domain_name(CONTROL_PLANE);
+    let channel = Endpoint::from_shared(format!("https://{}", replica.addr))?
+        .tls_config(tls)?
+        .connect()
+        .await?;
+    let rejected = Uuid::now_v7();
+    let status = GatewayGitClient::new(channel)
+        .record_push(record(rejected))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::PermissionDenied, "{status}");
+
+    let stored: Vec<Uuid> = sqlx::query_scalar("SELECT push_id FROM git_pushes")
+        .fetch_all(&pool)
+        .await?;
+    assert_eq!(stored, [accepted]);
+    replica.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rejected_push_without_ref_updates_is_stored() -> Result<()> {
+    use df_proto::gateway::v1::gateway_git_client::GatewayGitClient;
+    use df_proto::gateway::v1::{PushRecord, PushVerdict};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let run = insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
+    let replica = Replica::start(&pool, &pki).await?;
+    let (files, _dir) = gateway_credentials(&pki)?;
+    let channel = gateway_connector(files)
+        .connect(&replica.addr.to_string())
+        .await?;
+    let push_id = Uuid::now_v7();
+    GatewayGitClient::new(channel)
+        .record_push(PushRecord {
+            push_id: push_id.to_string(),
+            run_id: run.to_string(),
+            gateway_pod: "gw-0".into(),
+            refs: Vec::new(),
+            verdict: PushVerdict::Rejected.into(),
+            bytes: 3,
+            duration: None,
+        })
+        .await?;
+
+    let stored: Vec<(Uuid, String)> = sqlx::query_as("SELECT push_id, verdict FROM git_pushes")
+        .fetch_all(&pool)
+        .await?;
+    assert_eq!(stored, [(push_id, "rejected".to_owned())]);
     replica.stop().await;
     Ok(())
 }

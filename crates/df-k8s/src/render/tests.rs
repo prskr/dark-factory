@@ -36,12 +36,13 @@ fn test_config() -> ProvisioningConfig {
             .to_string(),
         gateway_ip: IpAddr::V4(Ipv4Addr::new(10, 105, 68, 86)),
         gateway_proxy_port: 3128,
+        gateway_git_host: "dark-factory-gateway.dark-factory-dev.svc".to_string(),
+        gateway_git_port: 8443,
         harness_images: BTreeMap::from([(
             df_core::CLAUDE_CODE_HARNESS.to_string(),
             "registry.example.org/claude-harness:0.95.0".to_string(),
         )]),
         log_format: df_telemetry::logging::LogFormat::Text,
-        allow_plain_http: false,
     }
 }
 
@@ -106,7 +107,14 @@ fn headless_target_is_listed_in_no_proxy_without_a_host_alias() {
         .unwrap();
     assert!(no_proxy.contains("db.ns.svc.cluster.local"), "{no_proxy}");
     assert!(no_proxy.split(',').any(|e| e == "db.ns.svc"), "{no_proxy}");
-    assert_eq!(sandbox.spec.pod_template.spec.host_aliases, None);
+    let aliases = sandbox.spec.pod_template.spec.host_aliases.unwrap();
+    assert!(
+        aliases
+            .iter()
+            .flat_map(|a| a.hostnames.iter().flatten())
+            .all(|h| !h.starts_with("db.ns.")),
+        "{aliases:?}"
+    );
 }
 
 #[test]
@@ -268,11 +276,11 @@ fn test_render_sandbox_spec_scenario() {
             .any(|m| m.mount_path == "/run/factory" && m.name == "tmpfs")
     );
 
-    // Host aliases
+    // Host aliases: the gateway Git proxy and the target
     let aliases = pod_spec.host_aliases.unwrap();
-    assert_eq!(aliases.len(), 1);
-    assert_eq!(aliases[0].ip, "10.96.0.50");
-    let hostnames = aliases[0].hostnames.as_ref().unwrap();
+    assert_eq!(aliases.len(), 2);
+    let scheduler = aliases.iter().find(|a| a.ip == "10.96.0.50").unwrap();
+    let hostnames = scheduler.hostnames.as_ref().unwrap();
     assert!(hostnames.contains(&"scheduler.nativelink.svc.cluster.local".to_string()));
     assert!(hostnames.contains(&"scheduler.nativelink.svc".to_string()));
 
@@ -362,16 +370,6 @@ fn sandbox_inherits_the_control_plane_log_format() {
         sandbox_env(&test_config(), "DF_LOG_FORMAT").as_deref(),
         Some("text")
     );
-}
-
-#[test]
-fn sandbox_allows_plain_http_for_git_only_when_the_instance_does() {
-    let on = test_config().with_allow_plain_http(true);
-    assert_eq!(
-        sandbox_env(&on, "DF_GIT_ALLOW_PLAIN_HTTP").as_deref(),
-        Some("true")
-    );
-    assert_eq!(sandbox_env(&test_config(), "DF_GIT_ALLOW_PLAIN_HTTP"), None);
 }
 
 #[test]
@@ -506,6 +504,71 @@ fn missing_harness_image_names_the_harness() {
 fn pod_has_no_init_containers() {
     let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
     assert!(sandbox.spec.pod_template.spec.init_containers.is_none());
+}
+
+#[test]
+fn git_host_resolves_to_the_gateway_without_dns_and_bypasses_the_proxy() {
+    let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
+    let pod_spec = sandbox.spec.pod_template.spec;
+
+    let aliases = pod_spec.host_aliases.unwrap();
+    let gateway = aliases.iter().find(|a| a.ip == "10.105.68.86").unwrap();
+    assert_eq!(
+        gateway.hostnames.as_deref(),
+        Some(&["dark-factory-gateway.dark-factory-dev.svc".to_string()][..])
+    );
+    for name in ["NO_PROXY", "no_proxy"] {
+        let value = pod_spec.containers[0]
+            .env
+            .iter()
+            .flatten()
+            .find(|e| e.name == name)
+            .and_then(|e| e.value.clone())
+            .unwrap();
+        assert!(
+            value
+                .split(',')
+                .any(|e| e == "dark-factory-gateway.dark-factory-dev.svc"),
+            "{name}={value}"
+        );
+    }
+}
+
+#[test]
+fn run_policy_allows_the_git_port_of_the_gateway_pods() {
+    let config = test_config();
+    let spec = test_spec();
+    let sandbox = render_sandbox(&spec, &[], &config).unwrap();
+    let netpol = render_network_policy(spec.run_id, &spec.task_key, &sandbox, &[], &config);
+
+    let egress = netpol.spec.unwrap().egress.unwrap();
+    let gateway_rule = egress
+        .iter()
+        .find(|rule| {
+            rule.to.iter().flatten().any(|peer| {
+                peer.pod_selector
+                    .as_ref()
+                    .and_then(|s| s.match_labels.as_ref())
+                    .and_then(|l| l.get("app.kubernetes.io/component"))
+                    .is_some_and(|c| c == "gateway")
+            })
+        })
+        .unwrap();
+    let peer = &gateway_rule.to.as_ref().unwrap()[0];
+    assert_eq!(
+        peer.namespace_selector
+            .as_ref()
+            .and_then(|s| s.match_labels.as_ref())
+            .and_then(|l| l.get("kubernetes.io/metadata.name"))
+            .map(String::as_str),
+        Some("dark-factory-dev")
+    );
+    assert!(
+        gateway_rule.ports.iter().flatten().any(|p| {
+            p.port == Some(IntOrString::Int(8443)) && p.protocol.as_deref() == Some("TCP")
+        }),
+        "{gateway_rule:?}"
+    );
 }
 
 #[test]

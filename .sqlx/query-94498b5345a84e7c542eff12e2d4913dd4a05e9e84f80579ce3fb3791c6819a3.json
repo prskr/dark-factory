@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE git_pushes\n        SET verdict = 'unknown', updated_at = now()\n        WHERE verdict = 'forwarding' AND created_at < now() - make_interval(secs => $1)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94498b5345a84e7c542eff12e2d4913dd4a05e9e84f80579ce3fb3791c6819a3"
+}

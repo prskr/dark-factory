@@ -36,6 +36,8 @@ pub(crate) fn live_config() -> ProvisioningConfig {
         GatewayEndpoint {
             ip: IpAddr::V4(Ipv4Addr::new(10, 105, 68, 86)),
             proxy_port: 3128,
+            git_host: "df-live-test-gateway".to_string(),
+            git_port: 8443,
         },
     )
 }

@@ -17,6 +17,7 @@ use crate::runner::{RunDriverParams, RunExecutionResult, run_session};
 mod cli;
 mod connection;
 mod git;
+mod git_retry;
 mod harness;
 mod mcp;
 mod outbox;
@@ -293,7 +294,6 @@ impl RunScenario {
             outbox,
             inbound_rx,
             outbound_tx,
-            git_credentials: None,
             cancel_requested: false,
         }
     }

@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-83.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-84.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -33,6 +33,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
 - Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-81 to TD-82: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
 
 ## Summary
 
@@ -110,6 +111,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
 | TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
+| TD-83 | low   | `df-gateway` tests | Two timing-sensitive unit tests fail intermittently |
 
 ## Entries
 
@@ -772,6 +774,16 @@ The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of 
 
 **Fix:** state the ceiling in the code comment and set `idle_in_transaction_session_timeout` on this transaction (`statement_timeout` does not cover the idle wait for the forge); if the pool does run dry, serialize per task in-process before taking the DB lock.
 
+### TD-83 (flaky). Two timing-sensitive gateway tests fail intermittently
+
+`crates/df-gateway/src/control/relay/tests.rs` (`the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_next_viewer`), `crates/df-gateway/src/proxy/tests.rs` (`an_upstream_that_never_answers_ends_with_502_and_upstream_timeout`)
+
+Both tests depend on real timing and sometimes fail on `main` too (at fd5cf70 the relay test failed 1 of 4 isolated runs; `cargo test -p df-gateway --lib` failed 3 of 4 runs).
+
+**Matters when:** CI or the pre-push run fails because of them and red builds get ignored.
+
+**Fix:** paused time (`tokio::time::pause()`) or waiting on the condition instead of on real time; first a test run that fails reliably with the current timing.
+
 ## Accepted decisions
 
 These were reviewed and kept on purpose. Don't raise them as issues unless the stated assumption changes.
@@ -780,8 +792,6 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 - **TurnEnded vs. trailing transcript chunks:** ordering is guaranteed. `agent-client-protocol` 3.4.0 (`concepts::ordering`) waits for each notification handler to finish before it routes the next message. The handler awaits the `outbound_tx` send, so all chunks of a turn are queued before the prompt response arrives. Revisit if the ACP crate changes its dispatch model.
 - **Late `HarnessCredentials`:** the documented order is "credentials before Assign". If credentials arrive after Assign, the runtime sends a notice and does not use them.
 - **Git config denylist instead of an allowlist:** the denylist was extended. Replace it with an allowlist once the set of config keys the control plane sends is known.
-- **Credential requests without a path:** they are denied. `credential.useHttpPath` is set in `.git/config` and through `-c` on every runtime git call, so git always sends the path.
-- **Credential request expiry:** `CommandFilter` expires credential requests by age, using the same 10 s constant as the runner (`CREDENTIAL_REQUEST_TIMEOUT`).
 - **Harness exit:** stdin is closed when the ACP transport is dropped. The runtime waits 5 s, then kills the harness.
 - **Fake agent cancel flag:** `fake-acp-agent` resets `cancelled` at the end of a prompt, because a cancel can be handled before the spawned prompt task starts.
 - **Hooks path not configurable:** `/opt/factory/hooks-empty` is a constant. It matches the runtime image layer (`deploy/BUILD.bazel`, `/hooks-empty` in the image mounted at `/opt/factory`). Generated commit hooks (`/run/factory/git-hooks`, `design/agent-run.md` §7.1) are not implemented yet.

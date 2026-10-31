@@ -79,3 +79,86 @@ rust_test(
         "//crates/df-proto:df_proto",
     ],
 )
+
+rust_test(
+    name = "report_status_test",
+    srcs = ["tests/report_status.rs"],
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+    ],
+)
+
+rust_test(
+    name = "git_fetch_test",
+    srcs = [
+        "tests/common/mod.rs",
+        "tests/git_fetch.rs",
+    ],
+    crate_root = "tests/git_fetch.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "git_mirror_test",
+    srcs = [
+        "tests/common/mod.rs",
+        "tests/git_mirror.rs",
+    ],
+    crate_root = "tests/git_mirror.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "git_push_test",
+    srcs = [
+        "tests/common/mod.rs",
+        "tests/git_push.rs",
+    ],
+    crate_root = "tests/git_push.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+        "//crates/df-proto:df_proto",
+    ],
+)

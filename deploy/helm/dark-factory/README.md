@@ -2,7 +2,7 @@
 
 Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031), including:
 - Control plane `Deployment` and `Service` (`8080` UI/health, `9443` agent mTLS gRPC, `9444` internal `PolicyWatch` mTLS gRPC)
-- Egress gateway `Deployment` (`>= 2` replicas), `PodDisruptionBudget`, `Service` (`3128` proxy), and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
+- Egress gateway `Deployment` (`>= 2` replicas), `PodDisruptionBudget`, `Service` (`3128` proxy, `8443` Git proxy), mirror `emptyDir`, and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
 - `migrate` pre-install/pre-upgrade hook `Job`
 - Least-privilege Kubernetes RBAC (`design/deployment.md` §3)
 - Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota`, `LimitRange`, and tokenless `ServiceAccount`
@@ -118,7 +118,7 @@ Every key in `values.yaml` is documented below:
 | `plugins.<name>.hosts` | `list` | unset | Forge hosts the plugin serves: a host (`ghe.example.org`) or `{host, apiUrl}` with an `https://` API URL. Written to the instance config only when set; an entry without `hosts` is the default plugin and serves every other project. See [Plugins](#plugins) for rollback. |
 | `plugins.<name>.authScheme` | `string` | unset (`token`) | `token` or `bearer`: how the control plane sends the forge credential (`Authorization: token …` / `Bearer …`). Written to the instance config only when set. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
-| `forge.allowPlainHttp` | `bool` | `false` | Accept `http://` repository URLs: forge plugin calls, sandbox git (`DF_GIT_ALLOW_PLAIN_HTTP=true` in the sandbox pods) and the project form (`forge.allowPlainHttp` of the instance config). Off, only `https://` works. The forge token travels unencrypted, so use it for throwaway clusters only; the control plane logs a warning at startup. A change restarts the control plane. |
+| `forge.allowPlainHttp` | `bool` | `false` | Accept `http://` repository URLs: forge plugin calls, the gateway's Git proxy towards the forge (sandboxes always use HTTPS to the gateway) and the project form (`forge.allowPlainHttp` of the instance config). Off, only `https://` works. The forge token travels unencrypted, so use it for throwaway clusters only; the control plane and the gateway log a warning at startup. A change restarts both. |
 | `web.showHiddenBlocks` | `bool` | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, such as the title request) in the task UI, muted and labeled (`web.showHiddenBlocks` of the instance config). For debugging prompts. Read at startup: a change restarts the control plane. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
 | `controlPlane.logLevel` | `string` | `info` | `RUST_LOG` (`EnvFilter` syntax, e.g. `info,df_web=debug`) of the control plane and the migrate job. |
@@ -133,6 +133,9 @@ Every key in `values.yaml` is documented below:
 | `gateway.serviceAccountName` | `string` | `""` | Optional override for the gateway `ServiceAccount` name (`automountServiceAccountToken: false`). |
 | `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget`. |
 | `gateway.ports.proxy` | `int` | `3128` | Egress HTTP/CONNECT proxy port for sandboxes. |
+| `gateway.ports.git` | `int` | `8443` | Git proxy (HTTPS) port for sandboxes, on the gateway container and `Service` (port name `git`). Sandboxes clone and push through `https://<fullname>-gateway.<namespace>.svc:<port>/git/<task>.git`; the gateway certificate carries that name. |
+| `gateway.git.mirrorSizeLimit` | `string` | `"10Gi"` | `sizeLimit` of the gateway `emptyDir` mounted at `/var/lib/dark-factory/git-mirrors` (repository mirrors and push spools). The kubelet evicts a pod that exceeds it; mirrors are refetched after a restart. |
+| `gateway.git.maxPushSizeBytes` | `int` | `268435456` | Maximum push request body in bytes (256 MiB); larger pushes are rejected with `df:push-too-large`. |
 | `gateway.ports.internalGrpc` | `int` | `9444` | Gateway internal gRPC port (`Tail`, mTLS). |
 | `gateway.ports.health` | `int` | `8080` | Gateway health HTTP port (`/healthz`, `/readyz`; ready after the first policy snapshot). |
 | `gateway.bufferSize` | `int` | `10000` | Flow events of the live egress log kept in memory per gateway pod. |
@@ -279,6 +282,10 @@ plugins:
 The control plane pod does not start and `kubectl describe pod` shows a failed pull of the image volume `plugin-<name>` in the pod's reason, message and events (retried with volume backoff, not reported as a container `ErrImagePull`): the plugin image or tag does not exist, the registry needs credentials (`image.pullSecrets` apply to plugin images) or the cluster has no image volume support.
 
 A plugin whose component is missing or invalid is logged at `error` ("forge plugin not loaded", fields `plugin`, `path`, `error`) and stays in the routing table as unavailable: its projects get a `config` error naming the plugin. `serve` exits only if no forge plugin loaded (`no forge plugin loaded: <every load error>`). Configuration errors (a host claimed by two plugins, two plugins without `hosts`, an `apiUrl` without `https://`) still stop startup. See [Startup](../../../crates/df-plugins/docs/configuration.md#startup).
+
+## Upgrade to the Git proxy
+
+From this chart version on, sandboxes clone and push only through the gateway's Git proxy (`gateway.ports.git`), which injects the forge credential; the egress proxy no longer carries Git traffic. After the upgrade, remove the forge host from the instance egress allowlist (UI, egress allowlist page). An entry left there lets an agent reach the forge's API and web UI directly, outside the proxy's ref rules and push records.
 
 ## Cluster targets
 

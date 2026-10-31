@@ -30,6 +30,10 @@ spec:
       port: {{ .Values.gateway.ports.proxy }}
       targetPort: proxy
       protocol: TCP
+    - name: git
+      port: {{ .Values.gateway.ports.git }}
+      targetPort: git
+      protocol: TCP
     - name: internal-grpc
       port: {{ .Values.gateway.ports.internalGrpc }}
       targetPort: internal-grpc

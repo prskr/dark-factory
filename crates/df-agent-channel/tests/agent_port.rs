@@ -20,9 +20,8 @@ use df_agent_channel::{ChannelConfig, ChannelContext};
 use df_core::{PeerIdentity, RunId, RunOutcome, RunState};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, CredentialRequest, GitCredentialRequest, PhaseChanged, PushReport, PushStatus,
-    PushTarget, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallRequest,
-    agent_message, control_message, credential_grant, credential_request,
+    AgentMessage, PhaseChanged, PushReport, PushStatus, PushTarget, RunPhase, RunReport,
+    RuntimeOperation, RuntimeTiming, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{
     AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
@@ -769,10 +768,10 @@ async fn message_queued_while_finalizing_requeues_the_task() -> anyhow::Result<(
     Ok(())
 }
 
-// --- 5. Tools and credentials over the stream -----------------------------------------------
+// --- 5. Tools over the stream ---------------------------------------------------------------
 
 #[tokio::test]
-async fn tool_call_and_credential_requests_are_answered_on_the_stream() -> anyhow::Result<()> {
+async fn tool_calls_are_answered_on_the_stream() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, _) = h.handshake().await?;
@@ -797,31 +796,6 @@ async fn tool_call_and_credential_requests_are_answered_on_the_stream() -> anyho
         (call_id.as_str(), false)
     );
 
-    for (path, expect_grant) in [("peter/dark-factory.git", true), ("peter/other.git", false)] {
-        runtime
-            .send(agent_message::Body::CredentialRequest(CredentialRequest {
-                request_id: path.into(),
-                kind: Some(credential_request::Kind::Git(GitCredentialRequest {
-                    protocol: "https".into(),
-                    host: "git.example.org".into(),
-                    path: path.into(),
-                })),
-            }))
-            .await;
-        let msgs = runtime
-            .recv_until(|m| matches!(m.body, Some(control_message::Body::CredentialGrant(_))))
-            .await?;
-        let Some(control_message::Body::CredentialGrant(grant)) =
-            msgs.last().and_then(|m| m.body.clone())
-        else {
-            anyhow::bail!("no grant");
-        };
-        assert_eq!(
-            matches!(grant.result, Some(credential_grant::Result::Git(_))),
-            expect_grant,
-            "{path}"
-        );
-    }
     Ok(())
 }
 
@@ -985,25 +959,8 @@ async fn secret_values_never_appear_in_logs() -> anyhow::Result<()> {
     );
 
     let h = Harness::start(pool.clone()).await?;
-    let (mut runtime, _) = h.handshake().await?;
-    for (id, path) in [
-        ("ok", "peter/dark-factory.git"),
-        ("denied", "peter/other.git"),
-    ] {
-        runtime
-            .send(agent_message::Body::CredentialRequest(CredentialRequest {
-                request_id: id.into(),
-                kind: Some(credential_request::Kind::Git(GitCredentialRequest {
-                    protocol: "https".into(),
-                    host: "git.example.org".into(),
-                    path: path.into(),
-                })),
-            }))
-            .await;
-        runtime
-            .recv_until(|m| matches!(m.body, Some(control_message::Body::CredentialGrant(_))))
-            .await?;
-    }
+    // The handshake reads the harness secret.
+    h.handshake().await?;
     // Failing secret reads log too.
     h.env.secrets.insert_error(
         "claude",

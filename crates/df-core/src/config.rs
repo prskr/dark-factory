@@ -194,6 +194,19 @@ impl AuthConfig {
 pub struct GatewayConfig {
     #[serde(default = "default_proxy_port")]
     pub proxy_port: u16,
+    /// Port of the Git proxy (HTTPS) for sandboxes.
+    #[serde(default = "default_git_port")]
+    pub git_port: u16,
+    /// Host name of the Git proxy URL in sandboxes, mapped to the gateway `ClusterIP` through
+    /// their `/etc/hosts`. The gateway certificate must carry it. Default `<instanceName>-gateway`.
+    #[serde(default)]
+    pub git_host: Option<String>,
+    /// Directory of the bare mirror repositories of the Git proxy.
+    #[serde(default = "default_mirror_dir")]
+    pub mirror_dir: PathBuf,
+    /// Largest push body the Git proxy accepts, in bytes.
+    #[serde(default = "default_max_push_size_bytes")]
+    pub max_push_size_bytes: u64,
     #[serde(default = "default_internal_grpc_port")]
     pub internal_grpc_port: u16,
     #[serde(default = "default_http_port")]
@@ -228,6 +241,10 @@ impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             proxy_port: default_proxy_port(),
+            git_port: default_git_port(),
+            git_host: None,
+            mirror_dir: default_mirror_dir(),
+            max_push_size_bytes: default_max_push_size_bytes(),
             internal_grpc_port: default_internal_grpc_port(),
             health_port: default_http_port(),
             control_plane_host: None,
@@ -258,6 +275,13 @@ impl GatewayConfig {
         self.identity
             .clone()
             .unwrap_or_else(|| format!("{instance_name}-gateway"))
+    }
+
+    /// The host name of the Git proxy URL; defaults to [`Self::identity_name`].
+    pub fn git_host_name(&self, instance_name: &str) -> String {
+        self.git_host
+            .clone()
+            .unwrap_or_else(|| self.identity_name(instance_name))
     }
 }
 
@@ -505,9 +529,9 @@ impl Default for RunsConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ForgeConfig {
-    /// Allow `http://` repository URLs: plugin calls, sandbox git and the project form. Off, only
-    /// `https://` is accepted. The token then travels unencrypted, so use it for throwaway
-    /// clusters only.
+    /// Allow `http://` repository URLs: plugin calls, the gateway's Git proxy and the project
+    /// form. Off, only `https://` is accepted. The token then travels unencrypted, so use it for
+    /// throwaway clusters only.
     #[serde(default)]
     pub allow_plain_http: bool,
 }
@@ -707,6 +731,18 @@ fn default_internal_grpc_port() -> u16 {
 
 fn default_proxy_port() -> u16 {
     3128
+}
+
+fn default_git_port() -> u16 {
+    8443
+}
+
+fn default_mirror_dir() -> PathBuf {
+    PathBuf::from("/var/lib/dark-factory/git-mirrors")
+}
+
+fn default_max_push_size_bytes() -> u64 {
+    268_435_456
 }
 
 fn default_flow_buffer_size() -> usize {
@@ -1032,6 +1068,19 @@ sandbox:
         );
         let unknown = format!("{minimal}forge:\n  plainHttp: true\n");
         assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
+    }
+
+    #[test]
+    fn git_proxy_defaults_to_port_8443_on_the_gateway_name() {
+        let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let gateway = InstanceConfig::from_yaml_str(minimal).unwrap().gateway;
+        assert_eq!(gateway.git_port, 8443);
+        assert_eq!(gateway.git_host_name("df"), "df-gateway");
+
+        let yaml = format!("{minimal}gateway:\n  gitPort: 9443\n  gitHost: df-gateway.df.svc\n");
+        let gateway = InstanceConfig::from_yaml_str(&yaml).unwrap().gateway;
+        assert_eq!(gateway.git_port, 9443);
+        assert_eq!(gateway.git_host_name("df"), "df-gateway.df.svc");
     }
 
     #[test]

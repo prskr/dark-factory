@@ -252,7 +252,6 @@ async fn test_df_harness_complete_task_ends_run_completed() {
         outbox,
         inbound_rx,
         outbound_tx,
-        git_credentials: None,
         cancel_requested: false,
     };
     let result = run_session(params)
@@ -374,16 +373,10 @@ async fn test_scenario_full_runtime_two_runs_on_single_data_dir() {
         .expect("seed push");
     assert!(out.status.success());
 
-    // 2. Start LocalHttpsGitServer with required Basic auth
+    // 2. Start LocalHttpsGitServer; like the gateway's Git proxy it needs no credentials
     let pki = TestPki::generate("localhost").expect("pki");
-    let git_user = "agent-bot".to_string();
-    let git_token = "agent-secret-pass-42".to_string();
-    let git_server = LocalHttpsGitServer::start(
-        &pki,
-        git_root.clone(),
-        Some((git_user.clone(), git_token.clone())),
-    )
-    .expect("start https git server");
+    let git_server =
+        LocalHttpsGitServer::start(&pki, git_root.clone(), None).expect("start https git server");
 
     let ca_path = temp_dir.path().join("ca.crt");
     std::fs::write(&ca_path, &pki.ca_cert_pem).expect("write ca.crt");
@@ -499,7 +492,6 @@ sessions:
         outbox: outbox1,
         inbound_rx: inbound_rx1,
         outbound_tx: outbound_tx1,
-        git_credentials: Some((git_user.clone(), git_token.clone())),
         cancel_requested: false,
     };
 
@@ -676,7 +668,6 @@ sessions:
         outbox: outbox2,
         inbound_rx: inbound_rx2,
         outbound_tx: outbound_tx2,
-        git_credentials: Some((git_user, git_token)),
         cancel_requested: false,
     };
 
@@ -894,7 +885,6 @@ async fn test_manual_claude_acp_run() {
         outbox,
         inbound_rx,
         outbound_tx,
-        git_credentials: None,
         cancel_requested: false,
     };
 
@@ -958,7 +948,6 @@ async fn test_cancel_before_assign_skips_prepare() {
         outbox,
         inbound_rx,
         outbound_tx,
-        git_credentials: None,
     };
     let result = run_session(params).await.unwrap();
     assert_eq!(result.outcome, RunOutcome::Cancelled);
@@ -971,142 +960,6 @@ async fn test_cancel_before_assign_skips_prepare() {
         report.body,
         Some(agent_message::Body::RunReport(_))
     ));
-}
-
-#[tokio::test]
-async fn test_credential_grant_delivered_during_prepare() {
-    use crate::git::Git;
-    use crate::outbox::Outbox;
-    use crate::runner::{RunDriverParams, run_session};
-    use crate::test_harness::{LocalHttpsGitServer, TestPki};
-    use df_proto::agent::v1::{
-        Assign, CredentialGrant, GitCredential, Harness, Workspace, credential_grant,
-    };
-
-    let mcp_bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("target/debug/factory-agent");
-    if !mcp_bin.exists() {
-        eprintln!("Skipping test: factory-agent binary not present");
-        return;
-    }
-
-    let temp = tempfile::tempdir().unwrap();
-    let _upstream = setup_test_remote_repo(temp.path()); // temp/upstream.git
-    let pki = TestPki::generate("localhost").unwrap();
-    let server = LocalHttpsGitServer::start(
-        &pki,
-        temp.path().to_path_buf(),
-        Some(("bot".to_string(), "tok".to_string())),
-    )
-    .unwrap();
-    let ca_path = temp.path().join("ca.crt");
-    std::fs::write(&ca_path, &pki.ca_cert_pem).unwrap();
-
-    let data = temp.path().join("data");
-    let repo_dir = data.join("repo");
-    let hooks = temp.path().join("hooks-empty");
-    std::fs::create_dir_all(&hooks).unwrap();
-    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
-        Outbox::open(
-            &data.join("runtime"),
-            "run-credential-grant",
-            1024 * 1024,
-            64 * 1024,
-        )
-        .unwrap(),
-    ));
-
-    let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel(10);
-    let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AgentMessage>(100);
-    // Control plane stand-in: answers every credential request, drops everything else
-    let responder = tokio::spawn(async move {
-        let mut asked = 0;
-        while let Some(msg) = outbound_rx.recv().await {
-            if let Some(agent_message::Body::CredentialRequest(req)) = msg.body {
-                asked += 1;
-                inbound_tx
-                    .send(ControlMessage {
-                        ack: 0,
-                        body: Some(control_message::Body::CredentialGrant(CredentialGrant {
-                            request_id: req.request_id,
-                            result: Some(credential_grant::Result::Git(GitCredential {
-                                username: "bot".to_string(),
-                                password: "tok".to_string(),
-                                expires_at: None,
-                            })),
-                        })),
-                    })
-                    .await
-                    .ok();
-            }
-        }
-        asked
-    });
-
-    let params = RunDriverParams {
-        assign: Assign {
-            run_id: "run-credential-grant".to_string(),
-            task: None,
-            workspace: Some(Workspace {
-                repo_url: format!("https://localhost:{}/upstream.git", server.addr.port()),
-                base_branch: "main".to_string(),
-                task_branch: "factory/task/DF-1".to_string(),
-                wip_branch: "factory/wip/DF-1".to_string(),
-                commit_identity: None,
-                git_hooks: vec![],
-                git_config: vec![],
-            }),
-            // The harness can't start; reaching that point means prepare succeeded
-            harness: Some(Harness {
-                kind: Some(df_proto::agent::v1::harness::Kind::Acp(
-                    df_proto::agent::v1::AcpHarness {
-                        command: vec!["/nonexistent/harness".to_string()],
-                        env: std::collections::HashMap::new(),
-                        model: None,
-                        settings_json: String::new(),
-                    },
-                )),
-                system_prompt: String::new(),
-            }),
-            tools: vec![],
-            budgets: None,
-            continuation: None,
-        },
-        credentials: None,
-        initial_prompts: vec![],
-        cancel_requested: false,
-        repo_dir: repo_dir.clone(),
-        home_dir: data.join("home"),
-        runtime_dir: temp.path().join("run"),
-        hooks_path: hooks.clone(),
-        mcp_command: mcp_bin,
-        runtime_sock_path: temp.path().join("run").join("runtime.sock"),
-        git: Git::new(&repo_dir)
-            .allow_protocols(["https"])
-            .with_hooks_empty_dir(&hooks)
-            .with_ssl_ca_info(&ca_path),
-        outbox,
-        inbound_rx,
-        outbound_tx,
-        git_credentials: None,
-    };
-    let result = run_session(params).await.unwrap();
-    assert!(
-        result
-            .run_report
-            .detail
-            .starts_with("Failed to spawn harness"),
-        "prepare must have succeeded, got: {}",
-        result.run_report.detail
-    );
-    assert!(repo_dir.join(".git").exists());
-    drop(result);
-    server.shutdown();
-    responder.abort();
 }
 
 /// A resumed harness replays the conversation before it answers `session/load`. The replay is

@@ -7,7 +7,7 @@ Each sandbox entry of the policy snapshot SHALL carry the run's Git route (proje
 
 #### Scenario: Run with a Git route
 - **WHEN** a gateway receives a snapshot while run R of `DF-7` is active
-- **THEN** R's entry names upstream `https://git.example.org/peter/dark-factory.git` and task branch `factory/task/DF-7`, and the referenced credential is present in the snapshot
+- **THEN** R's entry names upstream `https://git.example.org/peter/dark-factory.git` and task branch `refs/heads/factory/task/DF-7`, and the referenced credential is present in the snapshot
 
 #### Scenario: Credential rotated
 - **WHEN** the Kubernetes Secret behind a project's forge credential changes

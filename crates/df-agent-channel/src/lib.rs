@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use df_core::config::{AgentConfig, HarnessConfig, RunsConfig};
+use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig};
 use df_core::{ForgeClient, InstanceConfig, SandboxProvider, SecretStore};
 use df_db::Notifier;
 use sqlx::PgPool;
@@ -37,6 +37,7 @@ pub struct ChannelConfig {
     pub agent: AgentConfig,
     pub harness: HarnessConfig,
     pub runs: RunsConfig,
+    pub git_proxy: GitProxy,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -45,6 +46,27 @@ impl From<&InstanceConfig> for ChannelConfig {
             agent: cfg.agent.clone(),
             harness: cfg.harness.clone(),
             runs: cfg.runs.clone(),
+            git_proxy: GitProxy {
+                host: cfg.gateway.git_host_name(&cfg.instance_name),
+                port: cfg.gateway.git_port,
+            },
+        }
+    }
+}
+
+/// Host and port of the gateway's Git proxy as sandboxes reach it (design D2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitProxy {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for GitProxy {
+    fn default() -> Self {
+        let gateway = GatewayConfig::default();
+        Self {
+            host: gateway.git_host_name("dark-factory"),
+            port: gateway.git_port,
         }
     }
 }

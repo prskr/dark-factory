@@ -1,5 +1,5 @@
 ---
-source: crates/df-k8s/src/render.rs
+source: crates/df-k8s/src/render/tests.rs
 expression: netpol_baseline
 ---
 apiVersion: networking.k8s.io/v1
@@ -33,6 +33,8 @@ spec:
               app.kubernetes.io/component: control-plane
     - ports:
         - port: 3128
+          protocol: TCP
+        - port: 8443
           protocol: TCP
       to:
         - namespaceSelector:

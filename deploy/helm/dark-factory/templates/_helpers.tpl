@@ -59,6 +59,20 @@ app.kubernetes.io/component: gateway
 {{- end }}
 
 {{/*
+Gateway mount path of the Git mirror emptyDir, also rendered as gateway.mirrorDir
+*/}}
+{{- define "dark-factory.gateway.mirrorDir" -}}
+/var/lib/dark-factory/git-mirrors
+{{- end }}
+
+{{/*
+Host name of the gateway Git proxy in sandbox remote URLs and the gateway certificate
+*/}}
+{{- define "dark-factory.gateway.gitHost" -}}
+{{ include "dark-factory.fullname" . }}-gateway.{{ .Release.Namespace }}.svc
+{{- end }}
+
+{{/*
 Control plane image reference (supports digest or tag)
 */}}
 {{- define "dark-factory.controlPlane.image" -}}
