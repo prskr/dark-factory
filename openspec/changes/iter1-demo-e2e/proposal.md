@@ -26,5 +26,8 @@ None.
 - New scripts under `crates/fake-acp-agent/scripts/`, `docs/demo.md`.
 - New `deploy/e2e/` (kind config, PostgreSQL, Dex, Forgejo, Playwright), `deploy/values-e2e.yaml`, Justfile recipes `e2e-local` and `seed`, pinned `kind` binary.
 - `df-web`: a plain `http://` `publicUrl` is accepted on any host, with a startup warning outside loopback (was: refused).
+- New instance setting `forge.allowPlainHttp` (default off): forge plugin, sandbox git (`DF_GIT_ALLOW_PLAIN_HTTP`) and the project form accept `http://` forge URLs, with a startup warning. Enabled only in `values-e2e.yaml`.
+- New chart value `oidc.extraScopes` (default `[]`).
+- `deploy/e2e/` also installs agent-sandbox and the cert-manager CSI driver.
 - No change to `//deploy:dev` or `deploy/values-dev.yaml`.
 - Depends on all other `iter1-*` changes being applied.

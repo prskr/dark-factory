@@ -277,7 +277,8 @@ where
     let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
-    let forge_plugins = forge::load_forge_plugins(&plugin_engine, &cfg.plugins)?;
+    let forge_plugins =
+        forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.forge.allow_plain_http)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 
@@ -503,6 +504,7 @@ fn web_router(
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
+        allow_plain_http: cfg.forge.allow_plain_http,
         approval_types,
     }))
 }

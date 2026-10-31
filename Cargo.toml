@@ -48,6 +48,9 @@ similar_names = "allow"
 struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
+[workspace.metadata.check-crates.exempt]
+"crates/df-e2e" = "end-to-end suite and seed program, built by cargo only (playwright-rs is pre-1.0 with a build-time driver download; design D6 of iter1-demo-e2e)"
+
 [workspace.metadata.file-length]
 max-lines = 1500
 
@@ -96,6 +99,7 @@ pbjson = "0.9"
 pbjson-build = "0.9"
 pbjson-types = "0.9"
 percent-encoding = "2"
+playwright-rs = "0.20"
 prometheus = { version = "0.14", default-features = false }
 prost = "0.14"
 prost-build = "0.14"

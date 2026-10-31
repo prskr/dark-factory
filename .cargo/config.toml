@@ -2,5 +2,9 @@
 SQLX_OFFLINE = { value = "true", force = false }
 DATABASE_URL = { value = "postgres://postgres:postgres@localhost:5432/postgres", force = false }
 
+# `playwright-rs` (crates/df-e2e) downloads a ~90 MB driver in its build script. Plain workspace
+# builds do not need it: `just e2e-local` installs it (docs/demo.md).
+PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD = { value = "1", force = false }
+
 [alias]
 xtask = "run --quiet --manifest-path tools/xtask/Cargo.toml --"

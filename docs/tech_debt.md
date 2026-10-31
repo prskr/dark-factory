@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-81.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-83.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -32,6 +32,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
 - Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-81 to TD-82: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -107,6 +108,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-78 | low    | `df-core` routing | Plain-HTTP routing table constructor for tests is public API |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
 | TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
+| TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
+| TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
 
 ## Entries
 
@@ -723,7 +726,7 @@ Each plugin image repeats the same six targets and a push target with only the n
 
 `crates/df-core/src/routing.rs` (`RoutingTable::from_plugins_allowing_plain_http`)
 
-The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls only `from_plugins`, but nothing stops another caller from building a table that sends forge tokens over plain HTTP.
+The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls it only when `forge.allowPlainHttp` is on (`iter1-demo-e2e`); nothing else stops a caller from building a table that sends forge tokens over plain HTTP.
 
 **Matters when:** a caller outside the tests uses it, for example a dev or e2e switch in the instance configuration.
 
@@ -748,6 +751,26 @@ Both files duplicate `plugins/forgejo/src/draft.rs` and `plugins/forgejo/src/was
 **Matters when:** a fix in one plugin has to be repeated in the other, or a third plugin copies them again.
 
 **Fix:** a small shared crate such as `plugins/forge-common`. Each plugin keeps its own WIT bindings; the shared code works on plain types.
+
+### TD-81 (S6). e2e database checks are not compile-time checked
+
+`crates/df-e2e/src/db.rs:43,52,64`
+
+The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of `query!`/`query_as!` with `.sqlx/` metadata.
+
+**Matters when:** a schema change renames or drops a column the suite reads; the break shows up only in a `just e2e-local` run instead of at compile time.
+
+**Fix:** use the checked macros (offline metadata for `df-e2e`), or read through existing `df-db` functions.
+
+### TD-82 (S23). First-PR creation holds a pooled connection across forge calls
+
+`crates/df-agent-channel/src/pr.rs:111-150`
+
+`try_ensure_draft` holds a transaction with the per-task advisory lock across up to three forge calls (bounded by `FORGE_TIMEOUT`); callers waiting for the same task each hold a connection too.
+
+**Matters when:** many runs reach their first push together against a slow forge, and the default pool of 16 connections runs dry for UI and session queries.
+
+**Fix:** state the ceiling in the code comment and set `idle_in_transaction_session_timeout` on this transaction (`statement_timeout` does not cover the idle wait for the forge); if the pool does run dry, serialize per task in-process before taking the DB lock.
 
 ## Accepted decisions
 

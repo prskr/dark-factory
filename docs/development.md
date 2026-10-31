@@ -135,6 +135,8 @@ The checksum is the SHA-384 of the migration file; run the `UPDATE` again after 
 
 ## 6. Running the Web UI Locally
 
+The end-to-end suite and the demo data (`just seed`) are described in [`demo.md`](demo.md).
+
 `just serve-local` runs the control plane against the compose services without a Kubernetes cluster:
 
 1. starts the compose services (`just db`) and builds the plugin components (`just plugins`),
@@ -156,7 +158,7 @@ The flags `--no-cluster` and `--demo-flows` exist only in a build with the Cargo
 - Project host icons: the script connects to `intranet.example.com` and `ghcr.io`. Create a credential reference, then a project with repository `https://intranet.example.com/org/df.git`, issue tracker `https://ghcr.io/org/df/issues` and that credential, and reload `/egress/log` (the lookup is built per connection) and `/egress/allowlist`: `intranet.example.com` shows the Forgejo icon and `ghcr.io` the issue icon instead of the globe. Without the credential it shows the generic Git icon.
 - The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
 
-Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is refused on any other host; with an `https://` URL the cookie always carries `Secure`.
+Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is accepted on any host (TLS is the operator's choice, for example the throwaway e2e cluster); on a non-loopback host the control plane logs a startup warning. With an `https://` URL the cookie always carries `Secure`.
 
 ```mermaid
 sequenceDiagram
@@ -215,7 +217,7 @@ The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` 
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `tailwindcss` and `yq` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `tailwindcss` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine.
 
 | Task | Command |

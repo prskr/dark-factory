@@ -19,11 +19,15 @@ fn assert_saved(response: &axum::http::Response<axum::body::Body>) {
 }
 
 fn project_form(key: &str, repo: &str) -> String {
+    project_form_with_tracker(key, repo, "")
+}
+
+fn project_form_with_tracker(key: &str, repo: &str, tracker: &str) -> String {
     form(&[
         ("key", key),
         ("name", "Dark Factory"),
         ("repo_url", repo),
-        ("issue_tracker_url", ""),
+        ("issue_tracker_url", tracker),
         ("image", "ghcr.io/example/sandbox:1"),
         ("base_branch", "main"),
         ("adapter_command", ""),
@@ -197,6 +201,76 @@ async fn project_is_created_and_listed() {
     let list = text(app.get("/projects", &cookie).await).await;
     assert!(list.contains("DF") && list.contains("dark-factory.git"));
     assert_eq!(audit(&app, "project.create").await[0]["after"]["key"], "DF");
+}
+
+#[tokio::test]
+async fn http_repository_is_accepted_when_the_instance_allows_plain_http() {
+    let app = TestApp::with_plain_http().await;
+    let cookie = app.login().await;
+    let response = app
+        .post(
+            "/projects",
+            &project_form("DF", "http://forgejo-http.forgejo.svc:3000/o/r.git"),
+            &cookie,
+        )
+        .await;
+    assert_saved(&response);
+    // Other schemes stay refused.
+    let response = app
+        .post(
+            "/projects",
+            &project_form("XY", "ssh://git@git.example.org/o/r.git"),
+            &cookie,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn repository_hint_says_https_only_unless_the_instance_allows_plain_http() {
+    let strict = TestApp::new().await;
+    let cookie = strict.login().await;
+    let html = text(strict.get_htmx("/projects/new", &cookie).await).await;
+    assert!(html.contains("HTTPS only."), "{html}");
+
+    let allowed = TestApp::with_plain_http().await;
+    let cookie = allowed.login().await;
+    let html = text(allowed.get_htmx("/projects/new", &cookie).await).await;
+    assert!(!html.contains("HTTPS only."), "{html}");
+}
+
+#[tokio::test]
+async fn http_issue_tracker_is_accepted_only_when_the_instance_allows_plain_http() {
+    let allowed = TestApp::with_plain_http().await;
+    let cookie = allowed.login().await;
+    let response = allowed
+        .post(
+            "/projects",
+            &project_form_with_tracker(
+                "DF",
+                "http://forgejo-http.forgejo.svc:3000/o/r.git",
+                "http://forgejo-http.forgejo.svc:3000/o/r/issues",
+            ),
+            &cookie,
+        )
+        .await;
+    assert_saved(&response);
+
+    let strict = TestApp::new().await;
+    let cookie = strict.login().await;
+    let response = strict
+        .post(
+            "/projects",
+            &project_form_with_tracker(
+                "DF",
+                "https://git.example.org/o/r.git",
+                "http://git.example.org/o/r/issues",
+            ),
+            &cookie,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(text(response).await.contains("Must be an HTTPS URL"));
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ pub mod title;
 
 pub use config::{
     AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
-    InstanceConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
+    ForgeConfig, InstanceConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
     SandboxSectionConfig,
 };
 pub use domain::{

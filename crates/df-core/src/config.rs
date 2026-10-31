@@ -58,6 +58,8 @@ pub struct InstanceConfig {
     pub runs: RunsConfig,
     #[serde(default)]
     pub web: WebConfig,
+    #[serde(default)]
+    pub forge: ForgeConfig,
     /// Integration plugins by name (`forgejo`, ...).
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginConfig>,
@@ -497,6 +499,17 @@ impl Default for RunsConfig {
             keep_alive_seconds: default_keep_alive(),
         }
     }
+}
+
+/// Instance-wide forge settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ForgeConfig {
+    /// Allow `http://` repository URLs: plugin calls, sandbox git and the project form. Off, only
+    /// `https://` is accepted. The token then travels unencrypted, so use it for throwaway
+    /// clusters only.
+    #[serde(default)]
+    pub allow_plain_http: bool,
 }
 
 /// Web UI settings.
@@ -999,6 +1012,26 @@ sandbox:
         assert_eq!(gateway.buffer_size, 50);
         assert_eq!(gateway.buffer_max_age_seconds, 120);
         assert_eq!(gateway.blocked_cidrs, ["10.42.0.0/16"]);
+    }
+
+    #[test]
+    fn forge_section_defaults_to_https_only_and_rejects_unknown_keys() {
+        let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        assert!(
+            !InstanceConfig::from_yaml_str(minimal)
+                .unwrap()
+                .forge
+                .allow_plain_http
+        );
+        let on = format!("{minimal}forge:\n  allowPlainHttp: true\n");
+        assert!(
+            InstanceConfig::from_yaml_str(&on)
+                .unwrap()
+                .forge
+                .allow_plain_http
+        );
+        let unknown = format!("{minimal}forge:\n  plainHttp: true\n");
+        assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
     }
 
     #[test]

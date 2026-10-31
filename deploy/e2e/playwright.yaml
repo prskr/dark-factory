@@ -1,0 +1,47 @@
+# Browser of the e2e suite: a Playwright server the tests reach over a port-forwarded WebSocket.
+# The version must match the driver of the `playwright-rs` crate (crates/df-e2e/Cargo.toml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: playwright
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playwright
+  namespace: playwright
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: playwright}
+  template:
+    metadata:
+      labels: {app: playwright}
+    spec:
+      containers:
+        - name: playwright
+          image: mcr.microsoft.com/playwright:v1.64.0-noble
+          command: [npx, -y, playwright@1.64.0, run-server, --port, "3000", --host, 0.0.0.0]
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            tcpSocket: {port: 3000}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: shm, mountPath: /dev/shm}
+      volumes:
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playwright
+  namespace: playwright
+spec:
+  selector: {app: playwright}
+  ports:
+    - port: 3000

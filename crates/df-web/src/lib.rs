@@ -56,6 +56,8 @@ pub struct WebState {
     pub services: Option<Arc<dyn egress::ServiceLookup>>,
     /// Show transcript content blocks marked `hidden` (`web.showHiddenBlocks`).
     pub show_hidden_blocks: bool,
+    /// Accept `http://` repository URLs in the project form (`forge.allowPlainHttp`).
+    pub allow_plain_http: bool,
     /// The approval types of this instance; they define what a request asks and does.
     pub approval_types: df_db::requests::ApprovalTypes,
 }

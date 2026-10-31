@@ -47,9 +47,13 @@ struct RouteStatus {
 /// every plugin (design D3, D6). A plugin that does not load is logged and skipped; its hosts stay
 /// routed to it. Fails on a configuration error, before loading, or if no forge plugin loaded,
 /// listing every load error. Needs no database, so `serve` calls it before connecting.
+///
+/// With `allow_plain_http` (`forge.allowPlainHttp`) the routing table accepts `http://` repository
+/// URLs and `apiUrl`s, and [`ForgeRouter`] lets every plugin client reach `http://` base URLs.
 pub(crate) fn load_forge_plugins(
     engine: &PluginEngine,
     plugins: &BTreeMap<String, PluginConfig>,
+    allow_plain_http: bool,
 ) -> anyhow::Result<ForgePlugins> {
     let implicit;
     let plugins = if plugins.is_empty() {
@@ -61,7 +65,18 @@ pub(crate) fn load_forge_plugins(
     } else {
         plugins
     };
-    let routes = RoutingTable::from_plugins(plugins).context("invalid `plugins` configuration")?;
+    let routes = if allow_plain_http {
+        RoutingTable::from_plugins_allowing_plain_http(plugins)
+    } else {
+        RoutingTable::from_plugins(plugins)
+    }
+    .context("invalid `plugins` configuration")?;
+    if allow_plain_http {
+        tracing::warn!(
+            setting = "forge.allowPlainHttp",
+            "plain HTTP allowed for forges: traffic and tokens may travel unencrypted; use it for throwaway clusters only"
+        );
+    }
     let mut loaded = BTreeMap::new();
     let mut failures = Vec::new();
     for (name, config) in plugins {
@@ -98,6 +113,7 @@ pub(crate) fn load_forge_plugins(
     Ok(plugins)
 }
 
+/// The startup warning due when `forge.allowPlainHttp` is on; none when it is off.
 impl ForgePlugins {
     /// The routing table with the loaded plugins, for the web UI (design D7).
     pub(crate) fn forge_routes(&self) -> ForgeRoutes {
@@ -273,12 +289,28 @@ mod tests {
     }
 
     #[test]
+    fn plain_http_repository_urls_route_only_when_allowed() {
+        let plugins = BTreeMap::from([(
+            "forgejo".to_string(),
+            PluginConfig::new(crate::tests::forgejo_component()),
+        )]);
+        let url = "http://forge.test:3000/o/r";
+        let strict = load_forge_plugins(&engine(), &plugins, false).expect("loads");
+        assert!(strict.routes.resolve(url).is_err());
+        let allowed = load_forge_plugins(&engine(), &plugins, true).expect("loads");
+        assert_eq!(
+            allowed.routes.resolve(url).expect("routed").plugin,
+            "forgejo"
+        );
+    }
+
+    #[test]
     fn single_missing_plugin_fails_startup_naming_plugin_and_path() {
         let plugins = BTreeMap::from([(
             "forgejo".to_string(),
             PluginConfig::new("/nonexistent/forgejo.wasm"),
         )]);
-        let err = load_forge_plugins(&engine(), &plugins)
+        let err = load_forge_plugins(&engine(), &plugins, false)
             .err()
             .expect("must fail");
         let message = format!("{err:#}");
@@ -289,7 +321,7 @@ mod tests {
 
     #[test]
     fn without_plugins_the_implicit_forgejo_entry_is_used() {
-        let err = load_forge_plugins(&engine(), &BTreeMap::new())
+        let err = load_forge_plugins(&engine(), &BTreeMap::new(), false)
             .err()
             .expect("the image path does not exist here");
         let message = format!("{err:#}");
@@ -309,7 +341,7 @@ mod tests {
                 with_hosts("/nonexistent/github.wasm", &["github.com"]),
             ),
         ]);
-        let plugins = load_forge_plugins(&engine(), &plugins).expect("forgejo loads");
+        let plugins = load_forge_plugins(&engine(), &plugins, false).expect("forgejo loads");
         assert_eq!(
             plugins.loaded.keys().collect::<Vec<_>>(),
             vec!["forgejo"],
@@ -326,8 +358,8 @@ mod tests {
 
     #[test]
     fn missing_plugin_is_reported_as_a_load_failure_naming_plugin_and_path() {
-        let plugins =
-            load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
+        let plugins = load_forge_plugins(&engine(), &forgejo_and_missing_github(), false)
+            .expect("forgejo loads");
         let [failure] = plugins.failures.as_slice() else {
             panic!("one failure expected: {:?}", plugins.failures);
         };
@@ -342,8 +374,8 @@ mod tests {
 
     #[test]
     fn routing_summary_lists_each_route_with_availability_and_the_default() {
-        let plugins =
-            load_forge_plugins(&engine(), &forgejo_and_missing_github()).expect("forgejo loads");
+        let plugins = load_forge_plugins(&engine(), &forgejo_and_missing_github(), false)
+            .expect("forgejo loads");
         let route = |host: Option<&str>, plugin: &str, available| RouteStatus {
             host: host.map(str::to_string),
             plugin: plugin.to_string(),
@@ -371,7 +403,7 @@ mod tests {
                 with_hosts("/nonexistent/mirror.wasm", &["GitHub.com"]),
             ),
         ]);
-        let err = load_forge_plugins(&engine(), &plugins)
+        let err = load_forge_plugins(&engine(), &plugins, false)
             .err()
             .expect("must fail");
         let message = format!("{err:#}");

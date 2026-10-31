@@ -103,9 +103,10 @@ impl OidcClient {
         let redirect = RedirectUrl::new(format!("{public_url}/auth/callback"))
             .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?;
         if redirect.url().scheme() == "http" && !is_loopback(redirect.url()) {
-            return Err(OidcError::Config(
-                "publicUrl: plain http is only allowed on loopback (local development)".into(),
-            ));
+            tracing::warn!(
+                public_url = %public_url,
+                "publicUrl is plain http on a non-loopback host: session cookies and logins travel unencrypted"
+            );
         }
         // Following redirects would open the token requests to SSRF.
         let http = reqwest::ClientBuilder::new()
@@ -127,7 +128,7 @@ impl OidcClient {
     }
 
     /// Whether the session cookie gets the `Secure` flag: always, unless `publicUrl` is plain
-    /// `http://` on loopback (local development without TLS; [`Self::new`] refuses it elsewhere).
+    /// `http://` (TLS is the operator's choice; [`Self::new`] warns for non-loopback hosts).
     pub fn secure_cookies(&self) -> bool {
         self.redirect.url().scheme() != "http"
     }
@@ -359,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn cookies_are_secure_unless_the_public_url_is_plain_http_on_loopback() {
+    fn cookies_are_secure_unless_the_public_url_is_plain_http() {
         let dir = tempfile::tempdir().unwrap();
         let secret_file = dir.path().join("secret");
         std::fs::write(&secret_file, "s3cret\n").unwrap();
@@ -382,13 +383,9 @@ mod tests {
         ] {
             assert!(!client(local).unwrap().secure_cookies(), "{local}");
         }
-        // Anywhere else the session cookie would travel in cleartext.
-        let remote = client("http://factory.lan");
-        assert!(
-            matches!(&remote, Err(OidcError::Config(msg)) if msg.contains("publicUrl")),
-            "{:?}",
-            remote.err()
-        );
+        // TLS is the operator's choice: a non-loopback http URL builds, the cookie is not `Secure`.
+        let remote = client("http://factory.lan").unwrap();
+        assert!(!remote.secure_cookies());
     }
 
     #[test]

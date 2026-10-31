@@ -49,6 +49,20 @@ sessions:
     assert_eq!(script.sessions.loaded[0].steps.len(), 2);
 }
 
+#[test]
+fn shipped_scripts_parse() {
+    let demo = Script::from_yaml_str(include_str!("../scripts/demo.yaml")).unwrap();
+    assert_eq!(demo.sessions.new.len(), 1);
+    assert_eq!(demo.sessions.loaded.len(), 1);
+    let limited = Script::from_yaml_str(include_str!("../scripts/rate-limit.yaml")).unwrap();
+    assert!(matches!(
+        limited.sessions.new[0].steps.last(),
+        Some(crate::script::Step::End(
+            crate::script::EndStep::RateLimited(_)
+        ))
+    ));
+}
+
 #[tokio::test]
 async fn test_scripted_turn_produces_expected_updates_and_stop_reason() {
     let yaml = r#"

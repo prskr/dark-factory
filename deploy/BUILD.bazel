@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@rules_img//img:image.bzl", "image_index", "image_manifest")
 load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
+load("@rules_img//img:load.bzl", "image_load")
 load("@rules_img//img:multi_deploy.bzl", "multi_deploy")
 load("@rules_img//img:push.bzl", "image_push")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
@@ -193,9 +194,13 @@ image_layer(
     name = "test_project_layer",
     srcs = {
         "/opt/harness/bin/fake-acp-agent": ":fake_acp_agent",
+        "/opt/harness/scripts/demo.yaml": "//crates/fake-acp-agent:scripts/demo.yaml",
+        "/opt/harness/scripts/rate-limit.yaml": "//crates/fake-acp-agent:scripts/rate-limit.yaml",
     },
     file_metadata = {
         "/opt/harness/bin/fake-acp-agent": file_metadata(mode = "0755"),
+        "/opt/harness/scripts/demo.yaml": file_metadata(mode = "0644"),
+        "/opt/harness/scripts/rate-limit.yaml": file_metadata(mode = "0644"),
     },
     include_runfiles = False,
 )
@@ -292,6 +297,24 @@ multi_deploy(
     ],
     tool_cfg = "target",
 )
+
+# Single-platform images for the throwaway kind cluster of `just e2e-local` (deploy/e2e/):
+# `bazel run //deploy:load_e2e_<name> -- --platform linux/<arch>` loads one into the local
+# docker/podman daemon, then `kind load docker-image` copies it into the node. The tag is the
+# one of deploy/values-e2e.yaml.
+[
+    image_load(
+        name = "load_e2e_" + name,
+        image = ":" + image + "_image",
+        tag = "ghcr.io/prskr/dark-factory/%s:e2e" % repository,
+    )
+    for name, image, repository in [
+        ("control_plane", "control_plane", "control-plane"),
+        ("runtime", "runtime", "runtime"),
+        ("test_project", "test_project", "test-project"),
+        ("plugin_forgejo", "plugin_forgejo", "plugin-forgejo"),
+    ]
+]
 
 filegroup(
     name = "helm_chart_files",

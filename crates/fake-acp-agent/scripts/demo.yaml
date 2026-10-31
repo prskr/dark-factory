@@ -1,0 +1,42 @@
+# Script of the iteration 1 demo (docs/demo.md): the e2e suite and `just seed` point the project's
+# adapter command at /opt/harness/scripts/demo.yaml.
+sessions:
+  # Run 1: first commit, then shape the pull request and comment on the issue.
+  new:
+    - - say: "I will add a greeting file for this task."
+      - plan:
+          entries:
+            - content: "Write greeting.txt"
+              status: completed
+            - content: "Rephrase the pull request"
+              status: pending
+      - shell: |
+          printf 'hello from the demo agent\n' > greeting.txt
+          git add greeting.txt
+          git -c user.name='Demo Agent' -c user.email=agent@example.com commit -q -m 'Add greeting'
+      - mcp:
+          server: factory
+          tool: update_pull_request
+          args:
+            title: "Add a greeting"
+            body: "Adds greeting.txt, written by the demo agent."
+      - mcp:
+          server: factory
+          tool: comment_on_issue
+          args:
+            body: "First pass pushed; waiting for feedback."
+      - say: "Pushed the greeting. Tell me what to change."
+      - end: end_turn
+  # Run 2 (after a follow-up message): a second commit on the same branch, then done.
+  loaded:
+    - - say: "Adding the requested test."
+      - shell: |
+          printf 'greeting is present\n' > greeting_test.txt
+          git add greeting_test.txt
+          git -c user.name='Demo Agent' -c user.email=agent@example.com commit -q -m 'Add greeting test'
+      - mcp:
+          server: factory
+          tool: complete_task
+          args:
+            summary: "Added greeting.txt and a test for it."
+      - end: end_turn

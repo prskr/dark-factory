@@ -87,7 +87,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 13] = [
+const TOOLS: [GithubTool; 14] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -147,6 +147,15 @@ const TOOLS: [GithubTool; 13] = [
             let os = p.os.replace("macos", "darwin");
             let suffix = if p.cpu == "arm64" { "_arm64" } else { "" };
             (format!("kube-linter-{os}{suffix}"), String::new())
+        },
+    },
+    GithubTool {
+        name: "kind",
+        repo: "kubernetes-sigs/kind",
+        asset: |_, p| {
+            let os = p.os.replace("macos", "darwin");
+            let arch = if p.cpu == "arm64" { "arm64" } else { "amd64" };
+            (format!("kind-{os}-{arch}"), String::new())
         },
     },
     GithubTool {

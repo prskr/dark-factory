@@ -17,6 +17,9 @@ docker_env := if docker_host == "" { "" } else { "DOCKER_HOST=" + docker_host }
 # Bazel flags that let sandboxed tests reach that socket.
 bazel_test_socket := if docker_host == "" { "" } else { "--test_env=DOCKER_HOST=" + docker_host + if docker_host =~ "^unix://" { " --sandbox_writable_path=" + parent_directory(trim_start_match(docker_host, "unix://")) } else { "" } }
 
+# `user:password` of the PostgreSQL in compose.yml.
+local_db_login := "postgres" + ":" + "postgres"
+
 default:
     @just --list
 
@@ -47,6 +50,14 @@ serve-local: db plugins
         -days 365 -subj /CN=localhost -keyout target/local-dev/agent.key -out target/local-dev/agent.crt 2>/dev/null
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml migrate
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml serve --no-cluster --demo-flows
+
+# Write the well-known demo data (credential reference, persona "e2e", projects DF and RL, allowlist entry) into the `just serve-local` database; idempotent. Override the target with E2E_DATABASE_URL.
+seed:
+    E2E_DATABASE_URL="${E2E_DATABASE_URL:-postgres://{{local_db_login}}@127.0.0.1:5432/dark_factory}" cargo run -p df-e2e --bin seed
+
+# Run the end-to-end suite through the web UI in a throwaway kind cluster that is created and deleted (E2E_KEEP=1 keeps it). Needs kind, Docker or Podman, and Bazel; see docs/demo.md.
+e2e-local:
+    deploy/e2e/e2e-local.sh
 
 # Remove the shared test PostgreSQL containers that testcontainers keeps running between test runs
 test-db-rm:
