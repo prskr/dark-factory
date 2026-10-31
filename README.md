@@ -27,6 +27,19 @@ You give Dark Factory a project (a Git repository, an issue tracker and a sandbo
 
 Not goals: reproducing code review in the UI, multi-tenancy, other container platforms.
 
+## Security
+
+Dark Factory runs untrusted agent code, so security is a design focus, not an add-on. The agent, the repository contents and everything the harness sends are treated as untrusted input.
+
+- **Isolation**: each run has its own sandbox (agent-sandbox, Kata Containers where available). Workspaces are managed inside the sandbox and are not copied back by the control plane. Git is the only durable state.
+- **Network**: sandboxes get generated network policies. Outbound traffic goes through the gateway proxy, which allows only listed hosts and keeps a live egress log.
+- **Identity**: agents connect to the control plane over mTLS and act with persona permissions. Humans sign in through OIDC.
+- **Least privilege**: new network or tool access needs an approval from a human. Which instance-management operations an agent may do is configured per instance.
+- **Secrets**: credentials stay in memory or in files outside the persistent volume. They are never written under `/data` and never logged.
+- **Traceability**: runs, approvals and costs go to an audit trail.
+
+See [`design/egress.md`](design/egress.md), [`design/agent-run.md`](design/agent-run.md) and the [ADRs](design/adr/README.md) for details.
+
 ## Who it is for
 
 - People who run their own Kubernetes cluster (the first target is a bare-metal Talos homelab with Cilium, Forgejo and Keycloak) and want a team of coding agents on their own infrastructure.
