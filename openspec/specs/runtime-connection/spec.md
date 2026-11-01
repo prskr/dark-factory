@@ -47,7 +47,7 @@ On stream failure the runtime SHALL reconnect with exponential backoff (capped a
 - **THEN** the harness keeps working, events queue in the outbox and are delivered after reconnect
 
 ### Requirement: Idempotent command handling
-The runtime SHALL ignore duplicate `Assign`, `Prompt` (same prompt id), `ToolCallResult` and `CredentialGrant` messages, and SHALL re-send pending tool-call and credential requests with the same ids after reconnecting.
+The runtime SHALL ignore duplicate `Assign`, `Prompt` (same prompt id) and `ToolCallResult` messages, and SHALL re-send pending tool-call requests with the same ids after reconnecting.
 
 #### Scenario: Prompt re-sent after reconnect
 - **WHEN** the control plane re-sends a prompt the runtime already holds

@@ -1,4 +1,4 @@
-//! The Git smart-HTTP proxy for sandbox pushes (`openspec/changes/iter2-git-proxy`).
+//! The Git smart-HTTP proxy for sandbox pushes (`openspec/changes/archive/2026-11-01-iter2-git-proxy`).
 
 pub mod mirror;
 pub mod protocol;
