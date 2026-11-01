@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-84.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-89.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -34,6 +34,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-81 to TD-82: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
+- Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
 
 ## Summary
 
@@ -112,6 +114,11 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
 | TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
 | TD-83 | low   | `df-gateway` tests | Two timing-sensitive unit tests fail intermittently |
+| TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
+| TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
+| TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
+| TD-87 | medium | `factory-agent` runner | The first turn never reports `Running`; the run stays `preparing` |
+| TD-88 | low   | `fake-acp-agent` scripts | An unknown or malformed step loads as an empty script without an error |
 
 ## Entries
 
@@ -783,6 +790,56 @@ Both tests depend on real timing and sometimes fail on `main` too (at fd5cf70 th
 **Matters when:** CI or the pre-push run fails because of them and red builds get ignored.
 
 **Fix:** paused time (`tokio::time::pause()`) or waiting on the condition instead of on real time; first a test run that fails reliably with the current timing.
+
+### TD-84 (S4). `request_approval` copies the raise logic of `ask_question`
+
+`crates/df-agent-channel/src/tools.rs` (`request_approval`, `ask_question`)
+
+Both tools parse `blocking`, build the agent principal and the `Raise`, map the same errors and build the same blocking/non-blocking outcome.
+
+**Matters when:** a third tool raises requests, or the raise outcome changes and one copy is missed.
+
+**Fix:** one helper that builds `(actor, blocking)` and the `Raise` from the call, and one that builds the outcome of a raised request.
+
+### TD-85 (S12, S13). Decision path repeats the approval sequence and looks up the type three times
+
+`crates/df-db/src/requests.rs` (`decide`, `record_approval_in`, `apply_decision`)
+
+`decide` repeats the sequence of `record_approval_in` (`lock_request`, state check, `record_decision`) and resolves the approval type three times. `(state, stored, action)` travels between the functions as a tuple.
+
+**Matters when:** the next approval type changes the decision path.
+
+**Fix:** resolve the type once after `lock_request`, share a `lock_pending` helper, and pass a `DecisionRecord { state, stored, action }`.
+
+### TD-86 (S22). Two failure types for gateway → control-plane calls
+
+`crates/df-gateway/src/git/records.rs` (`Failure`), `crates/df-gateway/src/link.rs` (`CallError`), `crates/df-gateway/src/denials.rs`
+
+`Failure` duplicates `CallError` variant by variant, and both senders map connect errors and timeouts to a transient failure by hand.
+
+**Matters when:** the next gateway → control-plane call is added.
+
+**Fix:** use `CallError` inside the push record sender and wrap it in `RecordError` only at the `PushRecorder` boundary; add `From<LinkError> for CallError` so connect failures convert with `?`.
+
+### TD-87 (observation a). The first turn never reports `Running`
+
+`crates/factory-agent/src/runner.rs` (idle wait, `IdleWake::Prompt`)
+
+The runtime sends `RunPhase::Running` only when it wakes from the idle wait for a later prompt. During the first turn the run row stays `preparing`, although the task is `running`.
+
+**Matters when:** the UI or a check reads the run state during the first turn (the e2e test of `iter2-egress-approvals` checks "no outcome, task running" instead).
+
+**Fix:** send `RunPhase::Running` when the first prompt starts, with a runner test that asserts the phase sequence.
+
+### TD-88 (S29). An unknown or malformed step loads as an empty script
+
+`crates/fake-acp-agent/src/script.rs` (untagged `ScriptFormat`)
+
+If `Wrapped` fails (unknown step kind, missing field), the untagged enum falls back to `SessionsDirect`, which ignores the unknown `sessions` key and loads an empty script. A typo in a step field silently takes its default because no `deny_unknown_fields` is set.
+
+**Matters when:** a new step or a script typo; the run then ends without the scripted output and the test fails far from the cause.
+
+**Fix:** `#[serde(deny_unknown_fields)]` on `Sessions` and the step structs, and a test that a script with an unknown step kind fails to load.
 
 ## Accepted decisions
 

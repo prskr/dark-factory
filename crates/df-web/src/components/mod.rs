@@ -22,8 +22,8 @@ pub use actions::{
 };
 pub use badges::{Tone, chip, filter_chip, harness_label, status_badge, tone_badge};
 pub use forms::{
-    FormErrors, MenuItem, field, field_error, form_error, readonly_field, search_menu,
-    select_field, text_field, textarea_field,
+    FormErrors, MenuItem, field, field_error, form_error, readonly_field, readonly_field_compact,
+    search_menu, select_field, text_field, textarea_field,
 };
 pub use host_icon::{HostIconSize, host_icon};
 pub use icons::{Icon, forge_icon, icon, logo};

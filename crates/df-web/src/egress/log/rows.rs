@@ -5,6 +5,7 @@ use df_proto::gateway::v1::{FlowEvent, Phase};
 use maud::{Markup, html};
 use serde_json::json;
 
+use super::allow::AllowTarget;
 use super::details::reason_explanation;
 use super::filter::is_blocked;
 use crate::components::{
@@ -219,6 +220,7 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
         }
     };
     let rule = rule_href(event).filter(|_| outcome != Outcome::Blocked);
+    let allow = AllowTarget::of_event(event);
     html! {
         tr id=[id.as_deref()] class={"border-t border-line" (tint)} data-flow=(flow_json(event, &target, projects)) data-outcome=(outcome.label().to_ascii_lowercase()) {
             td class={"font-mono text-[13px] text-muted " (CELL) " " (edge) " @[680px]:border-l-0"} { (time) }
@@ -240,9 +242,12 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
                 @if !event.reason.is_empty() { " " span class="text-xs text-faint" { (event.reason) } }
             }
             td class="py-2 pr-4 pl-3 text-right" {
-                // Wide panel: inline actions. The slot is where later actions (allow) go.
+                // Wide panel: inline actions.
                 div class="hidden items-center justify-end gap-1 @[680px]:flex" data-slot="row-actions" {
                     (details_button(&target, &time, "inline-flex h-9 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk hover:text-ink", html! { "Details" }))
+                    @if let Some(allow) = &allow {
+                        (allow.button("inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-accent-text hover:bg-sunk [&_svg]:size-4", html! { (icon(Icon::Plus)) "Allow" }))
+                    }
                     @if let Some(href) = &rule {
                         a href=(href) class="inline-flex h-9 items-center rounded-lg px-3 text-sm text-accent-text hover:bg-sunk" { "Rule" }
                     }
@@ -256,6 +261,9 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
                     }
                     div x-show="menu" x-cloak class="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-line bg-panel p-1 text-left shadow-lg" data-slot="row-menu" {
                         (details_button(&target, &time, "flex min-h-10 w-full items-center rounded-lg px-3 text-sm hover:bg-sunk", html! { "Request details" }))
+                        @if let Some(allow) = &allow {
+                            (allow.button("flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm hover:bg-sunk [&_svg]:size-4", html! { (icon(Icon::Plus)) "Allow…" }))
+                        }
                         @if let Some(href) = &rule {
                             a href=(href) class="flex min-h-10 items-center rounded-lg px-3 text-sm hover:bg-sunk" { "Rule" }
                         }
@@ -318,6 +326,44 @@ mod tests {
         let html = row(&event(Verdict::Allowed, Phase::Closed)).into_string();
         let trigger = crate::testkit::tag_around(&html, "aria-label=\"Actions for ");
         assert!(trigger.contains(ICON_BUTTON_CLASS), "{trigger}");
+    }
+
+    #[test]
+    fn a_not_allowlisted_denial_of_a_run_offers_allow_in_the_slot_and_the_menu() {
+        // Scenario "Action on the table row": the dialog of DF-7's row offers task, project and
+        // instance scope (the dialog's options are tested in `allow`).
+        let mut denied = event(Verdict::Denied, Phase::Closed);
+        denied.host = "files.pythonhosted.org".into();
+        denied.port = 443;
+        denied.project_key = "DF".into();
+        denied.reason = "not-allowlisted".into();
+        let html = row(&denied).into_string();
+        let dialog = "hx-get=\"/egress/log/allow?host=files.pythonhosted.org&amp;port=443&amp;task=DF-7&amp;project=DF\"";
+        let slot = &html[html.find("data-slot=\"row-actions\"").unwrap()
+            ..html.find("data-slot=\"row-menu\"").unwrap()];
+        assert!(
+            slot.contains(dialog) && slot.contains("Allow</button>"),
+            "{slot}"
+        );
+        let menu = &html[html.find("data-slot=\"row-menu\"").unwrap()..];
+        assert!(
+            menu.contains(dialog) && menu.contains("Allow…</button>"),
+            "{menu}"
+        );
+        assert!(menu.find("Request details").unwrap() < menu.find("Allow…").unwrap());
+    }
+
+    #[test]
+    fn rows_denied_for_other_reasons_offer_only_the_details() {
+        let mut ip = event(Verdict::Denied, Phase::Closed);
+        ip.reason = "ip-literal".into();
+        let mut unknown = event(Verdict::Denied, Phase::Closed);
+        unknown.reason = "not-allowlisted".into();
+        unknown.run_id.clear();
+        for event in [ip, unknown] {
+            let html = row(&event).into_string();
+            assert!(!html.contains("/egress/log/allow"), "{html}");
+        }
     }
 
     #[test]

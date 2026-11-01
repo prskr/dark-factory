@@ -78,6 +78,7 @@ pub enum Step {
     Think(String),
     ToolCall(ToolCallStep),
     Shell(String),
+    Fetch(FetchStep),
     Mcp(McpStep),
     Plan(PlanStep),
     Usage(UsageStep),
@@ -103,6 +104,19 @@ pub struct ToolCallStep {
 
 fn default_call_id() -> String {
     "call_1".to_string()
+}
+
+/// Scripted HTTP(S) GET with `curl`, which uses the sandbox's proxy settings. Retried once a
+/// second until it succeeds or `timeout_seconds` have passed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FetchStep {
+    pub url: String,
+    #[serde(default = "default_fetch_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_fetch_timeout() -> u64 {
+    60
 }
 
 /// Scripted MCP call.

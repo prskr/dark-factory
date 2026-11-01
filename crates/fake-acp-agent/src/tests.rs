@@ -6,6 +6,8 @@
 )]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -13,9 +15,10 @@ use agent_client_protocol::schema::v1::{
     PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::{Channel, Client, ConnectionTo};
-use tokio::sync::Mutex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{Mutex, Notify};
 
-use crate::agent::{AgentState, build_agent};
+use crate::agent::{AgentState, build_agent, fetch_attempt_limit, sleep_unless_cancelled};
 use crate::script::Script;
 
 #[test]
@@ -61,6 +64,16 @@ fn shipped_scripts_parse() {
             crate::script::EndStep::RateLimited(_)
         ))
     ));
+    let network = Script::from_yaml_str(include_str!("../scripts/network-access.yaml")).unwrap();
+    assert!(
+        network.sessions.new[0]
+            .steps
+            .iter()
+            .any(|step| matches!(step, crate::script::Step::Fetch(_)))
+    );
+    // The decision message is the next prompt of the same session, not a resumed one.
+    assert_eq!(network.sessions.new.len(), 2);
+    assert!(network.sessions.loaded.is_empty());
 }
 
 #[tokio::test]
@@ -682,7 +695,7 @@ sessions:
                 let sid_cancel = sid.clone();
                 let cancel_sender = cx.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     cancel_sender
                         .send_notification(
                             agent_client_protocol::schema::v1::CancelNotification::new(sid_cancel),
@@ -704,4 +717,211 @@ sessions:
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
     client_res.expect("client panic").expect("client error");
+}
+
+/// Plays the first turn of `yaml` in a new session and returns the agent's message chunks.
+async fn messages_of_first_turn(yaml: &str) -> Vec<String> {
+    let script = Script::from_yaml_str(yaml).expect("script should parse");
+    let temp_session = tempfile::tempdir().expect("tempdir");
+    let state = Arc::new(Mutex::new(AgentState::new(
+        script,
+        temp_session.path().to_path_buf(),
+    )));
+    let agent = build_agent(state);
+    let (transport, peer) = Channel::duplex();
+    let updates = Arc::new(Mutex::new(Vec::new()));
+    let updates_cb = Arc::clone(&updates);
+    let client = Client.builder().on_receive_notification(
+        async move |notification: SessionNotification,
+                    _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
+            updates_cb.lock().await.push(notification.update);
+            Ok(())
+        },
+        agent_client_protocol::on_receive_notification!(),
+    );
+    let client_task = tokio::spawn(async move {
+        client
+            .connect_with(transport, async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await
+                    .expect("init");
+                let new_session = cx
+                    .send_request(NewSessionRequest::new(temp_session.path().to_path_buf()))
+                    .block_task()
+                    .await
+                    .expect("new session");
+                let res = cx
+                    .send_request(PromptRequest::new(
+                        new_session.session_id,
+                        vec![ContentBlock::Text(TextContent::new("go"))],
+                    ))
+                    .block_task()
+                    .await
+                    .expect("prompt");
+                assert_eq!(res.stop_reason, StopReason::EndTurn);
+                Ok(())
+            })
+            .await
+    });
+    let agent_task = tokio::spawn(async move {
+        agent.connect_to(peer).await.ok();
+    });
+    let (client_res, _) = tokio::join!(client_task, agent_task);
+    client_res.expect("client panic").expect("client error");
+
+    updates
+        .lock()
+        .await
+        .iter()
+        .filter_map(|update| match update {
+            SessionUpdate::AgentMessageChunk(ContentChunk {
+                content: ContentBlock::Text(TextContent { text, .. }),
+                ..
+            }) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An HTTP server that answers 403 to the first `denials` requests and 200 afterwards. Returns
+/// its URL and the number of requests it got.
+async fn http_server(denials: usize) -> (String, Arc<AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/simple/", listener.local_addr().unwrap());
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&requests);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _peer)) = listener.accept().await {
+            let mut head = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
+            let status = if counter.fetch_add(1, Ordering::SeqCst) < denials {
+                "403 Forbidden"
+            } else {
+                "200 OK"
+            };
+            let response =
+                format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            stream.write_all(response.as_bytes()).await.ok();
+            stream.shutdown().await.ok();
+        }
+    });
+    (url, requests)
+}
+
+fn fetch_script(url: &str, timeout_seconds: u64) -> String {
+    format!(
+        "sessions:\n  new:\n    - - fetch:\n          url: \"{url}\"\n          timeout_seconds: {timeout_seconds}\n      - end: end_turn\n"
+    )
+}
+
+#[tokio::test]
+async fn fetch_retries_until_the_url_answers() {
+    let (url, requests) = http_server(2).await;
+
+    let messages = messages_of_first_turn(&fetch_script(&url, 30)).await;
+
+    assert_eq!(messages, vec![format!("Fetched {url}.")]);
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn fetch_reports_the_last_error_after_the_timeout() {
+    let (url, _requests) = http_server(usize::MAX).await;
+
+    let messages = messages_of_first_turn(&fetch_script(&url, 1)).await;
+
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].starts_with(&format!("Could not fetch {url}: ")),
+        "{messages:?}"
+    );
+    assert!(messages[0].contains("403"), "{messages:?}");
+}
+
+#[tokio::test]
+async fn fetch_reports_a_timeout_beyond_the_clock_range_without_fetching() {
+    let (url, requests) = http_server(0).await;
+
+    let messages = messages_of_first_turn(&fetch_script(&url, u64::MAX)).await;
+
+    assert_eq!(
+        messages,
+        vec![format!(
+            "Could not fetch {url}: timeout_seconds {} is too large",
+            u64::MAX
+        )]
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn fetch_attempt_limit_is_the_time_left_within_one_and_ten_seconds() {
+    let now = tokio::time::Instant::now();
+
+    assert_eq!(
+        fetch_attempt_limit(now + Duration::from_secs(3), now),
+        Duration::from_secs(3)
+    );
+    assert_eq!(
+        fetch_attempt_limit(now + Duration::from_secs(240), now),
+        Duration::from_secs(10)
+    );
+    assert_eq!(
+        fetch_attempt_limit(now + Duration::from_millis(200), now),
+        Duration::from_secs(1)
+    );
+    assert_eq!(
+        fetch_attempt_limit(now, now + Duration::from_secs(5)),
+        Duration::from_secs(1)
+    );
+}
+
+#[tokio::test]
+async fn retry_pause_ends_when_the_turn_was_already_cancelled() {
+    let notify = Notify::new();
+    let cancelled = AtomicBool::new(true);
+
+    let pause = sleep_unless_cancelled(Duration::from_secs(3600), &notify, &cancelled);
+    let was_cancelled = tokio::time::timeout(Duration::from_secs(5), pause)
+        .await
+        .expect("the pause ends on the cancel");
+
+    assert!(was_cancelled);
+}
+
+#[tokio::test]
+async fn retry_pause_ends_when_the_turn_is_cancelled_during_it() {
+    let notify = Arc::new(Notify::new());
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let (notify_cancel, cancelled_cancel) = (Arc::clone(&notify), Arc::clone(&cancelled));
+    tokio::spawn(async move {
+        cancelled_cancel.store(true, Ordering::SeqCst);
+        notify_cancel.notify_waiters();
+    });
+
+    let pause = sleep_unless_cancelled(Duration::from_secs(3600), &notify, &cancelled);
+    let was_cancelled = tokio::time::timeout(Duration::from_secs(5), pause)
+        .await
+        .expect("the pause ends on the cancel");
+
+    assert!(was_cancelled);
+}
+
+#[tokio::test]
+async fn retry_pause_runs_out_without_a_cancel() {
+    let was_cancelled = sleep_unless_cancelled(
+        Duration::from_millis(10),
+        &Notify::new(),
+        &AtomicBool::new(false),
+    )
+    .await;
+
+    assert!(!was_cancelled);
 }

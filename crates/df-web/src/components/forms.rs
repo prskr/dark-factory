@@ -40,6 +40,10 @@ pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-str
 /// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
 const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";
 
+/// Classes of the compact read-only value of a dialog.
+const READONLY_COMPACT_CLASS: &str =
+    "h-9 w-full rounded-lg bg-sunk px-3 font-mono text-[13px] text-ink";
+
 /// A labelled control with an optional hint and the field's error.
 pub fn field(
     label: &str,
@@ -96,13 +100,35 @@ pub fn readonly_field(
     errors: &FormErrors,
     hint: Option<&str>,
 ) -> Markup {
+    readonly(label, name, value, errors, hint, READONLY_INPUT_CLASS)
+}
+
+/// The compact [`readonly_field`] of a dialog: 36 px, borderless, the value in 13 px mono.
+pub fn readonly_field_compact(
+    label: &str,
+    name: &str,
+    value: &str,
+    errors: &FormErrors,
+    hint: Option<&str>,
+) -> Markup {
+    readonly(label, name, value, errors, hint, READONLY_COMPACT_CLASS)
+}
+
+fn readonly(
+    label: &str,
+    name: &str,
+    value: &str,
+    errors: &FormErrors,
+    hint: Option<&str>,
+    class: &str,
+) -> Markup {
     field(
         label,
         name,
         errors,
         hint,
         html! {
-            input id=(name) name=(name) type="text" value=(value) readonly class=(READONLY_INPUT_CLASS)
+            input id=(name) name=(name) type="text" value=(value) readonly class=(class)
                 aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)];
         },
     )
@@ -262,6 +288,34 @@ mod tests {
         assert!(
             html.contains("aria-invalid=\"true\"")
                 && html.contains("aria-describedby=\"key-hint key-error\"")
+        );
+    }
+
+    #[test]
+    fn a_compact_readonly_field_is_a_borderless_mono_value_linked_to_its_error() {
+        let mut errors = FormErrors::default();
+        errors.add("destination", "Invalid.");
+        let html = readonly_field_compact("Destination", "destination", "a.b:443", &errors, None)
+            .into_string();
+        let input = &html[html.find("<input").unwrap()..];
+        let input = &input[..input.find('>').unwrap()];
+        assert!(
+            input.contains(" readonly")
+                && input.contains("name=\"destination\"")
+                && input.contains("value=\"a.b:443\""),
+            "{input}"
+        );
+        assert!(
+            input.contains("h-9")
+                && input.contains("bg-sunk")
+                && input.contains("font-mono text-[13px]")
+                && !input.contains("border"),
+            "{input}"
+        );
+        assert!(
+            input.contains("aria-invalid=\"true\"")
+                && input.contains("aria-describedby=\"destination-error\""),
+            "{input}"
         );
     }
 

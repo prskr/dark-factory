@@ -7,9 +7,12 @@ use std::collections::HashMap;
 use df_proto::gateway::v1::FlowEvent;
 use maud::{Markup, html};
 
+use super::allow::{AllowTarget, task_keys};
 use super::filter::{Filter, is_blocked};
 use super::rows::{sandbox_key, sandbox_lines};
-use crate::components::{HostIconSize, Icon, ProjectHosts, host_icon, icon};
+use crate::components::{
+    ButtonKind, HostIconSize, Icon, ProjectHosts, action_class, host_icon, icon,
+};
 
 /// Sandboxes drawn at most, the most recently seen.
 pub(super) const MAX_SANDBOXES: usize = 12;
@@ -113,6 +116,10 @@ pub(super) struct DestinationNode {
     pub(super) port: u32,
     pub(super) blocked: bool,
     pub(super) dimmed: bool,
+    /// The "allow" action of a node blocked by `not-allowlisted` denials, with the task keys of
+    /// those denials.
+    pub(super) allow: Option<AllowTarget>,
+    pub(super) blocked_for: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -144,7 +151,8 @@ fn newest<K: Clone + Eq + std::hash::Hash>(seen: &HashMap<K, (u64, u64)>, limit:
 }
 
 /// Builds the model: at most [`MAX_SANDBOXES`] and [`MAX_DESTINATIONS`] nodes, a node is dimmed
-/// when none of its edges matches `filter`, a destination is blocked when any edge to it is.
+/// when none of its edges matches `filter`, a destination is blocked when any edge to it is
+/// (also one from a sandbox that is not drawn).
 pub(super) fn model(edges: &Edges, filter: &Filter) -> Model {
     let mut sandboxes: HashMap<String, (u64, u64)> = HashMap::new();
     let mut destinations: HashMap<(String, u32), (u64, u64)> = HashMap::new();
@@ -203,6 +211,8 @@ pub(super) fn model(edges: &Edges, filter: &Filter) -> Model {
             port: *port,
             blocked: false,
             dimmed: true,
+            allow: None,
+            blocked_for: Vec::new(),
         })
         .collect();
     for (key, edge) in &edges.map {
@@ -221,7 +231,6 @@ pub(super) fn model(edges: &Edges, filter: &Filter) -> Model {
         let blocked = is_blocked(&edge.latest);
         sandbox.dimmed &= !matches;
         destination.dimmed &= !matches;
-        destination.blocked |= blocked;
         // The label and task of a sandbox node are those of its latest event.
         if edge.last >= *seen {
             *seen = edge.last;
@@ -237,8 +246,25 @@ pub(super) fn model(edges: &Edges, filter: &Filter) -> Model {
     // The map's order is arbitrary: sort the edges so that equal states render equal.
     model.edges.sort_by_key(|e| (e.sandbox, e.destination));
     model.sandboxes = sandbox_nodes.into_iter().map(|(_, node)| node).collect();
+    add_allow_actions(edges, &mut destination_nodes);
     model.destinations = destination_nodes;
     model
+}
+
+/// Sets the allow action, "Blocked for" and the blocked state of each node from the latest
+/// events of all its edges, also those from sandboxes the graph does not draw (design D5).
+fn add_allow_actions(edges: &Edges, nodes: &mut [DestinationNode]) {
+    for node in nodes {
+        let events: Vec<&FlowEvent> = edges
+            .map
+            .iter()
+            .filter(|(key, _)| key.host == node.host && key.port == node.port)
+            .map(|(_, edge)| &edge.latest)
+            .collect();
+        node.blocked = events.iter().any(|e| is_blocked(e));
+        node.allow = AllowTarget::of_edges(events.iter().copied());
+        node.blocked_for = task_keys(events);
+    }
 }
 
 /// A node's vertical position.
@@ -379,7 +405,7 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
             }
             @for (node, placed) in model.destinations.iter().zip(&layout.destinations) {
                 div data-node="destination" data-blocked=[node.blocked.then_some("true")]
-                    class={"absolute flex items-center gap-2 " (CARD) " px-2 " (if node.blocked { "border-danger" } else { "border-line-strong" }) (dim(node.dimmed))}
+                    class={"group absolute flex items-center gap-2 " (CARD) " px-2 " (if node.blocked { "border-danger" } else { "border-line-strong" }) (dim(node.dimmed))}
                     style={"right:" (RIGHT_PAD) "px;top:" (placed.y) "px;width:" (destination_width) ";height:" (DEST_H) "px"} {
                     // Where the edges arrive: the tip touches the card's outer left edge.
                     svg data-arrow class="absolute -left-[8px] top-1/2 -translate-y-1/2" aria-hidden="true" width="7" height="10" viewBox="0 0 7 10" {
@@ -388,6 +414,9 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
                     (host_icon(&node.host, HostIconSize::Graph, projects))
                     span class="min-w-0 flex-1 truncate font-mono text-[13px]" title=(node.host) { (node.host) }
                     span class="shrink-0 rounded-md bg-sunk px-1.5 py-0.5 font-mono text-xs text-muted" { (node.port) }
+                    @if let Some(allow) = &node.allow {
+                        (allow_popover(allow, &node.blocked_for))
+                    }
                 }
             }
             @if model.hidden_sandboxes > 0 || model.hidden_destinations > 0 {
@@ -408,6 +437,29 @@ pub(super) fn render(model: &Model, projects: &ProjectHosts) -> Markup {
             }
             span { "Dimmed: excluded by the filters" }
         }
+    }
+}
+
+/// The popover of a blocked node, shown on hover and while its button has the focus (it stays
+/// in the tab order, transparent).
+fn allow_popover(allow: &AllowTarget, tasks: &[String]) -> Markup {
+    html! {
+        div data-allow-popover class="pointer-events-none absolute right-0 top-full z-10 pt-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" {
+            div class="w-max max-w-64 rounded-xl border border-line bg-panel p-3 shadow-lg" {
+                div class="font-mono text-[13px]" { (allow.destination()) }
+                div class="mt-0.5 text-xs text-muted" { (blocked_for(tasks)) }
+                (allow.button(&format!("{} mt-2 [&_svg]:size-4", action_class(ButtonKind::Secondary)), html! { (icon(Icon::Plus)) "Allow" }))
+            }
+        }
+    }
+}
+
+/// `Blocked for DF-7`, `Blocked for DF-7 and DF-8`, `Blocked for DF-7, DF-8 and DF-9`.
+fn blocked_for(tasks: &[String]) -> String {
+    match tasks {
+        [] => "Blocked".to_string(),
+        [only] => format!("Blocked for {only}"),
+        [rest @ .., last] => format!("Blocked for {} and {last}", rest.join(", ")),
     }
 }
 
@@ -788,5 +840,125 @@ mod tests {
             "legend"
         );
         assert!(html.contains("stroke-faint"));
+    }
+
+    fn not_allowlisted(run: &str, task: &str, project: &str) -> FlowEvent {
+        FlowEvent {
+            project_key: project.into(),
+            task_key: task.into(),
+            reason: "not-allowlisted".into(),
+            ..event(run, "statsig.anthropic.com", Verdict::Denied)
+        }
+    }
+
+    #[test]
+    fn a_node_blocked_for_two_tasks_of_one_project_offers_project_and_instance() {
+        // Scenario "Graph node across tasks of one project".
+        let model = model_of(&[
+            not_allowlisted("run-a", "DF-7", "DF"),
+            not_allowlisted("run-b", "DF-8", "DF"),
+        ]);
+        let node = &model.destinations[0];
+        let allow = node.allow.as_ref().unwrap();
+        assert_eq!(
+            (allow.task.as_deref(), allow.project.as_deref()),
+            (None, Some("DF"))
+        );
+        assert_eq!(node.blocked_for, ["DF-7", "DF-8"]);
+        let html = render(&model).into_string();
+        let popover = &html[html.find("data-allow-popover").unwrap()..];
+        assert!(
+            popover.contains(">statsig.anthropic.com:443<")
+                && popover.contains(">Blocked for DF-7 and DF-8<"),
+            "{popover}"
+        );
+        assert!(
+            popover.contains(
+                "hx-get=\"/egress/log/allow?host=statsig.anthropic.com&amp;port=443&amp;project=DF\""
+            ),
+            "{popover}"
+        );
+        let button = &popover[popover.find("<button").unwrap()..];
+        let button = &button[..button.find('>').unwrap()];
+        assert!(
+            button.contains(action_class(ButtonKind::Secondary)),
+            "a secondary button: {button}"
+        );
+        let at = html.find("data-allow-popover").unwrap();
+        let wrapper = &html[html[..at].rfind("<div").unwrap()..];
+        assert!(
+            wrapper.contains("group-hover:opacity-100 group-focus-within:pointer-events-auto"),
+            "shown on hover and focus: {wrapper}"
+        );
+    }
+
+    #[test]
+    fn a_hidden_sandbox_of_another_project_limits_the_scope_of_a_node() {
+        // The oldest of 13 sandboxes is not drawn, but its denial still counts.
+        let mut events = vec![not_allowlisted("run-0", "OPS-1", "OPS")];
+        events.extend(
+            (1..=MAX_SANDBOXES).map(|i| not_allowlisted(&format!("run-{i}"), "DF-7", "DF")),
+        );
+        let model = model_of(&events);
+        assert_eq!(model.hidden_sandboxes, 1);
+        let node = &model.destinations[0];
+        let allow = node.allow.as_ref().unwrap();
+        assert_eq!(
+            (allow.task.as_deref(), allow.project.as_deref()),
+            (None, None)
+        );
+        assert_eq!(node.blocked_for, ["DF-7", "OPS-1"]);
+
+        // Only the hidden sandbox was denied: the node offers the action and is drawn blocked.
+        let mut events = vec![not_allowlisted("run-0", "OPS-1", "OPS")];
+        events.extend((1..=MAX_SANDBOXES).map(|i| {
+            event(
+                &format!("run-{i}"),
+                "statsig.anthropic.com",
+                Verdict::Allowed,
+            )
+        }));
+        let model = model_of(&events);
+        assert_eq!(model.hidden_sandboxes, 1);
+        let node = &model.destinations[0];
+        assert!(node.allow.is_some() && node.blocked, "{node:?}");
+        let html = render(&model).into_string();
+        assert!(html.contains("data-blocked=\"true\""), "{html}");
+    }
+
+    #[test]
+    fn a_node_of_one_task_offers_its_task_and_other_nodes_have_no_popover() {
+        // Scenario "Graph node of one task".
+        let model = model_of(&[not_allowlisted("run-a", "DF-7", "DF")]);
+        let allow = model.destinations[0].allow.as_ref().unwrap();
+        assert_eq!(
+            (allow.task.as_deref(), allow.project.as_deref()),
+            (Some("DF-7"), Some("DF"))
+        );
+        assert!(render(&model).into_string().contains(">Blocked for DF-7<"));
+
+        let ip = FlowEvent {
+            reason: "ip-literal".into(),
+            ..not_allowlisted("run-a", "DF-7", "DF")
+        };
+        for model in [
+            model_of(&[ip]),
+            model_of(&[event("run-a", "pypi.org", Verdict::Allowed)]),
+        ] {
+            assert_eq!(model.destinations[0].allow, None);
+            assert!(!render(&model).into_string().contains("data-allow-popover"));
+        }
+    }
+
+    #[test]
+    fn blocked_for_lists_the_task_keys() {
+        let keys =
+            |keys: &[&str]| blocked_for(&keys.iter().map(ToString::to_string).collect::<Vec<_>>());
+        assert_eq!(keys(&[]), "Blocked");
+        assert_eq!(keys(&["DF-7"]), "Blocked for DF-7");
+        assert_eq!(
+            keys(&["DF-7", "DF-8", "OPS-1"]),
+            "Blocked for DF-7, DF-8 and OPS-1"
+        );
     }
 }

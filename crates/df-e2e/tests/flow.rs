@@ -1,6 +1,8 @@
 //! The iteration 1 flow through the web UI (`just e2e-local`): assignment, pull request, tools,
-//! follow-up, completion and the rate limit. Needs the environment of `E2eEnv`, so the tests
-//! are ignored by default.
+//! follow-up, completion and the rate limit; and demo step 4 of iteration 2 (network access
+//! request). Needs the environment of `E2eEnv`, so the tests are ignored by default.
+
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use df_e2e::browser::Session;
@@ -9,6 +11,17 @@ use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data, db};
 use serde_json::Value;
 use sqlx::PgPool;
+
+/// Wait limit for the approval to be stored.
+const RETRY_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the retry may take after the approval, until the UI shows it.
+const RETRY_BOUND: Duration = Duration::from_secs(10);
+/// What the first turn of the `network-access` script says before it fetches.
+const NEED: &str = "I need the package index from pypi.org.";
+/// What the fake agent says once the fetch of the first turn got through.
+const FETCHED: &str = "Fetched https://pypi.org/";
+/// What the second turn of the `network-access` script (the decision message) says.
+const NOTED: &str = "Noted the decision.";
 
 struct World {
     env: E2eEnv,
@@ -211,5 +224,96 @@ async fn rate_limited_run_shows_the_limit_and_the_next_message_continues() -> Re
     world.wait_for_status(&key, "waiting").await?;
     let runs = db::runs(&world.pool, &key).await?;
     assert_eq!(runs.len(), 2, "{runs:?}");
+    Ok(())
+}
+
+/// Demo step 4 of iteration 2: the proxy denies `pypi.org`, the control plane raises a
+/// `network-access` request from the gateway's report, the board member approves it for the
+/// task and the agent's retry in the same turn gets through.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn denied_host_is_requested_and_the_approval_lets_the_retry_through() -> Result<()> {
+    let (host, port) = (data::NETWORK_HOST, data::NETWORK_PORT);
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::NETWORK_PROJECT_KEY,
+            "Fetch the package index",
+            None,
+        )
+        .await?;
+    world.session.expect_text(NEED, RUN_TIMEOUT).await?;
+
+    let request = eventually("a network-access request", RUN_TIMEOUT, || async {
+        db::network_request(&world.pool, &key, host, port).await
+    })
+    .await?;
+    assert_eq!(request.state, "pending", "{request:?}");
+    assert!(request.raised_by_control_plane, "{request:?}");
+    assert!(!request.blocking, "{request:?}");
+    assert!(
+        request.reason.contains(&format!("{host}:{port}")),
+        "{request:?}"
+    );
+    assert_eq!(
+        db::http_host_scopes(&world.pool, &key, host, port).await?,
+        Vec::<String>::new()
+    );
+    // The fetch of run 1 is still retrying. The run row stays `preparing` during the first turn,
+    // so the task status tells that it runs.
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].outcome, None, "{runs:?}");
+    assert_eq!(db::task_status(&world.pool, &key).await?, "running");
+
+    world
+        .session
+        .approve_request(
+            &world.env,
+            &request.id.to_string(),
+            &format!("network access to {host}:{port}"),
+            "task",
+        )
+        .await?;
+    let approved_at = Instant::now();
+
+    let decided = eventually("the approval", RETRY_TIMEOUT, || async {
+        let request = db::network_request(&world.pool, &key, host, port).await?;
+        Ok(request.filter(|r| r.state != "pending"))
+    })
+    .await?;
+    assert_eq!(decided.id, request.id);
+    assert_eq!(decided.state, "approved");
+    assert_eq!(decided.scope.as_deref(), Some("task"));
+    assert_eq!(
+        db::http_host_scopes(&world.pool, &key, host, port).await?,
+        ["task"]
+    );
+    world.session.open_task(&world.env, &key).await?;
+    // Bound from demo step 4 ("about a second"), measured from the approval, UI polling included.
+    // Playwright reads a zero timeout as no limit.
+    let left = RETRY_BOUND
+        .saturating_sub(approved_at.elapsed())
+        .max(Duration::from_millis(1));
+    world
+        .session
+        .expect_region_text("#transcript", FETCHED, left)
+        .await?;
+    // The decision message is the next prompt of the same session in run 1.
+    world
+        .session
+        .expect_region_text("#transcript", NOTED, RUN_TIMEOUT)
+        .await?;
+
+    // Run 1 fetched: a restart (a new run, or a new session after a failed resume) would replay
+    // the first turn of the script, so the transcript would say it needs the index twice.
+    let transcript = world.session.region_text("#transcript").await?;
+    assert_eq!(transcript.matches(NEED).count(), 1, "{transcript}");
+    assert_eq!(transcript.matches(FETCHED).count(), 1, "{transcript}");
+    assert_eq!(transcript.matches(NOTED).count(), 1, "{transcript}");
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 1, "{runs:?}");
     Ok(())
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, project_id, host AS \"host!\", port AS \"port!\" FROM egress_allowlist\n           WHERE kind = 'http-host' AND host IS NOT NULL AND port IS NOT NULL\n           ORDER BY created_at, id",
+  "query": "SELECT id, project_id, task_id, host AS \"host!\", port AS \"port!\" FROM egress_allowlist\n           WHERE kind = 'http-host' AND host IS NOT NULL AND port IS NOT NULL\n           ORDER BY created_at, id",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "host!",
         "type_info": "Text",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "port!",
         "type_info": "Int4",
         "origin": {
@@ -55,8 +66,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "b85b0fadce9de6a5b7bb1c74d0c0cb7ab482c5bb73b6653d52cee9667dc27c41"
+  "hash": "e99824cd63d158f196cd7b5156a6e6a9b92088981d05b5b6265aacda1717888c"
 }

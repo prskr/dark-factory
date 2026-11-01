@@ -10,6 +10,8 @@
 //     events of the egress proxy, buffered ones first, then live ones.
 //   * GatewayGit (served by the control plane): the Git proxy of a gateway pod records every
 //     push of a sandbox with RecordPush (iter2-git-proxy design D1).
+//   * GatewayEvents (served by the control plane): the egress proxy reports `not-allowlisted`
+//     denials with ReportDenial (iter2-egress-approvals design D2).
 //
 // Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
 // gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
@@ -36,6 +38,12 @@ service GatewayGit {
   // Stores or advances the record of a push. Idempotent by `push_id`; a call that would move the
   // verdict backwards is ignored.
   rpc RecordPush(PushRecord) returns (RecordPushResponse);
+}
+
+service GatewayEvents {
+  // Reports a `not-allowlisted` denial of a sandbox. Sent at most once per minute per run, host
+  // and port, fire-and-forget; the control plane may raise a `network-access` request from it.
+  rpc ReportDenial(Denial) returns (ReportDenialResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +107,7 @@ message HostRule {
   // Hostname or `*.suffix`.
   string pattern = 1;
   uint32 port = 2;
-  // `instance` or `project`.
+  // `instance`, `project` or `task`.
   string scope = 3;
   string entry_id = 4;
 }
@@ -234,3 +242,18 @@ message RefUpdate {
 }
 
 message RecordPushResponse {}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+// A request of a run the proxy denied with `not-allowlisted`.
+message Denial {
+  string run_id = 1;
+  // The requested host, normalized (lower case, no trailing dot).
+  string host = 2;
+  uint32 port = 3;
+  google.protobuf.Timestamp at = 4;
+}
+
+message ReportDenialResponse {}

@@ -24,7 +24,7 @@ wasm-tools component embed --dummy --world forge wit/integrations -o forge.core.
 wasm-tools component new forge.core.wasm -o forge.wasm
 ```
 
-Both pass with protoc 29.3 and wasm-tools 1.245.0. The factory tool file is plain JSON; its schemas are JSON Schema.
+Both pass with protoc 29.3 and wasm-tools 1.245.0. The factory tool file is plain JSON; its schemas are JSON Schema (draft 2020-12). The unit test `embedded_schemas_compile` in `df-agent-channel` checks every input schema against the meta-schema.
 
 ## Design notes
 
@@ -66,20 +66,22 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 - `report_progress` sets the task's status line; mirroring it to the issue is project policy, separate from the explicit `comment_on_issue`.
 - `set_task_title` sets the task's title with source `agent`; it changes nothing when a person or an earlier call already set a title.
 - `complete_task` ends the run after the current turn; the control plane marks the PR ready for review.
+- `request_approval` raises a typed approval request on the task (iteration 2: `network-access`). `type` is an enum; `payload` is a plain object that the control plane validates per type, because harnesses support `oneOf` per type poorly. For `network-access` the control plane first checks the run's effective allowlist and answers "already allowed" without storing a request.
 
 ### Gateway link
 - `GatewayPolicy.PolicyWatch` is served by the control plane and called by every gateway pod; `GatewayLog.Tail` is served by every gateway pod and called by the control plane. Both use the internal port (9444) with mTLS and certificates from the instance CA.
-- Every `PolicyUpdate` is a full snapshot (sandbox registry with each run's effective `http-host` allowlist). `version` comes from a database sequence, so it is monotonic across control plane replicas. A gateway enforces its last snapshot while it is disconnected.
+- Every `PolicyUpdate` is a full snapshot (sandbox registry with each run's effective `http-host` allowlist: the instance entries, its project's entries and its task's entries; `HostRule.scope` is `instance`, `project` or `task`). `version` comes from a database sequence, so it is monotonic across control plane replicas. A gateway enforces its last snapshot while it is disconnected.
 - `FlowEvent` is ephemeral: gateway pods keep it in a ring buffer, nothing is persisted. A lagging `Tail` stream receives an event with `gap = true` where events were dropped.
 - Git proxy (iter2-git-proxy): `SandboxEntry.git` (`GitRoute`) names the run's upstream repository (`https://` only), its branches as full ref names (`refs/heads/main`, `refs/heads/factory/task/<KEY>`, `refs/heads/factory/wip/<KEY>`) and a `credential_ref` into `Snapshot.forge_credentials`. Route and credential arrive in the same snapshot, so they always match. `ForgeCredential` is secret: never logged, and its Rust `Debug` redacts the password.
 - `GatewayGit.RecordPush` is served by the control plane on the internal port (9444) and called by the gateway's Git proxy for every push. `push_id` (UUIDv7) is the idempotency key; the verdict only moves forward (`FORWARDING` → `ACCEPTED` | `UPSTREAM_FAILED`; `REJECTED` is final). The gateway records `FORWARDING` before it sends anything upstream. A `FORWARDING` record without a final call for 10 minutes is marked `unknown` by the control plane; this state exists only in the database, not in the contract enum, and a later `ACCEPTED` or `UPSTREAM_FAILED` replaces it with an audit entry.
+- `GatewayEvents.ReportDenial` (iter2-egress-approvals) is served by the control plane on the internal port (9444). The egress proxy reports `not-allowlisted` denials, at most once per minute per run, host and port, fire-and-forget with one retry. A lost report only delays the request until the next denial. The control plane raises a non-blocking `network-access` request on the run's task unless the run ended, the task is completed or cancelled, or the run's effective allowlist already covers the host and port. Other denial reasons are not reported.
 
 ## Planned additive changes (no new major version needed)
 - `Assign`: skills bundle, project context document (ADR-0026), keep-alive window for `AwaitingInput`, workspace lifecycle hooks (phase, name, command or script, timeout, failure policy — F9).
 - `ControlMessage`: `ToolsChanged` for lazy tool loading (`load_server`); `SnapshotWorkspace` for an immediate WIP snapshot (F8).
 - WIT: `issues.list`/webhook handling (`handle-webhook`, ADR-0015), PR comments and review data for the review loop, a `repository` capability (compare refs, read a file at a ref, list a tree) for the workspace changes view (F8). Also for ADR-0033: `pull-requests.list-open` with filters (head prefix, author, label) and a `checks` capability (CI status and job logs for a ref or PR). For ADR-0034: `pull-requests.merge` (merge method) and `branches.create` (new branch at a ref).
 - Agent protocol: the branch rewrite policy in `Assign.workspace` (ADR-0033). Subtasks based on a parent branch need no change; the parent branch arrives as `Workspace.base_branch` (ADR-0034).
-- Factory tools: `ask_question` (text, suggested answers, addressee, blocking) and `request_approval` (type, typed payload, reason, blocking) (ADR-0038). Transcript: request and decision events.
+- Factory tools: an addressee for `ask_question` (questions to other agents). Transcript: request and decision events (ADR-0038).
 - Factory tools: "create subtask" (assignee, prompt, optional base and settings no looser than the resolved ones) and "merge subtask PR" (ADR-0034).
 - Transcript: a hook execution event (phase, name, exit code, duration, output tail) for lifecycle hooks (F9).
 - Artifacts, agent-side WASI tools (F2), `Assign.harness` for the built-in loop (inference endpoint URL, model), the gateway MCP endpoint for the harness configuration (ADR-0032).

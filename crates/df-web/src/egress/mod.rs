@@ -66,4 +66,5 @@ pub fn routes() -> Router<WebState> {
         .route("/egress/allowlist/{id}", delete(allowlist::remove))
         .route("/egress/log", get(log::page))
         .route("/egress/log/events", get(log::events))
+        .route("/egress/log/allow", get(log::allow_dialog).post(log::allow))
 }

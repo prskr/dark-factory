@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::{FlowEvent, FlowFilter, Phase, Verdict};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -10,6 +11,7 @@ use tokio::sync::watch;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use super::*;
+use crate::denials::DenialReports;
 use crate::policy::HostRule;
 use crate::sni::tests::client_hello;
 
@@ -101,9 +103,29 @@ impl Harness {
         upstream: SocketAddr,
         metrics: Arc<Metrics>,
     ) -> Result<Self> {
+        Self::build(policy, names, upstream, metrics, None).await
+    }
+
+    /// Like [`Harness::start`], queueing denial reports into `reports`.
+    async fn start_reporting(
+        policy: Option<Arc<Policy>>,
+        names: &[(&str, &str)],
+        upstream: SocketAddr,
+        reports: Arc<DenialReports>,
+    ) -> Result<Self> {
+        Self::build(policy, names, upstream, Arc::default(), Some(reports)).await
+    }
+
+    async fn build(
+        policy: Option<Arc<Policy>>,
+        names: &[(&str, &str)],
+        upstream: SocketAddr,
+        metrics: Arc<Metrics>,
+        reports: Option<Arc<DenialReports>>,
+    ) -> Result<Self> {
         let (policy_tx, policy_rx) = watch::channel(policy);
         let flows = Arc::new(FlowLog::new(100));
-        let proxy = Arc::new(Proxy::new(
+        let mut proxy = Proxy::new(
             "gw-0",
             policy_rx,
             Arc::new(StubResolver::of(names)),
@@ -111,7 +133,11 @@ impl Harness {
             BlockedRanges::new([])?,
             flows.clone(),
             metrics,
-        ));
+        );
+        if let Some(reports) = reports {
+            proxy = proxy.with_denial_reports(reports);
+        }
+        let proxy = Arc::new(proxy);
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -601,6 +627,130 @@ async fn plain_http_without_port_80_entry_gets_403() -> Result<()> {
     .await?;
     assert!(response.starts_with("HTTP/1.1 403"), "{response}");
     assert_eq!(harness.closed_event(0).await.reason, "not-allowlisted");
+    Ok(())
+}
+
+fn reports() -> (Arc<DenialReports>, tokio::sync::mpsc::Receiver<pb::Denial>) {
+    let (reports, queue) = DenialReports::new(16);
+    (Arc::new(reports), queue)
+}
+
+fn queued(queue: &mut tokio::sync::mpsc::Receiver<pb::Denial>) -> Vec<(String, String, u32)> {
+    let mut reports = Vec::new();
+    while let Ok(denial) = queue.try_recv() {
+        reports.push((denial.run_id, denial.host, denial.port));
+    }
+    reports
+}
+
+#[tokio::test]
+async fn not_allowlisted_requests_are_reported_with_run_host_and_port() -> Result<()> {
+    let (reports, mut queue) = reports();
+    let harness = Harness::start_reporting(
+        Some(policy_of("127.0.0.1", vec![rule("api.anthropic.com", 443)])),
+        &[],
+        "127.0.0.1:1".parse()?,
+        reports,
+    )
+    .await?;
+    request(harness.proxy, &connect_head("Statsig.Anthropic.com.", 443)).await?;
+    request(
+        harness.proxy,
+        "GET http://deb.debian.org/ HTTP/1.1\r\nHost: deb.debian.org\r\n\r\n",
+    )
+    .await?;
+    harness.closed_event(1).await;
+    assert_eq!(
+        queued(&mut queue),
+        [
+            ("run-1".into(), "statsig.anthropic.com".into(), 443),
+            ("run-1".into(), "deb.debian.org".into(), 80)
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn other_denial_reasons_are_not_reported() -> Result<()> {
+    let upstream = TcpListener::bind("127.0.0.1:0").await?;
+    let (reports, mut queue) = reports();
+    let harness = Harness::start_reporting(
+        Some(policy_of(
+            "127.0.0.1",
+            vec![
+                rule("api.anthropic.com", 443),
+                rule("internal.example.com", 443),
+            ],
+        )),
+        &[
+            ("api.anthropic.com", PUBLIC_IP),
+            ("internal.example.com", "10.0.0.5"),
+        ],
+        upstream.local_addr()?,
+        reports,
+    )
+    .await?;
+    request(harness.proxy, &connect_head("internal.example.com", 443)).await?;
+    request(harness.proxy, &connect_head("1.1.1.1", 443)).await?;
+    let (mut stream, _) = request(harness.proxy, &connect_head("api.anthropic.com", 443)).await?;
+    stream.write_all(&client_hello("evil.example.com")).await?;
+    stream.read_to_end(&mut Vec::new()).await.ok();
+    let mut reasons = Vec::new();
+    for index in 0..3 {
+        reasons.push(harness.closed_event(index).await.reason);
+    }
+    assert_eq!(
+        reasons,
+        ["private-destination", "ip-literal", "sni-mismatch"]
+    );
+    assert!(queued(&mut queue).is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn plain_http_to_a_port_other_than_80_is_not_reported() -> Result<()> {
+    let (reports, mut queue) = reports();
+    let harness = Harness::start_reporting(
+        Some(policy_of("127.0.0.1", vec![rule("deb.debian.org", 443)])),
+        &[("deb.debian.org", PUBLIC_IP)],
+        "127.0.0.1:1".parse()?,
+        reports,
+    )
+    .await?;
+    request(
+        harness.proxy,
+        "GET http://deb.debian.org:8080/ HTTP/1.1\r\nHost: deb.debian.org:8080\r\n\r\n",
+    )
+    .await?;
+    assert_eq!(harness.closed_event(0).await.reason, "not-allowlisted");
+    assert!(queued(&mut queue).is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_new_snapshot_forgets_the_reports_of_runs_that_left_it() -> Result<()> {
+    let (reports, mut queue) = reports();
+    let harness = Harness::start_reporting(
+        Some(policy_of("127.0.0.1", vec![])),
+        &[],
+        "127.0.0.1:1".parse()?,
+        reports.clone(),
+    )
+    .await?;
+    request(harness.proxy, &connect_head("pypi.org", 443)).await?;
+    harness.closed_event(0).await;
+    assert_eq!(queued(&mut queue).len(), 1);
+    assert_eq!(reports.remembered(), 1);
+
+    harness
+        .policy
+        .send_replace(Some(Arc::new(Policy::new(2, []))));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while reports.remembered() > 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
     Ok(())
 }
 

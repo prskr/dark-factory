@@ -30,6 +30,32 @@ pub trait GrpcConnector: Send + Sync {
     async fn connect(&self, authority: &str) -> Result<Channel, LinkError>;
 }
 
+/// Why a call to the control plane failed: worth another attempt, or refused for good.
+#[derive(Debug, Error)]
+pub enum CallError {
+    #[error("{0}")]
+    Transient(String),
+    #[error("{0}")]
+    Permanent(String),
+}
+
+impl From<tonic::Status> for CallError {
+    fn from(status: tonic::Status) -> Self {
+        let transient = matches!(
+            status.code(),
+            tonic::Code::Unavailable
+                | tonic::Code::DeadlineExceeded
+                | tonic::Code::ResourceExhausted
+                | tonic::Code::Unknown
+        );
+        if transient {
+            Self::Transient(status.to_string())
+        } else {
+            Self::Permanent(status.to_string())
+        }
+    }
+}
+
 /// mTLS with the instance's certificate, key and CA. The files are read on every connect, so a
 /// certificate renewed by cert-manager is used by the next connection.
 pub struct MtlsConnector {

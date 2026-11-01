@@ -1,5 +1,5 @@
 {
-  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question. The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
+  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question and request_approval. The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
   "version": 2,
   "tools": [
     {
@@ -165,6 +165,50 @@
         },
         "required": [
           "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "request_approval",
+      "title": "Request approval",
+      "description": "Ask the humans of this task to approve something you may not do on your own. Type network-access: your run needs a host that the egress proxy denies (payload {host, port}; port defaults to 443). If your run may already reach the host, nothing is stored and the result says so. Once approved, the host is reachable within about a second; retry then. Use blocking=false when you can continue without the approval: the decision arrives later as a message. Use blocking=true only when you cannot make progress without it: your turn then ends and the run waits for the decision for a limited time. Requesting the same thing again while it is pending returns the existing request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "network-access"
+            ],
+            "description": "What to approve."
+          },
+          "payload": {
+            "type": "object",
+            "description": "Defined by the type and validated by the control plane. network-access: {\"host\": \"pypi.org\", \"port\": 443}; host is a hostname or *.suffix (no IP address), port is optional (default 443, plain HTTP needs 80)."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Why you need it, for the human who decides."
+          },
+          "blocking": {
+            "type": "boolean",
+            "default": false,
+            "description": "True if you cannot continue without the decision."
+          }
+        },
+        "required": [
+          "type",
+          "payload",
+          "reason"
         ],
         "additionalProperties": false
       },

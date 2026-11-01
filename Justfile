@@ -51,7 +51,7 @@ serve-local: db plugins
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml migrate
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml serve --no-cluster --demo-flows
 
-# Write the well-known demo data (credential reference, persona "e2e", projects DF and RL, allowlist entry) into the `just serve-local` database; idempotent. Override the target with E2E_DATABASE_URL.
+# Write the well-known demo data (credential reference, persona "e2e", projects DF, RL and NA) into the `just serve-local` database; idempotent. Override the target with E2E_DATABASE_URL.
 seed:
     E2E_DATABASE_URL="${E2E_DATABASE_URL:-postgres://{{local_db_login}}@127.0.0.1:5432/dark_factory}" cargo run -p df-e2e --bin seed
 

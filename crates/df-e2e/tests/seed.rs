@@ -41,7 +41,15 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         rate_limit.adapter_command,
         data::adapter_command(data::RATE_LIMIT_SCRIPT)
     );
-    assert_eq!(df_db::list_entries(&pool).await?.len(), 1);
+    let network = get_project_by_key(&pool, data::NETWORK_PROJECT_KEY)
+        .await?
+        .context("project NA")?;
+    assert_eq!(
+        network.adapter_command,
+        data::adapter_command(data::NETWORK_SCRIPT)
+    );
+    // Sandboxes reach Forgejo through the gateway's Git proxy: no allowlist entry.
+    assert!(df_db::list_entries(&pool).await?.is_empty());
     Ok(())
 }
 

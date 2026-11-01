@@ -1,6 +1,7 @@
 //! The control plane's side of the gateway links: the internal server (`PolicyWatch`,
-//! `GatewayGit` and the stale push scan) and the `Tail` relay.
+//! `GatewayGit`, `GatewayEvents` and the stale push scan) and the `Tail` relay.
 
+pub mod denial_events;
 pub mod git_records;
 pub mod internal;
 pub mod policy_service;

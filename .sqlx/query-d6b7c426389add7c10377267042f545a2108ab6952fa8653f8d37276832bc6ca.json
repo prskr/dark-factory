@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT e.id, p.key AS \"project_key?\", e.kind, e.host, e.port, e.namespace, e.service,\n                  e.ports, e.allow_dns\n           FROM egress_allowlist e LEFT JOIN projects p ON p.id = e.project_id\n           ORDER BY (e.project_id IS NOT NULL), p.key, e.kind, e.host, e.namespace, e.service,\n                    e.id",
+  "query": "SELECT e.id, p.key AS \"project_key?\", t.key AS \"task_key?\", e.kind, e.host, e.port,\n                  e.namespace, e.service, e.ports, e.allow_dns\n           FROM egress_allowlist e\n           LEFT JOIN projects p ON p.id = e.project_id\n           LEFT JOIN tasks t ON t.id = e.task_id\n           ORDER BY (e.task_id IS NOT NULL), (e.project_id IS NOT NULL), p.key, t.key, e.kind,\n                    e.host, e.namespace, e.service, e.id",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "task_key?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "kind",
         "type_info": "Text",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "host",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "port",
         "type_info": "Int4",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "namespace",
         "type_info": "Text",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "service",
         "type_info": "Text",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "ports",
         "type_info": "Int4Array",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "allow_dns",
         "type_info": "Bool",
         "origin": {
@@ -110,6 +121,7 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       true,
@@ -118,5 +130,5 @@
       false
     ]
   },
-  "hash": "ca84f3f1f916ff724fa751035bfaece62fffcb9f9795026c5ceffa05322800b3"
+  "hash": "d6b7c426389add7c10377267042f545a2108ab6952fa8653f8d37276832bc6ca"
 }

@@ -1,10 +1,11 @@
-//! `/egress/allowlist`: instance and project entries of kind `http-host` and `cluster-service`.
+//! `/egress/allowlist`: instance, project and task entries of kind `http-host` and
+//! `cluster-service` (task entries are only `http-host`).
 
 use axum::Extension;
 use axum::extract::{Form, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
-use df_core::host::{is_ip_literal, normalize_host};
+use df_core::host::{DEFAULT_HOST_PORT, is_dns_label, validate_allowlist_host};
 use df_db::catalog::Actor;
 use df_db::{DbError, EntryKind, EntryRecord};
 use maud::{Markup, html};
@@ -24,8 +25,6 @@ use crate::config_pages::{
 use crate::layout::Nav;
 use crate::responses::{internal_error, invalid, not_found};
 
-/// Port of an `http-host` entry whose form field is left empty.
-const DEFAULT_PORT: u16 = 443;
 const ALLOWLIST: &str = "/egress/allowlist";
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -50,39 +49,17 @@ pub(super) struct ServiceForm {
 // Validation (pure)
 // ---------------------------------------------------------------------------------------------
 
-fn is_dns_label(label: &str) -> bool {
-    let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    (1..=63).contains(&label.len())
-        && label.starts_with(edge)
-        && label.ends_with(edge)
-        && label.chars().all(|c| edge(c) || c == '-')
-}
-
-/// A hostname or `*.suffix` as stored: lower case, no trailing dot. IP literals, a bare `*` and
-/// wildcards anywhere but at the start are rejected.
-fn validate_host(raw: &str) -> Result<String, &'static str> {
-    let host = normalize_host(raw.trim());
-    if host.is_empty() {
-        return Err("Host is required.");
-    }
-    if is_ip_literal(&host) {
-        return Err("IP addresses are not allowed. Use a hostname.");
-    }
-    let name = host.strip_prefix("*.").unwrap_or(&host);
-    if host == "*" || name.len() > 253 || !name.split('.').all(is_dns_label) {
-        return Err(
-            "Must be a hostname such as pypi.org, or *.example.org for all its subdomains.",
-        );
-    }
-    Ok(host)
-}
-
 fn validate_port(raw: &str) -> Result<u16, &'static str> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Ok(DEFAULT_PORT);
+    if raw.trim().is_empty() {
+        return Ok(DEFAULT_HOST_PORT);
     }
-    raw.parse::<u16>()
+    validate_required_port(raw)
+}
+
+/// A port between 1 and 65535 that must be given.
+pub(super) fn validate_required_port(raw: &str) -> Result<u16, &'static str> {
+    raw.trim()
+        .parse::<u16>()
         .ok()
         .filter(|port| *port != 0)
         .ok_or("Must be a port between 1 and 65535.")
@@ -114,11 +91,45 @@ fn validate_ports(raw: &str) -> Result<Vec<u16>, &'static str> {
 // Rendering
 // ---------------------------------------------------------------------------------------------
 
+/// The scope of an entry by its keys, as the allowlist and the allow dialog name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScopeName<'a> {
+    Task(&'a str),
+    Project(&'a str),
+    Instance,
+}
+
+impl<'a> ScopeName<'a> {
+    /// The scope of an entry with these keys; a task entry also names its project.
+    pub(super) fn of(project: Option<&'a str>, task: Option<&'a str>) -> Self {
+        match (project, task) {
+            (_, Some(task)) => Self::Task(task),
+            (Some(project), None) => Self::Project(project),
+            (None, None) => Self::Instance,
+        }
+    }
+
+    /// `Task DF-7`, `Project DF`, `Everywhere`.
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::Task(task) => format!("Task {task}"),
+            Self::Project(project) => format!("Project {project}"),
+            Self::Instance => "Everywhere".to_string(),
+        }
+    }
+
+    /// `for task DF-7`, `for project DF`, `everywhere`: the end of "… is allowed …".
+    pub(super) fn phrase(self) -> String {
+        match self {
+            Self::Task(task) => format!("for task {task}"),
+            Self::Project(project) => format!("for project {project}"),
+            Self::Instance => "everywhere".to_string(),
+        }
+    }
+}
+
 fn scope_label(record: &EntryRecord) -> String {
-    record
-        .project_key
-        .clone()
-        .unwrap_or_else(|| "Instance".to_string())
+    ScopeName::of(record.project_key.as_deref(), record.task_key.as_deref()).label()
 }
 
 /// The ports of a cluster service entry: the list, or "all ports".
@@ -416,7 +427,7 @@ pub(super) async fn add_host(
     Form(form): Form<HostForm>,
 ) -> Response {
     let mut errors = FormErrors::default();
-    let host = validate_host(&form.host).map_err(|m| errors.add("host", m));
+    let host = validate_allowlist_host(&form.host).map_err(|m| errors.add("host", m));
     let port = validate_port(&form.port).map_err(|m| errors.add("port", m));
     if let (Ok(host), Ok(port)) = (host, port) {
         let kind = EntryKind::HttpHost { host, port };
@@ -526,44 +537,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hosts_are_normalized_and_ip_literals_rejected() {
-        assert_eq!(
-            validate_host(" API.Anthropic.com. "),
-            Ok("api.anthropic.com".into())
-        );
-        assert_eq!(validate_host("*.crates.io"), Ok("*.crates.io".into()));
-        assert_eq!(validate_host("localhost"), Ok("localhost".into()));
-        for ip in ["10.0.0.5", "1.1.1.1", "::1", "[::1]", "2606:4700::1111"] {
-            assert!(validate_host(ip).unwrap_err().contains("IP"), "{ip}");
-        }
-        for bad in [
-            "",
-            "  ",
-            "*",
-            "*.",
-            "a.*.b",
-            "-a.com",
-            "a..com",
-            "a b.com",
-            "exa_mple.com",
-            "a.com/x",
-            "*.*.com",
-            "[[::1]]",
-            "[::1",
-            "::1]",
-        ] {
-            assert!(validate_host(bad).is_err(), "{bad:?}");
-        }
-        assert!(validate_host(&format!("{}.com", "a".repeat(64))).is_err());
-    }
-
-    #[test]
     fn ports_default_to_443_and_must_be_valid() {
         assert_eq!(validate_port(""), Ok(443));
         assert_eq!(validate_port(" 80 "), Ok(80));
         for bad in ["0", "65536", "http", "-1"] {
             assert!(validate_port(bad).is_err(), "{bad}");
         }
+        assert_eq!(validate_required_port(" 80 "), Ok(80));
+        assert_eq!(validate_required_port(""), validate_port("0"));
         assert_eq!(
             validate_ports("50051, 8080 9090"),
             Ok(vec![50051, 8080, 9090])
@@ -571,6 +552,26 @@ mod tests {
         assert_eq!(validate_ports(""), Ok(vec![]));
         assert!(validate_ports("80,x").is_err());
         assert!(validate_ports("0").is_err());
+    }
+
+    #[test]
+    fn a_scope_is_named_by_its_narrowest_key() {
+        let names = |project, task| {
+            let scope = ScopeName::of(project, task);
+            (scope.label(), scope.phrase())
+        };
+        assert_eq!(
+            names(Some("DF"), Some("DF-7")),
+            ("Task DF-7".into(), "for task DF-7".into())
+        );
+        assert_eq!(
+            names(Some("DF"), None),
+            ("Project DF".into(), "for project DF".into())
+        );
+        assert_eq!(
+            names(None, None),
+            ("Everywhere".into(), "everywhere".into())
+        );
     }
 
     #[test]
