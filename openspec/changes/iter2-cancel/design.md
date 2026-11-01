@@ -45,8 +45,10 @@ Without a PR, nothing is sent to the forge. The cancelled run still finalizes an
 
 No completion summary is posted: no agent wrote one. Later, the factory minion can write one from the transcript (`product/iterations/roadmap.md`). Alternative: post a generic "marked done by <actor>" comment. Rejected: noise for the reviewer.
 
+To keep mark done the exception, the `complete_task` description in `factory-tools.v2.json` gets: "Also call it when the instructions leave nothing to do (already done, nothing to change, question answered), with a summary that says why: if you end your turn without it, the task waits for a human." Agents only see the tool descriptions and the persona's system prompt; `product/agent-playbook.md` has the same rule but reaches agents only as a skill (`iter4-skills`). Alternative: a hidden instruction block in every first prompt, like the `set_task_title` request. Rejected: the tool description is where the agent looks when it decides to call the tool, and it costs no extra message.
+
 ## Risks / Trade-offs
 
 - [Stop during a push leaves a half-pushed state] → the runtime finalizes normally; Git pushes are atomic per ref.
 - [Teardown after the stop timeout loses the WIP snapshot] → the task volume is kept, and the next run's prepare pushes unpushed commits.
-- [Mark done gives the reviewer no summary] → accepted; agents are asked to call `complete_task` themselves when nothing is left to do (`product/agent-playbook.md`).
+- [Mark done gives the reviewer no summary] → accepted; the `complete_task` description asks agents to call it themselves when nothing is left to do (D5).

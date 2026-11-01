@@ -10,6 +10,7 @@
 - [ ] 2.2 Add the stop timeout to the timeout scan and the run-end mapping exception. Verify "runtime hangs" (`tokio::time::pause`), "stopped with an undelivered message" and "completed with an undelivered message"
 - [ ] 2.3 Implement cancelling and reopening a task (design D2). Verify "cancel a running task", "cancel a completed task", "reopen", "reopen before the stopped run ended" (also as "reopened while the stopped run finalizes" in `specs/run-orchestration/spec.md`) and "cancelled with a pending approval" (container-backed; CI)
 - [ ] 2.4 Mark the PR ready when a task is marked done (design D5). Skip draft creation for `completed` tasks in `try_ensure_draft`. Verify "close a waiting task with a PR", "mark done without a PR" and "marked done before the first PR" with a fake forge, and that a forge error leaves the task `completed`
+- [ ] 2.5 Extend the `complete_task` description in `contract/mcp/factory-tools.v2.json` with the sentence from design D5 and update the `complete_task` note in `contract/README.md`. Verify "nothing left to do" (`specs/factory-tools/spec.md`) with a test on `tool_descriptors()`
 
 ## 3. UI
 
