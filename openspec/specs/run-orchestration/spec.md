@@ -25,7 +25,7 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 - **THEN** the run ends with outcome `provisioning_failed` and the task status becomes `failed`
 
 ### Requirement: Assign content
-`Assign` SHALL contain the task reference, the workspace (project repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
+`Assign` SHALL contain the task reference, the workspace (the task's Git proxy URL `https://<gateway host>:<git port>/git/<KEY>.git` as repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects
@@ -38,6 +38,10 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 #### Scenario: Project adapter command
 - **WHEN** a run of a project with adapter command `/opt/harness/bin/fake-acp-agent` connects
 - **THEN** `Assign.harness.acp.command` is `["/opt/harness/bin/fake-acp-agent"]`
+
+#### Scenario: Repository through the proxy
+- **WHEN** run 1 of `DF-1` connects in an instance whose gateway Service is `df-gateway.df.svc` with Git port 8443
+- **THEN** `Assign.workspace.repo_url` is `https://df-gateway.df.svc:8443/git/DF-1.git` and contains no credentials
 
 ### Requirement: Continuation across runs
 Every run after the first SHALL carry the harness session id reported by the previous run, and a summary of the task's transcript for harnesses that can't resume the session.

@@ -17,13 +17,9 @@ After every `HelloAck`, the control plane SHALL send `HarnessCredentials` with t
 - **WHEN** the referenced Secret or key doesn't exist
 - **THEN** the run fails with detail naming the credential reference (not its value)
 
-### Requirement: Git credentials for the project repository only
-A `CredentialRequest` for Git SHALL be granted with the project's forge credential only if protocol, host and path match the project's repository URL; any other request SHALL be denied with a reason.
+### Requirement: No Git credentials in the sandbox
+The control plane SHALL never send a forge credential to a sandbox. The agent contract has no credential request: `CredentialRequest`/`CredentialGrant` are removed and their field numbers (`AgentMessage` 14, `ControlMessage` 16) reserved.
 
-#### Scenario: Request for the project repo
-- **WHEN** the runtime requests credentials for `https://git.example.org/peter/dark-factory.git`
-- **THEN** it receives a `GitCredential` with the bot username and token
-
-#### Scenario: Request for another repo
-- **WHEN** the runtime requests credentials for `https://git.example.org/peter/other.git`
-- **THEN** the grant contains `denied_reason` and no credential
+#### Scenario: Sandbox environment
+- **WHEN** a run starts
+- **THEN** the runtime receives only `HarnessCredentials` and no forge token

@@ -34,4 +34,4 @@
 
 ## 6. Integration
 
-- [ ] 6.1 On the dev cluster: a task run clones and pushes through the proxy, the sandbox has no forge token and no forge allowlist entry, a manual `git push origin HEAD:main` from the sandbox is rejected, and push records exist for both pushes. Update `design/agent-run.md` §8 and §11 (status: implemented, v2 behaviour) and remove the forge host from the demo seed in `iter1-demo-e2e`'s seed tooling
+- [x] 6.1 On the dev cluster: a task run clones and pushes through the proxy, the sandbox has no forge token and no forge allowlist entry, a manual `git push origin HEAD:main` from the sandbox is rejected, and push records exist for both pushes. Update `design/agent-run.md` §8 and §11 (status: implemented, v2 behaviour) and remove the forge host from the demo seed in `iter1-demo-e2e`'s seed tooling

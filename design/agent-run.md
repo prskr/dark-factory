@@ -279,7 +279,7 @@ Summary; full design in [`egress.md`](egress.md) and ADR-0029.
 **Future option — DNS server in the gateway.** Like the HTTP proxy, the gateway could also serve DNS for sandboxes (pod `dnsPolicy: None`, `dnsConfig` pointing at the gateway's ClusterIP). Details in [`egress.md`](egress.md) §12.
 
 ## 11. Git smart-HTTP proxy
-Status: **implemented** (iteration 2, `openspec/changes/iter2-git-proxy`; behaviour reference in [`crates/df-gateway/README.md`](../crates/df-gateway/README.md), "Git proxy"). It runs in the gateway Deployment (ADR-0029), not in the control plane process; the control plane supplies the task → repository route and the forge credential in the same policy snapshot that feeds the egress allowlists.
+Status: **implemented** (iteration 2, `openspec/changes/archive/2026-11-01-iter2-git-proxy`; behaviour reference in [`crates/df-gateway/README.md`](../crates/df-gateway/README.md), "Git proxy"). It runs in the gateway Deployment (ADR-0029), not in the control plane process; the control plane supplies the task → repository route and the forge credential in the same policy snapshot that feeds the egress allowlists.
 
 - **Endpoint**: `https://<gitHost>:<gitPort>/git/<task key>.git` on the gateway Service (`<fullname>-gateway.<namespace>.svc`, a `hostAliases` entry in the sandbox). The control plane sends this URL as `repo_url` in `Assign`.
 - **Identification**: by source pod IP from the snapshot (`403 df: unknown source` until the snapshot contains the pod). A sandbox may only use its own task key (`403 other-task`).

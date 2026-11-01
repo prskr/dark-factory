@@ -111,7 +111,7 @@ The pod name in flow events is the `HOSTNAME` environment variable (the pod name
 
 ## Git proxy
 
-Smart-HTTP endpoint for the task repository (`openspec/changes/iter2-git-proxy`, `design/agent-run.md` §11) on `gateway.gitPort`. URLs have the form `https://<gitHost>:<gitPort>/git/<task key>.git/info/refs?service=…` and `…/git-upload-pack` or `…/git-receive-pack`. The gateway identifies the sandbox by source IP, routes to the task's forge repository from the policy snapshot and injects the forge credential; the sandbox never sees it.
+Smart-HTTP endpoint for the task repository (`openspec/changes/archive/2026-11-01-iter2-git-proxy`, `design/agent-run.md` §11) on `gateway.gitPort`. URLs have the form `https://<gitHost>:<gitPort>/git/<task key>.git/info/refs?service=…` and `…/git-upload-pack` or `…/git-receive-pack`. The gateway identifies the sandbox by source IP, routes to the task's forge repository from the policy snapshot and injects the forge credential; the sandbox never sees it.
 
 ### Behaviour
 
