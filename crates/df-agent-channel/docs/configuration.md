@@ -12,7 +12,7 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `agent.tls.keyFile` | yes | none | PEM private key of `certFile`. |
 | `agent.tls.clientCaFile` | yes | none | PEM CA bundle. Client certificates must chain to it. |
 | `agent.commitIdentity.name` / `.email` | no | `Dark Factory` / `dark-factory@localhost` | Commit identity in `Assign.workspace.commit_identity`. |
-| `agent.gitUsername` | no | `dark-factory` | User name sent with the project's forge token in a Git credential grant. |
+| `agent.gitUsername` | no | `dark-factory` | User name the gateway's Git proxy sends with the project's forge token. |
 | `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.95.0` | Harness image, mounted read-only at `/opt/harness/claude-code` in the sandbox of every run whose project has no adapter command. The tag is the adapter version. The chart renders it from `image.harness.claudeCode.*`. |
 | `harness.claudeCode.adapterCommand` | no | `["/opt/harness/claude-code/bin/claude-agent-acp"]` | ACP adapter command from the harness image; a project's own adapter command replaces it (and the harness image mount). Personas have no adapter command. |
 | `harness.claudeCode.env` | no | `{}` | Non-secret environment for the harness (`Assign.harness.acp.env`). |

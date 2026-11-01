@@ -206,10 +206,10 @@ values route `github.com` to it.
 5. Projects → "New project": repository URL `https://github.com/<owner>/<repo>.git` and that
    credential as forge credential. The hint below the repository URL reads "Served by the GitHub
    integration; pull requests and issues use it."
-6. Egress rules → "New egress rule": host `github.com`, port empty (443), for every project
-   (instance) or only this one. The sandbox clones and pushes over HTTPS with `agent.gitUsername`
-   and the token; the rule is needed until `iter2-git-proxy` moves Git to the gateway. API calls
-   come from the control plane, not the sandbox, and need no rule.
+
+No egress rule for `github.com` is needed. The sandbox clones and pushes through the gateway's Git
+proxy, which sends `agent.gitUsername` and the token upstream; API calls come from the control
+plane.
 
 ### Use title-prefix drafts
 
