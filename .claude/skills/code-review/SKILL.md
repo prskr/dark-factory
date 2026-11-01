@@ -1,14 +1,15 @@
 ---
 name: code-review
-description: "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."
+description: "Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes: Standards (does the code follow this repo's documented coding standards?), Spec (does the code match what the originating issue/spec asked for?) and Security (does the change introduce an exploitable vulnerability?). Runs the reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."
 ---
 
-Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
+Three-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards**: does the code conform to this repo's documented coding standards?
 - **Spec**: does the code faithfully implement the originating issue / spec?
+- **Security**: does the change introduce a high-confidence, exploitable vulnerability?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+All axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
 The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.
 
@@ -20,7 +21,7 @@ Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside parallel sub-agents.
 
 ### 2. Identify the spec source
 
@@ -55,9 +56,9 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Spawn the sub-agents in parallel
 
-Spawn them with `subagent_type: standards-reviewer` and `subagent_type: spec-reviewer` (defined in `~/.claude/agents/`). The agent definitions carry the briefs, the model and the output format; the prompt only passes the inputs.
+Spawn them in one message with `subagent_type: standards-reviewer`, `subagent_type: spec-reviewer` and `subagent_type: security-reviewer` (defined in `.claude/agents/`). The agent definitions carry the briefs, the model and the output format; the prompt only passes the inputs.
 
 **Standards sub-agent prompt** should include:
 
@@ -71,19 +72,31 @@ Spawn them with `subagent_type: standards-reviewer` and `subagent_type: spec-rev
 - The path or fetched contents of the spec.
 - The ledger of earlier findings, if the caller has one.
 
+**Security sub-agent prompt** should include:
+
+- `mode: find`, the diff command and commit list.
+- The ledger of earlier findings, if the caller has one.
+
+The agent carries the threat model, categories, exclusions and precedents itself.
+
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
+
+### 4b. Filter security false positives
+
+For every `X<n>` finding of the Security sub-agent, spawn a fresh `subagent_type: security-reviewer` with `mode: verify`, the diff command and that one finding line. Spawn all of them **in parallel** in one message. Drop every finding whose verifier answers `drop` or a confidence below 8; list the dropped IDs with the verifier's reason under the Security report. Skip this step if the Security sub-agent reported no findings.
 
 ### 5. Aggregate
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
+Present the reports under `## Standards`, `## Spec` and `## Security` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why separate axes_).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
-## Why two axes
+## Why separate axes
 
-A change can pass one axis and fail the other:
+A change can pass one axis and fail another:
 
 - Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+- Clean, spec-conformant code that follows an agent-controlled symlink → **Standards and Spec pass, Security fail.**
 
-Reporting them separately stops one axis from masking the other.
+Reporting them separately stops one axis from masking another. Security has its own reviewer because its bar differs: it reports only exploitable issues with high confidence, where the other axes report every deviation.

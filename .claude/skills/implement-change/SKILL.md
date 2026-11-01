@@ -1,6 +1,6 @@
 ---
 name: implement-change
-description: Orchestrate the implementation of an OpenSpec change. A Sonnet implementer writes the code, two Opus reviewers (Standards, Spec) review it, the orchestrator classifies the findings and the user confirms the fix list every round, until no blocking finding is open.
+description: Orchestrate the implementation of an OpenSpec change. A Sonnet implementer writes the code, three Opus reviewers (Standards, Spec, Security) review it, the orchestrator classifies the findings and the user confirms the fix list every round, until no blocking finding is open.
 argument-hint: <change-name>
 disable-model-invocation: true
 ---
@@ -47,15 +47,17 @@ When it reports:
 2. Diff range:
    - Round 1: `BASE...HEAD`, the whole change.
    - Round 2 and later: `HEAD_prev...HEAD`, only what the last fix round changed, plus the ledger check.
-3. Spawn both reviewers **in parallel** in one message:
+3. Spawn all three reviewers **in parallel** in one message:
    - `subagent_type: standards-reviewer`: diff command, commit list, standards files, the smell baseline pasted in full, the ledger rows.
    - `subagent_type: spec-reviewer`: diff command, commit list, the change's context files (`openspec instructions apply --change <name> --json`, with `--store`, → `contextFiles`), the ledger rows.
+   - `subagent_type: security-reviewer`: `mode: find`, diff command, commit list, the ledger rows.
+4. Filter the Security findings as in step 4b of the code-review skill (one parallel `mode: verify` agent per finding, drop below confidence 8). Record dropped findings in the ledger as `rejected (verifier: <reason>)`.
 
 ## 4. Classify
 
 For every finding, decide each of the following and record it in the ledger.
 
-**Verify first.** Open the cited code for every finding a reviewer rates `critical` or `major`, and for any finding that looks doubtful. Mark false positives `rejected` with a one-line reason. Merge findings from both axes that describe the same defect into one entry and keep both IDs. Keep the axis label on each entry.
+**Verify first.** Open the cited code for every finding a reviewer rates `critical` or `major`, and for any finding that looks doubtful. Mark false positives `rejected` with a one-line reason. Merge findings from different axes that describe the same defect into one entry and keep all IDs. Keep the axis label on each entry.
 
 **Blocking** (must be fixed before the change is done):
 - A spec requirement is missing, partial or wrong. A spec scenario has no test.
