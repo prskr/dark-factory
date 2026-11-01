@@ -37,7 +37,7 @@
 
 ## 7. End-to-end
 
-- [ ] 7.1 Run `tests/github_live.rs` on github.com against a private scratch repository with `native` (default), `title-prefix` and `auto`, and a public one with `native`. On the dev cluster, run a task for a project on github.com end to end: clone and push with `agent.gitUsername` and the token, draft PR after the first push, `complete_task` marks it ready and posts the summary. Record the results with the date in `plugins/github/README.md` (status line like the Forgejo README)
+- [ ] 7.1 Run `tests/github_live.rs` on github.com against a private scratch repository with `native` (default), `title-prefix` and `auto`, and a public one with `native`. On the dev cluster, run a task for a project on github.com end to end: clone and push through the gateway's Git proxy (no `github.com` egress rule), draft PR after the first push, `complete_task` marks it ready and posts the summary. Record the results with the date in `plugins/github/README.md` (status line like the Forgejo README)
   - Live part done 2026-10-30 (private repository on GitHub Free with `native` default, `title-prefix` and `auto`; public with `native`; README status line updated); the dev-cluster run is open, like the cluster check of 6.3
 
 ## 8. Optional: requests against GitHub's OpenAPI description
