@@ -239,7 +239,7 @@ pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
 
 pull(
     name = "distroless_static_debian13_nonroot",
-    digest = "sha256:15f8637509792e05b97d83451b0b6ccfa4abd548f997e406ac1e72c87fe1fa78",
+    digest = "sha256:448810357cc8e67b7208988abdba0f5ec3d3aebee0a5b13eb624979792cffc0f",
     # Bazel downloader: blobs land in the repository cache (sha256-addressed) and are not fetched again.
     downloader = "bazel",
     # Only the platforms the images are built for; every child manifest counts as a registry pull.
