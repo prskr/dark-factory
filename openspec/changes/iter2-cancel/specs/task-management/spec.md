@@ -13,6 +13,29 @@ A task SHALL have exactly one status: `queued` (pending work, no active run), `r
 - **WHEN** a message is queued on a task in status `blocked`
 - **THEN** the task status becomes `queued`
 
+### Requirement: Mark a task done
+A board member SHALL be able to mark a task done unless it is `queued`, `running` or already `completed`. The task SHALL become `completed`; if it has a run in `awaiting_input`, the control plane SHALL cancel that run. The change SHALL be audited with the actor. If the task has a PR, the control plane SHALL mark it ready for review after the status change, without a summary; a forge failure is logged and doesn't undo the status. Undelivered messages stay queued; a new message reopens the task as for any `completed` task.
+
+#### Scenario: Close a waiting task
+- **WHEN** a board member marks `DF-1` in status `waiting` done
+- **THEN** `DF-1` becomes `completed` and an audit entry names the board member
+
+#### Scenario: Close a waiting task with a PR
+- **WHEN** a board member marks `DF-1` in status `waiting` with a draft PR done
+- **THEN** `DF-1` becomes `completed`, the PR is no longer a draft and gets no new comment
+
+#### Scenario: Mark done without a PR
+- **WHEN** a board member marks a task without a PR done
+- **THEN** the task becomes `completed` and the forge is not called
+
+#### Scenario: Not while working
+- **WHEN** a board member tries to mark a `running` task done
+- **THEN** the request is rejected and the status does not change
+
+#### Scenario: Not twice
+- **WHEN** a board member tries to mark a `completed` task done
+- **THEN** the request is rejected as a conflict and no audit entry is written
+
 ## ADDED Requirements
 
 ### Requirement: Cancelling a task

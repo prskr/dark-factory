@@ -48,6 +48,7 @@
 
 ### Finishing
 - Call `complete_task` only when the work is done and committed, with a summary written for the reviewer.
+- If the instructions leave nothing to do (already done, nothing to change, question answered), call `complete_task` anyway with a summary that says why. Ending the turn without it leaves the task `waiting` for a human.
 
 ### Delegating (coordinating agents, e.g. the CEO)
 - Split work by unit of ownership — typically one branch or one PR per child task — and state the definition of done for each.

@@ -106,7 +106,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Item | Status | Reference |
 |---|---|---|
 | Full-harness mode as a separate ACP binary (`df-native`); uses the inference endpoint of iteration 3 | decided | ADR-0045, context §4.1, `openspec/changes/full-harness-mode` |
-| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); no tools, single text output, sanitized; uses the provider configuration of the inference endpoint; ADR on model credentials in the control plane | decided | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7), [`design/egress.md`](../../design/egress.md) §9 |
+| Factory minion: optional model call in the control plane for task titles and summaries (title source `generated`, see `ui-redesign`); for a task a human marked done, a summary from the transcript (e.g. the last 50 messages) posted to the PR in place of the agent's completion summary (`iter2-cancel` D5); no tools, single text output, sanitized; uses the provider configuration of the inference endpoint; ADR on model credentials in the control plane | decided | `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7), [`design/egress.md`](../../design/egress.md) §9 |
 | OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
