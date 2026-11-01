@@ -159,11 +159,11 @@ The chart SHALL declare `kubeVersion: ">=1.36.0-0"` and SHALL NOT offer a runtim
 - **THEN** the instance configuration has no `runtimeDelivery` key and `values.yaml` has no `sandboxNamespace.runtimeDelivery`
 
 ### Requirement: Plugin images
-For each entry under `plugins.<name>` with an image, the chart SHALL mount it as a read-only image volume at `/plugins/<name>` of the control plane pod and SHALL write `plugins.<name>.path: /plugins/<name>/plugin.wasm`, call timeout, memory limit, settings and, when set, `hosts` and `authScheme` into the instance config. An entry without an image SHALL require `path` and SHALL render only the config. The default values SHALL configure `forgejo` with its plugin image of the chart's app version.
+For each `plugins.<name>` entry with an image, the chart SHALL mount it as a read-only image volume at `/plugins/<name>` in the control plane pod and SHALL write the path `/plugins/<name>/plugin.wasm`, call timeout, memory limit, settings and, when set, `hosts` and `authScheme` to the instance config. An entry without an image SHALL require `path` and render only the config. Default values SHALL configure `forgejo`, and `github` for `github.com`, with plugin images of the chart's app version.
 
 #### Scenario: Default release
 - **WHEN** the chart is rendered with default values
-- **THEN** the control plane pod has an image volume with the Forgejo plugin image mounted read-only at `/plugins/forgejo`, and the instance config sets `plugins.forgejo.path` to `/plugins/forgejo/plugin.wasm`
+- **THEN** the control plane pod has image volumes with the Forgejo and GitHub plugin images mounted read-only at `/plugins/forgejo` and `/plugins/github`, and the instance config sets `plugins.forgejo.path` to `/plugins/forgejo/plugin.wasm` and `plugins.github.path` to `/plugins/github/plugin.wasm`
 
 #### Scenario: Pinned digest
 - **WHEN** `plugins.forgejo.image.digest` is set
@@ -178,12 +178,20 @@ For each entry under `plugins.<name>` with an image, the chart SHALL mount it as
 - **THEN** rendering fails with a message naming the plugin
 
 #### Scenario: Routing values
-- **WHEN** `plugins.github` sets `hosts: [{host: github.com, apiUrl: https://api.github.com}]` and `authScheme: bearer`
-- **THEN** the instance config contains both values unchanged under `plugins.github`
+- **WHEN** `plugins.github.hosts` is set to `[{host: github.com, apiUrl: https://api.github.com}, {host: ghe.example.org, apiUrl: https://ghe.example.org/api/v3}]` and `authScheme` to `bearer`
+- **THEN** the instance config contains both routes and `authScheme` unchanged under `plugins.github`
+
+#### Scenario: Default routes
+- **WHEN** the chart is rendered with default values
+- **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it is the default plugin, and `plugins.github` has `authScheme: bearer` and `hosts: [{host: github.com, apiUrl: https://api.github.com}]`
 
 #### Scenario: Default release has no hosts
 - **WHEN** the chart is rendered with default values
-- **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it serves every project
+- **THEN** `plugins.forgejo` in the instance config has no `hosts`, so it serves every project on a host no other plugin claims
+
+#### Scenario: Entry removed
+- **WHEN** `plugins.github` is set to `null`
+- **THEN** no `plugin-github` volume is rendered, the instance config has no `github` entry, and projects on `github.com` go to the default plugin
 
 ### Requirement: Plugin names
 Plugin names under `plugins` SHALL be lowercase DNS labels of at most 54 characters, so that the volume name `plugin-<name>` is a valid DNS label.

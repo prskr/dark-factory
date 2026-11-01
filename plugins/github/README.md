@@ -100,7 +100,9 @@ Status: verified against github.com (`cargo test -p df-plugins --test github_liv
 `title-prefix` and `auto`, and in a public one with `native`: creating a draft, finding it by head
 and base, retitling it (stays a draft), marking it ready and commenting on the pull request and on
 an issue all succeed. GitHub created native drafts in both repositories, so `auto` did not need its
-fallback; the unit tests cover the fallback. Not yet verified: a task end to end on the dev cluster.
+fallback; the unit tests cover the fallback. A task on github.com ran end to end on the dev cluster
+(2026-11-01): clone and push through the gateway's Git proxy, draft pull request after the first
+push, ready and summary comment after `complete_task`.
 
 ## Error mapping
 
