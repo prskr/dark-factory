@@ -12,7 +12,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::push::{PushRecord, PushRecorder, RecordError};
-use crate::link::GrpcConnector;
+use crate::link::{CallError, GrpcConnector};
 
 /// Records waiting for a retry after their first attempt window; beyond that, newer records are
 /// dropped with a warning.
@@ -178,14 +178,7 @@ impl Sender {
             GatewayGitClient::new(channel)
                 .record_push(message.clone())
                 .await
-                .map_err(|status| {
-                    let error = RecordError(status.to_string());
-                    if is_transient(status.code()) {
-                        Failure::Transient(error)
-                    } else {
-                        Failure::Permanent(error)
-                    }
-                })?;
+                .map_err(|status| Failure::from(CallError::from(status)))?;
             Ok(())
         };
         tokio::time::timeout(limit, call)
@@ -200,14 +193,13 @@ enum Failure {
     Permanent(RecordError),
 }
 
-fn is_transient(code: tonic::Code) -> bool {
-    matches!(
-        code,
-        tonic::Code::Unavailable
-            | tonic::Code::DeadlineExceeded
-            | tonic::Code::ResourceExhausted
-            | tonic::Code::Unknown
-    )
+impl From<CallError> for Failure {
+    fn from(error: CallError) -> Self {
+        match error {
+            CallError::Transient(error) => Self::Transient(RecordError(error)),
+            CallError::Permanent(error) => Self::Permanent(RecordError(error)),
+        }
+    }
 }
 
 /// Retries queued records one after the other until each is stored. After `stop` it stores what

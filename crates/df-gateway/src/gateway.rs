@@ -16,7 +16,7 @@ use crate::metrics::Metrics;
 use crate::policy::Policy;
 use crate::proxy::{Dialer, Proxy};
 use crate::resolve::{BlockedRanges, Resolver};
-use crate::{health, tail, watch as policy_watch};
+use crate::{denials, health, tail, watch as policy_watch};
 
 /// Settings of a gateway pod.
 pub struct Settings {
@@ -80,14 +80,22 @@ where
     let blocked = BlockedRanges::new(settings.blocked_cidrs.iter().map(String::as_str))?;
     let flows = Arc::new(FlowLog::new(settings.buffer_size).with_max_age(settings.buffer_max_age));
     let policy_rx = policy_tx.subscribe();
-    let proxy = Arc::new(Proxy::new(
-        settings.pod.clone(),
-        policy_rx.clone(),
-        outside.resolver,
-        outside.dialer,
-        blocked,
-        flows.clone(),
-        settings.metrics.clone(),
+    let (reports, report_queue) = denials::DenialReports::new(denials::QUEUE_CAPACITY);
+    let proxy = Arc::new(
+        Proxy::new(
+            settings.pod.clone(),
+            policy_rx.clone(),
+            outside.resolver,
+            outside.dialer,
+            blocked,
+            flows.clone(),
+            settings.metrics.clone(),
+        )
+        .with_denial_reports(Arc::new(reports)),
+    );
+    let report_sink = Arc::new(denials::GrpcDenialSink::new(
+        outside.connector.clone(),
+        settings.control_plane.clone(),
     ));
 
     let mut parts = JoinSet::new();
@@ -95,6 +103,11 @@ where
     parts.spawn(async move {
         proxy.serve(proxy_listener, stop.cancelled_owned()).await;
         "the proxy"
+    });
+    let stop = shutdown.clone();
+    parts.spawn(async move {
+        denials::send_reports(report_queue, report_sink, stop).await;
+        "the denial reporter"
     });
     let stop = shutdown.clone();
     parts.spawn(async move {

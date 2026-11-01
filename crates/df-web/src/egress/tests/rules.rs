@@ -4,11 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use df_db::{EntryKind, Notification};
+use df_db::catalog::Actor;
+use df_db::{EntryKind, HostScope, Notification};
 
 use super::{BrokenServices, add_host, allowed, app_with_egress, new_viewer};
 use crate::egress::log::Filter;
-use crate::testkit::{TestApp, form, header_str, seed, text};
+use crate::testkit::{TestApp, actor, form, header_str, new_task, seed, text};
 
 #[tokio::test]
 async fn an_instance_entry_applies_to_every_project_and_is_listed() {
@@ -26,7 +27,9 @@ async fn an_instance_entry_applies_to_every_project_and_is_listed() {
     assert_eq!(header_str(&response, "hx-trigger"), "modal-close");
     let html = text(response).await;
     assert!(
-        html.contains(">api.anthropic.com<") && html.contains(">443<") && html.contains("Instance"),
+        html.contains(">api.anthropic.com<")
+            && html.contains(">443<")
+            && html.contains(">Everywhere<"),
         "{html}"
     );
 
@@ -251,6 +254,68 @@ async fn removing_an_entry_is_audited_and_announced() {
 }
 
 #[tokio::test]
+async fn task_entries_are_listed_with_their_task_key_and_can_be_removed() {
+    // Scenario "Task entries listed".
+    let app = app_with_egress(vec![]).await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "Fix CI").await;
+    let cookie = app.login().await;
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let mut tx = app.pool.begin().await.unwrap();
+    let entry = df_db::create_http_host_entry(
+        &mut tx,
+        HostScope::Task(task.id.as_uuid()),
+        "pypi.org",
+        443,
+        actor,
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let page = text(app.get("/egress/allowlist", &cookie).await).await;
+    let row = row_of(&page, ">pypi.org<");
+    assert!(row.contains(&format!(">Task {}<", task.key)), "{row}");
+    assert!(
+        row.contains(&format!("hx-delete=\"/egress/allowlist/{}\"", entry.id)),
+        "{row}"
+    );
+
+    let notifier = df_db::Notifier::start(&app.pool).await.unwrap();
+    let mut notifications = notifier.subscribe();
+    let response = app
+        .delete(&format!("/egress/allowlist/{}", entry.id), &cookie)
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!text(response).await.contains("pypi.org"));
+    assert!(df_db::list_entries(&app.pool).await.unwrap().is_empty());
+    let announced = tokio::time::timeout(Duration::from_secs(5), notifications.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(announced, Notification::EgressPolicy);
+    let deleted: serde_json::Value = sqlx::query_scalar(
+        "SELECT details FROM audit_log WHERE action = 'egress_allowlist.delete'",
+    )
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(deleted["task_key"], task.key.to_string(), "{deleted}");
+}
+
+/// The markup of the table row that contains `marker`.
+fn row_of<'a>(page: &'a str, marker: &str) -> &'a str {
+    let at = page.find(marker).unwrap();
+    let start = page[..at].rfind("<tr").unwrap();
+    &page[start..at + page[at..].find("</tr>").unwrap()]
+}
+
+#[tokio::test]
 async fn forms_are_modal_fragments_and_state_changes_need_htmx() {
     let app = app_with_egress(vec![]).await;
     let cookie = app.login().await;
@@ -310,17 +375,19 @@ async fn rule_rows_show_icon_port_scope_and_a_named_delete_button() {
     )
     .await;
     let page = text(app.get("/egress/allowlist", &cookie).await).await;
-    let github = &page[page.find(">github.com<").unwrap()..];
-    let github = &github[..github.find("</tr>").unwrap()];
+    let github = row_of(&page, ">github.com<");
     assert!(
-        github.contains(">443<") && github.contains("Instance"),
+        github.contains(">443<") && github.contains(">Everywhere<"),
         "{github}"
     );
     let github_row = &page[..page.find(">github.com<").unwrap()];
     assert!(github_row.rfind("data-host-icon=\"GH\"").is_some());
     let ghcr = &page[page.find(">ghcr.io<").unwrap() - 600..page.find(">ghcr.io<").unwrap()];
     assert!(ghcr.contains("data-host-icon=\"globe\""), "{ghcr}");
-    assert!(page.contains(">DF<"), "project scope");
+    assert!(
+        row_of(&page, ">ghcr.io<").contains(">Project DF<"),
+        "project scope"
+    );
     assert!(page.contains(">nativelink/scheduler<"), "{page}");
     assert!(
         page.contains(">cluster service<") && page.contains(">8980<"),

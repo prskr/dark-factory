@@ -13,6 +13,7 @@ use super::log::{Filter, Viewer};
 use super::{FlowSource, LookupError, ServiceLookup};
 use crate::testkit::{TestApp, form};
 
+mod allow;
 mod flows;
 mod icons;
 mod log;

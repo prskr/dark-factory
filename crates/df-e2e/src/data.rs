@@ -8,7 +8,15 @@ pub const PROJECT_NAME: &str = "Demo Factory";
 pub const RATE_LIMIT_PROJECT_KEY: &str = "RL";
 pub const RATE_LIMIT_PROJECT_NAME: &str = "Rate Limit";
 
-/// Persona that works on both projects.
+/// Project whose fake agent needs `pypi.org` (demo step 4 of iteration 2); tasks are `NA-<n>`.
+pub const NETWORK_PROJECT_KEY: &str = "NA";
+pub const NETWORK_PROJECT_NAME: &str = "Network Access";
+
+/// The host the fake agent of project `NA` fetches from, and the port of its `CONNECT`.
+pub const NETWORK_HOST: &str = "pypi.org";
+pub const NETWORK_PORT: u16 = 443;
+
+/// Persona that works on all projects.
 pub const PERSONA_NAME: &str = "e2e";
 
 /// Forgejo owner and repository the projects are linked to.
@@ -37,6 +45,7 @@ pub const PROJECT_IMAGE: &str = "ghcr.io/prskr/dark-factory/test-project:e2e";
 pub const FAKE_AGENT: &str = "/opt/harness/bin/fake-acp-agent";
 pub const DEMO_SCRIPT: &str = "/opt/harness/scripts/demo.yaml";
 pub const RATE_LIMIT_SCRIPT: &str = "/opt/harness/scripts/rate-limit.yaml";
+pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

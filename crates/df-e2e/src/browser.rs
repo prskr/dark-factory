@@ -9,6 +9,9 @@ use playwright_rs::{Playwright, expect, expect_page};
 
 use crate::env::E2eEnv;
 
+/// How long a page waits for a card that already exists in the database.
+const CARD_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A page of the remote browser. Keeps the local Playwright driver alive.
 pub struct Session {
     _playwright: Playwright,
@@ -117,6 +120,44 @@ impl Session {
             .with_context(|| format!("task key in {url}"))
     }
 
+    /// Opens the page of task `key`.
+    pub async fn open_task(&self, env: &E2eEnv, key: &str) -> Result<()> {
+        self.page
+            .goto(&format!("{}/tasks/{key}", env.base_url), None)
+            .await
+            .with_context(|| format!("open task {key}"))?;
+        Ok(())
+    }
+
+    /// Approves request `id` in the `/requests` inbox for `scope` (`task`, `project` or
+    /// `instance`) once its card shows `summary`. The decided card leaves the live inbox, so
+    /// callers check the outcome elsewhere.
+    pub async fn approve_request(
+        &self,
+        env: &E2eEnv,
+        id: &str,
+        summary: &str,
+        scope: &str,
+    ) -> Result<()> {
+        self.page
+            .goto(&format!("{}/requests", env.base_url), None)
+            .await
+            .context("open the requests inbox")?;
+        let card = format!("#request-{id}");
+        self.expect_region_text(&card, summary, CARD_TIMEOUT)
+            .await?;
+        self.page
+            .locator(format!("{card} input[name=scope][value={scope}]"))
+            .click(None)
+            .await
+            .with_context(|| format!("choose scope {scope}"))?;
+        self.page
+            .locator(format!("{card} button:has-text('Approve')"))
+            .click(None)
+            .await
+            .context("approve the request")
+    }
+
     /// Sends `message` to the open task.
     pub async fn send_message(&self, message: &str) -> Result<()> {
         self.page
@@ -152,6 +193,15 @@ impl Session {
             .to_contain_text(text)
             .await
             .with_context(|| format!("wait for `{text}` in {selector}"))
+    }
+
+    /// The rendered text of the element `selector` of the open task.
+    pub async fn region_text(&self, selector: &str) -> Result<String> {
+        self.page
+            .locator(selector)
+            .inner_text()
+            .await
+            .with_context(|| format!("text of {selector}"))
     }
 
     /// Waits until the open task shows `text` (a transcript line, a status).

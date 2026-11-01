@@ -53,8 +53,8 @@ pub async fn build(
     Ok(update)
 }
 
-/// A run's effective allowlist is the union of the instance entries and the entries of its
-/// project. The forge credentials are left empty.
+/// A run's effective allowlist is the union of the instance entries, the entries of its project
+/// and the entries of its task. The forge credentials are left empty.
 fn assemble(
     version: u64,
     runs: &[ActiveRun],
@@ -73,16 +73,11 @@ fn assemble(
             persona_id: run.persona_id.to_string(),
             hosts: entries
                 .iter()
-                .filter(|entry| entry.project_id.is_none_or(|id| id == run.project_id))
+                .filter(|entry| entry.scope.applies_to(run.task_id, run.project_id))
                 .map(|entry| HostRule {
                     pattern: entry.host.clone(),
                     port: u32::from(entry.port),
-                    scope: if entry.project_id.is_some() {
-                        "project"
-                    } else {
-                        "instance"
-                    }
-                    .into(),
+                    scope: entry.scope.as_str().into(),
                     entry_id: entry.id.to_string(),
                 })
                 .collect(),
@@ -179,12 +174,14 @@ async fn forge_credentials(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use df_db::HostScope;
     use uuid::Uuid;
 
     fn run(project: Uuid, key: &str) -> ActiveRun {
         ActiveRun {
             run_id: Uuid::now_v7(),
             pod_ip: "10.0.0.1".into(),
+            task_id: Uuid::now_v7(),
             task_key: format!("{key}-1"),
             run_number: 2,
             project_id: project,
@@ -209,25 +206,28 @@ mod tests {
         super::assemble(version, runs, entries, &settings())
     }
 
-    fn entry(project: Option<Uuid>, host: &str) -> HostEntry {
+    fn entry(scope: HostScope, host: &str) -> HostEntry {
         HostEntry {
             id: Uuid::now_v7(),
-            project_id: project,
+            scope,
             host: host.into(),
             port: 443,
         }
     }
 
     #[test]
-    fn effective_allowlist_is_the_union_of_instance_and_own_project_entries() {
+    fn effective_allowlist_is_the_union_of_instance_own_project_and_own_task_entries() {
         let (df, other) = (Uuid::now_v7(), Uuid::now_v7());
+        let (df_run, other_run) = (run(df, "DF"), run(other, "WEB"));
         let update = assemble(
             9,
-            &[run(df, "DF"), run(other, "WEB")],
+            &[df_run.clone(), other_run],
             &[
-                entry(None, "api.anthropic.com"),
-                entry(Some(df), "*.crates.io"),
-                entry(Some(other), "pypi.org"),
+                entry(HostScope::Instance, "api.anthropic.com"),
+                entry(HostScope::Project(df), "*.crates.io"),
+                entry(HostScope::Project(other), "pypi.org"),
+                entry(HostScope::Task(df_run.task_id), "files.pythonhosted.org"),
+                entry(HostScope::Task(Uuid::now_v7()), "registry.npmjs.org"),
             ],
         );
         assert_eq!(update.version, 9);
@@ -244,7 +244,8 @@ mod tests {
             hosts(&sandboxes[0]),
             [
                 ("api.anthropic.com".to_string(), "instance".to_string()),
-                ("*.crates.io".to_string(), "project".to_string())
+                ("*.crates.io".to_string(), "project".to_string()),
+                ("files.pythonhosted.org".to_string(), "task".to_string())
             ]
         );
         assert_eq!(
@@ -260,7 +261,7 @@ mod tests {
 
     #[test]
     fn no_runs_is_an_empty_snapshot() {
-        let update = assemble(1, &[], &[entry(None, "x.com")]);
+        let update = assemble(1, &[], &[entry(HostScope::Instance, "x.com")]);
         assert!(update.snapshot.unwrap().sandboxes.is_empty());
     }
 

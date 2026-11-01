@@ -1,0 +1,13 @@
+# Script of demo step 4 of iteration 2 (docs/demo.md): the proxy denies pypi.org until the board
+# member approves the `network-access` request; the fetch retries once a second in the same turn.
+sessions:
+  new:
+    - - say: "I need the package index from pypi.org."
+      - fetch:
+          url: https://pypi.org/simple/pip/
+          timeout_seconds: 240
+      - end: end_turn
+    # The approval's decision message is queued during the fetch and becomes the next prompt of
+    # this session, in the same run.
+    - - say: "Noted the decision."
+      - end: end_turn

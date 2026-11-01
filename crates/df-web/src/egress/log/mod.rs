@@ -15,6 +15,7 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::layout::{Nav, layout};
 
+mod allow;
 mod details;
 mod filter;
 mod graph;
@@ -22,6 +23,7 @@ mod page;
 mod rows;
 mod viewer;
 
+pub(super) use allow::{create as allow, dialog as allow_dialog};
 pub(super) use filter::Filter;
 #[cfg(test)]
 pub(super) use filter::VerdictFilter;

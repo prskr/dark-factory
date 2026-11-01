@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT approval_type FROM agent_requests WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "approval_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_requests",
+            "name": "approval_type"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e5994ab36b6daf6040f04fbf6ffba2b4f29bb2bef9ec454b1177bd036b5a2b5f"
+}
