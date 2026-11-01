@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod egress;
 pub mod git_pushes;
 pub mod migrate;
+pub mod network_access;
 pub mod notify;
 pub mod pool;
 pub mod projects;
@@ -19,8 +20,9 @@ pub mod users;
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
 pub use blobs::{BlobRow, PgBlobStore, sha256_hex};
 pub use egress::{
-    ActiveRun, ClusterServiceRule, EntryKind, EntryRecord, HostEntry, active_runs, add_entry,
-    delete_entry, http_host_entries, list_cluster_services, list_entries, next_policy_version,
+    ActiveRun, ClusterServiceRule, EntryKind, EntryRecord, HostEntry, HostScope, active_runs,
+    add_entry, create_http_host_entry, delete_entry, http_host_entries, list_cluster_services,
+    list_entries, lock_allowlist, next_policy_version,
 };
 pub use migrate::run_migrate;
 pub use notify::{Notification, Notifier, publish};

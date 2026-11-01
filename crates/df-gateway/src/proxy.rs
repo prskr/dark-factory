@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 
 use crate::count::{Counted, Direction, Metered, Traffic};
+use crate::denials::DenialReports;
 use crate::flow::{FlowLog, duration_proto, timestamp_now};
 use crate::metrics::{Decision, Metrics};
 use crate::policy::{self, Policy, Sandbox};
@@ -82,6 +83,8 @@ pub struct Proxy {
     flows: Arc<FlowLog>,
     metrics: Arc<Metrics>,
     tunnels: Arc<Tunnels>,
+    /// Where `not-allowlisted` denials of runs are reported, if anywhere.
+    denials: Option<Arc<DenialReports>>,
     /// Last flow id handed out.
     last_flow: AtomicU64,
     /// Tunnels and upstream HTTP connections. Aborted when `serve` ends.
@@ -128,11 +131,19 @@ impl Proxy {
             flows,
             metrics,
             tunnels: Arc::default(),
+            denials: None,
             // Ids must not repeat when the container restarts under the same pod name: start at
             // the current time (microseconds).
             last_flow: AtomicU64::new(unix_micros()),
             tasks: Mutex::new(Some(JoinSet::new())),
         }
+    }
+
+    /// Reports `not-allowlisted` denials of runs to `reports`.
+    #[must_use]
+    pub fn with_denial_reports(mut self, reports: Arc<DenialReports>) -> Self {
+        self.denials = Some(reports);
+        self
     }
 
     /// Serves connections from `listener` until `shutdown` resolves; open tunnels and upstream
@@ -198,6 +209,9 @@ impl Proxy {
             }
             let current = policy.borrow_and_update().clone();
             self.tunnels.close_disallowed(current.as_deref());
+            if let Some(reports) = &self.denials {
+                reports.retain_runs(current.as_deref());
+            }
         }
     }
 
@@ -274,6 +288,12 @@ impl Proxy {
         let rule = match decision.verdict {
             Ok(rule) => rule,
             Err(denial) => {
+                if denial == policy::Denial::NotAllowlisted
+                    && request.allowlistable()
+                    && let (Some(reports), Some(sandbox)) = (&self.denials, decision.sandbox)
+                {
+                    reports.denied(&sandbox.run_id, &target.host, target.port);
+                }
                 flow.event.reason = denial.reason().into();
                 self.finish(flow, Verdict::Denied);
                 return Err(Box::new(reply(status_of(denial), denial.reason())));

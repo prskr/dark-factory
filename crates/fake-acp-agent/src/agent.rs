@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, Content, ContentBlock, ContentChunk, Error,
@@ -20,7 +21,14 @@ use rmcp::ServiceExt;
 use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
 
-use crate::script::{EndStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn, UsageStep};
+use crate::script::{
+    EndStep, FetchStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn, UsageStep,
+};
+
+/// Pause between the attempts of a `fetch` step.
+const FETCH_RETRY: Duration = Duration::from_secs(1);
+/// Limit of one attempt of a `fetch` step.
+const FETCH_ATTEMPT: Duration = Duration::from_secs(10);
 
 /// Tracks active session state.
 #[derive(Debug, Clone)]
@@ -326,6 +334,7 @@ async fn play_step(step: Step, ctx: &TurnContext, cx: &ConnectionTo<Client>) -> 
         Step::Plan(plan_step) => play_plan(plan_step, ctx, cx),
         Step::Usage(usage_step) => play_usage(&usage_step, ctx, cx),
         Step::Shell(cmd) => run_shell(&cmd, &ctx.cwd).await,
+        Step::Fetch(fetch) => play_fetch(&fetch, ctx, cx).await,
         Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
         Step::End(end_step) => return play_end(end_step, ctx).await,
     }
@@ -407,6 +416,90 @@ async fn run_shell(cmd: &str, cwd: &Path) {
         Err(e) => {
             eprintln!("fake-acp-agent: failed to execute shell command '{cmd}': {e}");
         }
+    }
+}
+
+/// Plays a `fetch` step and says its outcome: `Fetched <url>.` or `Could not fetch <url>: <error>`.
+async fn play_fetch(fetch: &FetchStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let text = match fetch_until_ok(fetch, ctx).await {
+        Ok(()) => format!("Fetched {}.", fetch.url),
+        Err(error) => format!("Could not fetch {}: {error}", fetch.url),
+    };
+    send_update(cx, &ctx.session_id, text_chunk_update(text, false));
+}
+
+/// GETs the URL until it succeeds, the timeout has passed or the turn is cancelled; the error
+/// is the one of the last attempt.
+async fn fetch_until_ok(fetch: &FetchStep, ctx: &TurnContext) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now()
+        .checked_add(Duration::from_secs(fetch.timeout_seconds))
+        .ok_or_else(|| format!("timeout_seconds {} is too large", fetch.timeout_seconds))?;
+    loop {
+        let limit = fetch_attempt_limit(deadline, tokio::time::Instant::now());
+        let error = match fetch_once(&fetch.url, limit).await {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if ctx.cancelled.load(Ordering::SeqCst) {
+            return Err(format!("cancelled ({error})"));
+        }
+        if tokio::time::Instant::now() + FETCH_RETRY > deadline {
+            return Err(error);
+        }
+        if sleep_unless_cancelled(FETCH_RETRY, &ctx.cancel_notify, &ctx.cancelled).await {
+            return Err(format!("cancelled ({error})"));
+        }
+    }
+}
+
+/// Limit of the next attempt of a `fetch` step: the time left until `deadline`, at most
+/// [`FETCH_ATTEMPT`] and at least a second.
+pub(crate) fn fetch_attempt_limit(
+    deadline: tokio::time::Instant,
+    now: tokio::time::Instant,
+) -> Duration {
+    deadline
+        .saturating_duration_since(now)
+        .clamp(Duration::from_secs(1), FETCH_ATTEMPT)
+}
+
+/// Sleeps for `duration` unless the turn is or gets cancelled; returns whether it was.
+pub(crate) async fn sleep_unless_cancelled(
+    duration: Duration,
+    cancel_notify: &Notify,
+    cancelled: &AtomicBool,
+) -> bool {
+    // Register for the wakeup before checking the flag, so a cancel in between is not lost.
+    let notified = cancel_notify.notified();
+    tokio::pin!(notified);
+    notified.as_mut().enable();
+    if cancelled.load(Ordering::SeqCst) {
+        return true;
+    }
+    tokio::select! {
+        () = notified => true,
+        () = tokio::time::sleep(duration) => false,
+    }
+}
+
+async fn fetch_once(url: &str, limit: Duration) -> Result<(), String> {
+    let output = tokio::process::Command::new("curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--output",
+            "/dev/null",
+        ])
+        .args(["--max-time", &limit.as_secs().to_string(), "--url", url])
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|e| format!("cannot run curl: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
     }
 }
 

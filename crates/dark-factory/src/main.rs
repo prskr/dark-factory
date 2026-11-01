@@ -300,8 +300,8 @@ where
     let flows = dev
         .demo_flows()
         .or_else(|| egress_log_relay(&cfg, tls_config));
-    // One registry for the UI (deciding) and the agent channel (raising). No type yet.
-    let approval_types = df_db::requests::ApprovalTypes::default();
+    // One registry for the UI (deciding) and the agent channel (raising).
+    let approval_types = df_db::requests::ApprovalTypes::builtin();
     let web = web_router(
         &cfg,
         &pool,

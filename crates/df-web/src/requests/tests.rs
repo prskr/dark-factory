@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use df_core::{Principal, RequestId, TaskId};
-use df_db::requests::{raise_approval, raise_question};
+use df_db::requests::{Raised, raise_approval, raise_question};
 use serde_json::json;
 
 use crate::testkit::{SseReader, TestApp, add_event, form, insert_run, new_task, seed, text};
@@ -50,7 +50,7 @@ impl Fixture {
 
     async fn approval(&self, reason: &str) -> RequestId {
         let agent = self.agent();
-        raise_approval(
+        let raised = raise_approval(
             &self.app.pool,
             &TestApp::approval_types(),
             self.from(&agent),
@@ -59,9 +59,11 @@ impl Fixture {
             reason,
         )
         .await
-        .unwrap()
-        .0
-        .id
+        .unwrap();
+        let Raised::Request { request, .. } = raised else {
+            panic!("not stored")
+        };
+        request.id
     }
 
     async fn page(&self, uri: &str) -> String {

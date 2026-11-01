@@ -26,9 +26,11 @@ None.
 - `run-orchestration`: stopping a run, stop timeout, and the stop exception in the run-end mapping.
 - `agent-requests` (introduced by `iter2-agent-requests`): pending requests close on cancellation.
 - `task-ui` (introduced by `iter1-control-plane-web`): stop and cancel actions.
+- `network-access-requests` (introduced by `iter2-egress-approvals`): denial reports for a cancelled task raise no request.
 
 ## Impact
 
 - Code: `df-db` migration (task status `cancelled`, `runs.stop_requested_at`, prompt state `discarded`), control plane run service (stop, timeout scan), `df-web` actions, the `df-web` mark-done handler calls the forge after the status change. No protocol change: `Cancel` and `RUN_OUTCOME_CANCELLED` already exist. The `complete_task` description in `contract/mcp/factory-tools.v2.json` changes (no schema change).
 - **Archive order:** after `iter2-agent-requests`, because both modify `Task status vocabulary` and `Run end maps to task status`; the deltas here include `blocked`.
+- **Archive order:** after `iter2-egress-approvals`, because the `network-access-requests` delta modifies its `Requests from denials`.
 - PenPot file "App Design": task detail boards (Desktop, Phone), cancel confirmation board, `Status badge` component; mapping rows in `docs/design-workflow.md`.

@@ -3,15 +3,20 @@
 //! Changes to entries write an audit entry and publish `egress_policy` in the transaction that
 //! changes them, so the notification reaches the gateways only for committed changes.
 
-use df_core::{CredentialRef, CredentialRefId};
+use df_core::{CredentialRef, CredentialRefId, RequestId};
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::catalog::Actor;
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::requests::Scope;
+
+/// Key of the transaction-level advisory lock that serializes `http-host` entry creation with
+/// denial handling (iter2-egress-approvals design D2, D3).
+const ALLOWLIST_LOCK_KEY: i64 = 0x6466_5f65_6772_6573; // "df_egres"
 
 /// What an allowlist entry allows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -28,11 +33,13 @@ pub enum EntryKind {
     },
 }
 
-/// A stored allowlist entry; `project_key` is `None` for instance scope.
+/// A stored allowlist entry: `project_key` is set for project scope, `task_key` for task scope,
+/// neither for instance scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EntryRecord {
     pub id: Uuid,
     pub project_key: Option<String>,
+    pub task_key: Option<String>,
     #[serde(flatten)]
     pub kind: EntryKind,
 }
@@ -40,6 +47,7 @@ pub struct EntryRecord {
 struct EntryRow {
     id: Uuid,
     project_key: Option<String>,
+    task_key: Option<String>,
     kind: String,
     host: Option<String>,
     port: Option<i32>,
@@ -79,6 +87,7 @@ impl TryFrom<EntryRow> for EntryRecord {
         Ok(Self {
             id: row.id,
             project_key: row.project_key,
+            task_key: row.task_key,
             kind,
         })
     }
@@ -89,6 +98,7 @@ impl TryFrom<EntryRow> for EntryRecord {
 pub struct ActiveRun {
     pub run_id: Uuid,
     pub pod_ip: String,
+    pub task_id: Uuid,
     pub task_key: String,
     pub run_number: i64,
     pub project_id: Uuid,
@@ -100,11 +110,74 @@ pub struct ActiveRun {
     pub forge_credential: Option<CredentialRef>,
 }
 
-/// An `http-host` entry for the policy snapshot; `project_id` is `None` for instance scope.
+/// The scope of an `http-host` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostScope {
+    Instance,
+    Project(Uuid),
+    Task(Uuid),
+}
+
+impl HostScope {
+    /// The entry scope an approval with `scope` creates for task `task_id` of project
+    /// `project_id`; `None` for [`Scope::Run`], which has no entry.
+    pub const fn for_approval(scope: Scope, task_id: Uuid, project_id: Uuid) -> Option<Self> {
+        match scope {
+            Scope::Run => None,
+            Scope::Task => Some(Self::Task(task_id)),
+            Scope::Project => Some(Self::Project(project_id)),
+            Scope::Instance => Some(Self::Instance),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Instance => "instance",
+            Self::Project(_) => "project",
+            Self::Task(_) => "task",
+        }
+    }
+
+    pub const fn project_id(self) -> Option<Uuid> {
+        match self {
+            Self::Project(id) => Some(id),
+            Self::Instance | Self::Task(_) => None,
+        }
+    }
+
+    pub const fn task_id(self) -> Option<Uuid> {
+        match self {
+            Self::Task(id) => Some(id),
+            Self::Instance | Self::Project(_) => None,
+        }
+    }
+
+    /// Whether an entry of this scope applies to the runs of task `task_id` of project
+    /// `project_id`.
+    pub fn applies_to(self, task_id: Uuid, project_id: Uuid) -> bool {
+        match self {
+            Self::Instance => true,
+            Self::Project(id) => id == project_id,
+            Self::Task(id) => id == task_id,
+        }
+    }
+}
+
+impl From<HostScope> for Scope {
+    fn from(scope: HostScope) -> Self {
+        match scope {
+            HostScope::Instance => Self::Instance,
+            HostScope::Project(_) => Self::Project,
+            HostScope::Task(_) => Self::Task,
+        }
+    }
+}
+
+/// An `http-host` entry for the policy snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostEntry {
     pub id: Uuid,
-    pub project_id: Option<Uuid>,
+    pub scope: HostScope,
     pub host: String,
     pub port: u16,
 }
@@ -123,7 +196,7 @@ pub async fn next_policy_version(pool: &PgPool) -> Result<u64, DbError> {
 /// Runs in a non-terminal state that have a pod address, oldest first.
 pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
     let rows = sqlx::query!(
-        r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.key AS task_key, r.number AS run_number, p.id AS project_id,
+        r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,
                   p.key AS project_key, t.persona_id, p.repo_url, p.base_branch,
                   c.id AS "credential_id?", c.name AS "credential_name?",
                   c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
@@ -158,6 +231,7 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
             },
             run_id: row.run_id,
             pod_ip: row.pod_ip,
+            task_id: row.task_id,
             task_key: row.task_key,
             run_number: row.run_number,
             project_id: row.project_id,
@@ -173,7 +247,7 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
 /// logged), so a corrupt row narrows the policy instead of widening it.
 pub async fn http_host_entries(pool: &PgPool) -> Result<Vec<HostEntry>, DbError> {
     let rows = sqlx::query!(
-        r#"SELECT id, project_id, host AS "host!", port AS "port!" FROM egress_allowlist
+        r#"SELECT id, project_id, task_id, host AS "host!", port AS "port!" FROM egress_allowlist
            WHERE kind = 'http-host' AND host IS NOT NULL AND port IS NOT NULL
            ORDER BY created_at, id"#
     )
@@ -184,7 +258,11 @@ pub async fn http_host_entries(pool: &PgPool) -> Result<Vec<HostEntry>, DbError>
         .filter_map(|row| match port_from_db(row.port) {
             Ok(port) => Some(HostEntry {
                 id: row.id,
-                project_id: row.project_id,
+                scope: match (row.task_id, row.project_id) {
+                    (Some(task), _) => HostScope::Task(task),
+                    (None, Some(project)) => HostScope::Project(project),
+                    (None, None) => HostScope::Instance,
+                },
                 host: row.host,
                 port,
             }),
@@ -196,15 +274,17 @@ pub async fn http_host_entries(pool: &PgPool) -> Result<Vec<HostEntry>, DbError>
         .collect())
 }
 
-/// All entries, instance scope first, then by project.
+/// All entries: instance scope first, then project and task entries by key.
 pub async fn list_entries(pool: &PgPool) -> Result<Vec<EntryRecord>, DbError> {
     let rows = sqlx::query_as!(
         EntryRow,
-        r#"SELECT e.id, p.key AS "project_key?", e.kind, e.host, e.port, e.namespace, e.service,
-                  e.ports, e.allow_dns
-           FROM egress_allowlist e LEFT JOIN projects p ON p.id = e.project_id
-           ORDER BY (e.project_id IS NOT NULL), p.key, e.kind, e.host, e.namespace, e.service,
-                    e.id"#
+        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.kind, e.host, e.port,
+                  e.namespace, e.service, e.ports, e.allow_dns
+           FROM egress_allowlist e
+           LEFT JOIN projects p ON p.id = e.project_id
+           LEFT JOIN tasks t ON t.id = e.task_id
+           ORDER BY (e.task_id IS NOT NULL), (e.project_id IS NOT NULL), p.key, t.key, e.kind,
+                    e.host, e.namespace, e.service, e.id"#
     )
     .fetch_all(pool)
     .await?;
@@ -212,7 +292,8 @@ pub async fn list_entries(pool: &PgPool) -> Result<Vec<EntryRecord>, DbError> {
 }
 
 /// Adds an entry at instance scope (`project_key` is `None`) or for a project. An identical
-/// entry is a [`DbError::Conflict`], an unknown project [`DbError::NotFound`].
+/// entry is a [`DbError::Conflict`], an unknown project [`DbError::NotFound`]. `http-host`
+/// entries go through [`create_http_host_entry`].
 pub async fn add_entry(
     pool: &PgPool,
     actor: Actor<'_>,
@@ -229,32 +310,29 @@ pub async fn add_entry(
         ),
         None => None,
     };
-    let duplicate: bool = match kind {
+    let (namespace, service, ports, allow_dns) = match kind {
         EntryKind::HttpHost { host, port } => {
-            sqlx::query_scalar!(
-                r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'
-                     AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3) AS "exists!""#,
-                host,
-                i32::from(*port),
-                project_id
-            )
-            .fetch_one(&mut *tx)
-            .await?
+            let scope = project_id.map_or(HostScope::Instance, HostScope::Project);
+            let record = create_http_host_entry(&mut tx, scope, host, *port, actor, None).await?;
+            tx.commit().await?;
+            return Ok(record);
         }
         EntryKind::ClusterService {
-            namespace, service, ..
-        } => {
-            sqlx::query_scalar!(
-                r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'
-                     AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3) AS "exists!""#,
-                namespace,
-                service,
-                project_id
-            )
-            .fetch_one(&mut *tx)
-            .await?
-        }
+            namespace,
+            service,
+            ports,
+            allow_dns,
+        } => (namespace, service, ports, allow_dns),
     };
+    let duplicate = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'
+             AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3) AS "exists!""#,
+        namespace,
+        service,
+        project_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     if duplicate {
         return Err(DbError::Conflict("this entry already exists".into()));
     }
@@ -265,50 +343,138 @@ pub async fn add_entry(
     } else {
         "instance"
     };
-    match kind {
-        EntryKind::HttpHost { host, port } => {
-            sqlx::query!(
-                "INSERT INTO egress_allowlist (id, scope, project_id, kind, host, port)
-                 VALUES ($1, $2, $3, 'http-host', $4, $5)",
-                id,
-                scope,
-                project_id,
-                host,
-                i32::from(*port)
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-        EntryKind::ClusterService {
-            namespace,
-            service,
-            ports,
-            allow_dns,
-        } => {
-            let ports: Vec<i32> = ports.iter().map(|p| i32::from(*p)).collect();
-            sqlx::query!(
-                "INSERT INTO egress_allowlist
-                     (id, scope, project_id, kind, namespace, service, ports, allow_dns)
-                 VALUES ($1, $2, $3, 'cluster-service', $4, $5, $6, $7)",
-                id,
-                scope,
-                project_id,
-                namespace,
-                service,
-                &ports,
-                *allow_dns
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    let db_ports: Vec<i32> = ports.iter().map(|p| i32::from(*p)).collect();
+    sqlx::query!(
+        "INSERT INTO egress_allowlist
+             (id, scope, project_id, kind, namespace, service, ports, allow_dns)
+         VALUES ($1, $2, $3, 'cluster-service', $4, $5, $6, $7)",
+        id,
+        scope,
+        project_id,
+        namespace,
+        service,
+        &db_ports,
+        *allow_dns
+    )
+    .execute(&mut *tx)
+    .await?;
     let record = EntryRecord {
         id,
         project_key: project_key.map(str::to_string),
+        task_key: None,
         kind: kind.clone(),
     };
     audit_and_notify(&mut tx, actor, "create", &record).await?;
     tx.commit().await?;
+    Ok(record)
+}
+
+/// Takes the allowlist lock (design D3) until the end of `tx`.
+pub async fn lock_allowlist(tx: &mut Transaction<'_, Postgres>) -> Result<(), DbError> {
+    // Runtime-checked: the macros cannot describe the `void` result.
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(ALLOWLIST_LOCK_KEY)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Whether the effective allowlist of the runs of task `task_id` (instance, project and task
+/// entries) has an `http-host` rule for `host` and exactly `port`, matched as the proxy matches.
+pub async fn allowlist_covers(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: Uuid,
+    host: &str,
+    port: u16,
+) -> Result<bool, DbError> {
+    let patterns = sqlx::query_scalar!(
+        r#"SELECT e.host AS "host!" FROM egress_allowlist e JOIN tasks t ON t.id = $1
+         WHERE e.kind = 'http-host' AND e.host IS NOT NULL AND e.port = $2
+           AND (e.task_id = t.id OR e.project_id = t.project_id
+                OR (e.task_id IS NULL AND e.project_id IS NULL))"#,
+        task_id,
+        i32::from(port)
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(patterns
+        .iter()
+        .any(|pattern| df_core::host::pattern_matches(pattern, host)))
+}
+
+/// Creates an `http-host` entry (`host` as returned by
+/// [`df_core::host::validate_allowlist_host`]) under the allowlist lock,
+/// audits it, publishes `egress_policy` and approves the pending `network-access` requests the
+/// entry covers, with `actor` as decider. `deciding` is the request whose approval creates the
+/// entry; it is not settled again. An identical entry is a [`DbError::Conflict`], an unknown
+/// project or task [`DbError::NotFound`].
+pub async fn create_http_host_entry(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: HostScope,
+    host: &str,
+    port: u16,
+    actor: Actor<'_>,
+    deciding: Option<RequestId>,
+) -> Result<EntryRecord, DbError> {
+    lock_allowlist(tx).await?;
+    let (project_id, task_id) = (scope.project_id(), scope.task_id());
+    let project_key = match project_id {
+        Some(id) => Some(
+            sqlx::query_scalar!("SELECT key FROM projects WHERE id = $1", id)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?,
+        ),
+        None => None,
+    };
+    let task_key = match task_id {
+        Some(id) => Some(
+            sqlx::query_scalar!("SELECT key FROM tasks WHERE id = $1", id)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or_else(|| DbError::NotFound(format!("task `{id}`")))?,
+        ),
+        None => None,
+    };
+    let duplicate = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'
+             AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3
+             AND task_id IS NOT DISTINCT FROM $4) AS "exists!""#,
+        host,
+        i32::from(port),
+        project_id,
+        task_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if duplicate {
+        return Err(DbError::Conflict("this entry already exists".into()));
+    }
+
+    let id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO egress_allowlist (id, scope, project_id, task_id, kind, host, port)
+         VALUES ($1, $2, $3, $4, 'http-host', $5, $6)",
+        id,
+        scope.as_str(),
+        project_id,
+        task_id,
+        host,
+        i32::from(port)
+    )
+    .execute(&mut **tx)
+    .await?;
+    let record = EntryRecord {
+        id,
+        project_key,
+        task_key,
+        kind: EntryKind::HttpHost {
+            host: host.to_string(),
+            port,
+        },
+    };
+    audit_and_notify(tx, actor, "create", &record).await?;
+    crate::network_access::settle(tx, scope, host, port, actor, deciding).await?;
     Ok(record)
 }
 
@@ -321,9 +487,11 @@ pub async fn delete_entry(
     let mut tx = pool.begin().await?;
     let row = sqlx::query_as!(
         EntryRow,
-        r#"SELECT e.id, p.key AS "project_key?", e.kind, e.host, e.port, e.namespace, e.service,
-                  e.ports, e.allow_dns
-           FROM egress_allowlist e LEFT JOIN projects p ON p.id = e.project_id
+        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.kind, e.host, e.port,
+                  e.namespace, e.service, e.ports, e.allow_dns
+           FROM egress_allowlist e
+           LEFT JOIN projects p ON p.id = e.project_id
+           LEFT JOIN tasks t ON t.id = e.task_id
            WHERE e.id = $1 FOR UPDATE OF e"#,
         id
     )
@@ -340,7 +508,7 @@ pub async fn delete_entry(
 }
 
 async fn audit_and_notify(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     actor: Actor<'_>,
     verb: &str,
     record: &EntryRecord,
@@ -414,6 +582,27 @@ fn port_from_db(port: i32) -> Result<u16, sqlx::Error> {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn approval_scopes_map_to_entry_scopes_and_back() {
+        let (task, project) = (Uuid::now_v7(), Uuid::now_v7());
+        assert_eq!(HostScope::for_approval(Scope::Run, task, project), None);
+        for (scope, expected) in [
+            (Scope::Task, HostScope::Task(task)),
+            (Scope::Project, HostScope::Project(project)),
+            (Scope::Instance, HostScope::Instance),
+        ] {
+            let host_scope = HostScope::for_approval(scope, task, project).unwrap();
+            assert_eq!(host_scope, expected);
+            assert_eq!(Scope::from(host_scope), scope);
+            assert_eq!(host_scope.as_str(), scope.as_str());
+            assert!(host_scope.applies_to(task, project));
+            assert_eq!(
+                host_scope.applies_to(Uuid::now_v7(), Uuid::now_v7()),
+                scope == Scope::Instance
+            );
+        }
+    }
 
     #[test]
     fn port_from_db_accepts_only_valid_ports() {
@@ -537,6 +726,67 @@ mod tests {
         assert!(list_cluster_services(&pool, None).await.is_err());
     }
 
+    #[tokio::test]
+    async fn task_scope_holds_only_http_host_entries_of_exactly_one_task() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let project = insert_project(&pool, "DF").await;
+        let persona = Uuid::now_v7();
+        sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, 'p', 'x')")
+            .bind(persona)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let task = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
+             VALUES ($1, $2, 7, 'DF-7', 't', 'user', $3)",
+        )
+        .bind(task)
+        .bind(project)
+        .bind(persona)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let insert = |scope: &'static str,
+                      project_id: Option<Uuid>,
+                      task_id: Option<Uuid>,
+                      kind: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query(
+                    "INSERT INTO egress_allowlist \
+                         (id, scope, project_id, task_id, kind, host, port, namespace, service) \
+                     VALUES ($1, $2, $3, $4, $5, 'pypi.org', 443, 'ns', 'svc')",
+                )
+                .bind(Uuid::now_v7())
+                .bind(scope)
+                .bind(project_id)
+                .bind(task_id)
+                .bind(kind)
+                .execute(&pool)
+                .await
+            }
+        };
+
+        insert("task", None, Some(task), "http-host").await.unwrap();
+        for (scope, project_id, task_id, kind) in [
+            ("task", None, Some(task), "cluster-service"),
+            ("task", Some(project), Some(task), "http-host"),
+            ("task", None, None, "http-host"),
+            ("project", Some(project), Some(task), "http-host"),
+            ("instance", None, Some(task), "http-host"),
+        ] {
+            assert!(
+                insert(scope, project_id, task_id, kind).await.is_err(),
+                "{scope} {project_id:?} {task_id:?} {kind} accepted"
+            );
+        }
+
+        let entries = http_host_entries(&pool).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].scope, HostScope::Task(task));
+    }
+
     fn actor_fixture() -> (df_core::Principal, Vec<String>) {
         (
             df_core::Principal::human(df_core::UserId::new(), "Peter"),
@@ -638,6 +888,74 @@ mod tests {
         .unwrap();
         assert_eq!(details["host"], "pypi.org");
         assert_eq!(details["project_key"], "DF");
+    }
+
+    #[tokio::test]
+    async fn task_entries_are_their_own_scope_when_listed_and_checked_for_duplicates() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let project = insert_project(&pool, "DF").await;
+        let persona = Uuid::now_v7();
+        sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, 'p', 'x')")
+            .bind(persona)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let task = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
+             VALUES ($1, $2, 7, 'DF-7', 't', 'user', $3)",
+        )
+        .bind(task)
+        .bind(project)
+        .bind(persona)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (principal, roles) = actor_fixture();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let create = |scope| {
+            let pool = pool.clone();
+            async move {
+                let mut tx = pool.begin().await?;
+                let record =
+                    create_http_host_entry(&mut tx, scope, "pypi.org", 443, actor, None).await?;
+                tx.commit().await?;
+                Ok::<_, DbError>(record)
+            }
+        };
+
+        let task_entry = create(HostScope::Task(task)).await.unwrap();
+        assert_eq!(task_entry.task_key.as_deref(), Some("DF-7"));
+        assert_eq!(task_entry.project_key, None);
+        assert!(matches!(
+            create(HostScope::Task(task)).await,
+            Err(DbError::Conflict(_))
+        ));
+        add_entry(&pool, actor, None, &http_host("pypi.org", 443))
+            .await
+            .unwrap();
+        add_entry(&pool, actor, Some("DF"), &http_host("pypi.org", 443))
+            .await
+            .unwrap();
+        assert!(matches!(
+            create(HostScope::Task(Uuid::now_v7())).await,
+            Err(DbError::NotFound(_))
+        ));
+
+        let listed = list_entries(&pool).await.unwrap();
+        let scopes: Vec<_> = listed
+            .iter()
+            .map(|e| (e.project_key.as_deref(), e.task_key.as_deref()))
+            .collect();
+        assert_eq!(
+            scopes,
+            [(None, None), (Some("DF"), None), (None, Some("DF-7"))]
+        );
+        let deleted = delete_entry(&pool, actor, task_entry.id).await.unwrap();
+        assert_eq!(deleted, task_entry);
     }
 
     #[tokio::test]

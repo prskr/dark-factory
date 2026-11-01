@@ -53,6 +53,21 @@ impl Request<'_> {
             Self::Connect { host, .. } | Self::Http { host, .. } => host,
         }
     }
+
+    const fn port(&self) -> u16 {
+        match self {
+            Self::Connect { port, .. } | Self::Http { port, .. } => *port,
+        }
+    }
+
+    /// Whether an allowlist entry can allow the request: `CONNECT` on any port, plain HTTP only
+    /// on port 80.
+    pub const fn allowlistable(&self) -> bool {
+        match self {
+            Self::Connect { .. } => true,
+            Self::Http { port, .. } => *port == 80,
+        }
+    }
 }
 
 /// An allowlist entry of a run.
@@ -67,13 +82,7 @@ pub struct HostRule {
 
 impl HostRule {
     fn matches_host(&self, host: &str) -> bool {
-        match self.pattern.strip_prefix("*.") {
-            // `*.example.com` covers every name below `example.com`, not `example.com` itself.
-            Some(suffix) => host
-                .strip_suffix(suffix)
-                .is_some_and(|label| label.len() > 1 && label.ends_with('.')),
-            None => self.pattern == host,
-        }
+        df_core::host::pattern_matches(&self.pattern, host)
     }
 }
 
@@ -138,6 +147,11 @@ impl Policy {
 
     pub fn sandbox(&self, ip: IpAddr) -> Option<&Sandbox> {
         self.sandboxes.get(&ip)
+    }
+
+    /// Every active sandbox.
+    pub fn sandboxes(&self) -> impl Iterator<Item = &Sandbox> {
+        self.sandboxes.values()
     }
 
     /// The repository of the sandbox at `ip`, if its run has one.
@@ -206,29 +220,18 @@ pub fn decide<'a>(
     };
     let verdict = if request.host().parse::<IpAddr>().is_ok() {
         Err(Denial::IpLiteral)
+    } else if !request.allowlistable() {
+        Err(Denial::NotAllowlisted)
     } else {
-        let port = match request {
-            Request::Connect { port, .. } => port,
-            // Plain HTTP only goes to port 80, and only when an entry names port 80.
-            Request::Http { port: 80, .. } => 80,
-            Request::Http { .. } => return denied(sandbox, Denial::NotAllowlisted),
-        };
         sandbox
             .hosts
             .iter()
-            .find(|rule| rule.port == port && rule.matches_host(request.host()))
+            .find(|rule| rule.port == request.port() && rule.matches_host(request.host()))
             .ok_or(Denial::NotAllowlisted)
     };
     Decision {
         sandbox: Some(sandbox),
         verdict,
-    }
-}
-
-fn denied(sandbox: &Sandbox, denial: Denial) -> Decision<'_> {
-    Decision {
-        sandbox: Some(sandbox),
-        verdict: Err(denial),
     }
 }
 

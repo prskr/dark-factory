@@ -105,6 +105,11 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 
 - Elements of the "Rejected" page are not built (request URL, query parameters, headers, response details; "Last matched" and "Matched N requests").
 - The traffic page filters by persona and task, not by sandbox, and labels sandboxes with task key and run number.
+- "Network · allow a blocked host" is superseded by "Network · allow from a row, with scope" (`iter2-egress-approvals`): the destination is read-only, the dialog has a scope, and only `not-allowlisted` rows (not IP literals) offer "Allow".
+- The row action "+ Allow" is a text button like "Details" and "Rule", not the board's outlined button.
+- The popover of a blocked graph node opens below the node inside the graph panel; the board places it to the right, outside the panel.
+- The "Allow egress" dialog uses the shared form modal width (576 px) like the allowlist forms; the board is 480 px wide.
+- After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
@@ -118,6 +123,11 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Network / Network · live traffic | `/egress/log` | `--demo-flows` | 1440 |
 | Network / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
 | Network / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
+| Network / Network · allow from a row, with scope | `/egress/log` | `--demo-flows`; a `not-allowlisted` event of a run, "Allow" clicked | 1440 |
+| Network / Network · narrow table, blocked row menu | `/egress/log` | `--demo-flows`; menu of a `not-allowlisted` row open | 1280 |
+| Network / Network · allow from a graph node (hover) | `/egress/log` | `--demo-flows`; pointer on a blocked node | 1440 |
+| Network / Network · allow from a graph node, across tasks | `/egress/log` | `--demo-flows`; blocked node with denied edges from two tasks of one project, "Allow" clicked | 1440 |
+| Network / Egress rules · table with task entries | `/egress/allowlist` | manual seed (not built): instance, project and task `http-host` entries | 1440 |
 | Desktop / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
 | Desktop / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
 | Desktop / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
