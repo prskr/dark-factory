@@ -28,7 +28,7 @@ bazel_dep(name = "tar.bzl", version = "0.10.9")
 
 bazel_dep(name = "bazel_env.bzl", version = "0.10.0", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
-bazel_dep(name = "toolchains_musl", version = "0.1.29", dev_dependency = True)
+bazel_dep(name = "toolchains_musl", version = "0.2.0", dev_dependency = True)
 
 # Every Linux target is static musl (see docs/development.md). Exec tools (build scripts, proc-macros)
 # use the host's C toolchain.
