@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanitize_title};
-use df_db::requests::{Raise, RequestError, close_pending_for_task, raise_question};
+use df_db::requests::{
+    Raise, Raised, RequestError, close_pending_for_task, raise_approval, raise_question,
+};
 use df_db::{NewAuditEntry, Notification, publish, set_task_title, write_audit_entry};
 use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
@@ -275,6 +277,7 @@ async fn run_handler(
         "set_task_title" => set_title(ctx, rc, args).await,
         "complete_task" => complete_task(ctx, rc, args).await,
         "ask_question" => ask_question(ctx, rc, args).await,
+        "request_approval" => request_approval(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -481,6 +484,72 @@ async fn ask_question(
     })
 }
 
+/// Raises an approval request of a registered type unless the run has what it asks for already;
+/// a blocking one makes the run wait for the decision after the turn.
+async fn request_approval(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Outcome, ChannelError> {
+    let task_id = rc.task.id;
+    let blocking = args
+        .get("blocking")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let actor = Principal::agent(
+        rc.persona.id,
+        rc.persona.name.clone(),
+        Some(rc.run.id),
+        task_id,
+    );
+    let from = Raise {
+        task_id,
+        run_id: Some(rc.run.id),
+        actor: &actor,
+        blocking,
+    };
+    let raised = raise_approval(
+        &ctx.pool,
+        &ctx.approval_types,
+        from,
+        &text_arg(args, "type").unwrap_or_default(),
+        args.get("payload").cloned().unwrap_or(Value::Null),
+        &text_arg(args, "reason").unwrap_or_default(),
+    )
+    .await;
+    Ok(match raised {
+        Ok(Raised::AlreadyGranted) => Outcome {
+            structured: Some(serde_json::json!({ "state": "already-allowed" })),
+            ..Outcome::ok(
+                "Your run is already allowed this; no request was stored. If a connection was denied, retry it.",
+            )
+        },
+        Ok(Raised::Request { request, .. }) => Outcome {
+            await_input_after_turn: blocking,
+            structured: Some(
+                serde_json::json!({ "id": request.id, "state": request.state.as_str() }),
+            ),
+            ..Outcome::ok(if blocking {
+                format!(
+                    "Approval request {} raised. End your turn now; the decision arrives as a message and the run waits for it for a limited time.",
+                    request.id
+                )
+            } else {
+                format!(
+                    "Approval request {} raised. Continue your work; the decision arrives later as a message.",
+                    request.id
+                )
+            })
+        },
+        Err(
+            e @ (RequestError::Invalid(_)
+            | RequestError::TooManyPending
+            | RequestError::UnknownType(_)),
+        ) => Outcome::error(e.to_string()),
+        Err(e) => return Err(e.into()),
+    })
+}
+
 /// Forge failures become results the model can act on; they never end the run.
 fn forge_error(err: &IntegrationError) -> Outcome {
     Outcome::error(match err {
@@ -532,7 +601,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 6);
+        assert_eq!(VALIDATORS.len(), 7);
     }
 
     #[tokio::test]
@@ -1068,5 +1137,108 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reason, "task-completed");
+    }
+
+    fn network_access(host: &str, blocking: bool) -> ToolCallRequest {
+        call(
+            "request_approval",
+            serde_json::json!({
+                "type": "network-access",
+                "payload": {"host": host},
+                "reason": "pip install needs PyPI",
+                "blocking": blocking,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn request_approval_raises_a_pending_network_access_request() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        let res = execute(&env.ctx, &rc, network_access("PyPI.org", false)).await;
+
+        assert!(!res.is_error, "{}", message(&res));
+        assert!(!res.await_input_after_turn && !res.end_run_after_turn);
+        let structured: Value = serde_json::from_str(&res.structured_content_json).unwrap();
+        assert_eq!(structured["state"], "pending");
+        let id: uuid::Uuid = structured["id"].as_str().unwrap().parse().unwrap();
+        let (payload, reason, run): (Value, String, Option<uuid::Uuid>) = sqlx::query_as(
+            "SELECT payload, reason, run_id FROM agent_requests
+             WHERE id = $1 AND approval_type = 'network-access' AND state = 'pending'",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({ "host": "pypi.org", "port": 443 })
+        );
+        assert_eq!(reason, "pip install needs PyPI");
+        assert_eq!(run, Some(rc.run.id.as_uuid()));
+    }
+
+    #[tokio::test]
+    async fn blocking_request_approval_awaits_input_after_the_turn() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        let res = execute(&env.ctx, &rc, network_access("pypi.org", true)).await;
+
+        assert!(!res.is_error, "{}", message(&res));
+        assert!(res.await_input_after_turn);
+    }
+
+    #[tokio::test]
+    async fn request_approval_with_an_invalid_payload_is_an_error() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        let res = execute(&env.ctx, &rc, network_access("10.0.0.5", false)).await;
+
+        assert!(res.is_error);
+        assert!(
+            message(&res).contains("invalid request"),
+            "{}",
+            message(&res)
+        );
+        assert_eq!(pending_requests(&pool).await, 0);
+    }
+
+    #[tokio::test]
+    async fn request_approval_for_an_allowed_host_stores_nothing() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let (peter, roles) = (
+            Principal::human(df_core::UserId::new(), "Peter"),
+            Vec::new(),
+        );
+        let actor = df_db::catalog::Actor {
+            principal: &peter,
+            roles: &roles,
+        };
+        let entry = df_db::egress::EntryKind::HttpHost {
+            host: "pypi.org".into(),
+            port: 443,
+        };
+        df_db::egress::add_entry(&pool, actor, Some("DF"), &entry)
+            .await
+            .unwrap();
+
+        let res = execute(&env.ctx, &rc, network_access("PyPI.org", true)).await;
+
+        assert!(!res.is_error, "{}", message(&res));
+        assert!(
+            message(&res).contains("already allowed"),
+            "{}",
+            message(&res)
+        );
+        assert!(!res.await_input_after_turn);
+        let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0);
     }
 }

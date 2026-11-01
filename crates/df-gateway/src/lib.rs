@@ -6,6 +6,7 @@
 
 pub mod control;
 mod count;
+pub mod denials;
 pub mod flow;
 pub mod gateway;
 pub mod git;

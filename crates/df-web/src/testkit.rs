@@ -650,9 +650,9 @@ impl df_db::requests::ApprovalType for FakeApproval {
     fn validate(
         &self,
         _task: &df_db::TaskRow,
-        _payload: &serde_json::Value,
-    ) -> Result<(), df_db::requests::RequestError> {
-        Ok(())
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, df_db::requests::RequestError> {
+        Ok(payload.clone())
     }
     fn fingerprint(&self, payload: &serde_json::Value) -> String {
         payload.to_string()
@@ -668,6 +668,7 @@ impl df_db::requests::ApprovalType for FakeApproval {
         _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         _request: &df_db::requests::RequestRow,
         _scope: df_db::requests::Scope,
+        _decider: df_db::catalog::Actor<'_>,
     ) -> Result<(), df_db::requests::RequestError> {
         Ok(())
     }

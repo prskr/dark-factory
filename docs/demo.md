@@ -99,6 +99,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 | `assigned_task_gets_a_draft_pr_with_the_shaped_title_and_an_issue_comment` | DF-1 with the fake agent; tools during the first run |
 | `follow_up_resumes_the_session_and_completing_marks_the_pr_ready` | follow-up message; `complete_task` in run 2 (the task is `in_review`, run 2 ends `completed`) |
 | `rate_limited_run_shows_the_limit_and_the_next_message_continues` | rate-limited run (the UI shows "rate limited"; the retry time is checked on the run in the database) |
+| `denied_host_is_requested_and_the_approval_lets_the_retry_through` | demo step 4 of iteration 2 (`openspec/changes/iter2-egress-approvals`): the proxy denies `pypi.org:443`, the control plane raises a non-blocking `network-access` request, the test approves it for the task in `/requests`, and the agent's retry in the same turn succeeds within 10 s of the approval (UI included). Needs internet access from the cluster: the gateway never connects to private or cluster addresses, so no in-cluster host can stand in |
 
 Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-local`.
 
@@ -112,9 +113,11 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 | Persona | `e2e` (harness `claude-code`, no credential) |
 | Project `DF` | "Demo Factory", repository `http://forgejo-http.forgejo.svc:3000/factory/demo`, test project image, `fake-acp-agent --script /opt/harness/scripts/demo.yaml` |
 | Project `RL` | "Rate Limit", same repository, script `/opt/harness/scripts/rate-limit.yaml` |
-| Allowlist (instance scope) | cluster service `forgejo/forgejo-http`, port 3000, DNS allowed |
+| Project `NA` | "Network Access", same repository, script `/opt/harness/scripts/network-access.yaml` |
 
-`just seed` targets the `just serve-local` database (`postgres://postgres:postgres@127.0.0.1:5432/dark_factory`); set `E2E_DATABASE_URL` for another one. The cluster entry does not resolve without Kubernetes, but the row is written.
+There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git proxy.
+
+`just seed` targets the `just serve-local` database (`postgres://postgres:postgres@127.0.0.1:5432/dark_factory`); set `E2E_DATABASE_URL` for another one.
 
 ### Fake agent scripts
 
@@ -122,6 +125,7 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 
 - `demo.yaml`: run 1 plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, calls `complete_task` and ends.
 - `rate-limit.yaml`: run 1 ends with a rate limit (60 s), the next turn continues.
+- `network-access.yaml`: run 1 fetches `https://pypi.org/simple/pip/` with a `fetch` step (`curl` through the sandbox's proxy settings, retried once a second for up to 240 s) and says `Fetched <url>.` or `Could not fetch <url>: <error>`; the decision message is the next prompt of the same session, and the agent only answers it.
 
 ## Running on another machine
 

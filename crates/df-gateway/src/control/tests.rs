@@ -323,6 +323,56 @@ async fn snapshot_has_the_git_route_of_an_active_run_and_the_current_forge_crede
 }
 
 #[tokio::test]
+async fn a_task_entry_reaches_only_the_runs_of_its_task() -> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let other = insert_task(&pool, seed.project, seed.persona, 2).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    insert_run(&pool, other, 1, "running", Some("10.1.0.8")).await?;
+    let entry = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO egress_allowlist (id, scope, task_id, kind, host, port)
+         VALUES ($1, 'task', $2, 'http-host', 'pypi.org', 443)",
+    )
+    .bind(entry)
+    .bind(seed.task)
+    .execute(&pool)
+    .await?;
+
+    let update = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+
+    let sandboxes = update.snapshot.unwrap().sandboxes;
+    let hosts = |key: &str| -> Vec<(String, u32, String, String)> {
+        sandboxes
+            .iter()
+            .find(|sandbox| sandbox.task_key == key)
+            .unwrap()
+            .hosts
+            .iter()
+            .map(|h| {
+                (
+                    h.pattern.clone(),
+                    h.port,
+                    h.scope.clone(),
+                    h.entry_id.clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        hosts("DF-1"),
+        [(
+            "pypi.org".to_string(),
+            443,
+            "task".to_string(),
+            entry.to_string()
+        )]
+    );
+    assert!(hosts("DF-2").is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_changed_forge_secret_reaches_the_watch_after_the_refresh_period() -> Result<()> {
     use df_proto::gateway::v1::gateway_policy_server::GatewayPolicy;
     use futures::StreamExt;
@@ -447,6 +497,65 @@ async fn record_push_is_accepted_only_from_the_gateway_certificate() -> Result<(
         .fetch_all(&pool)
         .await?;
     assert_eq!(stored, [accepted]);
+    replica.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_reported_denial_raises_one_network_access_request() -> Result<()> {
+    use df_proto::gateway::v1::Denial;
+    use df_proto::gateway::v1::gateway_events_client::GatewayEventsClient;
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let run = insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
+    let replica = Replica::start(&pool, &pki).await?;
+    let (files, _dir) = gateway_credentials(&pki)?;
+    let channel = gateway_connector(files)
+        .connect(&replica.addr.to_string())
+        .await?;
+    let mut client = GatewayEventsClient::new(channel);
+    let denial = |run_id: String, port| Denial {
+        run_id,
+        host: "statsig.anthropic.com".into(),
+        port,
+        at: None,
+    };
+
+    client.report_denial(denial(run.to_string(), 443)).await?;
+    client.report_denial(denial(run.to_string(), 443)).await?;
+    let invalid = client
+        .report_denial(denial(run.to_string(), 0))
+        .await
+        .unwrap_err();
+    let malformed = client
+        .report_denial(denial("run-1".into(), 443))
+        .await
+        .unwrap_err();
+
+    assert_eq!(invalid.code(), tonic::Code::InvalidArgument, "{invalid}");
+    assert_eq!(
+        malformed.code(),
+        tonic::Code::InvalidArgument,
+        "{malformed}"
+    );
+    let stored: Vec<(String, String, bool, Option<Uuid>)> = sqlx::query_as(
+        "SELECT approval_type, fingerprint, blocking, run_id FROM agent_requests
+         WHERE task_id = $1 AND state = 'pending'",
+    )
+    .bind(seed.task)
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(
+        stored,
+        [(
+            "network-access".to_owned(),
+            "statsig.anthropic.com:443".to_owned(),
+            false,
+            None
+        )]
+    );
     replica.stop().await;
     Ok(())
 }
@@ -635,5 +744,50 @@ async fn an_entry_added_on_one_replica_reaches_a_gateway_on_another_within_a_sec
     watcher.abort();
     replica_a.stop().await;
     replica_b.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn approving_a_network_access_request_for_the_task_reaches_the_run_snapshot() -> Result<()> {
+    use df_core::{Principal, RunId, UserId};
+    use df_db::network_access::{DenialOutcome, raise_from_denial};
+    use df_db::requests::{ApprovalTypes, Decision, Raised, Scope, decide};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let run = insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let raised = raise_from_denial(&pool, RunId::from_uuid(run), "pypi.org", 443).await?;
+    let DenialOutcome::Raised(Raised::Request { request, new: true }) = raised else {
+        anyhow::bail!("no request raised: {raised:?}");
+    };
+    let notifier = Notifier::start(&pool).await?;
+    let mut notifications = notifier.subscribe();
+
+    decide(
+        &pool,
+        &ApprovalTypes::builtin(),
+        request.id,
+        &Principal::human(UserId::new(), "Peter"),
+        &["board-member".to_string()],
+        Decision::Approve(Scope::Task),
+    )
+    .await?;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while notifications.recv().await? != Notification::EgressPolicy {}
+        anyhow::Ok(())
+    })
+    .await??;
+    let update = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+    let sandboxes = sandboxes(&update);
+    let [sandbox] = sandboxes else {
+        anyhow::bail!("expected one sandbox: {update:?}");
+    };
+    let hosts: Vec<_> = sandbox
+        .hosts
+        .iter()
+        .map(|h| (h.pattern.as_str(), h.port, h.scope.as_str()))
+        .collect();
+    assert_eq!(hosts, [("pypi.org", 443, "task")]);
     Ok(())
 }

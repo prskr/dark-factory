@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Executor, Row};
+use uuid::Uuid;
 
 /// Schema of the control plane tables unless `E2E_DATABASE_SCHEMA` says otherwise.
 pub const DEFAULT_SCHEMA: &str = "dark_factory";
@@ -81,4 +82,71 @@ pub async fn runs(pool: &PgPool, key: &str) -> Result<Vec<RunRow>> {
             })
         })
         .collect()
+}
+
+/// A `network-access` request as the tests compare them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkRequest {
+    pub id: Uuid,
+    pub state: String,
+    /// Raised by the control plane (no run), not by the agent.
+    pub raised_by_control_plane: bool,
+    pub blocking: bool,
+    pub reason: String,
+    /// The scope of the approval.
+    pub scope: Option<String>,
+}
+
+/// The newest `network-access` request of task `key` for `host:port`.
+pub async fn network_request(
+    pool: &PgPool,
+    key: &str,
+    host: &str,
+    port: u16,
+) -> Result<Option<NetworkRequest>> {
+    let row = sqlx::query(
+        "SELECT r.id, r.state, r.run_id IS NULL AS raised_by_control_plane, r.blocking, r.reason, \
+         r.decision ->> 'scope' AS scope FROM agent_requests r \
+         JOIN tasks t ON t.id = r.task_id \
+         WHERE t.key = $1 AND r.approval_type = 'network-access' AND r.fingerprint = $2 \
+         ORDER BY r.created_at DESC LIMIT 1",
+    )
+    .bind(key)
+    .bind(format!("{host}:{port}"))
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("network-access request of task {key}"))?;
+    row.map(|row| {
+        Ok(NetworkRequest {
+            id: row.try_get("id")?,
+            state: row.try_get("state")?,
+            raised_by_control_plane: row.try_get("raised_by_control_plane")?,
+            blocking: row.try_get("blocking")?,
+            reason: row.try_get("reason")?,
+            scope: row.try_get("scope")?,
+        })
+    })
+    .transpose()
+}
+
+/// The scopes of the `http-host` allowlist entries for exactly `host:port` that cover task `key`
+/// (`task` for an entry of the task itself).
+pub async fn http_host_scopes(
+    pool: &PgPool,
+    key: &str,
+    host: &str,
+    port: u16,
+) -> Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT e.scope FROM egress_allowlist e, tasks t \
+         WHERE t.key = $1 AND e.kind = 'http-host' AND e.host = $2 AND e.port = $3 \
+         AND (e.scope = 'instance' OR e.project_id = t.project_id OR e.task_id = t.id) \
+         ORDER BY e.scope",
+    )
+    .bind(key)
+    .bind(host)
+    .bind(i32::from(port))
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("allowlist entries for {host}:{port} of task {key}"))
 }

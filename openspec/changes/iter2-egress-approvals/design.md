@@ -22,10 +22,10 @@
 
 ### D2 — Denial reports
 ```proto
-service GatewayEvents { rpc ReportDenial(Denial) returns (google.protobuf.Empty); } // control plane, 9444
+service GatewayEvents { rpc ReportDenial(Denial) returns (ReportDenialResponse); } // control plane, 9444
 message Denial { string run_id = 1; string host = 2; uint32 port = 3; google.protobuf.Timestamp at = 4; }
 ```
-The gateway keeps a `HashMap<(run, host, port), Instant>` and reports at most once per minute per key. Reports are fire-and-forget with one retry; a lost report only delays the request until the next denial. The map is pruned when runs leave the snapshot.
+The gateway keeps a `HashMap<(run, host, port), Instant>` and reports at most once per minute per key. Only exact, valid host names are reported (no wildcards), and only denials an entry can fix (CONNECT, or plain HTTP on port 80). Reports are fire-and-forget with one retry for transient failures; a refused report is dropped. A lost report only delays the request until the next denial. The map is pruned by age and when runs leave the snapshot.
 
 The control plane handles a report in one transaction:
 1. Take the allowlist lock (D3) and the task row lock (`FOR UPDATE`, the same lock that cancellation and message queueing take).
@@ -36,7 +36,7 @@ The control plane handles a report in one transaction:
 Because entry creation and cancellation take the same locks, a request is either raised before an entry is created (and then settled by it) or sees the entry and is skipped. In the same way, it is either raised before a cancellation (and then closed by it) or sees the cancelled task and is skipped. The "already allowed" check of `request_approval` (D4) runs under the same locks.
 
 ### D3 — Entry creation and settling
-`create_http_host_entry(tx, scope, host, port, actor)` first takes the allowlist lock, a transaction-level advisory lock (`pg_advisory_xact_lock` on a fixed key) shared with denial handling (D2). Allowlist writes are rare, so one instance-wide lock is enough. *ponytail:* add per-project keys if writes ever contend. It then inserts the entry, writes the audit entry and publishes `egress_policy`. Then it selects pending `network-access` requests with fingerprint `host:port` whose task falls under the scope, and decides them through the decision path of `iter2-agent-requests` with `apply` skipped (the entry already exists), as decider = the actor. The `network-access` type's `apply` calls the same function, which therefore has to skip re-settling the request being decided.
+`create_http_host_entry(tx, scope, host, port, actor)` first takes the allowlist lock, a transaction-level advisory lock (`pg_advisory_xact_lock` on a fixed key) shared with denial handling (D2). Allowlist writes are rare, so one instance-wide lock is enough. *ponytail:* add per-project keys if writes ever contend. It then inserts the entry, writes the audit entry and publishes `egress_policy`. Then it selects pending `network-access` requests whose task falls under the scope and whose host and port the entry covers (see below), and records their approval (`record_approval_in`) without applying it again (the entry already exists), as decider = the actor. The `network-access` type's `apply` calls the same function, which therefore has to skip re-settling the request being decided.
 
 Requests are matched with the proxy's own host matcher, not by comparing fingerprints. A wildcard entry (`*.suffix`) therefore settles requests for every host it covers, and the port must match exactly.
 
@@ -52,7 +52,7 @@ A blocked graph node also gets the action, but it is one `host:port` and can hav
 - project scope only if they all belong to one project;
 - instance scope always.
 
-This prevents a node action from creating an entry for another run's task or project. The action posts to the allowlist handler with `host` and `port` taken from the event or node, never a wildcard.
+This prevents a node action from creating an entry for another run's task or project. The action posts to an allow handler that creates the entry like the allowlist form (through `create_http_host_entry`), with `host` and `port` taken from the event or node, never a wildcard.
 
 ### D6 — Design first in PenPot
 The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).

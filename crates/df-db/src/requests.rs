@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
+use crate::catalog::Actor;
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 use crate::tasks::{TaskRow, get_task, queue_message_tx};
@@ -214,18 +215,36 @@ impl RequestRow {
 #[async_trait::async_trait] // boxes the future so the trait stays dyn-compatible
 pub trait ApprovalType: Send + Sync {
     fn name(&self) -> &'static str;
-    /// Rejects a payload that does not fit the type or the task.
-    fn validate(&self, task: &TaskRow, payload: &Value) -> Result<(), RequestError>;
+    /// Rejects a payload that does not fit the type or the task; returns it in the form it is
+    /// stored in.
+    fn validate(&self, task: &TaskRow, payload: &Value) -> Result<Value, RequestError>;
     /// Identical pending requests of a task (same fingerprint) are merged.
     fn fingerprint(&self, payload: &Value) -> String;
     /// The scopes a human may choose from, narrowest first.
     fn scopes(&self) -> &'static [Scope];
+    /// Takes the locks `apply` needs before the decision locks the request's task, so lock order
+    /// stays the same as on the type's other write paths. Must be re-entrant within a transaction:
+    /// `record_approval_in` takes it again when settling runs under it.
+    async fn lock(&self, _tx: &mut Transaction<'_, Postgres>) -> Result<(), DbError> {
+        Ok(())
+    }
+    /// Whether what `payload` asks for is granted to the task already, read under [`Self::lock`]
+    /// and the task lock. Such a request is not stored.
+    async fn granted(
+        &self,
+        _tx: &mut Transaction<'_, Postgres>,
+        _task: &TaskRow,
+        _payload: &Value,
+    ) -> Result<bool, RequestError> {
+        Ok(false)
+    }
     /// The action an approval takes, in the decision's transaction.
     async fn apply(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         request: &RequestRow,
         scope: Scope,
+        decider: Actor<'_>,
     ) -> Result<(), RequestError>;
     /// Text for the UI card and the decision message.
     fn describe(&self, request: &RequestRow) -> String;
@@ -236,6 +255,11 @@ pub trait ApprovalType: Send + Sync {
 pub struct ApprovalTypes(BTreeMap<&'static str, Arc<dyn ApprovalType>>);
 
 impl ApprovalTypes {
+    /// The approval types the control plane offers.
+    pub fn builtin() -> Self {
+        Self::default().with(Arc::new(crate::network_access::NetworkAccess))
+    }
+
     #[must_use]
     pub fn with(mut self, approval_type: Arc<dyn ApprovalType>) -> Self {
         self.0.insert(approval_type.name(), approval_type);
@@ -263,6 +287,16 @@ pub struct Raise<'a> {
     pub run_id: Option<RunId>,
     pub actor: &'a Principal,
     pub blocking: bool,
+}
+
+/// What [`raise_approval`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Raised {
+    /// The request and whether it is `new`; an identical pending request is returned instead of
+    /// a new one.
+    Request { request: Box<RequestRow>, new: bool },
+    /// What the request asks for is granted already; nothing is stored.
+    AlreadyGranted,
 }
 
 /// Raises a question on the task. Returns the request and whether it is new; an identical
@@ -303,8 +337,9 @@ pub async fn raise_question(
         .join(" ")
         .to_lowercase();
     let fingerprint = hex::encode(Sha256::digest(normalized.as_bytes()));
-    raise(
-        pool,
+    let mut tx = pool.begin().await?;
+    let raised = raise_in(
+        &mut tx,
         NewRequest {
             from,
             kind: RequestKind::Question,
@@ -314,10 +349,13 @@ pub async fn raise_question(
             fingerprint,
         },
     )
-    .await
+    .await?;
+    tx.commit().await?;
+    Ok(raised)
 }
 
-/// Raises an approval request of a registered type on the task.
+/// Raises an approval request of a registered type on the task, unless the type finds it granted
+/// already.
 pub async fn raise_approval(
     pool: &PgPool,
     types: &ApprovalTypes,
@@ -325,17 +363,24 @@ pub async fn raise_approval(
     type_name: &str,
     payload: Value,
     reason: &str,
-) -> Result<(RequestRow, bool), RequestError> {
+) -> Result<Raised, RequestError> {
     let approval_type = types
         .get(type_name)
         .ok_or_else(|| RequestError::UnknownType(type_name.to_string()))?;
     let task = get_task(pool, from.task_id)
         .await?
         .ok_or(RequestError::NotFound)?;
-    approval_type.validate(&task, &payload)?;
+    let payload = approval_type.validate(&task, &payload)?;
     let fingerprint = approval_type.fingerprint(&payload);
-    raise(
-        pool,
+    let mut tx = pool.begin().await?;
+    // Same lock order as deciding: the type's locks, then the task.
+    approval_type.lock(&mut tx).await?;
+    lock_task(&mut tx, from.task_id).await?;
+    if approval_type.granted(&mut tx, &task, &payload).await? {
+        return Ok(Raised::AlreadyGranted);
+    }
+    let (request, new) = raise_in(
+        &mut tx,
         NewRequest {
             from,
             kind: RequestKind::Approval,
@@ -345,7 +390,12 @@ pub async fn raise_approval(
             fingerprint,
         },
     )
-    .await
+    .await?;
+    tx.commit().await?;
+    Ok(Raised::Request {
+        request: Box::new(request),
+        new,
+    })
 }
 
 /// Decides a pending request (design D3). `decider` is the human, `roles` their roles for the
@@ -359,9 +409,86 @@ pub async fn decide(
     decision: Decision,
 ) -> Result<RequestRow, RequestError> {
     let mut tx = pool.begin().await?;
-    let (task_id, request) = lock_pending_request(&mut tx, request_id).await?;
-    let (state, stored, action) = apply_decision(&mut tx, types, &request, &decision).await?;
+    if matches!(decision, Decision::Approve(_)) {
+        let type_name: Option<String> =
+            sqlx::query_scalar("SELECT approval_type FROM agent_requests WHERE id = $1")
+                .bind(request_id.as_uuid())
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten();
+        if let Some(approval_type) = type_name.as_deref().and_then(|name| types.get(name)) {
+            approval_type.lock(&mut tx).await?;
+        }
+    }
+    let decider = Actor {
+        principal: decider,
+        roles,
+    };
+    let (task_id, request) = lock_request(&mut tx, request_id)
+        .await?
+        .ok_or(RequestError::NotFound)?;
+    if request.state != RequestState::Pending {
+        return Err(RequestError::AlreadyDecided);
+    }
+    let (state, stored, action) =
+        apply_decision(&mut tx, types, &request, &decision, decider).await?;
+    let approval_type = request
+        .approval_type
+        .as_deref()
+        .and_then(|name| types.get(name));
+    let decided = record_decision(
+        &mut tx,
+        task_id,
+        request_id,
+        decider,
+        (state, stored, action),
+        approval_type.map(AsRef::as_ref),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(decided)
+}
 
+/// Records the approval with `scope` of the request `request_id` of `approval_type`, whose
+/// approved action the caller took already, in the caller's transaction. Does nothing if the
+/// request is no longer pending.
+pub(crate) async fn record_approval_in(
+    tx: &mut Transaction<'_, Postgres>,
+    approval_type: &dyn ApprovalType,
+    request_id: RequestId,
+    decider: Actor<'_>,
+    scope: Scope,
+) -> Result<Option<RequestRow>, DbError> {
+    // Re-entrant: the caller may hold the type's lock already.
+    approval_type.lock(tx).await?;
+    let Some((task_id, request)) = lock_request(tx, request_id).await? else {
+        return Ok(None);
+    };
+    if request.state != RequestState::Pending {
+        return Ok(None);
+    }
+    let decided = record_decision(
+        tx,
+        task_id,
+        request_id,
+        decider,
+        approved(scope),
+        Some(approval_type),
+    )
+    .await?;
+    Ok(Some(decided))
+}
+
+/// Stores a decision (state, stored decision, audit action) of the locked request `request_id`,
+/// audits it and tells the agent.
+async fn record_decision(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    request_id: RequestId,
+    decider: Actor<'_>,
+    (state, stored, action): (RequestState, Value, &'static str),
+    approval_type: Option<&dyn ApprovalType>,
+) -> Result<RequestRow, DbError> {
     let record = sqlx::query_as::<_, RequestRecord>(concat!(
         "UPDATE agent_requests
          SET state = $2, decision = $3, decided_by = $4, decided_at = now()
@@ -372,53 +499,54 @@ pub async fn decide(
     .bind(request_id.as_uuid())
     .bind(state.as_str())
     .bind(&stored)
-    .bind(serde_json::to_value(decider)?)
-    .fetch_one(&mut *tx)
+    .bind(serde_json::to_value(decider.principal)?)
+    .fetch_one(&mut **tx)
     .await?;
     let decided: RequestRow = record.try_into()?;
 
     let entry = NewAuditEntry::new(
-        decider.clone(),
-        roles.to_vec(),
+        decider.principal.clone(),
+        decider.roles.to_vec(),
         action,
         "request",
         request_id.to_string(),
     )
     .with_details(&json!({ "task_id": task_id, "decision": stored }))?;
-    write_audit_entry(&mut *tx, &entry).await?;
+    write_audit_entry(&mut **tx, &entry).await?;
 
-    let message = decision_message(types, &decided);
+    let message = decision_message(approval_type, &decided);
     queue_message_tx(
-        &mut tx,
+        tx,
         task_id,
         Principal::system("request.decided"),
         vec![text_block(message)],
     )
     .await?;
     publish(
-        &mut *tx,
+        &mut **tx,
         &Notification::RequestChanged {
             task_id,
             request_id,
         },
     )
     .await?;
-    tx.commit().await?;
     Ok(decided)
 }
 
 /// Locks the task and then the request (like `raise` and `close_pending_for_task`) and returns
-/// them if the request is still pending.
-async fn lock_pending_request(
+/// them; `None` if there is no such request.
+async fn lock_request(
     tx: &mut Transaction<'_, Postgres>,
     request_id: RequestId,
-) -> Result<(TaskId, RequestRow), RequestError> {
-    let task_uuid: uuid::Uuid =
+) -> Result<Option<(TaskId, RequestRow)>, DbError> {
+    let Some(task_uuid): Option<uuid::Uuid> =
         sqlx::query_scalar("SELECT task_id FROM agent_requests WHERE id = $1")
             .bind(request_id.as_uuid())
             .fetch_optional(&mut **tx)
             .await?
-            .ok_or(RequestError::NotFound)?;
+    else {
+        return Ok(None);
+    };
     let task_id = TaskId::from_uuid(task_uuid);
     lock_task(tx, task_id).await?;
     let record = sqlx::query_as::<_, RequestRecord>(concat!(
@@ -429,20 +557,17 @@ async fn lock_pending_request(
     .bind(request_id.as_uuid())
     .fetch_one(&mut **tx)
     .await?;
-    let request: RequestRow = record.try_into()?;
-    if request.state != RequestState::Pending {
-        return Err(RequestError::AlreadyDecided);
-    }
-    Ok((task_id, request))
+    Ok(Some((task_id, record.try_into()?)))
 }
 
-/// Validates `decision` against the kind of `request` and applies an approval's effect. Returns
-/// the new state, the stored decision and the audit action.
+/// Validates `decision` against the kind of `request` and applies an approval's effect as
+/// `decider`. Returns the new state, the stored decision and the audit action.
 async fn apply_decision(
     tx: &mut Transaction<'_, Postgres>,
     types: &ApprovalTypes,
     request: &RequestRow,
     decision: &Decision,
+    decider: Actor<'_>,
 ) -> Result<(RequestState, Value, &'static str), RequestError> {
     Ok(match (decision, request.kind) {
         (Decision::Answer(text), RequestKind::Question) => {
@@ -463,12 +588,8 @@ async fn apply_decision(
             if !approval_type.scopes().contains(scope) {
                 return Err(RequestError::ScopeNotOffered(*scope));
             }
-            approval_type.apply(tx, request, *scope).await?;
-            (
-                RequestState::Approved,
-                json!({ "scope": scope.as_str() }),
-                "request.approve",
-            )
+            approval_type.apply(tx, request, *scope, decider).await?;
+            approved(*scope)
         }
         (Decision::Deny(comment), RequestKind::Approval) => {
             let comment = comment.as_deref().map(str::trim).filter(|c| !c.is_empty());
@@ -484,6 +605,15 @@ async fn apply_decision(
             ));
         }
     })
+}
+
+/// State, stored decision and audit action of an approval with `scope`.
+fn approved(scope: Scope) -> (RequestState, Value, &'static str) {
+    (
+        RequestState::Approved,
+        json!({ "scope": scope.as_str() }),
+        "request.approve",
+    )
 }
 
 /// Closes the pending requests of a task (for example when it completes). Runs in the caller's
@@ -586,18 +716,14 @@ pub async fn pending_count(pool: &PgPool) -> Result<i64, DbError> {
     )
 }
 
-/// The text of a decision message to the agent.
-pub fn decision_message(types: &ApprovalTypes, request: &RequestRow) -> String {
+/// The text of a decision message to the agent; `approval_type` is the type of an approval.
+pub fn decision_message(approval_type: Option<&dyn ApprovalType>, request: &RequestRow) -> String {
     let subject = match request.kind {
         RequestKind::Question => format!("your question \"{}\"", request.question_text()),
-        RequestKind::Approval => request
-            .approval_type
-            .as_deref()
-            .and_then(|name| types.get(name))
-            .map_or_else(
-                || "your approval request".to_string(),
-                |t| t.describe(request),
-            ),
+        RequestKind::Approval => approval_type.map_or_else(
+            || "your approval request".to_string(),
+            |t| t.describe(request),
+        ),
     };
     let who = match &request.decided_by {
         Some(Principal::Human { display_name, .. }) => format!(" by {display_name}"),
@@ -621,18 +747,21 @@ pub fn decision_message(types: &ApprovalTypes, request: &RequestRow) -> String {
     }
 }
 
-struct NewRequest<'a> {
-    from: Raise<'a>,
-    kind: RequestKind,
-    approval_type: Option<String>,
-    payload: Value,
-    reason: &'a str,
-    fingerprint: String,
+pub(crate) struct NewRequest<'a> {
+    pub(crate) from: Raise<'a>,
+    pub(crate) kind: RequestKind,
+    pub(crate) approval_type: Option<String>,
+    pub(crate) payload: Value,
+    pub(crate) reason: &'a str,
+    pub(crate) fingerprint: String,
 }
 
-async fn raise(pool: &PgPool, new: NewRequest<'_>) -> Result<(RequestRow, bool), RequestError> {
-    let mut tx = pool.begin().await?;
-    lock_task(&mut tx, new.from.task_id).await?;
+/// Stores `new` in the caller's transaction, or returns the identical pending request (`false`).
+pub(crate) async fn raise_in(
+    tx: &mut Transaction<'_, Postgres>,
+    new: NewRequest<'_>,
+) -> Result<(RequestRow, bool), RequestError> {
+    lock_task(tx, new.from.task_id).await?;
 
     let existing = sqlx::query_as::<_, RequestRecord>(concat!(
         "SELECT ",
@@ -645,7 +774,7 @@ async fn raise(pool: &PgPool, new: NewRequest<'_>) -> Result<(RequestRow, bool),
     .bind(new.kind.as_str())
     .bind(&new.approval_type)
     .bind(&new.fingerprint)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     if let Some(existing) = existing {
         return Ok((existing.try_into()?, false));
@@ -655,7 +784,7 @@ async fn raise(pool: &PgPool, new: NewRequest<'_>) -> Result<(RequestRow, bool),
         "SELECT count(*) FROM agent_requests WHERE task_id = $1 AND state = 'pending'",
     )
     .bind(new.from.task_id.as_uuid())
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     if pending >= MAX_PENDING_PER_TASK {
         return Err(RequestError::TooManyPending);
@@ -679,7 +808,7 @@ async fn raise(pool: &PgPool, new: NewRequest<'_>) -> Result<(RequestRow, bool),
     .bind(new.reason)
     .bind(new.from.blocking)
     .bind(&new.fingerprint)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     let row: RequestRow = record.try_into()?;
     let entry = NewAuditEntry::new(
@@ -695,16 +824,15 @@ async fn raise(pool: &PgPool, new: NewRequest<'_>) -> Result<(RequestRow, bool),
         "approval_type": new.approval_type,
         "blocking": new.from.blocking,
     }))?;
-    write_audit_entry(&mut *tx, &entry).await?;
+    write_audit_entry(&mut **tx, &entry).await?;
     publish(
-        &mut *tx,
+        &mut **tx,
         &Notification::RequestChanged {
             task_id: new.from.task_id,
             request_id: id,
         },
     )
     .await?;
-    tx.commit().await?;
     Ok((row, true))
 }
 
@@ -813,11 +941,11 @@ mod tests {
         fn name(&self) -> &'static str {
             "fake"
         }
-        fn validate(&self, _task: &TaskRow, payload: &Value) -> Result<(), RequestError> {
+        fn validate(&self, _task: &TaskRow, payload: &Value) -> Result<Value, RequestError> {
             payload
                 .get("what")
                 .and_then(Value::as_str)
-                .map(|_| ())
+                .map(|_| payload.clone())
                 .ok_or_else(|| RequestError::Invalid("`what` is required".into()))
         }
         fn fingerprint(&self, payload: &Value) -> String {
@@ -831,6 +959,7 @@ mod tests {
             tx: &mut Transaction<'_, Postgres>,
             request: &RequestRow,
             _scope: Scope,
+            _decider: Actor<'_>,
         ) -> Result<(), RequestError> {
             if request.payload["what"] == "fail" {
                 return Err(RequestError::ApplyFailed("nope".into()));
@@ -1081,7 +1210,7 @@ mod tests {
     async fn approval_applies_the_action_and_is_audited() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let task = task(&pool).await;
-        let (r, _) = raise_approval(
+        let Raised::Request { request: r, .. } = raise_approval(
             &pool,
             &types(),
             raise_by(task.id, &agent(&task), false),
@@ -1090,7 +1219,9 @@ mod tests {
             "needed",
         )
         .await
-        .unwrap();
+        .unwrap() else {
+            panic!("not stored")
+        };
         let err = decide(
             &pool,
             &types(),
@@ -1125,7 +1256,7 @@ mod tests {
     async fn failing_action_rolls_the_decision_back() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let task = task(&pool).await;
-        let (r, _) = raise_approval(
+        let Raised::Request { request: r, .. } = raise_approval(
             &pool,
             &types(),
             raise_by(task.id, &agent(&task), false),
@@ -1134,7 +1265,9 @@ mod tests {
             "r",
         )
         .await
-        .unwrap();
+        .unwrap() else {
+            panic!("not stored")
+        };
         let err = decide(
             &pool,
             &types(),

@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.payload FROM agent_requests r JOIN tasks t ON t.id = r.task_id\n         WHERE r.state = 'pending' AND r.kind = 'approval' AND r.approval_type = $1\n           AND ($2::uuid IS NULL OR r.task_id = $2) AND ($3::uuid IS NULL OR t.project_id = $3)\n         ORDER BY r.created_at, r.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "agent_requests",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "agent_requests",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "bf14006105e7ea7332cbe4dbb61cd8a24afcf8f483d6ce0e1ba45929603db626"
+}

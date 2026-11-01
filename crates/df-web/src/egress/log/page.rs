@@ -56,6 +56,8 @@ pub(super) fn page_body(
             (filter_bar(filter, personas, &backlog.counts))
             (traffic(&events, filter, backlog))
             (details::panel())
+            // Where the allow action reports the created rule.
+            div id="allow-toast" role="status" aria-live="polite" class="fixed right-6 bottom-6 z-50" {}
         }
     }
 }
@@ -242,6 +244,16 @@ mod tests {
         // The counts depend on the filter but sit outside `#traffic`, the form's swap target.
         let form = filter_bar(&Filter::default(), &[], &Counts::default()).into_string();
         assert!(form.contains(r##"hx-select-oob="#count-all,#count-blocked,#count-allowed""##));
+    }
+
+    #[test]
+    fn the_page_has_a_live_region_for_the_rule_created_toast() {
+        let html = page();
+        let toast = tag(&html, "id=\"allow-toast\"");
+        assert!(
+            toast.contains("role=\"status\"") && toast.contains("fixed"),
+            "{toast}"
+        );
     }
 
     #[test]

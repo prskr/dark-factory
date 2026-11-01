@@ -10,6 +10,7 @@ flowchart LR
     P -- allowed --> I[(internet)]
     CP[control plane replica] -- "PolicyWatch (snapshots), mTLS :9444" --> G[gateway pod]
     G -- "Tail (flow events), mTLS :9444" --> CP
+    G -- "ReportDenial, RecordPush, mTLS :9444" --> CP
     DB[(PostgreSQL)] -- "NOTIFY egress_policy / run_changed" --> CP
     UI[board member] -- SSE --> CP
 ```
@@ -36,6 +37,15 @@ flowchart LR
 Each new connection is checked against the latest snapshot. Names are resolved by the gateway, IPv4 first (a cluster without IPv6 egress cannot reach the IPv6 address of a dual-stack host); the first resolved address is used and a failed connection is logged with a warning.
 
 Blocked destination ranges: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, `224.0.0.0/3`, `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`, `ff00::/8`, the NAT64 prefixes `64:ff9b::/96` and `64:ff9b:1::/48`, IPv4-mapped IPv6 addresses by their IPv4 part, plus `gateway.blockedCidrs`.
+
+### Denial reports
+
+A `not-allowlisted` denial of a run is reported to the control plane with `GatewayEvents.ReportDenial` on its internal port (same mTLS connector as `PolicyWatch`), so it can raise a `network-access` request. Other denial reasons are never reported.
+
+- At most one report per run, host (lower case, no trailing dot) and port per minute, per gateway pod. The memory of a run is dropped when the run leaves the snapshot.
+- Fire-and-forget: one reporter task sends the reports one after the other, each call limited to 5 s and retried once, then dropped (debug log). At most 256 reports wait; beyond that new ones are dropped and reported again by the next denial.
+
+The control plane handles a report in one transaction under the allowlist lock and the task row lock, the locks entry creation and marking the task done take. It ignores the report if the run ended (`succeeded`, `failed`, `cancelled`), the task is `completed`, or the run's allowlist covers host and port by now; otherwise it raises a non-blocking `network-access` request, raised by the control plane, with reason `The egress proxy denied <host>:<port>`, or keeps the identical pending one. An unknown run is ignored; a malformed run id, an empty host or port 0 get `INVALID_ARGUMENT`.
 
 ## Policy distribution
 
@@ -73,7 +83,7 @@ Flow event fields (time is when the event was recorded): flow id, phase, time, g
 
 Both directions use the certificate, key and CA of `agent.tls` (the chart mounts the `gateway-tls` secret in gateway pods and the `control-plane-tls` secret in control plane pods). The CA also signs sandbox certificates, so the TLS layer alone does not identify the peer. Each side additionally requires a DNS name in the peer's certificate:
 
-- the control plane accepts `PolicyWatch` only from `gateway.identity`,
+- the control plane accepts `PolicyWatch`, `RecordPush` and `ReportDenial` only from `gateway.identity`,
 - a gateway accepts `Tail` only from `gateway.controlPlaneHost`.
 
 Certificates are re-read for every new connection, so renewals by cert-manager need no restart.
