@@ -38,7 +38,15 @@ Two htmx `POST` actions on the task detail. "Cancel task" uses a native `<dialog
 ### D4 — Design first in PenPot
 The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
 
+### D5 — Mark done marks the PR ready
+After the `mark_task_done` transaction commits, the mark-done handler calls `update_pull_request(draft: false)` through the forge routes. Best effort: a failure is logged as a warning and not retried, the same as at run end. A PR that is already ready (task was `in_review`) stays unchanged. The run that mark done cancels ends `cancelled`, so the run-end path does not mark the PR ready a second time.
+
+Without a PR, nothing is sent to the forge. The cancelled run still finalizes and may push, so its push report or the run-end retry would open a draft PR for the done task. `try_ensure_draft` therefore skips a task that is `completed`, which covers both triggers; it reads the status together with `pr_number` under its advisory lock, so a mark done that commits just before is seen. Alternative: open the PR and mark it ready right away. Rejected: the human decided the task is done without one.
+
+No completion summary is posted: no agent wrote one. Later, the factory minion can write one from the transcript (`product/iterations/roadmap.md`). Alternative: post a generic "marked done by <actor>" comment. Rejected: noise for the reviewer.
+
 ## Risks / Trade-offs
 
 - [Stop during a push leaves a half-pushed state] → the runtime finalizes normally; Git pushes are atomic per ref.
 - [Teardown after the stop timeout loses the WIP snapshot] → the task volume is kept, and the next run's prepare pushes unpushed commits.
+- [Mark done gives the reviewer no summary] → accepted; agents are asked to call `complete_task` themselves when nothing is left to do (`product/agent-playbook.md`).
