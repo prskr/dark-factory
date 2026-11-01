@@ -25,7 +25,7 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 - **THEN** the run ends with outcome `provisioning_failed` and the task status becomes `failed`
 
 ### Requirement: Assign content
-`Assign` SHALL contain the task reference, the workspace (the task's Git proxy URL `https://<gateway host>:<git port>/git/<KEY>.git` as repo URL, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's adapter command if it sets one, otherwise `harness.claudeCode.adapterCommand` of the instance.
+`Assign` SHALL contain the task reference, the workspace (repo URL through the gateway's Git proxy, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's, otherwise the instance's default.
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects
