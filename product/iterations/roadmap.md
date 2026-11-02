@@ -118,6 +118,11 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/iter2-run-resilience` (Non-Goals, D6) |
 | Dependencies set by humans: `depends_on` in the new-task composer | idea | `openspec/changes/iter3-task-dependencies` |
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/iter3-task-dependencies` |
+| Dependencies set by humans also covers `base_task` in the new-task composer | idea | `openspec/changes/iter3-task-tree` |
+| Base-branch notices: tell open tasks with own commits that their base branch moved (subtask merged, rebase), without waking them | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
+| `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/iter2-continuation-summary` |
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |
