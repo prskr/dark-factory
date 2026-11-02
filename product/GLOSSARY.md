@@ -65,3 +65,17 @@ _Avoid_: Webhook, hook, endpoint
 **Webhook**:
 An HTTP request a forge sends to Dark Factory. Notifications Dark Factory sends are lifecycle events, never webhooks.
 _Avoid_: Incoming webhook, forge event
+
+### Network
+
+**Egress rule**:
+A board member's decision about which external hosts sandboxes may reach. It is either an allow rule or a deny rule.
+_Avoid_: Allowlist entry, firewall rule
+
+**Allow rule**:
+An egress rule that lets the runs within its scope (instance, project or task) connect to a host.
+_Avoid_: Allowlist entry, grant, whitelist
+
+**Deny rule**:
+An instance-wide egress rule naming a host that will never be allowed, so no network access request is raised for it. An allow rule still lets a connection through.
+_Avoid_: Silencer, blocklist, blacklist, mute
