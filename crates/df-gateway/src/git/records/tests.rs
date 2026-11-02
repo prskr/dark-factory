@@ -116,8 +116,16 @@ impl GatewayGit for Store {
             }
         }
         let count = {
+            // Idempotent like the control plane: a retry whose first attempt was stored but
+            // answered after the attempt timeout stores nothing new.
+            let record = request.into_inner();
             let mut records = self.records.lock().unwrap();
-            records.push(request.into_inner());
+            if !records
+                .iter()
+                .any(|r| r.push_id == record.push_id && r.verdict == record.verdict)
+            {
+                records.push(record);
+            }
             records.len()
         };
         self.count.send_replace(count);

@@ -892,7 +892,7 @@ async fn silent_origin() -> Result<(SocketAddr, TcpListener)> {
     Ok((listener.local_addr()?, listener))
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn an_upstream_that_never_answers_ends_with_502_and_upstream_timeout() -> Result<()> {
     let (origin, listener) = silent_origin().await?;
     let harness = Harness::start(
@@ -901,11 +901,26 @@ async fn an_upstream_that_never_answers_ends_with_502_and_upstream_timeout() -> 
         origin,
     )
     .await?;
-    let (_, response) = request(
+    let response = tokio::spawn(request(
         harness.proxy,
         "POST http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nContent-Length: 3\r\n\r\nabc",
-    )
-    .await?;
+    ));
+
+    // Real time until the request reached the upstream: a paused clock jumps ahead whenever the
+    // runtime is idle, also while loopback I/O is still in flight, and fired the timeout early.
+    let (mut upstream, _) =
+        tokio::time::timeout(Duration::from_secs(5), listener.accept()).await??;
+    let mut received = Vec::new();
+    while !received.ends_with(b"abc") {
+        let read = tokio::time::timeout(Duration::from_secs(5), upstream.read_buf(&mut received))
+            .await??;
+        assert_ne!(read, 0, "the upstream connection ended early: {received:?}");
+    }
+    // Only the proxy's timeout is left to wait for.
+    tokio::time::pause();
+
+    let (_, response) = response.await??;
+    tokio::time::resume();
     assert!(response.starts_with("HTTP/1.1 502"), "{response}");
     let event = harness.closed_event(0).await;
     assert_eq!(event.reason, "upstream-timeout");
@@ -915,13 +930,7 @@ async fn an_upstream_that_never_answers_ends_with_502_and_upstream_timeout() -> 
     );
 
     // The proxy closed its connection to the upstream: the socket does not leak.
-    let (mut upstream, _) = listener.accept().await?;
-    let mut received = Vec::new();
     tokio::time::timeout(Duration::from_secs(5), upstream.read_to_end(&mut received)).await??;
-    assert!(
-        received.ends_with(b"abc"),
-        "the request reached the upstream"
-    );
     Ok(())
 }
 
