@@ -105,6 +105,90 @@ Paths and `HOME` stay identical across runs so absolute symlinks (e.g. Bazel con
 
 States: `Pending → Provisioning → Connecting → Preparing → Running ⇄ AwaitingInput → Finalizing → Succeeded | Blocked | Failed | Cancelled`. The runtime reports each phase transition over the stream. `Blocked` means the run ended waiting for an answer or approval; the next run resumes the task.
 
+### 6.0 Sequence as implemented
+
+The diagram shows one run as the code runs it today (2026-11-02). Run states are in notes. Where the code deviates from this section's design, the deviation is listed below the diagram.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Web UI / DB
+    participant S as Scheduler
+    participant K as Kubernetes
+    participant CP as Agent channel
+    participant R as Runtime
+    participant H as Harness (ACP)
+    participant G as Gateway
+    participant F as Forge
+
+    UI->>S: task queued or message queued (TaskMessageQueued, 15 s tick)
+    S->>S: insert run, task → running
+    Note over S: Pending
+    S->>K: ensure_task_volume (PVC task-KEY)
+    Note over S: Provisioning
+    S->>K: provision (Sandbox + NetworkPolicy)
+    K-->>S: SandboxEvent::Started (pod IP)
+    Note over S: Connecting (mark_started)
+    R->>CP: AgentChannel.Connect (mTLS), Hello
+    CP->>CP: resolve_identity, harness_credentials
+    Note over CP: Preparing (mark_connected, budget starts)
+    CP->>R: HelloAck, HarnessCredentials, Assign, Prompt*
+    R->>G: clone / fetch, push task branch (Git proxy)
+    G->>F: forward
+    G->>CP: GatewayGit.RecordPush (stored only)
+    R->>H: spawn, initialize, session/new or session/load
+    loop each turn
+        R->>CP: TranscriptEvent TurnStarted / UserMessage (prompt delivered)
+        R->>H: session/prompt
+        H-->>R: session/update*
+        R->>CP: TranscriptEvent*, TurnEnded
+        R->>G: push task branch
+        R->>CP: PushReport
+        CP-->>R: ack
+        opt first push ahead of base, no PR yet
+            CP->>F: find_open_pull_request / create_pull_request (draft)
+        end
+        opt harness waits for input
+            R->>CP: PhaseChanged(AWAITING_INPUT)
+            Note over CP: AwaitingInput (task → waiting, idle_at = TurnEnded + keepAliveSeconds)
+            alt new prompt before idle_at
+                CP->>R: Prompt
+                R->>CP: PhaseChanged(RUNNING)
+                Note over CP: Running
+            else idle_at passed
+                Note over CP: Finalizing
+                CP->>R: Release
+            end
+        end
+    end
+    R->>H: stop
+    R->>G: push task branch, force-push WIP snapshot
+    R->>CP: PushReport*, RunReport(outcome, WorkspaceState)
+    Note over CP: Succeeded | Failed | Cancelled (end_run_tx, task status from outcome)
+    CP->>K: teardown (delete Sandbox, NetworkPolicy via ownerRef, PVC kept)
+    CP->>F: on_run_end (background): retry missing PR, on Completed mark ready + completion summary
+```
+
+Failure and stop paths, each ending in `end_run_tx` and teardown:
+
+| Path | Trigger | Outcome → state |
+|---|---|---|
+| Provisioning fails | error from `ensure_task_volume` or `provision` | `provisioning_failed` → Failed |
+| Connect timeout | Pending/Provisioning/Connecting older than `runs.connectTimeoutSeconds` (600 s, from run creation) | `connect_timeout` → Failed |
+| Sandbox lost | `SandboxEvent::Gone` (pod deleted or failed, image pull error) | `sandbox_lost` → Failed |
+| Missing harness credentials | after `Hello` | `failed` → Failed |
+| Budget | session timer at budget + 1× grace → Finalizing, `Cancel`; scheduler hard stop at budget + 2× grace | `cancelled` → Cancelled, hard stop → Failed |
+| Task marked done | `mark_task_done` on an awaiting-input run → Finalizing, `Cancel` | `cancelled` → Cancelled |
+| Runtime failure | prepare, harness spawn or finalize fails | `failed` → Failed |
+
+`completed`, `end_turn`, `blocked`, `limit_reached` and `rate_limited` end the run as Succeeded. The task status (`in_review`, `waiting`, `blocked`, …) carries the difference.
+
+Deviations from the design in this section:
+- The runtime sends `PhaseChanged` only for `AWAITING_INPUT` and for `RUNNING` after an idle wake-up. The first turn therefore runs while the run is still Preparing. Finalizing is set only by the control plane (Release, Cancel, mark done), never by a runtime that ends on its own.
+- `Blocked` is an outcome, not a run state.
+- There is no user-triggered run cancel yet (`iter2-cancel`).
+- Gateway push records (`RecordPush`) don't drive the PR flow. It runs on the runtime's `PushReport` and `RunReport`.
+
 ### 6.1 Triggers and Assign
 - A run starts when a task with pending work has no active run: task assignment (human or superior agent), queued messages (chat), a routine firing, completion of a task this one depends on, or a routed webhook notification (ADR-0015).
 - Control plane → `Assign { run_id, task, workspace, harness, tools, budgets, continuation }`, followed by harness credentials and the queued prompts. Budgets cover wall-clock time, tokens and turns; both runtime and control plane enforce them.
