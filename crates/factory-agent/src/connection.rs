@@ -2,13 +2,14 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use df_proto::agent::v1::agent_channel_client::AgentChannelClient;
 use df_proto::agent::v1::{
     AgentMessage, ControlMessage, Hello, HelloAck, agent_message, control_message,
 };
 use tokio::sync::{Mutex, mpsc, watch};
+use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
@@ -95,8 +96,10 @@ pub async fn connect_channel(
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a worker may take to finish the message it is handling when it is asked to stop.
 const WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long, after a shutdown request, the manager keeps reconnecting to deliver queued messages.
-const SHUTDOWN_RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long, after a shutdown request (finalize), the manager keeps reconnecting to deliver
+/// queued messages, the final `RunReport` above all, before the process exits regardless. Long
+/// enough for a control plane restart.
+pub(crate) const FINAL_REPORT_FLUSH: Duration = Duration::from_mins(10);
 /// How long shutdown waits for queued messages to be sent and acknowledged.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -298,8 +301,7 @@ impl ConnectionManager {
         if !*shutdown_rx.borrow() {
             return false;
         }
-        let deadline =
-            *flush_deadline.get_or_insert_with(|| Instant::now() + SHUTDOWN_RECONNECT_TIMEOUT);
+        let deadline = *flush_deadline.get_or_insert_with(|| Instant::now() + FINAL_REPORT_FLUSH);
         self.drain_outbound_to_outbox(outbound_rx).await;
         let pending = !self.outbox.lock().await.is_empty();
         if pending && Instant::now() < deadline {
@@ -542,7 +544,12 @@ impl ConnectionManager {
                         inbound_tx,
                     )
                     .await;
-                    return StreamEnd::Shutdown;
+                    // Unacknowledged messages (the stream dropped during the flush, for
+                    // example by a control plane restart) go back to the connect loop.
+                    if self.outbox.lock().await.is_empty() {
+                        return StreamEnd::Shutdown;
+                    }
+                    return StreamEnd::Dropped;
                 }
                 _ = disconnect_rx.recv() => {
                     break;

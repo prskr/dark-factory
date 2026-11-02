@@ -309,6 +309,7 @@ impl TestApp {
             services,
             show_hidden_blocks,
             allow_plain_http,
+            max_auto_resumes: 3,
             approval_types: df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval)),
         };
         Self {

@@ -113,6 +113,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
 | Subscription pools and fallback | idea | F6 |
+| Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/iter2-run-resilience` (Non-Goals, D6) |
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/iter2-continuation-summary` |
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |

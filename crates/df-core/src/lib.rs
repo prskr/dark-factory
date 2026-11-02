@@ -18,7 +18,8 @@ pub use config::{
     SandboxSectionConfig,
 };
 pub use domain::{
-    ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus,
+    CAPACITY_DETAIL, ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, StatusSet,
+    TaskStatus,
 };
 pub use forge::ForgeKind;
 pub use ids::{

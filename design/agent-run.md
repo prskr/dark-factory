@@ -281,8 +281,12 @@ Trust policy for configuration found in the repository:
 | Push rejected (non-fast-forward or lease mismatch) | Remote moved, or rewrite not allowed by policy | No unconditional force push; task marked diverged; resolved at next prepare per policy |
 | Forge unreachable | Push fails | Work kept on the PVC; retried at next prepare; task flagged |
 | Token or time limit reached | Run stops | Finalize normally; run ends with the limit as reason; task resumable with a new run |
-| Provider rate limit | Run stops | Finalize normally; distinct resumable outcome with retry time if known |
-| Control plane restart | Stream drops | Runtime reconnects (any replica) and resumes from the last persisted seq; run continues |
+| Provider rate limit | Run stops | Finalize normally; outcome `rate_limited` with retry time if known. The task gets that time (one hour ahead if unknown) as its resume time and the scheduler starts the next run then, without a message |
+| Sandbox lost, runtime did not connect, provisioning failed | Run ends `sandbox_lost`, `connect_timeout` or `provisioning_failed` | Task is re-queued with a backoff of 2 min x (resumes + 1), up to `runs.maxAutoResumes` (3) consecutive times, then `failed`. A message or a run with a `RunReport` resets the count. A harness crash (`failed`) is not resumed |
+| Provider quota exceeded | Provisioning rejected | Run ends `provisioning_failed` with detail `capacity`; task re-queued after 2 min, the resume count is unchanged |
+| Run created, sandbox never provisioned (replica stopped) | Run stays `pending`/`provisioning` | Scheduler tick provisions it again after 1 min (idempotent) |
+| Many due tasks | Many sandboxes at once | At most `runs.maxConcurrent` (4) non-terminal runs per instance; further tasks wait, oldest resume time first |
+| Control plane restart | Stream drops | Runtime reconnects (any replica) and resumes from the last persisted seq; run continues. After finalize the runtime keeps reconnecting for up to 10 minutes until the `RunReport` is acknowledged; a pod that exits without it ends `sandbox_lost` and is resumed |
 | Push rejected by the Git proxy's checks (`df:secret-scan`, `df:protected-path`, ...) | Push fails | The agent gets a `push.rejected` message with the masked findings and rewrites its unpushed commits, or a human approves the `push-check-exception` request; the runtime pushes again after the next turn (§11.1). A rejected WIP snapshot stays on the PVC |
 | Certificate rotation / expiry | New connections need the new cert | Runtime reloads files; reconnects if the stream fails |
 | PVC full | Builds fail | Quota limits damage; runtime reports; human resets workspace |

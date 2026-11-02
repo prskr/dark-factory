@@ -32,6 +32,9 @@ mod tests;
 
 use cli::{Cli, Command};
 
+/// Time on top of the final report flush window for a connection attempt that is under way when
+/// the window ends (three handshake steps of 15 s each).
+const FINAL_FLUSH_MARGIN: Duration = Duration::from_secs(60);
 /// How long `run` waits for the control plane to send `Assign`.
 const ASSIGN_TIMEOUT: Duration = Duration::from_mins(10);
 /// `core.hooksPath` for the agent's git: the empty, read-only hooks directory from the image.
@@ -132,7 +135,8 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     // Let the connection manager flush the final reports before the process exits
     shutdown_tx.send(true).ok();
     if let Some(task) = conn_task {
-        match tokio::time::timeout(Duration::from_secs(30), task).await {
+        match tokio::time::timeout(connection::FINAL_REPORT_FLUSH + FINAL_FLUSH_MARGIN, task).await
+        {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 tracing::warn!(error = %error, "connection manager failed during the final flush");

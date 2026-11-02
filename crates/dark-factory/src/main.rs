@@ -580,6 +580,7 @@ fn web_router(
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
         allow_plain_http: cfg.forge.allow_plain_http,
+        max_auto_resumes: cfg.runs.max_auto_resumes,
         approval_types,
     }))
 }

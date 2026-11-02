@@ -325,6 +325,8 @@ pub async fn queue_message_tx(
                 ) THEN 'running'
                 ELSE 'queued'
             END,
+            resume_at = NULL,
+            auto_resumes = 0,
             updated_at = now()
         WHERE id = $1
         RETURNING id
@@ -773,10 +775,12 @@ pub async fn mark_task_done(
             "a {status} task cannot be marked done"
         )));
     }
-    sqlx::query("UPDATE tasks SET status = 'completed', updated_at = now() WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE tasks SET status = 'completed', resume_at = NULL, updated_at = now() WHERE id = $1",
+    )
+    .bind(task_id.as_uuid())
+    .execute(&mut *tx)
+    .await?;
     let idle_run: Option<Uuid> = sqlx::query_scalar(
         "UPDATE runs SET state = 'finalizing' WHERE task_id = $1 AND state = 'awaiting_input'
          RETURNING id",
@@ -846,10 +850,12 @@ pub async fn cancel_task(pool: &PgPool, task_id: TaskId, actor: Principal) -> Re
             "a {status} task cannot be cancelled"
         )));
     }
-    sqlx::query("UPDATE tasks SET status = 'cancelled', updated_at = now() WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE tasks SET status = 'cancelled', resume_at = NULL, updated_at = now() WHERE id = $1",
+    )
+    .bind(task_id.as_uuid())
+    .execute(&mut *tx)
+    .await?;
     let discarded = sqlx::query(
         "UPDATE task_messages SET discarded_at = now()
          WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL",

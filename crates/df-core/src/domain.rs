@@ -121,6 +121,12 @@ impl TaskStatus {
         !matches!(self, Self::Completed | Self::Cancelled)
     }
 
+    /// Whether a task in this status waits for the scheduler to start its next run, possibly at
+    /// a resume time.
+    pub const fn waits_for_resume(&self) -> bool {
+        matches!(self, Self::Queued | Self::RateLimited)
+    }
+
     pub const ALL: &'static [Self] = &[
         Self::Queued,
         Self::Running,
@@ -274,6 +280,10 @@ impl FromStr for RunState {
         }
     }
 }
+
+/// Detail of a `provisioning_failed` run that the provider rejected for lack of capacity (an
+/// exceeded quota). The task is re-queued without counting a resume.
+pub const CAPACITY_DETAIL: &str = "capacity";
 
 /// Run end outcome (`runs.outcome`), covering both runtime-reported outcomes
 /// and control-plane-side failure outcomes.

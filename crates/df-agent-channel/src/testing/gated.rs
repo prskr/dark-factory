@@ -71,6 +71,10 @@ impl SandboxProvider for GatedProvider {
         self.inner.teardown(run_id).await
     }
 
+    async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError> {
+        self.inner.sandbox_exists(run_id).await
+    }
+
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId> {
         self.inner.resolve_identity(peer).await
     }

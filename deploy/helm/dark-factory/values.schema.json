@@ -234,7 +234,9 @@
     "runs": {
       "type": "object",
       "properties": {
-        "keepAliveSeconds": { "type": "integer", "minimum": 0 }
+        "keepAliveSeconds": { "type": "integer", "minimum": 0 },
+        "maxConcurrent": { "type": "integer", "minimum": 1 },
+        "maxAutoResumes": { "type": "integer", "minimum": 0 }
       }
     },
     "volumes": {

@@ -32,6 +32,10 @@ pub(crate) mod sandbox_placeholders {
             Ok(())
         }
 
+        async fn sandbox_exists(&self, _run_id: RunId) -> Result<bool, ProviderError> {
+            Ok(false)
+        }
+
         async fn resolve_identity(&self, _peer: &PeerIdentity) -> Option<RunId> {
             None
         }

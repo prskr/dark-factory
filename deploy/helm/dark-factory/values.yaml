@@ -189,6 +189,11 @@ runs:
   # Seconds a run stays up after a normal turn end (task "waiting") before it is released.
   # 0 releases right after the turn.
   keepAliveSeconds: 600
+  # Runs that may be active at the same time, across all replicas.
+  maxConcurrent: 4
+  # Consecutive automatic resumes after a lost sandbox, a connect timeout or a failed
+  # provisioning before the task fails.
+  maxAutoResumes: 3
 
 # Retention of task volumes. The leader checks once per hour; a task with an active run keeps its
 # volume, the next run of a task without one clones again.

@@ -638,22 +638,9 @@ async fn tracker_emits_one_gone_when_the_sandbox_is_deleted() {
 
 #[tokio::test]
 async fn ensure_task_volume_times_out_when_the_api_does_not_answer() {
-    use tower_test::mock;
-
     tokio::time::pause();
     // Keep the handle alive but never answer.
-    let (mock_service, _handle) =
-        mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
-    let client = Client::new(mock_service, "default");
-    let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
-    let provider = K8sSandboxProvider::new(
-        client,
-        test_config(),
-        Arc::new(StaticClusterTargetsProvider::new(vec![])),
-        pod_store,
-        sb_store,
-    );
+    let (provider, _handle) = mock_provider(test_config());
 
     let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
     let err = provider.ensure_task_volume(&task).await.unwrap_err();
@@ -740,21 +727,10 @@ async fn delete_task_volume_reports_other_api_errors() {
 
 #[tokio::test]
 async fn provision_without_a_harness_image_is_invalid_and_names_the_harness() {
-    let (mock_service, _handle) =
-        tower_test::mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
-    let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
-    let config = ProvisioningConfig {
+    let (provider, _handle) = mock_provider(ProvisioningConfig {
         harness_images: BTreeMap::new(),
         ..test_config()
-    };
-    let provider = K8sSandboxProvider::new(
-        Client::new(mock_service, "default"),
-        config,
-        Arc::new(StaticClusterTargetsProvider::new(vec![])),
-        pod_store,
-        sb_store,
-    );
+    });
     let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
     let spec = RunSandboxSpec {
         run_id: RunId::new(),
@@ -779,17 +755,7 @@ async fn provision_without_a_harness_image_is_invalid_and_names_the_harness() {
 #[tokio::test]
 async fn events_stream_survives_lag_and_keeps_later_events() {
     use futures::StreamExt as _;
-    let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
-    let (mock_service, _handle) =
-        tower_test::mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
-    let provider = K8sSandboxProvider::new(
-        Client::new(mock_service, "default"),
-        test_config(),
-        Arc::new(StaticClusterTargetsProvider::new(vec![])),
-        pod_store,
-        sb_store,
-    );
+    let (provider, _handle) = mock_provider(test_config());
     let mut events = provider.events();
     // The channel holds 128 events: overflow it, then send one more that must still arrive.
     for n in 0..200_u128 {
@@ -828,6 +794,36 @@ fn rule(ns: &str, svc: &str) -> ClusterServiceRef {
 type MockHandle =
     tower_test::mock::Handle<http::Request<kube::client::Body>, http::Response<String>>;
 
+/// Sends `body` as the JSON response with `status`.
+fn send_json(
+    send: tower_test::mock::SendResponse<http::Response<String>>,
+    status: u16,
+    body: &serde_json::Value,
+) {
+    send.send_response(
+        http::Response::builder()
+            .status(status)
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .unwrap(),
+    );
+}
+
+/// A provider on a mocked Kubernetes API with empty reflector stores.
+fn mock_provider(config: ProvisioningConfig) -> (K8sSandboxProvider, MockHandle) {
+    let (mock_service, handle) = tower_test::mock::pair();
+    let (pod_store, _) = reflector::store();
+    let (sb_store, _) = reflector::store();
+    let provider = K8sSandboxProvider::new(
+        Client::new(mock_service, "default"),
+        config,
+        Arc::new(StaticClusterTargetsProvider::new(vec![])),
+        pod_store,
+        sb_store,
+    );
+    (provider, handle)
+}
+
 /// Answers the next request with `status`: a Service for 200, an API error Status otherwise.
 /// With `headless_without_ports` the answered Service is headless.
 async fn answer_service(handle: &mut MockHandle, status: u16) {
@@ -848,15 +844,9 @@ async fn answer_service_as(handle: &mut MockHandle, status: u16, headless: bool)
             }
         })
     } else {
-        serde_json::json!({ "kind": "Status", "apiVersion": "v1", "code": status, "message": "boom" })
+        status_body(status, "boom")
     };
-    send.send_response(
-        http::Response::builder()
-            .status(status)
-            .header("Content-Type", "application/json")
-            .body(body.to_string())
-            .unwrap(),
-    );
+    send_json(send, status, &body);
 }
 
 /// Runs `resolve(scope, rules)` and answers its Service lookups with `statuses`.
@@ -1142,4 +1132,88 @@ async fn named_target_port_collects_the_ports_of_all_slices() {
             .unwrap(),
     );
     assert_eq!(task.await.unwrap().unwrap().target_ports, vec![8080, 9090]);
+}
+
+/// Provider whose Kubernetes API answers the next request with a `Status` of code 403.
+async fn ensure_volume_rejected_with(reason: &str, message: &str) -> ProviderError {
+    let (provider, mut handle) = mock_provider(test_config());
+    let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
+    let call = tokio::spawn(async move { provider.ensure_task_volume(&task).await });
+    let (_req, send) = handle.next_request().await.expect("PVC patch");
+    let body = serde_json::json!({
+        "kind": "Status", "apiVersion": "v1", "status": "Failure",
+        "code": 403, "reason": reason, "message": message,
+    });
+    send_json(send, 403, &body);
+    call.await.unwrap().unwrap_err()
+}
+
+#[tokio::test]
+async fn a_quota_rejection_is_a_capacity_error() {
+    let err = ensure_volume_rejected_with(
+        "Forbidden",
+        "persistentvolumeclaims \"df-df-1\" is forbidden: exceeded quota: sandboxes, requested: requests.storage=10Gi",
+    )
+    .await;
+    assert!(matches!(err, ProviderError::Capacity(_)), "{err}");
+}
+
+#[tokio::test]
+async fn a_forbidden_response_without_quota_text_is_a_backend_error() {
+    let err = ensure_volume_rejected_with(
+        "Forbidden",
+        "persistentvolumeclaims is forbidden: User cannot patch resource",
+    )
+    .await;
+    assert!(matches!(err, ProviderError::Backend(_)), "{err}");
+}
+
+/// Provider on a mocked Kubernetes API; `sandbox_exists` runs against the answer that
+/// the mock gives to the sandbox list request, and the request's query is returned with it.
+async fn sandbox_exists_answered(
+    run_id: RunId,
+    status: u16,
+    items: Vec<Sandbox>,
+) -> (Result<bool, ProviderError>, String) {
+    let (provider, mut handle) = mock_provider(test_config());
+    let call = tokio::spawn(async move { provider.sandbox_exists(run_id).await });
+    let (req, send) = handle.next_request().await.expect("sandbox list");
+    let query = req.uri().query().unwrap_or_default().to_string();
+    let body = if status == 200 {
+        serde_json::json!({
+            "apiVersion": "agents.x-k8s.io/v1alpha1", "kind": "SandboxList",
+            "metadata": {}, "items": items,
+        })
+    } else {
+        status_body(status, "boom")
+    };
+    send_json(send, status, &body);
+    (call.await.unwrap(), query)
+}
+
+#[tokio::test]
+async fn sandbox_exists_is_true_for_a_listed_sandbox_and_selects_by_instance_and_run() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let (exists, query) = sandbox_exists_answered(run_id, 200, vec![sandbox_for(run_id)]).await;
+    assert!(exists.unwrap());
+    let selector =
+        format!("dark-factory.io%2Finstance%3Dtest-instance%2Cdark-factory.io%2Frun-id%3D{run_id}");
+    assert!(query.contains(&selector), "{query}");
+}
+
+#[tokio::test]
+async fn sandbox_exists_is_false_for_an_empty_list() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let (exists, _) = sandbox_exists_answered(run_id, 200, vec![]).await;
+    assert!(!exists.unwrap());
+}
+
+#[tokio::test]
+async fn sandbox_exists_reports_an_api_error() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let (exists, _) = sandbox_exists_answered(run_id, 500, vec![]).await;
+    assert!(
+        matches!(exists, Err(ProviderError::Backend(_))),
+        "{exists:?}"
+    );
 }

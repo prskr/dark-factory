@@ -1,6 +1,7 @@
 //! Task pages: the three-column workspace (list, transcript, details), the composer, rename and
 //! the message input (`specs/task-ui/spec.md`, design D4 to D8).
 
+mod resume;
 mod view;
 
 use std::time::Duration;
@@ -30,6 +31,7 @@ use crate::layout::{View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
 use crate::transcript::{Folder, render_transcript};
+pub(crate) use resume::ResumeNote;
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
     list_column, pending_region, runs_region, stoppable, task_rows,
@@ -120,6 +122,7 @@ struct Selected {
     pending: Vec<df_db::TaskMessageRow>,
     folder: Folder,
     show_hidden: bool,
+    max_auto_resumes: u32,
     requests: Vec<crate::requests::CardData>,
 }
 
@@ -192,7 +195,12 @@ fn selected_columns(s: &Selected) -> Markup {
             }
             (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
         }
-        (details_column(&s.detail, &s.runs, &CancelNote::new(&s.runs, &s.pending)))
+        (details_column(
+            &s.detail,
+            &s.runs,
+            &CancelNote::new(&s.runs, &s.pending),
+            &ResumeNote::new(&s.detail, &s.runs, s.max_auto_resumes),
+        ))
     }
 }
 
@@ -267,6 +275,7 @@ async fn task_detail(
         pending: data.pending,
         folder,
         show_hidden: state.show_hidden_blocks,
+        max_auto_resumes: state.max_auto_resumes,
         requests,
     };
     workspace(&state, &user, &query.filters(), Some(selected)).await
@@ -603,6 +612,7 @@ async fn details_answer(
             details_region(
                 &data.task,
                 &CancelNote::new(&data.runs, &data.pending),
+                &ResumeNote::new(&data.task, &data.runs, state.max_auto_resumes),
                 error,
             ),
         )
