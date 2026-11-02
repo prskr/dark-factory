@@ -394,6 +394,34 @@ async fn run_changes_rerender_the_runs_region() {
 }
 
 #[tokio::test]
+async fn stopping_the_run_shows_it_finalizing_and_turns_stop_back_into_send() {
+    let f = fixture().await;
+    sqlx::query("UPDATE tasks SET status = 'running'")
+        .execute(&f.app.pool)
+        .await
+        .unwrap();
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    let first = sse.next().await;
+    assert!(first.data.contains("aria-label=\"Stop\""), "{}", first.data);
+
+    let (actor, _) = crate::testkit::actor();
+    df_db::stop_run(&f.app.pool, f.task, actor).await.unwrap();
+
+    let frame = sse.next_within(LIVE).await;
+    assert!(
+        frame.data.contains(r##"hx-target="#runs""##) && frame.data.contains(">finalizing<"),
+        "{}",
+        frame.data
+    );
+    assert!(
+        frame.data.contains(r##"hx-target="#composer-action""##)
+            && !frame.data.contains("aria-label=\"Stop\""),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
 async fn a_turn_end_refreshes_the_runs_and_details_regions_without_adding_an_item() {
     let f = fixture().await;
     let mut sse = f.events("/tasks/DF-1/events?after=0").await;

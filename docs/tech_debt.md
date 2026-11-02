@@ -634,9 +634,11 @@ Swapping `#ws-detail` through the task list logs an `AbortError` in the browser 
 
 `state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')` is written out in `set_idle_tx`, `start_finalizing` and the `queue_message` CASE. It restates `RunState::is_terminal` plus `Finalizing`.
 
+`crates/df-db/src/tasks.rs` also repeats the terminal list `state NOT IN ('succeeded', 'failed', 'cancelled')` in `request_stop_tx` and `has_active_run` (code review of `iter2-cancel`, S4, 2026-11-02).
+
 **Matters when:** a run state is added or changed; all three statements have to change together.
 
-**Fix:** Put the list in one `RunState` constant next to `is_terminal` and bind it with `= ANY($n)`.
+**Fix:** Put the list in one `RunState` constant next to `is_terminal` and bind it with `= ANY($n)`, plus a second constant for the terminal states.
 
 ### TD-66 (S15). `start_finalizing` takes a flag argument
 

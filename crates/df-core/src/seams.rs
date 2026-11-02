@@ -247,6 +247,19 @@ pub trait ForgeClient: Send + Sync {
         ch: PullRequestUpdate,
     ) -> Result<PullRequest, IntegrationError>;
 
+    /// Takes pull request `number` out of draft (ready for review).
+    async fn mark_pull_request_ready(
+        &self,
+        p: &ProjectId,
+        number: u64,
+    ) -> Result<PullRequest, IntegrationError> {
+        let ready = PullRequestUpdate {
+            draft: Some(false),
+            ..PullRequestUpdate::default()
+        };
+        self.update_pull_request(p, number, ready).await
+    }
+
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError>;
 
     async fn add_issue_comment(

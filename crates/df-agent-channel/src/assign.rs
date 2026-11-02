@@ -544,6 +544,19 @@ mod tests {
     }
 
     #[test]
+    fn complete_task_is_described_for_runs_with_nothing_left_to_do() {
+        let tools = tool_descriptors();
+        let complete = tools.iter().find(|t| t.name == "complete_task").unwrap();
+        assert!(
+            complete.description.contains("leave nothing to do")
+                && complete.description.contains("summary that says why")
+                && complete.description.contains("the task waits for a human"),
+            "{}",
+            complete.description
+        );
+    }
+
+    #[test]
     fn summary_keeps_the_newest_messages_when_it_has_to_cut() {
         let header = "x".repeat(10 * 1024);
         let entries: Vec<String> = (0..20)

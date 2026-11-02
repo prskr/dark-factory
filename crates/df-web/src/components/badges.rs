@@ -14,6 +14,8 @@ pub enum Tone {
     Queued,
     Completed,
     Failed,
+    /// A cancelled task or run: outlined, no fill.
+    Cancelled,
     /// Rate limited or limit reached.
     Limited,
     /// The agent is done and the PR waits for review.
@@ -28,6 +30,7 @@ impl Tone {
             Self::Queued => "bg-status-queued-bg text-status-queued-fg",
             Self::Completed => "bg-status-completed-bg text-status-completed-fg",
             Self::Failed => "bg-status-failed-bg text-status-failed-fg",
+            Self::Cancelled => "border border-line-strong bg-panel text-muted",
             Self::Limited => "bg-status-limited-bg text-status-limited-fg",
             Self::Review => "bg-status-review-bg text-status-review-fg",
         }
@@ -41,6 +44,7 @@ impl Tone {
             Self::Queued => "bg-status-queued-fg",
             Self::Completed => "bg-status-completed-fg",
             Self::Failed => "bg-status-failed-fg",
+            Self::Cancelled => "bg-muted",
             Self::Limited => "bg-status-limited-fg",
             Self::Review => "bg-status-review-fg",
         }
@@ -55,6 +59,7 @@ impl Tone {
             TaskStatus::InReview => Self::Review,
             TaskStatus::Completed => Self::Completed,
             TaskStatus::RateLimited | TaskStatus::LimitReached => Self::Limited,
+            TaskStatus::Cancelled => Self::Cancelled,
             TaskStatus::Failed => Self::Failed,
         }
     }
@@ -69,8 +74,8 @@ impl Tone {
             RunState::Pending
             | RunState::Provisioning
             | RunState::Connecting
-            | RunState::Preparing
-            | RunState::Cancelled => Self::Queued,
+            | RunState::Preparing => Self::Queued,
+            RunState::Cancelled => Self::Cancelled,
         }
     }
 }
@@ -128,7 +133,8 @@ mod tests {
             (TaskStatus::LimitReached, "status-limited"),
             (TaskStatus::Failed, "status-failed"),
         ];
-        assert_eq!(expected.len(), TaskStatus::ALL.len());
+        // Cancelled is outlined, not filled (see `a_cancelled_task_is_outlined`).
+        assert_eq!(expected.len() + 1, TaskStatus::ALL.len());
         for (status, token) in expected {
             let html = status_badge(status).into_string();
             assert!(
@@ -137,6 +143,17 @@ mod tests {
             );
             assert!(html.contains(&format!(">{}<", status.as_str().replace('_', " "))));
         }
+    }
+
+    #[test]
+    fn a_cancelled_task_is_outlined_in_muted_colors() {
+        let html = status_badge(TaskStatus::Cancelled).into_string();
+        assert!(
+            html.contains("border border-line-strong bg-panel text-muted"),
+            "{html}"
+        );
+        assert!(html.contains(">cancelled<"));
+        assert_eq!(Tone::of_run(RunState::Cancelled), Tone::Cancelled);
     }
 
     #[test]
@@ -150,7 +167,6 @@ mod tests {
         assert_eq!(Tone::of_run(RunState::Succeeded), Tone::Completed);
         assert_eq!(Tone::of_run(RunState::Failed), Tone::Failed);
         assert_eq!(Tone::of_run(RunState::AwaitingInput), Tone::Waiting);
-        assert_eq!(Tone::of_run(RunState::Cancelled), Tone::Queued);
     }
 
     #[test]

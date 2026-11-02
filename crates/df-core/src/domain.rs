@@ -23,7 +23,7 @@ pub enum StatusGroup {
     Active,
     /// Waiting or limit reached: a human has to act.
     Waiting,
-    /// Completed or failed.
+    /// Completed, cancelled or failed.
     Done,
 }
 
@@ -35,7 +35,7 @@ pub enum StatusSet {
     Active,
     /// Waiting, limit reached.
     Waiting,
-    /// Completed, failed.
+    /// Completed, cancelled, failed.
     Done,
     /// Queued only.
     Queued,
@@ -58,7 +58,11 @@ impl StatusSet {
                 TaskStatus::InReview,
                 TaskStatus::LimitReached,
             ],
-            Self::Done => &[TaskStatus::Completed, TaskStatus::Failed],
+            Self::Done => &[
+                TaskStatus::Completed,
+                TaskStatus::Cancelled,
+                TaskStatus::Failed,
+            ],
             Self::Queued => &[TaskStatus::Queued],
             Self::Running => &[TaskStatus::Running, TaskStatus::RateLimited],
         }
@@ -88,6 +92,8 @@ pub enum TaskStatus {
     InReview,
     /// A human marked the task done.
     Completed,
+    /// A human cancelled the task; a new message reopens it.
+    Cancelled,
     RateLimited,
     LimitReached,
     Failed,
@@ -100,7 +106,7 @@ impl TaskStatus {
             Self::Waiting | Self::Blocked | Self::InReview | Self::LimitReached => {
                 StatusGroup::Waiting
             }
-            Self::Completed | Self::Failed => StatusGroup::Done,
+            Self::Completed | Self::Cancelled | Self::Failed => StatusGroup::Done,
         }
     }
 
@@ -110,6 +116,11 @@ impl TaskStatus {
         !matches!(self, Self::Queued | Self::Running | Self::Completed)
     }
 
+    /// Whether a board member may cancel a task in this status: any but the two final ones.
+    pub const fn can_cancel(&self) -> bool {
+        !matches!(self, Self::Completed | Self::Cancelled)
+    }
+
     pub const ALL: &'static [Self] = &[
         Self::Queued,
         Self::Running,
@@ -117,6 +128,7 @@ impl TaskStatus {
         Self::Blocked,
         Self::InReview,
         Self::Completed,
+        Self::Cancelled,
         Self::RateLimited,
         Self::LimitReached,
         Self::Failed,
@@ -130,6 +142,7 @@ impl TaskStatus {
             Self::Blocked => "blocked",
             Self::InReview => "in_review",
             Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
             Self::RateLimited => "rate_limited",
             Self::LimitReached => "limit_reached",
             Self::Failed => "failed",
@@ -162,6 +175,7 @@ impl FromStr for TaskStatus {
             "blocked" => Ok(Self::Blocked),
             "in_review" => Ok(Self::InReview),
             "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
             "rate_limited" => Ok(Self::RateLimited),
             "limit_reached" => Ok(Self::LimitReached),
             "failed" => Ok(Self::Failed),
@@ -402,6 +416,7 @@ mod tests {
             (TaskStatus::Blocked, "blocked"),
             (TaskStatus::InReview, "in_review"),
             (TaskStatus::Completed, "completed"),
+            (TaskStatus::Cancelled, "cancelled"),
             (TaskStatus::RateLimited, "rate_limited"),
             (TaskStatus::LimitReached, "limit_reached"),
             (TaskStatus::Failed, "failed"),
@@ -431,7 +446,7 @@ mod tests {
             StatusSet::Waiting.statuses(),
             [Waiting, Blocked, InReview, LimitReached]
         );
-        assert_eq!(StatusSet::Done.statuses(), [Completed, Failed]);
+        assert_eq!(StatusSet::Done.statuses(), [Completed, Cancelled, Failed]);
         // The groups are made of the statuses `TaskStatus::group` assigns to them.
         for group in [StatusGroup::Active, StatusGroup::Waiting, StatusGroup::Done] {
             let set = StatusSet::from(group);
@@ -457,11 +472,20 @@ mod tests {
             RateLimited,
             LimitReached,
             Failed,
+            Cancelled,
         ] {
             assert!(status.can_mark_done(), "{status}");
         }
         for status in [Queued, Running, Completed] {
             assert!(!status.can_mark_done(), "{status}");
+        }
+    }
+
+    #[test]
+    fn only_final_statuses_cannot_be_cancelled() {
+        for status in TaskStatus::ALL {
+            let final_status = matches!(status, TaskStatus::Completed | TaskStatus::Cancelled);
+            assert_eq!(status.can_cancel(), !final_status, "{status}");
         }
     }
 
@@ -477,6 +501,7 @@ mod tests {
             (TaskStatus::InReview, Waiting),
             (TaskStatus::LimitReached, Waiting),
             (TaskStatus::Completed, Done),
+            (TaskStatus::Cancelled, Done),
             (TaskStatus::Failed, Done),
         ];
         assert_eq!(expected.len(), TaskStatus::ALL.len());

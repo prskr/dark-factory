@@ -212,6 +212,8 @@ pub(crate) struct TestApp {
     pub router: Router,
     pub pool: PgPool,
     pub idp: Idp,
+    /// The forge the handlers call; records the calls.
+    pub forge: df_core::testing::FakeForgeClient,
     _dir: tempfile::TempDir,
 }
 
@@ -292,7 +294,9 @@ impl TestApp {
             roles_claim: "roles".into(),
             extra_scopes: Vec::new(),
         };
+        let forge = df_core::testing::FakeForgeClient::new();
         let state = WebState {
+            forge: Arc::new(forge.clone()),
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
             oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
             pool: pool.clone(),
@@ -307,6 +311,7 @@ impl TestApp {
             router: router(state),
             pool,
             idp,
+            forge,
             _dir: dir,
         }
     }

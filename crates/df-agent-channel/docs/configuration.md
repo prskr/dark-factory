@@ -50,6 +50,13 @@ stateDiagram-v2
     finalizing --> failed: RunReport failed
     preparing --> failed: sandbox_lost
     running --> failed: sandbox_lost, hard stop
+    preparing --> finalizing: human stop (Cancel)
+    running --> finalizing: human stop (Cancel)
+    awaiting_input --> finalizing: human stop (Cancel)
+    pending --> cancelled: human stop
+    provisioning --> cancelled: human stop
+    connecting --> cancelled: human stop
+    finalizing --> cancelled: stop timeout (120 s)
 ```
 
 A `RunReport` is accepted in any non-terminal state. `Cancel` is sent by the replica holding the
@@ -63,13 +70,24 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 | `end_turn` | `succeeded` | `waiting` |
 | `limit_reached` | `succeeded` | `limit_reached` |
 | `rate_limited` | `succeeded` | `rate_limited` |
-| `cancelled` | `cancelled` | `waiting` |
+| `cancelled` | `cancelled` | `waiting` (`cancelled` if a board member cancelled the task) |
 | `blocked` | `blocked` | `waiting` |
 | `failed`, `provisioning_failed`, `connect_timeout`, `sandbox_lost` | `failed` | `failed` |
 
 If prompts are still undelivered when a run ends with an outcome other than `failed`-class or
 `rate_limited`, the task becomes `queued` and the next run starts with them. A task a board member
 marked done (`completed`) keeps its status when its run ends, unless prompts are undelivered.
+
+### Human stop and cancel
+
+A board member stops the active run (`POST /tasks/{key}/stop`) or cancels the task (`POST /tasks/{key}/cancel`, which stops the run too). Both set `runs.stop_requested_at`.
+
+- A connected run in `preparing`, `running` or `awaiting_input` moves to `finalizing`; the session holding the stream sends `Cancel`, the runtime reports `cancelled` and the task becomes `waiting`. A run that is already `finalizing` is not marked by a stop (cancelling the task still marks it).
+- A run without a connection (`pending`, `provisioning`, `connecting`) is ended `cancelled` by the scheduler on the next notification or tick and its sandbox is torn down. The task volume is kept.
+- A stopped run that has not ended 120 s after the stop is torn down and ends `cancelled` with detail `stop-timeout` (volume kept).
+- Task status `cancelled` is kept when the run ends. A message reopens the task (`queued`); the next run starts after the stopped run ended.
+- Only messages queued after the stop requeue the task at run end; older undelivered messages leave it `waiting`. Cancelling discards the undelivered messages and closes the pending requests (`task-cancelled`).
+- No pull request is opened or marked ready for a `cancelled` task; an existing one is left as it is.
 
 ### Idle run (keep-alive)
 

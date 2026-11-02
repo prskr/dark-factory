@@ -826,10 +826,17 @@ async fn task_with_queued_message_pre_migration(pool: &PgPool) -> (TaskId, Promp
     let (task, _) = create_task(pool, new_task(project_id, persona_id, Some("T")))
         .await
         .unwrap();
-    let msg = queue_message(pool, task.id, human(), text("old"))
+    // Plain SQL: `queue_message` reads columns that newer migrations added.
+    let msg = PromptId::new();
+    sqlx::query("INSERT INTO task_messages (id, task_id, author, content) VALUES ($1, $2, $3, $4)")
+        .bind(msg.as_uuid())
+        .bind(task.id.as_uuid())
+        .bind(serde_json::to_value(human()).unwrap())
+        .bind(serde_json::to_value(text("old")).unwrap())
+        .execute(pool)
         .await
         .unwrap();
-    (task.id, msg.id)
+    (task.id, msg)
 }
 
 #[tokio::test]
@@ -1054,4 +1061,148 @@ async fn sql_and_rust_agree_on_which_messages_are_editable() {
             );
         }
     }
+}
+
+async fn run_stop_marker(pool: &PgPool, task: TaskId) -> (String, bool) {
+    sqlx::query_as("SELECT state, stop_requested_at IS NOT NULL FROM runs WHERE task_id = $1")
+        .bind(task.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn stopping_a_connected_run_finalizes_it_and_is_audited() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "running").await;
+    stop_run(&pool, task.id, human()).await.unwrap();
+    assert_eq!(
+        run_stop_marker(&pool, task.id).await,
+        ("finalizing".into(), true)
+    );
+    // Stopping again changes nothing and writes no second entry.
+    stop_run(&pool, task.id, human()).await.unwrap();
+    assert_eq!(audit_count(&pool, "run.stop").await, 1);
+    // The task keeps its status until the run reports.
+    assert_eq!(status_of(&pool, task.id).await, TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn stopping_a_run_without_a_connection_only_sets_the_marker() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "provisioning").await;
+    stop_run(&pool, task.id, human()).await.unwrap();
+    assert_eq!(
+        run_stop_marker(&pool, task.id).await,
+        ("provisioning".into(), true)
+    );
+}
+
+#[tokio::test]
+async fn stopping_a_finalizing_run_leaves_it_unmarked() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "finalizing").await;
+    stop_run(&pool, task.id, human()).await.unwrap();
+    assert_eq!(
+        run_stop_marker(&pool, task.id).await,
+        ("finalizing".into(), false)
+    );
+    assert_eq!(audit_count(&pool, "run.stop").await, 0);
+}
+
+#[tokio::test]
+async fn cancelling_a_task_marks_its_finalizing_run() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "finalizing").await;
+    cancel_task(&pool, task.id, human()).await.unwrap();
+    assert_eq!(
+        run_stop_marker(&pool, task.id).await,
+        ("finalizing".into(), true)
+    );
+}
+
+#[tokio::test]
+async fn stopping_a_task_without_an_active_run_is_a_conflict() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Waiting, "succeeded").await;
+    let err = stop_run(&pool, task.id, human()).await;
+    assert!(matches!(err, Err(DbError::Conflict(_))));
+    assert_eq!(audit_count(&pool, "run.stop").await, 0);
+}
+
+#[tokio::test]
+async fn cancelling_a_running_task_stops_the_run_and_discards_its_messages() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "running").await;
+    queue_message(&pool, task.id, human(), text("later"))
+        .await
+        .unwrap();
+
+    cancel_task(&pool, task.id, human()).await.unwrap();
+
+    assert_eq!(status_of(&pool, task.id).await, TaskStatus::Cancelled);
+    assert_eq!(
+        run_stop_marker(&pool, task.id).await,
+        ("finalizing".into(), true)
+    );
+    assert!(
+        list_undelivered_messages(&pool, task.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(audit_count(&pool, "task.cancel").await, 1);
+}
+
+#[tokio::test]
+async fn cancelling_is_rejected_for_completed_and_cancelled_tasks() {
+    for status in [TaskStatus::Completed, TaskStatus::Cancelled] {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_run(&pool, status, "succeeded").await;
+        let err = cancel_task(&pool, task.id, human()).await;
+        assert!(matches!(err, Err(DbError::Conflict(_))), "{status}");
+        assert_eq!(status_of(&pool, task.id).await, status);
+        assert_eq!(audit_count(&pool, "task.cancel").await, 0);
+    }
+}
+
+#[tokio::test]
+async fn cancelling_a_task_in_review_is_allowed() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::InReview, "succeeded").await;
+    cancel_task(&pool, task.id, human()).await.unwrap();
+    assert_eq!(status_of(&pool, task.id).await, TaskStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn a_message_reopens_a_cancelled_task_and_discarded_ones_stay_discarded() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Waiting, "succeeded").await;
+    queue_message(&pool, task.id, human(), text("old"))
+        .await
+        .unwrap();
+    cancel_task(&pool, task.id, human()).await.unwrap();
+
+    let new = queue_message(&pool, task.id, human(), text("please continue after all"))
+        .await
+        .unwrap();
+
+    assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
+    let undelivered = list_undelivered_messages(&pool, task.id).await.unwrap();
+    assert_eq!(
+        undelivered.iter().map(|m| m.id).collect::<Vec<_>>(),
+        [new.id]
+    );
+}
+
+#[tokio::test]
+async fn a_message_on_a_cancelled_task_with_a_stopped_run_queues_it_for_after_the_run() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "provisioning").await;
+    cancel_task(&pool, task.id, human()).await.unwrap();
+    queue_message(&pool, task.id, human(), text("again"))
+        .await
+        .unwrap();
+    // The stopped run has no connection yet, but it is going away.
+    assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
 }

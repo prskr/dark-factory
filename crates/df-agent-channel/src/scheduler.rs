@@ -19,12 +19,17 @@ use tokio::task::JoinSet;
 use crate::ChannelContext;
 use crate::assign::load_run_context;
 use crate::error::ChannelError;
-use crate::runs::{RunEnd, RunRow, finish_run, list_active_runs, mark_started, start_queued_runs};
+use crate::runs::{
+    RunEnd, RunRow, finish_run, get_run, list_active_runs, mark_started, start_queued_runs,
+    teardown,
+};
 
 /// Interval of the safety-net tick besides notifications.
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
 /// Runs started per tick; the next tick (or notification) picks up the rest.
 const START_BATCH: i64 = 10;
+/// Time a stopped run gets to report before its sandbox is torn down (design D1).
+const STOP_TIMEOUT_SECONDS: u64 = 120;
 /// Time granted to in-flight provisioning when the scheduler stops.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
 
@@ -60,6 +65,12 @@ impl Scheduler {
                 note = notifications.recv() => match note {
                     Ok(Notification::TaskMessageQueued { .. } | Notification::Reconnected)
                         | Err(RecvError::Lagged(_)) => self.start_in_background(&mut provisions).await,
+                    // A stop of a run without a connection ends it here, not on the tick.
+                    Ok(Notification::RunChanged { .. }) => {
+                        if let Err(e) = self.enforce_timeouts(Utc::now()).await {
+                            tracing::error!(error = %e, "failed to end stopped runs");
+                        }
+                    }
                     Ok(_) => {}
                     Err(RecvError::Closed) => break,
                 },
@@ -157,7 +168,17 @@ impl Scheduler {
                 ),
             ]),
         };
-        Ok(provider.provision(&spec).await?)
+        provider.provision(&spec).await?;
+        // A stop may have ended the run while the sandbox was being created: that teardown
+        // found nothing to delete.
+        if get_run(&self.ctx.pool, run_id)
+            .await?
+            .is_some_and(|run| run.state.is_terminal())
+        {
+            tracing::info!(run_id = %run_id, "run ended while its sandbox was created; tearing it down");
+            teardown(&self.ctx, run_id).await;
+        }
+        Ok(())
     }
 
     async fn provisioning_failed(
@@ -194,13 +215,28 @@ impl Scheduler {
         }
     }
 
-    /// Fails runs that never connected and runs that outlived budget plus two grace periods
-    /// (the first one is for `Cancel`, sent by the session holding the stream).
+    /// Ends runs a board member stopped (at once without a connection, after the stop timeout
+    /// otherwise), fails runs that never connected and runs that outlived budget plus two grace
+    /// periods (the first one is for `Cancel`, sent by the session holding the stream).
     pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), ChannelError> {
         let cfg = &self.ctx.config.runs;
         let mut first_error = None;
         for run in list_active_runs(&self.ctx.pool).await? {
             let end = match run.state {
+                // A human stopped a run that has no connection to send `Cancel` to.
+                RunState::Pending | RunState::Provisioning | RunState::Connecting
+                    if run.stop_requested_at.is_some() =>
+                {
+                    RunEnd::failure(run.id, RunOutcome::Cancelled, "stopped")
+                }
+                _ if is_before(
+                    run.stop_requested_at
+                        .and_then(|at| after(at, STOP_TIMEOUT_SECONDS)),
+                    now,
+                ) =>
+                {
+                    RunEnd::failure(run.id, RunOutcome::Cancelled, "stop-timeout")
+                }
                 RunState::Pending | RunState::Provisioning | RunState::Connecting
                     if is_before(after(run.started_at, cfg.connect_timeout_seconds), now) =>
                 {

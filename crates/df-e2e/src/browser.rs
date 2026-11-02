@@ -172,6 +172,36 @@ impl Session {
             .context("send the message")
     }
 
+    /// Stops the active run of the open task with the "Stop" button of its run card.
+    pub async fn stop_run(&self) -> Result<()> {
+        self.open_runs().await?;
+        self.page
+            .locator("#runs button:has-text('Stop')")
+            .first()
+            .click(None)
+            .await
+            .context("stop the run")
+    }
+
+    /// Cancels the open task: Status menu, "Cancel task…", then the confirmation.
+    pub async fn cancel_task(&self) -> Result<()> {
+        self.page
+            .locator("#task-details button[aria-haspopup=true]")
+            .click(None)
+            .await
+            .context("open the status menu")?;
+        self.page
+            .locator("#task-details button:has-text('Cancel task…')")
+            .click(None)
+            .await
+            .context("choose Cancel task…")?;
+        self.page
+            .locator("dialog[open] button:has-text('Cancel task')")
+            .click(None)
+            .await
+            .context("confirm the cancellation")
+    }
+
     /// Opens the closed "Runs" disclosure of the open task.
     pub async fn open_runs(&self) -> Result<()> {
         self.page

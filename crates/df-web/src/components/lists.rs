@@ -15,7 +15,7 @@ pub fn section(title: &str, body: Markup) -> Markup {
 /// Label and value pairs in a 76 px label column, for example project, persona and branch.
 pub fn definition_list(items: &[(&str, Markup)]) -> Markup {
     html! {
-        dl class="grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[13px]" {
+        dl class="grid grid-cols-[76px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2 text-[13px]" {
             @for (label, value) in items {
                 dt class="text-faint" { (label) }
                 dd class="min-w-0 break-words font-medium" { (value) }
@@ -112,9 +112,12 @@ mod tests {
     #[test]
     fn definition_list_pairs_terms_and_values() {
         let html = definition_list(&[("Project", html! { "Dark Factory" })]).into_string();
-        // A 76 px label column, 13 px text, faint labels, left-aligned medium values.
+        // A 76 px label column, 13 px text, faint labels, left-aligned medium values; a label sits
+        // on the baseline of its value, also next to a taller control such as the status select.
         assert!(
-            html.contains("grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[13px]"),
+            html.contains(
+                "grid grid-cols-[76px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2 text-[13px]"
+            ),
             "{html}"
         );
         assert!(

@@ -5,7 +5,7 @@
 //! Opening the PR is retried by the next trigger (push report or run end); at the end of a
 //! completed run there is no next trigger, so each step there runs even if the one before failed.
 
-use df_core::{IntegrationError, NewPullRequest, PullRequest, PullRequestUpdate, RepoRef, TaskId};
+use df_core::{IntegrationError, NewPullRequest, PullRequest, RepoRef, TaskId, TaskStatus};
 use df_db::{Notification, publish};
 use df_proto::agent::v1::{PushReport, PushStatus, PushTarget, WorkspaceState};
 use sqlx::PgPool;
@@ -53,19 +53,16 @@ pub async fn on_run_end(
             None
         });
     }
-    if !completed {
+    // A cancelled task keeps its PR as it is: neither ready nor a summary.
+    if !completed || current.task.status == TaskStatus::Cancelled {
         return;
     }
     let Some(number) = pr_number.and_then(|n| u64::try_from(n).ok()) else {
         return;
     };
-    let ready = PullRequestUpdate {
-        draft: Some(false),
-        ..PullRequestUpdate::default()
-    };
     if let Err(e) = ctx
         .forge
-        .update_pull_request(&rc.project.id, number, ready)
+        .mark_pull_request_ready(&rc.project.id, number)
         .await
     {
         // A completed run has no later trigger: still post the summary.
@@ -117,21 +114,31 @@ async fn try_ensure_draft(
         .bind(format!("task-pr:{}", current.task.id))
         .execute(&mut *tx)
         .await?;
-    let recorded: Option<i64> = sqlx::query_scalar("SELECT pr_number FROM tasks WHERE id = $1")
-        .bind(current.task.id.as_uuid())
-        .fetch_one(&mut *tx)
-        .await?;
+    let (recorded, status): (Option<i64>, String) =
+        sqlx::query_as("SELECT pr_number, status FROM tasks WHERE id = $1")
+            .bind(current.task.id.as_uuid())
+            .fetch_one(&mut *tx)
+            .await?;
     if recorded.is_some() {
         return Ok(recorded);
     }
     let (head, base) = (current.task_branch(), current.project.base_branch.clone());
     let project = current.project.id;
-    let pr = if let Some(pr) = ctx
+    let existing = ctx
         .forge
         .find_open_pull_request(&project, &head, &base)
-        .await?
-    {
+        .await?;
+    // A board member marked the task done or cancelled it without a PR: a push of its stopped
+    // run or the retry at run end must not open one. A PR opened before (its recording was
+    // lost) is still recorded.
+    let closed = matches!(
+        status.parse::<TaskStatus>().map_err(df_db::DbError::from)?,
+        TaskStatus::Completed | TaskStatus::Cancelled
+    );
+    let pr = if let Some(pr) = existing {
         pr
+    } else if closed {
+        return Ok(None);
     } else {
         let request = new_pull_request(current, head.clone(), base.clone())?;
         match ctx.forge.create_pull_request(&project, request).await {
@@ -321,6 +328,90 @@ mod tests {
         // A second push does not open another PR.
         on_push_report(&env.ctx, &rc, &push(3, PushStatus::Ok)).await;
         assert_eq!(creates(&env).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn no_pull_request_is_opened_for_a_task_marked_done() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        sqlx::query("UPDATE tasks SET status = 'completed' WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        on_push_report(&env.ctx, &rc, &push(2, PushStatus::Ok)).await;
+        on_run_end(&env.ctx, &rc, false, Some(&pushed_workspace())).await;
+
+        assert!(creates(&env).is_empty());
+        assert_eq!(pr_number(&pool, rc.task.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn no_pull_request_is_opened_for_a_cancelled_task() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        sqlx::query("UPDATE tasks SET status = 'cancelled' WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        on_push_report(&env.ctx, &rc, &push(2, PushStatus::Ok)).await;
+        on_run_end(&env.ctx, &rc, true, Some(&pushed_workspace())).await;
+
+        assert!(creates(&env).is_empty());
+        assert_eq!(pr_number(&pool, rc.task.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_existing_pr_of_a_cancelled_task_is_recorded_without_creating_one() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        sqlx::query("UPDATE tasks SET status = 'cancelled' WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        env.forge
+            .push_find_open_pull_request_result(Ok(Some(pull_request(7))));
+
+        on_push_report(&env.ctx, &rc, &push(2, PushStatus::Ok)).await;
+
+        assert!(creates(&env).is_empty());
+        assert_eq!(pr_number(&pool, rc.task.id).await, Some(7));
+    }
+
+    #[tokio::test]
+    async fn completed_run_of_a_cancelled_task_leaves_the_pr_draft_and_posts_no_comment() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
+        sqlx::query(
+            "UPDATE tasks SET status = 'cancelled', completion_summary = 'All done' WHERE id = $1",
+        )
+        .bind(rc.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        on_run_end(&env.ctx, &rc, true, None).await;
+
+        assert!(
+            !env.forge.calls().iter().any(|c| matches!(
+                c,
+                ForgeCall::UpdatePullRequest { .. } | ForgeCall::AddIssueComment { .. }
+            )),
+            "{:?}",
+            env.forge.calls()
+        );
+    }
+
+    fn pushed_workspace() -> WorkspaceState {
+        WorkspaceState {
+            task_branch_pushed: true,
+            ..WorkspaceState::default()
+        }
     }
 
     #[tokio::test]

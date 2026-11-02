@@ -710,7 +710,7 @@
           "FILE:@@//crates/df-proto/Cargo.toml cc19fc9825e77fac413be79103ef4a16ea1a1fcd3edfbae92c1a02046d8f35e2",
           "FILE:@@//crates/df-telemetry/Cargo.toml 16866e9a1f043613801199bb1188042c86e5ce9622b26981a72c068891bea1f4",
           "FILE:@@//crates/df-test-postgres/Cargo.toml 9f9cb5cb84b68001d34cf1148d9f31a44b9751e89b647181915b6fbe4beb156f",
-          "FILE:@@//crates/df-web/Cargo.toml d157d19af5e263dd40c7cc04c3b8afd059879b1fab831157abe65b888de45b99",
+          "FILE:@@//crates/df-web/Cargo.toml 62852e6f5473f02043b16e060ca08a50db0c2afb446e8bb9650e2c9baf46c1b7",
           "FILE:@@//crates/factory-agent/Cargo.toml 6e2ba33ba2f74048e3dcea8d716006487fb5fd11d4fbd1985e09e54fa76d505c",
           "FILE:@@//crates/fake-acp-agent/Cargo.toml a1a9a7229f9fe9d2d3006c0c43fa89be63c49b4941db27d797d33c9e48b1503f",
           "FILE:@@//plugins/forgejo/Cargo.toml 6e23b19ce2903383c8b71605ed263c86e70b532325284b90facde77f5c66eb31",
@@ -11643,12 +11643,13 @@
     },
     "@@rules_rust+//crate_universe/private:internal_extensions.bzl%cu_nr": {
       "general": {
-        "bzlTransitiveDigest": "PmV0moBlbuZHJM/PwEtqLC7yitKhhPCtvyIxnHKn5NA=",
+        "bzlTransitiveDigest": "v7FMDQjHegEupeAzesdQyr/QKDLpikhapHqMyGoUzZE=",
         "usagesDigest": "+1w4EnEfZLFpf8Ak18jhmCWsOTE75Noy2i16whyXYWs=",
         "recordedInputs": [
           "REPO_MAPPING:apple_support+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:bazel_features+,bazel_features_globals bazel_features++version_extension+bazel_features_globals",
           "REPO_MAPPING:bazel_features+,bazel_features_version bazel_features++version_extension+bazel_features_version",
+          "REPO_MAPPING:rules_cc+,bazel_features bazel_features+",
           "REPO_MAPPING:rules_cc+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:rules_cc+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_cc+,cc_compatibility_proxy rules_cc++compatibility_proxy+cc_compatibility_proxy",

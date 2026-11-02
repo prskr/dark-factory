@@ -50,6 +50,8 @@ pub struct WebState {
     /// The forge routing table with each plugin's availability; projects show their forge by icon
     /// and name.
     pub forges: df_core::routing::ForgeRoutes,
+    /// The forge client; marking a task done uses it to mark the PR ready for review.
+    pub forge: Arc<dyn df_core::ForgeClient>,
     /// Flow events of the egress gateways; without it the egress log page is unavailable.
     pub flows: Option<Arc<dyn egress::FlowSource>>,
     /// Checks `cluster-service` entries against the cluster; without it they cannot be added.
