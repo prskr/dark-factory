@@ -22,7 +22,7 @@ Delegation (ADR-0016) implied parents and children but never specified them. Big
 - **Base branch creation:** if a task's base task has no task branch yet, the control plane creates it from the base task's own base through the forge when the task starts for the first time.
 - **Events along the tree:** a subtask ending (Completion, Done, failed, cancelled) wakes only its direct parent (ADR-0043). Changes to a base branch don't notify the tasks based on it; the prepare fast-forward (ADR-0041) brings tasks without own commits up to date.
 - **Lifecycle:**
-  - A task can't complete while it has **open subtasks**: subtasks in `awaiting_dependencies`, `queued`, `running` or `blocked`, or subtasks with an open, unmerged PR against the task's own branch. `complete_task` returns an error naming them. A subtask in `in_review` without such a PR, Done, failed or cancelled doesn't block.
+  - A task can't complete while it has **open subtasks**: subtasks that haven't finished their round (any status except `in_review`, Done, failed and cancelled, so also `waiting` or `rate_limited`), or subtasks based on the task with a PR that is neither merged nor cancelled. `complete_task` returns an error naming them; a board member can still mark the task done.
   - Cancelling a task cancels its non-final descendants top-down in one transaction, so no child-ended wake-ups fire inside the subtree. The cancelled task's own parent is woken once. Dependents outside the subtree stay waiting (ADR-0052).
   - Chat tasks are exempt from both (ADR-0043).
   - Progress and cost are shown per task and summed per subtree.
