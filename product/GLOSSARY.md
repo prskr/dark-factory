@@ -18,6 +18,14 @@ _Avoid_: Completed, closed, merged
 The task another task reports to: it is woken whenever that task ends and receives its escalated questions.
 _Avoid_: Creator, owner, supervisor
 
+**Subtask**:
+A task whose parent task is set.
+_Avoid_: Child task, sub-task
+
+**Base task**:
+The task whose branch another task's branch starts from, so that task's workspace contains the base task's work.
+_Avoid_: Source task, upstream task
+
 **Dependency**:
 A condition under which a task may start for the first time: another task of the same project reaching its first Completion, or reaching Done.
 _Avoid_: Blocker, blocked by, prerequisite
