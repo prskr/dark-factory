@@ -1,6 +1,6 @@
 # Agent Run — Deep Dive
 
-> Detailed design of how a single agent run executes: identity, sandbox and storage lifecycle, workspace handling, harness setup, credentials, MCP proxying and failure handling. High-level decisions live in the ADRs ([`design/adr/`](adr/README.md), mainly ADR-0005–ADR-0010, ADR-0015–ADR-0017, ADR-0019, ADR-0022–ADR-0023); wire formats in [`contract/`](../contract/README.md). Status: **design draft**.
+> Detailed design of how a single agent run executes: identity, sandbox and storage lifecycle, workspace handling, harness setup, credentials, MCP proxying and failure handling. High-level decisions live in the ADRs ([`docs/adr/`](../docs/adr/README.md), mainly ADR-0005–ADR-0010, ADR-0015–ADR-0017, ADR-0019, ADR-0022–ADR-0023); wire formats in [`contract/`](../contract/README.md). Status: **design draft**.
 
 ## 1. Terminology
 

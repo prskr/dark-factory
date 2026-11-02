@@ -40,7 +40,7 @@ The controls below are the design targets. Sandbox isolation, network policies, 
 - **Secrets**: credentials stay in memory or in files outside the persistent volume. They are never written under `/data` and never logged.
 - **Traceability**: audit entries are written; a view, approvals and cost reporting are planned.
 
-See [`design/egress.md`](design/egress.md), [`design/agent-run.md`](design/agent-run.md) and the [ADRs](design/adr/README.md) for details.
+See [`design/egress.md`](design/egress.md), [`design/agent-run.md`](design/agent-run.md) and the [ADRs](docs/adr/README.md) for details.
 
 ## Who it is for
 
@@ -71,7 +71,7 @@ Read [`docs/development.md`](docs/development.md) for the local setup (Rust tool
 | [`product/iterations/roadmap.md`](product/iterations/roadmap.md) | Planned iterations and backlog |
 | [`product/agent-playbook.md`](product/agent-playbook.md) | How agents are expected to work |
 | [`design/tech-stack.md`](design/tech-stack.md) | The tech stack in one place |
-| [`design/adr/`](design/adr/README.md) | Architecture Decision Records |
+| [`docs/adr/`](docs/adr/README.md) | Architecture Decision Records |
 | [`design/`](design/) | Deep dives: [`agent-run.md`](design/agent-run.md), [`egress.md`](design/egress.md), [`deployment.md`](design/deployment.md) |
 | [`contract/`](contract/README.md) | Protobuf, WIT and tool contracts |
 | [`openspec/`](openspec/README.md) | Specs and implementation changes |
