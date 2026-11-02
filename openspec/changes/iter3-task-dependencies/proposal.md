@@ -45,8 +45,8 @@ Agents can't hand work to each other: only a human creates tasks, a task can't w
 
 Out of scope:
 - Limits on tree depth, children per task and relayed messages: `iter3-task-tree`.
-- `base_task`, subtask branches, the Sub-tasks tab and cancelling a subtree: `iter3-task-tree`.
-- Questions addressed to the parent (`ask_question` addressee, `answer_question`): `iter3-task-tree`.
+- `base_task`, subtask branches, the Subtasks tab and cancelling a subtree: `iter3-task-tree`.
+- Questions addressed to the parent (`ask_question` addressee, `answer_question`): `iter3-parent-questions`.
 - Chats as parents: `iter3-chats`.
 - Reading other tasks' artifacts along dependencies: `iter3-artifacts`.
 - `depends_on` in the new-task composer: backlog ("Dependencies set by humans").

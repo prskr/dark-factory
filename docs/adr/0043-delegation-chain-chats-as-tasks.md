@@ -30,7 +30,7 @@ The existing ADRs cover the parts but not the whole: ADR-0034 defines the task t
 ## Consequences
 
 - Escalation and delegation are the same chain: task → parent → … → chat → human. No separate org model to keep consistent.
-- Chats need a task row and a key. They share the project's task counter, so task numbers have gaps (`DF-12-CHAT`, next task `DF-13`); the task key pattern accepts the `-CHAT` suffix. The task list filters on kind; the chat UI is separate and chat-shaped (message stream, no tabs for PR or sub-tasks).
+- Chats need a task row and a key. They share the project's task counter, so task numbers have gaps (`DF-12-CHAT`, next task `DF-13`); the task key pattern accepts the `-CHAT` suffix. The task list filters on kind; the chat UI is separate and chat-shaped (message stream, no tabs for PR or subtasks).
 - A delegation costs a sandbox start and a clone for the child; accepted (ADR-0033 makes the same trade-off for fan-out).
 - `tasks.created_by` and `agent_requests.decided_by` change from user references to principals in iteration 3; `agent_requests` gets an addressee. Both are additive migrations on top of iteration 2.
 - Waking on any child completion makes parents robust against partial results; the playbook tells coordinators to check the state of all children before continuing.
