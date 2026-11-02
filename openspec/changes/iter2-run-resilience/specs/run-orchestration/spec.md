@@ -49,7 +49,7 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 - **THEN** another tick provisions the run within 2 minutes and the run connects normally
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, reset the task's resume count, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited` with the resume time set to the reported retry time or one hour ahead when none was reported, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. For a run stopped by a human, only prompts queued after the stop count. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome. A task whose status is still `cancelled` SHALL stay `cancelled`.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, reset the task's resume count, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited` with the resume time set to the reported retry time or one hour ahead when none was reported, `cancelled`→`waiting`, `failed`→`failed`.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with retry time 04:30
@@ -63,33 +63,13 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 - **WHEN** a task resumed twice automatically ends a run with `RUN_OUTCOME_END_TURN`
 - **THEN** its resume count is 0
 
-#### Scenario: Message arrived during finalize
-- **WHEN** a message is queued while a run is finalizing and the run ends with `end_turn`
-- **THEN** the task becomes `queued` and the next run starts with that message
-
 #### Scenario: Agent completes
 - **WHEN** a run ends with outcome `completed`
 - **THEN** the task becomes `in_review`
 
-#### Scenario: Marked done while idle
-- **WHEN** a board member marks a task done while its run is `awaiting_input`
-- **THEN** the run is cancelled, its sandbox deleted, and the task stays `completed`
-
 #### Scenario: Blocked run
 - **WHEN** a run reports `RUN_OUTCOME_BLOCKED`
 - **THEN** the task becomes `blocked` and no new run starts until a message is queued
-
-#### Scenario: Completed with an undelivered message
-- **WHEN** a human queues a message during the turn in which the agent calls `complete_task`
-- **THEN** the run ends `completed`, the PR is marked ready, and the task becomes `queued` so the next run addresses the message
-
-#### Scenario: Stopped with an undelivered message
-- **WHEN** a message queued before the stop is still undelivered when the stopped run's `RunReport` arrives
-- **THEN** the task becomes `waiting` and no new run starts until another message is queued
-
-#### Scenario: Reopened while the stopped run finalizes
-- **WHEN** a task is cancelled, a board member queues a message before the stopped run's `RunReport` arrives, and the run then reports `RUN_OUTCOME_CANCELLED`
-- **THEN** the task stays `queued` and the next run starts with that message once the stopped run has ended
 
 ## ADDED Requirements
 
