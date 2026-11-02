@@ -1,6 +1,6 @@
 # ADR-0015: Inbound events: plugins normalize, the control plane filters and routes
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0051](0051-webhook-wake-rules.md))
 - **Date:** 2026-10-16
 - **Related:** [ADR-0014](0014-tasks-authoritative-issues-linked.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md)
 

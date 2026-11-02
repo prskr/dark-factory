@@ -18,7 +18,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0012](0012-postgresql-and-blob-store.md) | PostgreSQL plus a blob store abstraction | Accepted |
 | [ADR-0013](0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
 | [ADR-0014](0014-tasks-authoritative-issues-linked.md) | Tasks are authoritative; issues are linked | Accepted |
-| [ADR-0015](0015-webhook-filtering-and-routing.md) | Inbound events: plugins normalize, the control plane filters and routes | Accepted |
+| [ADR-0015](0015-webhook-filtering-and-routing.md) | Inbound events: plugins normalize, the control plane filters and routes | Accepted (amended by ADR-0051) |
 | [ADR-0016](0016-runs-and-triggers.md) | Runs and triggers | Accepted (amended by ADR-0034 and ADR-0043) |
 | [ADR-0017](0017-transcript-schema-and-versioning.md) | Own transcript schema and protocol versioning | Accepted |
 | [ADR-0018](0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
@@ -54,3 +54,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0048](0048-image-artifacts.md) | Image artifacts | Accepted (planned for iteration 3) |
 | [ADR-0049](0049-lifecycle-events-outbox-and-ed25519-signatures.md) | Lifecycle events via a PostgreSQL outbox, signed with Ed25519 | Accepted |
 | [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md) | Model traffic and usage only through the gateway | Accepted (planned for iteration 3) |
+| [ADR-0051](0051-webhook-wake-rules.md) | Webhook wake rules | Accepted (planned for iteration 3) |
