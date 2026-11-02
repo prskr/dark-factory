@@ -1,6 +1,6 @@
 # Sandbox Egress — Deep Dive
 
-> How sandboxes reach anything outside themselves: the gateway Deployment, the allowlist model, generated network policies, how allowlist changes reach running sandboxes, and the live egress log. Decision record: [ADR-0029](adr/0029-egress-gateway-and-generated-network-policies.md). Status: **design draft**.
+> How sandboxes reach anything outside themselves: the gateway Deployment, the allowlist model, generated network policies, how allowlist changes reach running sandboxes, and the live egress log. Decision record: [ADR-0029](../docs/adr/0029-egress-gateway-and-generated-network-policies.md). Status: **design draft**.
 
 ## 1. Goals
 

@@ -1,6 +1,6 @@
 # Deployment — Reference
 
-> What an instance needs in the cluster and in PostgreSQL, and what the Helm chart provides. This is the basis for the setup documentation. Decision records: [ADR-0012](adr/0012-postgresql-and-blob-store.md) (database roles, migrations), [ADR-0013](adr/0013-single-tenant-instances.md) (one instance per tenant), [ADR-0030](adr/0030-kubernetes-only-with-sandbox-provider-seam.md) (scoped RBAC, sandbox namespace), [ADR-0031](adr/0031-helm-chart-deployment-packaging.md) (Helm chart). Status: **design draft**.
+> What an instance needs in the cluster and in PostgreSQL, and what the Helm chart provides. This is the basis for the setup documentation. Decision records: [ADR-0012](../docs/adr/0012-postgresql-and-blob-store.md) (database roles, migrations), [ADR-0013](../docs/adr/0013-single-tenant-instances.md) (one instance per tenant), [ADR-0030](../docs/adr/0030-kubernetes-only-with-sandbox-provider-seam.md) (scoped RBAC, sandbox namespace), [ADR-0031](../docs/adr/0031-helm-chart-deployment-packaging.md) (Helm chart). Status: **design draft**.
 
 ## 1. Layout of one instance
 
