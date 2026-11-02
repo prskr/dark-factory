@@ -232,7 +232,11 @@ impl DetailStream {
         });
         let rendered = [
             head_region(&data.task, None),
-            details_region(&data.task, &CancelNote::new(&data.runs, &data.pending)),
+            details_region(
+                &data.task,
+                &CancelNote::new(&data.runs, &data.pending),
+                None,
+            ),
             runs_region(
                 &data.task.key,
                 &data.runs,

@@ -96,9 +96,10 @@ Paths and `HOME` stay identical across runs so absolute symlinks (e.g. Bazel con
 - No nested containers or container daemons. Container-based tests run via Bazel RBE; its endpoints are part of the project's egress allowlist (§10).
 
 ### 5.5 Garbage collection
-- Task closed or merged → delete the PVC after a grace period.
-- Idle TTL for abandoned tasks.
-- "Reset workspace" in the UI deletes the PVC; the next run re-clones.
+Status: **implemented** (iteration 2, `openspec/changes/iter2-task-volume-lifecycle`; settings in [`crates/df-agent-channel/docs/configuration.md`](../crates/df-agent-channel/docs/configuration.md), reset in [`crates/df-web/README.md`](../crates/df-web/README.md)).
+- Once per hour the control plane replica holding the instance Lease deletes the PVC of every task without a non-terminal run that is `completed` or `cancelled` with its last run older than `volumes.retainAfterCloseSeconds` (default `604800`, 7 days), or whose last run is older than `volumes.idleTtlSeconds` (default `2592000`, 30 days). PR merge events don't trigger a deletion; "completed + grace" covers that case.
+- "Reset workspace" in the task's Status menu deletes the PVC on demand after a confirmation that names what is lost (unpushed commits, uncommitted changes without a WIP snapshot). It is rejected (409) while the task has a non-terminal run and audited as `task.reset_workspace`.
+- Both lock the task row (`SELECT … FOR UPDATE`, the row the scheduler locks to start a run), re-check that no run is active, delete the PVC with a 30 s timeout and set `tasks.volume_deleted_at`. A run start for the task is skipped while the lock is held (the scheduler starts it on a later tick); the next run creates the PVC again (clearing the marker), re-clones and restores the WIP snapshot. Deleting a PVC that is already gone succeeds.
 - All of this is safe because Git holds committed work and the WIP snapshot.
 
 ## 6. Run lifecycle

@@ -24,6 +24,9 @@ use tonic::{Status, Streaming};
 
 use crate::{ChannelConfig, ChannelContext, TlsReloader, serve};
 
+#[cfg(test)]
+pub(crate) mod gated;
+
 /// Server name of the test server certificate.
 pub const SERVER_NAME: &str = "localhost";
 /// Pod SAN used by [`Env`] for its run.

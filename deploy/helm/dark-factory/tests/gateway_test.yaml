@@ -1,0 +1,235 @@
+suite: Dark Factory Helm Chart - gateway and Git proxy
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - control-plane-service.yaml
+  - migrate-job.yaml
+  - rbac.yaml
+  - sandbox-namespace.yaml
+  - certs.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - netpol.yaml
+  - httproute.yaml
+  - servicemonitor.yaml
+tests:
+  - it: renders gateway Deployment with >=2 replicas, automountServiceAccountToken false, PDB, Service, and headless Service
+    templates:
+      - gateway-deployment.yaml
+      - gateway-service.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+        template: gateway-deployment.yaml
+      - equal:
+          path: spec.replicas
+          value: 2
+        template: gateway-deployment.yaml
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: gateway-deployment.yaml
+      - isKind:
+          of: PodDisruptionBudget
+        template: gateway-service.yaml
+        documentIndex: 0
+      - isKind:
+          of: Service
+        template: gateway-service.yaml
+        documentIndex: 1
+      - isKind:
+          of: Service
+        template: gateway-service.yaml
+        documentIndex: 2
+      - equal:
+          path: spec.clusterIP
+          value: None
+        template: gateway-service.yaml
+        documentIndex: 2
+
+  - it: renders instance NetworkPolicies restricting control-plane and gateway ingress
+    template: netpol.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: NetworkPolicy
+        documentIndex: 0
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 9443
+        documentIndex: 0
+      - equal:
+          path: spec.ingress[1].ports[0].port
+          value: 9444
+        documentIndex: 0
+      - equal:
+          path: spec.ingress[2].ports[0].port
+          value: 8080
+        documentIndex: 0
+      - isKind:
+          of: NetworkPolicy
+        documentIndex: 1
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 3128
+        documentIndex: 1
+      - equal:
+          path: spec.ingress[1].ports[0].port
+          value: 9444
+        documentIndex: 1
+
+  - it: opens the gateway Git port to the sandbox namespace only
+    template: netpol.yaml
+    asserts:
+      - equal:
+          path: spec.ingress[0].from
+          value:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: dark-factory-sandboxes
+        documentIndex: 1
+      - contains:
+          path: spec.ingress[0].ports
+          content:
+            protocol: TCP
+            port: 8443
+        documentIndex: 1
+      - notContains:
+          path: spec.ingress[1].ports
+          content:
+            protocol: TCP
+            port: 8443
+        documentIndex: 1
+
+  - it: exposes the Git port on the gateway Service and container and mounts a size-limited mirror emptyDir by default
+    templates:
+      - gateway-deployment.yaml
+      - gateway-service.yaml
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: git
+            port: 8443
+            targetPort: git
+            protocol: TCP
+        template: gateway-service.yaml
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: git
+            containerPort: 8443
+            protocol: TCP
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-mirrors
+            emptyDir:
+              sizeLimit: 10Gi
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: git-mirrors
+            mountPath: /var/lib/dark-factory/git-mirrors
+        template: gateway-deployment.yaml
+
+  - it: applies a configured Git port and mirror size limit
+    templates:
+      - gateway-deployment.yaml
+      - gateway-service.yaml
+      - netpol.yaml
+    set:
+      gateway.ports.git: 9443
+      gateway.git.mirrorSizeLimit: 50Gi
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: git
+            port: 9443
+            targetPort: git
+            protocol: TCP
+        template: gateway-service.yaml
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-mirrors
+            emptyDir:
+              sizeLimit: 50Gi
+        template: gateway-deployment.yaml
+      - contains:
+          path: spec.ingress[0].ports
+          content:
+            protocol: TCP
+            port: 9443
+        template: netpol.yaml
+        documentIndex: 1
+
+  - it: issues the gateway certificate for the Git proxy host name sandboxes connect to
+    templates:
+      - certs.yaml
+      - configmap.yaml
+    release:
+      name: df
+      namespace: df
+    set:
+      fullnameOverride: df
+    asserts:
+      - contains:
+          path: spec.dnsNames
+          content: df-gateway.df.svc
+        template: certs.yaml
+        documentIndex: 4
+      - contains:
+          path: spec.dnsNames
+          content: df-gateway.df
+        template: certs.yaml
+        documentIndex: 4
+      - contains:
+          path: spec.dnsNames
+          content: df-gateway
+        template: certs.yaml
+        documentIndex: 4
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'gitHost: "df-gateway.df.svc"'
+        template: configmap.yaml
+        documentIndex: 0
+
+  - it: renders the Git proxy settings into the instance config
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  gitPort: 8443$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  mirrorDir: "/var/lib/dark-factory/git-mirrors"$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  maxPushSizeBytes: 268435456$'
+        documentIndex: 0
+
+  - it: renders a configured maximum push size as an integer
+    template: configmap.yaml
+    set:
+      gateway.git.maxPushSizeBytes: 1073741824
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  maxPushSizeBytes: 1073741824$'
+        documentIndex: 0
+
+  - it: rejects a non-positive maximum push size
+    template: configmap.yaml
+    set:
+      gateway.git.maxPushSizeBytes: 0
+    asserts:
+      - failedTemplate: {}

@@ -18,6 +18,7 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `GET /tasks/compose?project=`, `POST /tasks` | New-task composer (dialog), creation. |
 | `POST /tasks/{key}/title`, `POST /tasks/{key}/messages` | Rename, message input. |
 | `POST /tasks/{key}/done`, `POST /tasks/{key}/stop`, `POST /tasks/{key}/cancel` | Mark done (the PR is marked ready; answers the details region, 409 if not allowed), stop the active run (204; 409 without an active run), cancel the task (answers the details region, 409 for a `completed` or `cancelled` task). Stop and cancel are audited (`run.stop`, `task.cancel`). |
+| `POST /tasks/{key}/reset-workspace` | Delete the task's volume (answers the details region, 409 while the task has a non-terminal run). Holds the task row lock during the deletion (30 s timeout), so no run starts meanwhile; audited as `task.reset_workspace`. |
 | `PATCH /tasks/{key}/messages/{id}`, `DELETE /tasks/{key}/messages/{id}` | Edit or remove a queued message the agent has not received (409 after forwarding, 422 for an empty text). |
 | `GET /tasks/events?status=&project=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
 | `/projects`, `/personas`, `/credentials` | Configuration lists (`POST` creates). |
@@ -31,11 +32,12 @@ Everything except health, assets and login requires the role `board-member`. Non
 the `HX-Request: true` header (CSRF guard). `base_router(pool)` serves only health and assets;
 `router(state)` adds the UI. Other crates reuse `layout()` and `auth::require_board_member`.
 
-## How to stop a run, cancel a task and reopen it
+## How to stop a run, cancel a task, reopen it and reset its workspace
 
 1. **Stop a run**: press "Stop" on the run card (details column, Runs), or press the round button of the message box while the task is `running` and the box is empty. A connected run (`preparing`, `running`, `awaiting_input`) is `finalizing` at once, the agent is told to stop and the task becomes `waiting` when it has; a run that is not connected yet (`pending`, `provisioning`, `connecting`) ends `cancelled` directly. A `finalizing` run is not stopped again. Queued messages stay queued but do not start a new run on their own. If the runtime has not reported after 120 s, the sandbox is deleted and the run ends `cancelled` (detail `stop-timeout`); the task volume is kept.
 2. **Cancel a task**: Status menu, "Cancel task…", confirm. The run is stopped, queued messages are discarded and pending requests closed. The pull request and the issue stay as they are. A `completed` or `cancelled` task cannot be cancelled.
 3. **Reopen a cancelled task**: send a message. The task becomes `queued` and a new run starts as soon as the stopped run has ended.
+4. **Reset the workspace**: Status menu, "Reset workspace…", confirm with "Reset workspace". The task's volume (clone and build caches) is deleted; the next run clones the repository again and restores the WIP snapshot if there is one. Commits that were not pushed and uncommitted changes without a WIP snapshot are lost. While a run is active the item is disabled ("Stop the run first"): stop the run, wait until it has ended, then reset. Any task offers it, also a `completed` or `cancelled` one; unused volumes are deleted automatically after `volumes.retainAfterCloseSeconds` and `volumes.idleTtlSeconds` (`crates/df-agent-channel/docs/configuration.md`).
 
 ## Server-sent events
 
@@ -45,7 +47,7 @@ Each SSE message is a bundle of `<hx-partial hx-target=... hx-swap=...>` element
 | --- | --- |
 | New transcript item | `#transcript`, `beforeend` |
 | Item changed (growing agent message, tool call status, turn end) | `#<dom id>`, `outerMorph` |
-| Head (title, status), details (status line, PR and issue links, project, persona, branch, collapsed strip, status menu with the cancel dialog), runs, queued message stack, Send/Stop button of the message box | `#task-head`, `#task-details`, `#runs`, `#pending`, `#composer-action`, `outerMorph` |
+| Head (title, status), details (status line, PR and issue links, project, persona, branch, collapsed strip, status menu with the cancel and reset dialogs), runs, queued message stack, Send/Stop button of the message box | `#task-head`, `#task-details`, `#runs`, `#pending`, `#composer-action`, `outerMorph` |
 | Task list | `#task-rows`, `outerMorph` |
 
 Transcript messages carry the id of the last event they contain as the SSE `id`. Agent chunks that

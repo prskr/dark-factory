@@ -293,6 +293,7 @@ where
         secrets,
         tasks: sandbox_tasks,
         services,
+        is_leader,
     } = backend
         .start(&cfg, &pool, &notifier, stop_rx.clone())
         .await?;
@@ -308,8 +309,11 @@ where
         &cfg,
         &pool,
         &notifier,
-        forge_routes,
-        forge.clone(),
+        WebBackends {
+            forges: forge_routes,
+            forge: forge.clone(),
+            provider: provider.clone(),
+        },
         EgressDeps { flows, services },
         approval_types.clone(),
     )?;
@@ -358,6 +362,11 @@ where
         }
     });
     let scheduler_stop = stop_rx.clone();
+    if let Some(is_leader) = is_leader {
+        let retention = df_agent_channel::Retention::new(ctx.clone());
+        let retention_stop = stop_rx.clone();
+        listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
+    }
     listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
     listeners.spawn(serve_policy_watch(
         cfg.gateway.identity_name(&cfg.instance_name),
@@ -551,8 +560,7 @@ fn web_router(
     cfg: &InstanceConfig,
     pool: &PgPool,
     notifier: &Arc<df_db::Notifier>,
-    forges: df_core::routing::ForgeRoutes,
-    forge: Arc<dyn df_core::ForgeClient>,
+    backends: WebBackends,
     egress: EgressDeps,
     approval_types: df_db::requests::ApprovalTypes,
 ) -> anyhow::Result<axum::Router> {
@@ -565,14 +573,22 @@ fn web_router(
         pool: pool.clone(),
         notifier: notifier.clone(),
         oidc: Arc::new(oidc),
-        forges,
-        forge,
+        forges: backends.forges,
+        forge: backends.forge,
+        provider: backends.provider,
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
         allow_plain_http: cfg.forge.allow_plain_http,
         approval_types,
     }))
+}
+
+/// The forges and the sandbox provider the task pages act on.
+struct WebBackends {
+    forges: df_core::routing::ForgeRoutes,
+    forge: Arc<dyn df_core::ForgeClient>,
+    provider: Arc<dyn df_core::SandboxProvider>,
 }
 
 /// What the egress pages need from the outside.
@@ -790,8 +806,7 @@ mod tests {
             &cfg,
             &pool,
             &notifier,
-            df_core::routing::ForgeRoutes::default(),
-            Arc::new(df_core::testing::FakeForgeClient::new()),
+            fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;
@@ -814,8 +829,7 @@ mod tests {
             &cfg,
             &pool,
             &notifier,
-            df_core::routing::ForgeRoutes::default(),
-            Arc::new(df_core::testing::FakeForgeClient::new()),
+            fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;
@@ -900,6 +914,14 @@ mod tests {
             path.display()
         );
         path
+    }
+
+    fn fake_backends() -> WebBackends {
+        WebBackends {
+            forges: df_core::routing::ForgeRoutes::default(),
+            forge: Arc::new(df_core::testing::FakeForgeClient::new()),
+            provider: Arc::new(df_core::testing::FakeSandboxProvider::new()),
+        }
     }
 
     fn serve_config(pool: &PgPool, dir: &std::path::Path, tls: Option<&str>) -> InstanceConfig {

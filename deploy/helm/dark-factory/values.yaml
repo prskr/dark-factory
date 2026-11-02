@@ -190,6 +190,14 @@ runs:
   # 0 releases right after the turn.
   keepAliveSeconds: 600
 
+# Retention of task volumes. The leader checks once per hour; a task with an active run keeps its
+# volume, the next run of a task without one clones again.
+volumes:
+  # Seconds after the last run of a `completed` or `cancelled` task (7 days).
+  retainAfterCloseSeconds: 604800
+  # Seconds after the last run of any task (30 days).
+  idleTtlSeconds: 2592000
+
 forge:
   # Accept `http://` repository URLs (plugin calls, the gateway's Git proxy towards the forge and
   # the project form; sandboxes always use HTTPS to the gateway). Off, only

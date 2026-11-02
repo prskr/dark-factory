@@ -16,6 +16,8 @@ pub enum ChannelError {
     #[error(transparent)]
     Provider(#[from] ProviderError),
     #[error(transparent)]
+    Volume(#[from] df_db::volumes::VolumeError),
+    #[error(transparent)]
     Secret(#[from] SecretError),
     #[error(transparent)]
     Integration(#[from] IntegrationError),

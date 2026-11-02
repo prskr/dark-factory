@@ -17,6 +17,7 @@ pub mod requests;
 pub mod task_views;
 pub mod tasks;
 pub mod users;
+pub mod volumes;
 
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
 pub use blobs::{BlobRow, PgBlobStore, sha256_hex};

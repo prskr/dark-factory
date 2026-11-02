@@ -7,6 +7,7 @@ mod detail;
 mod layout;
 mod list;
 mod messages;
+mod reset_workspace;
 mod stop_cancel;
 
 async fn set_status(app: &TestApp, status: &str) {

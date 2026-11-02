@@ -16,6 +16,7 @@ use df_core::{
 };
 use df_db::NewTask;
 use df_db::task_views::{RunView, TaskDetail};
+use df_db::volumes::VolumeError;
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -41,6 +42,8 @@ const PAGE_BATCH: i64 = 1000;
 /// committed; a forge that does not answer must not keep the page waiting through the plugin's
 /// retries.
 const MARK_READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Shown in the details when the provider could not delete the volume.
+const RESET_FAILED: &str = "The workspace could not be reset. Try again later.";
 
 pub(crate) fn routes() -> Router<WebState> {
     Router::new()
@@ -59,6 +62,7 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/tasks/{key}/done", post(task_done))
         .route("/tasks/{key}/stop", post(task_stop))
         .route("/tasks/{key}/cancel", post(task_cancel))
+        .route("/tasks/{key}/reset-workspace", post(task_reset_workspace))
 }
 
 /// The query of the list pages.
@@ -464,7 +468,7 @@ async fn task_done(
         Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
         Err(e) => return internal_error(&e),
     };
-    details_answer(&state, id, status).await
+    details_answer(&state, id, status, None).await
 }
 
 /// Marks the PR of a task ready for review, without a summary. Best effort: a forge failure is
@@ -544,11 +548,50 @@ async fn task_cancel(
         Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
         Err(e) => return internal_error(&e),
     };
-    details_answer(&state, id, status).await
+    details_answer(&state, id, status, None).await
 }
 
-/// The details region of the task as it is now, with `status`.
-async fn details_answer(state: &WebState, id: TaskId, status: StatusCode) -> Response {
+/// `POST /tasks/{key}/reset-workspace`: a board member deletes the task's volume (the dialog asked
+/// before). The answer is the details region, also when a run is active (409) or the provider
+/// failed (503, with an inline error).
+async fn task_reset_workspace(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(key): Path<String>,
+) -> Response {
+    let task = match task_by_key(&state, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    let id = TaskId::from_uuid(task.id);
+    let reset = df_db::volumes::reset_workspace(
+        &state.pool,
+        state.provider.as_ref(),
+        id,
+        user.principal(),
+        df_db::volumes::DELETE_TIMEOUT,
+    )
+    .await;
+    let (status, error) = match reset {
+        Ok(()) => (StatusCode::OK, None),
+        Err(VolumeError::Db(df_db::DbError::Conflict(_))) => (StatusCode::CONFLICT, None),
+        Err(VolumeError::Db(df_db::DbError::NotFound(_))) => return not_found("The task"),
+        Err(VolumeError::Provider(error)) => {
+            tracing::error!(%error, task = %task.key, "resetting the workspace failed");
+            (StatusCode::SERVICE_UNAVAILABLE, Some(RESET_FAILED))
+        }
+        Err(e) => return internal_error(&e),
+    };
+    details_answer(&state, id, status, error).await
+}
+
+/// The details region of the task as it is now, with `status` and an optional inline `error`.
+async fn details_answer(
+    state: &WebState,
+    id: TaskId,
+    status: StatusCode,
+    error: Option<&str>,
+) -> Response {
     let task = match df_db::task_views::get_task_detail(&state.pool, id).await {
         Ok(Some(task)) => task,
         Ok(None) => return not_found("The task"),
@@ -557,7 +600,11 @@ async fn details_answer(state: &WebState, id: TaskId, status: StatusCode) -> Res
     match load_detail(state, task).await {
         Ok(data) => (
             status,
-            details_region(&data.task, &CancelNote::new(&data.runs, &data.pending)),
+            details_region(
+                &data.task,
+                &CancelNote::new(&data.runs, &data.pending),
+                error,
+            ),
         )
             .into_response(),
         Err(e) => internal_error(&e),

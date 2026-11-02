@@ -1,0 +1,103 @@
+suite: Dark Factory Helm Chart - control plane and migrate job
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - control-plane-service.yaml
+  - migrate-job.yaml
+  - rbac.yaml
+  - sandbox-namespace.yaml
+  - certs.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - netpol.yaml
+  - httproute.yaml
+  - servicemonitor.yaml
+tests:
+  - it: renders standard release config ConfigMap and pre-install/pre-upgrade migrate-config ConfigMap
+    template: configmap.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ConfigMap
+        documentIndex: 0
+      - notExists:
+          path: metadata.annotations["helm.sh/hook"]
+        documentIndex: 0
+      - isNotNull:
+          path: data["config.yaml"]
+        documentIndex: 0
+      - isKind:
+          of: ConfigMap
+        documentIndex: 1
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: pre-install,pre-upgrade
+        documentIndex: 1
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation,hook-succeeded
+        documentIndex: 1
+      - isNotNull:
+          path: data["migrate-config.yaml"]
+        documentIndex: 1
+
+  - it: renders control-plane Deployment with D7 ports and health/readiness probes
+    template: control-plane-deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8080
+      - equal:
+          path: spec.template.spec.containers[0].ports[1].containerPort
+          value: 9443
+      - equal:
+          path: spec.template.spec.containers[0].ports[2].containerPort
+          value: 9444
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+
+  - it: renders migrate pre-install/pre-upgrade hook Job with owner and app password secret mounts
+    template: migrate-job.yaml
+    asserts:
+      - isKind:
+          of: Job
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: pre-install,pre-upgrade
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation,hook-succeeded
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: db-owner-secret
+            mountPath: /run/secrets/db-owner
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: db-app-secret
+            mountPath: /run/secrets/db-app
+            readOnly: true
+
+  - it: omits app password secret mount in migrate Job when manageAppRole is false
+    template: migrate-job.yaml
+    set:
+      database.migrate.manageAppRole: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: db-app-secret
+            mountPath: /run/secrets/db-app
+            readOnly: true

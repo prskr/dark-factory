@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Volume retention
-Once per hour the control plane SHALL delete the volumes of tasks without a non-terminal run that are `completed` or `cancelled` with their last run older than `volumes.retainAfterClose` (default 7 days), or whose last run is older than `volumes.idleTtl` (default 30 days), and SHALL remember the deletion so it is not repeated.
+Once per hour the control plane SHALL delete the volumes of tasks without a non-terminal run that are `completed` or `cancelled` with their last run older than `volumes.retainAfterCloseSeconds` (default 7 days), or whose last run is older than `volumes.idleTtlSeconds` (default 30 days), and SHALL remember the deletion so it is not repeated.
 
 #### Scenario: Closed task after the grace period
 - **WHEN** `DF-1` has been `completed` for 8 days

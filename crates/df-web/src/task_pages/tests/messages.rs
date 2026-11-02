@@ -109,7 +109,7 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
         .unwrap();
     for region in [
         head_region(&detail, None),
-        details_region(&detail, &crate::task_pages::CancelNote::default()),
+        details_region(&detail, &crate::task_pages::CancelNote::default(), None),
         runs_region("DF-1", &[], None),
         pending_region("DF-1", "Linus", "queued", &[], false, None),
     ] {

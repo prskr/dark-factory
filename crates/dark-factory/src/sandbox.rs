@@ -35,6 +35,8 @@ pub(crate) struct SandboxWiring {
     pub(crate) tasks: Vec<Task>,
     /// Checks `cluster-service` allowlist entries against the cluster; `None` without a cluster.
     pub(crate) services: Option<Arc<dyn df_web::egress::ServiceLookup>>,
+    /// Whether this replica holds the instance Lease; `None` without a cluster.
+    pub(crate) is_leader: Option<watch::Receiver<bool>>,
 }
 
 /// The live egress log: the relay to the gateway pods.
@@ -79,6 +81,7 @@ impl SandboxBackend for UnconfiguredBackend {
             secrets: Arc::new(unconfigured::sandbox_placeholders::UnconfiguredSecretStore),
             tasks: Vec::new(),
             services: None,
+            is_leader: None,
         })
     }
 }
@@ -148,7 +151,7 @@ impl SandboxBackend for KubernetesBackend {
             kube_client,
             prov_config,
             targets_provider,
-            is_leader_rx,
+            is_leader_rx.clone(),
             notify_rx,
             stop.clone(),
         );
@@ -157,6 +160,7 @@ impl SandboxBackend for KubernetesBackend {
             provider: provider as Arc<dyn df_core::SandboxProvider>,
             secrets,
             services: Some(services),
+            is_leader: Some(is_leader_rx),
             tasks: vec![
                 Box::pin(until_stopped(stop.clone(), kube_watcher_task)),
                 Box::pin(until_stopped(stop.clone(), forwarder_task)),
@@ -308,7 +312,8 @@ async fn forward_policy_notifications(
     }
 }
 
-/// Runs the leader election for the policy reconciliation until `stop` is set.
+/// Runs the leader election for the policy reconciliation and the volume retention until `stop`
+/// is set.
 async fn leader_election_task(
     client: Client,
     instance_name: String,

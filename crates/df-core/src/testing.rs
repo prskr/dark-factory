@@ -26,6 +26,7 @@ use crate::seams::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SandboxCall {
     EnsureTaskVolume(TaskVolumeSpec),
+    DeleteTaskVolume(TaskVolumeSpec),
     Provision(RunSandboxSpec),
     Teardown(RunId),
     ResolveIdentity(PeerIdentity),
@@ -36,6 +37,7 @@ struct SandboxState {
     calls: Vec<SandboxCall>,
     identities: HashMap<PeerIdentity, RunId>,
     ensure_volume_results: VecDeque<Result<(), ProviderError>>,
+    delete_volume_results: VecDeque<Result<(), ProviderError>>,
     provision_results: VecDeque<Result<(), ProviderError>>,
     teardown_results: VecDeque<Result<(), ProviderError>>,
 }
@@ -85,6 +87,15 @@ impl FakeSandboxProvider {
             .push_back(result);
     }
 
+    /// Queues a scripted result for the next `delete_task_volume` call.
+    pub fn push_delete_volume_result(&self, result: Result<(), ProviderError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .delete_volume_results
+            .push_back(result);
+    }
+
     /// Queues a scripted result for the next `provision` call.
     pub fn push_provision_result(&self, result: Result<(), ProviderError>) {
         self.state
@@ -117,6 +128,14 @@ impl SandboxProvider for FakeSandboxProvider {
             .calls
             .push(SandboxCall::EnsureTaskVolume(task.clone()));
         state.ensure_volume_results.pop_front().unwrap_or(Ok(()))
+    }
+
+    async fn delete_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state
+            .calls
+            .push(SandboxCall::DeleteTaskVolume(task.clone()));
+        state.delete_volume_results.pop_front().unwrap_or(Ok(()))
     }
 
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
@@ -556,6 +575,26 @@ mod tests {
     use secrecy::ExposeSecret;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
+
+    #[tokio::test]
+    async fn fake_sandbox_provider_records_volume_deletions_and_scripts_their_results() {
+        let provider = FakeSandboxProvider::new();
+        let volume = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
+        provider.push_delete_volume_result(Err(ProviderError::Backend("down".into())));
+
+        let first = provider.delete_task_volume(&volume).await;
+        let second = provider.delete_task_volume(&volume).await;
+
+        assert_eq!(first, Err(ProviderError::Backend("down".into())));
+        assert_eq!(second, Ok(()));
+        assert_eq!(
+            provider.calls(),
+            vec![
+                SandboxCall::DeleteTaskVolume(volume.clone()),
+                SandboxCall::DeleteTaskVolume(volume),
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn fake_sandbox_provider_records_calls_scripts_results_and_streams_events() {

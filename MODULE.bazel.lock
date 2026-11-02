@@ -700,7 +700,7 @@
           "FILE:@@//Cargo.lock d2efcd200fcc143700485d7893a66f1c08017275c43e2d32eef8e8cbde88e098",
           "FILE:@@//Cargo.toml c36a14fa7fa88f48292994ac97c619c9b659645f9ece020852951e2605dd4e43",
           "FILE:@@//crates/dark-factory/Cargo.toml 2c34519558b76d9ca64027d7f2ec6945e42c1ed425538fc822c7b1e966bbe03f",
-          "FILE:@@//crates/df-agent-channel/Cargo.toml 39a802e7a44f0cf7c6b20e44eeb8c015c50c958ac97baa97b7b2011774cbc2ae",
+          "FILE:@@//crates/df-agent-channel/Cargo.toml d7ed02d2a2469164a7115501a0b30b7631aac8d93a5143595c373f87466a59fd",
           "FILE:@@//crates/df-core/Cargo.toml 5b2e88d2833baea58a7367bf5ed92f6a91c9559c84dcbc882b95736487691e7b",
           "FILE:@@//crates/df-db/Cargo.toml 124259febee1ee6587e5b1aa5b8d644ce7c9b0936de3d15941f2457c83162b40",
           "FILE:@@//crates/df-gateway/Cargo.toml d3c8428ea0dc5cb3a9f351a8fcbab953ff9a8fcd77bb1dfba145729b13d39ed6",

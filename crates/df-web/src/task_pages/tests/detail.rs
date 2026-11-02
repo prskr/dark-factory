@@ -724,7 +724,7 @@ async fn mark_done_is_offered_in_the_status_select_only_for_allowed_statuses() {
             offered,
             "{status}"
         );
-        // A working task shows "Mark done" disabled; a completed one has no menu.
+        // A working task shows "Mark done" disabled; a completed one offers only a reset.
         let listed = status != "completed";
         assert_eq!(dl.contains(">Mark done<"), listed, "{status}");
         assert_eq!(

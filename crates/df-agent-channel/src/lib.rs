@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig};
+use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig, VolumesConfig};
 use df_core::{ForgeClient, InstanceConfig, SandboxProvider, SecretStore};
 use df_db::Notifier;
 use sqlx::PgPool;
@@ -16,6 +16,7 @@ pub mod error;
 pub mod identity;
 pub mod metrics;
 pub mod pr;
+pub mod retention;
 pub mod runs;
 pub mod scheduler;
 pub mod server;
@@ -28,6 +29,7 @@ pub mod testing;
 
 pub use error::ChannelError;
 pub use metrics::Metrics;
+pub use retention::Retention;
 pub use scheduler::Scheduler;
 pub use server::{AgentService, MtlsIncoming, TlsError, TlsReloader, mtls_incoming, serve};
 
@@ -37,6 +39,7 @@ pub struct ChannelConfig {
     pub agent: AgentConfig,
     pub harness: HarnessConfig,
     pub runs: RunsConfig,
+    pub volumes: VolumesConfig,
     pub git_proxy: GitProxy,
 }
 
@@ -46,6 +49,7 @@ impl From<&InstanceConfig> for ChannelConfig {
             agent: cfg.agent.clone(),
             harness: cfg.harness.clone(),
             runs: cfg.runs.clone(),
+            volumes: cfg.volumes.clone(),
             git_proxy: GitProxy {
                 host: cfg.gateway.git_host_name(&cfg.instance_name),
                 port: cfg.gateway.git_port,
