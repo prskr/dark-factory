@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n             SELECT 1 FROM task_messages\n             WHERE task_id = $1 AND delivered_at IS NULL\n               AND author->>'kind' = 'system' AND author->>'reason' = $2\n           ) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "426428dd2f7146d0587e339c9d5da9fa70d4567d4c713b9bc663912d198b7b78"
+}

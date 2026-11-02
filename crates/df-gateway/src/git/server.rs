@@ -29,7 +29,7 @@ use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
-use super::push::Push;
+use super::push::{Push, Pusher};
 use super::spool::BODY_IDLE_TIMEOUT;
 use super::upstream::{BodyLimit, LimitedBody, MAX_FETCH_REQUEST_BYTES};
 use crate::policy::Policy;
@@ -160,7 +160,7 @@ impl GitEndpoint {
             return text(StatusCode::NOT_FOUND, "df: not found");
         };
         let policy = self.policy.borrow().clone();
-        let (forge, run_id) = match identify(policy.as_deref(), source, &target.key) {
+        let (forge, pusher) = match identify(policy.as_deref(), source, &target.key) {
             Ok(found) => found,
             Err(rejection) => {
                 tracing::warn!(
@@ -184,7 +184,7 @@ impl GitEndpoint {
         if (request.service, request.operation) == (Service::ReceivePack, Operation::Rpc) {
             return self
                 .push
-                .handle(self.upstream.as_ref(), forge, run_id, request)
+                .handle(self.upstream.as_ref(), forge, pusher, request)
                 .await;
         }
         self.fetch(forge, request).await
@@ -450,12 +450,12 @@ impl Target {
     }
 }
 
-/// The forge target and the run id of the sandbox at `source`, if it may access `key`.
+/// The forge target and the pushing run of the sandbox at `source`, if it may access `key`.
 fn identify<'a>(
     policy: Option<&'a Policy>,
     source: IpAddr,
     key: &TaskKey,
-) -> Result<(ForgeTarget<'a>, &'a str), Rejection> {
+) -> Result<(ForgeTarget<'a>, Pusher<'a>), Rejection> {
     let policy = policy.ok_or(Rejection::NoSnapshot)?;
     let sandbox = policy.sandbox(source).ok_or(Rejection::UnknownSource)?;
     if sandbox.task_key != key.to_string() {
@@ -467,7 +467,12 @@ fn identify<'a>(
     let credential = policy
         .forge_credential(&route.credential_ref)
         .ok_or(Rejection::CredentialUnavailable)?;
-    Ok((ForgeTarget::new(route, credential), &sandbox.run_id))
+    let pusher = Pusher {
+        run_id: &sandbox.run_id,
+        policy: policy.push_policy(&sandbox.project_key),
+        exceptions: policy.exceptions(source),
+    };
+    Ok((ForgeTarget::new(route, credential), pusher))
 }
 
 /// The [`FORWARDED_HEADERS`] of `headers` that apply to `service`.

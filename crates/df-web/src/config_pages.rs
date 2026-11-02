@@ -12,6 +12,7 @@ use df_db::DbError;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, PersonaRecord, ProjectInput, ProjectRecord,
 };
+use df_db::push_checks::PushPolicy;
 use df_db::task_views::ProjectStatusCount;
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -29,6 +30,10 @@ use crate::components::{
 };
 use crate::layout::{Nav, layout};
 use crate::responses::{internal_error, invalid, not_found};
+
+mod push_policy;
+
+use push_policy::PushPolicyForm;
 
 /// Harness every persona uses in iteration 1.
 const HARNESS: &str = df_core::CLAUDE_CODE_HARNESS;
@@ -78,6 +83,9 @@ pub(crate) struct ProjectForm {
     base_branch: String,
     adapter_command: String,
     forge_credential_id: String,
+    /// The "Push checks" tab of the edit form.
+    #[serde(flatten)]
+    push: PushPolicyForm,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -329,10 +337,61 @@ pub(crate) fn full_row(field: Markup) -> Markup {
 
 /// Bottom right of a modal form: Cancel (closes the dialog) and the primary action.
 pub(crate) fn form_footer(submit_label: &str) -> Markup {
+    footer("mt-5 border-t border-line pt-3", submit_label)
+}
+
+fn footer(class: &str, submit_label: &str) -> Markup {
     html! {
-        div class="mt-5 flex justify-end gap-2 border-t border-line pt-3" {
+        div class={"flex justify-end gap-2 " (class)} {
             button type="button" "x-on:click"="$el.closest('dialog').close()" class=(action_class(ButtonKind::Secondary)) { "Cancel" }
             (submit_button(ButtonKind::Primary, submit_label))
+        }
+    }
+}
+
+/// A tab of a [`tabbed_form`].
+pub(crate) struct Tab {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) panel: Markup,
+}
+
+/// A modal form ([`DialogStyle::Wide`]) with its tabs on the left (on top below 768 px), one panel
+/// per tab and the footer across the full width. `open` is the id of the tab shown first; the
+/// Alpine component `tabs` (`assets/tabs.js`) switches them.
+pub(crate) fn tabbed_form(
+    action: &str,
+    errors: &FormErrors,
+    tabs: &[Tab],
+    open: &str,
+    submit: &str,
+) -> Markup {
+    html! {
+        form id="form" hx-post=(action) hx-target="#form" hx-swap="outerHTML" x-data={"tabs(" (serde_json::Value::from(open).to_string()) ")"} {
+            div class="flex flex-col md:flex-row" {
+                div role="tablist" aria-label="Sections" "x-on:keydown"="move($event)"
+                    class="flex shrink-0 gap-1 border-b border-line px-3 py-2 md:w-42 md:flex-col md:border-r md:border-b-0 md:py-4" {
+                    @for tab in tabs {
+                        @let selected = tab.id == open;
+                        button type="button" role="tab" id={"tab-" (tab.id)} data-tab=(tab.id) aria-controls={"panel-" (tab.id)}
+                            aria-selected=(selected) tabindex=(if selected { "0" } else { "-1" })
+                            ":aria-selected"={"tab === '" (tab.id) "'"} ":tabindex"={"tab === '" (tab.id) "' ? 0 : -1"}
+                            "x-on:click"={"tab = '" (tab.id) "'"}
+                            class="group relative flex min-h-11 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9" {
+                            span aria-hidden="true" class="absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block" {}
+                            (tab.label)
+                        }
+                    }
+                }
+                div class="min-w-0 flex-1 space-y-4 px-4 py-5 md:px-6" {
+                    (form_error(errors))
+                    @for tab in tabs {
+                        div role="tabpanel" id={"panel-" (tab.id)} aria-labelledby={"tab-" (tab.id)} class="space-y-4"
+                            "x-show"={"tab === '" (tab.id) "'"} x-cloak[tab.id != open] { (tab.panel) }
+                    }
+                }
+            }
+            (footer("border-t border-line px-4 pt-3 pb-5 md:px-6", submit))
         }
     }
 }
@@ -516,7 +575,7 @@ async fn save_credential(
 // Projects
 // ---------------------------------------------------------------------------------------------
 
-fn project_values(p: &ProjectRecord) -> ProjectForm {
+fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
     ProjectForm {
         key: p.key.clone(),
         name: p.name.clone(),
@@ -529,6 +588,7 @@ fn project_values(p: &ProjectRecord) -> ProjectForm {
             .forge_credential_id
             .map(|id| id.to_string())
             .unwrap_or_default(),
+        push: PushPolicyForm::from_policy(push_policy),
     }
 }
 
@@ -619,6 +679,8 @@ fn url_field(
     )
 }
 
+/// The project form: one page for a new project, the tabs "General" and "Push checks" when
+/// `editing`. A re-rendered edit form opens "Push checks" if all its errors are there.
 fn project_form(
     action: &str,
     values: &ProjectForm,
@@ -630,27 +692,50 @@ fn project_form(
 ) -> Markup {
     let feedback = forge_feedback(&state.forges, &values.repo_url, &values.issue_tracker_url);
     let repo_hint = (!state.allow_plain_http).then_some("HTTPS only.");
-    html! {
-        form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
-            (form_error(errors))
-            (form_grid(html! {
-                (key_field(&values.key, errors, editing))
-                (text_field("Name", "name", &values.name, errors, None))
-                (full_row(html! {
-                    (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
-                    p id="forge-hint" aria-live="polite" class="mt-1 text-xs text-muted" { (feedback.hint) }
-                }))
-                (full_row(url_field("Issue tracker URL", "issue_tracker_url", "issue-forge", &values.issue_tracker_url, errors, &feedback.issue_icon, Some("Optional."))))
-                (full_row(text_field("Sandbox image", "image", &values.image, errors, None)))
-                (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
-                (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
-                    &values.forge_credential_id, Some("None"), errors))
-                (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
-                    Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
-            }))
-            (form_footer(submit))
-        }
+    let general = form_grid(html! {
+        (key_field(&values.key, errors, editing))
+        (text_field("Name", "name", &values.name, errors, None))
+        (full_row(html! {
+            (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
+            p id="forge-hint" aria-live="polite" class="mt-1 text-xs text-muted" { (feedback.hint) }
+        }))
+        (full_row(url_field("Issue tracker URL", "issue_tracker_url", "issue-forge", &values.issue_tracker_url, errors, &feedback.issue_icon, Some("Optional."))))
+        (full_row(text_field("Sandbox image", "image", &values.image, errors, None)))
+        (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
+        (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
+            &values.forge_credential_id, Some("None"), errors))
+        (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
+            Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
+    });
+    if !editing {
+        return html! {
+            form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
+                (form_error(errors))
+                (general)
+                (form_footer(submit))
+            }
+        };
     }
+    let push_errors_only =
+        !errors.is_empty() && errors.fields().all(|f| push_policy::FIELDS.contains(&f));
+    let tabs = [
+        Tab {
+            id: "general",
+            label: "General",
+            panel: general,
+        },
+        Tab {
+            id: "push-checks",
+            label: "Push checks",
+            panel: push_policy::panel(&values.push, errors),
+        },
+    ];
+    let open = if push_errors_only {
+        "push-checks"
+    } else {
+        "general"
+    };
+    tabbed_form(action, errors, &tabs, open, submit)
 }
 
 /// The key: typed when a project is created, shown read-only afterwards (it never changes).
@@ -916,18 +1001,20 @@ async fn project_edit(
         Ok((None, _)) => return not_found("The project"),
         Err(e) => return internal_error(&e),
     };
-    modal(
-        "Edit project",
-        project_form(
-            &format!("/projects/{key}"),
-            &project_values(&project),
-            &FormErrors::default(),
-            &credentials,
-            &state,
-            "Save project",
-            true,
-        ),
-    )
+    let push_policy = match df_db::push_checks::push_policy(&state.pool, project.id).await {
+        Ok(policy) => policy,
+        Err(e) => return internal_error(&e),
+    };
+    let form = project_form(
+        &format!("/projects/{key}"),
+        &project_values(&project, &push_policy),
+        &FormErrors::default(),
+        &credentials,
+        &state,
+        "Save project",
+        true,
+    );
+    dialog_with("modal", "Edit project", DialogStyle::Wide, form).into_response()
 }
 
 async fn project_create(
@@ -968,7 +1055,7 @@ async fn save_project(
     // The key is set at creation and never changes (df-db enforces it as well): an edit that
     // carries another key is refused, next to the other errors, and the form shows the stored key.
     let key_changed = existing.as_ref().is_some_and(|e| form.key.trim() != e.key);
-    let form = match &existing {
+    let mut form = match &existing {
         Some(e) if key_changed => ProjectForm {
             key: e.key.clone(),
             ..form
@@ -976,41 +1063,63 @@ async fn save_project(
         _ => form,
     };
     let known: Vec<Uuid> = credentials.iter().map(|c| c.id.as_uuid()).collect();
-    let mut errors = match validate_project(&form, &known, state.allow_plain_http) {
-        Ok(input) if !key_changed => {
-            let principal = user.principal();
-            let actor = Actor {
-                principal: &principal,
-                roles: &user.roles,
-            };
-            match df_db::catalog::save_project(
-                &state.pool,
-                actor,
-                existing.as_ref().map(|p| p.id),
-                &input,
-            )
-            .await
-            {
-                Ok(_) => {
-                    return match projects_markup(&state, &user.display_name).await {
-                        Ok(region) => saved(region),
-                        Err(response) => *response,
-                    };
+    let mut errors = FormErrors::default();
+    let input = validate_project(&form, &known, state.allow_plain_http)
+        .map_err(|e| errors.extend(e))
+        .ok();
+    let push_policy = match &existing {
+        Some(project) => match push_policy::validate(&form.push) {
+            Ok(Some(policy)) => Some(policy),
+            // Without the tab's fields the stored policy stays; a re-rendered form shows it.
+            Ok(None) => match df_db::push_checks::push_policy(&state.pool, project.id).await {
+                Ok(stored) => {
+                    form.push = PushPolicyForm::from_policy(&stored);
+                    None
                 }
-                Err(e) => {
-                    let mut errors = FormErrors::default();
-                    if let Some(response) = conflict(&mut errors, "key", e) {
-                        return response;
-                    }
-                    errors
-                }
+                Err(e) => return internal_error(&e),
+            },
+            Err(e) => {
+                errors.extend(e);
+                None
             }
-        }
-        Ok(_) => FormErrors::default(),
-        Err(errors) => errors,
+        },
+        None => None,
     };
     if key_changed {
         errors.add("key", "The key cannot change after creation.");
+    }
+    if let Some(input) = input.filter(|_| errors.is_empty()) {
+        let principal = user.principal();
+        let actor = Actor {
+            principal: &principal,
+            roles: &user.roles,
+        };
+        let stored = if let (Some(project), Some(policy)) = (&existing, &push_policy) {
+            df_db::catalog::update_project_with_push_policy(
+                &state.pool,
+                actor,
+                project.id,
+                &input,
+                policy,
+            )
+            .await
+        } else {
+            let id = existing.as_ref().map(|p| p.id);
+            df_db::catalog::save_project(&state.pool, actor, id, &input).await
+        };
+        match stored {
+            Ok(_) => {
+                return match projects_markup(&state, &user.display_name).await {
+                    Ok(region) => saved(region),
+                    Err(response) => *response,
+                };
+            }
+            Err(e) => {
+                if let Some(response) = conflict(&mut errors, "key", e) {
+                    return response;
+                }
+            }
+        }
     }
     let action = existing_key
         .as_ref()

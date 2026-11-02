@@ -12,7 +12,11 @@ use std::sync::atomic::AtomicBool;
 use gix::hash::Kind;
 use tempfile::TempDir;
 
+use super::push::PushObjects;
 use super::refs::{Ancestry, ObjectId};
+use super::secret_rules::BlobSource;
+use super::server::BoxError;
+use super::view::{PushView, TaskRefs, ViewError, push_view};
 
 /// Failure to quarantine a pack or to answer an ancestry query.
 #[derive(Debug, thiserror::Error)]
@@ -34,13 +38,27 @@ pub enum QuarantineError {
 /// An indexed push pack, removed from disk on drop.
 pub struct Quarantine {
     dir: TempDir,
+    /// The mirror with the quarantine's objects (pack plus the mirror's objects).
     repo: gix::Repository,
+    mirror: gix::Repository,
 }
 
 impl Quarantine {
     /// The quarantine's `objects` directory (pack plus alternates to the mirror).
     pub fn objects_dir(&self) -> PathBuf {
         self.dir.path().join("objects")
+    }
+
+    /// What a push of `tip` by the run with the branches `task` adds to the mirror (see
+    /// [`push_view`]).
+    pub fn push_view(
+        &self,
+        task: TaskRefs<'_>,
+        tip: &ObjectId,
+        max_commits: usize,
+        interrupt: &AtomicBool,
+    ) -> Result<PushView, ViewError> {
+        push_view(&self.repo, &self.mirror, task, tip, max_commits, interrupt)
     }
 }
 
@@ -94,10 +112,14 @@ pub fn quarantine(
     )
     .map_err(|e| QuarantineError::Pack(e.to_string()))?;
 
-    let mut repo = mirror_repo;
+    let mut repo = mirror_repo.clone();
     let store = gix::odb::at(&objects, kind).map_err(|e| QuarantineError::Pack(e.to_string()))?;
     repo.objects = gix::odb::memory::Proxy::new(store, kind);
-    Ok(Quarantine { dir: qdir, repo })
+    Ok(Quarantine {
+        dir: qdir,
+        repo,
+        mirror: mirror_repo,
+    })
 }
 
 impl Ancestry for Quarantine {
@@ -108,8 +130,26 @@ impl Ancestry for Quarantine {
     }
 }
 
-/// Ancestry from the mirror alone, for a push without a pack (e.g. a pushed commit that
-/// already exists upstream).
+impl BlobSource for Quarantine {
+    fn read_blob(&self, id: gix::ObjectId) -> Result<Vec<u8>, BoxError> {
+        self.repo.read_blob(id)
+    }
+}
+
+impl PushObjects for Quarantine {
+    fn push_view(
+        &self,
+        task: TaskRefs<'_>,
+        tip: &ObjectId,
+        max_commits: usize,
+        interrupt: &AtomicBool,
+    ) -> Result<PushView, ViewError> {
+        Quarantine::push_view(self, task, tip, max_commits, interrupt)
+    }
+}
+
+/// Ancestry and objects from the mirror alone, for a push without a pack (e.g. a pushed commit
+/// that already exists upstream).
 pub struct MirrorAncestry {
     repo: gix::Repository,
 }
@@ -127,6 +167,24 @@ impl Ancestry for MirrorAncestry {
 
     fn is_ancestor(&self, ancestor: &ObjectId, descendant: &ObjectId) -> Result<bool, Self::Error> {
         is_ancestor_in(&self.repo, ancestor, descendant)
+    }
+}
+
+impl BlobSource for MirrorAncestry {
+    fn read_blob(&self, id: gix::ObjectId) -> Result<Vec<u8>, BoxError> {
+        self.repo.read_blob(id)
+    }
+}
+
+impl PushObjects for MirrorAncestry {
+    fn push_view(
+        &self,
+        task: TaskRefs<'_>,
+        tip: &ObjectId,
+        max_commits: usize,
+        interrupt: &AtomicBool,
+    ) -> Result<PushView, ViewError> {
+        push_view(&self.repo, &self.repo, task, tip, max_commits, interrupt)
     }
 }
 

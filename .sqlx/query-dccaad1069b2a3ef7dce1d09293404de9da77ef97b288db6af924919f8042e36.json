@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tasks SET push_rejections_since_accept = push_rejections_since_accept + 1\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dccaad1069b2a3ef7dce1d09293404de9da77ef97b288db6af924919f8042e36"
+}

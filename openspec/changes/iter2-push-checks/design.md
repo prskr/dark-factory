@@ -20,14 +20,16 @@
 
 ### D1 — Push view
 From mirror + quarantine:
-1. Added commits: walk from every pushed new SHA, stopping at commits reachable from any mirror ref (gix revision walk with the mirror tips as hidden). The walk is bounded by a maximum of 10,000 commits; above that the push is rejected with `df:push-too-large`.
-2. For each added commit: its tree diffs against each parent (or the empty tree for a root commit), giving changed paths with old and new blob ids. Renames count as delete + add, so both paths are checked.
-3. Added blobs: new blob ids from those diffs that are not in the mirror, each read once (with a size header first, so the size check doesn't load huge blobs).
+1. Added commits: walk from every pushed new SHA, stopping at commits reachable from an upstream mirror ref (gix revision walk with those tips as hidden). Upstream refs are all mirror refs except WIP branches and other tasks' task branches: a WIP push only gets the secret scan and the size limit, and another task's commits were checked under that task's exceptions. The walk is bounded by a maximum of 10,000 commits; above that the push is rejected with `df:push-too-large`.
+2. For each added commit: its tree diff against the parent (or the empty tree for a root commit). A merge commit uses a combined diff: a path counts only if its entry differs from every parent, so merging the base branch doesn't report the human's changes. Renames count as delete + add, so both paths are checked.
+3. Added blobs: the new blob ids from those diffs, each read once (with a size header first, so the size check doesn't load huge blobs). Blobs the mirror already has are scanned too, because the mirror also holds WIP and other tasks' content.
 
 ### D2 — Checks and findings
 ```rust
-pub struct Finding { check: Check, mode: Mode, fingerprint: String, path: String,
-                     line: Option<u32>, detail: String /* masked */ }
+pub struct Finding { check: Check, mode: Mode,
+                     fingerprint: Option<String> /* None: identity, merge commit */,
+                     path: String, line: Option<u32>, detail: String /* masked */,
+                     secret: Option<MaskedSecret> /* rule + masked match */ }
 fn check_push(view: &PushView, policy: &PushPolicy, identity: &Identity,
               target: Target /* TaskBranch | Wip */) -> Vec<Finding>
 ```
@@ -76,5 +78,5 @@ The boards of task 3.3 are drawn and approved before the UI code changes and are
 
 - [False positives block a task] → secret findings are approval-gated per finding by default.
 - [An approved secret exception lets a real secret reach the forge] → the card shows the masked match, rule, path and line. Approving is an explicit, audited human decision for exactly that finding.
-- [Large pushes make checks slow, also because binary blobs are scanned] → the push size limit (256 MiB) bounds the scanned bytes, the commit walk is bounded, and the regex set runs once per blob. Pushes happen once per turn.
+- [Large pushes make checks slow, also because binary blobs are scanned] → the commit walk is bounded (10,000 commits) and the regex set runs once per blob. Blobs the mirror already has are scanned too, so the 256 MiB push size limit does not bound the scanned bytes; a byte cap per push is TD-90. Pushes happen once per turn.
 - [Agent loops on rejections] → feedback capped at 3 consecutive messages; budgets still apply.

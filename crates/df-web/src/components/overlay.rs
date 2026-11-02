@@ -13,6 +13,9 @@ pub enum DialogStyle {
     Sheet,
     /// Like `Sheet`, but a full-height sheet below 768 px (forms with many fields).
     Form,
+    /// Like `Form`, 768 px wide, with a line under the title. The body brings its own padding
+    /// (a form with tabs).
+    Wide,
     /// No frame: the body is the card (the new-task composer). The body brings its own close
     /// button ([`dialog_close`]).
     Bare,
@@ -34,6 +37,9 @@ pub fn dialog_with(id: &str, title: &str, style: DialogStyle, body: Markup) -> M
         DialogStyle::Form => {
             "fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto border border-line bg-panel p-0 text-ink backdrop:bg-black/50 md:m-auto md:h-fit md:max-h-[90dvh] md:max-w-xl md:rounded-2xl"
         }
+        DialogStyle::Wide => {
+            "fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto border border-line bg-panel p-0 text-ink backdrop:bg-black/50 md:m-auto md:h-fit md:max-h-[90dvh] md:max-w-3xl md:rounded-2xl"
+        }
         DialogStyle::Bare => {
             "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-xl md:p-0"
         }
@@ -43,6 +49,12 @@ pub fn dialog_with(id: &str, title: &str, style: DialogStyle, body: Markup) -> M
             "x-on:modal-close.window"="$el.close()" "x-on:click"="$event.target === $el && $el.close()" class=(class) {
             @if style == DialogStyle::Bare {
                 h2 id=(title_id) class="sr-only" { (title) }
+                (body)
+            } @else if style == DialogStyle::Wide {
+                div class="flex items-center justify-between gap-2 border-b border-line pt-4 pr-3 pb-3 pl-4 md:pl-6" {
+                    h2 id=(title_id) class="text-lg font-semibold" { (title) }
+                    (dialog_close())
+                }
                 (body)
             } @else {
                 div class="flex items-center justify-between gap-2 px-4 pt-3 md:px-5" {

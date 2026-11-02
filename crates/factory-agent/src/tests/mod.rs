@@ -21,6 +21,7 @@ mod git_retry;
 mod harness;
 mod mcp;
 mod outbox;
+mod push_rejections;
 mod runner;
 mod runner_idle;
 mod runner_runtime;

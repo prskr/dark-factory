@@ -6,6 +6,8 @@ use std::path::Path;
 use df_proto::agent::v1::{
     PushReport, PushStatus, PushTarget, RunOutcome, RunReport, Workspace, WorkspaceState,
 };
+use df_proto::gateway::v1::PushCheck;
+use df_proto::push_reasons::{NON_FAST_FORWARD, PUSH_TOO_LARGE};
 use df_proto::transcript::v1::{Notice, NoticeLevel};
 
 use crate::git::{
@@ -83,7 +85,7 @@ impl PrepareResult {
     /// A workspace after the prepare-time push of `report`.
     fn pushed(head_sha: String, report: PushReport) -> Self {
         Self {
-            push_failed: report.status() == PushStatus::Failed,
+            push_failed: report.status() != PushStatus::Ok,
             push_report: Some(report),
             ..Self::clean(head_sha)
         }
@@ -312,10 +314,10 @@ async fn push_task_branch(
 ) -> anyhow::Result<PushReport> {
     let refspec = format!("{}:{}", workspace.task_branch, workspace.task_branch);
     let push_output = git.push("origin", &refspec, false).await?;
-    let status = if push_output.status.success() {
-        PushStatus::Ok
+    let (status, detail) = if push_output.status.success() {
+        (PushStatus::Ok, detail.to_string())
     } else {
-        PushStatus::Failed
+        rejected_push(&push_output)
     };
     Ok(PushReport {
         target: PushTarget::TaskBranch as i32,
@@ -323,7 +325,7 @@ async fn push_task_branch(
         sha: local_sha.to_string(),
         status: status as i32,
         commits_ahead_of_base,
-        detail: detail.to_string(),
+        detail,
     })
 }
 
@@ -399,29 +401,70 @@ pub async fn push_after_turn(
         };
         Ok(Some(report))
     } else {
-        let stderr = String::from_utf8_lossy(&push_out.stderr);
-        let stdout = String::from_utf8_lossy(&push_out.stdout);
-        let combined = format!("{stdout}\n{stderr}");
-        let status = if combined.contains("non-fast-forward")
-            || combined.contains("[rejected]")
-            || combined.contains("fetch first")
-            || combined
-                .lines()
-                .any(|l| l.starts_with('!') && l.contains("rejected"))
-        {
-            PushStatus::RejectedNonFastForward
-        } else {
-            PushStatus::Failed
-        };
+        let (status, detail) = rejected_push(&push_out);
         let report = PushReport {
             target: PushTarget::TaskBranch as i32,
             r#ref: format!("refs/heads/{}", workspace.task_branch),
             sha: current_sha,
             status: status as i32,
             commits_ahead_of_base: 0,
-            detail: combined.trim().to_string(),
+            detail,
         };
         Ok(Some(report))
+    }
+}
+
+/// Status and detail of a failed `git push --porcelain` (iter2-push-checks design D6). A ref the
+/// Git proxy rejected with a `df:` reason maps by that reason, which is also the detail; any
+/// `df:secret-scan` among joined findings wins. Other failures keep the whole output as detail:
+/// a rejection is a non-fast-forward, anything else `FAILED`.
+pub fn rejected_push(output: &std::process::Output) -> (PushStatus, String) {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(reason) = porcelain_reasons(&stdout).find(|reason| reason.starts_with("df:")) {
+        return (status_of_reason(reason), reason.to_owned());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}\n{stderr}");
+    let status = if combined.contains("non-fast-forward")
+        || combined.contains("[rejected]")
+        || combined.contains("fetch first")
+        || combined
+            .lines()
+            .any(|l| l.starts_with('!') && l.contains("rejected"))
+    {
+        PushStatus::RejectedNonFastForward
+    } else {
+        PushStatus::Failed
+    };
+    (status, combined.trim().to_string())
+}
+
+/// The reasons of the refs `git push --porcelain` rejected: `!<TAB><from>:<to><TAB><summary>
+/// (<reason>)`.
+fn porcelain_reasons(stdout: &str) -> impl Iterator<Item = &str> {
+    stdout.lines().filter_map(|line| {
+        let (_refs, summary) = line.strip_prefix("!\t")?.split_once('\t')?;
+        summary.split_once(" (")?.1.strip_suffix(')')
+    })
+}
+
+/// The push status of a `df:` reason; findings are joined with `; `.
+fn status_of_reason(reason: &str) -> PushStatus {
+    let mut codes = reason
+        .split("; ")
+        .filter_map(|finding| finding.split_whitespace().next());
+    if codes
+        .clone()
+        .any(|code| PushCheck::from_reason_code(code) == Some(PushCheck::SecretScan))
+    {
+        return PushStatus::RejectedSecretDetected;
+    }
+    match codes.next() {
+        Some(code) if code == PUSH_TOO_LARGE || PushCheck::from_reason_code(code).is_some() => {
+            PushStatus::RejectedByCheck
+        }
+        Some(NON_FAST_FORWARD) => PushStatus::RejectedNonFastForward,
+        _ => PushStatus::Failed,
     }
 }
 
@@ -683,10 +726,7 @@ async fn push_wip_snapshot(
     let (status, detail) = if push_out.status.success() {
         (PushStatus::Ok, "Pushed WIP snapshot".to_string())
     } else {
-        (
-            PushStatus::Failed,
-            String::from_utf8_lossy(&push_out.stderr).trim().to_string(),
-        )
+        rejected_push(&push_out)
     };
     Ok(PushReport {
         target: PushTarget::WipBranch as i32,

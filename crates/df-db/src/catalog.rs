@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::pool::DbError;
+use crate::push_checks::{PushPolicy, save_push_policy};
 
 /// Who performs a change; recorded in the audit entry.
 #[derive(Debug, Clone, Copy)]
@@ -237,17 +238,44 @@ pub async fn save_project(
     input: &ProjectInput,
 ) -> Result<ProjectRecord, DbError> {
     let mut tx = pool.begin().await?;
+    let record = save_project_in(&mut tx, actor, id, input).await?;
+    tx.commit().await?;
+    Ok(record)
+}
+
+/// Updates project `id` like [`save_project`] and stores its push policy in the same transaction
+/// ([`push_checks::save_push_policy`](crate::push_checks)).
+pub async fn update_project_with_push_policy(
+    pool: &PgPool,
+    actor: Actor<'_>,
+    id: Uuid,
+    input: &ProjectInput,
+    push_policy: &PushPolicy,
+) -> Result<ProjectRecord, DbError> {
+    let mut tx = pool.begin().await?;
+    let record = save_project_in(&mut tx, actor, Some(id), input).await?;
+    save_push_policy(&mut tx, actor, record.id, &record.key, push_policy).await?;
+    tx.commit().await?;
+    Ok(record)
+}
+
+async fn save_project_in(
+    tx: &mut Transaction<'_, Postgres>,
+    actor: Actor<'_>,
+    id: Option<Uuid>,
+    input: &ProjectInput,
+) -> Result<ProjectRecord, DbError> {
     let before: Option<ProjectRecord> = match id {
         Some(id) => {
             sqlx::query("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE")
                 .bind(id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await?
                 .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?;
             Some(
                 sqlx::query_as(select_project!("WHERE p.id = $1"))
                     .bind(id)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut **tx)
                     .await?,
             )
         }
@@ -284,17 +312,17 @@ pub async fn save_project(
     .bind(&input.base_branch)
     .bind(input.forge_credential_id)
     .bind(&input.adapter_command)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|e| conflict_or(e, "a project with this key already exists"))?;
 
     let record: ProjectRecord = sqlx::query_as(select_project!("WHERE p.id = $1"))
         .bind(row_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
     let before_input = before.as_ref().map(project_input);
     audit(
-        &mut tx,
+        tx,
         actor,
         "project",
         &record.key,
@@ -303,7 +331,6 @@ pub async fn save_project(
         input,
     )
     .await?;
-    tx.commit().await?;
     Ok(record)
 }
 
@@ -391,7 +418,7 @@ fn conflict_or(err: sqlx::Error, message: &str) -> DbError {
 }
 
 /// Writes `<resource>.create` or `<resource>.update` with `{before, after}` details.
-async fn audit<T: Serialize>(
+pub(crate) async fn audit<T: Serialize>(
     tx: &mut Transaction<'_, Postgres>,
     actor: Actor<'_>,
     resource: &str,
@@ -539,6 +566,77 @@ mod tests {
             .unwrap();
         let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
         assert!(stored.adapter_command.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_changed_push_policy_is_stored_audited_and_announced_with_the_project() {
+        use std::time::Duration;
+
+        use crate::notify::{Notification, Notifier};
+        use crate::push_checks::{CheckMode, PushPolicy, push_policies, push_policy};
+
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+        let notifier = Notifier::start(&pool).await.unwrap();
+        let mut notifications = notifier.subscribe();
+
+        let default = PushPolicy::default();
+        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &default)
+            .await
+            .unwrap();
+        assert!(push_policies(&pool, &[p.id]).await.unwrap().is_empty());
+        assert_eq!(push_policy(&pool, p.id).await.unwrap(), default);
+
+        let mut policy = PushPolicy::default();
+        policy.protected_globs.push("deploy/**".into());
+        policy.secret_mode = CheckMode::Reject;
+        let mut renamed = project("DF", None);
+        renamed.name = "Factory".into();
+        update_project_with_push_policy(&pool, actor, p.id, &renamed, &policy)
+            .await
+            .unwrap();
+        assert_eq!(push_policy(&pool, p.id).await.unwrap(), policy);
+        assert_eq!(
+            get_project_by_key(&pool, "DF").await.unwrap().unwrap().name,
+            "Factory"
+        );
+        let created = audit_details(&pool, "push_policy.create").await;
+        assert_eq!(created.len(), 1);
+        assert!(created[0]["before"].is_null());
+        assert_eq!(created[0]["after"]["protected_globs"][4], "deploy/**");
+        assert_eq!(created[0]["after"]["secret_mode"], "reject");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while notifications.recv().await.unwrap() != Notification::EgressPolicy {}
+        })
+        .await
+        .unwrap();
+
+        update_project_with_push_policy(&pool, actor, p.id, &renamed, &policy)
+            .await
+            .unwrap();
+        assert!(audit_details(&pool, "push_policy.update").await.is_empty());
+        let mut linear = policy.clone();
+        linear.linear_history = true;
+        update_project_with_push_policy(&pool, actor, p.id, &renamed, &linear)
+            .await
+            .unwrap();
+        let updated = audit_details(&pool, "push_policy.update").await;
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0]["before"]["linear_history"], false);
+        assert_eq!(updated[0]["after"]["linear_history"], true);
+
+        let rekeyed =
+            update_project_with_push_policy(&pool, actor, p.id, &project("DFX", None), &default)
+                .await;
+        assert!(matches!(rekeyed, Err(DbError::Conflict(_))), "{rekeyed:?}");
+        assert_eq!(push_policy(&pool, p.id).await.unwrap(), linear);
     }
 
     #[tokio::test]

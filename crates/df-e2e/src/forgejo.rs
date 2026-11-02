@@ -56,6 +56,18 @@ impl Forgejo {
         self.json(&format!("commits?sha={branch}&limit=50")).await
     }
 
+    /// Content of `path` on `branch`.
+    pub async fn file(&self, branch: &str, path: &str) -> Result<String> {
+        let response = self
+            .get(&format!("raw/{path}?ref={branch}"))
+            .await?
+            .error_for_status()?;
+        response
+            .text()
+            .await
+            .with_context(|| format!("read {path} on {branch}"))
+    }
+
     async fn json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         let response = self.get(path).await?.error_for_status()?;
         response

@@ -1,5 +1,6 @@
 # Script of the iteration 1 demo (docs/demo.md): the e2e suite and `just seed` point the project's
-# adapter command at /opt/harness/scripts/demo.yaml.
+# adapter command at /opt/harness/scripts/demo.yaml. Commits use the identity of the runtime-owned
+# `.git/config`: the Git proxy rejects any other (`df:identity`).
 sessions:
   # Run 1: first commit, then shape the pull request and comment on the issue.
   new:
@@ -13,7 +14,7 @@ sessions:
       - shell: |
           printf 'hello from the demo agent\n' > greeting.txt
           git add greeting.txt
-          git -c user.name='Demo Agent' -c user.email=agent@example.com commit -q -m 'Add greeting'
+          git commit -q -m 'Add greeting'
       - mcp:
           server: factory
           tool: update_pull_request
@@ -33,7 +34,7 @@ sessions:
       - shell: |
           printf 'greeting is present\n' > greeting_test.txt
           git add greeting_test.txt
-          git -c user.name='Demo Agent' -c user.email=agent@example.com commit -q -m 'Add greeting test'
+          git commit -q -m 'Add greeting test'
       - mcp:
           server: factory
           tool: complete_task

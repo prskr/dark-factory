@@ -136,12 +136,14 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Desktop / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
 | Desktop / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
 | Desktop / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
-| Desktop / Requests · inbox | `/requests` | manual seed (not built): pending approval, blocking question with suggested answers, question without | 1440 |
+| Request Inbox / Requests · inbox | `/requests` | manual seed (not built): pending `push-check-exception` request (DF-17, two findings), pending `network-access` approval, blocking question with suggested answers | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
 | Phone / Phone · stop and cancel | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |
 | Phone / Phone · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 390 |
 | Phone / Phone · stop from composer | `/tasks/<id>` | task `running`, message box empty | 390 |
-| Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
+| Tasks - Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
+| Config / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |
+| Config / Projects · edit modal, push checks, invalid glob | `/projects/<key>/edit` | as above; `deploy/[` added as fifth glob and saved | 1440 |
 | Config / Phone · projects | `/projects` | projects (not built) | 390 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |
 | Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |

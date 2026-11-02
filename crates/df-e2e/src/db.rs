@@ -1,6 +1,9 @@
 //! The database of the instance, read by the tests for what the UI does not show.
 
 use anyhow::{Context, Result};
+use df_db::git_pushes::RefUpdate;
+use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, PUSH_REJECTED, request_findings};
+use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Executor, Row};
 use uuid::Uuid;
@@ -130,6 +133,94 @@ pub async fn network_request(
         })
     })
     .transpose()
+}
+
+/// A `push-check-exception` request as the tests compare them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExceptionRequest {
+    pub id: Uuid,
+    pub state: String,
+    pub close_reason: Option<String>,
+    pub findings: Vec<ExceptionFinding>,
+}
+
+/// The `push-check-exception` requests of task `key`, oldest first.
+pub async fn exception_requests(pool: &PgPool, key: &str) -> Result<Vec<ExceptionRequest>> {
+    let rows = sqlx::query(
+        "SELECT r.id, r.state, r.close_reason, r.payload FROM agent_requests r \
+         JOIN tasks t ON t.id = r.task_id \
+         WHERE t.key = $1 AND r.approval_type = $2 ORDER BY r.created_at",
+    )
+    .bind(key)
+    .bind(PUSH_CHECK_EXCEPTION)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("push-check-exception requests of task {key}"))?;
+    rows.iter()
+        .map(|row| {
+            let payload: Value = row.try_get("payload")?;
+            Ok(ExceptionRequest {
+                id: row.try_get("id")?,
+                state: row.try_get("state")?,
+                close_reason: row.try_get("close_reason")?,
+                findings: request_findings(&payload),
+            })
+        })
+        .collect()
+}
+
+/// The fingerprints of the push check exceptions of task `key`.
+pub async fn push_exceptions(pool: &PgPool, key: &str) -> Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT e.fingerprint FROM push_check_exceptions e \
+         JOIN tasks t ON t.id = e.task_id WHERE t.key = $1 ORDER BY e.fingerprint",
+    )
+    .bind(key)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("push check exceptions of task {key}"))
+}
+
+/// A push of a task through the Git proxy as the tests compare them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushRow {
+    pub verdict: String,
+    pub refs: Vec<RefUpdate>,
+}
+
+/// The pushes of the runs of task `key`, oldest first.
+pub async fn pushes(pool: &PgPool, key: &str) -> Result<Vec<PushRow>> {
+    let rows = sqlx::query(
+        "SELECT g.verdict, g.refs FROM git_pushes g JOIN runs r ON r.id = g.run_id \
+         JOIN tasks t ON t.id = r.task_id WHERE t.key = $1 ORDER BY g.created_at",
+    )
+    .bind(key)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("pushes of task {key}"))?;
+    rows.iter()
+        .map(|row| {
+            let refs: Value = row.try_get("refs")?;
+            Ok(PushRow {
+                verdict: row.try_get("verdict")?,
+                refs: serde_json::from_value(refs).context("refs of a push")?,
+            })
+        })
+        .collect()
+}
+
+/// The text of the `push.rejected` messages queued on task `key`, oldest first.
+pub async fn push_rejected_messages(pool: &PgPool, key: &str) -> Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT m.content::text FROM task_messages m JOIN tasks t ON t.id = m.task_id \
+         WHERE t.key = $1 AND m.author ->> 'kind' = 'system' AND m.author ->> 'reason' = $2 \
+         ORDER BY m.queued_at",
+    )
+    .bind(key)
+    .bind(PUSH_REJECTED)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("push.rejected messages of task {key}"))
 }
 
 /// The scopes of the `http-host` allowlist entries for exactly `host:port` that cover task `key`

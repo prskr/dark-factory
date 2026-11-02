@@ -1,11 +1,12 @@
 //! The iteration 1 flow through the web UI (`just e2e-local`): assignment, pull request, tools,
-//! follow-up, completion and the rate limit; and demo steps 4 (network access request) and 5
-//! (stop and cancel) of iteration 2. Needs the environment of `E2eEnv`, so the tests are ignored
-//! by default.
+//! follow-up, completion and the rate limit; and demo steps 2 to 5 of iteration 2 (push checks,
+//! network access request, stop and cancel). Needs the environment of `E2eEnv`, so the tests
+//! are ignored by default.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use df_db::push_checks::PushCheck;
 use df_e2e::browser::Session;
 use df_e2e::forgejo::Forgejo;
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
@@ -275,7 +276,7 @@ async fn denied_host_is_requested_and_the_approval_lets_the_retry_through() -> R
             &world.env,
             &request.id.to_string(),
             &format!("network access to {host}:{port}"),
-            "task",
+            Some("task"),
         )
         .await?;
     let approved_at = Instant::now();
@@ -396,5 +397,185 @@ async fn cancelling_a_task_leaves_its_pull_request_untouched() -> Result<()> {
     assert_eq!(after.len(), 1, "{after:?}");
     assert_eq!(after[0]["draft"], true, "{after:?}");
     assert_eq!(after[0]["state"], "open", "{after:?}");
+    Ok(())
+}
+
+/// Demo step 2 of iteration 2: the Git proxy rejects the agent's commit with a token, raises a
+/// `push-check-exception` request and tells the agent (`push.rejected`). The agent amends its
+/// unpushed commit, the next push passes and closes the request as obsolete.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn committed_secret_is_rejected_and_the_amended_commit_closes_the_request() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::SECRET_PROJECT_KEY,
+            "Add the deploy configuration",
+            None,
+        )
+        .await?;
+    let token = data::test_token();
+
+    let request = eventually("a push-check-exception request", RUN_TIMEOUT, || async {
+        Ok(db::exception_requests(&world.pool, &key)
+            .await?
+            .into_iter()
+            .next())
+    })
+    .await?;
+    let [finding] = request.findings.as_slice() else {
+        panic!("one finding: {request:?}");
+    };
+    assert_eq!(finding.check, PushCheck::SecretScan, "{finding:?}");
+    assert_eq!(finding.path, data::SECRET_PATH);
+    assert_eq!(finding.line, Some(data::SECRET_LINE));
+    assert_eq!(finding.rule.as_deref(), Some("betterleaks.github-pat"));
+    assert_eq!(finding.preview, "ghp_********");
+
+    let closed = eventually("the request to close", RUN_TIMEOUT, || async {
+        let requests = db::exception_requests(&world.pool, &key).await?;
+        Ok(requests
+            .into_iter()
+            .find(|r| r.id == request.id && r.state != "pending"))
+    })
+    .await?;
+    assert_eq!(closed.state, "closed", "{closed:?}");
+    assert_eq!(closed.close_reason.as_deref(), Some("push-accepted"));
+    let requests = db::exception_requests(&world.pool, &key).await?;
+    assert!(
+        requests.iter().all(|r| r.state != "pending"),
+        "{requests:?}"
+    );
+
+    // The rejection reached the push record and the agent, masked.
+    let pushes = db::pushes(&world.pool, &key).await?;
+    let rejected = pushes
+        .iter()
+        .flat_map(|p| &p.refs)
+        .find(|r| r.reason.starts_with("df:secret-scan"))
+        .with_context(|| format!("a df:secret-scan rejection: {pushes:?}"))?;
+    let location = format!("{}:{}", data::SECRET_PATH, data::SECRET_LINE);
+    assert!(rejected.reason.contains(&location), "{rejected:?}");
+    assert!(pushes.iter().any(|p| p.verdict == "accepted"), "{pushes:?}");
+    let messages = db::push_rejected_messages(&world.pool, &key).await?;
+    assert!(!messages.is_empty());
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("df:secret-scan") && m.contains("ghp_********")),
+        "{messages:?}"
+    );
+    assert!(
+        pushes.iter().all(|p| !format!("{p:?}").contains(&token)),
+        "a push record holds the token"
+    );
+    assert!(
+        messages.iter().all(|m| !m.contains(&token)),
+        "a message holds the token"
+    );
+
+    // The forge has the amended commit only: no token on the branch.
+    let branch = branch_of(&key);
+    let config = world.forgejo.file(&branch, data::SECRET_PATH).await?;
+    assert!(!config.contains(&token), "{config}");
+    assert!(config.contains("DEPLOY_TOKEN"), "{config}");
+    let commits = world.forgejo.commits(&branch).await?;
+    let added = commits
+        .iter()
+        .filter(|c| {
+            c["commit"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("Add deploy configuration"))
+        })
+        .count();
+    assert_eq!(added, 1, "{commits:?}");
+    Ok(())
+}
+
+/// Demo step 3 of iteration 2: the agent edits the CI workflow, a protected path in mode
+/// `approval`. Every push of the commit is rejected until the board member approves the
+/// `push-check-exception` request; after the next turn the same commit passes.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn protected_path_passes_after_the_exception_is_approved() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::PROTECTED_PROJECT_KEY,
+            "Run the tests in CI",
+            None,
+        )
+        .await?;
+    let branch = branch_of(&key);
+
+    let request = eventually("a push-check-exception request", RUN_TIMEOUT, || async {
+        Ok(db::exception_requests(&world.pool, &key)
+            .await?
+            .into_iter()
+            .next())
+    })
+    .await?;
+    assert_eq!(request.state, "pending", "{request:?}");
+    let [finding] = request.findings.as_slice() else {
+        panic!("one finding: {request:?}");
+    };
+    assert_eq!(finding.check, PushCheck::ProtectedPath, "{finding:?}");
+    assert_eq!(finding.path, data::PROTECTED_PATH);
+    let fingerprint = format!("path:{}", data::PROTECTED_PATH);
+    assert_eq!(finding.fingerprint, fingerprint);
+    let pushes = db::pushes(&world.pool, &key).await?;
+    assert!(pushes.iter().all(|p| p.verdict == "rejected"), "{pushes:?}");
+    assert!(
+        pushes
+            .iter()
+            .flat_map(|p| &p.refs)
+            .all(|r| r.reason.starts_with("df:protected-path")),
+        "{pushes:?}"
+    );
+
+    world
+        .session
+        .approve_request(
+            &world.env,
+            &request.id.to_string(),
+            data::PROTECTED_PATH,
+            None,
+        )
+        .await?;
+
+    let decided = eventually("the approval", RETRY_TIMEOUT, || async {
+        let requests = db::exception_requests(&world.pool, &key).await?;
+        Ok(requests
+            .into_iter()
+            .find(|r| r.id == request.id && r.state != "pending"))
+    })
+    .await?;
+    assert_eq!(decided.state, "approved", "{decided:?}");
+    assert_eq!(db::push_exceptions(&world.pool, &key).await?, [fingerprint]);
+
+    // The decision message starts the next turn; the runtime pushes the same commit again.
+    eventually("an accepted push", RUN_TIMEOUT, || async {
+        let pushes = db::pushes(&world.pool, &key).await?;
+        Ok(pushes.iter().any(|p| p.verdict == "accepted").then_some(()))
+    })
+    .await?;
+    let commits = world.forgejo.commits(&branch).await?;
+    assert!(
+        commits.iter().any(|c| c["commit"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("Run the tests in CI"))),
+        "{commits:?}"
+    );
+    let workflow = world.forgejo.file(&branch, data::PROTECTED_PATH).await?;
+    assert!(workflow.contains("echo test"), "{workflow}");
+    let requests = db::exception_requests(&world.pool, &key).await?;
+    assert!(
+        requests.iter().all(|r| r.state != "pending"),
+        "{requests:?}"
+    );
     Ok(())
 }

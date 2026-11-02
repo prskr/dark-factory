@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use df_proto::push_reasons::NON_FAST_FORWARD;
+
 /// Prefix of the task branch ref of a task key.
 #[cfg(test)]
 const TASK_BRANCH_PREFIX: &str = "refs/heads/factory/task/";
@@ -81,7 +83,7 @@ impl RefScope {
 }
 
 /// Why a ref update was rejected; reported to the Git client as `ng <ref> <reason>`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reason {
     /// The ref is outside the run's scope, or the update is a task branch deletion.
     RefNotAllowed,
@@ -93,16 +95,20 @@ pub enum Reason {
     AuditUnavailable,
     /// A push check rejected the update; the `df:` reason comes from the check.
     Check(&'static str),
+    /// The push checks rejected the update for what they found: one or more
+    /// `df:<check> <path>[:<line>] (<detail>)`, one line of text.
+    Findings(String),
 }
 
 impl Reason {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::RefNotAllowed => "df:ref-not-allowed",
-            Self::NonFastForward => "df:non-fast-forward",
+            Self::NonFastForward => NON_FAST_FORWARD,
             Self::OtherRefRejected => "df:other-ref-rejected",
             Self::AuditUnavailable => "df:audit-unavailable",
             Self::Check(reason) => reason,
+            Self::Findings(text) => text,
         }
     }
 }
@@ -246,7 +252,10 @@ mod tests {
     }
 
     fn reasons(verdicts: &[RefVerdict]) -> Vec<Option<Reason>> {
-        verdicts.iter().map(|verdict| verdict.reason).collect()
+        verdicts
+            .iter()
+            .map(|verdict| verdict.reason.clone())
+            .collect()
     }
 
     #[test]
@@ -275,7 +284,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            verdicts[0].reason.map(Reason::as_str),
+            verdicts[0].reason.as_ref().map(Reason::as_str),
             Some("df:ref-not-allowed")
         );
     }
@@ -311,7 +320,7 @@ mod tests {
 
         assert_eq!(reasons(&verdicts), [Some(Reason::NonFastForward)]);
         assert_eq!(
-            verdicts[0].reason.map(Reason::as_str),
+            verdicts[0].reason.as_ref().map(Reason::as_str),
             Some("df:non-fast-forward")
         );
     }

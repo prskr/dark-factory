@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use df_proto::gateway::v1::{GitRoute, PushVerdict, RefUpdate};
+use df_proto::gateway::v1::{GitRoute, PushFinding, PushPolicy, PushVerdict, RefUpdate};
+use df_proto::push_reasons::{CHECK_FAILED, PUSH_TOO_LARGE};
 use http_body_util::{BodyExt, Full};
 use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue};
 use hyper::{Response, StatusCode};
@@ -21,10 +22,12 @@ use super::protocol::{
     report_status_requested, side_band_requested,
 };
 use super::quarantine::{MirrorAncestry, QuarantineError, quarantine};
-use super::refs::{Ancestry, Reason, RefCommand, RefScope, RefVerdict, check_refs};
+use super::refs::{Ancestry, ObjectId, Reason, RefCommand, RefScope, RefVerdict, check_refs};
+use super::secret_rules::BlobSource;
 use super::server::{Body, BoxError, ForgeTarget, GitRequest, Upstream, text};
 use super::spool::{BODY_IDLE_TIMEOUT, SpoolError, SpoolFailure, Spooled, spool};
 use super::upstream::{INVALID_URL, REJECTED, UNREACHABLE};
+use super::view::{PushView, TaskRefs, ViewError};
 
 /// Content type of a `report-status` answer.
 const RESULT_CONTENT_TYPE: &str = "application/x-git-receive-pack-result";
@@ -37,7 +40,6 @@ const MAX_CONCURRENT_CHECKS: usize = 4;
 const CHECK_DEADLINE: Duration = Duration::from_secs(600);
 /// Reason for every ref of a push that carries push options; they are never forwarded.
 const PUSH_OPTIONS_NOT_ALLOWED: &str = "df:push-options-not-allowed";
-const PUSH_TOO_LARGE: &str = "df:push-too-large";
 const BODY_TIMED_OUT: &str = "df:request-timeout";
 const BODY_UNREADABLE: &str = "df:unreadable-push";
 /// A failure on the gateway's side, not caused by the push.
@@ -45,7 +47,6 @@ const GATEWAY_ERROR: &str = "df:gateway-error";
 const INVALID_PACK: &str = "df:invalid-pack";
 const MALFORMED_PUSH: &str = "df:malformed-push";
 const FORGE_UNAVAILABLE: &str = "df:forge-unavailable";
-const CHECK_FAILED: &str = "df:check-failed";
 /// Largest forge answer to a push read for its `report-status` (report plus hook output).
 // ponytail: buffered to read the verdict; an answer above this fails the push even if the forge
 // took it. Tee the stream instead if hooks ever print more.
@@ -82,29 +83,68 @@ impl Rejection {
 
 /// Checks of a push beyond the ref rules (design D5), run only if the ref rules passed.
 pub trait PushChecks: Send + Sync {
-    /// One entry per command, in command order: `None` accepts it, `Some` rejects it with a
-    /// `df:` reason. `objects` is the quarantine's objects directory (pushed pack plus the
-    /// mirror as alternate), `None` for a push without a pack. Runs on the blocking pool.
-    fn check(
+    /// Checks the commands of `push` against the pushed `objects`. Runs on the blocking pool.
+    fn check(&self, push: &CheckedPush<'_>, objects: &dyn PushObjects) -> ChecksOutcome;
+}
+
+/// What the push checks of one push get.
+pub struct CheckedPush<'a> {
+    pub route: &'a GitRoute,
+    /// The push policy of the run's project; `None` if the snapshot has none.
+    pub policy: Option<&'a PushPolicy>,
+    /// Fingerprints of the findings approved for the run's task.
+    pub exceptions: &'a [String],
+    /// Every command of the push, in command order.
+    pub commands: &'a [RefCommand],
+    /// Set when the push is abandoned (deadline, client gone).
+    pub interrupt: &'a AtomicBool,
+}
+
+/// The objects of a push: the quarantine (pushed pack plus the mirror), or the mirror alone for a
+/// push without a pack.
+pub trait PushObjects: BlobSource {
+    /// What a push of `tip` by the run with the branches `task` adds (see
+    /// [`super::view::push_view`]).
+    fn push_view(
         &self,
-        route: &GitRoute,
-        commands: &[RefCommand],
-        objects: Option<&Path>,
-    ) -> Vec<Option<&'static str>>;
+        task: TaskRefs<'_>,
+        tip: &ObjectId,
+        max_commits: usize,
+        interrupt: &AtomicBool,
+    ) -> Result<PushView, ViewError>;
+}
+
+/// The result of the push checks.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChecksOutcome {
+    /// One entry per command, in command order: `None` accepts it, `Some` rejects it.
+    pub reasons: Vec<Option<Reason>>,
+    /// The findings without a matching exception, of every ref.
+    pub findings: Vec<PushFinding>,
+    /// Rejected on the task branch only by findings a human may approve.
+    pub approval_requested: bool,
 }
 
 /// Accepts every command.
 pub struct NoPushChecks;
 
 impl PushChecks for NoPushChecks {
-    fn check(
-        &self,
-        _: &GitRoute,
-        commands: &[RefCommand],
-        _: Option<&Path>,
-    ) -> Vec<Option<&'static str>> {
-        vec![None; commands.len()]
+    fn check(&self, push: &CheckedPush<'_>, _: &dyn PushObjects) -> ChecksOutcome {
+        ChecksOutcome {
+            reasons: vec![None; push.commands.len()],
+            ..ChecksOutcome::default()
+        }
     }
+}
+
+/// The pushing run, as the snapshot describes it.
+#[derive(Debug, Clone, Copy)]
+pub struct Pusher<'a> {
+    pub run_id: &'a str,
+    /// The push policy of the run's project; `None` if the snapshot has none.
+    pub policy: Option<&'a PushPolicy>,
+    /// Fingerprints of the push check findings approved for the run's task.
+    pub exceptions: &'a [String],
 }
 
 /// One state of a push, stored with the control plane (design D6).
@@ -120,6 +160,10 @@ pub struct PushRecord {
     pub bytes: u64,
     /// From the start of the push to this verdict.
     pub duration: Duration,
+    /// Findings of the push checks without an exception; empty unless rejected by a check.
+    pub findings: Vec<PushFinding>,
+    /// Rejected on the task branch only by findings a human may approve.
+    pub approval_requested: bool,
 }
 
 /// Failure to store a push record.
@@ -195,15 +239,16 @@ impl Push {
         self
     }
 
-    /// Answers a `git-receive-pack` POST of the run `run_id` to `forge`.
+    /// Answers a `git-receive-pack` POST of `pusher` to `forge`.
     pub(crate) async fn handle(
         &self,
         upstream: &dyn Upstream,
         forge: ForgeTarget<'_>,
-        run_id: &str,
+        pusher: Pusher<'_>,
         mut request: GitRequest,
     ) -> Response<Body> {
         let started = Instant::now();
+        let run_id = pusher.run_id;
         let body = std::mem::replace(&mut request.body, empty());
         let spooled = match spool(body, &self.spool_dir, self.max_bytes, self.idle).await {
             Ok(spooled) => spooled,
@@ -231,7 +276,7 @@ impl Push {
                 .await;
             return report(&parsed, &verdicts);
         }
-        let (spooled, verdicts) = match self.verify(forge, &parsed, spooled).await {
+        let (spooled, checked) = match self.verify(forge, pusher, &parsed, spooled).await {
             Ok(checked) => checked,
             Err(rejection) => {
                 let verdicts = entry.rejected(Reason::Check(rejection.reason));
@@ -241,11 +286,15 @@ impl Push {
                 return *rejection.response;
             }
         };
+        let verdicts = checked.verdicts;
         if verdicts.iter().any(|verdict| !verdict.is_accepted()) {
             tracing::info!(task_key = %request.task_key, "push rejected by the ref rules or checks");
-            self.store(entry.record(&verdicts, PushVerdict::Rejected))
-                .await
-                .ok();
+            let record = PushRecord {
+                findings: checked.findings,
+                approval_requested: checked.approval_requested,
+                ..entry.record(&verdicts, PushVerdict::Rejected)
+            };
+            self.store(record).await.ok();
             return report(&parsed, &verdicts);
         }
         if let Err(error) = self
@@ -253,7 +302,7 @@ impl Push {
             .await
         {
             tracing::warn!(%error, task_key = %request.task_key, "push rejected: record unavailable");
-            return report(&parsed, &reject_all(&verdicts, Reason::AuditUnavailable));
+            return report(&parsed, &reject_all(&verdicts, &Reason::AuditUnavailable));
         }
         let response = forward(upstream, forge, request, spooled).await;
         let (response, verdict, verdicts) =
@@ -326,9 +375,10 @@ impl Push {
     async fn verify(
         &self,
         forge: ForgeTarget<'_>,
+        pusher: Pusher<'_>,
         parsed: &ReceivePackRequest,
         spooled: Spooled,
-    ) -> Result<(Spooled, Vec<RefVerdict>), Rejection> {
+    ) -> Result<(Spooled, Checked), Rejection> {
         let deadline = tokio::time::Instant::now() + CHECK_DEADLINE;
         let failed = || {
             Rejection::new(
@@ -354,6 +404,8 @@ impl Push {
             commands: parsed.commands.clone(),
             pack_offset: parsed.pack_offset,
             route: forge.route.clone(),
+            policy: pusher.policy.cloned(),
+            exceptions: pusher.exceptions.to_vec(),
             checks: self.checks.clone(),
             alloc_limit: usize::try_from(self.max_bytes.saturating_mul(OBJECT_ALLOC_FACTOR))
                 .unwrap_or(usize::MAX),
@@ -369,7 +421,7 @@ impl Push {
             .await
             .unwrap_or_else(|_elapsed| Err("push check deadline exceeded".into()));
         match joined {
-            Ok((spooled, Ok(verdicts))) => Ok((spooled, verdicts)),
+            Ok((spooled, Ok(checked))) => Ok((spooled, checked)),
             Ok((_, Err(QuarantineError::Pack(error)))) => {
                 tracing::info!(%error, "push rejected: invalid pack");
                 Err(Rejection::new(
@@ -406,15 +458,35 @@ struct Verify {
     commands: Vec<RefCommand>,
     pack_offset: Option<usize>,
     route: GitRoute,
+    policy: Option<PushPolicy>,
+    exceptions: Vec<String>,
     checks: Arc<dyn PushChecks>,
     alloc_limit: usize,
     interrupt: Arc<AtomicBool>,
 }
 
+/// The verdicts of the refs of a push and what the push checks found.
+struct Checked {
+    verdicts: Vec<RefVerdict>,
+    findings: Vec<PushFinding>,
+    approval_requested: bool,
+}
+
+impl Checked {
+    /// Verdicts without anything the push checks found.
+    fn refs(verdicts: Vec<RefVerdict>) -> Self {
+        Self {
+            verdicts,
+            findings: Vec::new(),
+            approval_requested: false,
+        }
+    }
+}
+
 impl Verify {
-    fn run(&self, spooled: &Spooled) -> Result<Vec<RefVerdict>, QuarantineError> {
+    fn run(&self, spooled: &Spooled) -> Result<Checked, QuarantineError> {
         let Some(offset) = self.pack_offset else {
-            return self.verdicts(&MirrorAncestry::open(&self.mirror)?, None);
+            return self.verdicts(&MirrorAncestry::open(&self.mirror)?);
         };
         let pack = spooled.reader_at(u64::try_from(offset).unwrap_or(u64::MAX))?;
         let quarantined = quarantine(
@@ -424,42 +496,49 @@ impl Verify {
             self.alloc_limit,
             &self.interrupt,
         )?;
-        self.verdicts(&quarantined, Some(&quarantined.objects_dir()))
+        self.verdicts(&quarantined)
     }
 
-    fn verdicts<A>(
-        &self,
-        ancestry: &A,
-        objects: Option<&Path>,
-    ) -> Result<Vec<RefVerdict>, QuarantineError>
+    fn verdicts<O>(&self, objects: &O) -> Result<Checked, QuarantineError>
     where
-        A: Ancestry<Error = QuarantineError>,
+        O: Ancestry<Error = QuarantineError> + PushObjects,
     {
-        let verdicts = check_refs(&self.scope, &self.commands, ancestry)?;
+        let verdicts = check_refs(&self.scope, &self.commands, objects)?;
         if verdicts.iter().any(|verdict| !verdict.is_accepted()) {
-            return Ok(verdicts);
+            return Ok(Checked::refs(verdicts));
         }
-        let reasons = self.checks.check(&self.route, &self.commands, objects);
-        if reasons.len() != verdicts.len() {
+        let push = CheckedPush {
+            route: &self.route,
+            policy: self.policy.as_ref(),
+            exceptions: &self.exceptions,
+            commands: &self.commands,
+            interrupt: &self.interrupt,
+        };
+        let outcome = self.checks.check(&push, objects);
+        if outcome.reasons.len() != verdicts.len() {
             tracing::error!(
                 "push checks returned a verdict count that does not match the commands"
             );
-            return Ok(reject_all(&verdicts, Reason::Check(CHECK_FAILED)));
+            return Ok(Checked::refs(reject_all(
+                &verdicts,
+                &Reason::Check(CHECK_FAILED),
+            )));
         }
         let mut verdicts: Vec<RefVerdict> = verdicts
             .into_iter()
-            .zip(reasons)
-            .map(|(verdict, reason)| RefVerdict {
-                reason: reason.map(Reason::Check),
-                ..verdict
-            })
+            .zip(outcome.reasons)
+            .map(|(verdict, reason)| RefVerdict { reason, ..verdict })
             .collect();
         if verdicts.iter().any(|verdict| !verdict.is_accepted()) {
             for verdict in &mut verdicts {
                 verdict.reason.get_or_insert(Reason::OtherRefRejected);
             }
         }
-        Ok(verdicts)
+        Ok(Checked {
+            verdicts,
+            findings: outcome.findings,
+            approval_requested: outcome.approval_requested,
+        })
     }
 }
 
@@ -543,7 +622,7 @@ impl Entry<'_> {
             .iter()
             .map(|command| RefVerdict {
                 name: command.name.clone(),
-                reason: Some(reason),
+                reason: Some(reason.clone()),
             })
             .collect()
     }
@@ -560,6 +639,7 @@ impl Entry<'_> {
                 verdict: i32::from(verdict),
                 reason: ref_verdict
                     .reason
+                    .as_ref()
                     .map(|reason| reason.as_str().to_owned())
                     .unwrap_or_default(),
             })
@@ -571,16 +651,18 @@ impl Entry<'_> {
             verdict,
             bytes: self.bytes,
             duration: self.started.elapsed(),
+            findings: Vec::new(),
+            approval_requested: false,
         }
     }
 }
 
-fn reject_all(verdicts: &[RefVerdict], reason: Reason) -> Vec<RefVerdict> {
+fn reject_all(verdicts: &[RefVerdict], reason: &Reason) -> Vec<RefVerdict> {
     verdicts
         .iter()
         .map(|verdict| RefVerdict {
             name: verdict.name.clone(),
-            reason: Some(reason),
+            reason: Some(reason.clone()),
         })
         .collect()
 }

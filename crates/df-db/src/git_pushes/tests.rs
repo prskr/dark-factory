@@ -54,6 +54,8 @@ fn record(run_id: RunId, push_id: Uuid, verdict: PushVerdict) -> PushRecord {
         verdict,
         bytes: 1024,
         duration: Duration::from_millis(250),
+        findings: Vec::new(),
+        approval_requested: false,
     }
 }
 

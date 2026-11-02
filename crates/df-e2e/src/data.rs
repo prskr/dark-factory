@@ -16,6 +16,21 @@ pub const NETWORK_PROJECT_NAME: &str = "Network Access";
 pub const NETWORK_HOST: &str = "pypi.org";
 pub const NETWORK_PORT: u16 = 443;
 
+/// Project whose fake agent commits a test token (demo step 2 of iteration 2); tasks are `SC-<n>`.
+pub const SECRET_PROJECT_KEY: &str = "SC";
+pub const SECRET_PROJECT_NAME: &str = "Secret Scan";
+
+/// Project whose fake agent edits the CI workflow (demo step 3 of iteration 2); tasks are `PP-<n>`.
+pub const PROTECTED_PROJECT_KEY: &str = "PP";
+pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
+
+/// The file of `push-secret.yaml` with the token, and the line the token is on.
+pub const SECRET_PATH: &str = "config.py";
+pub const SECRET_LINE: u32 = 2;
+
+/// The workflow `push-protected.yaml` adds.
+pub const PROTECTED_PATH: &str = ".forgejo/workflows/ci.yml";
+
 /// Persona that works on all projects.
 pub const PERSONA_NAME: &str = "e2e";
 
@@ -46,10 +61,18 @@ pub const FAKE_AGENT: &str = "/opt/harness/bin/fake-acp-agent";
 pub const DEMO_SCRIPT: &str = "/opt/harness/scripts/demo.yaml";
 pub const RATE_LIMIT_SCRIPT: &str = "/opt/harness/scripts/rate-limit.yaml";
 pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
+pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
+pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {
     format!("http://{FORGE_SERVICE}.{FORGE_NAMESPACE}.svc:{FORGE_PORT}/{FORGE_OWNER}/{FORGE_REPO}")
+}
+
+/// The GitHub token `push-secret.yaml` commits (rule `betterleaks.github-pat`). Assembled from
+/// parts like the script does, so no source file holds a string that secret scanners match.
+pub fn test_token() -> String {
+    format!("{}_{}", "ghp", "E2eTestOnlyNotARealToken000000000000")
 }
 
 /// Command that starts the fake agent with `script`.

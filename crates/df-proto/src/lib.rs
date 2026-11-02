@@ -44,6 +44,8 @@ pub mod gateway {
     }
 }
 
+pub mod push_reasons;
+
 #[cfg(test)]
 mod tests {
     use super::agent::v1::{

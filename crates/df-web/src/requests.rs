@@ -16,6 +16,7 @@ use axum::{Extension, Form, Router};
 use chrono::{DateTime, Utc};
 use df_core::{RequestId, TaskId};
 use df_db::Notification;
+use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, PushCheck, request_findings};
 use df_db::requests::{
     ApprovalTypes, Decision, RequestError, RequestKind, RequestRow, RequestState, Scope,
 };
@@ -167,6 +168,9 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
                     }
                 }
             }
+            @if row.approval_type.as_deref() == Some(PUSH_CHECK_EXCEPTION) {
+                (finding_list(&request_findings(&row.payload)))
+            }
             @if pending {
                 (actions(card, &target))
             } @else {
@@ -221,6 +225,56 @@ const fn scope_label(scope: Scope) -> &'static str {
     }
 }
 
+/// The approve button: it names the scope when the type offers only one.
+const fn approve_label(scopes: &[Scope]) -> &'static str {
+    match scopes {
+        [Scope::Run] => "Approve for this run",
+        [Scope::Task] => "Approve for this task",
+        [Scope::Project] => "Approve for this project",
+        [Scope::Instance] => "Approve everywhere",
+        _ => "Approve",
+    }
+}
+
+const fn check_label(check: PushCheck) -> &'static str {
+    match check {
+        PushCheck::SecretScan => "Secret scan",
+        PushCheck::Identity => "Identity",
+        PushCheck::ProtectedPath => "Protected path",
+        PushCheck::BlobTooLarge => "Size limit",
+        PushCheck::MergeCommit => "Merge commit",
+    }
+}
+
+/// The findings of a `push-check-exception` request, one row each: check, path and line, the
+/// rule of a secret and the masked match or blob size. Desktop: one line per row; phone: check
+/// and rule above path and preview.
+fn finding_list(findings: &[ExceptionFinding]) -> Markup {
+    html! {
+        ul class="divide-y divide-line rounded-lg border border-line bg-panel" {
+            @for finding in findings {
+                li class="flex flex-col items-start gap-1 px-3 py-2 lg:flex-row lg:items-center lg:gap-2" {
+                    div class="flex items-center gap-2 lg:contents" {
+                        span class="shrink-0 rounded-md bg-sunk px-2 py-px text-xs text-muted" { (check_label(finding.check)) }
+                        @if let Some(rule) = &finding.rule {
+                            span class="text-xs text-faint lg:order-1" { (rule) }
+                        }
+                    }
+                    div class="flex min-w-0 max-w-full items-center gap-2 lg:contents" {
+                        span class="min-w-0 break-all font-mono text-[13px] text-ink" {
+                            (finding.path)
+                            @if let Some(line) = finding.line { ":" (line) }
+                        }
+                        @if !finding.preview.is_empty() {
+                            span class="shrink-0 font-mono text-xs text-muted lg:order-2 lg:ml-auto" { (finding.preview) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn actions(card: &CardData, target: &str) -> Markup {
     let row = &card.row;
     let post = |action: &str| format!("/requests/{}/{action}", row.id);
@@ -246,7 +300,9 @@ fn actions(card: &CardData, target: &str) -> Markup {
         },
         RequestKind::Approval => html! {
             form class="space-y-3" {
-                @if !card.scopes.is_empty() {
+                @if let [only] = card.scopes.as_slice() {
+                    input type="hidden" name="scope" value=(only.as_str());
+                } @else if !card.scopes.is_empty() {
                     fieldset class="flex flex-wrap gap-x-4 gap-y-1" {
                         legend class="sr-only" { "Scope" }
                         @for (i, scope) in card.scopes.iter().enumerate() {
@@ -263,7 +319,7 @@ fn actions(card: &CardData, target: &str) -> Markup {
                 div class="flex flex-wrap gap-2" {
                     // htmx 4 does not inherit target and swap from the form.
                     button type="submit" hx-post=(post("approve")) hx-target=(target) hx-swap="outerHTML"
-                        class=(action_class(ButtonKind::Primary)) { "Approve" }
+                        class=(action_class(ButtonKind::Primary)) { (approve_label(&card.scopes)) }
                     button type="submit" hx-post=(post("deny")) hx-target=(target) hx-swap="outerHTML"
                         class=(button_class) { "Deny" }
                 }

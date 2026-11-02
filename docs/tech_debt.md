@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-89.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-91.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -119,6 +119,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
 | TD-87 | medium | `factory-agent` runner | The first turn never reports `Running`; the run stays `preparing` |
 | TD-88 | low   | `fake-acp-agent` scripts | An unknown or malformed step loads as an empty script without an error |
+| TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
+| TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
 
 ## Entries
 
@@ -842,6 +844,28 @@ If `Wrapped` fails (unknown step kind, missing field), the untagged enum falls b
 **Matters when:** a new step or a script typo; the run then ends without the scripted output and the test fails far from the cause.
 
 **Fix:** `#[serde(deny_unknown_fields)]` on `Sessions` and the step structs, and a test that a script with an unknown step kind fails to load.
+
+Origin of TD-89 to TD-90: code review of `iter2-push-checks` (2026-11-02).
+
+### TD-89 (R2-S2). The check enum exists three times
+
+`crates/df-gateway/src/git/checks.rs` (`Check`), `crates/df-db/src/push_checks.rs` (`PushCheck`), `crates/df-proto/src/push_reasons.rs`
+
+The gateway's `Check` is `pb::PushCheck` without `Unspecified`, plus a `From` conversion; df-db has its own `PushCheck` with another conversion.
+
+**Matters when:** a check is added; it needs three enums and their mappings.
+
+**Fix:** use `pb::PushCheck` directly in the gateway's `Finding` and in df-db, and drop `Check`.
+
+### TD-90 (R3-P1). No cap on the bytes scanned per push
+
+`crates/df-gateway/src/git/view.rs` (`added_blobs`), `crates/df-gateway/src/git/secret_rules.rs` (`read_blob`)
+
+Blobs the mirror already has (WIP content, other tasks' branches) are scanned too, so only `MAX_COMMITS` bounds the scanned bytes, not the 256 MiB pack limit. Each blob is read whole into memory.
+
+**Matters when:** repositories with large files, or long branches rebased or merged from other tasks; one push can then scan far more than its pack size.
+
+**Fix:** a total byte limit per push that rejects with `df:push-too-large`, and streaming blob reads for the secret scan.
 
 ## Accepted decisions
 

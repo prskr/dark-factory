@@ -140,6 +140,8 @@ impl Sender {
             verdict: record.verdict.into(),
             bytes: record.bytes,
             duration: Some(crate::flow::duration_proto(record.duration)),
+            findings: record.findings,
+            approval_requested: record.approval_requested,
         }
     }
 

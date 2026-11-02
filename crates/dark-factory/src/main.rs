@@ -13,6 +13,8 @@ use df_agent_channel::{ChannelConfig, ChannelContext, Scheduler};
 use df_core::InstanceConfig;
 use df_core::config::DEFAULT_CONFIG_PATH;
 use df_db::PgPool;
+use df_gateway::git::policy_checks::PolicyChecks;
+use df_gateway::git::secret_rules::SecretRules;
 use df_telemetry::logging;
 use df_telemetry::otel as telemetry;
 use kube::Client;
@@ -461,7 +463,9 @@ async fn run_gateway_command(
         settings.pod.clone(),
         df_gateway::git::records::RetryPolicy::default(),
     ));
+    let checks = Arc::new(PolicyChecks::new(SecretRules::builtin()?));
     let push = df_gateway::git::push::Push::new(Arc::new(mirrors), &mirror_dir, max_push_size)
+        .with_checks(checks)
         .with_recorder(recorder.clone());
     let git = Arc::new(df_gateway::git::server::GitEndpoint::new(
         policy_rx,

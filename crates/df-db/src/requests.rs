@@ -257,7 +257,9 @@ pub struct ApprovalTypes(BTreeMap<&'static str, Arc<dyn ApprovalType>>);
 impl ApprovalTypes {
     /// The approval types the control plane offers.
     pub fn builtin() -> Self {
-        Self::default().with(Arc::new(crate::network_access::NetworkAccess))
+        Self::default()
+            .with(Arc::new(crate::network_access::NetworkAccess))
+            .with(Arc::new(crate::push_checks::PushCheckException))
     }
 
     #[must_use]
@@ -629,13 +631,37 @@ pub async fn close_pending_for_task(
     reason: &str,
     actor: &Principal,
 ) -> Result<Vec<RequestId>, DbError> {
+    close_pending(tx, task_id, None, reason, actor).await
+}
+
+/// [`close_pending_for_task`] for the pending approvals of type `approval_type` only.
+pub(crate) async fn close_pending_of_type(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    approval_type: &str,
+    reason: &str,
+    actor: &Principal,
+) -> Result<Vec<RequestId>, DbError> {
+    close_pending(tx, task_id, Some(approval_type), reason, actor).await
+}
+
+async fn close_pending(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    approval_type: Option<&str>,
+    reason: &str,
+    actor: &Principal,
+) -> Result<Vec<RequestId>, DbError> {
     lock_task(tx, task_id).await?;
     let ids: Vec<uuid::Uuid> = sqlx::query_scalar(
         "UPDATE agent_requests SET state = 'closed', close_reason = $2
-         WHERE task_id = $1 AND state = 'pending' RETURNING id",
+         WHERE task_id = $1 AND state = 'pending'
+           AND ($3::text IS NULL OR approval_type = $3)
+         RETURNING id",
     )
     .bind(task_id.as_uuid())
     .bind(reason)
+    .bind(approval_type)
     .fetch_all(&mut **tx)
     .await?;
     let mut closed = Vec::with_capacity(ids.len());
@@ -851,7 +877,7 @@ fn approval_type_of<'a>(
         .ok_or_else(|| RequestError::UnknownType(name.to_string()))
 }
 
-fn text_block(text: String) -> ContentBlock {
+pub(crate) fn text_block(text: String) -> ContentBlock {
     ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text })),
         hidden: false,

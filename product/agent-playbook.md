@@ -22,6 +22,18 @@
 - Follow the project's commit message conventions.
 - Never commit secrets or files that look like credentials, even temporarily.
 
+### Rejected pushes
+- The Git proxy checks every commit you push: secrets, commit identity, protected paths (CI workflows, `CODEOWNERS`, `.dark-factory/**`), blob size and, if the project wants it, merge commits (`design/agent-run.md` §11.1).
+- A rejection arrives as a `push.rejected` message at the start of a turn. It lists each finding as `df:<check> <path>[:<line>] (<detail>)` with secrets masked, and says whether a human was asked to approve them (`push-check-exception` request).
+- The rejected commits are not on the forge; they are your unpushed commits. Rewrite them so the finding is gone from every commit, not only from the latest:
+  - Finding in the last commit: fix the file, `git add` it, `git commit --amend --no-edit`.
+  - Finding in an older unpushed commit: `git commit --fixup=<commit>` with the fix, then `git rebase -i --autosquash <last pushed commit>` (non-interactively: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`). The last pushed commit is the remote task branch (`git fetch origin`, then `origin/factory/task/<key>`), or the base branch before the first push.
+  - Never rewrite commits that are already pushed (see "Tasks and branches").
+- A leaked secret stays leaked: remove it from the commits and say in your summary that it should be rotated. Read secrets from the environment or configuration, never from the repository.
+- If the change is intended (a CI workflow the task asks for, a false positive), don't rewrite it. Say why in your turn and continue with other work; if an approval was requested, the same commits pass on the first push after the approval. If you can't continue without it, ask a blocking question and end your turn.
+- Findings that can't be approved (identity, `.dark-factory/**`, merge commits) must be removed. Don't change the Git identity or configuration to get around one.
+- After 3 rejections in a row you get no further messages until a push passes; check that every finding is fixed before you end the turn.
+
 ### Pull requests and issues
 - Don't open pull requests yourself — the control plane opens a draft PR after your first push. Shape it with `update_pull_request` (title, description for reviewers).
 - Use `comment_on_issue` for findings and decisions that should outlive the task; use `report_progress` at meaningful milestones only.
