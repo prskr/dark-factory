@@ -29,7 +29,7 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects
-- **THEN** `Assign.workspace.task_branch` is `factory/task/DF-1` and `Assign.tools` contains exactly the six factory tools v2
+- **THEN** `Assign.workspace.task_branch` is `factory/task/DF-1` and `Assign.tools` contains exactly the seven factory tools v2, including `request_approval`
 
 #### Scenario: Default adapter command
 - **WHEN** a run of a project without an adapter command connects
