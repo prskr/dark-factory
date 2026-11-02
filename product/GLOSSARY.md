@@ -51,3 +51,17 @@ _Avoid_: Conversation, discussion
 **System principal**:
 Dark Factory itself as the author of a prompt sent to the agent, such as the task assignment or a routed webhook.
 _Avoid_: System event
+
+### Integrations
+
+**Lifecycle event**:
+A notification that something happened to a task's sandbox or volume, such as a sandbox being provisioned or destroyed, sent by Dark Factory to external systems after the fact. It never influences the run.
+_Avoid_: Webhook, hook, outgoing webhook
+
+**Event subscription**:
+A receiver URL registered for lifecycle events, either for the whole instance or for one project.
+_Avoid_: Webhook, hook, endpoint
+
+**Webhook**:
+An HTTP request a forge sends to Dark Factory. Notifications Dark Factory sends are lifecycle events, never webhooks.
+_Avoid_: Incoming webhook, forge event

@@ -46,6 +46,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Cancel button** for tasks and runs.
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
 - **Task volume lifecycle (`iter2-task-volume-lifecycle`, [`design/agent-run.md`](../../design/agent-run.md) §5.5):** retention for closed and idle tasks, "reset workspace".
+- **Lifecycle events (`lifecycle-events`, ADR-0049):** signed outgoing notifications for task volume and sandbox lifecycle (provisioned, provisioning failed, destroyed), at least once via a PostgreSQL outbox, receivers per instance (Helm) and per project (UI, `admin` role). After `iter2-task-volume-lifecycle`.
 - **Plugin distribution (`iter2-plugin-distribution`, ADR-0018):** plugins as OCI images mounted into the control plane via image volumes; the control plane image no longer bundles plugins.
 - **Several forges side by side (`iter2-multi-forge`):** each project goes to the forge plugin that claims the host of its repository URL (no plugin per project); per-plugin API URL and `Authorization` scheme; a broken plugin no longer stops the control plane; the UI shows the forge per project.
 - **GitHub plugin (`iter2-github-plugin`):** pull requests and issues on github.com and GitHub Enterprise Server, GitHub's native draft pull requests (default), drafts through a title prefix, or native drafts with the title prefix as fallback; enabled for `github.com` in the default release.
@@ -147,3 +148,4 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Code themes that follow the inverted agent bubble (dark code theme in light-mode agent bubbles) | idea | ADR-0047 |
 | Content-Security-Policy for the web UI (needs Alpine's CSP build or a nonce strategy) | idea | `openspec/changes/iter3-markdown-rendering` (design) |
 | Remaining low-severity tech debt | — | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
+| Lifecycle event extensions: a "started" event for volumes (`volume.provisioning`), run and task state events, two signatures during key rotation, delivery history and manual redelivery, hot reload of key and instance subscriptions, per-subscription concurrency, the `can()` permission check instead of the `admin` role check | idea | ADR-0049, `openspec/changes/lifecycle-events` |
