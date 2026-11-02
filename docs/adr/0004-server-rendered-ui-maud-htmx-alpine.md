@@ -1,6 +1,6 @@
 # ADR-0004: Server-rendered UI with maud, htmx 4 and Alpine
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md): class-based syntect themes, client-side Mermaid)
 - **Date:** 2026-10-16
 
 ## Context

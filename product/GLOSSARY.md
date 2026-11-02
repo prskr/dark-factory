@@ -22,6 +22,12 @@ _Avoid_: System event, warning
 A transcript event in which the control plane records that the task's work reached the forge: a task-branch push (accepted, rejected, or failed at the forge), a pull request opened, or a pull request marked ready for review. It is shown to humans only, never to the agent.
 _Avoid_: System event, Git event, notice
 
+### Results
+
+**Artifact**:
+A named file that belongs to one task (chats included), written by its agent for humans or for related tasks. It is either text, such as a Markdown document, or an image, such as a screenshot of the running app.
+_Avoid_: Attachment, document, upload
+
 ### Authors
 
 **System principal**:
