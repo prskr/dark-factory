@@ -328,3 +328,10 @@ The task detail SHALL offer "Stop" for an active run and "Cancel task" for tasks
 #### Scenario: Cancel needs confirmation
 - **WHEN** a board member clicks "Cancel task"
 - **THEN** nothing changes until the confirmation is accepted
+
+### Requirement: Resume information
+The task detail SHALL show the resume time of a task that waits for one, and the resume count when it is above 0.
+
+#### Scenario: Rate-limited task
+- **WHEN** a board member opens a `rate_limited` task with resume time 04:30
+- **THEN** the page shows that the task resumes at 04:30
