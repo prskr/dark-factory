@@ -28,6 +28,24 @@ _Avoid_: System event, Git event, notice
 A named file that belongs to one task (chats included), written by its agent for humans or for related tasks. It is either text, such as a Markdown document, or an image, such as a screenshot of the running app.
 _Avoid_: Attachment, document, upload
 
+### Pull request feedback
+
+**PR comment**:
+A top-level comment in the conversation of a pull request, not anchored to any line of the change.
+_Avoid_: Issue comment, conversation comment
+
+**Review**:
+One submitted batch of feedback on a pull request with a verdict (approve, request changes, or comment) and an optional body.
+_Avoid_: Approval, code review
+
+**Review comment**:
+A comment anchored to a file and line of a pull request's change, belonging to a review.
+_Avoid_: Inline comment, line comment
+
+**Review thread**:
+A review comment together with its replies; it can be resolved.
+_Avoid_: Conversation, discussion
+
 ### Authors
 
 **System principal**:
