@@ -91,7 +91,7 @@ The control plane SHALL fail a run that doesn't connect within the configured co
 - **THEN** the run fails with `sandbox_lost` and the task volume is kept
 
 ### Requirement: Run end maps to task status
-On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox and set the task status: `completed`→`in_review`, `end_turn` and `cancelled`→`waiting`, any other outcome to the status of the same name. Undelivered prompts SHALL make the task `queued` instead unless the outcome is `failed` or `rate_limited`, even if a human marked it done; without them, a task marked done (`completed`) SHALL keep its status, whatever the outcome.
+On `RunReport` the control plane SHALL store outcome, detail, retry time, session id and workspace state, delete the sandbox, and set the task status: `completed`→`in_review`, `end_turn`→`waiting`, `blocked`→`blocked`, `limit_reached`→`limit_reached`, `rate_limited`→`rate_limited`, `cancelled`→`waiting`, `failed`→`failed`. If undelivered prompts exist and the outcome is neither `failed` nor `rate_limited`, the task SHALL become `queued` instead; this also applies to a task a human marked done. For a run stopped by a human, only prompts queued after the stop count. Without undelivered prompts, a task a human marked done (`completed`) SHALL keep its status, whatever the outcome. A task whose status is still `cancelled` SHALL stay `cancelled`.
 
 #### Scenario: Rate limit
 - **WHEN** a run reports `RUN_OUTCOME_RATE_LIMITED` with a retry time
@@ -116,6 +116,14 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 #### Scenario: Completed with an undelivered message
 - **WHEN** a human queues a message during the turn in which the agent calls `complete_task`
 - **THEN** the run ends `completed`, the PR is marked ready, and the task becomes `queued` so the next run addresses the message
+
+#### Scenario: Stopped with an undelivered message
+- **WHEN** a message queued before the stop is still undelivered when the stopped run's `RunReport` arrives
+- **THEN** the task becomes `waiting` and no new run starts until another message is queued
+
+#### Scenario: Reopened while the stopped run finalizes
+- **WHEN** a task is cancelled, a board member queues a message before the stopped run's `RunReport` arrives, and the run then reports `RUN_OUTCOME_CANCELLED`
+- **THEN** the task stays `queued` and the next run starts with that message once the stopped run has ended
 
 ### Requirement: Prompts during a run
 A message queued while a run is active and not `finalizing` SHALL be sent to the runtime as a `Prompt` by the replica holding the run's stream. This includes a run that is `awaiting_input`; no new run SHALL start for it. A message queued while the run is `finalizing` (including after `Release` or `Cancel`) SHALL stay held back; the run end makes the task `queued` and the next run delivers it.
@@ -153,3 +161,25 @@ For a run whose last turn had a blocking request, the control plane SHALL apply 
 #### Scenario: Default window
 - **WHEN** a run awaits an answer in an instance without `runs.keepAliveSeconds`
 - **THEN** the control plane sends `Release` after 10 minutes and the run ends `blocked`
+
+### Requirement: Stopping a run
+A board member SHALL be able to stop a non-terminal run. A connected run SHALL receive `Cancel`; a run that isn't connected yet SHALL have its sandbox torn down and end with outcome `cancelled`. Stopping SHALL write an audit entry `run.stop`. A run that is already `finalizing` is not stopped again: the request changes nothing, so messages queued before it still make the task `queued` at run end.
+
+#### Scenario: Stop a running run
+- **WHEN** a board member stops run 2 of `DF-9` during a turn
+- **THEN** the runtime receives `Cancel`, finalizes and reports `RUN_OUTCOME_CANCELLED`, and `DF-9` becomes `waiting`
+
+#### Scenario: Stop while provisioning
+- **WHEN** a board member stops a run in state `provisioning`
+- **THEN** the sandbox is deleted, the run ends `cancelled` and the task volume is kept
+
+#### Scenario: Stop while finalizing
+- **WHEN** a board member stops a run that is `finalizing` after `complete_task` while a message queued before is undelivered
+- **THEN** nothing changes, and the task becomes `queued` when the run ends `completed`
+
+### Requirement: Stop timeout
+If no `RunReport` arrives within 2 minutes after `Cancel` was sent for a human stop, the control plane SHALL tear down the sandbox and end the run `cancelled` with detail `stop-timeout`, keeping the task volume.
+
+#### Scenario: Runtime hangs
+- **WHEN** the runtime doesn't report within 2 minutes after a stop
+- **THEN** the sandbox is deleted and the run ends `cancelled` with detail `stop-timeout`
