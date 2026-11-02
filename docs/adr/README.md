@@ -52,3 +52,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0046](0046-forge-activity-in-the-transcript.md) | Forge activity in the transcript | Accepted |
 | [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md) | Markdown rendering with class-based syntect themes and sandboxed Mermaid | Accepted (planned for iteration 3) |
 | [ADR-0048](0048-image-artifacts.md) | Image artifacts | Accepted (planned for iteration 3) |
+| [ADR-0049](0049-lifecycle-events-outbox-and-ed25519-signatures.md) | Lifecycle events via a PostgreSQL outbox, signed with Ed25519 | Accepted |

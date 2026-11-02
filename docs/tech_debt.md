@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-91.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-92.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -36,6 +36,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
+- Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
 
 ## Summary
 
@@ -121,6 +122,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-88 | low   | `fake-acp-agent` scripts | An unknown or malformed step loads as an empty script without an error |
 | TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
+| TD-91 | medium | `df-agent-channel` PR | Forge calls in `pr.rs` run inline and are retried only by the next push report or run end |
 
 ## Entries
 
@@ -868,6 +870,15 @@ Blobs the mirror already has (WIP content, other tasks' branches) are scanned to
 **Matters when:** repositories with large files, or long branches rebased or merged from other tasks; one push can then scan far more than its pack size.
 
 **Fix:** a total byte limit per push that rejects with `df:push-too-large`, and streaming blob reads for the secret scan.
+### TD-91. Forge calls in `pr.rs` run inline and are retried only by the next trigger
+
+`crates/df-agent-channel/src/pr.rs` (`on_push_report`, `on_run_end`, `try_ensure_draft`)
+
+Opening the draft PR, marking it ready and posting the completion summary call the forge inline and are best effort. A failure is logged. Opening the PR is retried only by the next push report or run end. At the end of a completed run there is no next trigger, so a failed "mark ready" or summary post is lost. A control plane restart between the state change and the forge call loses the call as well. TD-11 to TD-13 come from the same inline design.
+
+**Matters when:** the forge is briefly unavailable or rate limits at the end of a run. The PR then stays a draft, or misses its summary, until a human acts.
+
+**Fix:** after `lifecycle-events`, enqueue the forge actions as outbox jobs (`pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary`) in the transaction that records the push report or run end, with an `OutboxHandler` per kind (`openspec/changes/lifecycle-events/design.md` D1, D3). Handlers must be idempotent: they find an existing PR before opening one and check the ready state before updating. Tests: a forge failure on "mark ready" is retried until it succeeds; a restart between the run end and the forge call still marks the PR ready. Check TD-11 to TD-13 against the new flow and close what it fixes.
 
 ## Accepted decisions
 
