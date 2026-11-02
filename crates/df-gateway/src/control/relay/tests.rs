@@ -458,7 +458,10 @@ async fn a_viewer_that_comes_back_after_the_grace_period_starts_a_new_session() 
     assert_eq!(directory.lookups(), 2);
 }
 
-#[tokio::test(start_paused = true)]
+/// Real time while the relay talks to the pod over loopback: a paused clock jumps ahead whenever
+/// the runtime is idle, also while I/O is in flight, and fires the backlog wait and the test's
+/// timeouts early. Paused only while nothing but the grace period runs.
+#[tokio::test]
 async fn the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_next_viewer() {
     let a = Pod::start().await;
     a.record("old", 1);
@@ -468,6 +471,8 @@ async fn the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_ne
 
     let mut first = relay.subscribe();
     assert_eq!(next_host(&mut first).await, "old");
+    while !next_event(&mut first).await.backlog_end {}
+    tokio::time::pause();
     drop(first);
 
     tokio::time::sleep(SESSION_GRACE / 2).await;
@@ -484,6 +489,8 @@ async fn the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_ne
     tokio::time::sleep(SESSION_GRACE / 2 + Duration::from_secs(1)).await;
     assert_eq!(a.streams(), 1);
     tokio::time::sleep(SESSION_GRACE).await;
+    // The pod sees the closed stream over loopback.
+    tokio::time::resume();
     a.wait_for_streams(0).await;
 }
 

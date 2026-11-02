@@ -113,7 +113,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
 | TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
-| TD-83 | low   | `df-gateway`, `df-web` tests | Timing-sensitive unit tests fail intermittently |
+| TD-83 | low   | `df-web` tests | SSE refresh test depends on the wall clock |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
@@ -785,15 +785,17 @@ The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of 
 
 **Fix:** state the ceiling in the code comment and set `idle_in_transaction_session_timeout` on this transaction (`statement_timeout` does not cover the idle wait for the forge); if the pool does run dry, serialize per task in-process before taking the DB lock.
 
-### TD-83 (flaky). Timing-sensitive unit tests fail intermittently
+### TD-83 (flaky). SSE refresh test depends on the wall clock
 
-`crates/df-gateway/src/control/relay/tests.rs` (`the_streams_to_the_pods_stay_open_for_the_grace_period_and_serve_the_next_viewer`), `crates/df-gateway/src/proxy/tests.rs` (`an_upstream_that_never_answers_ends_with_502_and_upstream_timeout`), `crates/df-gateway/src/git/records/tests.rs` (`shutdown_stores_queued_records_when_the_control_plane_comes_back_in_time`), `crates/df-web/src/sse/tests.rs` (`streams_end_when_the_session_token_is_due_for_refresh`)
+`crates/df-web/src/sse/tests.rs` (`streams_end_when_the_session_token_is_due_for_refresh`)
 
-The tests depend on real timing and sometimes fail on `main` too (at fd5cf70 the relay test failed 1 of 4 isolated runs; `cargo test -p df-gateway --lib` failed 3 of 4 runs). The records and SSE tests failed once in CI of PR #84 and passed on the re-run. The records test likely stores a record twice when an answer takes longer than the 200 ms attempt timeout (left: 2, right: 1).
+The test seeds a session token that is due for refresh one second later (`expires_at` in whole seconds, `REFRESH_SKEW` 30 s, checked against `now_unix()`). If seeding and the request take longer than that second, the auth middleware refreshes the token at the request and the stream stays open. It failed once in CI of PR #84 and passed on the re-run. A paused tokio clock does not help: the check reads the system clock.
 
-**Matters when:** CI or the pre-push run fails because of them and red builds get ignored.
+The gateway tests listed here before (proxy upstream timeout, relay grace period, records shutdown) are fixed: real time while loopback I/O is in flight, a paused clock only for the waits, and an idempotent fake control plane.
 
-**Fix:** paused time (`tokio::time::pause()`) or waiting on the condition instead of on real time; first a test run that fails reliably with the current timing.
+**Matters when:** CI or the pre-push run fails because of it and red builds get ignored.
+
+**Fix:** an injectable clock for the session check, or a larger margin than one second.
 
 ### TD-84 (S4). `request_approval` copies the raise logic of `ask_question`
 
