@@ -120,17 +120,16 @@ Comparable to Hubble: ephemeral, live, filterable — built for spotting missing
 - **Later:** a CLI (`dark-factory egress tail`).
 - **Blind spot:** connection attempts that bypass the proxy (tools ignoring proxy settings, wrong ports) are dropped by the network policy and never reach the gateway, so they don't appear in this log. In Cilium mode, Hubble shows them.
 
-## 9. Inference endpoint (planned for iteration 3, `iter3-inference-gateway`)
+## 9. Inference endpoint (planned for iteration 3, `iter3-inference-gateway`, ADR-0050)
 
-- An HTTP endpoint in the gateway for model traffic of every harness. Provider kinds:
-  - `anthropic`: Messages API pass-through, credential is a subscription token (`claude setup-token`) or an API key. Claude Code reaches it through `ANTHROPIC_BASE_URL`.
-  - `openai-compatible`: base URL, API key and extra headers (e.g. a session ID header). Used by `df-native` in full-harness mode and by any ACP harness that accepts a base URL.
-  - Further per-provider differences go into adapters (F5), later possibly WASI plugins. Candidate for the provider layer: [octolib](https://github.com/muvon/octolib) (rejected for full-harness mode in ADR-0045 because it covers only the provider layer, which is all the gateway needs). To check: whether it can handle auth, extra headers and usage extraction for streamed responses without re-encoding pass-through requests, plus dependency weight and `cargo deny`.
-- Providers are configured at instance level (kind, upstream URL, credential reference, allowed models) and referenced by personas. The harness gets the gateway as its base URL and a placeholder credential; no provider credential enters the sandbox (ADR-0010).
-- The sandbox is identified by pod IP, exactly as for the egress proxy; the run's provider route and allowed models come with the `PolicyWatch` snapshot.
-- The gateway swaps the placeholder for the provider credential, streams responses straight back to the sandbox, measures usage per request and reports it to the control plane (transcript `USAGE_SOURCE_GATEWAY`, ADR-0021). Token streams never pass through the control plane.
-- The provider hosts (e.g. `api.anthropic.com`) leave the harness's default allowlist, so the egress proxy no longer carries model traffic.
-- Later: token or cost budgets enforced per request, the factory minion in the control plane as a further client of the same provider configuration.
+- An HTTPS endpoint `/inference` on the Git proxy's TLS listener, for the model traffic of every harness. The harness trusts the instance CA through its runtime's CA variables (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`), set on the harness process only.
+- Pass-through of three wire APIs, nothing else: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`), OpenAI Chat Completions (`/v1/chat/completions`, `/v1/models`) and OpenAI Responses (`/v1/responses`, `/v1/models`). Other paths and APIs the provider does not offer answer `404`. No protocol translation, no fallback routing, no body rewriting; routing features belong in an LLM router (e.g. agentgateway) configured as upstream of a model provider.
+- A **model provider** is instance-wide: an upstream base URL per offered wire API, a credential reference (ADR-0020), a credential scheme (`x-api-key`, `bearer`, custom header with prefix, `claude-subscription`) and optional extra headers. Built-in presets only prefill the form. Each persona references exactly one model provider; `claude-subscription` providers only with the `claude-code` harness.
+- Extra headers are minijinja templates over run values (`task_id`, `task_key`, `run_id`, `project_key`, `persona_id`) with a `sha256` filter, rendered by the control plane when it builds the snapshot. They replace client headers of the same name; other client headers pass through; client credential headers are stripped; the credential is injected last.
+- The sandbox is identified by pod IP, exactly as for the Git proxy; the run's route (upstream URL, wire API, rendered headers, credential reference) and the provider credentials come with the `PolicyWatch` snapshot. The harness gets the gateway as base URL and a placeholder credential; no provider credential enters the sandbox (ADR-0010).
+- Responses stream straight back. The gateway reads usage from a copy of the response (final SSE events or the JSON body) and reports one record per request to the control plane; a response without usage is recorded as unknown. This is the only usage source (ADR-0050). Token streams never pass through the control plane.
+- Provider hosts (e.g. `api.anthropic.com`) are no longer needed in the egress allowlist.
+- Later: provider adapters as WASI plugins (F5) if a provider needs more than header templates, token or cost budgets per request, the factory minion as a further client.
 
 ## 10. MCP endpoint (later)
 

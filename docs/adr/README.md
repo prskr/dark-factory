@@ -13,7 +13,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0007](0007-custom-protobuf-agent-protocol.md) | Custom protobuf protocol between runtime and control plane | Accepted (amended by ADR-0027 and ADR-0029) |
 | [ADR-0008](0008-configuration-split-provisioning-protocol.md) | Configuration split between provisioning and protocol | Accepted |
 | [ADR-0009](0009-agent-managed-workspaces-git-durable.md) | Agent-managed workspaces with Git as the only durable state | Accepted |
-| [ADR-0010](0010-credentials-in-the-sandbox.md) | Credentials in the sandbox | Accepted |
+| [ADR-0010](0010-credentials-in-the-sandbox.md) | Credentials in the sandbox | Accepted (amended by ADR-0050) |
 | [ADR-0011](0011-authentication-authorization-personas.md) | Authentication, authorization and agent personas | Accepted |
 | [ADR-0012](0012-postgresql-and-blob-store.md) | PostgreSQL plus a blob store abstraction | Accepted |
 | [ADR-0013](0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
@@ -24,7 +24,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0018](0018-plugin-packaging-versioning-config.md) | Plugin packaging, versioning and configuration | Accepted (amended by ADR-0028) |
 | [ADR-0019](0019-identifiers.md) | Identifiers | Accepted |
 | [ADR-0020](0020-configuration-in-database.md) | Configuration lives in the database | Accepted (amended by ADR-0039) |
-| [ADR-0021](0021-usage-and-cost-data.md) | Usage and cost data | Accepted |
+| [ADR-0021](0021-usage-and-cost-data.md) | Usage and cost data | Accepted (amended by ADR-0050) |
 | [ADR-0022](0022-project-images-runtime-volume-no-warm-pools.md) | Per-project sandbox images, runtime via image volume, no warm pools | Accepted |
 | [ADR-0023](0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
@@ -53,3 +53,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md) | Markdown rendering with class-based syntect themes and sandboxed Mermaid | Accepted (planned for iteration 3) |
 | [ADR-0048](0048-image-artifacts.md) | Image artifacts | Accepted (planned for iteration 3) |
 | [ADR-0049](0049-lifecycle-events-outbox-and-ed25519-signatures.md) | Lifecycle events via a PostgreSQL outbox, signed with Ed25519 | Accepted |
+| [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md) | Model traffic and usage only through the gateway | Accepted (planned for iteration 3) |

@@ -79,3 +79,9 @@ _Avoid_: Allowlist entry, grant, whitelist
 **Deny rule**:
 An instance-wide egress rule naming a host that will never be allowed, so no network access request is raised for it. An allow rule still lets a connection through.
 _Avoid_: Silencer, blocklist, blacklist, mute
+
+### Models
+
+**Model provider**:
+An upstream model service together with the one credential Dark Factory uses for it. Two accounts at the same service are two model providers. A persona uses exactly one.
+_Avoid_: Connection, provider account, LLM backend

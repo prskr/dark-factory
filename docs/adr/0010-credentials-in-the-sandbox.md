@@ -1,6 +1,6 @@
 # ADR-0010: Credentials in the sandbox
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md))
 - **Date:** 2026-10-16
 - **Related:** [ADR-0006](0006-agent-dial-back-grpc-mtls.md), [ADR-0009](0009-agent-managed-workspaces-git-durable.md)
 
