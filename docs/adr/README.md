@@ -29,7 +29,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0023](0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
 | [ADR-0025](0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033) |
-| [ADR-0026](0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043 and ADR-0052) |
+| [ADR-0026](0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043, ADR-0052 and ADR-0053) |
 | [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
 | [ADR-0029](0029-egress-gateway-and-generated-network-policies.md) | Egress gateway and generated network policies | Accepted |
@@ -46,7 +46,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 6) |
 | [ADR-0041](0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3, amended by ADR-0052) |
 | [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
-| [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3, amended by ADR-0052) |
+| [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3, amended by ADR-0052 and ADR-0053) |
 | [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3; amended by ADR-0048) |
 | [ADR-0045](0045-full-harness-mode-as-separate-acp-binary.md) | Full-harness mode as a separate ACP binary | Proposed (spike `native-harness-spike`) |
 | [ADR-0046](0046-forge-activity-in-the-transcript.md) | Forge activity in the transcript | Accepted |
@@ -56,3 +56,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md) | Model traffic and usage only through the gateway | Accepted (planned for iteration 3) |
 | [ADR-0051](0051-webhook-wake-rules.md) | Webhook wake rules | Accepted (planned for iteration 3) |
 | [ADR-0052](0052-dependencies-gate-the-first-start.md) | Dependencies gate the first start, later rounds go through the parent | Accepted (planned for iteration 3) |
+| [ADR-0053](0053-parallel-chats-topics-and-archiving.md) | Parallel chats, topics and archiving | Accepted (planned for iteration 3) |

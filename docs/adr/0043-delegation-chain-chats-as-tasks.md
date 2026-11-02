@@ -1,8 +1,8 @@
 # ADR-0043: Delegation chain, chats as tasks and waiting on subtasks
 
-- **Status:** Accepted (planned for iteration 3, amended by ADR-0052)
+- **Status:** Accepted (planned for iteration 3, amended by ADR-0052 and ADR-0053)
 - **Date:** 2026-10-27
-- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0036](0036-code-review-stays-in-the-forge.md), [ADR-0038](0038-agent-questions-and-approval-requests.md), [ADR-0052](0052-dependencies-gate-the-first-start.md)
+- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0036](0036-code-review-stays-in-the-forge.md), [ADR-0038](0038-agent-questions-and-approval-requests.md), [ADR-0052](0052-dependencies-gate-the-first-start.md), [ADR-0053](0053-parallel-chats-topics-and-archiving.md)
 
 ## Context
 
@@ -16,7 +16,7 @@ The existing ADRs cover the parts but not the whole: ADR-0034 defines the task t
 ## Decision
 
 - **One pointer:** a task's `parent_id` is its decomposition parent, the task it reports to, and the target of its escalations. A human creating a task from the UI sets no parent or picks one; an agent creating a task (`task:create`) becomes its parent. `created_by` becomes a principal (human user or task).
-- **Chats are tasks:** a chat (ADR-0026) is a task of kind `chat`, one per (persona, project), long-lived. Messages, runs, wake-ups and the transcript use the normal task machinery. A chat task has no task branch and no PR, but a read-only checkout of the project's default branch so the persona can read the code; the Git proxy accepts no push from it (it owns no task branch). Its key is the next project number plus a suffix (`DF-12-CHAT`), and it has its own chat UI instead of appearing in the task list: a chat can write artifacts (ADR-0044), anything that needs a branch, a PR or other task features belongs in a regular task. Tasks created in a chat have the chat as parent. A chat never completes, doesn't block on open subtasks, and cancelling it doesn't cancel the tasks it created.
+- **Chats are tasks:** a chat (ADR-0026) is a task of kind `chat`, one per (persona, project), long-lived (amended by ADR-0053: several per (persona, project), archived instead of completed). Messages, runs, wake-ups and the transcript use the normal task machinery. A chat task has no task branch and no PR, but a read-only checkout of the project's default branch so the persona can read the code; the Git proxy accepts no push from it (it owns no task branch). Its key is the next project number plus a suffix (`DF-12-CHAT`), and it has its own chat UI instead of appearing in the task list: a chat can write artifacts (ADR-0044), anything that needs a branch, a PR or other task features belongs in a regular task. Tasks created in a chat have the chat as parent. A chat never completes, doesn't block on open subtasks, and cancelling it doesn't cancel the tasks it created.
 - **No group tasks:** every task has a persona (ADR-0034 amended). Grouping work for a feature means a task with a coordinating agent.
 - **Delegation:** the agent creates a task for another persona and ends its turn. The parent is not blocked: it wakes on **any** child ending (Completion, Done, failed, cancelled) through a queued message carrying the child's summary (ADR-0016); a parent that is already final isn't woken. The parent messages its own children with the same rules as a board member's message (ADR-0052). It decides whether anything is left to do; a wake-up with nothing to do costs a few tokens. The `depends_on` relation stays the only way to hold a task back before its first start (ADR-0026, ADR-0052).
 - **Escalation is a question to the parent:** `ask_question` can be addressed to the parent task's agent or to a human (ADR-0038 amended). The parent answers with `answer_question`. If it can't decide, it asks its own parent or a human and relays the answer. There is no forward primitive. If the parent is completed or cancelled, the question goes to a human.
@@ -25,7 +25,7 @@ The existing ADRs cover the parts but not the whole: ADR-0034 defines the task t
 - **Between siblings:** implementer and reviewer talk through the forge (ADR-0036); there is no direct task-to-task messaging beyond parent and child.
 - **No org tree:** no `reports_to` between personas. The parent chain exists per task at run time. A static org chart (default escalation, delegation allowlists, who may hire whom) can be added later with the full permission model (ADR-0011); it needs only additive columns.
 - **Naming:** "escalation" in this context means passing a question up. ADR-0011's "no privilege escalation" keeps its meaning (an agent can't grant itself more permissions).
-- **Limits:** depth and children per task (ADR-0034) bound delegation loops; the instance concurrency limit (iteration 2) bounds parallel runs.
+- **Limits:** depth and children per task (ADR-0034) bound delegation loops; the instance concurrency limit (iteration 2) bounds parallel runs; chats have their own limit (ADR-0053).
 
 ## Consequences
 
