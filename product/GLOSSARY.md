@@ -34,6 +34,20 @@ _Avoid_: Blocker, blocked by, prerequisite
 An agent handing part of its work to another persona by creating a task whose parent task is its own.
 _Avoid_: Sub-agent, hand-off
 
+### Chats
+
+**Chat**:
+A conversation of a human with one persona in one project. Its agent can create tasks and is then their parent task. A persona can have several chats in a project.
+_Avoid_: Conversation, session, thread
+
+**Topic**:
+The title of a chat, set by its agent in the first run and renamable by a human.
+_Avoid_: Chat title, subject
+
+**Archived chat**:
+A chat a human set aside: read-only and without runs until a human unarchives it. Its subtasks go on.
+_Avoid_: Closed chat, completed chat, deleted chat
+
 ### Transcript
 
 **Transcript**:
