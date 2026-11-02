@@ -25,7 +25,8 @@ pub const NETWORK_ACCESS: &str = "network-access";
 pub struct NetworkAccess;
 
 /// The normalized `(host, port)` of a `network-access` payload `{host, port}`; the port defaults
-/// to 443.
+/// to 443 when missing or null. Returns [`RequestError::Invalid`] if the host is missing or
+/// invalid, or the port is not an integer in `1..=65535`. The host may be a wildcard pattern.
 pub fn requested_target(payload: &Value) -> Result<(String, u16), RequestError> {
     let invalid = |what: &str| RequestError::Invalid(what.to_string());
     let host = payload
@@ -129,6 +130,10 @@ pub enum DenialOutcome {
 /// `not-allowlisted` denial of `run_id` reported by the gateway (design D2). Takes the allowlist
 /// lock and then the task row lock, like entry creation and marking the task done, so the request
 /// is either settled or closed by them or not raised at all.
+///
+/// Returns [`RequestError::Invalid`] for an invalid or wildcard host or a port outside
+/// `1..=65535`, and [`RequestError::TooManyPending`] if a new request would exceed the task's
+/// pending limit. Database errors are propagated.
 pub async fn raise_from_denial(
     pool: &PgPool,
     run_id: RunId,

@@ -37,7 +37,8 @@ pub fn is_dns_label(label: &str) -> bool {
 }
 
 /// The host of an allowlist entry as stored: a hostname or `*.suffix`, lower case, without a
-/// trailing dot. IP literals, a bare `*` and wildcards anywhere but at the start are rejected.
+/// trailing dot. Surrounding whitespace is trimmed. IP literals, a bare `*`, wildcards anywhere
+/// but at the start, and names over 253 bytes or with invalid DNS labels are rejected.
 pub fn validate_allowlist_host(raw: &str) -> Result<String, &'static str> {
     let host = normalize_host(raw.trim());
     if host.is_empty() {

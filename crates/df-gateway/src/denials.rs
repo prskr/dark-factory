@@ -50,7 +50,8 @@ impl DenialReports {
 
     /// Queues a report of a `not-allowlisted` denial of `run_id` unless one was queued for the
     /// same host and port within [`REPORT_INTERVAL`]. A host no allowlist entry can name exactly
-    /// (a wildcard, an invalid name) is not reported.
+    /// (a wildcard, an invalid name) is not reported. If the queue is full or closed, the report
+    /// is dropped and does not count toward the interval.
     pub fn denied(&self, run_id: &str, host: &str, port: u16) {
         let host = df_core::host::normalize_host(host);
         if df_core::host::validate_exact_host(&host).as_ref() != Ok(&host) {
