@@ -62,6 +62,8 @@ Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `h
 
 `forge_credentials` holds each referenced credential once: user name `agent.gitUsername`, password read through the secret store on every rebuild. A credential that cannot be read is left out with a warning (never the value); its routes stay, so the Git proxy answers their requests with its own error.
 
+`push_policies` holds one push policy per project of a run in the snapshot, keyed by project key: the project's `project_push_policies` row, or without one the defaults (protected globs `.forgejo/workflows/**`, `.github/workflows/**`, `.gitea/workflows/**`, `CODEOWNERS`; protected paths, secret scan and size limit in mode `APPROVAL`; 5 MiB; linear history off). Each sandbox entry carries the exception fingerprints of its task (`push_check_exceptions`). Adding exceptions and changing a push policy ([Push policy](#push-policy-per-project)) publish `egress_policy`.
+
 ## Live log
 
 Every gateway pod keeps the last `gateway.bufferSize` flow events in memory, none older than `gateway.bufferMaxAgeSeconds` (the control plane's merged buffer applies the same age). The `opened` event of a connection that has not closed yet is kept regardless of age. Expired events are never part of a backlog and are removed from the buffer at most once a minute. An open page keeps the rows it has until it receives a new backlog (Resume, reload, or the reconnect after a token refresh). Nothing is persisted. `GatewayLog.Tail` streams the buffered events matching a filter (verdict, project, task, persona, host substring), a `backlog_end` marker, then live events; a subscriber that falls behind receives a `gap` marker.
@@ -152,7 +154,7 @@ Smart-HTTP endpoint for the task repository (`openspec/changes/archive/2026-11-0
 | Spooling, quarantine or ancestry lookup fails | `500` |
 | Ref neither the task branch nor the WIP branch, or a deletion of the task branch | `200` with `report-status`: `ng <ref> df:ref-not-allowed` |
 | Task branch update that is not a fast-forward (WIP branch: any update allowed) | `ng <ref> df:non-fast-forward` |
-| A push check rejects a ref | `ng <ref> <reason of the check>` (`df:check-failed` if the checks return a wrong count) |
+| A push check rejects a ref | `ng <ref> <reason>`, see [Push checks](#push-checks) (`df:check-failed` if the checks return a wrong count) |
 | Another ref of the same push is rejected | `ng <ref> df:other-ref-rejected`; a push is accepted or rejected as a whole |
 | `FORWARDING` record cannot be stored | `ng <ref> df:audit-unavailable` for every ref; nothing reaches the forge |
 | All refs accepted | forwarded; the forge's answer (incl. its `report-status`) is relayed |
@@ -203,6 +205,46 @@ The chart mounts an `emptyDir` there, so mirrors are rebuilt after a pod restart
 | Deadline for the mirror fetch, waiting, quarantining and checking one push | 10 min | `500`, `df:check-failed`; the indexing is interrupted |
 | Client disconnects during the checks | — | the indexing is interrupted and the quarantine removed |
 
+### Push checks
+
+`git::policy_checks::PolicyChecks` runs after the ref rules on every pushed ref that is not a deletion, over the commits the ref adds. A commit counts as already on the forge if a mirror ref reaches it, except the WIP branches (any task) and the task branches of other tasks: their commits passed fewer checks or another task's exceptions, so they are checked again. A merge commit only changes the paths whose entry differs from the entry in every parent (combined diff), so merging the base branch brings in none of its changes. Policy and exceptions come from the snapshot the request was identified with: `Snapshot.push_policies[<project key>]` and `SandboxEntry.exceptions`; the commit identity is `GitRoute.commit_email`.
+
+#### Push policy (per project)
+
+Board members set the policy in the web UI: **Projects → Edit (pencil) → Push checks**. "Save project" stores it together with the general fields in one transaction (table `project_push_policies`); a project without a row uses the defaults below.
+
+| Setting | Default | Effect |
+|---|---|---|
+| Protected paths | `.forgejo/workflows/**`, `.github/workflows/**`, `.gitea/workflows/**`, `CODEOWNERS` | One `globset` glob per line, `*` does not match `/`; blank lines are dropped. A commit that adds, changes, deletes or renames a matching path is a `df:protected-path` finding. |
+| Protected paths: mode | Ask for approval | `Ask for approval` (`approval`): the push is rejected and a `push-check-exception` request raised; `Reject`: rejected, no request. |
+| Secret scan: mode | Ask for approval | As above, for `df:secret-scan` findings. |
+| Blob size limit | 5 MiB | Whole MiB from 1 to 1024. A larger added blob is a `df:blob-too-large` finding. |
+| Blob size limit: mode | Ask for approval | As above, for `df:blob-too-large` findings. |
+| Linear history | off | On: merge commits are `df:merge-commit` findings (always `Reject`). |
+
+Always on, whatever the policy: the commit identity (`df:identity`) and changes to `.dark-factory/**` (`df:protected-path`, `Reject`).
+
+- Saving validates every glob; an invalid one keeps the form open with the error on the field, for example `Line 5: "deploy/[" is not a valid glob (unclosed character class).`
+- A changed policy is written to the audit log (`push_policy.create` or `push_policy.update`, label = project key, `before` and `after`) and publishes `egress_policy`, so gateways get it with the next snapshot (within a second) and the next push of the project's tasks is checked against it. Saving an unchanged policy writes nothing; saving the defaults for a project without a row stores none.
+- A form post without the push check fields (no modes) leaves the stored policy as it is.
+
+| Situation | `ng` reason |
+|---|---|
+| Findings left after the exceptions | every finding as `df:<check> <path>[:<line>] (<detail>)`, joined with `; `, control characters as spaces, cut at 1 KiB; e.g. `df:secret-scan config.py:3 (betterleaks.github-pat ghp_********)` |
+| The ref adds more than 10,000 commits | `df:push-too-large` |
+| No push policy for the project, a glob that does not compile, the commits or a blob cannot be read | `df:check-failed` (logged as an error or warning) |
+
+The WIP branch gets only the secret scan and the size limit, both `REJECT`, and exceptions never apply to it. A secret preview keeps the first 4 characters of the match and masks the rest, at most 12 characters, with bytes that are not UTF-8 and control characters as `\xNN`; neither the reason, the record nor the logs contain the match. The `REJECTED` record carries the findings (with `ref`, check, mode, fingerprint, path, line and detail) and `approval_requested`, which is set when every rejected ref was rejected only by `APPROVAL` findings.
+
+The control plane reacts to a stored final verdict, once per push, for the task branch only:
+
+| Verdict | Reaction |
+|---|---|
+| `REJECTED` with findings on the task branch | `approval_requested`: one `push-check-exception` request (scope task) listing the `APPROVAL` findings; an identical pending request (same set of fingerprints) is reused. Always: a `push.rejected` system message with the findings, unless one is still undelivered or 3 were queued since the last accepted push (`tasks.push_rejections_since_accept`). Nothing for a completed task. |
+| `ACCEPTED` on the task branch | The counter is reset; pending `push-check-exception` requests are closed with reason `push-accepted`. |
+
+Approving the request adds one `push_check_exceptions` row per fingerprint and publishes `egress_policy`. Agents cannot raise this type themselves.
+
 ### Push records
 
 Every push is stored with the control plane through `GatewayGit.RecordPush` on its internal port (same mTLS connector as `PolicyWatch`), keyed by a gateway-chosen `UUIDv7` `push_id`; `gateway_pod` is `HOSTNAME`.
@@ -247,6 +289,26 @@ Checked through a minimal pass-through that forwards only the D3 headers and inj
 - A push larger than `http.postBuffer` (1 MiB) sends two POSTs: a probe whose body is only `0000` (`Content-Length: 4`), then the push with `Transfer-Encoding: chunked`. The proxy forwards the probe without a push record, and neither the spool nor the size limit relies on `Content-Length`.
 - Forgejo answers pushes with side-band `report-status` (v1) and band-2 messages; the relayed answer prints normally.
 - A plain-text body of a 403 or 503 is shown by git as a `remote:` line, followed by `fatal: unable to access …: The requested URL returned error: 503` and exit code 128. git does not retry a 503 by itself (not even with `http.maxRetries`), so the runtime retries it.
+
+### Secret scanning
+
+The push checks scan added blobs with the rules in [`rules/secrets.yml`](rules/secrets.yml) (`git::secret_rules`): 56 rules for cloud keys, private keys and tokens of GitHub, GitLab, Slack, Stripe and similar services, taken from Kingfisher's catalog (crate `kingfisher-rules` 3.0.1, which Kingfisher converted from Betterleaks). License and attribution: [`rules/NOTICE`](rules/NOTICE). Nothing contacts a provider to validate a match.
+
+The rules are compiled once with `regex::bytes` and without Unicode, so `\w`, `\s` and `\b` are ASCII and a match may sit between bytes that are not UTF-8. A `RegexSet` (lazy DFA cache 8 MiB) selects the rules that match a blob; only the `Regex` of those rules locates the matches.
+
+Spike (2026-11-02, design D3), release build on an Apple M2 Pro, best of 3 runs over 50 MiB in 3185 blobs: 25 MiB of this repository's sources, 20 MiB of `.rlib` files in 1 MiB chunks, 5 MiB of random bytes, plus a planted GitHub token and a private key after NUL bytes.
+
+| Option | New crates in `Cargo.lock` | Native code | Compiling the rules | Scanning 50 MiB | Matches |
+|---|---|---|---|---|---|
+| (a) `kingfisher-scanner` 3.0.1 as a library (no default features), the 56 rules | 116, among them a second `gix` (0.87), `liquid`, `tera`, `tiktoken-rs`, `tokei` and the deprecated `serde_yaml` | Vectorscan (C++, `build.rs` downloads a prebuilt library or builds it with CMake) and `aws-lc-sys` (C, CMake) | 73 ms | 100 ms | 2 |
+| (a) the same with all ~500 built-in rules | same | same | 4.2 s | 195 ms | 33 |
+| (b) the vendored 56 rules with `regex` | 0 (`regex` and `serde-saphyr` are already in the workspace) | none | 6 ms | 110 ms | 2 |
+| (b) the same with the default 2 MiB DFA cache | 0 | none | 5 ms | 240 ms | 2 |
+| (b) all 470 Betterleaks rules in one `RegexSet` | 0 | none | 70 ms | 12 s | 46 |
+
+Decision: (b). It scans the subset as fast as Kingfisher, without 116 crates and two native builds that need network access or CMake in `build.rs` and a C++ runtime in the static musl image (the Git proxy spikes rejected `aws-lc-sys` for the same reason). A `RegexSet` does not scale to the whole catalog (its lazy DFA thrashes), and the full catalogs also match ordinary sources (for example `azure-client-id` on UUIDs). So the vendored rules stay a curated subset; after adding rules, measure the scan time again.
+
+Updating the rules: copy the entries from `generated/rules/betterleaks.yml` of a newer `kingfisher-rules` release with only the fields `name`, `id`, `pattern`, `keywords` and `confidence`, and update the versions in the header of `secrets.yml` and in `NOTICE`.
 
 ## Tests
 

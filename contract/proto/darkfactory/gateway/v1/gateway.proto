@@ -9,7 +9,8 @@
 //   * GatewayLog (served by each gateway pod): the control plane opens Tail to read the flow
 //     events of the egress proxy, buffered ones first, then live ones.
 //   * GatewayGit (served by the control plane): the Git proxy of a gateway pod records every
-//     push of a sandbox with RecordPush (iter2-git-proxy design D1).
+//     push of a sandbox with RecordPush (iter2-git-proxy design D1), including the findings of
+//     its push checks (iter2-push-checks design D2).
 //   * GatewayEvents (served by the control plane): the egress proxy reports `not-allowlisted`
 //     denials with ReportDenial (iter2-egress-approvals design D2).
 //
@@ -64,6 +65,10 @@ message Snapshot {
   repeated SandboxEntry sandboxes = 1;
   // Credentials of the forges the Git routes push to, keyed by `GitRoute.credential_ref`.
   map<string, ForgeCredential> forge_credentials = 2;
+  // Push checks of the projects in `sandboxes`, keyed by `SandboxEntry.project_key`. Every such
+  // project has an entry; the control plane fills in the defaults for a project without a stored
+  // policy.
+  map<string, PushPolicy> push_policies = 3;
 }
 
 // An active sandbox: where its traffic comes from and what it may reach.
@@ -78,6 +83,9 @@ message SandboxEntry {
   uint32 run_number = 7;
   // The repository the run may fetch from and push to through the Git proxy; unset if none.
   GitRoute git = 8;
+  // Fingerprints of the push check findings approved for the run's task
+  // (`PushFinding.fingerprint`); a push passes findings with a listed fingerprint.
+  repeated string exceptions = 9;
 }
 
 // A run's repository behind the Git proxy. Branches are full ref names (`refs/heads/main`).
@@ -101,6 +109,32 @@ message GitRoute {
 message ForgeCredential {
   string username = 1;
   string password = 2;
+}
+
+// A project's push checks (iter2-push-checks design D4). Always on and not listed here: the
+// commit identity and `.dark-factory/**` as a protected path, both with mode `REJECT`.
+message PushPolicy {
+  // Protected path globs (`globset` syntax; `*` does not match `/`), e.g. `.forgejo/workflows/**`.
+  repeated string protected_globs = 1;
+  CheckMode protected_mode = 2;
+  CheckMode secret_mode = 3;
+  CheckMode size_mode = 4;
+  // Largest blob a push may add, in bytes.
+  uint64 max_blob_bytes = 5;
+  // Merge commits are rejected (`df:merge-commit`, mode `REJECT`).
+  bool linear_history = 6;
+}
+
+// What a finding of a check does to a push on the task branch. Pushes to the WIP branch treat
+// every finding as `REJECT`.
+enum CheckMode {
+  // Treated as `REJECT`.
+  CHECK_MODE_UNSPECIFIED = 0;
+  // The push is rejected.
+  CHECK_MODE_REJECT = 1;
+  // The push is rejected unless the task has an exception for the finding; without one, a human
+  // can approve it (`push-check-exception` request).
+  CHECK_MODE_APPROVAL = 2;
 }
 
 message HostRule {
@@ -226,6 +260,58 @@ message PushRecord {
   uint64 bytes = 6;
   // From the start of the push to this verdict.
   google.protobuf.Duration duration = 7;
+  // Findings of the push checks without a matching exception, of every ref; empty unless
+  // `REJECTED` by a check.
+  repeated PushFinding findings = 8;
+  // `REJECTED` on the task branch only by `APPROVAL` findings; the control plane raises a
+  // `push-check-exception` request for them.
+  bool approval_requested = 9;
+}
+
+// One finding of a push check (iter2-push-checks design D2). Never contains a matched secret.
+message PushFinding {
+  // Full name of the ref whose added commits produced the finding.
+  string ref = 1;
+  PushCheck check = 2;
+  // The mode applied: always `REJECT` for the identity, `.dark-factory/**`, merge commits and the
+  // WIP branch.
+  CheckMode mode = 3;
+  // Key of an exception: `secret:<rule>:<blob>:<line>`, `path:<path>` or `size:<path>:<blob>`
+  // (`<blob>` is the hex object id); unset for identity and merge commit findings.
+  optional string fingerprint = 4;
+  // Path in the repository; empty for identity and merge commit findings.
+  string path = 5;
+  // 1-based line of a secret.
+  optional uint32 line = 6;
+  // Masked, human-readable detail, e.g. the rule and the masked match of a secret or the size of
+  // a blob.
+  string detail = 7;
+  // What a `SECRET_SCAN` finding matched; unset for the other checks.
+  MaskedSecret secret = 8;
+}
+
+// A secret a push check found, without the secret.
+message MaskedSecret {
+  // Id of the rule that matched, e.g. `betterleaks.github-pat`.
+  string rule = 1;
+  // The match with all but its first characters masked.
+  string masked = 2;
+}
+
+// The checks of a push. `PushFinding.check` and the `df:` reason of a rejected ref name the same
+// check.
+enum PushCheck {
+  PUSH_CHECK_UNSPECIFIED = 0;
+  // `df:secret-scan`
+  PUSH_CHECK_SECRET_SCAN = 1;
+  // `df:identity`: author or committer email differs from `GitRoute.commit_email`.
+  PUSH_CHECK_IDENTITY = 2;
+  // `df:protected-path`
+  PUSH_CHECK_PROTECTED_PATH = 3;
+  // `df:blob-too-large`
+  PUSH_CHECK_BLOB_TOO_LARGE = 4;
+  // `df:merge-commit`
+  PUSH_CHECK_MERGE_COMMIT = 5;
 }
 
 message RefUpdate {
@@ -236,8 +322,9 @@ message RefUpdate {
   string new_sha = 3;
   PushVerdict verdict = 4;
   // Empty unless rejected or failed: a gateway rule (`df:ref-not-allowed`,
-  // `df:non-fast-forward`, `df:other-ref-rejected`, ...) for `REJECTED`, the upstream's `ng`
-  // reason or the failure for `UPSTREAM_FAILED`.
+  // `df:non-fast-forward`, `df:other-ref-rejected`, ...) or the push checks' reason
+  // (`df:secret-scan …`, `df:protected-path …`, ..., one finding after the other) for `REJECTED`,
+  // the upstream's `ng` reason or the failure for `UPSTREAM_FAILED`.
   string reason = 5;
 }
 

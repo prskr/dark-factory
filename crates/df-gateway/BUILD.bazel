@@ -16,6 +16,7 @@ rust_library(
     name = "df_gateway",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
+    compile_data = ["rules/secrets.yml"],
     crate_name = "df_gateway",
     edition = "2024",
     lint_config = ":lints",
@@ -35,11 +36,13 @@ alias(
 )
 
 # Rebuilt from source (instead of `crate = ":df_gateway"`) so that the tests can use the
-# `test-util` variant of `df-agent-channel` (test PKI) without the library linking it.
+# `test-util` variants of `df-agent-channel` (test PKI) and `df-telemetry` (log capture) without
+# the library linking them.
 rust_test(
     name = "df_gateway_test",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
+    compile_data = ["rules/secrets.yml"],
     crate_name = "df_gateway",
     crate_root = "src/lib.rs",
     edition = "2024",
@@ -56,7 +59,7 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
-        "//crates/df-telemetry:df_telemetry",
+        "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
     ],
 )
@@ -160,5 +163,28 @@ rust_test(
     ) + [
         ":df_gateway",
         "//crates/df-proto:df_proto",
+    ],
+)
+
+rust_test(
+    name = "push_checks_test",
+    srcs = [
+        "tests/common/mod.rs",
+        "tests/push_checks.rs",
+    ],
+    crate_root = "tests/push_checks.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        ":df_gateway",
+        "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_test_util",
     ],
 )

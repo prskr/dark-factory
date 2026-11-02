@@ -1,16 +1,20 @@
 //! Builds the policy snapshot from the database: active sandboxes, their effective
-//! `http-host` allowlists, their Git routes and the forge credentials of those routes.
+//! `http-host` allowlists, their Git routes, the forge credentials of those routes, the push
+//! policies of their projects and the push check exceptions of their tasks.
 
 use std::collections::{HashMap, HashSet};
 
 use df_core::SecretStore;
 use df_core::TaskKey;
 use df_core::config::{AgentConfig, ForgeConfig};
+use df_db::push_checks::{self, CheckMode, PushPolicy};
 use df_db::{ActiveRun, DbError, HostEntry, PgPool};
+use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::{
     ForgeCredential, GitRoute, HostRule, PolicyUpdate, SandboxEntry, Snapshot,
 };
 use secrecy::ExposeSecret;
+use uuid::Uuid;
 
 /// Instance settings of the Git routes: the same values the run's `Assign` carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +49,8 @@ pub async fn build(
     let version = df_db::next_policy_version(pool).await?;
     let runs = df_db::active_runs(pool).await?;
     let entries = df_db::http_host_entries(pool).await?;
-    let mut update = assemble(version, &runs, &entries, git);
+    let push = PushData::load(pool, &runs).await?;
+    let mut update = assemble(version, &runs, &entries, git, &push);
     if let Some(snapshot) = update.snapshot.as_mut() {
         snapshot.forge_credentials =
             forge_credentials(secrets, &runs, &snapshot.sandboxes, &git.username).await;
@@ -53,13 +58,33 @@ pub async fn build(
     Ok(update)
 }
 
+/// The stored push policies (by project id) and exceptions (by task id) of the active runs.
+#[derive(Debug, Default)]
+struct PushData {
+    policies: HashMap<Uuid, PushPolicy>,
+    exceptions: HashMap<Uuid, Vec<String>>,
+}
+
+impl PushData {
+    async fn load(pool: &PgPool, runs: &[ActiveRun]) -> Result<Self, DbError> {
+        let projects: Vec<Uuid> = runs.iter().map(|run| run.project_id).collect();
+        let tasks: Vec<Uuid> = runs.iter().map(|run| run.task_id).collect();
+        Ok(Self {
+            policies: push_checks::push_policies(pool, &projects).await?,
+            exceptions: push_checks::push_check_exceptions(pool, &tasks).await?,
+        })
+    }
+}
+
 /// A run's effective allowlist is the union of the instance entries, the entries of its project
-/// and the entries of its task. The forge credentials are left empty.
+/// and the entries of its task. Every project of a run gets a push policy, the defaults without a
+/// stored one. The forge credentials are left empty.
 fn assemble(
     version: u64,
     runs: &[ActiveRun],
     entries: &[HostEntry],
     git: &GitSettings,
+    push: &PushData,
 ) -> PolicyUpdate {
     let sandboxes = runs
         .iter()
@@ -82,6 +107,21 @@ fn assemble(
                 })
                 .collect(),
             git: git_route(run, git),
+            exceptions: push
+                .exceptions
+                .get(&run.task_id)
+                .cloned()
+                .unwrap_or_default(),
+        })
+        .collect();
+    let push_policies = runs
+        .iter()
+        .map(|run| {
+            let policy = push.policies.get(&run.project_id).cloned();
+            (
+                run.project_key.clone(),
+                push_policy(policy.unwrap_or_default()),
+            )
         })
         .collect();
     PolicyUpdate {
@@ -89,7 +129,26 @@ fn assemble(
         snapshot: Some(Snapshot {
             sandboxes,
             forge_credentials: HashMap::new(),
+            push_policies,
         }),
+    }
+}
+
+fn push_policy(policy: PushPolicy) -> pb::PushPolicy {
+    let mode = |mode: CheckMode| -> i32 {
+        match mode {
+            CheckMode::Reject => pb::CheckMode::Reject,
+            CheckMode::Approval => pb::CheckMode::Approval,
+        }
+        .into()
+    };
+    pb::PushPolicy {
+        protected_globs: policy.protected_globs,
+        protected_mode: mode(policy.protected_mode),
+        secret_mode: mode(policy.secret_mode),
+        size_mode: mode(policy.size_mode),
+        max_blob_bytes: policy.max_blob_bytes,
+        linear_history: policy.linear_history,
     }
 }
 
@@ -203,7 +262,7 @@ mod tests {
     }
 
     fn assemble(version: u64, runs: &[ActiveRun], entries: &[HostEntry]) -> PolicyUpdate {
-        super::assemble(version, runs, entries, &settings())
+        super::assemble(version, runs, entries, &settings(), &PushData::default())
     }
 
     fn entry(scope: HostScope, host: &str) -> HostEntry {
@@ -300,12 +359,76 @@ mod tests {
             allow_plain_http: true,
             ..settings()
         };
-        let update = super::assemble(1, &runs, &[], &allowing);
+        let update = super::assemble(1, &runs, &[], &allowing, &PushData::default());
         let route = update.snapshot.unwrap().sandboxes[0].git.clone().unwrap();
         assert_eq!(
             route.upstream_url,
             "http://forgejo.forgejo.svc:3000/factory/demo"
         );
+    }
+
+    #[test]
+    fn every_project_of_a_run_gets_one_push_policy_with_the_defaults_unless_stored() {
+        let (df, web) = (Uuid::now_v7(), Uuid::now_v7());
+        let runs = [run(df, "DF"), run(df, "DF"), run(web, "WEB")];
+        let stored = PushPolicy {
+            protected_globs: vec!["deploy/**".into()],
+            protected_mode: CheckMode::Reject,
+            max_blob_bytes: 1024,
+            linear_history: true,
+            ..PushPolicy::default()
+        };
+        let push = PushData {
+            policies: HashMap::from([(web, stored)]),
+            ..PushData::default()
+        };
+
+        let update = super::assemble(1, &runs, &[], &settings(), &push);
+
+        let policies = update.snapshot.unwrap().push_policies;
+        assert_eq!(policies.len(), 2);
+        let defaults = &policies["DF"];
+        assert_eq!(
+            defaults.protected_globs,
+            push_checks::DEFAULT_PROTECTED_GLOBS
+        );
+        assert_eq!(
+            (
+                defaults.protected_mode(),
+                defaults.secret_mode(),
+                defaults.size_mode()
+            ),
+            (
+                pb::CheckMode::Approval,
+                pb::CheckMode::Approval,
+                pb::CheckMode::Approval
+            )
+        );
+        assert_eq!(defaults.max_blob_bytes, 5 * 1024 * 1024);
+        assert!(!defaults.linear_history);
+        let web = &policies["WEB"];
+        assert_eq!(web.protected_globs, ["deploy/**"]);
+        assert_eq!(
+            (web.protected_mode(), web.secret_mode()),
+            (pb::CheckMode::Reject, pb::CheckMode::Approval)
+        );
+        assert_eq!((web.max_blob_bytes, web.linear_history), (1024, true));
+    }
+
+    #[test]
+    fn a_sandbox_gets_the_exceptions_of_its_task_only() {
+        let project = Uuid::now_v7();
+        let (first, second) = (run(project, "DF"), run(project, "DF"));
+        let push = PushData {
+            exceptions: HashMap::from([(first.task_id, vec!["path:CODEOWNERS".to_string()])]),
+            ..PushData::default()
+        };
+
+        let update = super::assemble(1, &[first, second], &[], &settings(), &push);
+
+        let sandboxes = update.snapshot.unwrap().sandboxes;
+        assert_eq!(sandboxes[0].exceptions, ["path:CODEOWNERS"]);
+        assert!(sandboxes[1].exceptions.is_empty());
     }
 
     /// Counts lookups and answers every reference with its secret name.

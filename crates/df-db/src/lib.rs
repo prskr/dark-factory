@@ -12,6 +12,7 @@ pub mod network_access;
 pub mod notify;
 pub mod pool;
 pub mod projects;
+pub mod push_checks;
 pub mod requests;
 pub mod task_views;
 pub mod tasks;

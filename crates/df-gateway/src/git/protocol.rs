@@ -118,7 +118,7 @@ pub fn report_status(verdicts: &[RefVerdict], side_band: bool) -> Vec<u8> {
     let mut report = Vec::new();
     push_pkt_line(&mut report, b"unpack ok\n");
     for verdict in verdicts {
-        let line = match verdict.reason {
+        let line = match &verdict.reason {
             None => format!("ok {}\n", verdict.name),
             Some(reason) => format!("ng {} {reason}\n", verdict.name),
         };

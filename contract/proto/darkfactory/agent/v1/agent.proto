@@ -313,6 +313,7 @@ message PushReport {
   string sha = 3;
   PushStatus status = 4;
   uint32 commits_ahead_of_base = 5;
+  // For a push the Git proxy rejected: its `df:` reason text.
   string detail = 6;
 }
 
@@ -325,13 +326,19 @@ enum PushTarget {
 enum PushStatus {
   PUSH_STATUS_UNSPECIFIED = 0;
   PUSH_STATUS_OK = 1;
-  // The remote moved; the runtime never force-pushes the task branch.
+  // The remote moved (the forge, or the Git proxy's `df:non-fast-forward`); the runtime never
+  // force-pushes the task branch.
   PUSH_STATUS_REJECTED_NON_FAST_FORWARD = 2;
+  // Includes `df:audit-unavailable`, `df:ref-not-allowed` and unknown `df:` reasons of the Git
+  // proxy.
   PUSH_STATUS_FAILED = 3;
-  // The Git proxy's secret scan rejected the push (once the proxy exists).
+  // The Git proxy's secret scan rejected the push (`df:secret-scan`).
   PUSH_STATUS_REJECTED_SECRET_DETECTED = 4;
   // WIP branch removed because there was no uncommitted work.
   PUSH_STATUS_DELETED = 5;
+  // Another push check of the Git proxy rejected the push (`df:identity`, `df:protected-path`,
+  // `df:blob-too-large`, `df:merge-commit`, `df:push-too-large`).
+  PUSH_STATUS_REJECTED_BY_CHECK = 6;
 }
 
 // Last message of a run, sent after finalizing.

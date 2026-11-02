@@ -74,6 +74,12 @@ fn shipped_scripts_parse() {
     // The decision message is the next prompt of the same session, not a resumed one.
     assert_eq!(network.sessions.new.len(), 2);
     assert!(network.sessions.loaded.is_empty());
+    // The fix turn answers the `push.rejected` message in the same or in a resumed session.
+    let secret = Script::from_yaml_str(include_str!("../scripts/push-secret.yaml")).unwrap();
+    assert_eq!(secret.sessions.new.len(), 2);
+    assert_eq!(secret.sessions.loaded, secret.sessions.new[1..]);
+    let protected = Script::from_yaml_str(include_str!("../scripts/push-protected.yaml")).unwrap();
+    assert_eq!(protected.sessions.new.len(), 1);
 }
 
 #[tokio::test]

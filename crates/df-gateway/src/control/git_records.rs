@@ -1,9 +1,11 @@
-//! `GatewayGit`: the control plane side of push records (iter2-git-proxy design D6).
+//! `GatewayGit`: the control plane side of push records (iter2-git-proxy design D6), including
+//! the findings of the push checks (iter2-push-checks design D5).
 
 use std::time::Duration;
 
 use df_core::RunId;
 use df_db::git_pushes::{self, PushRecord, PushVerdict, RecordOutcome, RefUpdate};
+use df_db::push_checks::{CheckMode, MaskedSecret, PushCheck, PushFinding};
 use df_db::{DbError, PgPool};
 use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::gateway_git_server::GatewayGit;
@@ -102,6 +104,11 @@ fn parse(record: pb::PushRecord) -> Result<PushRecord, Status> {
         .transpose()
         .map_err(|error| Status::invalid_argument(format!("duration: {error}")))?
         .unwrap_or_default();
+    let findings = record
+        .findings
+        .into_iter()
+        .map(finding)
+        .collect::<Result<Vec<_>, Status>>()?;
     Ok(PushRecord {
         push_id,
         run_id,
@@ -110,6 +117,38 @@ fn parse(record: pb::PushRecord) -> Result<PushRecord, Status> {
         verdict,
         bytes: record.bytes,
         duration,
+        findings,
+        approval_requested: record.approval_requested,
+    })
+}
+
+fn finding(finding: pb::PushFinding) -> Result<PushFinding, Status> {
+    let check = match finding.check() {
+        pb::PushCheck::Unspecified => {
+            return Err(Status::invalid_argument("findings: check is unspecified"));
+        }
+        pb::PushCheck::SecretScan => PushCheck::SecretScan,
+        pb::PushCheck::Identity => PushCheck::Identity,
+        pb::PushCheck::ProtectedPath => PushCheck::ProtectedPath,
+        pb::PushCheck::BlobTooLarge => PushCheck::BlobTooLarge,
+        pb::PushCheck::MergeCommit => PushCheck::MergeCommit,
+    };
+    let mode = match finding.mode() {
+        pb::CheckMode::Approval => CheckMode::Approval,
+        pb::CheckMode::Reject | pb::CheckMode::Unspecified => CheckMode::Reject,
+    };
+    Ok(PushFinding {
+        ref_name: finding.r#ref,
+        check,
+        mode,
+        fingerprint: finding.fingerprint,
+        path: finding.path,
+        line: finding.line,
+        detail: finding.detail,
+        secret: finding.secret.map(|secret| MaskedSecret {
+            rule: secret.rule,
+            masked: secret.masked,
+        }),
     })
 }
 
@@ -142,6 +181,7 @@ mod tests {
             verdict: pb::PushVerdict::Accepted.into(),
             bytes: 7,
             duration: Some(crate::flow::duration_proto(Duration::from_secs(1))),
+            ..Default::default()
         }
     }
 
@@ -150,6 +190,46 @@ mod tests {
         let record = parse(valid()).unwrap();
         assert_eq!(record.verdict, PushVerdict::Accepted);
         assert_eq!(record.duration, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn findings_and_the_approval_flag_are_kept_with_an_unspecified_mode_as_reject() {
+        let mut message = valid();
+        message.verdict = pb::PushVerdict::Rejected.into();
+        message.approval_requested = true;
+        message.findings = vec![pb::PushFinding {
+            r#ref: "refs/heads/factory/task/DF-1".into(),
+            check: pb::PushCheck::SecretScan.into(),
+            mode: pb::CheckMode::Unspecified.into(),
+            fingerprint: Some("secret:r:ab:3".into()),
+            path: "config.py".into(),
+            line: Some(3),
+            detail: "r ghp_****".into(),
+            secret: Some(pb::MaskedSecret {
+                rule: "r".into(),
+                masked: "ghp_****".into(),
+            }),
+        }];
+
+        let record = parse(message).unwrap();
+
+        assert!(record.approval_requested);
+        assert_eq!(
+            record.findings,
+            [PushFinding {
+                ref_name: "refs/heads/factory/task/DF-1".into(),
+                check: PushCheck::SecretScan,
+                mode: CheckMode::Reject,
+                fingerprint: Some("secret:r:ab:3".into()),
+                path: "config.py".into(),
+                line: Some(3),
+                detail: "r ghp_****".into(),
+                secret: Some(MaskedSecret {
+                    rule: "r".into(),
+                    masked: "ghp_****".into(),
+                }),
+            }]
+        );
     }
 
     #[test]
@@ -164,11 +244,12 @@ mod tests {
 
     #[test]
     fn invalid_records_are_invalid_arguments() {
-        let cases: [fn(&mut pb::PushRecord); 4] = [
+        let cases: [fn(&mut pb::PushRecord); 5] = [
             |r| r.push_id = "nope".into(),
             |r| r.run_id = String::new(),
             |r| r.verdict = pb::PushVerdict::Unspecified.into(),
             |r| r.refs.clear(),
+            |r| r.findings.push(pb::PushFinding::default()),
         ];
         for change in cases {
             let mut record = valid();

@@ -32,6 +32,16 @@ impl FormErrors {
             Err(self)
         }
     }
+
+    /// Adds the errors of `other`.
+    pub fn extend(&mut self, other: Self) {
+        self.0.extend(other.0);
+    }
+
+    /// The fields with an error.
+    pub fn fields(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(|(field, _)| *field)
+    }
 }
 
 /// Classes of text inputs, selects and textareas; 16 px text so phones do not zoom on focus.

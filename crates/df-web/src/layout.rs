@@ -7,7 +7,7 @@ use crate::components::{CreateAction, bottom_bar, floating_create, rail};
 
 /// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
 /// Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 2] = ["egress-log.js", "workspace.js"];
+pub(crate) const COMPONENT_SCRIPTS: [&str; 3] = ["egress-log.js", "tabs.js", "workspace.js"];
 
 /// The navigation entry a page belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

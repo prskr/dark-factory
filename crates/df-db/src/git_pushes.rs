@@ -7,17 +7,19 @@
 //!
 //! One audit entry `git.push` is written per final verdict reported by the gateway (`accepted`,
 //! `rejected`, `upstream-failed`), in the transaction that stores it. `forwarding` and `unknown`
-//! only live in `git_pushes`.
+//! only live in `git_pushes`. A stored final verdict also changes the task as the push checks
+//! require (iter2-push-checks design D5, [`crate::push_checks`]).
 
 use std::time::Duration;
 
-use df_core::{PersonaId, Principal, RunId, TaskId};
+use df_core::{PersonaId, Principal, RunId, TaskId, TaskKey};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::pool::DbError;
+use crate::push_checks::{PushFinding, PushingTask, react_to_push};
 
 /// Verdict of a push as stored in `git_pushes.verdict`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +95,10 @@ pub struct PushRecord {
     pub verdict: PushVerdict,
     pub bytes: u64,
     pub duration: Duration,
+    /// Findings of the push checks without a matching exception; empty unless rejected by a check.
+    pub findings: Vec<PushFinding>,
+    /// Rejected on the task branch only by findings in mode `approval`.
+    pub approval_requested: bool,
 }
 
 /// What [`record_push`] did.
@@ -117,7 +123,7 @@ struct PushAuditDetails<'a> {
 /// Stores or advances a push record, and writes its audit entry, in one transaction.
 pub async fn record_push(pool: &PgPool, record: &PushRecord) -> Result<RecordOutcome, DbError> {
     let mut tx = pool.begin().await?;
-    let actor = run_agent(&mut tx, record.run_id).await?;
+    let (actor, task) = run_agent(&mut tx, record.run_id).await?;
     let refs = serde_json::to_value(&record.refs)?;
     let bytes = i64::try_from(record.bytes).unwrap_or(i64::MAX);
     let duration_ms = i64::try_from(record.duration.as_millis()).unwrap_or(i64::MAX);
@@ -193,6 +199,7 @@ pub async fn record_push(pool: &PgPool, record: &PushRecord) -> Result<RecordOut
             refs: &record.refs,
         })?;
         write_audit_entry(&mut *tx, &entry).await?;
+        react_to_push(&mut tx, &task, record).await?;
     }
     tx.commit().await?;
     Ok(outcome)
@@ -214,14 +221,14 @@ pub async fn mark_stale_forwarding(pool: &PgPool, older_than: Duration) -> Resul
     Ok(done.rows_affected())
 }
 
-/// The agent principal of a run: its task's persona.
+/// The agent principal of a run (its task's persona) and the run's task.
 async fn run_agent(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_id: RunId,
-) -> Result<Principal, DbError> {
+) -> Result<(Principal, PushingTask), DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT r.task_id, t.persona_id, p.name
+        SELECT r.task_id, t.key AS task_key, t.persona_id, p.name
         FROM runs r
         JOIN tasks t ON t.id = r.task_id
         JOIN personas p ON p.id = t.persona_id
@@ -232,12 +239,22 @@ async fn run_agent(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| DbError::NotFound(format!("run {run_id}")))?;
-    Ok(Principal::agent(
+    let key: TaskKey = row
+        .task_key
+        .parse()
+        .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))?;
+    let task_id = TaskId::from_uuid(row.task_id);
+    let actor = Principal::agent(
         PersonaId::from_uuid(row.persona_id),
         row.name,
         Some(run_id),
-        TaskId::from_uuid(row.task_id),
-    ))
+        task_id,
+    );
+    let task = PushingTask {
+        id: task_id,
+        task_branch: format!("refs/heads/{}", key.task_branch()),
+    };
+    Ok((actor, task))
 }
 
 #[cfg(test)]

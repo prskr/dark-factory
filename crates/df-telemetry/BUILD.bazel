@@ -36,6 +36,20 @@ rust_library(
     deps = all_crate_deps(normal = True),
 )
 
+# For the unit tests of crates that link the full library (df-gateway), which rebuild themselves
+# from source and so can link this variant instead.
+rust_library(
+    name = "df_telemetry_test_util",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_features = _TEST,
+    crate_name = "df_telemetry",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
 # `all_crate_deps` lists the optional dependencies whatever the features are, so the slim
 # variants name their (few) dependencies. The list must match the non-optional `[dependencies]` of
 # Cargo.toml plus those of the features the slim targets enable (today `clap`).

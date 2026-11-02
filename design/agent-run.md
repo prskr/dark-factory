@@ -183,7 +183,7 @@ Trust policy for configuration found in the repository:
    else:
        delete remote factory/wip/<key> if it exists
    ```
-   No secret scanning happens in the sandbox; the Git proxy scans every push centrally (§11). Until it exists, WIP snapshots rely on `.gitignore` and the denylist.
+   No secret scanning happens in the sandbox; the Git proxy scans every push centrally (§11.1) and rejects a WIP snapshot with a secret.
 5. Report to the control plane: outcome, task branch SHA, WIP SHA, push status, workspace size, harness session id. Token usage per turn (model, input/output/cache-read/cache-write tokens) is already in the transcript.
 6. Flush remaining events from the outbox, close the stream, exit. The control plane deletes the Sandbox.
 
@@ -198,7 +198,7 @@ Trust policy for configuration found in the repository:
 | Token or time limit reached | Run stops | Finalize normally; run ends with the limit as reason; task resumable with a new run |
 | Provider rate limit | Run stops | Finalize normally; distinct resumable outcome with retry time if known |
 | Control plane restart | Stream drops | Runtime reconnects (any replica) and resumes from the last persisted seq; run continues |
-| Push rejected by the Git proxy's secret scan (later) | Push fails | The rejection message names commit and file; the agent rewrites the commit. A rejected WIP snapshot stays on the PVC; human alerted |
+| Push rejected by the Git proxy's checks (`df:secret-scan`, `df:protected-path`, ...) | Push fails | The agent gets a `push.rejected` message with the masked findings and rewrites its unpushed commits, or a human approves the `push-check-exception` request; the runtime pushes again after the next turn (§11.1). A rejected WIP snapshot stays on the PVC |
 | Certificate rotation / expiry | New connections need the new cert | Runtime reloads files; reconnects if the stream fails |
 | PVC full | Builds fail | Quota limits damage; runtime reports; human resets workspace |
 
@@ -288,7 +288,51 @@ Status: **implemented** (iteration 2, `openspec/changes/archive/2026-11-01-iter2
 - **Push records**: every push attempt is stored through `GatewayGit.RecordPush` (`REJECTED`, `FORWARDING` before the first byte reaches the forge, then `ACCEPTED` / `UPSTREAM_FAILED`). Without a stored `FORWARDING` record nothing is forwarded.
 - **Retries** live in the runtime (§7.2), not in the gateway.
 
-The rest of this section describes the design and the planned extensions.
+### 11.1 Push checks
+Status: **implemented** (iteration 2, `openspec/changes/iter2-push-checks`; settings in [`crates/df-gateway/README.md`](../crates/df-gateway/README.md), "Push policy (per project)").
+
+- **What is checked**: the commits a push adds (reachable from a pushed SHA, not from any forge ref; at most 10,000, else `df:push-too-large`). Commits already on the forge are not checked again, so a rebase onto a new `main` checks only the agent's commits.
+
+  | Check | Reason | Mode |
+  |---|---|---|
+  | Secret scan: every added blob, binary ones included, against the vendored rule set (`crates/df-gateway/rules/secrets.yml`, no live validation) | `df:secret-scan` | project setting (default `approval`) |
+  | Commit identity: author and committer email equal the instance's commit identity | `df:identity` | always `reject` |
+  | Protected paths: added, changed, deleted or renamed paths matching a glob (default `.forgejo/workflows/**`, `.github/workflows/**`, `.gitea/workflows/**`, `CODEOWNERS`) | `df:protected-path` | project setting (default `approval`); `.dark-factory/**` always `reject` |
+  | Blob size (default 5 MiB) | `df:blob-too-large` | project setting (default `approval`) |
+  | Linear history (off by default): no merge commits | `df:merge-commit` | always `reject` |
+
+- **WIP snapshots** (`factory/wip/<key>`) get only the secret scan and the size limit, both `reject`, and never raise requests.
+- **Findings** carry check, path, line and a masked preview (first 4 characters, at most 12). The matched value is never stored, logged or sent. `report-status` answers `ng <ref> df:<check> <path>[:<line>] (<detail>)`, all findings of the ref joined.
+- **Approval-gated findings**: a task-branch push rejected only by `approval` findings raises one `push-check-exception` request on the task, listing the findings. Approving it (scope task only) stores one exception per finding fingerprint (secret: rule + blob + line, protected path: path, size: path + blob); the gateway gets them with the next snapshot, and the next push of the same commits passes. A new secret or a different blob needs a new approval.
+- **Feedback to the agent**: a task-branch push rejected by checks queues a system message (reason `push.rejected`) with the masked findings and whether an approval was requested. No message while one is undelivered, and at most 3 between two accepted pushes.
+- **Accepted push**: closes the task's pending `push-check-exception` requests (`push-accepted`) and resets the message counter.
+- **Runtime**: maps `df:secret-scan` to `PUSH_STATUS_REJECTED_SECRET_DETECTED` and the other check reasons to `PUSH_STATUS_REJECTED_BY_CHECK`, keeps "last pushed commit" unchanged and pushes again after the next turn (`contract/README.md`).
+
+```mermaid
+sequenceDiagram
+  participant R as Runtime
+  participant G as Gateway (Git proxy)
+  participant C as Control plane
+  participant H as Board member
+  R->>G: push task branch (after the turn)
+  G->>C: RecordPush REJECTED (findings, approval_requested)
+  C-->>C: raise push-check-exception, queue push.rejected
+  G-->>R: ng refs/heads/factory/task/KEY df:secret-scan ...
+  alt agent fixes its commits
+    C->>R: Prompt (push.rejected)
+    R->>G: push amended commit
+    G->>C: RecordPush ACCEPTED
+    C-->>C: close request (push-accepted)
+  else human approves
+    H->>C: approve request (task)
+    C->>G: snapshot with exceptions
+    C->>R: Prompt (request.decided)
+    R->>G: push the same commits
+    G->>C: RecordPush ACCEPTED
+  end
+```
+
+### 11.2 Design and planned extensions
 
 - **Runtime change**: only the remote URL in `Assign` changed; the credential helper is gone.
 - **Forwarding**: the gateway maps task → upstream repo and bot credential (both pushed by the control plane), forwards `info/refs`, `git-upload-pack` and `git-receive-pack`, injecting auth. Protocol v2 and partial-clone filters pass through.

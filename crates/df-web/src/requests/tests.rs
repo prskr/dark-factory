@@ -585,3 +585,93 @@ fn task_stream_url(page: &str) -> String {
         .expect("task stream url")
         .replace("&amp;", "&")
 }
+
+/// A pending `push-check-exception` request of DF-17 with the findings of the design board.
+fn push_check_card(findings: serde_json::Value) -> super::CardData {
+    use df_db::requests::{RequestKind, RequestRow, RequestState};
+    let row = RequestRow {
+        id: RequestId::new(),
+        task_id: TaskId::new(),
+        run_id: None,
+        kind: RequestKind::Approval,
+        approval_type: Some(df_db::push_checks::PUSH_CHECK_EXCEPTION.into()),
+        payload: json!({ "findings": findings }),
+        reason: "Approving lets exactly these findings pass for this task.".into(),
+        blocking: false,
+        state: RequestState::Pending,
+        decision: None,
+        decided_by: None,
+        decided_at: None,
+        close_reason: None,
+        created_at: chrono::Utc::now(),
+    };
+    super::CardData::new(
+        &df_db::requests::ApprovalTypes::builtin(),
+        row,
+        "DF-17".into(),
+        "Add a CI workflow for the release build".into(),
+    )
+}
+
+#[test]
+fn a_push_check_exception_card_lists_one_row_per_check_result_and_approves_for_the_task() {
+    let card = super::request_card(
+        &push_check_card(json!([
+            {"check": "protected-path", "path": ".forgejo/workflows/ci.yml",
+             "fingerprint": "path:.forgejo/workflows/ci.yml"},
+            {"check": "secret-scan", "path": "config/dev.env", "line": 3,
+             "rule": "aws-access-key", "preview": "AKIA********",
+             "fingerprint": "secret:aws-access-key:ab12:3"},
+        ])),
+        None,
+    )
+    .into_string();
+
+    assert!(card.contains(">Push needs approval: 2 findings<"), "{card}");
+    assert!(
+        card.contains("Approving lets exactly these findings pass for this task."),
+        "{card}"
+    );
+    let rows: Vec<&str> = card.split("<li").skip(1).collect();
+    let [path, secret] = rows[..] else {
+        panic!("not two rows: {card}");
+    };
+    assert!(
+        path.contains(">Protected path<") && path.contains(">.forgejo/workflows/ci.yml<"),
+        "{path}"
+    );
+    for text in [
+        ">Secret scan<",
+        ">config/dev.env:3<",
+        ">aws-access-key<",
+        ">AKIA********<",
+    ] {
+        assert!(secret.contains(text), "{text}: {secret}");
+    }
+    let comment = card.find("Comment (optional)").unwrap();
+    assert!(card.find("AKIA********").unwrap() < comment, "{card}");
+    assert!(!card.contains("type=\"radio\""), "{card}");
+    assert!(
+        crate::testkit::tag_around(&card, "name=\"scope\"").contains("type=\"hidden\""),
+        "{card}"
+    );
+    assert!(card.contains(">Approve for this task<"), "{card}");
+}
+
+#[test]
+fn findings_on_a_card_are_shown_as_text() {
+    let card = super::request_card(
+        &push_check_card(json!([
+            {"check": "protected-path", "path": "<script>alert(1)</script>",
+             "fingerprint": "path:x"},
+        ])),
+        None,
+    )
+    .into_string();
+
+    assert!(!card.contains("<script>alert"), "{card}");
+    assert!(
+        card.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{card}"
+    );
+}

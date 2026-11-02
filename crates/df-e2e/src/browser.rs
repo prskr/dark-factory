@@ -130,14 +130,15 @@ impl Session {
     }
 
     /// Approves request `id` in the `/requests` inbox for `scope` (`task`, `project` or
-    /// `instance`) once its card shows `summary`. The decided card leaves the live inbox, so
-    /// callers check the outcome elsewhere.
+    /// `instance`) once its card shows `summary`; `None` for a type with a single scope (no
+    /// choice on the card). The decided card leaves the live inbox, so callers check the outcome
+    /// elsewhere.
     pub async fn approve_request(
         &self,
         env: &E2eEnv,
         id: &str,
         summary: &str,
-        scope: &str,
+        scope: Option<&str>,
     ) -> Result<()> {
         self.page
             .goto(&format!("{}/requests", env.base_url), None)
@@ -146,11 +147,13 @@ impl Session {
         let card = format!("#request-{id}");
         self.expect_region_text(&card, summary, CARD_TIMEOUT)
             .await?;
-        self.page
-            .locator(format!("{card} input[name=scope][value={scope}]"))
-            .click(None)
-            .await
-            .with_context(|| format!("choose scope {scope}"))?;
+        if let Some(scope) = scope {
+            self.page
+                .locator(format!("{card} input[name=scope][value={scope}]"))
+                .click(None)
+                .await
+                .with_context(|| format!("choose scope {scope}"))?;
+        }
         self.page
             .locator(format!("{card} button:has-text('Approve')"))
             .click(None)

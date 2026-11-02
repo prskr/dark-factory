@@ -52,6 +52,24 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         credential,
     )
     .await?;
+    ensure_project(
+        pool,
+        actor,
+        data::SECRET_PROJECT_KEY,
+        data::SECRET_PROJECT_NAME,
+        data::SECRET_SCRIPT,
+        credential,
+    )
+    .await?;
+    ensure_project(
+        pool,
+        actor,
+        data::PROTECTED_PROJECT_KEY,
+        data::PROTECTED_PROJECT_NAME,
+        data::PROTECTED_SCRIPT,
+        credential,
+    )
+    .await?;
     Ok(())
 }
 

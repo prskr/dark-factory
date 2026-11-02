@@ -464,6 +464,7 @@ async fn record_push_is_accepted_only_from_the_gateway_certificate() -> Result<(
         verdict: PushVerdict::Accepted.into(),
         bytes: 7,
         duration: None,
+        ..Default::default()
     };
 
     let (files, _dir) = gateway_credentials(&pki)?;
@@ -584,6 +585,7 @@ async fn a_rejected_push_without_ref_updates_is_stored() -> Result<()> {
             verdict: PushVerdict::Rejected.into(),
             bytes: 3,
             duration: None,
+            ..Default::default()
         })
         .await?;
 
@@ -790,4 +792,284 @@ async fn approving_a_network_access_request_for_the_task_reaches_the_run_snapsho
         .collect();
     assert_eq!(hosts, [("pypi.org", 443, "task")]);
     Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_has_the_stored_push_policy_and_the_exceptions_of_the_task() -> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let other = insert_task(&pool, seed.project, seed.persona, 2).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    insert_run(&pool, other, 1, "running", Some("10.1.0.8")).await?;
+    sqlx::query(
+        "INSERT INTO project_push_policies
+             (project_id, protected_globs, protected_mode, secret_mode, size_mode,
+              max_blob_bytes, linear_history)
+         VALUES ($1, ARRAY['deploy/**'], 'approval', 'reject', 'approval', 2048, true)",
+    )
+    .bind(seed.project)
+    .execute(&pool)
+    .await?;
+    let request = insert_exception_request(&pool, seed.task).await?;
+    sqlx::query(
+        "INSERT INTO push_check_exceptions (task_id, fingerprint, request_id)
+         VALUES ($1, 'path:deploy/values.yaml', $2)",
+    )
+    .bind(seed.task)
+    .bind(request)
+    .execute(&pool)
+    .await?;
+
+    let update = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+
+    let snapshot = update.snapshot.unwrap();
+    let policy = &snapshot.push_policies["DF"];
+    assert_eq!(policy.protected_globs, ["deploy/**"]);
+    assert_eq!(
+        policy.secret_mode(),
+        df_proto::gateway::v1::CheckMode::Reject
+    );
+    assert_eq!((policy.max_blob_bytes, policy.linear_history), (2048, true));
+    let exceptions = |key: &str| {
+        snapshot
+            .sandboxes
+            .iter()
+            .find(|sandbox| sandbox.task_key == key)
+            .map(|sandbox| sandbox.exceptions.clone())
+    };
+    assert_eq!(
+        exceptions("DF-1"),
+        Some(vec!["path:deploy/values.yaml".to_string()])
+    );
+    assert_eq!(exceptions("DF-2"), Some(Vec::new()));
+    Ok(())
+}
+
+/// "Policy change applies to the next push": the policy saved through the project form's call
+/// reaches a gateway on `PolicyWatch` within a second, and the checks of a push with that policy
+/// find a change under the added glob.
+#[tokio::test]
+async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> Result<()> {
+    use df_core::{Principal, UserId};
+    use df_db::catalog::{
+        Actor, ProjectInput, get_project_by_key, update_project_with_push_policy,
+    };
+    use df_db::push_checks::PushPolicy;
+
+    use crate::git::checks::{
+        Check, CheckPolicy, Identity, ScanError, SecretMatch, SecretMatcher, Target, check_push,
+    };
+    use crate::git::view::{AddedBlob, AddedCommit, PathChange, PushView};
+
+    struct NoSecrets;
+    impl SecretMatcher for NoSecrets {
+        fn find(&self, _blob: &AddedBlob) -> Result<Vec<SecretMatch>, ScanError> {
+            Ok(Vec::new())
+        }
+    }
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
+    let replica = Replica::start(&pool, &pki).await?;
+    let (files, _dir) = gateway_credentials(&pki)?;
+    let (policy_tx, mut received) = tokio::sync::watch::channel(None);
+    let watcher = tokio::spawn(crate::watch::run(
+        Arc::new(gateway_connector(files)),
+        replica.addr.to_string(),
+        "gw-0".into(),
+        policy_tx,
+        Duration::from_millis(50),
+        Arc::default(),
+    ));
+    let protects_deploy = |policy: &Option<Arc<crate::policy::Policy>>| {
+        policy
+            .as_deref()
+            .and_then(|policy| policy.push_policy("DF"))
+            .is_some_and(|pushed| pushed.protected_globs.iter().any(|g| g == "deploy/**"))
+    };
+    tokio::time::timeout(Duration::from_secs(5), received.wait_for(Option::is_some)).await??;
+    assert!(!protects_deploy(&received.borrow()));
+    let project = get_project_by_key(&pool, "DF")
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no project DF"))?;
+    let input = ProjectInput {
+        key: project.key,
+        name: project.name,
+        repo_url: project.repo_url,
+        issue_tracker_url: project.issue_tracker_url,
+        image: project.image,
+        base_branch: project.base_branch,
+        adapter_command: project.adapter_command,
+        forge_credential_id: project.forge_credential_id,
+    };
+    let mut policy = PushPolicy::default();
+    policy.protected_globs.push("deploy/**".into());
+    let principal = Principal::human(UserId::new(), "Peter");
+    let roles = vec!["board-member".to_string()];
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+
+    update_project_with_push_policy(&pool, actor, seed.project, &input, &policy).await?;
+
+    tokio::time::timeout(Duration::from_secs(1), received.wait_for(protects_deploy)).await??;
+    let snapshot = received.borrow().clone();
+    let pushed = snapshot
+        .as_deref()
+        .and_then(|policy| policy.push_policy("DF"))
+        .ok_or_else(|| anyhow::anyhow!("no push policy for DF"))?;
+    let id = |n: u8| gix::ObjectId::from_bytes_or_panic(&[n; 20]);
+    let email = git_settings().commit_email;
+    let view = PushView {
+        commits: vec![AddedCommit {
+            id: id(2),
+            parents: vec![id(1)],
+            author_email: email.clone(),
+            committer_email: email.clone(),
+            changes: vec![PathChange {
+                path: "deploy/values.yaml".into(),
+                old: Some(id(10)),
+                new: Some(id(11)),
+            }],
+        }],
+        blobs: Vec::new(),
+    };
+    let findings = check_push(
+        &view,
+        &CheckPolicy::new(pushed)?,
+        &Identity { email: &email },
+        Target::TaskBranch,
+        &NoSecrets,
+    )?;
+    let found: Vec<_> = findings
+        .iter()
+        .map(|finding| (finding.check, finding.path.as_str()))
+        .collect();
+    assert_eq!(found, [(Check::ProtectedPath, "deploy/values.yaml")]);
+    watcher.abort();
+    replica.stop().await;
+    Ok(())
+}
+
+/// A pending `push-check-exception` request of `task`.
+async fn insert_exception_request(pool: &PgPool, task: Uuid) -> Result<Uuid> {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO agent_requests (id, task_id, kind, approval_type, payload, fingerprint)
+         VALUES ($1, $2, 'approval', 'push-check-exception', '{}', 'f')",
+    )
+    .bind(id)
+    .bind(task)
+    .execute(pool)
+    .await?;
+    Ok(id)
+}
+
+/// Two replicas on one database: the rejected push of `DF-1` is recorded through replica A's
+/// `RecordPush` and its exception request approved; the gateway is connected to replica B.
+#[tokio::test]
+async fn an_exception_approved_on_one_replica_reaches_a_gateway_on_another_within_a_second()
+-> Result<()> {
+    use df_core::{Principal, TaskId, UserId};
+    use df_db::requests::{ApprovalTypes, Decision, Scope, decide, list_for_task};
+    use df_proto::gateway::v1::gateway_git_client::GatewayGitClient;
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let run = insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
+    let replica_a = Replica::start(&pool, &pki).await?;
+    let replica_b = Replica::start(&pool, &pki).await?;
+    let (files, _dir) = gateway_credentials(&pki)?;
+    let (policy_tx, mut policy) = tokio::sync::watch::channel(None);
+    let watcher = tokio::spawn(crate::watch::run(
+        Arc::new(gateway_connector(files)),
+        replica_b.addr.to_string(),
+        "gw-0".into(),
+        policy_tx,
+        Duration::from_millis(50),
+        Arc::default(),
+    ));
+    let ip = "10.1.0.7".parse()?;
+    let excepted = |policy: &Option<Arc<crate::policy::Policy>>| {
+        policy
+            .as_deref()
+            .is_some_and(|policy| policy.exceptions(ip) == ["path:CODEOWNERS"])
+    };
+    tokio::time::timeout(Duration::from_secs(5), policy.wait_for(Option::is_some)).await??;
+    assert!(!excepted(&policy.borrow()));
+    assert!(
+        policy
+            .borrow()
+            .as_deref()
+            .unwrap()
+            .push_policy("DF")
+            .is_some()
+    );
+    let (a_files, _a_dir) = gateway_credentials(&pki)?;
+    let channel_a = gateway_connector(a_files)
+        .connect(&replica_a.addr.to_string())
+        .await?;
+    GatewayGitClient::new(channel_a)
+        .record_push(codeowners_rejected(run))
+        .await?;
+    let requests = list_for_task(&pool, TaskId::from_uuid(seed.task)).await?;
+    let [request] = &requests[..] else {
+        anyhow::bail!("expected one request: {requests:?}");
+    };
+
+    decide(
+        &pool,
+        &ApprovalTypes::builtin(),
+        request.id,
+        &Principal::human(UserId::new(), "Peter"),
+        &["board-member".to_string()],
+        Decision::Approve(Scope::Task),
+    )
+    .await?;
+
+    tokio::time::timeout(Duration::from_secs(1), policy.wait_for(excepted)).await??;
+
+    watcher.abort();
+    replica_a.stop().await;
+    replica_b.stop().await;
+    Ok(())
+}
+
+/// A push of `DF-1` rejected only because it changes `CODEOWNERS` (mode `approval`).
+fn codeowners_rejected(run: Uuid) -> df_proto::gateway::v1::PushRecord {
+    use df_proto::gateway::v1::{
+        CheckMode, PushCheck, PushFinding, PushRecord, PushVerdict, RefUpdate,
+    };
+
+    let task_branch = "refs/heads/factory/task/DF-1".to_string();
+    PushRecord {
+        push_id: Uuid::now_v7().to_string(),
+        run_id: run.to_string(),
+        gateway_pod: "gw-0".into(),
+        refs: vec![RefUpdate {
+            name: task_branch.clone(),
+            old_sha: "0".repeat(40),
+            new_sha: "a".repeat(40),
+            verdict: PushVerdict::Rejected.into(),
+            reason: "df:protected-path CODEOWNERS (matches CODEOWNERS)".into(),
+        }],
+        verdict: PushVerdict::Rejected.into(),
+        bytes: 7,
+        findings: vec![PushFinding {
+            r#ref: task_branch,
+            check: PushCheck::ProtectedPath.into(),
+            mode: CheckMode::Approval.into(),
+            fingerprint: Some("path:CODEOWNERS".into()),
+            path: "CODEOWNERS".into(),
+            line: None,
+            detail: "matches CODEOWNERS".into(),
+            secret: None,
+        }],
+        approval_requested: true,
+        ..Default::default()
+    }
 }

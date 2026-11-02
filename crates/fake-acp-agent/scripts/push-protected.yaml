@@ -1,0 +1,15 @@
+# Script of demo step 3 of iteration 2 (docs/demo.md): run 1 edits the CI workflow, a protected
+# path in mode `approval`. The Git proxy rejects every push of the commit until the board member
+# approves the `push-check-exception` request. Later prompts (`push.rejected` messages, the
+# decision) find no scripted turn and end at once; the runtime pushes the same commit again after
+# each of them.
+sessions:
+  new:
+    - - say: "Running the tests in CI."
+      - shell: |
+          mkdir -p .forgejo/workflows
+          printf 'on: [push]\njobs:\n  test:\n    runs-on: docker\n    steps:\n      - run: echo test\n' > .forgejo/workflows/ci.yml
+          git add .forgejo/workflows/ci.yml
+          git commit -q -m 'Run the tests in CI'
+      - say: "Committed .forgejo/workflows/ci.yml."
+      - end: end_turn

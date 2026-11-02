@@ -149,7 +149,38 @@ fn record(push_id: Uuid, verdict: PushVerdict) -> PushRecord {
         verdict,
         bytes: 42,
         duration: Duration::from_millis(1500),
+        findings: Vec::new(),
+        approval_requested: false,
     }
+}
+
+#[tokio::test]
+async fn the_findings_and_the_approval_request_of_a_rejection_are_stored() {
+    let control_plane = FakeControlPlane::start(0).await;
+    let recorder = control_plane.recorder(FAST);
+    let found = pb::PushFinding {
+        r#ref: "refs/heads/df/task".into(),
+        check: pb::PushCheck::ProtectedPath.into(),
+        mode: pb::CheckMode::Approval.into(),
+        fingerprint: Some("path:.forgejo/workflows/ci.yml".into()),
+        path: ".forgejo/workflows/ci.yml".into(),
+        line: None,
+        detail: "matches .forgejo/workflows/**".into(),
+        secret: None,
+    };
+
+    recorder
+        .record(PushRecord {
+            findings: vec![found.clone()],
+            approval_requested: true,
+            ..record(Uuid::now_v7(), PushVerdict::Rejected)
+        })
+        .await
+        .unwrap();
+
+    let stored = control_plane.stored();
+    assert_eq!(stored[0].findings, [found]);
+    assert!(stored[0].approval_requested);
 }
 
 #[tokio::test]

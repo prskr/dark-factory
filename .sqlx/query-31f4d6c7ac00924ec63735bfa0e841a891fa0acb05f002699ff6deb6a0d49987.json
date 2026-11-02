@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO push_check_exceptions (task_id, fingerprint, request_id)\n         SELECT $1, fingerprint, $3 FROM unnest($2::text[]) AS fingerprint\n         ON CONFLICT (task_id, fingerprint) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31f4d6c7ac00924ec63735bfa0e841a891fa0acb05f002699ff6deb6a0d49987"
+}

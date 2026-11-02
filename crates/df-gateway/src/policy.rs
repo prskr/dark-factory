@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use df_proto::gateway::v1::{ForgeCredential, GitRoute, PolicyUpdate, SandboxEntry};
+use df_proto::gateway::v1::{ForgeCredential, GitRoute, PolicyUpdate, PushPolicy, SandboxEntry};
 
 /// Reason of a denied request, as shown in the egress log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +104,8 @@ pub struct Policy {
     sandboxes: HashMap<IpAddr, Sandbox>,
     git_routes: HashMap<IpAddr, GitRoute>,
     forge_credentials: HashMap<String, ForgeCredential>,
+    push_policies: HashMap<String, PushPolicy>,
+    exceptions: HashMap<IpAddr, Vec<String>>,
 }
 
 impl Policy {
@@ -113,6 +115,8 @@ impl Policy {
             sandboxes: sandboxes.into_iter().collect(),
             git_routes: HashMap::new(),
             forge_credentials: HashMap::new(),
+            push_policies: HashMap::new(),
+            exceptions: HashMap::new(),
         }
     }
 
@@ -128,21 +132,39 @@ impl Policy {
         self
     }
 
+    /// Adds the push policies of the projects (by project key) and the exceptions of the
+    /// sandboxes (by pod IP).
+    #[must_use]
+    pub fn with_push_checks(
+        mut self,
+        policies: impl IntoIterator<Item = (String, PushPolicy)>,
+        exceptions: impl IntoIterator<Item = (IpAddr, Vec<String>)>,
+    ) -> Self {
+        self.push_policies = policies.into_iter().collect();
+        self.exceptions = exceptions.into_iter().collect();
+        self
+    }
+
     /// Entries whose `pod_ip` does not parse are skipped: they can never match a connection.
     pub fn from_update(update: PolicyUpdate) -> Self {
         let snapshot = update.snapshot.unwrap_or_default();
         let mut routes = Vec::new();
+        let mut exceptions = Vec::new();
         let sandboxes: Vec<_> = snapshot
             .sandboxes
             .into_iter()
             .filter_map(|mut entry| {
                 let route = entry.git.take();
+                let excepted = std::mem::take(&mut entry.exceptions);
                 let (ip, sandbox) = sandbox_from_entry(entry)?;
                 routes.extend(route.map(|route| (ip, route)));
+                exceptions.push((ip, excepted));
                 Some((ip, sandbox))
             })
             .collect();
-        Self::new(update.version, sandboxes).with_git(routes, snapshot.forge_credentials)
+        Self::new(update.version, sandboxes)
+            .with_git(routes, snapshot.forge_credentials)
+            .with_push_checks(snapshot.push_policies, exceptions)
     }
 
     pub fn sandbox(&self, ip: IpAddr) -> Option<&Sandbox> {
@@ -162,6 +184,16 @@ impl Policy {
     /// The credential a [`GitRoute::credential_ref`] names.
     pub fn forge_credential(&self, reference: &str) -> Option<&ForgeCredential> {
         self.forge_credentials.get(reference)
+    }
+
+    /// The push policy of the project `project_key`.
+    pub fn push_policy(&self, project_key: &str) -> Option<&PushPolicy> {
+        self.push_policies.get(project_key)
+    }
+
+    /// Fingerprints of the push check findings approved for the task of the sandbox at `ip`.
+    pub fn exceptions(&self, ip: IpAddr) -> &[String] {
+        self.exceptions.get(&ip).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -416,11 +448,42 @@ mod tests {
                     ..Default::default()
                 }],
                 forge_credentials: [("forge".to_string(), credential.clone())].into(),
+                ..Default::default()
             }),
         });
         assert_eq!(policy.git_route(POD.parse().unwrap()), Some(&route));
         assert_eq!(policy.forge_credential("forge"), Some(&credential));
         assert_eq!(policy.git_route("10.9.9.9".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn snapshot_conversion_keeps_push_policies_and_exceptions() {
+        use df_proto::gateway::v1::{PushPolicy, Snapshot};
+        let push_policy = PushPolicy {
+            protected_globs: vec!["deploy/**".into()],
+            max_blob_bytes: 1024,
+            ..Default::default()
+        };
+        let policy = Policy::from_update(PolicyUpdate {
+            version: 1,
+            snapshot: Some(Snapshot {
+                sandboxes: vec![SandboxEntry {
+                    pod_ip: POD.into(),
+                    project_key: "DF".into(),
+                    exceptions: vec!["path:deploy/values.yaml".into()],
+                    ..Default::default()
+                }],
+                push_policies: [("DF".to_string(), push_policy.clone())].into(),
+                ..Default::default()
+            }),
+        });
+        assert_eq!(policy.push_policy("DF"), Some(&push_policy));
+        assert_eq!(policy.push_policy("OTHER"), None);
+        assert_eq!(
+            policy.exceptions(POD.parse().unwrap()),
+            ["path:deploy/values.yaml"]
+        );
+        assert!(policy.exceptions("10.9.9.9".parse().unwrap()).is_empty());
     }
 
     #[test]

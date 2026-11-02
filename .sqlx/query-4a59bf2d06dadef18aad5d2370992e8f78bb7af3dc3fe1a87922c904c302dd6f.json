@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT project_id, protected_globs, protected_mode, secret_mode, size_mode,\n                max_blob_bytes, linear_history\n         FROM project_push_policies WHERE project_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "protected_globs",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "protected_globs"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "protected_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "protected_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "secret_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "secret_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "size_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "size_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "max_blob_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "max_blob_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "linear_history",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "linear_history"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4a59bf2d06dadef18aad5d2370992e8f78bb7af3dc3fe1a87922c904c302dd6f"
+}

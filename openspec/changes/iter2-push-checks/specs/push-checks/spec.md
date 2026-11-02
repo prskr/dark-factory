@@ -7,11 +7,19 @@ Checks every pushed commit at the Git proxy before it reaches the forge: no secr
 ## ADDED Requirements
 
 ### Requirement: Checked commits
-Checks SHALL run before forwarding, on the commits a push adds (reachable from a pushed new SHA, not reachable from any upstream ref). Commits already on the forge SHALL NOT be checked again.
+Checks SHALL run before forwarding, on the commits a push adds: reachable from a pushed new SHA, not reachable from an upstream ref. WIP branches and other tasks' task branches SHALL NOT count as upstream, so their commits are checked again for this task, including the identity of human commits on them. A merge commit SHALL count as changing only the paths that differ from every parent. Other commits already on the forge SHALL NOT be checked again.
 
 #### Scenario: Rebased onto a new base
 - **WHEN** the task branch is rebased onto a `main` that contains human commits and pushed
 - **THEN** only the agent's rebased commits are checked
+
+#### Scenario: WIP commit pushed to the task branch
+- **WHEN** a commit that changes `.dark-factory/config.toml` was pushed to the WIP branch and is then pushed to the task branch
+- **THEN** the task-branch push is rejected with `df:protected-path`
+
+#### Scenario: Merging the base branch
+- **WHEN** a human changed `.forgejo/workflows/ci.yml` on `main` and the agent merges `main` into its task branch with linear history off
+- **THEN** the push produces no `df:protected-path` finding for that path
 
 ### Requirement: Secret scan
 The proxy SHALL scan the full content of every blob added by checked commits, binary blobs included, with the secret rule set, without contacting any service to validate findings. A finding SHALL record rule, path, line and a masked preview, and SHALL NOT store or log the matched value.
@@ -78,7 +86,7 @@ A task-branch push rejected only by approval-mode findings without a matching ex
 - **THEN** the push is rejected and no request is raised
 
 ### Requirement: Approved exceptions
-Approving a `push-check-exception` request SHALL create task-scoped exceptions for exactly its findings (secret: rule + blob + line; protected path: path; size: path + blob). A later push of the task SHALL pass findings with a matching exception.
+Approving a `push-check-exception` request SHALL create task-scoped exceptions for exactly its findings (secret: rule + blob + line; protected path: path; size: path + blob). A later push of the task SHALL pass approval-mode findings with a matching exception; a finding whose check mode is `reject` SHALL stay rejected.
 
 #### Scenario: Exception approved
 - **WHEN** the request for `.forgejo/workflows/ci.yml` is approved and the runtime pushes the same commits again

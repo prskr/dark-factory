@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT r.task_id, t.persona_id, p.name\n        FROM runs r\n        JOIN tasks t ON t.id = r.task_id\n        JOIN personas p ON p.id = t.persona_id\n        WHERE r.id = $1\n        ",
+  "query": "\n        SELECT r.task_id, t.key AS task_key, t.persona_id, p.name\n        FROM runs r\n        JOIN tasks t ON t.id = r.task_id\n        JOIN personas p ON p.id = t.persona_id\n        WHERE r.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "task_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "persona_id",
         "type_info": "Uuid",
         "origin": {
@@ -26,7 +37,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "name",
         "type_info": "Text",
         "origin": {
@@ -45,8 +56,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "5b2f50003e16cef5474490677c82ca84fb5f8ec0ca81ec320cdc3fb298edd7e3"
+  "hash": "ddebeb1bbd8bb760124bc34e9363b7fd8cc7f9e7e8213bd1f42b0995e3223a14"
 }
