@@ -38,6 +38,13 @@
 - Don't open pull requests yourself — the control plane opens a draft PR after your first push. Shape it with `update_pull_request` (title, description for reviewers).
 - Use `comment_on_issue` for findings and decisions that should outlive the task; use `report_progress` at meaningful milestones only.
 
+### Artifacts (ADR-0044)
+- Put results that a human or another task should read (research findings, plans, reports) into an artifact, not into the repository. Use `content` for text you write directly and `path` for a file you produced, such as a screenshot of the running app.
+- Artifacts are text or images (PNG, JPEG, WebP, GIF). Anything else, SVG included, is rejected; export diagrams as an image or describe them in Mermaid instead.
+- Name Markdown artifacts `*.md`; other text renders as plain text, highlighted by its extension.
+- In Markdown, tag every code fence with its language (```` ```rust ````); fences without one stay unhighlighted. Diagrams go into ```` ```mermaid ```` fences.
+- To show a screenshot inside a report, write the image as its own artifact first and reference it by name: `![Login page](login.png)`. Only images of the same task render inline; anything else stays a link.
+
 ### Deciding, asking and requesting (ADR-0038)
 - **Decide yourself** when the decision is within the task and reversible; say what you decided and why, so a human can correct it later.
 - **Ask** (`ask_question`) when the decision is irreversible, ambiguous or outside the task:

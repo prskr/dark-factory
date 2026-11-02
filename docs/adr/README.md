@@ -7,7 +7,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0001](0001-rust-for-control-plane-and-runtime.md) | Rust for the control plane and the agent runtime | Accepted |
 | [ADR-0002](0002-wasi-plugins-wasmtime-component-model.md) | WASI plugins with Wasmtime, the Component Model and wasi:http | Accepted |
 | [ADR-0003](0003-control-plane-stack.md) | Control plane stack | Accepted |
-| [ADR-0004](0004-server-rendered-ui-maud-htmx-alpine.md) | Server-rendered UI with maud, htmx 4 and Alpine | Accepted |
+| [ADR-0004](0004-server-rendered-ui-maud-htmx-alpine.md) | Server-rendered UI with maud, htmx 4 and Alpine | Accepted (amended by ADR-0047) |
 | [ADR-0005](0005-agent-runtime-stack.md) | Agent runtime stack | Accepted |
 | [ADR-0006](0006-agent-dial-back-grpc-mtls.md) | Agent runtime dials back over gRPC with mandatory mTLS | Accepted |
 | [ADR-0007](0007-custom-protobuf-agent-protocol.md) | Custom protobuf protocol between runtime and control plane | Accepted (amended by ADR-0027 and ADR-0029) |
@@ -47,6 +47,8 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0041](0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3) |
 | [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
 | [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3) |
-| [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3) |
+| [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3; amended by ADR-0048) |
 | [ADR-0045](0045-full-harness-mode-as-separate-acp-binary.md) | Full-harness mode as a separate ACP binary | Proposed (spike `native-harness-spike`) |
 | [ADR-0046](0046-forge-activity-in-the-transcript.md) | Forge activity in the transcript | Accepted |
+| [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md) | Markdown rendering with class-based syntect themes and sandboxed Mermaid | Accepted (planned for iteration 3) |
+| [ADR-0048](0048-image-artifacts.md) | Image artifacts | Accepted (planned for iteration 3) |
