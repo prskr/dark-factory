@@ -94,7 +94,7 @@
 2. **Classify** the failures: a *shared root cause* (base branch broken, common configuration, toolchain) or *individual breaking changes* of one dependency.
 3. **Shared root cause:**
    - One task fixes it on a new branch from the base, with a regular PR.
-   - Create one child task per affected dependency PR, blocked by "PR merged" of the fix.
+   - Create one child task per affected dependency PR, depending on the fix being Done (`done`, PR merged).
    - Once unblocked, prefer asking renovate to rebase (its PR checkbox) over pushing a rebase yourself — renovate stops managing branches that contain foreign commits. The child then only verifies CI and steps in if it's still red.
 4. **Individual breaking change:** one child task per branch, started from the renovate branch with PR mode "attach" (ADR-0025). Fix on top of the update; rebase with lease if the base moved (ADR-0033). Note in the PR that renovate will no longer update the branch automatically.
 5. **Report.** Children summarize in their PRs; the coordinator gives the human one overview (what was fixed, what was merged, what still needs a decision).
@@ -102,16 +102,16 @@
 ### 2.2 Implementation and review
 **Situation:** a change should be reviewed by a second agent before a human looks at it.
 
-1. The coordinator creates an implementation task and a review task blocked by its completion (ADR-0026), with the implementation task as its `base_task` (ADR-0041). The reviewer's workspace then contains the changes, and every run starts from the current state of the implementation branch.
+1. The coordinator creates an implementation task and a review task that depends on its Completion (ADR-0026), with the implementation task as its `base_task` (ADR-0041). The reviewer's workspace then contains the changes, and every run starts from the current state of the implementation branch.
 2. The reviewer reads the PR and reviews it in the forge (line comments, submitted review — ADR-0036). It can build and test in its workspace, but doesn't commit: commits would open a second PR against the implementation branch.
-3. A submitted review wakes the implementation task (ADR-0015); it addresses the comments and completes again, which can re-trigger the review.
+3. The coordinator wakes when the review task ends (ADR-0043). If the review has findings, it messages the implementation task; the implementer addresses the comments and completes again. The coordinator wakes again and messages the review task for the next round (ADR-0052). A human's submitted review wakes the implementation task directly (ADR-0015).
 4. The PR is marked ready for the human only when the review task completes without open findings.
 
 ### 2.3 Big feature in iterations
 **Situation:** a feature is too big for one reviewable PR.
 
 1. Create a feature task with a coordinating agent and `subtask_base: parent-branch`. Its branch is the feature branch; its PR against the default branch appears once the first iteration is merged into it (ADR-0034).
-2. Plan iterations so that each one leaves the feature branch building and tested, and create them one at a time or chained with "PR merged" dependencies — not all in parallel, since each builds on the previous.
+2. Plan iterations so that each one leaves the feature branch building and tested, and create them one at a time or chained with `done` dependencies (PR merged) — not all in parallel, since each builds on the previous.
 3. Each iteration is a subtask with its own small PR against the feature branch. It's reviewed (pattern 2.2 works one level down) and merged by a human or, if `subtask_merge: parent-agent`, by the feature agent.
 4. Keep the feature branch current between iterations, not while one is open: rebasing it with open subtasks forces them to rebase too.
 5. When the last iteration is merged, the feature task completes and its PR is marked ready; the human reviews the whole feature, aided by the already reviewed iteration PRs.

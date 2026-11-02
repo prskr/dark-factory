@@ -1,8 +1,8 @@
 # ADR-0033: Branch rewrites, fan-out across branches and merge triggers
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by ADR-0052)
 - **Date:** 2026-10-16
-- **Related:** [ADR-0015](0015-webhook-filtering-and-routing.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0028](0028-integrations-wit-capability-interfaces.md)
+- **Related:** [ADR-0015](0015-webhook-filtering-and-routing.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0028](0028-integrations-wit-capability-interfaces.md), [ADR-0052](0052-dependencies-gate-the-first-start.md)
 
 ## Context
 
@@ -15,7 +15,7 @@ Dependency update PRs (e.g. from renovate) pile up when the build breaks or an u
   - The Git proxy allows non-fast-forward updates of the task's branch when the policy permits; `receive-pack` already rejects updates whose expected old value no longer matches. The WIP snapshot ref is always force-pushed; base and other branches are never writable.
   - Rewrites are reported (`PushReport`) and visible in the transcript.
 - **Several branches are handled by fan-out, not multi-branch tasks:** a coordinating task (or the CEO) creates one child task per branch, each started from that existing branch with PR mode "attach" (ADR-0025). Children run in parallel with their own sandbox, workspace and PR.
-- **"PR merged" is a dependency trigger:** a task can be blocked until another task's PR is merged — not only until that task completes (ADR-0016, ADR-0026). The event comes from the routed forge webhooks (ADR-0015). A PR closed without merge doesn't unblock; it queues a message on the dependent task and its creator.
+- **"PR merged" is a dependency:** a task can wait until another task is Done (`depends_on` kind `done`): its PR was merged or a board member marked it done — not only until its Completion (ADR-0016, ADR-0026, ADR-0052). The merge comes from the routed forge webhooks (ADR-0015). A PR closed without merge doesn't release the dependent; the PR's own task is told (ADR-0051).
 - **Forge capabilities for this flow** (integrations package, ADR-0028): list open pull requests with filters (head prefix, author, label), and CI status plus job logs for a ref or PR — as plugin capabilities, or through a forge MCP server via the gateway (ADR-0032).
 
 ## Consequences
