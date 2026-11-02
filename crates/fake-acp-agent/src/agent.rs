@@ -428,8 +428,10 @@ async fn play_fetch(fetch: &FetchStep, ctx: &TurnContext, cx: &ConnectionTo<Clie
     send_update(cx, &ctx.session_id, text_chunk_update(text, false));
 }
 
-/// GETs the URL until it succeeds, the timeout has passed or the turn is cancelled; the error
-/// is the one of the last attempt.
+/// GETs the URL until it succeeds, the timeout has passed or the turn is cancelled. At least one
+/// attempt is made; a failed attempt returns its error when no retry fits before the deadline,
+/// or that error prefixed with `cancelled` if the turn is cancelled. An unrepresentable timeout
+/// returns an error before the first attempt.
 async fn fetch_until_ok(fetch: &FetchStep, ctx: &TurnContext) -> Result<(), String> {
     let deadline = tokio::time::Instant::now()
         .checked_add(Duration::from_secs(fetch.timeout_seconds))

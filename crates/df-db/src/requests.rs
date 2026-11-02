@@ -355,7 +355,11 @@ pub async fn raise_question(
 }
 
 /// Raises an approval request of a registered type on the task, unless the type finds it granted
-/// already.
+/// already. An identical pending request is returned with `new` set to false.
+///
+/// Returns [`RequestError::UnknownType`] for an unregistered type, [`RequestError::NotFound`]
+/// for a missing task, and [`RequestError::TooManyPending`] when a new request exceeds the
+/// task's pending limit. Type validation and database errors are propagated.
 pub async fn raise_approval(
     pool: &PgPool,
     types: &ApprovalTypes,
