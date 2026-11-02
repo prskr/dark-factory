@@ -6,7 +6,7 @@
 
 Let agents work as a team on a project, with forge events driving the work instead of humans relaying them:
 
-- Forge events (submitted reviews, CI results, merged PRs, mentions) reach the right task without a human (ADR-0015).
+- Forge events (submitted reviews, CI results, merged PRs, mentions) reach the right task without a human (ADR-0015, ADR-0051). Agents read and answer PR feedback through forge tools (ADR-0036).
 - Agents create tasks for other personas (delegation) and tasks depend on other tasks: on their completion or on their PR being merged (ADR-0026, ADR-0033, ADR-0043).
 - Tasks form a tree. Subtasks can branch off their parent's branch, and a reviewing task can be based on the branch it reviews (ADR-0034, ADR-0041). The parent is also where questions escalate to: task → parent → chat → human (ADR-0043).
 - Results travel between tasks as artifacts (Markdown or images such as screenshots); research on the repository needs no commit (ADR-0044, ADR-0048). Markdown renders with highlighted code and Mermaid diagrams (ADR-0047).
@@ -16,13 +16,13 @@ Let agents work as a team on a project, with forge events driving the work inste
 - Model credentials leave the sandbox: every persona uses a model provider, an inference endpoint in the gateway injects its credential for the Anthropic Messages, OpenAI Chat Completions and OpenAI Responses APIs, and the gateway is the only source of usage (ADR-0010 accepted risk, ADR-0029, ADR-0050).
 - OpenCode runs as a second harness next to Claude Code.
 
-Prerequisites: iteration 2 is done ([`iteration-2.md`](iteration-2.md)).
+Prerequisites: iteration 2 is done ([`iteration-2.md`](iteration-2.md)); `iter3-webhooks` builds directly on `lifecycle-events` (outbox) and `iter2-task-volume-lifecycle` (retention scan).
 
 ## 2. Demo scenario (definition of done)
 
 1. In the CEO chat of a project, the board member asks for a change. The CEO creates `DF-20` (implementation, agent A) and `DF-21` (review, agent B) with `blocked_by: DF-20` and `base_task: DF-20` (pattern 2.2).
 2. A commits and calls `complete_task`. `DF-21` starts automatically; its HEAD contains A's changes. B builds, runs the tests and submits a review with line comments in the forge.
-3. The submitted review wakes `DF-20` through the webhook (individual review comments don't). A addresses the comments and completes again. `DF-21` runs again and sees the new commits without fetching anything. B approves and completes; the PR of `DF-20` is marked ready.
+3. `DF-21` ending wakes `DF-20` through the task relations (`iter3-task-dependencies` / `iter3-task-tree`; the bot's own reviews never wake a task through webhooks, ADR-0051). A addresses the comments and completes again. `DF-21` runs again and sees the new commits without fetching anything. B approves and completes; the PR of `DF-20` is marked ready.
 4. A feature task `DF-30` with `subtask_base: parent-branch` and `subtask_merge: parent-agent` gets two iteration subtasks, the second blocked by "PR merged" of the first. The feature agent merges the first subtask PR into the feature branch; the second subtask starts and finds the merge on its base.
 5. During `DF-20`, A asks a question the CEO can't decide. The CEO asks the board member in the chat and relays the answer to A. A delegates a research task `DF-22` to a researcher persona and ends its turn. The researcher writes its findings as an artifact; A wakes when `DF-22` completes and reads the artifact.
 6. A routine creates a nightly task. A CI failure on its PR wakes it.
@@ -34,7 +34,10 @@ Automated with the fake ACP agent and a fake forge webhook sender (`iter1-demo-e
 
 ```mermaid
 flowchart LR
-  WH[iter3-webhooks] --> TD[iter3-task-dependencies]
+  LE([lifecycle-events, it. 2]) -.-> WH
+  TV([iter2-task-volume-lifecycle, it. 2]) -.-> WH
+  RT[iter3-review-tools] --> WH[iter3-webhooks]
+  WH --> TD[iter3-task-dependencies]
   TD --> CH[iter3-chats]
   TD --> TT[iter3-task-tree]
   TD --> AR[iter3-artifacts]
@@ -46,8 +49,9 @@ flowchart LR
 
 | Change | Scope |
 |---|---|
-| `iter3-webhooks` | ADR-0015: webhook endpoint in the control plane, `handle-webhook` in the Forgejo plugin with host-side signature verification, filtering (own bot, submitted reviews only), debouncing per task, routing by branch → task mapping and issue mentions, queued notification messages. Follow-ups deferred until webhooks exist: a merged PR completes its task (`iter1-keep-alive-and-review`) and deletes its task volume (`iter2-task-volume-lifecycle`); a ready PR goes back to draft when an `in_review` task gets a new message. |
-| `iter3-task-dependencies` | ADR-0043, ADR-0026, ADR-0033: `created_by` becomes a principal (human or task), `create_task` and `list_personas` factory tools, persona `description`; `blocked_by` relations on task completion and on "PR merged"; dependent tasks start automatically; a PR closed without merge queues a message instead of unblocking; a parent is woken by every child that ends (completed, failed, cancelled; ADR-0016). |
+| `iter3-review-tools` | ADR-0036, ADR-0015: factory tools `read_pull_request_feedback` (PR comments, reviews, review threads, author roles `bot` / `member` / `outside`) and `comment_on_pull_request` on the task's own PR; WIT `pull-requests.list-feedback` and `reply` in the Forgejo and GitHub plugins. |
+| `iter3-webhooks` | ADR-0015, ADR-0051: webhook endpoint per plugin, `handle-webhook` in the Forgejo and GitHub plugins with host-side signature verification, filtering (own bot, submitted reviews only, project setting `webhook_wake`), 30 s debouncing per task through the outbox, routing by branch → task mapping, PR number and issue links, queued notification messages. Humans' reviews wake a task this way; a mention on an issue without a task creating a new task stays in the backlog. Follow-ups deferred until webhooks exist: a merged PR completes its task (`iter1-keep-alive-and-review`) and deletes its task volume (`iter2-task-volume-lifecycle`); a ready PR goes back to draft when an `in_review` task gets a new message. |
+| `iter3-task-dependencies` | ADR-0043, ADR-0026, ADR-0033: `created_by` becomes a principal (human or task), `create_task` and `list_personas` factory tools, persona `description`; `blocked_by` relations on task completion and on "PR merged"; dependent tasks start automatically; a PR closed without merge queues a message instead of unblocking; a parent is woken by every child that ends (completed, failed, cancelled; ADR-0016); a reviewing task that ends wakes the task it reviews (demo step 3; to decide: `base_task` relation or relay through the parent). |
 | `iter3-task-tree` | ADR-0034, ADR-0041: `parent_id`, `subtask_base` / `subtask_merge` resolution, `base_task`, draft PRs against the base branch, prepare fast-forward for task branches without own commits, notices on parent-branch changes, factory tools to create subtasks and merge subtask PRs, cancelling a task cancels its subtree (`iter2-cancel` non-goal), questions to the parent task's agent (`agent_requests` addressee, `answer_question`; iteration-2 decision 8, ADR-0043), limits on depth and children. UI: Overview and Sub-tasks tabs in the details column, done/total chip on task rows (see [`roadmap.md`](roadmap.md)). |
 | `iter3-branch-workflows` | ADR-0033, ADR-0025: branch rewrite policy per project (`never` / `with-lease` / `always`) in the runtime and the Git proxy, tasks starting from existing branches, PR modes `none` and `attach`, forge capabilities to list open PRs and read CI status and job logs. |
 | `iter3-markdown-rendering` | ADR-0047: shared Markdown renderer (moved out of `transcript/`), syntect code highlighting in CSS-class mode with a 64 KiB plain fallback, `web.codeTheme.light` / `web.codeTheme.dark` in the instance config and Helm values, generated theme stylesheet, vendored Mermaid loaded on demand with `securityLevel: 'sandbox'`. |
@@ -57,7 +61,7 @@ flowchart LR
 | `iter3-inference-gateway` | ADR-0050, [`design/egress.md`](../../design/egress.md) §9: inference endpoint `/inference` on the Git proxy's TLS listener with pod-IP identity, credential swap and unbuffered streaming. Pass-through of Anthropic Messages, OpenAI Chat Completions and OpenAI Responses with a fixed path list per API. Instance-wide model providers (upstream URL per wire API, credential reference, credential scheme incl. `claude-subscription` for `claude-code` only, extra headers as minijinja templates rendered per run); every persona references one (replaces `harness_credential_id`, `HarnessCredentials` removed). Harness wire APIs as code constants, checked when a persona is saved. Usage per request from the response, reported to the control plane and stored per request; the runtime's usage reporting is removed once the gateway path is verified. The fake ACP agent gets a model-call step and the e2e a fake Anthropic upstream. |
 | `iter3-opencode-harness` | OpenCode (`opencode acp`) as a second harness through the inference endpoint: image, generated config (provider base URL, placeholder key, model), disabled auto-update, model catalog fetch and sharing, session state on the task volume. First harness besides Claude Code ahead of the harness registry (F12). |
 
-Suggested order: `iter3-webhooks` first, since review routing and "PR merged" dependencies need it. Then `iter3-task-dependencies` (agents creating tasks is the core primitive), then `iter3-chats` (the entry point and root of the delegation chain) and `iter3-task-tree`: pattern 2.2 only runs on its own once dependencies and `base_task` exist. `iter3-branch-workflows` follows `iter3-webhooks` (CI status, merge triggers). `iter3-markdown-rendering` is independent and goes before `iter3-artifacts`. `iter3-artifacts` follows `iter3-task-dependencies` and is independent of the tree and the chats (a chat just uses it). `iter3-routines` and `iter3-inference-gateway` are independent and can run in parallel; `iter3-opencode-harness` follows `iter3-inference-gateway`.
+Suggested order: `iter3-review-tools` first (the webhook message points the agent to `read_pull_request_feedback`, and `author-role` comes from it), then `iter3-webhooks`, since review routing and "PR merged" dependencies need it; `lifecycle-events` and `iter2-task-volume-lifecycle` from iteration 2 must be merged before it. Then `iter3-task-dependencies` (agents creating tasks is the core primitive), then `iter3-chats` (the entry point and root of the delegation chain) and `iter3-task-tree`: pattern 2.2 only runs on its own once dependencies and `base_task` exist. `iter3-branch-workflows` follows `iter3-webhooks` (CI status, merge triggers). `iter3-markdown-rendering` is independent and goes before `iter3-artifacts`. `iter3-artifacts` follows `iter3-task-dependencies` and is independent of the tree and the chats (a chat just uses it). `iter3-routines` and `iter3-inference-gateway` are independent and can run in parallel; `iter3-opencode-harness` follows `iter3-inference-gateway`.
 
 ## 4. Decisions taken for this iteration
 
@@ -73,7 +77,7 @@ Suggested order: `iter3-webhooks` first, since review routing and "PR merged" de
 | 8 | One inference endpoint passing through three wire APIs (Anthropic Messages, OpenAI Chat Completions, OpenAI Responses), with model providers as one entity (service + credential), instead of provider kinds or an Anthropic-only pass-through. Every harness and later the factory minion use it, and usage is measured only there (ADR-0050). | Anthropic-only pass-through; separate provider and connection entities; usage from the harness. |
 | 9 | No provider adapter plugins in this iteration: extra headers are templates rendered by the control plane per run. | WASI adapter plugins in the gateway: a plugin runtime in the gateway for one known header. |
 
-To decide before the iteration starts: debounce window (ADR-0015 says 30–60 s), default limits on tree depth and children, whether a dependent task restarts on every re-completion of its dependency or only once per new commit.
+To decide before the iteration starts: default limits on tree depth and children, whether a dependent task restarts on every re-completion of its dependency or only once per new commit.
 
 ## 5. Contract changes
 
@@ -81,9 +85,9 @@ To decide before the iteration starts: debounce window (ADR-0015 says 30–60 s)
 |---|---|
 | `darkfactory.agent.v1` | Branch rewrite policy in `Assign` for pushes with lease (ADR-0033). Base branches need no change; they reach the runtime as `Workspace.base_branch` (ADR-0034, ADR-0041). `HarnessCredentials` is removed (breaking); the gateway base URL and placeholder go into the harness env. `transcript.v1`: `TurnEnded.usage`, `usage_source` and `UsageSource` are removed (breaking). |
 | `darkfactory.gateway.v1` | Branch rewrite policy in `GitRoute`; inference route per sandbox (wire API, upstream URL, credential reference and scheme, rendered headers), provider credentials in the snapshot, usage reports per request. |
-| Integrations WIT | `handle-webhook`, `pull-requests.merge`, branch creation, list open PRs with filters, CI status and job logs (ADR-0028, ADR-0033). |
-| Factory tools | Creating tasks (any persona) with `blocked_by` and `base_task`, creating subtasks, `list_personas`, `ask_question` addressed to the parent and `answer_question`, `write_artifact` / `list_artifacts` / `read_artifact`, merging subtask PRs, updating the project context. |
-| Database | `tasks.created_by` and `agent_requests.decided_by` become principals; `tasks.kind`; `task_artifacts`; `personas.description`; `agent_requests` gets an addressee (additive on top of iteration 2). `model_providers`, `model_usage`; `personas.harness_credential_id` replaced by `model_provider_id` (breaking, migrated); `personas.harness` allows `opencode`. |
+| Integrations WIT | `pull-requests.list-feedback` and `reply`; interface `webhooks` (`handle-webhook`, `whoami`, `author-role`) and host import `webhook-signature` (breaking, required in world `forge`); `pull-requests.merge`, branch creation, list open PRs with filters, CI status and job logs (ADR-0028, ADR-0033). |
+| Factory tools | `read_pull_request_feedback`, `comment_on_pull_request`; creating tasks (any persona) with `blocked_by` and `base_task`, creating subtasks, `list_personas`, `ask_question` addressed to the parent and `answer_question`, `write_artifact` / `list_artifacts` / `read_artifact`, merging subtask PRs, updating the project context. |
+| Database | `tasks.created_by` and `agent_requests.decided_by` become principals; `tasks.kind`; `task_artifacts`; `personas.description`; `agent_requests` gets an addressee (additive on top of iteration 2); `webhook_events`, `projects.webhook_wake`, `tasks.pr_merged_at`. `model_providers`, `model_usage`; `personas.harness_credential_id` replaced by `model_provider_id` (breaking, migrated); `personas.harness` allows `opencode`. |
 
 ## 6. Out of scope (later iterations)
 
@@ -102,7 +106,7 @@ To decide before the iteration starts: debounce window (ADR-0015 says 30–60 s)
 
 ## 7. Verify first (spikes)
 
-- Forgejo webhooks: which events distinguish a submitted review from individual review comments; signature header and payload shape (`product/context.md`, open questions).
+- Forgejo webhooks: which events distinguish a submitted review from individual review comments; signature header and payload shape (`product/context.md`, open questions). Task 1 of `iter3-webhooks`.
 - Forgejo API: merging a PR with the project's merge method, creating a branch from a ref, the draft/WIP mechanism (ADR-0025).
 - Claude Code with `ANTHROPIC_BASE_URL` pointing at the gateway in a long interactive session (the iteration-1 spike confirmed streaming and the swapped subscription bearer for `claude -p`).
 - Usage fields in streamed responses of the `anthropic` and `openai-compatible` kinds (`stream_options.include_usage` is not supported by every provider).
