@@ -1,6 +1,6 @@
 # ADR-0021: Usage and cost data
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md))
 - **Date:** 2026-10-16
 
 ## Context
