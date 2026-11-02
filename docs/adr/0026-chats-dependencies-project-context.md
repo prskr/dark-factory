@@ -1,17 +1,17 @@
 # ADR-0026: Chats per persona and project, task dependencies, project context
 
-- **Status:** Accepted (planned for iteration 3, amended by ADR-0041 and ADR-0043)
+- **Status:** Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043 and ADR-0052)
 - **Date:** 2026-10-16
-- **Related:** [ADR-0016](0016-runs-and-triggers.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md)
+- **Related:** [ADR-0016](0016-runs-and-triggers.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md), [ADR-0052](0052-dependencies-gate-the-first-start.md)
 
 ## Context
 
-The typical workflow is an ongoing chat with the CEO persona per project, in which the CEO creates tasks for other agents — e.g. an implementation task and a review task blocked by it. Paperclip offers only one chat per agent.
+The typical workflow is an ongoing chat with the CEO persona per project, in which the CEO creates tasks for other agents — e.g. an implementation task and a review task that depends on it. Paperclip offers only one chat per agent.
 
 ## Decision
 
 - One chat per (persona, project): a long-lived conversation scoped to a project. A chat is a task of kind `chat` (ADR-0043).
-- Task dependencies: `blocked_by` relations. When a task completes (`complete_task`), dependent tasks become runnable and start automatically.
+- Task dependencies: `depends_on` relations. When a task completes (`complete_task`), dependent tasks in `awaiting_dependencies` start automatically. Dependencies gate only the first start; later rounds go through the parent (ADR-0052).
 - Project context: a Dark Factory–side project document injected into every run of the project; agents with `project:context:write` can update it, e.g. by extracting context from a chat.
 
 ## Consequences

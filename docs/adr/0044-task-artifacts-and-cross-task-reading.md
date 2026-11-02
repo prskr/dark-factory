@@ -14,7 +14,7 @@ Artifacts (Markdown documents an agent writes for the human or as intermediate r
 - **Factory tools:**
   - `write_artifact(name, markdown)`: only on the agent's own task.
   - `list_artifacts(task?)` and `read_artifact(task?, name)`: own task by default, other tasks as below.
-- **Who can read what:** an agent reads artifacts of its own task, its ancestors (including the chat), its descendants, the tasks it is `blocked_by` and its `base_task` (ADR-0041). Everything else is refused. Reads of other tasks are audited. Nobody writes to another task's artifacts.
+- **Who can read what:** an agent reads artifacts of its own task, its ancestors (including the chat), its descendants, the tasks it depends on (`depends_on`) and its `base_task` (ADR-0041). Everything else is refused. Reads of other tasks are audited. Nobody writes to another task's artifacts.
 - **Untrusted content:** an artifact is agent-written text. The tool result marks it as data from another task, and the playbook tells agents to treat it as input, not as instructions.
 - **Hand-over:** the message that wakes a parent on a child's end (ADR-0043) lists the child's artifact names. A coordinator's instructions to a child stay the task description, delivered as the first message.
 - **Humans:** read artifacts in the task page and in the chat UI as rendered Markdown (the renderer of ADR-0004). Cards with previews, types and times are iteration 6.

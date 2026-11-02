@@ -4,6 +4,28 @@ A single-tenant control plane that delegates tasks to coding agents running in K
 
 ## Language
 
+### Tasks
+
+**Completion**:
+The agent's declaration that its work on a task is finished for now; the task then waits for review. A task can complete several times.
+_Avoid_: Done, finished
+
+**Done**:
+The final state of a task whose pull request was merged or that a board member marked done.
+_Avoid_: Completed, closed, merged
+
+**Parent task**:
+The task another task reports to: it is woken whenever that task ends and receives its escalated questions.
+_Avoid_: Creator, owner, supervisor
+
+**Dependency**:
+A condition under which a task may start for the first time: another task of the same project reaching its first Completion, or reaching Done.
+_Avoid_: Blocker, blocked by, prerequisite
+
+**Delegation**:
+An agent handing part of its work to another persona by creating a task whose parent task is its own.
+_Avoid_: Sub-agent, hand-off
+
 ### Transcript
 
 **Transcript**:

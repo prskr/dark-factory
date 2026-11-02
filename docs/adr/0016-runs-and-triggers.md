@@ -1,8 +1,8 @@
 # ADR-0016: Runs and triggers
 
-- **Status:** Accepted (amended by ADR-0034 and ADR-0043)
+- **Status:** Accepted (amended by ADR-0034, ADR-0043 and ADR-0052)
 - **Date:** 2026-10-16
-- **Related:** [ADR-0015](0015-webhook-filtering-and-routing.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md)
+- **Related:** [ADR-0015](0015-webhook-filtering-and-routing.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md), [ADR-0052](0052-dependencies-gate-the-first-start.md)
 
 ## Context
 
@@ -15,8 +15,8 @@ Tasks are interrupted — questions to a human or another agent, limits, failure
 - History belongs to the task: all runs share one transcript and context. Continuity via the harness's session state on the PVC where possible, otherwise a summary.
 - Humans can queue messages at any time; delivery is turn-based, like ACP.
 - Blocking questions keep the sandbox alive for a short window; later answers start a new run.
-- Triggers: assignment (human or superior agent), messages, routines, completion of a task this one depends on (ADR-0026), routed webhook events (ADR-0015).
-- Delegation: a parent doesn't block on children; any child ending (completed, failed, cancelled) queues a message with its summary on the parent, which decides whether there is anything to do (ADR-0043).
+- Triggers: assignment (human or superior agent), messages, routines, dependencies satisfied before the first start (ADR-0026, ADR-0052), routed webhook events (ADR-0015).
+- Delegation: a parent doesn't block on children; any child ending (Completion, Done, failed, cancelled) queues a message with its summary on the parent, which decides whether there is anything to do (ADR-0043).
 - Event-driven plus routines only; no Paperclip-style heartbeats unless something turns out to be missing.
 
 ## Consequences

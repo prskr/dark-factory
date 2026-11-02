@@ -27,7 +27,7 @@
 - Throughput comes from many tasks being worked on concurrently, not from fast sandbox start-up; cold starts are acceptable (ADR-0022).
 - Claude Code support exists primarily to use Claude **subscriptions** instead of API pricing; other subscription-style providers (e.g. OpenCode Go) should follow (F5, F6).
 - Deliberately out of scope: **feedback on changes** (code review). Review happens in the forge on the pull request; Dark Factory routes review events to the agent but doesn't reproduce line comments, review threads or approvals (ADR-0036).
-- Typical workflow: an ongoing chat with the CEO per project, where the CEO creates tasks for other agents, e.g. an implementation task for agent A and a review task for agent B blocked by it; when A completes, B is woken automatically.
+- Typical workflow: an ongoing chat with the CEO per project, where the CEO creates tasks for other agents, e.g. an implementation task for agent A and a review task for agent B that depends on it; when A completes, B starts automatically.
 
 ## 2. Target environment
 
@@ -80,7 +80,7 @@
 - **Full-text search** across tasks and transcripts.
 - **Projects**: typically one Git repository in a forge + one issue tracker + a sandbox image (ADR-0022) + a project context document (ADR-0026) + Git config entries and commit hooks for the agents' own commits (also at instance scope, ADR-0009), optionally a repository configuration file `.dark-factory/config.toml`, activated by approval (F11, ADR-0039).
 - **Agent memory**: agents store, search and retrieve memories at project and (project, persona) scope; memories are hints with provenance, reviewable in the UI, and can be promoted into the project context by approval. Explicit memories with full-text search first, curation and semantic retrieval later (ADR-0040) *(not in the first iteration; planned before LSP)*.
-- **Artifacts per task**: text documents (Markdown) an agent creates for the human in the loop, or as intermediate results to be consumed later. Agents write only their own task's artifacts and read those of related tasks (ancestors, descendants, `blocked_by`, `base_task`), chats included (ADR-0044).
+- **Artifacts per task**: text documents (Markdown) an agent creates for the human in the loop, or as intermediate results to be consumed later. Agents write only their own task's artifacts and read those of related tasks (ancestors, descendants, `depends_on`, `base_task`), chats included (ADR-0044).
 - **Routines**: scheduled tasks with a fixed prompt, always assigned to a specific agent.
 - **Audit log**:
   - last activity
