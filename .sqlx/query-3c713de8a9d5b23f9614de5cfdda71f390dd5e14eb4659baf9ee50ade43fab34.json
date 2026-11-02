@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tasks SET volume_deleted_at = NULL WHERE id = $1 AND volume_deleted_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c713de8a9d5b23f9614de5cfdda71f390dd5e14eb4659baf9ee50ade43fab34"
+}

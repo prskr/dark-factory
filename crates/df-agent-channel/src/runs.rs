@@ -15,6 +15,7 @@ macro_rules! terminal_states {
         "('succeeded', 'failed', 'cancelled')"
     };
 }
+pub(crate) use terminal_states;
 
 macro_rules! run_columns {
     () => {

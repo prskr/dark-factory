@@ -624,6 +624,35 @@ impl SandboxProvider for K8sSandboxProvider {
         Ok(())
     }
 
+    async fn delete_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError> {
+        let pvcs: Api<PersistentVolumeClaim> =
+            Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);
+        let name = task.task_key.volume_name();
+
+        let deleted = tokio::time::timeout(
+            K8S_API_TIMEOUT,
+            pvcs.delete(&name, &DeleteParams::default()),
+        )
+        .await;
+        match deleted {
+            Ok(Ok(_)) => info!(task_key = %task.task_key, volume = %name, "task PVC deleted"),
+            Ok(Err(kube::Error::Api(e))) if e.code == 404 => {
+                info!(task_key = %task.task_key, volume = %name, "task PVC already gone");
+            }
+            Ok(Err(e)) => {
+                return Err(ProviderError::Backend(format!(
+                    "failed to delete task PVC `{name}`: {e}"
+                )));
+            }
+            Err(_elapsed) => {
+                return Err(ProviderError::Backend(format!(
+                    "timeout trying to delete task PVC `{name}`"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
         let sandboxes: Api<Sandbox> =
             Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);

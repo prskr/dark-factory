@@ -1,0 +1,204 @@
+suite: Dark Factory Helm Chart - plugins
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - control-plane-service.yaml
+  - migrate-job.yaml
+  - rbac.yaml
+  - sandbox-namespace.yaml
+  - certs.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - netpol.yaml
+  - httproute.yaml
+  - servicemonitor.yaml
+tests:
+  - it: mounts the Forgejo and GitHub plugin images of the app version read-only by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-forgejo
+            image:
+              reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.1.0
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-forgejo
+            mountPath: /plugins/forgejo
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-github
+            image:
+              reference: ghcr.io/prskr/dark-factory/plugin-github:0.1.0
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-github
+            mountPath: /plugins/github
+            readOnly: true
+
+  - it: references the plugin image by digest when one is pinned
+    template: control-plane-deployment.yaml
+    set:
+      plugins.forgejo.image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-forgejo
+            image:
+              reference: ghcr.io/prskr/dark-factory/plugin-forgejo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+              pullPolicy: IfNotPresent
+
+  - it: renders no plugin volume and no plugin mount for a plugin without an image
+    template: control-plane-deployment.yaml
+    values:
+      - values/plugin-baked-in.yaml
+    asserts:
+      # config, db-app, oidc and tls only; the default release adds the two plugin volumes
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 4
+      - lengthEqual:
+          path: spec.template.spec.containers[0].volumeMounts
+          count: 4
+
+  - it: rejects a plugin name that is not a lowercase DNS label
+    # the values schema rejects the name before any template renders
+    template: gateway-deployment.yaml
+    set:
+      plugins.My_Plugin.path: /custom/plugin.wasm
+    asserts:
+      - failedTemplate:
+          errorPattern: "invalid propertyName 'My_Plugin'"
+
+  - it: writes the custom plugin path and settings into the config
+    template: configmap.yaml
+    documentIndex: 0
+    values:
+      - values/plugin-baked-in.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'path: "/custom/forgejo.wasm"'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'settings: \{"wip-prefixes":"WIP:"\}'
+
+  - it: writes the routing hosts and auth scheme of a plugin into the config
+    template: configmap.yaml
+    documentIndex: 0
+    values:
+      - values/plugin-routing.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "github":\n    path: "/custom/github.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\},\{"apiUrl":"https://ghe.example.org/api/v3","host":"ghe.example.org"\},"ghe.example.net"\]\n    authScheme: "bearer"'
+
+  - it: keeps Forgejo the default plugin and routes github.com to GitHub by default
+    template: configmap.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n'
+
+  - it: renders no GitHub plugin volume when the entry is removed
+    template: control-plane-deployment.yaml
+    values:
+      - values/plugin-github-removed.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-github
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-github
+          any: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-forgejo
+          any: true
+
+  - it: writes no GitHub plugin config when the entry is removed
+    template: configmap.yaml
+    documentIndex: 0
+    values:
+      - values/plugin-github-removed.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: '"github"|hosts:|authScheme:'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"'
+
+  - it: rejects an unknown plugin auth scheme
+    # the values schema rejects the value before any template renders
+    template: configmap.yaml
+    set:
+      plugins.forgejo.authScheme: basic
+    asserts:
+      - failedTemplate:
+          errorPattern: "authScheme"
+
+  - it: rejects a plugin host route without an https API URL
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+          apiUrl: http://api.github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
+  - it: rejects a plugin host route with an unknown key
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+          api: https://api.github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
+  - it: rejects a plugin host route without an API URL
+    template: configmap.yaml
+    set:
+      plugins.forgejo.hosts:
+        - host: github.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "hosts"
+
+  - it: rejects a plugin entry that has neither an image nor a path
+    # the values schema rejects the entry before any template renders
+    template: control-plane-deployment.yaml
+    values:
+      - values/plugin-without-image-or-path.yaml
+    asserts:
+      - failedTemplate:
+          errorPattern: "at '/plugins/forgejo': 'anyOf' failed"
+
+  - it: puts the configured plugin tag into the image volume reference of the pod template
+    template: control-plane-deployment.yaml
+    set:
+      plugins.forgejo.image.tag: 0.2.0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-forgejo
+            image:
+              reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.2.0
+              pullPolicy: IfNotPresent

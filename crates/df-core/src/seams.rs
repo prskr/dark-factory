@@ -86,6 +86,8 @@ pub enum ProviderError {
 #[async_trait]
 pub trait SandboxProvider: Send + Sync {
     async fn ensure_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError>;
+    /// Deletes the task's volume. A volume that doesn't exist counts as deleted.
+    async fn delete_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError>;
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError>;
     async fn teardown(&self, run_id: RunId) -> Result<(), ProviderError>;
     /// Peer = URI SAN from the client cert + peer IP. `None` = reject.

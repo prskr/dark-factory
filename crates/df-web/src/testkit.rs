@@ -214,6 +214,8 @@ pub(crate) struct TestApp {
     pub idp: Idp,
     /// The forge the handlers call; records the calls.
     pub forge: df_core::testing::FakeForgeClient,
+    /// The sandbox provider the handlers call; records the calls.
+    pub provider: df_core::testing::FakeSandboxProvider,
     _dir: tempfile::TempDir,
 }
 
@@ -295,8 +297,10 @@ impl TestApp {
             extra_scopes: Vec::new(),
         };
         let forge = df_core::testing::FakeForgeClient::new();
+        let provider = df_core::testing::FakeSandboxProvider::new();
         let state = WebState {
             forge: Arc::new(forge.clone()),
+            provider: Arc::new(provider.clone()),
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
             oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
             pool: pool.clone(),
@@ -312,6 +316,7 @@ impl TestApp {
             pool,
             idp,
             forge,
+            provider,
             _dir: dir,
         }
     }

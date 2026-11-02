@@ -52,6 +52,8 @@ pub struct WebState {
     pub forges: df_core::routing::ForgeRoutes,
     /// The forge client; marking a task done uses it to mark the PR ready for review.
     pub forge: Arc<dyn df_core::ForgeClient>,
+    /// The sandbox provider; resetting a task's workspace deletes its volume.
+    pub provider: Arc<dyn df_core::SandboxProvider>,
     /// Flow events of the egress gateways; without it the egress log page is unavailable.
     pub flows: Option<Arc<dyn egress::FlowSource>>,
     /// Checks `cluster-service` entries against the cluster; without it they cannot be added.

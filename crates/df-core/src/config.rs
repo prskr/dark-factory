@@ -57,6 +57,8 @@ pub struct InstanceConfig {
     #[serde(default)]
     pub runs: RunsConfig,
     #[serde(default)]
+    pub volumes: VolumesConfig,
+    #[serde(default)]
     pub web: WebConfig,
     #[serde(default)]
     pub forge: ForgeConfig,
@@ -525,6 +527,27 @@ impl Default for RunsConfig {
     }
 }
 
+/// Retention of task volumes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VolumesConfig {
+    /// The volume of a `completed` or `cancelled` task is deleted this long after its last run.
+    #[serde(default = "default_retain_after_close")]
+    pub retain_after_close_seconds: u64,
+    /// The volume of any task is deleted this long after its last run.
+    #[serde(default = "default_idle_ttl")]
+    pub idle_ttl_seconds: u64,
+}
+
+impl Default for VolumesConfig {
+    fn default() -> Self {
+        Self {
+            retain_after_close_seconds: default_retain_after_close(),
+            idle_ttl_seconds: default_idle_ttl(),
+        }
+    }
+}
+
 /// Instance-wide forge settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -691,6 +714,14 @@ fn default_cancel_grace() -> u64 {
 
 fn default_keep_alive() -> u64 {
     10 * 60
+}
+
+fn default_retain_after_close() -> u64 {
+    7 * 24 * 60 * 60
+}
+
+fn default_idle_ttl() -> u64 {
+    30 * 24 * 60 * 60
 }
 
 fn default_instance_name() -> String {
@@ -1152,6 +1183,23 @@ harness:
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.harness.claude_code.env["DISABLE_AUTOUPDATER"], "1");
         assert_eq!(cfg.harness.claude_code.image, "registry.example/harness:1");
+    }
+
+    #[test]
+    fn volume_retention_defaults_to_seven_and_thirty_days_and_can_be_overridden() {
+        let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
+        assert_eq!(cfg.volumes.retain_after_close_seconds, 7 * 24 * 3600);
+        assert_eq!(cfg.volumes.idle_ttl_seconds, 30 * 24 * 3600);
+
+        let custom =
+            format!("{minimal}volumes:\n  retainAfterCloseSeconds: 60\n  idleTtlSeconds: 120\n");
+        let cfg = InstanceConfig::from_yaml_str(&custom).unwrap();
+        assert_eq!(cfg.volumes.retain_after_close_seconds, 60);
+        assert_eq!(cfg.volumes.idle_ttl_seconds, 120);
+
+        let typo = format!("{minimal}volumes:\n  idleTtl: 120\n");
+        assert!(InstanceConfig::from_yaml_str(&typo).is_err());
     }
 
     #[test]

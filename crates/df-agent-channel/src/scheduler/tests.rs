@@ -3,6 +3,7 @@
 use super::*;
 use crate::runs::get_run;
 use crate::testing::Env;
+use crate::testing::gated::{Gate, GatedProvider};
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, TaskStatus};
 use sqlx::PgPool;
@@ -71,6 +72,92 @@ async fn new_task_gets_a_run_and_a_sandbox() {
     assert_eq!(spec.image, "registry.example.org/df/project:latest");
     assert_eq!(spec.harness.as_deref(), Some("claude-code"));
     assert_eq!(spec.labels["dark-factory.io/task-key"], "DF-1");
+}
+
+async fn volume_deleted_at(pool: &PgPool, env: &Env) -> Option<DateTime<Utc>> {
+    sqlx::query_scalar("SELECT volume_deleted_at FROM tasks WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn mark_volume_deleted(pool: &PgPool, env: &Env) {
+    sqlx::query("UPDATE tasks SET volume_deleted_at = now() WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn deleted_volume_is_recreated_before_the_next_run_and_the_marker_cleared() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    mark_volume_deleted(&pool, &env).await;
+
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+
+    let calls = env.provider.calls();
+    assert!(matches!(&calls[0], SandboxCall::EnsureTaskVolume(v) if v.volume_name == "task-df-1"));
+    assert!(matches!(&calls[1], SandboxCall::Provision(spec) if spec.volume_name == "task-df-1"));
+    assert_eq!(volume_deleted_at(&pool, &env).await, None);
+}
+
+#[tokio::test]
+async fn failed_volume_creation_keeps_the_deletion_marker() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    mark_volume_deleted(&pool, &env).await;
+    env.provider
+        .push_ensure_volume_result(Err(ProviderError::Backend("storage down".into())));
+
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        only_run(&pool).await.outcome,
+        Some(RunOutcome::ProvisioningFailed)
+    );
+    assert!(volume_deleted_at(&pool, &env).await.is_some());
+}
+
+#[tokio::test]
+async fn the_next_run_after_a_workspace_reset_recreates_the_volume() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    env.insert_run(env.task.id, 1, "succeeded").await;
+    sqlx::query("UPDATE tasks SET status = 'waiting' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    df_db::volumes::reset_workspace(
+        &pool,
+        env.ctx.provider.as_ref(),
+        env.task.id,
+        env.human(),
+        df_db::volumes::DELETE_TIMEOUT,
+    )
+    .await
+    .unwrap();
+    assert!(volume_deleted_at(&pool, &env).await.is_some());
+
+    df_db::queue_message(&pool, env.task.id, env.human(), vec![])
+        .await
+        .unwrap();
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+
+    let calls = env.provider.calls();
+    assert!(matches!(&calls[0], SandboxCall::DeleteTaskVolume(v) if v.volume_name == "task-df-1"));
+    assert!(matches!(&calls[1], SandboxCall::EnsureTaskVolume(v) if v.volume_name == "task-df-1"));
+    assert!(matches!(&calls[2], SandboxCall::Provision(spec) if spec.volume_name == "task-df-1"));
+    assert_eq!(volume_deleted_at(&pool, &env).await, None);
 }
 
 #[tokio::test]
@@ -595,52 +682,11 @@ async fn runtime_that_does_not_report_within_the_stop_timeout_is_torn_down() {
     );
 }
 
-/// A provider whose `provision` signals that it started and then waits to be released.
-struct GatedProvider {
-    inner: df_core::testing::FakeSandboxProvider,
-    entered: std::sync::Arc<tokio::sync::Notify>,
-    release: std::sync::Arc<tokio::sync::Notify>,
-}
-
-#[async_trait::async_trait]
-impl df_core::SandboxProvider for GatedProvider {
-    async fn ensure_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError> {
-        self.inner.ensure_task_volume(task).await
-    }
-
-    async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
-        self.inner.provision(spec).await?;
-        self.entered.notify_one();
-        self.release.notified().await;
-        Ok(())
-    }
-
-    async fn teardown(&self, run_id: df_core::RunId) -> Result<(), ProviderError> {
-        self.inner.teardown(run_id).await
-    }
-
-    async fn resolve_identity(&self, peer: &df_core::PeerIdentity) -> Option<df_core::RunId> {
-        self.inner.resolve_identity(peer).await
-    }
-
-    fn events(&self) -> futures::stream::BoxStream<'static, SandboxEvent> {
-        self.inner.events()
-    }
-}
-
 #[tokio::test]
 async fn a_stop_while_the_sandbox_is_created_tears_it_down_afterwards() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    let (entered, release) = (
-        std::sync::Arc::new(tokio::sync::Notify::new()),
-        std::sync::Arc::new(tokio::sync::Notify::new()),
-    );
-    env.ctx.provider = std::sync::Arc::new(GatedProvider {
-        inner: env.provider.clone(),
-        entered: entered.clone(),
-        release: release.clone(),
-    });
+    let (entered, release) = GatedProvider::install(&mut env, Gate::Provision);
     let scheduler = Scheduler::new(env.ctx.clone());
     let run_id = env.insert_run(env.task.id, 1, "pending").await;
     let run = get_run(&pool, run_id).await.unwrap().unwrap();

@@ -95,7 +95,7 @@ impl Scheduler {
         start_queued_runs(&self.ctx.pool, START_BATCH).await
     }
 
-    async fn start_in_background(&self, provisions: &mut JoinSet<()>) {
+    pub(crate) async fn start_in_background(&self, provisions: &mut JoinSet<()>) {
         match self.start_runs().await {
             Ok(runs) => {
                 for run in runs {
@@ -129,6 +129,7 @@ impl Scheduler {
         let volume = TaskVolumeSpec::for_task(rc.task.key.clone());
         let volume_name = volume.volume_name.clone();
         provider.ensure_task_volume(&volume).await?;
+        df_db::tasks::clear_volume_deleted(&self.ctx.pool, rc.task.id).await?;
         // The run may have ended meanwhile (sandbox lost, connect timeout on another replica):
         // nothing would tear a sandbox created now down again.
         if !crate::runs::set_run_state(&self.ctx.pool, run_id, RunState::Provisioning, None).await?

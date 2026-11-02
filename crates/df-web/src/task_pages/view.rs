@@ -25,6 +25,8 @@ const CHIP_SELECT: &str =
 /// The persona picker of the composer sits in the card without a border of its own.
 const PERSONA_SELECT: &str =
     "min-h-11 rounded-full bg-transparent px-3 text-sm text-ink lg:min-h-8";
+/// A native modal `<dialog>`, centered from `md` and anchored to the bottom on a phone.
+const DIALOG_CLASS: &str = "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-md md:p-0";
 
 /// The status filter of the task list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -507,8 +509,13 @@ impl CancelNote {
 
 /// Status line, links, project, persona and branch; updated live. It also renders the narrow
 /// strip the details collapse to: status dot, links to the pull request and issue (icons with
-/// tooltips) and the control that shows the details again.
-pub(crate) fn details_region(task: &TaskDetail, cancel: &CancelNote) -> Markup {
+/// tooltips) and the control that shows the details again. `error` is shown below the details
+/// list.
+pub(crate) fn details_region(
+    task: &TaskDetail,
+    cancel: &CancelNote,
+    error: Option<&str>,
+) -> Markup {
     let branch = task
         .key
         .parse::<TaskKey>()
@@ -561,6 +568,7 @@ pub(crate) fn details_region(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                         ("Persona", html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } }),
                         ("Branch", html! { span class="font-mono text-xs" { (branch) } }),
                     ]))
+                    @if error.is_some() { div class="mt-3" { (field_error(error)) } }
                 }
                 @if !task.description.is_empty() {
                     details class="border-b border-line px-5 py-4 text-sm" {
@@ -574,18 +582,19 @@ pub(crate) fn details_region(task: &TaskDetail, cancel: &CancelNote) -> Markup {
 }
 
 /// The status of the details list: a select like the project filter whose menu shows the current
-/// status (checked), "Mark done" (disabled while the task works) and "Cancel task…", which opens
-/// the confirmation. A status that allows neither shows the plain name.
+/// status (checked), "Mark done" (disabled while the task works), "Reset workspace…" (disabled
+/// while a run is active) and "Cancel task…"; the last two open their confirmation. A completed
+/// task offers only "Reset workspace…". Opening the menu makes the phone sheet full height, so
+/// the menu below the select fits on the screen.
 fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
     let name = status_name(task.status);
-    if !task.status.can_mark_done() && !task.status.can_cancel() {
-        return html! { (name) };
-    }
+    let closed = !task.status.can_mark_done() && !task.status.can_cancel();
+    let active_run = cancel.run.is_some();
     let done = format!("/tasks/{}/done", task.key);
     let item = "flex min-h-11 w-full items-center rounded-lg px-2 text-left text-sm font-normal lg:min-h-9";
     html! {
         div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
-            button type="button" aria-haspopup="true" ":aria-expanded"="open" "x-on:click"="open = !open"
+            button type="button" aria-haspopup="true" ":aria-expanded"="open" "x-on:click"="open = !open; if (open) sheet = 'full'"
                 class="inline-flex min-h-11 items-center gap-1 rounded-[10px] border border-line bg-panel px-3 text-sm font-medium hover:bg-sunk lg:min-h-8" {
                 (name) (icon(Icon::ChevronDown))
             }
@@ -594,12 +603,26 @@ fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                     li class="flex min-h-11 items-center justify-between gap-2 rounded-lg px-2 text-sm font-medium text-accent-text lg:min-h-9" aria-current="true" {
                         span { (name) } (icon(Icon::Check))
                     }
+                    @if !closed {
+                        li {
+                            @if task.status.can_mark_done() {
+                                button type="button" hx-post=(done) hx-target="#task-details" hx-swap="outerMorph"
+                                    class={(item) " text-ink hover:bg-sunk"} { "Mark done" }
+                            } @else {
+                                button type="button" disabled class={(item) " cursor-not-allowed text-faint"} { "Mark done" }
+                            }
+                        }
+                    }
                     li {
-                        @if task.status.can_mark_done() {
-                            button type="button" hx-post=(done) hx-target="#task-details" hx-swap="outerMorph"
-                                class={(item) " text-ink hover:bg-sunk"} { "Mark done" }
+                        @if active_run {
+                            button type="button" disabled
+                                class="flex min-h-11 w-full cursor-not-allowed flex-col items-start justify-center rounded-lg px-2 py-1 text-left text-sm font-normal text-faint lg:min-h-9" {
+                                "Reset workspace…"
+                                span class="text-xs text-muted" { "Stop the run first" }
+                            }
                         } @else {
-                            button type="button" disabled class={(item) " cursor-not-allowed text-faint"} { "Mark done" }
+                            button type="button" "x-on:click"="open = false; $refs.resetDialog.showModal()"
+                                class={(item) " text-ink hover:bg-sunk"} { "Reset workspace…" }
                         }
                     }
                     @if task.status.can_cancel() {
@@ -610,7 +633,33 @@ fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                     }
                 }
             }
+            @if !active_run { (reset_dialog(task)) }
             @if task.status.can_cancel() { (cancel_dialog(task, cancel)) }
+        }
+    }
+}
+
+/// The confirmation of "Reset workspace…", built like [`cancel_dialog`]; it names what is lost
+/// (design D2).
+fn reset_dialog(task: &TaskDetail) -> Markup {
+    let action = format!("/tasks/{}/reset-workspace", task.key);
+    html! {
+        dialog x-ref="resetDialog" aria-labelledby="reset-title"
+            "x-on:click"="$event.target === $el && $el.close()" class=(DIALOG_CLASS) {
+            div class="rounded-2xl border border-line bg-panel p-5 shadow-lg" {
+                h2 id="reset-title" class="text-lg font-semibold" { "Reset workspace of " (task.key) "?" }
+                p class="mt-3 text-sm font-normal max-md:text-[15px]" {
+                    "This deletes the task's volume with its clone and build caches. The next run clones the repository again and restores the WIP snapshot if there is one."
+                }
+                p class="mt-3 text-sm font-normal max-md:text-[15px]" {
+                    "Lost for good: commits that were not pushed and uncommitted changes without a WIP snapshot."
+                }
+                div class="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end" {
+                    button type="button" "x-on:click"="$refs.resetDialog.close()" class=(action_class(ButtonKind::Secondary)) { "Keep workspace" }
+                    button type="button" hx-post=(action) hx-target="#task-details" hx-swap="outerMorph"
+                        "x-on:click"="$refs.resetDialog.close()" class=(action_class(ButtonKind::Danger)) { "Reset workspace" }
+                }
+            }
         }
     }
 }
@@ -630,8 +679,7 @@ fn cancel_dialog(task: &TaskDetail, cancel: &CancelNote) -> Markup {
     .join(" and ");
     html! {
         dialog x-ref="cancelDialog" aria-labelledby="cancel-title"
-            "x-on:click"="$event.target === $el && $el.close()"
-            class="fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-md md:p-0" {
+            "x-on:click"="$event.target === $el && $el.close()" class=(DIALOG_CLASS) {
             div class="rounded-2xl border border-line bg-panel p-5 shadow-lg" {
                 h2 id="cancel-title" class="text-lg font-semibold" { "Cancel " (task.key) "?" }
                 p class="mt-3 text-sm" {
@@ -770,7 +818,7 @@ fn run_detail(detail: &str) -> Markup {
 pub(super) fn details_column(task: &TaskDetail, runs: &[RunView], cancel: &CancelNote) -> Markup {
     details_panel(
         "Details",
-        html! { (details_region(task, cancel)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
+        html! { (details_region(task, cancel, None)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
     )
 }
 

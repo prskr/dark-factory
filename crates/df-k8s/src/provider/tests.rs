@@ -663,6 +663,81 @@ async fn ensure_task_volume_times_out_when_the_api_does_not_answer() {
     );
 }
 
+/// Deletes the volume of `DF-1` against a mock API that answers the request with `status` and
+/// `body`; returns the result and the method and path of the request.
+async fn delete_volume_answered_with(
+    status: u16,
+    body: serde_json::Value,
+) -> (Result<(), ProviderError>, String, String) {
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
+    let (pod_store, _) = reflector::store();
+    let (sb_store, _) = reflector::store();
+    let provider = K8sSandboxProvider::new(
+        Client::new(mock_service, "default"),
+        test_config(),
+        Arc::new(StaticClusterTargetsProvider::new(vec![])),
+        pod_store,
+        sb_store,
+    );
+    let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
+    let call = tokio::spawn(async move { provider.delete_task_volume(&task).await });
+
+    let (req, send) = handle.next_request().await.expect("PVC DELETE");
+    let request = (req.method().to_string(), req.uri().path().to_string());
+    send.send_response(
+        http::Response::builder()
+            .status(status)
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .unwrap(),
+    );
+    (call.await.unwrap(), request.0, request.1)
+}
+
+fn status_body(code: u16, reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "apiVersion": "v1", "kind": "Status", "status": "Failure",
+        "message": reason, "reason": reason, "code": code
+    })
+}
+
+#[tokio::test]
+async fn delete_task_volume_deletes_the_pvc_of_the_task() {
+    let namespace = test_config().sandbox.namespace;
+    let pvc = serde_json::json!({
+        "apiVersion": "v1", "kind": "PersistentVolumeClaim",
+        "metadata": { "name": "task-df-1", "namespace": namespace }
+    });
+
+    let (result, method, path) = delete_volume_answered_with(200, pvc).await;
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(method, "DELETE");
+    assert_eq!(
+        path,
+        format!("/api/v1/namespaces/{namespace}/persistentvolumeclaims/task-df-1")
+    );
+}
+
+#[tokio::test]
+async fn delete_task_volume_succeeds_when_the_pvc_is_already_gone() {
+    let (result, method, _) = delete_volume_answered_with(404, status_body(404, "NotFound")).await;
+
+    assert_eq!(method, "DELETE");
+    assert_eq!(result, Ok(()));
+}
+
+#[tokio::test]
+async fn delete_task_volume_reports_other_api_errors() {
+    let (result, _, _) = delete_volume_answered_with(403, status_body(403, "Forbidden")).await;
+
+    assert!(
+        matches!(&result, Err(ProviderError::Backend(msg)) if msg.contains("task-df-1")),
+        "{result:?}"
+    );
+}
+
 #[tokio::test]
 async fn provision_without_a_harness_image_is_invalid_and_names_the_harness() {
     let (mock_service, _handle) =

@@ -20,6 +20,10 @@ pub(crate) mod sandbox_placeholders {
             Err(ProviderError::Backend(NOT_CONFIGURED.into()))
         }
 
+        async fn delete_task_volume(&self, _task: &TaskVolumeSpec) -> Result<(), ProviderError> {
+            Err(ProviderError::Backend(NOT_CONFIGURED.into()))
+        }
+
         async fn provision(&self, _spec: &RunSandboxSpec) -> Result<(), ProviderError> {
             Err(ProviderError::Backend(NOT_CONFIGURED.into()))
         }

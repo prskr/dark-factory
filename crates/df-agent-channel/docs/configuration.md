@@ -21,6 +21,8 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `runs.connectTimeoutSeconds` | no | `600` | Time from run creation until the runtime opens its stream; then the run fails with `connect_timeout`. |
 | `runs.cancelGraceSeconds` | no | `300` | Grace after the wall-clock budget. |
 | `runs.keepAliveSeconds` | no | `600` | How long a run waits for a follow-up after a normal turn end (`awaiting_input`) before the control plane sends `Release` and the run ends `end_turn`. `0` releases right after the turn. Idle time counts toward `maxWallClockSeconds`. |
+| `volumes.retainAfterCloseSeconds` | no | `604800` (7 days) | The volume of a `completed` or `cancelled` task without an active run is deleted this long after its last run ended. The check runs once per hour on the replica holding the instance Lease (not without a cluster). `0` deletes at the next check; a value too large to represent as a date means never. |
+| `volumes.idleTtlSeconds` | no | `2592000` (30 days) | The volume of any task without an active run is deleted this long after its last run ended; same check and value rules as `retainAfterCloseSeconds`. The next run creates a fresh volume, clones again and restores the WIP snapshot. A board member can delete a volume at once with "Reset workspace" (`crates/df-web/README.md`). |
 | `web.showHiddenBlocks` | no | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, e.g. the `set_task_title` request) in the task page and the queued message stack, muted and labeled "Instruction for the agent". Hidden blocks are always delivered to the harness. Read at startup; a change needs a restart. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.

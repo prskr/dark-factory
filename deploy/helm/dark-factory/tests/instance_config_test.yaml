@@ -1,0 +1,225 @@
+suite: Dark Factory Helm Chart - routes and instance config
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - control-plane-service.yaml
+  - migrate-job.yaml
+  - rbac.yaml
+  - sandbox-namespace.yaml
+  - certs.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - netpol.yaml
+  - httproute.yaml
+  - servicemonitor.yaml
+tests:
+  - it: renders no HTTPRoute by default
+    template: httproute.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: routes the configured hostnames to the control plane UI port
+    template: httproute.yaml
+    release:
+      name: df
+      namespace: factory
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs:
+        - name: public
+          namespace: gateway-system
+      httpRoute.hostnames:
+        - factory.example.org
+    asserts:
+      - isKind:
+          of: HTTPRoute
+      - equal:
+          path: metadata.namespace
+          value: factory
+      - equal:
+          path: spec.parentRefs
+          value:
+            - name: public
+              namespace: gateway-system
+      - equal:
+          path: spec.hostnames
+          value:
+            - factory.example.org
+      - equal:
+          path: spec.rules[0].backendRefs
+          value:
+            - name: df-dark-factory-control-plane
+              port: 8080
+
+  - it: opens the UI port to every source when networkPolicy.ingressController.allowAll is set
+    template: netpol.yaml
+    set:
+      networkPolicy.ingressController.allowAll: true
+    asserts:
+      - notExists:
+          path: spec.ingress[2].from
+        documentIndex: 0
+      - equal:
+          path: spec.ingress[2].ports[0].port
+          value: 8080
+        documentIndex: 0
+      - exists:
+          path: spec.ingress[0].from
+        documentIndex: 0
+      - exists:
+          path: spec.ingress[1].from
+        documentIndex: 0
+
+  - it: passes image.runtime as the sandbox runtime image to the control plane
+    template: configmap.yaml
+    set:
+      image.runtime.repository: registry.example.org/runtime
+      image.runtime.tag: dev
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeImage: "registry.example.org/runtime:dev"'
+        documentIndex: 0
+
+  - it: prefers image.runtime.digest over the tag for the sandbox runtime image
+    template: configmap.yaml
+    set:
+      image.runtime.tag: dev
+      image.runtime.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+        documentIndex: 0
+
+  - it: renders the keep-alive window of runs
+    template: configmap.yaml
+    set:
+      runs.keepAliveSeconds: 120
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runs:\n  keepAliveSeconds: 120\n'
+        documentIndex: 0
+
+  - it: defaults the keep-alive window to 10 minutes
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runs:\n  keepAliveSeconds: 600\n'
+        documentIndex: 0
+
+  - it: renders the volume retention values
+    template: configmap.yaml
+    set:
+      volumes.retainAfterCloseSeconds: 3600
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'volumes:\n  retainAfterCloseSeconds: 3600\n  idleTtlSeconds: 2592000\n'
+        documentIndex: 0
+
+  - it: renders a configured idle volume TTL
+    template: configmap.yaml
+    set:
+      volumes.idleTtlSeconds: 86400
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'volumes:\n  retainAfterCloseSeconds: 604800\n  idleTtlSeconds: 86400\n'
+        documentIndex: 0
+
+  - it: renders the largest accepted volume retention exactly
+    template: configmap.yaml
+    set:
+      volumes.idleTtlSeconds: 9007199254740991
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'idleTtlSeconds: 9007199254740991\n'
+        documentIndex: 0
+
+  - it: rejects a volume retention beyond the accepted range
+    template: configmap.yaml
+    set:
+      volumes.retainAfterCloseSeconds: 10000000000000000000
+    asserts:
+      - failedTemplate: {}
+
+  - it: allows only https to the forge by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'forge:\n  allowPlainHttp: false\n'
+        documentIndex: 0
+
+  - it: renders forge.allowPlainHttp
+    template: configmap.yaml
+    set:
+      forge.allowPlainHttp: true
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'forge:\n  allowPlainHttp: true\n'
+        documentIndex: 0
+
+  - it: hides hidden transcript blocks by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'web:\n  showHiddenBlocks: false\n'
+        documentIndex: 0
+
+  - it: renders web.showHiddenBlocks
+    template: configmap.yaml
+    set:
+      web.showHiddenBlocks: true
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'web:\n  showHiddenBlocks: true\n'
+        documentIndex: 0
+
+  - it: renders the harness image from tag and repository
+    template: configmap.yaml
+    set:
+      image.harness.claudeCode.repository: registry.example.org/claude-harness
+      image.harness.claudeCode.tag: 0.95.0
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'harness:\n  claudeCode:\n    image: "registry.example.org/claude-harness:0.95.0"'
+        documentIndex: 0
+
+  - it: prefers image.harness.claudeCode.digest over the tag
+    template: configmap.yaml
+    set:
+      image.harness.claudeCode.repository: registry.example.org/claude-harness
+      image.harness.claudeCode.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'image: "registry.example.org/claude-harness@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+        documentIndex: 0
+
+  - it: requires a harness image tag or digest
+    # the config checksum in the gateway Deployment renders the config first, so it fails there
+    template: gateway-deployment.yaml
+    set:
+      image.harness.claudeCode.tag: ''
+      image.harness.claudeCode.digest: ''
+    asserts:
+      - failedTemplate:
+          errorPattern: image.harness.claudeCode.tag or .digest is required
+
+  - it: has no runtime delivery setting
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeDelivery'
+        documentIndex: 0

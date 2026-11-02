@@ -1,0 +1,156 @@
+suite: Dark Factory Helm Chart - RBAC and sandbox namespace
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - control-plane-service.yaml
+  - migrate-job.yaml
+  - rbac.yaml
+  - sandbox-namespace.yaml
+  - certs.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - netpol.yaml
+  - httproute.yaml
+  - servicemonitor.yaml
+tests:
+  - it: renders least-privilege RBAC without pods/exec or pods/attach and supports target namespaces and Cilium mode
+    template: rbac.yaml
+    set:
+      enforcement.mode: cilium
+      clusterTargets.namespaces:
+        - nativelink
+        - forgejo
+    asserts:
+      - hasDocuments:
+          count: 12
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 1
+      - equal:
+          path: automountServiceAccountToken
+          value: false
+        documentIndex: 1
+      - isKind:
+          of: Role
+        documentIndex: 2
+      - equal:
+          path: metadata.namespace
+          value: dark-factory-sandboxes
+        documentIndex: 2
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["agents.x-k8s.io"]
+            resources: ["sandboxes"]
+            verbs: ["create", "get", "list", "watch", "patch", "delete"]
+        documentIndex: 2
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["cilium.io"]
+            resources: ["ciliumnetworkpolicies"]
+            verbs: ["create", "get", "list", "watch", "patch", "delete"]
+        documentIndex: 2
+      - notContains:
+          path: rules
+          content:
+            apiGroups: ["discovery.k8s.io"]
+            resources: ["endpointslices"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 4
+      - equal:
+          path: metadata.namespace
+          value: nativelink
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["services"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["discovery.k8s.io"]
+            resources: ["endpointslices"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 6
+      - equal:
+          path: metadata.namespace
+          value: forgejo
+        documentIndex: 8
+      - isKind:
+          of: ClusterRole
+        documentIndex: 10
+      - equal:
+          path: rules[0].resourceNames
+          value: ["dark-factory-sandboxes"]
+        documentIndex: 10
+
+  - it: renders release-prefixed ClusterRole when clusterTargets.anyNamespace is true
+    template: rbac.yaml
+    release:
+      name: inst-a
+    set:
+      clusterTargets.anyNamespace: true
+    asserts:
+      - hasDocuments:
+          count: 10
+      - isKind:
+          of: ClusterRole
+        documentIndex: 6
+      - equal:
+          path: metadata.name
+          value: inst-a-dark-factory-cluster-targets-reader
+        documentIndex: 6
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["services"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 6
+
+  - it: creates sandbox namespace objects when sandboxNamespace.create is true
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: true
+    asserts:
+      - hasDocuments:
+          count: 5
+      - isKind:
+          of: Namespace
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["pod-security.kubernetes.io/enforce"]
+          value: restricted
+        documentIndex: 0
+      - isKind:
+          of: NetworkPolicy
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: default-deny-all
+        documentIndex: 1
+      - isKind:
+          of: ResourceQuota
+        documentIndex: 2
+      - isKind:
+          of: LimitRange
+        documentIndex: 3
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 4
+      - equal:
+          path: automountServiceAccountToken
+          value: false
+        documentIndex: 4
+
+  - it: renders no sandbox namespace objects when sandboxNamespace.create is false
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
