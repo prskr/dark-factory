@@ -35,11 +35,13 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+df-core = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 http-body-util.workspace = true
 insta.workspace = true
 rsa.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
 wiremock.workspace = true

@@ -20,7 +20,7 @@
 - the run-end mapping exception: only prompts with `queued_at > stop_requested_at` make the task `queued`; older undelivered prompts leave it `waiting`;
 - the timeout scan: the existing `enforce_timeouts` loop also selects runs with `stop_requested_at < now() - 2 min` that are not terminal.
 
-Sending `Cancel` follows the existing path for commands (idempotent, re-sent after reconnects by the replica holding the stream). The stop handler publishes `run_changed`, and the holding replica sends `Cancel` on that notification. A run without a connection (`pending`, `provisioning`, `connecting`) is torn down by the handler directly through `SandboxProvider`, outside the database transaction.
+Sending `Cancel` follows the existing path for commands (idempotent, re-sent after reconnects by the replica holding the stream). The stop handler (`df_db::stop_run`) only sets the marker and publishes `run_changed`; it has no `SandboxProvider`. A run in `preparing`, `running` or `awaiting_input` moves to `finalizing` in the same transaction, and the holding replica sends `Cancel` on that notification. A run that is already `finalizing` (`complete_task`, release) is not marked by the human stop: the marker would hide the messages queued before it from the run-end mapping. Cancelling the task still marks it. The scheduler ends runs without a connection (`pending`, `provisioning`, `connecting`) as `cancelled` and tears their sandbox down, and applies the stop timeout, on `RunChanged` and on its tick. `provision` re-reads the run after `provider.provision` returns and tears the sandbox down if the run ended meanwhile.
 
 ### D2 — Cancel task
 One transaction: set `cancelled`, mark undelivered prompts `discarded` (new prompt state, excluded from delivery queries), close pending requests through the `iter2-agent-requests` close function, audit. Then the run is stopped as in D1.
@@ -33,7 +33,7 @@ The `RunReport` handler and message queueing both lock the task row (`FOR UPDATE
 The new run starts through the normal scheduler, which only starts runs for tasks without a non-terminal run. It therefore waits for the stopped run to end.
 
 ### D3 — UI
-Two htmx `POST` actions on the task detail. "Cancel task" uses a native `<dialog>` for confirmation (no extra JS beyond Alpine). Live updates come through the existing `run_changed`/`task_changed` SSE events.
+Two htmx `POST` actions on the task detail. "Stop" sits on the active run card; while the task is `running` and the message box is empty, the composer's Send button turns into a Stop button (same action, no confirmation) and turns back into Send as soon as text is typed. "Cancel task…" is the last item of the Status menu, below "Mark done" (disabled while the task is `running` or `queued`). "Cancel task" uses a native `<dialog>` for confirmation (no extra JS beyond Alpine). Live updates come through the existing `run_changed`/`task_changed` SSE events.
 
 ### D4 — Design first in PenPot
 The boards of task 3.1 are drawn and approved before the UI code changes and are the reference for placement, wording and states. Alternative: implement first and draw afterwards. Rejected: PenPot is the master of the UI design (`docs/design-workflow.md`).
@@ -41,7 +41,7 @@ The boards of task 3.1 are drawn and approved before the UI code changes and are
 ### D5 — Mark done marks the PR ready
 After the `mark_task_done` transaction commits, the mark-done handler calls `update_pull_request(draft: false)` through the forge routes. Best effort: a failure is logged as a warning and not retried, the same as at run end. A PR that is already ready (task was `in_review`) stays unchanged. The run that mark done cancels ends `cancelled`, so the run-end path does not mark the PR ready a second time.
 
-Without a PR, nothing is sent to the forge. The cancelled run still finalizes and may push, so its push report or the run-end retry would open a draft PR for the done task. `try_ensure_draft` therefore skips a task that is `completed`, which covers both triggers; it reads the status together with `pr_number` under its advisory lock, so a mark done that commits just before is seen. Alternative: open the PR and mark it ready right away. Rejected: the human decided the task is done without one.
+Without a PR, nothing is sent to the forge. The cancelled run still finalizes and may push, so its push report or the run-end retry would open a draft PR for the done task. `try_ensure_draft` therefore skips a task that is `completed` or `cancelled` (a cancelled task's stopped run pushes the same way), which covers both triggers; it reads the status together with `pr_number` under its advisory lock, so a mark done that commits just before is seen. Alternative: open the PR and mark it ready right away. Rejected: the human decided the task is done without one.
 
 No completion summary is posted: no agent wrote one. Later, the factory minion can write one from the transcript (`product/iterations/roadmap.md`). Alternative: post a generic "marked done by <actor>" comment. Rejected: noise for the reviewer.
 

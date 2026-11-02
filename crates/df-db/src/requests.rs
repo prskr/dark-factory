@@ -1333,6 +1333,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelling_the_task_closes_pending_requests_with_task_cancelled() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task(&pool).await;
+        let (q, _) = raise_question(
+            &pool,
+            raise_by(task.id, &agent(&task), false),
+            "Which?",
+            &[],
+        )
+        .await
+        .unwrap();
+        crate::cancel_task(&pool, task.id, human()).await.unwrap();
+        let row = get_request(&pool, q.id).await.unwrap().unwrap();
+        assert_eq!(
+            (row.state, row.close_reason.as_deref()),
+            (RequestState::Closed, Some("task-cancelled"))
+        );
+        assert_eq!(pending_count(&pool).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn marking_the_task_done_closes_pending_requests_for_good() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let task = task(&pool).await;

@@ -65,7 +65,7 @@ Recorded as ADR-0028 (*Accepted*). ADR-0018 named the package `darkfactory:forge
 - `update_pull_request` works before the PR exists: values are stored and applied when the control plane opens the draft PR after the first push.
 - `report_progress` sets the task's status line; mirroring it to the issue is project policy, separate from the explicit `comment_on_issue`.
 - `set_task_title` sets the task's title with source `agent`; it changes nothing when a person or an earlier call already set a title.
-- `complete_task` ends the run after the current turn; the control plane marks the PR ready for review.
+- `complete_task` ends the run after the current turn; the control plane marks the PR ready for review. Its description also asks the agent to call it when the instructions leave nothing to do, with a summary that says why; ending the turn without it leaves the task waiting for a human.
 - `request_approval` raises a typed approval request on the task (iteration 2: `network-access`). `type` is an enum; `payload` is a plain object that the control plane validates per type, because harnesses support `oneOf` per type poorly. For `network-access` the control plane first checks the run's effective allowlist and answers "already allowed" without storing a request.
 
 ### Gateway link

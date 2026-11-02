@@ -28,6 +28,8 @@ pub enum Icon {
     PullRequest,
     Issue,
     Send,
+    /// A filled square: stop (the Stop button of a running task).
+    Stop,
     ArrowUp,
     Link,
     /// Delete (Lucide `trash`).
@@ -84,6 +86,7 @@ impl Icon {
         Self::PullRequest,
         Self::Issue,
         Self::Send,
+        Self::Stop,
         Self::ArrowUp,
         Self::Link,
         Self::Trash,
@@ -155,6 +158,9 @@ impl Icon {
             }
             Self::Send => {
                 "<path d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z\"/><path d=\"m21.854 2.147-10.94 10.939\"/>"
+            }
+            Self::Stop => {
+                "<rect width=\"12\" height=\"12\" x=\"6\" y=\"6\" rx=\"1.5\" fill=\"currentColor\"/>"
             }
             Self::ArrowUp => "<path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/>",
             Self::Logo => LOGO_BODY,

@@ -7,6 +7,7 @@ mod detail;
 mod layout;
 mod list;
 mod messages;
+mod stop_cancel;
 
 async fn set_status(app: &TestApp, status: &str) {
     sqlx::query("UPDATE tasks SET status = $1")

@@ -598,6 +598,30 @@ async fn marking_the_task_done_cancels_its_finalizing_run_once() {
 }
 
 #[tokio::test]
+async fn stopping_the_run_sends_cancel_once() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = run_of_running_task(&env, "running").await;
+    let (mut session, mut rx) = session_for(&env, run_id).await;
+    assert!(session.reconcile_finalizing().await.unwrap());
+    assert!(rx.try_recv().is_err());
+
+    df_db::stop_run(&pool, env.task.id, env.human())
+        .await
+        .unwrap();
+    assert!(session.reconcile_finalizing().await.unwrap());
+    assert!(session.reconcile_finalizing().await.unwrap());
+
+    let sent: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|m| m.ok().and_then(|c| c.body))
+        .collect();
+    assert!(
+        matches!(sent.as_slice(), [control_message::Body::Cancel(_)]),
+        "{sent:?}"
+    );
+}
+
+#[tokio::test]
 async fn no_prompt_is_sent_to_a_finalizing_run_and_its_end_queues_the_task() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
@@ -629,7 +653,7 @@ async fn session_for(
         tasks: JoinSet::new(),
         ended: false,
         idle_at: None,
-        done_cancel_sent: false,
+        human_cancel_sent: false,
         release_sent: false,
     };
     (session, rx)

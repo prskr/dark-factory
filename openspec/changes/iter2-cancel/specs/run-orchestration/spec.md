@@ -40,7 +40,7 @@ On `RunReport` the control plane SHALL store outcome, detail, retry time, sessio
 ## ADDED Requirements
 
 ### Requirement: Stopping a run
-A board member SHALL be able to stop a non-terminal run. A connected run SHALL receive `Cancel`; a run that isn't connected yet SHALL have its sandbox torn down and end with outcome `cancelled`. Stopping SHALL write an audit entry `run.stop`.
+A board member SHALL be able to stop a non-terminal run. A connected run SHALL receive `Cancel`; a run that isn't connected yet SHALL have its sandbox torn down and end with outcome `cancelled`. Stopping SHALL write an audit entry `run.stop`. A run that is already `finalizing` is not stopped again: the request changes nothing, so messages queued before it still make the task `queued` at run end.
 
 #### Scenario: Stop a running run
 - **WHEN** a board member stops run 2 of `DF-9` during a turn
@@ -49,6 +49,10 @@ A board member SHALL be able to stop a non-terminal run. A connected run SHALL r
 #### Scenario: Stop while provisioning
 - **WHEN** a board member stops a run in state `provisioning`
 - **THEN** the sandbox is deleted, the run ends `cancelled` and the task volume is kept
+
+#### Scenario: Stop while finalizing
+- **WHEN** a board member stops a run that is `finalizing` after `complete_task` while a message queued before is undelivered
+- **THEN** nothing changes, and the task becomes `queued` when the run ends `completed`
 
 ### Requirement: Stop timeout
 If no `RunReport` arrives within 2 minutes after `Cancel` was sent for a human stop, the control plane SHALL tear down the sandbox and end the run `cancelled` with detail `stop-timeout`, keeping the task volume.

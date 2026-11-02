@@ -30,8 +30,8 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
-    Filters, ListQuery, details_region, head_region, load_detail, pending_region, runs_region,
-    task_rows,
+    CancelNote, Filters, ListQuery, composer_action, details_region, head_region, load_detail,
+    pending_region, runs_region, stoppable, task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -77,7 +77,7 @@ pub(crate) async fn task_events(
         cursor: 0,
         folder,
         check_regions: true,
-        regions: [String::new(), String::new(), String::new(), String::new()],
+        regions: Default::default(),
         settle: None,
     };
     let events = futures::stream::unfold(stream, |mut s| async move {
@@ -104,10 +104,10 @@ struct DetailStream {
     /// Id of the last transcript row read.
     cursor: i64,
     folder: Folder,
-    /// Re-render head, runs and pending list at the next opportunity.
+    /// Re-render the five regions at the next opportunity.
     check_regions: bool,
-    /// Last sent markup of head, details, runs and pending list.
-    regions: [String; 4],
+    /// Last sent markup of head, details, runs, pending list and composer action.
+    regions: [String; 5],
     /// Pause before the next read to coalesce chunks.
     settle: Option<Duration>,
 }
@@ -232,8 +232,12 @@ impl DetailStream {
         });
         let rendered = [
             head_region(&data.task, None),
-            details_region(&data.task),
-            runs_region(&data.runs, data.task.persona_model.as_deref()),
+            details_region(&data.task, &CancelNote::new(&data.runs, &data.pending)),
+            runs_region(
+                &data.task.key,
+                &data.runs,
+                data.task.persona_model.as_deref(),
+            ),
             pending_region(
                 &data.task.key,
                 &data.task.persona_name,
@@ -242,12 +246,19 @@ impl DetailStream {
                 self.state.show_hidden_blocks,
                 None,
             ),
+            composer_action(&data.task.key, stoppable(data.task.status, &data.runs)),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(
-            ["#task-head", "#task-details", "#runs", "#pending"]
-                .into_iter()
-                .zip(rendered),
+            [
+                "#task-head",
+                "#task-details",
+                "#runs",
+                "#pending",
+                "#composer-action",
+            ]
+            .into_iter()
+            .zip(rendered),
         ) {
             let html = markup.0;
             if *slot != html {

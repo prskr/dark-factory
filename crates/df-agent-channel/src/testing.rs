@@ -438,6 +438,11 @@ impl Env {
         run_id
     }
 
+    /// A board member as the actor of UI actions.
+    pub fn human(&self) -> df_core::Principal {
+        df_core::Principal::human(df_core::UserId::new(), "Ada")
+    }
+
     /// Makes the provider resolve [`POD_SAN`] from loopback to `run_id`.
     pub fn bind_pod(&self, run_id: RunId) {
         self.provider.bind_identity(

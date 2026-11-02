@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        DELETE FROM task_messages\n        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL\n          AND author->>'kind' = 'human'\n        RETURNING content\n        ",
+  "query": "\n        SELECT content FROM task_messages\n        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL\n          AND discarded_at IS NULL AND author->>'kind' = 'human'\n        FOR UPDATE\n        ",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       false
     ]
   },
-  "hash": "b18143af2d6df5890044530eefc04ad696fa10231870934b32086cdea4e80468"
+  "hash": "3d05dd2d5dd7f83b624f26ac41f5b90e1409476cf6a45ea650e558f445674a74"
 }

@@ -544,7 +544,7 @@ fn the_runs_fill_the_details_column_and_keep_room_for_two_cards() {
     );
     assert!(rule(".ws-runs:has(details[open]){").contains("min-height:17rem"));
     assert!(rule(".ws-runs details::details-content{").contains("flex:1;"));
-    let region = runs_region(&[], None).into_string();
+    let region = runs_region("DF-1", &[], None).into_string();
     assert!(region.contains("ws-runs"), "{region}");
 }
 
@@ -713,6 +713,7 @@ async fn mark_done_is_offered_in_the_status_select_only_for_allowed_statuses() {
         ("queued", false),
         ("running", false),
         ("completed", false),
+        ("cancelled", true),
     ] {
         set_status(&app, status).await;
         let html = text(app.get("/tasks/DF-1", &cookie).await).await;
@@ -723,7 +724,14 @@ async fn mark_done_is_offered_in_the_status_select_only_for_allowed_statuses() {
             offered,
             "{status}"
         );
-        assert_eq!(dl.contains(">Mark done<"), offered, "{status}");
+        // A working task shows "Mark done" disabled; a completed one has no menu.
+        let listed = status != "completed";
+        assert_eq!(dl.contains(">Mark done<"), listed, "{status}");
+        assert_eq!(
+            dl.contains("disabled") && listed,
+            !offered && listed,
+            "{status}"
+        );
         // The Status row comes first, above Project.
         assert!(
             dl.find(">Status<").unwrap() < dl.find(">Project<").unwrap(),

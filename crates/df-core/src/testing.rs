@@ -187,6 +187,7 @@ struct ForgeState {
     create_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     find_open_results: VecDeque<Result<Option<PullRequest>, IntegrationError>>,
     hang_find_open: bool,
+    hang_update_pr: bool,
     find_open_gate: Option<Arc<tokio::sync::Semaphore>>,
     comment_gate: Option<Arc<tokio::sync::Semaphore>>,
     update_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
@@ -245,6 +246,12 @@ impl FakeForgeClient {
     /// does not answer.
     pub fn hang_find_open_pull_request(&self) {
         self.state.lock().expect("lock poisoned").hang_find_open = true;
+    }
+
+    /// Makes `update_pull_request` record the call and then never return, like a forge that does
+    /// not answer.
+    pub fn hang_update_pull_request(&self) {
+        self.state.lock().expect("lock poisoned").hang_update_pr = true;
     }
 
     /// Makes `add_issue_comment` record the call and then wait until a permit of the returned
@@ -381,12 +388,19 @@ impl ForgeClient for FakeForgeClient {
         number: u64,
         ch: PullRequestUpdate,
     ) -> Result<PullRequest, IntegrationError> {
+        let hang = {
+            let mut state = self.state.lock().expect("lock poisoned");
+            state.calls.push(ForgeCall::UpdatePullRequest {
+                project_id: *p,
+                number,
+                changes: ch.clone(),
+            });
+            state.hang_update_pr
+        };
+        if hang {
+            return std::future::pending().await;
+        }
         let mut state = self.state.lock().expect("lock poisoned");
-        state.calls.push(ForgeCall::UpdatePullRequest {
-            project_id: *p,
-            number,
-            changes: ch.clone(),
-        });
         if let Some(scripted) = state.update_pr_results.pop_front() {
             return scripted;
         }

@@ -307,6 +307,7 @@ where
         &pool,
         &notifier,
         forge_routes,
+        forge.clone(),
         EgressDeps { flows, services },
         approval_types.clone(),
     )?;
@@ -547,6 +548,7 @@ fn web_router(
     pool: &PgPool,
     notifier: &Arc<df_db::Notifier>,
     forges: df_core::routing::ForgeRoutes,
+    forge: Arc<dyn df_core::ForgeClient>,
     egress: EgressDeps,
     approval_types: df_db::requests::ApprovalTypes,
 ) -> anyhow::Result<axum::Router> {
@@ -560,6 +562,7 @@ fn web_router(
         notifier: notifier.clone(),
         oidc: Arc::new(oidc),
         forges,
+        forge,
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
@@ -784,6 +787,7 @@ mod tests {
             &pool,
             &notifier,
             df_core::routing::ForgeRoutes::default(),
+            Arc::new(df_core::testing::FakeForgeClient::new()),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;
@@ -807,6 +811,7 @@ mod tests {
             &pool,
             &notifier,
             df_core::routing::ForgeRoutes::default(),
+            Arc::new(df_core::testing::FakeForgeClient::new()),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
         )?;

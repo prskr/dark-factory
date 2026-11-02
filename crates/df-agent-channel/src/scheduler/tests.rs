@@ -522,3 +522,149 @@ async fn run_loop_starts_runs_on_notification_and_applies_events() {
     stop_tx.send(()).ok();
     handle.await.unwrap();
 }
+
+#[tokio::test]
+async fn stopping_a_run_that_is_provisioning_tears_it_down_and_keeps_the_volume() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    tick(&scheduler, Utc::now()).await.unwrap();
+    let run = only_run(&pool).await;
+    assert_eq!(run.state, RunState::Provisioning);
+
+    df_db::stop_run(&pool, env.task.id, env.human())
+        .await
+        .unwrap();
+    scheduler.enforce_timeouts(Utc::now()).await.unwrap();
+
+    let run = only_run(&pool).await;
+    assert_eq!(
+        (run.state, run.outcome),
+        (RunState::Cancelled, Some(RunOutcome::Cancelled))
+    );
+    assert_eq!(task_status(&pool, &env).await, "waiting");
+    let calls = env.provider.calls();
+    assert!(calls.contains(&SandboxCall::Teardown(run.id)));
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|c| matches!(c, SandboxCall::EnsureTaskVolume(_)))
+            .count(),
+        1,
+        "the volume is only ensured, never deleted"
+    );
+}
+
+#[tokio::test]
+async fn runtime_that_does_not_report_within_the_stop_timeout_is_torn_down() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.insert_run(env.task.id, 1, "running").await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    df_db::stop_run(&pool, env.task.id, env.human())
+        .await
+        .unwrap();
+    let stopped = Utc::now();
+
+    scheduler
+        .enforce_timeouts(stopped + chrono::Duration::seconds(110))
+        .await
+        .unwrap();
+    assert_eq!(
+        get_run(&pool, run_id).await.unwrap().unwrap().state,
+        RunState::Finalizing
+    );
+
+    scheduler
+        .enforce_timeouts(stopped + chrono::Duration::seconds(130))
+        .await
+        .unwrap();
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!(
+        (run.state, run.outcome, run.detail.as_str()),
+        (
+            RunState::Cancelled,
+            Some(RunOutcome::Cancelled),
+            "stop-timeout"
+        )
+    );
+    assert!(
+        env.provider
+            .calls()
+            .contains(&SandboxCall::Teardown(run_id))
+    );
+}
+
+/// A provider whose `provision` signals that it started and then waits to be released.
+struct GatedProvider {
+    inner: df_core::testing::FakeSandboxProvider,
+    entered: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl df_core::SandboxProvider for GatedProvider {
+    async fn ensure_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError> {
+        self.inner.ensure_task_volume(task).await
+    }
+
+    async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
+        self.inner.provision(spec).await?;
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(())
+    }
+
+    async fn teardown(&self, run_id: df_core::RunId) -> Result<(), ProviderError> {
+        self.inner.teardown(run_id).await
+    }
+
+    async fn resolve_identity(&self, peer: &df_core::PeerIdentity) -> Option<df_core::RunId> {
+        self.inner.resolve_identity(peer).await
+    }
+
+    fn events(&self) -> futures::stream::BoxStream<'static, SandboxEvent> {
+        self.inner.events()
+    }
+}
+
+#[tokio::test]
+async fn a_stop_while_the_sandbox_is_created_tears_it_down_afterwards() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool.clone()).await;
+    let (entered, release) = (
+        std::sync::Arc::new(tokio::sync::Notify::new()),
+        std::sync::Arc::new(tokio::sync::Notify::new()),
+    );
+    env.ctx.provider = std::sync::Arc::new(GatedProvider {
+        inner: env.provider.clone(),
+        entered: entered.clone(),
+        release: release.clone(),
+    });
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let run_id = env.insert_run(env.task.id, 1, "pending").await;
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    let provisioning = tokio::spawn({
+        let scheduler = scheduler.clone();
+        async move { scheduler.provision(run).await }
+    });
+    entered.notified().await;
+
+    // The stop ends the run while `provision` is still creating the sandbox.
+    df_db::stop_run(&pool, env.task.id, env.human())
+        .await
+        .unwrap();
+    scheduler.enforce_timeouts(Utc::now()).await.unwrap();
+    release.notify_one();
+    provisioning.await.unwrap().unwrap();
+
+    let run = only_run(&pool).await;
+    assert_eq!(run.state, RunState::Cancelled);
+    let teardowns = env
+        .provider
+        .calls()
+        .into_iter()
+        .filter(|c| *c == SandboxCall::Teardown(run_id))
+        .count();
+    assert_eq!(teardowns, 2, "once by the stop, once after the creation");
+}

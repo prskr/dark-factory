@@ -657,6 +657,41 @@ async fn reported_phases_drive_the_run_state() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn a_stopped_run_gets_cancel_and_its_cancelled_report_makes_the_task_wait()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let h = Harness::start(pool.clone()).await?;
+    let (mut runtime, _) = h.handshake().await?;
+    // The assignment prompt is confirmed, so nothing is pending at run end.
+    sqlx::query("UPDATE task_messages SET delivered_at = now()")
+        .execute(&pool)
+        .await?;
+    // The scheduler set `running` when it created the run.
+    sqlx::query("UPDATE tasks SET status = 'running'")
+        .execute(&pool)
+        .await?;
+    let seq = runtime
+        .send(agent_message::Body::PhaseChanged(PhaseChanged {
+            phase: RunPhase::Running as i32,
+            detail: String::new(),
+        }))
+        .await;
+    runtime.recv_until(|m| m.ack == seq).await?;
+
+    df_db::stop_run(&pool, h.env.task.id, h.env.human()).await?;
+
+    runtime
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Cancel(_))))
+        .await?;
+    assert_eq!(run_state(&pool, h.run_id).await, RunState::Finalizing);
+    let seq = runtime.send(run_report(WireOutcome::Cancelled)).await;
+    runtime.recv_until(|m| m.ack == seq).await?;
+    assert_eq!(run_state(&pool, h.run_id).await, RunState::Cancelled);
+    assert_eq!(task_status(&pool, &h).await, "waiting");
+    Ok(())
+}
+
+#[tokio::test]
 async fn run_report_maps_every_outcome_to_run_state_and_task_status() -> anyhow::Result<()> {
     let table = [
         (

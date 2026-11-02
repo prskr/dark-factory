@@ -12,6 +12,8 @@ pub enum ButtonKind {
     Secondary,
     /// Text only, for toolbars and dismissals.
     Ghost,
+    /// Outlined in the danger color; confirms something destructive.
+    Danger,
 }
 
 /// Classes of an action; use it on elements that need their own attributes (`hx-*`, `x-*`).
@@ -25,6 +27,9 @@ pub fn action_class(kind: ButtonKind) -> &'static str {
         }
         ButtonKind::Ghost => {
             "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 text-muted hover:bg-sunk hover:text-ink"
+        }
+        ButtonKind::Danger => {
+            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 border border-danger/40 bg-panel text-danger hover:bg-danger-soft"
         }
     }
 }

@@ -339,7 +339,10 @@ async fn the_empty_states_follow_the_mockup() {
             "waiting",
             "Tasks that wait for you or hit a limit show up here.",
         ),
-        ("done", "Completed and failed tasks show up here."),
+        (
+            "done",
+            "Completed, cancelled and failed tasks show up here.",
+        ),
         ("queued", "Tasks waiting for a run show up here."),
         ("running", "Running and rate-limited tasks show up here."),
     ] {

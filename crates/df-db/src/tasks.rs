@@ -321,6 +321,7 @@ pub async fn queue_message_tx(
                     SELECT 1 FROM runs
                     WHERE runs.task_id = tasks.id
                       AND runs.state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')
+                      AND runs.stop_requested_at IS NULL
                 ) THEN 'running'
                 ELSE 'queued'
             END,
@@ -488,7 +489,7 @@ pub async fn list_undelivered_messages(
         SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
                forwarded_at
         FROM task_messages
-        WHERE task_id = $1 AND delivered_at IS NULL
+        WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL
         ORDER BY queued_at ASC, id ASC
         "#,
         task_id.as_uuid()
@@ -510,6 +511,7 @@ pub async fn claim_held_back_messages(
         r#"
         UPDATE task_messages SET forwarded_at = now()
         WHERE task_id = $1 AND delivered_at IS NULL AND forwarded_at IS NULL
+          AND discarded_at IS NULL
         RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
                   forwarded_at
         "#,
@@ -544,7 +546,7 @@ pub async fn edit_queued_message(
         r#"
         SELECT content FROM task_messages
         WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
-          AND author->>'kind' = 'human'
+          AND discarded_at IS NULL AND author->>'kind' = 'human'
         FOR UPDATE
         "#,
         prompt_id.as_uuid(),
@@ -598,7 +600,7 @@ pub async fn remove_queued_message(
         r#"
         DELETE FROM task_messages
         WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
-          AND author->>'kind' = 'human'
+          AND discarded_at IS NULL AND author->>'kind' = 'human'
         RETURNING content
         "#,
         prompt_id.as_uuid(),
@@ -611,7 +613,9 @@ pub async fn remove_queued_message(
         r#"
         UPDATE tasks SET status = 'waiting', updated_at = now()
         WHERE id = $1 AND status = 'queued'
-          AND NOT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND delivered_at IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM task_messages
+              WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL)
         "#,
         task_id.as_uuid()
     )
@@ -792,6 +796,140 @@ pub async fn mark_task_done(
     publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// A board member stops the active run of a task (design D1). The run gets the stop marker; a
+/// connected run (`preparing`, `running`, `awaiting_input`) also becomes `finalizing`, which makes
+/// the replica holding its stream send `Cancel`. A run that is not connected yet is torn down by
+/// the scheduler, which follows `run_changed`. The task becomes `waiting` when the run reports.
+/// Audited as `run.stop`. Stopping a stopped run changes nothing; a task without an active run
+/// is rejected with [`DbError::Conflict`].
+pub async fn stop_run(pool: &PgPool, task_id: TaskId, actor: Principal) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    lock_runs_then_task(&mut tx, task_id).await?;
+    if let Some(run_id) = request_stop_tx(&mut tx, task_id, StopScope::ActiveOnly).await? {
+        let entry = NewAuditEntry::new(actor, Vec::new(), "run.stop", "run", run_id.to_string())
+            .with_details(&serde_json::json!({ "task_id": task_id }))?;
+        write_audit_entry(&mut *tx, &entry).await?;
+    } else if !has_active_run(&mut tx, task_id).await? {
+        return Err(DbError::Conflict("the task has no active run".into()));
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// A board member cancels a task (design D2): one transaction sets `cancelled`, discards the
+/// undelivered messages, closes the pending requests (`task-cancelled`), stops the active run
+/// as in [`stop_run`] and audits `task.cancel`. A `completed` or `cancelled` task is rejected
+/// with [`DbError::Conflict`]. The PR and the issue are not touched.
+pub async fn cancel_task(pool: &PgPool, task_id: TaskId, actor: Principal) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    lock_runs_then_task(&mut tx, task_id).await?;
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
+    if !status.parse::<TaskStatus>()?.can_cancel() {
+        return Err(DbError::Conflict(format!(
+            "a {status} task cannot be cancelled"
+        )));
+    }
+    sqlx::query("UPDATE tasks SET status = 'cancelled', updated_at = now() WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
+    let discarded = sqlx::query(
+        "UPDATE task_messages SET discarded_at = now()
+         WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL",
+    )
+    .bind(task_id.as_uuid())
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    request_stop_tx(&mut tx, task_id, StopScope::IncludingFinalizing).await?;
+    crate::requests::close_pending_for_task(&mut tx, task_id, "task-cancelled", &actor).await?;
+    let entry = NewAuditEntry::new(
+        actor,
+        Vec::new(),
+        "task.cancel",
+        "task",
+        task_id.to_string(),
+    )
+    .with_details(&serde_json::json!({ "old_status": status, "discarded_messages": discarded }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    publish(&mut *tx, &Notification::TaskMessageChanged { task_id }).await?;
+    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Lock order everywhere: run rows, then the task row (see `lock_task` in df-agent-channel).
+async fn lock_runs_then_task(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT 1 FROM runs WHERE task_id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task_id.as_uuid())
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Which runs [`request_stop_tx`] marks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StopScope {
+    /// A human stop of a run: a `finalizing` run is left alone.
+    ActiveOnly,
+    /// Cancelling the task: a `finalizing` run is marked as well.
+    IncludingFinalizing,
+}
+
+/// Sets the stop marker on the task's active run if it has none and publishes `run_changed`.
+/// A `finalizing` run is ending already (`complete_task`, release): it is marked only when
+/// `scope` is [`StopScope::IncludingFinalizing`] (cancelling the task), because the marker also
+/// stops messages queued before the stop from requeuing the task. Returns the run when this call
+/// stopped it.
+async fn request_stop_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    scope: StopScope,
+) -> Result<Option<RunId>, DbError> {
+    let run: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE runs SET stop_requested_at = now(),
+             state = CASE WHEN state IN ('preparing', 'running', 'awaiting_input')
+                          THEN 'finalizing' ELSE state END
+         WHERE task_id = $1 AND stop_requested_at IS NULL
+           AND state NOT IN ('succeeded', 'failed', 'cancelled')
+           AND ($2 OR state <> 'finalizing')
+         RETURNING id",
+    )
+    .bind(task_id.as_uuid())
+    .bind(scope == StopScope::IncludingFinalizing)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let run_id = run.map(RunId::from_uuid);
+    if let Some(run_id) = run_id {
+        publish(&mut **tx, &Notification::RunChanged { run_id, task_id }).await?;
+    }
+    Ok(run_id)
+}
+
+async fn has_active_run(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM runs
+         WHERE task_id = $1 AND state NOT IN ('succeeded', 'failed', 'cancelled'))",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_one(&mut **tx)
+    .await?)
 }
 
 /// Asks a persona to name a task that has no title from a person.

@@ -1,6 +1,7 @@
 //! The iteration 1 flow through the web UI (`just e2e-local`): assignment, pull request, tools,
-//! follow-up, completion and the rate limit; and demo step 4 of iteration 2 (network access
-//! request). Needs the environment of `E2eEnv`, so the tests are ignored by default.
+//! follow-up, completion and the rate limit; and demo steps 4 (network access request) and 5
+//! (stop and cancel) of iteration 2. Needs the environment of `E2eEnv`, so the tests are ignored
+//! by default.
 
 use std::time::{Duration, Instant};
 
@@ -315,5 +316,85 @@ async fn denied_host_is_requested_and_the_approval_lets_the_retry_through() -> R
     assert_eq!(transcript.matches(NOTED).count(), 1, "{transcript}");
     let runs = db::runs(&world.pool, &key).await?;
     assert_eq!(runs.len(), 1, "{runs:?}");
+    Ok(())
+}
+
+/// Demo step 5 of iteration 2, first half: the board member stops the run during its first turn,
+/// the task waits and its pending request stays; cancelling the task then closes the request.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn stopping_a_run_makes_the_task_wait_and_cancelling_it_closes_its_requests() -> Result<()> {
+    let (host, port) = (data::NETWORK_HOST, data::NETWORK_PORT);
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::NETWORK_PROJECT_KEY,
+            "Fetch the package index",
+            None,
+        )
+        .await?;
+    world.session.expect_text(NEED, RUN_TIMEOUT).await?;
+    let request = eventually("a network-access request", RUN_TIMEOUT, || async {
+        db::network_request(&world.pool, &key, host, port).await
+    })
+    .await?;
+    assert_eq!(request.state, "pending", "{request:?}");
+
+    world.session.stop_run().await?;
+
+    // The runtime finalizes and reports `cancelled`: the task waits, the request is untouched.
+    world.wait_for_status(&key, "waiting").await?;
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].state, "cancelled", "{runs:?}");
+    assert_eq!(runs[0].outcome.as_deref(), Some("cancelled"), "{runs:?}");
+    world
+        .session
+        .expect_region_text("#task-details", "waiting", RUN_TIMEOUT)
+        .await?;
+    let after_stop = db::network_request(&world.pool, &key, host, port)
+        .await?
+        .context("the request still exists")?;
+    assert_eq!(after_stop.state, "pending", "{after_stop:?}");
+
+    world.session.cancel_task().await?;
+
+    world.wait_for_status(&key, "cancelled").await?;
+    world
+        .session
+        .expect_region_text("#task-details", "cancelled", RUN_TIMEOUT)
+        .await?;
+    let closed = db::network_request(&world.pool, &key, host, port)
+        .await?
+        .context("the request still exists")?;
+    assert_eq!(closed.state, "closed", "{closed:?}");
+    assert_eq!(closed.close_reason.as_deref(), Some("task-cancelled"));
+    Ok(())
+}
+
+/// Demo step 5 of iteration 2, second half: cancelling a task with a draft PR leaves the PR
+/// as it is.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn cancelling_a_task_leaves_its_pull_request_untouched() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(&world.env, data::PROJECT_KEY, "Add a greeting file", None)
+        .await?;
+    world.wait_for_status(&key, "waiting").await?;
+    let before = world.pulls_of(&branch_of(&key)).await?;
+    assert_eq!(before.len(), 1, "{before:?}");
+    assert_eq!(before[0]["draft"], true, "{before:?}");
+
+    world.session.cancel_task().await?;
+
+    world.wait_for_status(&key, "cancelled").await?;
+    let after = world.pulls_of(&branch_of(&key)).await?;
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert_eq!(after[0]["draft"], true, "{after:?}");
+    assert_eq!(after[0]["state"], "open", "{after:?}");
     Ok(())
 }

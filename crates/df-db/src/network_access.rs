@@ -122,8 +122,8 @@ pub enum DenialOutcome {
     UnknownRun,
     /// The run is no longer active.
     RunEnded,
-    /// The run's task is completed.
-    TaskCompleted,
+    /// The run's task is completed or cancelled.
+    TaskClosed,
 }
 
 /// Raises a non-blocking `network-access` request, raised by the control plane, for a
@@ -165,8 +165,11 @@ pub async fn raise_from_denial(
     {
         return Ok(DenialOutcome::RunEnded);
     }
-    if status.parse::<TaskStatus>().map_err(DbError::from)? == TaskStatus::Completed {
-        return Ok(DenialOutcome::TaskCompleted);
+    if matches!(
+        status.parse::<TaskStatus>().map_err(DbError::from)?,
+        TaskStatus::Completed | TaskStatus::Cancelled
+    ) {
+        return Ok(DenialOutcome::TaskClosed);
     }
     if allowlist_covers(&mut tx, task_id, &host, port).await? {
         return Ok(DenialOutcome::Raised(Raised::AlreadyGranted));

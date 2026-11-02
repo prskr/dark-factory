@@ -3,6 +3,8 @@
 
 mod view;
 
+use std::time::Duration;
+
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -28,13 +30,17 @@ use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
 use crate::transcript::{Folder, render_transcript};
 pub(crate) use view::{
-    Choices, Filters, TaskForm, details_region, head_region, list_column, pending_region,
-    runs_region, task_rows,
+    CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
+    list_column, pending_region, runs_region, stoppable, task_rows,
 };
 use view::{composer_dialog, composer_form, details_column, message_area};
 
 /// How many transcript rows the detail page renders at once.
 const PAGE_BATCH: i64 = 1000;
+/// How long marking a task done waits for the forge to mark its PR ready. The status is already
+/// committed; a forge that does not answer must not keep the page waiting through the plugin's
+/// retries.
+const MARK_READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) fn routes() -> Router<WebState> {
     Router::new()
@@ -51,6 +57,8 @@ pub(crate) fn routes() -> Router<WebState> {
         )
         .route("/tasks/{key}/title", post(task_rename))
         .route("/tasks/{key}/done", post(task_done))
+        .route("/tasks/{key}/stop", post(task_stop))
+        .route("/tasks/{key}/cancel", post(task_cancel))
 }
 
 /// The query of the list pages.
@@ -178,9 +186,9 @@ fn selected_columns(s: &Selected) -> Markup {
                 "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
                 (render_transcript(s.folder.items(), &timeline_cards(&s.requests)))
             }
-            (message_area(key, &s.detail.persona_name, s.detail.status.as_str(), &s.pending, s.show_hidden))
+            (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
         }
-        (details_column(&s.detail, &s.runs))
+        (details_column(&s.detail, &s.runs, &CancelNote::new(&s.runs, &s.pending)))
     }
 }
 
@@ -435,8 +443,9 @@ async fn task_rename(
     response
 }
 
-/// `POST /tasks/{key}/done`: a board member marks the task done. The answer is the details
-/// region as the task is now, also when the task could not be marked done (409).
+/// `POST /tasks/{key}/done`: a board member marks the task done and its PR, if any, becomes
+/// ready for review. The answer is the details region as the task is now, also when the task
+/// could not be marked done (409).
 async fn task_done(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
@@ -448,13 +457,109 @@ async fn task_done(
     };
     let id = TaskId::from_uuid(task.id);
     let status = match df_db::mark_task_done(&state.pool, id, user.principal()).await {
+        Ok(()) => {
+            mark_pr_ready(&state, id).await;
+            StatusCode::OK
+        }
+        Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
+        Err(e) => return internal_error(&e),
+    };
+    details_answer(&state, id, status).await
+}
+
+/// Marks the PR of a task ready for review, without a summary. Best effort: a forge failure is
+/// logged and does not undo the status (design D5).
+async fn mark_pr_ready(state: &WebState, id: TaskId) {
+    let task = match df_db::get_task(&state.pool, id).await {
+        Ok(Some(task)) => task,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, task_id = %id, "failed to load the task to mark its pull request ready");
+            return;
+        }
+    };
+    let Some(number) = task.pr_number.and_then(|n| u64::try_from(n).ok()) else {
+        return;
+    };
+    mark_ready_bounded(
+        state.forge.as_ref(),
+        &task.project_id,
+        number,
+        MARK_READY_TIMEOUT,
+    )
+    .await;
+}
+
+/// Marks PR `number` ready for review, waiting at most `deadline`. Failures and an expired
+/// deadline are logged; the forge may still apply the change later.
+pub(crate) async fn mark_ready_bounded(
+    forge: &dyn df_core::ForgeClient,
+    project_id: &ProjectId,
+    number: u64,
+    deadline: Duration,
+) {
+    match tokio::time::timeout(deadline, forge.mark_pull_request_ready(project_id, number)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(%error, %project_id, number, "failed to mark the pull request ready");
+        }
+        Err(_elapsed) => {
+            tracing::warn!(%project_id, number, "marking the pull request ready timed out");
+        }
+    }
+}
+
+/// `POST /tasks/{key}/stop`: a board member stops the active run. The page follows through the
+/// live events, so the answer has no content (409 if there is no run to stop).
+async fn task_stop(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(key): Path<String>,
+) -> Response {
+    let task = match task_by_key(&state, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    match df_db::stop_run(&state.pool, TaskId::from_uuid(task.id), user.principal()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT.into_response(),
+        Err(e) => internal_error(&e),
+    }
+}
+
+/// `POST /tasks/{key}/cancel`: a board member cancels the task (the dialog asked before). The
+/// answer is the details region as the task is now, also when it could not be cancelled (409).
+async fn task_cancel(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(key): Path<String>,
+) -> Response {
+    let task = match task_by_key(&state, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    let id = TaskId::from_uuid(task.id);
+    let status = match df_db::cancel_task(&state.pool, id, user.principal()).await {
         Ok(()) => StatusCode::OK,
         Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
         Err(e) => return internal_error(&e),
     };
-    match df_db::task_views::get_task_detail(&state.pool, id).await {
-        Ok(Some(task)) => (status, details_region(&task)).into_response(),
-        Ok(None) => not_found("The task"),
+    details_answer(&state, id, status).await
+}
+
+/// The details region of the task as it is now, with `status`.
+async fn details_answer(state: &WebState, id: TaskId, status: StatusCode) -> Response {
+    let task = match df_db::task_views::get_task_detail(&state.pool, id).await {
+        Ok(Some(task)) => task,
+        Ok(None) => return not_found("The task"),
+        Err(e) => return internal_error(&e),
+    };
+    match load_detail(state, task).await {
+        Ok(data) => (
+            status,
+            details_region(&data.task, &CancelNote::new(&data.runs, &data.pending)),
+        )
+            .into_response(),
         Err(e) => internal_error(&e),
     }
 }

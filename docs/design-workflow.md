@@ -134,8 +134,13 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Desktop / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Desktop / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
 | Desktop / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
+| Desktop / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
+| Desktop / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
 | Desktop / Requests · inbox | `/requests` | manual seed (not built): pending approval, blocking question with suggested answers, question without | 1440 |
 | Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
+| Phone / Phone · stop and cancel | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |
+| Phone / Phone · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 390 |
+| Phone / Phone · stop from composer | `/tasks/<id>` | task `running`, message box empty | 390 |
 | Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
 | Config / Phone · projects | `/projects` | projects (not built) | 390 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |

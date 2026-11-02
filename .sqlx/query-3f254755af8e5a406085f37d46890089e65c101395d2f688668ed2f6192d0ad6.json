@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n               forwarded_at\n        FROM task_messages\n        WHERE task_id = $1 AND delivered_at IS NULL\n        ORDER BY queued_at ASC, id ASC\n        ",
+  "query": "\n        UPDATE task_messages SET forwarded_at = now()\n        WHERE task_id = $1 AND delivered_at IS NULL AND forwarded_at IS NULL\n          AND discarded_at IS NULL\n        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n                  forwarded_at\n        ",
   "describe": {
     "columns": [
       {
@@ -108,5 +108,5 @@
       true
     ]
   },
-  "hash": "6f8bb02cc68e2ca2504bbc7e6ddf1405604bebeb8e47952457381d80151336a4"
+  "hash": "3f254755af8e5a406085f37d46890089e65c101395d2f688668ed2f6192d0ad6"
 }

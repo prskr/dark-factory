@@ -95,6 +95,8 @@ pub struct NetworkRequest {
     pub reason: String,
     /// The scope of the approval.
     pub scope: Option<String>,
+    /// Why a closed request was closed (`task-cancelled`, ...).
+    pub close_reason: Option<String>,
 }
 
 /// The newest `network-access` request of task `key` for `host:port`.
@@ -106,7 +108,7 @@ pub async fn network_request(
 ) -> Result<Option<NetworkRequest>> {
     let row = sqlx::query(
         "SELECT r.id, r.state, r.run_id IS NULL AS raised_by_control_plane, r.blocking, r.reason, \
-         r.decision ->> 'scope' AS scope FROM agent_requests r \
+         r.decision ->> 'scope' AS scope, r.close_reason FROM agent_requests r \
          JOIN tasks t ON t.id = r.task_id \
          WHERE t.key = $1 AND r.approval_type = 'network-access' AND r.fingerprint = $2 \
          ORDER BY r.created_at DESC LIMIT 1",
@@ -124,6 +126,7 @@ pub async fn network_request(
             blocking: row.try_get("blocking")?,
             reason: row.try_get("reason")?,
             scope: row.try_get("scope")?,
+            close_reason: row.try_get("close_reason")?,
         })
     })
     .transpose()

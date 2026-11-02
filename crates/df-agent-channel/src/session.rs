@@ -123,7 +123,7 @@ where
         tasks: JoinSet::new(),
         ended: false,
         idle_at: None,
-        done_cancel_sent: false,
+        human_cancel_sent: false,
         release_sent: false,
     };
     let result = session
@@ -149,8 +149,8 @@ struct Session {
     /// `runs.keepAliveSeconds`. `None` unless the run is `awaiting_input` and no prompt is in
     /// flight.
     idle_at: Option<Instant>,
-    /// This session sent `Cancel` because the task was marked done.
-    done_cancel_sent: bool,
+    /// This session sent `Cancel` because the task was marked done or the run was stopped.
+    human_cancel_sent: bool,
     /// This session sent `Release`.
     release_sent: bool,
 }
@@ -327,7 +327,7 @@ impl Session {
             .await?;
         lock_task(&mut tx, self.rc.task.id).await?;
         let moved = if only_idle {
-            !has_undelivered_message(&mut tx, self.rc.task.id).await?
+            !has_undelivered_message(&mut tx, self.rc.task.id, None).await?
                 && sqlx::query(
                     "UPDATE runs SET state = 'finalizing' WHERE id = $1 AND state = 'awaiting_input'",
                 )
@@ -383,9 +383,9 @@ impl Session {
     }
 
     /// Commands for a run the control plane has moved to `finalizing`: `Cancel` when the task was
-    /// marked done, `Release` when the idle deadline passed (again after a reconnect, when the
-    /// first one was lost with the old stream). Returns `false` once the peer is gone or the run
-    /// ended.
+    /// marked done or the run stopped, `Release` when the idle deadline passed (again after a
+    /// reconnect, when the first one was lost with the old stream). Returns `false` once the peer
+    /// is gone or the run ended.
     async fn reconcile_finalizing(&mut self) -> Result<bool, ChannelError> {
         let Some(run) = get_run(&self.ctx.pool, self.rc.run.id).await? else {
             return Ok(false);
@@ -401,12 +401,17 @@ impl Session {
             .fetch_one(&self.ctx.pool)
             .await?;
         let status: TaskStatus = status.parse()?;
-        if status == TaskStatus::Completed {
-            if self.done_cancel_sent {
+        if status == TaskStatus::Completed || run.stop_requested_at.is_some() {
+            if self.human_cancel_sent {
                 return Ok(true);
             }
-            self.done_cancel_sent = true;
-            return Ok(self.send_cancel("task marked done").await);
+            self.human_cancel_sent = true;
+            let reason = if status == TaskStatus::Completed {
+                "task marked done"
+            } else {
+                "run stopped by a board member"
+            };
+            return Ok(self.send_cancel(reason).await);
         }
         // A budget `Cancel` also leaves the run `finalizing`. Once the budget deadline has passed
         // the budget timer sends it (also on a replica that takes over after the first one was

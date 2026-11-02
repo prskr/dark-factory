@@ -504,9 +504,25 @@ async fn a_denial_reported_after_the_run_ended_or_the_task_was_done_raises_nothi
         .unwrap();
 
     assert_eq!(after_cancel, DenialOutcome::RunEnded);
-    assert_eq!(after_done, DenialOutcome::TaskCompleted);
+    assert_eq!(after_done, DenialOutcome::TaskClosed);
     assert!(pending_for(&pool, &df7).await.is_empty());
     assert!(pending_for(&pool, &df8).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_denial_reported_after_cancellation_raises_nothing() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    // The cancelled task's run is still finalizing when the gateway reports.
+    let run_id = run(&pool, &df7, "running").await;
+    crate::cancel_task(&pool, df7.id, human()).await.unwrap();
+
+    let outcome = raise_from_denial(&pool, run_id, "pypi.org", 443)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, DenialOutcome::TaskClosed);
+    assert!(pending_for(&pool, &df7).await.is_empty());
 }
 
 #[tokio::test]

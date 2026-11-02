@@ -111,7 +111,7 @@
     {
       "name": "complete_task",
       "title": "Complete task",
-      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: ask it with ask_question instead.",
+      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: ask it with ask_question instead. Also call it when the instructions leave nothing to do (already done, nothing to change, question answered), with a summary that says why: if you end your turn without it, the task waits for a human.",
       "inputSchema": {
         "type": "object",
         "properties": {
