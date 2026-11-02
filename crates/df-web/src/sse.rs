@@ -30,8 +30,8 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
-    CancelNote, Filters, ListQuery, composer_action, details_region, head_region, load_detail,
-    pending_region, runs_region, stoppable, task_rows,
+    CancelNote, Filters, ListQuery, ResumeNote, composer_action, details_region, head_region,
+    load_detail, pending_region, runs_region, stoppable, task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -235,6 +235,7 @@ impl DetailStream {
             details_region(
                 &data.task,
                 &CancelNote::new(&data.runs, &data.pending),
+                &ResumeNote::new(&data.task, &data.runs, self.state.max_auto_resumes),
                 None,
             ),
             runs_region(

@@ -111,6 +111,17 @@ tests:
           pattern: 'runs:\n  keepAliveSeconds: 600\n'
         documentIndex: 0
 
+  - it: renders the concurrency limit and the resume cap of runs
+    template: configmap.yaml
+    set:
+      runs.maxConcurrent: 2
+      runs.maxAutoResumes: 5
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'maxConcurrent: 2\n  maxAutoResumes: 5\n'
+        documentIndex: 0
+
   - it: renders the volume retention values
     template: configmap.yaml
     set:

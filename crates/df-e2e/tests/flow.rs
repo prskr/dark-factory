@@ -229,6 +229,39 @@ async fn rate_limited_run_shows_the_limit_and_the_next_message_continues() -> Re
     Ok(())
 }
 
+/// A rate-limited task resumes at the retry time reported by the run (60 s in the script) and the
+/// next run starts without a message.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn rate_limited_task_resumes_at_the_retry_time_without_a_message() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::RATE_LIMIT_PROJECT_KEY,
+            "Do some work",
+            None,
+        )
+        .await?;
+
+    world.wait_for_status(&key, "rate_limited").await?;
+    world
+        .session
+        .expect_region_text("#task-details", "Resumes at", RUN_TIMEOUT)
+        .await?;
+
+    // No message: the scheduler starts run 2 once the retry time has passed.
+    world
+        .session
+        .expect_text("Continuing after the rate limit.", RUN_TIMEOUT)
+        .await?;
+    world.wait_for_status(&key, "waiting").await?;
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    Ok(())
+}
+
 /// Demo step 4 of iteration 2: the proxy denies `pypi.org`, the control plane raises a
 /// `network-access` request from the gateway's report, the board member approves it for the
 /// task and the agent's retry in the same turn gets through.

@@ -78,6 +78,10 @@ pub enum ProviderError {
     NotFound(String),
     #[error("invalid sandbox specification: {0}")]
     InvalidSpec(String),
+    /// The provider has no room for the resource right now (for example an exceeded quota).
+    /// The run is retried later and the attempt does not count as a resume.
+    #[error("provider capacity exhausted: {0}")]
+    Capacity(String),
     #[error("kubernetes / provider failure: {0}")]
     Backend(String),
 }
@@ -90,6 +94,9 @@ pub trait SandboxProvider: Send + Sync {
     async fn delete_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError>;
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError>;
     async fn teardown(&self, run_id: RunId) -> Result<(), ProviderError>;
+    /// Whether a sandbox of the run exists (one existence check). The scheduler provisions a stale
+    /// run again only when it does not.
+    async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError>;
     /// Peer = URI SAN from the client cert + peer IP. `None` = reject.
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId>;
     /// Stream of `Started { run_id, pod_ip }` and `Gone { run_id, reason }` transitions.

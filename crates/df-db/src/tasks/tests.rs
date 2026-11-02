@@ -613,6 +613,33 @@ async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: &str) -> Ta
     task
 }
 
+#[tokio::test]
+async fn a_message_clears_the_resume_time_and_count() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::RateLimited, "succeeded").await;
+    sqlx::query(
+        "UPDATE tasks SET resume_at = now() + interval '40 minutes', auto_resumes = 2 WHERE id = $1",
+    )
+    .bind(task.id.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    queue_message(&pool, task.id, human(), text("go on"))
+        .await
+        .unwrap();
+
+    let (status, resume_at, count): (String, Option<DateTime<Utc>>, i32) =
+        sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
+            .bind(task.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "queued");
+    assert_eq!(resume_at, None);
+    assert_eq!(count, 0);
+}
+
 /// A transaction that holds the run row and then wants the task row (`persist_batch`) must
 /// not deadlock with `mark_task_done`: that waits for the run row before taking the task row.
 #[tokio::test]

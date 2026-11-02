@@ -37,6 +37,8 @@ data:
     {{- include "dark-factory.sandboxConfig" . | nindent 4 }}
     runs:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
+      maxConcurrent: {{ .Values.runs.maxConcurrent }}
+      maxAutoResumes: {{ .Values.runs.maxAutoResumes }}
     volumes:
       retainAfterCloseSeconds: {{ .Values.volumes.retainAfterCloseSeconds | int64 }}
       idleTtlSeconds: {{ .Values.volumes.idleTtlSeconds | int64 }}

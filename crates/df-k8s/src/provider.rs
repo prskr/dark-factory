@@ -602,6 +602,23 @@ impl K8sSandboxProvider {
         // Best-effort broadcast; receivers might be closed or dropped.
         self.events_tx.send(event).ok(); // receiver may be gone
     }
+
+    fn sandbox_api(&self) -> Api<Sandbox> {
+        Api::namespaced(self.client.clone(), &self.config.sandbox.namespace)
+    }
+
+    /// The sandboxes of this instance labelled with `run_id`.
+    async fn list_run_sandboxes(
+        &self,
+        run_id: RunId,
+        what: &str,
+    ) -> Result<kube::api::ObjectList<Sandbox>, ProviderError> {
+        let list_params = kube::api::ListParams::default().labels(&format!(
+            "dark-factory.io/instance={},dark-factory.io/run-id={run_id}",
+            self.config.instance_name
+        ));
+        api_call(what, self.sandbox_api().list(&list_params)).await
+    }
 }
 
 #[async_trait]
@@ -654,8 +671,7 @@ impl SandboxProvider for K8sSandboxProvider {
     }
 
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
-        let sandboxes: Api<Sandbox> =
-            Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);
+        let sandboxes = self.sandbox_api();
         let netpols: Api<NetworkPolicy> =
             Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);
 
@@ -709,16 +725,10 @@ impl SandboxProvider for K8sSandboxProvider {
     }
 
     async fn teardown(&self, run_id: RunId) -> Result<(), ProviderError> {
-        let sandboxes: Api<Sandbox> =
-            Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);
-
-        // List sandboxes by instance and run-id label
-        let list_params = kube::api::ListParams::default().labels(&format!(
-            "dark-factory.io/instance={},dark-factory.io/run-id={run_id}",
-            self.config.instance_name
-        ));
-        let matching =
-            api_call("list sandboxes for teardown", sandboxes.list(&list_params)).await?;
+        let sandboxes = self.sandbox_api();
+        let matching = self
+            .list_run_sandboxes(run_id, "list sandboxes for teardown")
+            .await?;
 
         for sb in matching {
             if let Some(name) = sb.metadata.name {
@@ -747,6 +757,13 @@ impl SandboxProvider for K8sSandboxProvider {
         }
 
         Ok(())
+    }
+
+    async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError> {
+        let matching = self
+            .list_run_sandboxes(run_id, "list sandboxes of a run")
+            .await?;
+        Ok(!matching.items.is_empty())
     }
 
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId> {
@@ -783,9 +800,32 @@ async fn api_call<T>(
 ) -> Result<T, ProviderError> {
     match tokio::time::timeout(K8S_API_TIMEOUT, call).await {
         Ok(Ok(value)) => Ok(value),
+        Ok(Err(err)) if is_quota_rejection(&err) => {
+            Err(ProviderError::Capacity(format!("failed to {what}: {err}")))
+        }
         Ok(Err(err)) => Err(ProviderError::Backend(format!("failed to {what}: {err}"))),
         Err(_) => Err(ProviderError::Backend(format!("timeout trying to {what}"))),
     }
+}
+
+/// Whether the API server rejected the request because a resource quota is exceeded: a 403
+/// `Forbidden` whose message or causes name the quota. Any other `Forbidden` (RBAC, admission)
+/// is an ordinary failure.
+fn is_quota_rejection(err: &kube::Error) -> bool {
+    let kube::Error::Api(status) = err else {
+        return false;
+    };
+    status.code == 403
+        && status.reason == "Forbidden"
+        && std::iter::once(status.message.as_str())
+            .chain(
+                status
+                    .details
+                    .iter()
+                    .flat_map(|d| &d.causes)
+                    .map(|c| c.message.as_str()),
+            )
+            .any(|text| text.contains("exceeded quota"))
 }
 
 /// Translates pod and sandbox watch events into [`SandboxEvent`]s, at most one `Started` and one

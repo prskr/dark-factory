@@ -62,6 +62,8 @@ pub struct WebState {
     pub show_hidden_blocks: bool,
     /// Accept `http://` repository URLs in the project form (`forge.allowPlainHttp`).
     pub allow_plain_http: bool,
+    /// `runs.maxAutoResumes`, the denominator of the resume count on the task detail.
+    pub max_auto_resumes: u32,
     /// The approval types of this instance; they define what a request asks and does.
     pub approval_types: df_db::requests::ApprovalTypes,
 }

@@ -23,6 +23,8 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `runs.keepAliveSeconds` | no | `600` | How long a run waits for a follow-up after a normal turn end (`awaiting_input`) before the control plane sends `Release` and the run ends `end_turn`. `0` releases right after the turn. Idle time counts toward `maxWallClockSeconds`. |
 | `volumes.retainAfterCloseSeconds` | no | `604800` (7 days) | The volume of a `completed` or `cancelled` task without an active run is deleted this long after its last run ended. The check runs once per hour on the replica holding the instance Lease (not without a cluster). `0` deletes at the next check; a value too large to represent as a date means never. |
 | `volumes.idleTtlSeconds` | no | `2592000` (30 days) | The volume of any task without an active run is deleted this long after its last run ended; same check and value rules as `retainAfterCloseSeconds`. The next run creates a fresh volume, clones again and restores the WIP snapshot. A board member can delete a volume at once with "Reset workspace" (`crates/df-web/README.md`). |
+| `runs.maxConcurrent` | no | `4` | At least 1 (0 is rejected at startup). Runs that may be non-terminal at the same time, counted across all replicas. Further due tasks keep their status until a slot frees and then start oldest resume time first. |
+| `runs.maxAutoResumes` | no | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` (backoff 2 min x (resumes + 1)); then the task becomes `failed`. A message or a run that ends with a `RunReport` resets the count; a capacity rejection does not count. |
 | `web.showHiddenBlocks` | no | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, e.g. the `set_task_title` request) in the task page and the queued message stack, muted and labeled "Instruction for the agent". Hidden blocks are always delivered to the harness. Read at startup; a change needs a restart. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
@@ -71,10 +73,12 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 | `completed` | `succeeded` | `in_review` |
 | `end_turn` | `succeeded` | `waiting` |
 | `limit_reached` | `succeeded` | `limit_reached` |
-| `rate_limited` | `succeeded` | `rate_limited` |
 | `cancelled` | `cancelled` | `waiting` (`cancelled` if a board member cancelled the task) |
 | `blocked` | `blocked` | `waiting` |
-| `failed`, `provisioning_failed`, `connect_timeout`, `sandbox_lost` | `failed` | `failed` |
+| `rate_limited` | `succeeded` | `rate_limited` with a resume time (the retry time, or one hour ahead) |
+| `failed` | `failed` | `failed` |
+| `provisioning_failed`, `connect_timeout`, `sandbox_lost` | `failed` | `queued` with a resume time and the resume count + 1, until `runs.maxAutoResumes`, then `failed` |
+| `provisioning_failed` with detail `capacity` (quota exceeded) | `failed` | `queued` in 2 minutes, resume count unchanged |
 
 If prompts are still undelivered when a run ends with an outcome other than `failed`-class or
 `rate_limited`, the task becomes `queued` and the next run starts with them. A task a board member

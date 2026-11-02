@@ -10,7 +10,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use df_core::config::RunsConfig;
-use df_core::{ProjectKey, RunOutcome, RunSandboxSpec, RunState, SandboxEvent, TaskVolumeSpec};
+use df_core::{
+    CAPACITY_DETAIL, ProjectKey, ProviderError, RunOutcome, RunSandboxSpec, RunState, SandboxEvent,
+    TaskVolumeSpec,
+};
 use df_db::Notification;
 use futures::StreamExt;
 use tokio::sync::broadcast::error::RecvError;
@@ -20,12 +23,15 @@ use crate::ChannelContext;
 use crate::assign::load_run_context;
 use crate::error::ChannelError;
 use crate::runs::{
-    RunEnd, RunRow, finish_run, get_run, list_active_runs, mark_started, start_queued_runs,
-    teardown,
+    RunEnd, RunRow, finish_run, get_run, list_active_runs, list_unprovisioned_runs, mark_started,
+    start_queued_runs, teardown,
 };
 
-/// Interval of the safety-net tick besides notifications.
-const TICK_INTERVAL: Duration = Duration::from_secs(15);
+/// Interval of the tick: resume times and freed slots are noticed on it (a due task starts
+/// within 5 seconds), and it is the safety net besides notifications.
+const TICK_INTERVAL: Duration = Duration::from_secs(5);
+/// Age of a run without a sandbox after which the tick provisions it again (design D4).
+const REPROVISION_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 /// Runs started per tick; the next tick (or notification) picks up the rest.
 const START_BATCH: i64 = 10;
 /// Time a stopped run gets to report before its sandbox is torn down (design D1).
@@ -57,8 +63,7 @@ impl Scheduler {
             tokio::select! {
                 () = &mut shutdown => break,
                 _ = interval.tick() => {
-                    self.start_in_background(&mut provisions).await;
-                    if let Err(e) = self.enforce_timeouts(Utc::now()).await {
+                    if let Err(e) = self.tick(&mut provisions, Utc::now()).await {
                         tracing::error!(error = %e, "failed to enforce run timeouts");
                     }
                 }
@@ -90,9 +95,62 @@ impl Scheduler {
         }
     }
 
-    /// Creates `pending` runs for queued tasks.
+    /// One pass of the safety net: provisions runs whose provisioning was interrupted, starts due
+    /// tasks and enforces the timeouts.
+    async fn tick(
+        &self,
+        provisions: &mut JoinSet<()>,
+        now: DateTime<Utc>,
+    ) -> Result<(), ChannelError> {
+        self.reprovision_stale(provisions, now).await;
+        self.start_in_background(provisions).await;
+        self.enforce_timeouts(now).await
+    }
+
+    /// Provisions runs again that stayed `pending`/`provisioning` for [`REPROVISION_AFTER`], for
+    /// example because the replica that created them stopped before the sandbox existed. Volume
+    /// and sandbox creation are idempotent; a run that has a sandbox only costs one existence check.
+    async fn reprovision_stale(&self, provisions: &mut JoinSet<()>, now: DateTime<Utc>) {
+        let Some(before) = now.checked_sub_signed(REPROVISION_AFTER) else {
+            return;
+        };
+        match list_unprovisioned_runs(&self.ctx.pool, before).await {
+            Ok(runs) => {
+                for run in runs {
+                    let scheduler = self.clone();
+                    provisions.spawn(async move { scheduler.retry_provision(run).await });
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "failed to list runs to provision again"),
+        }
+    }
+
+    /// Provisions a stale run again unless its sandbox exists. A failure is only logged: the run
+    /// is tried again on the next tick or ends on the connect timeout, so a transient API error
+    /// never ends a run that may be starting up fine.
+    async fn retry_provision(&self, run: RunRow) {
+        let run_id = run.id;
+        match self.ctx.provider.sandbox_exists(run_id).await {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, run_id = %run_id, "failed to check for the sandbox of a stale run");
+                return;
+            }
+        }
+        if let Err(e) = self.provision(run).await {
+            tracing::warn!(error = %e, run_id = %run_id, "provisioning a stale run again failed; retrying on a later tick");
+        }
+    }
+
+    /// Creates `pending` runs for due tasks.
     async fn start_runs(&self) -> Result<Vec<RunRow>, ChannelError> {
-        start_queued_runs(&self.ctx.pool, START_BATCH).await
+        start_queued_runs(
+            &self.ctx.pool,
+            START_BATCH,
+            self.ctx.config.runs.max_concurrent,
+        )
+        .await
     }
 
     pub(crate) async fn start_in_background(&self, provisions: &mut JoinSet<()>) {
@@ -113,7 +171,12 @@ impl Scheduler {
         let run_id = run.id;
         if let Err(e) = self.provision(run).await {
             tracing::error!(error = %e, run_id = %run_id, "provisioning failed");
-            if let Err(e2) = self.provisioning_failed(run_id, &e.to_string()).await {
+            // The error is logged above; the run keeps the marker the run end acts on.
+            let detail = match &e {
+                ChannelError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
+                _ => e.to_string(),
+            };
+            if let Err(e2) = self.provisioning_failed(run_id, &detail).await {
                 tracing::error!(error = %e2, run_id = %run_id, "failed to record provisioning failure");
             }
         }
@@ -132,7 +195,14 @@ impl Scheduler {
         df_db::tasks::clear_volume_deleted(&self.ctx.pool, rc.task.id).await?;
         // The run may have ended meanwhile (sandbox lost, connect timeout on another replica):
         // nothing would tear a sandbox created now down again.
-        if !crate::runs::set_run_state(&self.ctx.pool, run_id, RunState::Provisioning, None).await?
+        let moved =
+            crate::runs::set_run_state(&self.ctx.pool, run_id, RunState::Provisioning, None)
+                .await?;
+        // Already `provisioning` is the retry of an interrupted run; anything else is over.
+        if !moved
+            && get_run(&self.ctx.pool, run_id)
+                .await?
+                .is_none_or(|run| run.state != RunState::Provisioning)
         {
             tracing::info!(run_id = %run_id, "run ended before its sandbox was created; skipping provisioning");
             return Ok(());

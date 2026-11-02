@@ -8,6 +8,7 @@ use df_db::TaskMessageRow;
 use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail, TaskListItem};
 use maud::{Markup, html};
 
+use super::resume::{ResumeNote, clock_label};
 use crate::components::QueuedState;
 use crate::components::forms::{INPUT_CLASS, MenuItem};
 use crate::components::transcript::queued_message;
@@ -170,6 +171,8 @@ pub(crate) fn task_rows(
         ul id="task-rows" {
             @for t in items {
                 @let href = format!("/tasks/{}{}", t.key, query);
+                @let status = status_of(&t.status);
+                @let resume_at = shown_resume_time(status, t.resume_at);
                 li id={"row-" (t.key)} {
                     a href=(href) hx-get=(href) hx-target="#ws-detail" hx-select="#ws-detail" hx-swap="outerHTML" hx-push-url="true"
                         aria-current=[(current == Some(t.key.as_str())).then_some("page")]
@@ -177,11 +180,13 @@ pub(crate) fn task_rows(
                         class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
                         div class="flex items-center gap-2" {
                             span class="font-mono text-xs text-faint" { (t.key) }
-                            @if let Some(status) = status_of(&t.status) { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
+                            @if let Some(status) = status { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
                             time datetime=(t.updated_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(t.updated_at)) }
                         }
                         div title=(t.title) class={"mt-0.5 truncate text-[15px] font-medium" @if t.title_source == TitleSource::Placeholder { " italic text-muted" }} { (t.title) }
-                        @if !t.status_line.is_empty() { div class="mt-0.5 truncate text-xs text-muted" { (t.status_line) } }
+                        @if let Some(at) = resume_at {
+                            div class="mt-0.5 truncate text-xs text-muted" { "Resumes at " (clock_label(at, Utc::now())) }
+                        } @else if !t.status_line.is_empty() { div class="mt-0.5 truncate text-xs text-muted" { (t.status_line) } }
                         div class="mt-1 text-xs text-faint" { (t.project_name) " · " (t.persona_name) }
                     }
                 }
@@ -189,6 +194,14 @@ pub(crate) fn task_rows(
             @if items.is_empty() { li { (empty_list(filters)) } }
         }
     }
+}
+
+/// The resume time a task row shows: only for a status that waits for it.
+fn shown_resume_time(
+    status: Option<TaskStatus>,
+    resume_at: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    resume_at.filter(|_| status.is_some_and(|s| s.waits_for_resume()))
 }
 
 /// What the task list says when no task matches the filters.
@@ -514,6 +527,7 @@ impl CancelNote {
 pub(crate) fn details_region(
     task: &TaskDetail,
     cancel: &CancelNote,
+    resume: &ResumeNote,
     error: Option<&str>,
 ) -> Markup {
     let branch = task
@@ -533,6 +547,41 @@ pub(crate) fn details_region(
     let issue = issue_url(task)
         .zip(task.issue_number)
         .map(|(url, number)| (url, format!("Issue #{number}")));
+    // "Now": the resume time while the task waits for one, else the status line.
+    let (now_tone, now_text) = match resume.at {
+        Some(at) => (
+            Tone::Limited,
+            html! {
+                "Resumes at " time datetime=(at.to_rfc3339()) title=(format_time(at)) { (clock_label(at, Utc::now())) }
+                " · " (resume.reason)
+            },
+        ),
+        None => (
+            Tone::of_status(task.status),
+            html! { @if task.status_line.is_empty() { (status_name(task.status)) } @else { (task.status_line) } },
+        ),
+    };
+    let mut properties = vec![
+        ("Status", status_select(task, cancel)),
+        (
+            "Project",
+            html! { (task.project_name) " " (chip(&task.project_key)) },
+        ),
+        (
+            "Persona",
+            html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } },
+        ),
+        (
+            "Branch",
+            html! { span class="font-mono text-xs" { (branch) } },
+        ),
+    ];
+    if resume.count > 0 {
+        properties.push((
+            "Resumes",
+            html! { (resume.count) " of " (resume.max) " automatic" },
+        ));
+    }
     html! {
         div id="task-details" class="md:shrink-0" {
             div class="ws-strip flex-col items-center gap-3 p-2" {
@@ -545,8 +594,8 @@ pub(crate) fn details_region(
             div class="ws-details-full" {
                 (section("Now", html! {
                     p class="flex items-center gap-2 font-medium" {
-                        span aria-hidden="true" class={"size-2 shrink-0 rounded-full " (Tone::of_status(task.status).dot_class())} {}
-                        @if task.status_line.is_empty() { (status_name(task.status)) } @else { span class="break-words" { (task.status_line) } }
+                        span aria-hidden="true" class={"size-2 shrink-0 rounded-full " (now_tone.dot_class())} {}
+                        span class="break-words" { (now_text) }
                     }
                 }))
                 (section("Links", html! {
@@ -562,12 +611,7 @@ pub(crate) fn details_region(
                     }
                 }))
                 div class="border-b border-line px-5 py-4" {
-                    (definition_list(&[
-                        ("Status", status_select(task, cancel)),
-                        ("Project", html! { (task.project_name) " " (chip(&task.project_key)) }),
-                        ("Persona", html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } }),
-                        ("Branch", html! { span class="font-mono text-xs" { (branch) } }),
-                    ]))
+                    (definition_list(&properties))
                     @if error.is_some() { div class="mt-3" { (field_error(error)) } }
                 }
                 @if !task.description.is_empty() {
@@ -815,10 +859,15 @@ fn run_detail(detail: &str) -> Markup {
 }
 
 /// The details panel: bottom sheet, slide-over or column depending on the width.
-pub(super) fn details_column(task: &TaskDetail, runs: &[RunView], cancel: &CancelNote) -> Markup {
+pub(super) fn details_column(
+    task: &TaskDetail,
+    runs: &[RunView],
+    cancel: &CancelNote,
+    resume: &ResumeNote,
+) -> Markup {
     details_panel(
         "Details",
-        html! { (details_region(task, cancel, None)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
+        html! { (details_region(task, cancel, resume, None)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
     )
 }
 

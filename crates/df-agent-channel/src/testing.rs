@@ -320,6 +320,23 @@ impl RuntimeClient {
     }
 }
 
+/// Status, resume time and resume count of a task, as stored.
+#[derive(Debug, sqlx::FromRow)]
+pub struct TaskResumeState {
+    pub status: String,
+    pub resume_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub auto_resumes: i32,
+}
+
+/// Reads the resume state of a task.
+pub async fn task_resume_state(pool: &PgPool, task_id: TaskId) -> TaskResumeState {
+    sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .expect("read the resume state of a task")
+}
+
 /// Seeded database, fakes and a context wired to them.
 pub struct Env {
     pub ctx: ChannelContext,

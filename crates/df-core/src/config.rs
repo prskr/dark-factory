@@ -24,6 +24,8 @@ pub enum ConfigError {
     },
     #[error("invalid YAML configuration: {0}")]
     Yaml(#[from] serde_saphyr::Error),
+    #[error("invalid configuration: {0}")]
+    Invalid(String),
     #[error("failed to read secret file `{path}`: {source}")]
     SecretFile {
         path: PathBuf,
@@ -70,7 +72,13 @@ pub struct InstanceConfig {
 impl InstanceConfig {
     /// Parses an [`InstanceConfig`] from a YAML string.
     pub fn from_yaml_str(yaml: &str) -> Result<Self, ConfigError> {
-        Ok(serde_saphyr::from_str(yaml)?)
+        let cfg: Self = serde_saphyr::from_str(yaml)?;
+        if cfg.runs.max_concurrent == 0 {
+            return Err(ConfigError::Invalid(
+                "`runs.maxConcurrent` must be at least 1: with 0 no run ever starts".into(),
+            ));
+        }
+        Ok(cfg)
     }
 
     /// Reads and parses an [`InstanceConfig`] from a file path.
@@ -514,6 +522,14 @@ pub struct RunsConfig {
     /// `0` releases right after the turn.
     #[serde(default = "default_keep_alive")]
     pub keep_alive_seconds: u64,
+    /// Runs that may be non-terminal at the same time, across all replicas. Further due tasks
+    /// wait in their status until a slot frees.
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: u32,
+    /// Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or
+    /// `provisioning_failed` before the task becomes `failed`.
+    #[serde(default = "default_max_auto_resumes")]
+    pub max_auto_resumes: u32,
 }
 
 impl Default for RunsConfig {
@@ -523,6 +539,8 @@ impl Default for RunsConfig {
             connect_timeout_seconds: default_connect_timeout(),
             cancel_grace_seconds: default_cancel_grace(),
             keep_alive_seconds: default_keep_alive(),
+            max_concurrent: default_max_concurrent(),
+            max_auto_resumes: default_max_auto_resumes(),
         }
     }
 }
@@ -722,6 +740,14 @@ fn default_retain_after_close() -> u64 {
 
 fn default_idle_ttl() -> u64 {
     30 * 24 * 60 * 60
+}
+
+fn default_max_concurrent() -> u32 {
+    4
+}
+
+fn default_max_auto_resumes() -> u32 {
+    3
 }
 
 fn default_instance_name() -> String {
@@ -1149,6 +1175,8 @@ database:
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.runs.cancel_grace_seconds, 300);
         assert_eq!(cfg.runs.keep_alive_seconds, 600);
+        assert_eq!(cfg.runs.max_concurrent, 4);
+        assert_eq!(cfg.runs.max_auto_resumes, 3);
         assert_eq!(
             cfg.harness.claude_code.adapter_command,
             ["/opt/harness/claude-code/bin/claude-agent-acp"]
@@ -1168,6 +1196,8 @@ agent:
 runs:
   maxWallClockSeconds: 60
   keepAliveSeconds: 30
+  maxConcurrent: 1
+  maxAutoResumes: 0
 harness:
   claudeCode:
     image: registry.example/harness:1
@@ -1180,6 +1210,8 @@ harness:
         assert_eq!(tls.client_ca_file, PathBuf::from("/tls/ca.crt"));
         assert_eq!(cfg.runs.max_wall_clock_seconds, 60);
         assert_eq!(cfg.runs.keep_alive_seconds, 30);
+        assert_eq!(cfg.runs.max_concurrent, 1);
+        assert_eq!(cfg.runs.max_auto_resumes, 0);
         assert_eq!(cfg.runs.connect_timeout_seconds, 600);
         assert_eq!(cfg.harness.claude_code.env["DISABLE_AUTOUPDATER"], "1");
         assert_eq!(cfg.harness.claude_code.image, "registry.example/harness:1");
@@ -1200,6 +1232,13 @@ harness:
 
         let typo = format!("{minimal}volumes:\n  idleTtl: 120\n");
         assert!(InstanceConfig::from_yaml_str(&typo).is_err());
+    }
+
+    #[test]
+    fn a_concurrency_limit_of_zero_is_rejected() {
+        let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\nruns:\n  maxConcurrent: 0\n";
+        let err = InstanceConfig::from_yaml_str(yaml).unwrap_err();
+        assert!(err.to_string().contains("runs.maxConcurrent"), "{err}");
     }
 
     #[test]

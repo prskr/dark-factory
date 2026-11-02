@@ -1063,6 +1063,22 @@ async fn start_flush_test_connection(
     MockControlPlane,
     tempfile::TempDir,
 ) {
+    let policy = crate::connection::ReconnectPolicy {
+        initial_delay: std::time::Duration::from_millis(20),
+        max_delay: std::time::Duration::from_millis(100),
+        backoff_factor: 1.5,
+    };
+    start_flush_test_connection_with(run_id, policy).await
+}
+
+async fn start_flush_test_connection_with(
+    run_id: &str,
+    policy: crate::connection::ReconnectPolicy,
+) -> (
+    crate::connection::ConnectionHandle,
+    MockControlPlane,
+    tempfile::TempDir,
+) {
     let server_name = "control-plane.darkfactory.local";
     let pki = TestPki::generate(server_name).expect("pki");
     let mut server =
@@ -1082,11 +1098,6 @@ async fn start_flush_test_connection(
         tls_dir,
         data_dir: temp.path().join("data"),
         run_dir: runtime_dir,
-    };
-    let policy = crate::connection::ReconnectPolicy {
-        initial_delay: std::time::Duration::from_millis(20),
-        max_delay: std::time::Duration::from_millis(100),
-        backoff_factor: 1.5,
     };
     let handle = crate::connection::ConnectionManager::new(config, outbox, policy).spawn();
     let _ = server.recv_agent_message().await.expect("hello");
@@ -1181,6 +1192,157 @@ async fn test_final_report_is_delivered_after_shutdown_while_disconnected() {
         .await
         .expect("connection manager must finish once the report is acked")
         .unwrap();
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn test_final_report_is_resent_when_the_stream_drops_during_the_flush() {
+    let (mut handle, mut server, _temp) = start_flush_test_connection("run-flush-drop").await;
+    handle.send(flush_test_report()).await.unwrap();
+    // The control plane receives the report but restarts before acknowledging it.
+    loop {
+        let msg = server.recv_agent_message().await.expect("stream open");
+        if matches!(msg.body, Some(agent_message::Body::RunReport(_))) {
+            break;
+        }
+    }
+    handle.shutdown();
+    server.drop_active_stream().await;
+
+    loop {
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            server.recv_agent_message(),
+        )
+        .await
+        .expect("manager must reconnect instead of exiting")
+        .expect("stream open");
+        if matches!(msg.body, Some(agent_message::Body::Hello(_))) {
+            break;
+        }
+    }
+    server
+        .send_control_message(ControlMessage {
+            ack: 0,
+            body: Some(control_message::Body::HelloAck(HelloAck {
+                run_id: "run-flush-drop".to_string(),
+                last_persisted_seq: 0,
+                capabilities: vec![],
+            })),
+        })
+        .await
+        .unwrap();
+    receive_and_ack_report(&mut server).await;
+    let task = handle.task.take().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), task)
+        .await
+        .expect("connection manager must finish once the report is acked")
+        .unwrap();
+    server.shutdown();
+}
+
+/// Queues the final report, requests shutdown and drops the stream. The caller has paused the
+/// clock, so every reconnect attempt that follows runs on virtual time; whether and when the
+/// control plane answers is up to the test.
+async fn finalize_during_an_outage(
+    handle: &crate::connection::ConnectionHandle,
+    server: &MockControlPlane,
+) {
+    handle.send(flush_test_report()).await.unwrap();
+    handle.shutdown();
+    server.drop_active_stream().await;
+}
+
+/// A realistic backoff: with the test policy of a few milliseconds a 10 minute outage would take
+/// thousands of real connection attempts.
+fn outage_policy() -> crate::connection::ReconnectPolicy {
+    crate::connection::ReconnectPolicy {
+        initial_delay: std::time::Duration::from_secs(1),
+        max_delay: std::time::Duration::from_secs(4),
+        backoff_factor: 2.0,
+    }
+}
+
+fn hello_ack(run_id: &str) -> ControlMessage {
+    ControlMessage {
+        ack: 0,
+        body: Some(control_message::Body::HelloAck(HelloAck {
+            run_id: run_id.to_string(),
+            last_persisted_seq: 0,
+            capabilities: vec![],
+        })),
+    }
+}
+
+#[tokio::test]
+async fn test_final_report_is_delivered_when_the_control_plane_returns_after_60_seconds() {
+    use std::time::Duration;
+
+    let (mut handle, mut server, _temp) =
+        start_flush_test_connection_with("run-outage", outage_policy()).await;
+    // The first handshake ran in real time. With the clock paused every connection attempt
+    // times out before the server answers (the clock jumps while the runtime waits for the
+    // socket): the control plane is unreachable for the 60 s of the outage.
+    tokio::time::pause();
+    finalize_during_an_outage(&handle, &server).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    // The control plane is back: from here on in real time.
+    tokio::time::resume();
+
+    loop {
+        let msg = tokio::time::timeout(Duration::from_secs(30), server.recv_agent_message())
+            .await
+            .expect("the manager must reconnect after the outage")
+            .expect("stream open");
+        if matches!(msg.body, Some(agent_message::Body::Hello(_))) {
+            break;
+        }
+    }
+    server
+        .send_control_message(hello_ack("run-outage"))
+        .await
+        .unwrap();
+    receive_and_ack_report(&mut server).await;
+    let task = handle.task.take().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("the manager exits once the report is acknowledged")
+        .unwrap();
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn test_manager_exits_with_the_report_in_the_outbox_after_the_flush_window() {
+    use std::time::Duration;
+
+    let (mut handle, server, temp) =
+        start_flush_test_connection_with("run-gone", outage_policy()).await;
+    // The first handshake runs in real time; the outage that follows in paused time.
+    tokio::time::pause();
+    let outage_start = tokio::time::Instant::now();
+    finalize_during_an_outage(&handle, &server).await;
+
+    let task = handle.task.take().unwrap();
+    tokio::time::timeout(
+        crate::connection::FINAL_REPORT_FLUSH + Duration::from_secs(60),
+        task,
+    )
+    .await
+    .expect("the manager exits after the flush window")
+    .unwrap();
+    assert!(outage_start.elapsed() >= crate::connection::FINAL_REPORT_FLUSH);
+
+    let outbox = crate::outbox::Outbox::open(
+        &temp.path().join("runtime"),
+        "run-gone",
+        1024 * 1024,
+        64 * 1024,
+    )
+    .unwrap();
+    assert!(
+        !outbox.is_empty(),
+        "the unacknowledged report stays in the outbox"
+    );
     server.shutdown();
 }
 

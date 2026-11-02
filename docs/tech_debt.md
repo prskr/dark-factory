@@ -43,7 +43,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | ID   | Sev    | Area | Issue |
 |------|--------|------|-------|
 | TD-1 | medium | `factory-agent` git | One fixed 5 min timeout for every git command, including clone |
-| TD-2 | medium | `factory-agent` connection | 10 s shutdown flush window is shorter than a control-plane restart |
 | TD-3 | low    | `factory-agent` workspace | Diverged workspace: every turn sends a rejected push and a PushReport |
 | TD-4 | low    | `factory-agent` outbox | Failed `run.json` save in `acknowledge` leaves segment accounting inconsistent |
 | TD-5 | low    | `factory-agent` tests | Shutdown-while-disconnected test relies on a 100 ms sleep |
@@ -59,7 +58,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-15 | low   | `df-agent-channel` runs | Guarded run update + `RunChanged` publish exists in three copies |
 | TD-16 | low   | `df-agent-channel` tests | `eventually` test helper polls with `sleep` and ends in `panic!` |
 | TD-17 | medium | `df-agent-channel` session | Tool-call handlers have no timeout; drain timeouts disagree with the shutdown budget |
-| TD-18 | medium | `df-agent-channel` scheduler | A run whose provisioning was interrupted is never provisioned again |
 | TD-19 | low   | `df-agent-channel` storage | Run, task and tool-call SQL is runtime-checked and partly duplicates `df-db` |
 | TD-20 | low   | Helm chart | `agent.tls.clientCaFile` needs `ca.crt`, which an external issuer may not fill |
 | TD-21 | low   | Helm chart | `terminationGracePeriodSeconds` equals `SHUTDOWN_GRACE` (30 s) |
@@ -133,16 +131,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 Every git command runs with `GIT_TIMEOUT` (5 min) and is killed when it expires. For a large repository, the blobless clone or the blob fetch during `checkout -B` can take longer than that. Prepare would then fail on every run, and the limit cannot be changed.
 
 **Fix:** Make the limit configurable (for example `DF_GIT_TIMEOUT`, documented in `crates/factory-agent/docs/configuration.md`), or give clone and fetch a longer limit than local commands. An inactivity timeout (no output for N minutes) would be more precise, but it needs more code.
-
-### TD-2 (R63). Shutdown flush window shorter than a control-plane restart
-
-`crates/factory-agent/src/connection.rs` (`SHUTDOWN_RECONNECT_TIMEOUT`, `should_stop`), `crates/factory-agent/src/main.rs` (30 s wait for the connection task)
-
-After shutdown, the connection manager tries to reconnect for 10 s, and `main` waits at most 30 s. One connection attempt alone can take up to 3 × 15 s (`HANDSHAKE_TIMEOUT` for connect, stream open and HelloAck). If a control-plane restart takes longer, the final RunReport stays only in the outbox on the PVC, and nothing replays it once the pod has exited.
-
-**Fix:** This needs a protocol decision. Either the control plane works out the outcome of a run whose pod exited without a RunReport (for example by reading `/data/runtime/outbox` at the next run, or by treating the run as FAILED/retryable), or the flush window becomes configurable and longer. Record the decision in `design/agent-run.md`.
-
-**Decision (2026-10-21):** the runtime keeps flushing for up to 10 minutes after finalize, and a pod that exits without a report ends `sandbox_lost` and is resumed automatically. Implemented by `openspec/changes/iter2-run-resilience` (design D5).
 
 ### TD-3 (R64). Diverged workspace pushes and reports on every turn
 
@@ -272,16 +260,6 @@ The helper checks a condition 200 times with a 25 ms `sleep` and ends with a han
 Tool-call handlers call the forge without a timeout, while forge work after a `PushReport`/`RunReport` is bounded by `FORGE_TIMEOUT`. A hanging forge keeps a claimed `tool_calls` row without a result until the stream ends; re-sent calls get "still in progress" for 5 minutes, then "did not finish". At shutdown the session believes it has 60 s to drain, but `stop_sessions` aborts after 20 s, so a call that needs longer loses its result although the effect may have happened.
 
 **Fix:** Bound each tool handler by `FORGE_TIMEOUT` and store a timeout error as the result. Derive the session drain from one budget that fits into `SHUTDOWN_GRACE` (and TD-21).
-
-### TD-18. Interrupted provisioning is not retried
-
-`crates/df-agent-channel/src/scheduler.rs` (`run`, `SHUTDOWN_DRAIN`, `provision_or_fail`)
-
-If a replica stops (rollout beyond the 10 s drain, crash) between `start_queued_runs` and `provider.provision`, the run stays `pending`/`provisioning` without a sandbox. After `connectTimeoutSeconds` (10 min) it ends as `connect_timeout` and the task becomes `failed`; the user has to queue a message to retry.
-
-**Fix:** On each tick, re-provision runs that have been `pending` longer than a short threshold and have no sandbox (provider calls must be idempotent, which `ensure_task_volume`/`provision` are meant to be), or end them as `provisioning_failed` with the task re-queued.
-
-**Decision (2026-10-21):** re-provisioned by the scheduler tick. Implemented by `openspec/changes/iter2-run-resilience` (design D4).
 
 ### TD-19. Runtime-checked SQL outside `df-db`
 

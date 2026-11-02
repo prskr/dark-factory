@@ -40,6 +40,7 @@ struct SandboxState {
     delete_volume_results: VecDeque<Result<(), ProviderError>>,
     provision_results: VecDeque<Result<(), ProviderError>>,
     teardown_results: VecDeque<Result<(), ProviderError>>,
+    exists_results: VecDeque<Result<bool, ProviderError>>,
 }
 
 /// In-memory fake [`SandboxProvider`] that records calls and allows scripting results and events.
@@ -114,6 +115,16 @@ impl FakeSandboxProvider {
             .push_back(result);
     }
 
+    /// Queues a scripted result for the next `sandbox_exists` call; without one the answer is
+    /// whether a `provision` call of the run was recorded and not followed by a `teardown`.
+    pub fn push_exists_result(&self, result: Result<bool, ProviderError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .exists_results
+            .push_back(result);
+    }
+
     /// Emits a [`SandboxEvent`] to all active stream subscribers.
     pub fn emit_event(&self, event: SandboxEvent) {
         self.events_tx.send(event).ok(); // no subscriber is fine
@@ -148,6 +159,19 @@ impl SandboxProvider for FakeSandboxProvider {
         let mut state = self.state.lock().expect("lock poisoned");
         state.calls.push(SandboxCall::Teardown(run_id));
         state.teardown_results.pop_front().unwrap_or(Ok(()))
+    }
+
+    async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        if let Some(result) = state.exists_results.pop_front() {
+            return result;
+        }
+        let last = state.calls.iter().rev().find_map(|call| match call {
+            SandboxCall::Provision(spec) if spec.run_id == run_id => Some(true),
+            SandboxCall::Teardown(id) if *id == run_id => Some(false),
+            _ => None,
+        });
+        Ok(last.unwrap_or(false))
     }
 
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId> {

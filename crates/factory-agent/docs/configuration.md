@@ -34,6 +34,7 @@ These are compiled in and not configurable.
 | Outbox size | 256 MiB, segments of 16 MiB | Soft cap: senders wait when it is full; a message already taken from the queue is still stored at shutdown. |
 | Wait for `Assign` | 10 min | `run` exits with status 1 when the control plane sends no `Assign`. |
 | Handshake steps | 15 s each | Connect, stream open and `HelloAck`; then backoff and retry. |
+| Final report flush window | 10 min | After finalize the runtime keeps reconnecting until every outbox message, the `RunReport` included, is acknowledged; then it exits. If the window passes, it exits with the messages left in the outbox and the control plane later ends the run `sandbox_lost` and resumes the task. The window does not extend the run's wall-clock budget. |
 | Git commands | 5 min each | A clone, fetch or push that takes longer is killed and fails prepare or finalize. |
 | Git retries | 3, after 1 s, 5 s and 15 s | Clone, fetch and push that fail transiently are retried (see "Git retries" below). |
 | Factory tool call | 30 min | Wait for a `ToolCallResult`; then the tool call returns an error. |
@@ -55,8 +56,11 @@ These are compiled in and not configurable.
   still gives `END_TURN`. `complete_task` in the same turn wins and ends the run `COMPLETED`. The runtime has no idle timer of its own: the control plane decides when to send
   `Release` (`runs.keepAliveSeconds`). A lost stream does not end the wait; the runtime reconnects.
 - **Shutdown.** After the final `RunReport` is queued, the runtime keeps trying to deliver queued
-  messages: it flushes them over the open stream, or reconnects, for up to about 10 s plus a 5 s
-  acknowledgement wait. Messages that are not acknowledged stay in the outbox and a warning is logged.
+  messages: it flushes them over the open stream, or reconnects with the usual backoff (also when
+  the stream drops during the flush, for example by a control plane restart), until all are
+  acknowledged or the final report flush window of 10 minutes has passed. Messages that are not
+  acknowledged by then stay in the outbox and a warning is logged. `main` waits for the connection
+  task for the window plus 60 s for a connection attempt that is under way.
 - **Git credentials.** The runtime holds no Git credentials: the gateway's Git proxy authenticates
   upstream. The generated `.git/config` sets an empty `credential.helper` (resets helpers from other
   config scopes) and `http.<proxy URL>.sslCAInfo` to the instance CA, scoped to

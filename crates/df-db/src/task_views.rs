@@ -22,6 +22,8 @@ pub struct TaskListItem {
     pub persona_name: String,
     pub status: String,
     pub status_line: String,
+    /// When the scheduler may start the task's next run.
+    pub resume_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -75,6 +77,9 @@ pub struct TaskDetail {
     pub pr_number: Option<i64>,
     pub pr_url: Option<String>,
     pub pr_title: Option<String>,
+    pub resume_at: Option<DateTime<Utc>>,
+    /// Consecutive automatic resumes after infrastructure failures.
+    pub auto_resumes: i32,
 }
 
 /// Token counts of one model within a run, summed over all turns.
@@ -142,7 +147,7 @@ pub async fn list_task_items(
     Ok(sqlx::query_as(
         "SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,
                 p.name AS project_name, ps.name AS persona_name,
-                t.status, t.status_line, t.created_at, t.updated_at
+                t.status, t.status_line, t.resume_at, t.created_at, t.updated_at
          FROM tasks t
          JOIN projects p ON p.id = t.project_id
          JOIN personas ps ON ps.id = t.persona_id
@@ -181,7 +186,8 @@ macro_rules! select_task_detail {
         concat!(
             "SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
                 p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title
+                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title,
+                t.resume_at, t.auto_resumes
              FROM tasks t
              JOIN projects p ON p.id = t.project_id
              JOIN personas ps ON ps.id = t.persona_id ",

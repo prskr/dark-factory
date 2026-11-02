@@ -553,7 +553,7 @@ async fn a_message_for_an_idle_run_starts_no_run_and_is_forwarded_at_once() {
 
     assert_eq!(state_and_status(&env, run_id).await.1, "running");
     assert!(
-        crate::runs::start_queued_runs(&pool, 10)
+        crate::runs::start_queued_runs(&pool, 10, 100)
             .await
             .unwrap()
             .is_empty()
@@ -633,7 +633,7 @@ async fn no_prompt_is_sent_to_a_finalizing_run_and_its_end_queues_the_task() {
     assert!(sent_prompt_ids(&mut rx).is_empty());
 
     let end = RunEnd::failure(run_id, RunOutcome::EndTurn, "");
-    crate::runs::end_run(&pool, &end).await.unwrap();
+    crate::runs::end_run(&pool, &end, 3).await.unwrap();
     assert_eq!(state_and_status(&env, run_id).await.1, "queued");
 }
 
