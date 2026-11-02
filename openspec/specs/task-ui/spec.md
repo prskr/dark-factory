@@ -270,15 +270,19 @@ The transcript SHALL open scrolled to its last item, also when another task is o
 - **THEN** the scroll position does not change
 
 ### Requirement: Mark done action
-The details pane SHALL show the task status as a select above Project. Its menu SHALL offer "Mark done" for tasks that are not `queued`, `running` or `completed`; other tasks show the plain status name. Using it SHALL set the task to `completed` without a reload; the badge and the task list row update live. Tasks in `in_review` SHALL show an "In review" badge.
+The details pane SHALL show the task status as a select above Project. Its menu SHALL list "Mark done" for every task except a `completed` one, disabled while the task is `queued` or `running`; a `completed` task shows the plain status name. Using it SHALL set the task to `completed` without a reload; the badge and the task list row update live. Tasks in `in_review` SHALL show an "In review" badge.
 
 #### Scenario: Mark done from the status select
 - **WHEN** a board member presses "Mark done" on a `waiting` task
 - **THEN** the badge shows "Completed", the action disappears and the task moves to the "Done" filter
 
-#### Scenario: Hidden while working
+#### Scenario: Disabled while working
 - **WHEN** the task is `running`
-- **THEN** the details pane shows the status without a menu and no "Mark done" action
+- **THEN** the status menu shows "Mark done" disabled
+
+#### Scenario: Plain status when completed
+- **WHEN** the task is `completed`
+- **THEN** the details pane shows the status without a menu
 
 ### Requirement: Notices as transcript rows
 A runtime or control plane notice SHALL be shown as one line in the transcript, aligned with tool rows, with the `bot-message-square` icon, the notice code and the message, without a background box. The row SHALL be expandable (touch and keyboard) to show the full message. The level SHALL only tint the code. A notice row directly after a tool row or another notice row SHALL share its divider line.
@@ -313,3 +317,14 @@ By default, content blocks marked `hidden` SHALL NOT be shown in the transcript 
 #### Scenario: Existing events
 - **WHEN** a stored `UserMessage` event has no `hidden` key on its blocks
 - **THEN** all its blocks are shown
+
+### Requirement: Stop and cancel actions
+The task detail SHALL offer "Stop" for an active run and "Cancel task" for tasks that can be cancelled, on phone and desktop. "Cancel task" SHALL ask for confirmation. Both SHALL update the page live when the run and task change.
+
+#### Scenario: Stop on a phone
+- **WHEN** a board member taps "Stop" at 390 px width on a running task
+- **THEN** the run shows as finalizing and then `cancelled` without a page reload
+
+#### Scenario: Cancel needs confirmation
+- **WHEN** a board member clicks "Cancel task"
+- **THEN** nothing changes until the confirmation is accepted
