@@ -18,6 +18,10 @@ _Avoid_: Completed, closed, merged
 The task another task reports to: it is woken whenever that task ends and receives its escalated questions.
 _Avoid_: Creator, owner, supervisor
 
+**Question**:
+A free-text request from an agent for a decision, addressed to its parent task's agent or to a human. Answering it only delivers the answer to the asking agent. A question to a parent task that has reached a final state, or to an archived chat, goes to a human instead.
+_Avoid_: Escalation request, query, ask
+
 **Subtask**:
 A task whose parent task is set.
 _Avoid_: Child task, sub-task
