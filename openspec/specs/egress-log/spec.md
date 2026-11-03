@@ -173,8 +173,8 @@ The graph SHALL draw sandboxes (one per run, or per source IP for unknown source
 Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows the run number (`#2`) and the task key, a destination node its host icon, host and port. A node of an unknown source SHALL show its source IP. The sandbox column, heading included, SHALL sit in a dashed group box, and the shorter column SHALL be centred vertically on the taller one.
 
 #### Scenario: Node content
-- **WHEN** the graph shows run 2 of task `DF-7` and destination `github.com:443`
-- **THEN** the sandbox node is a card with an icon tile, `#2` and `DF-7`, and the destination node shows the `GH` icon, `github.com` and `443`
+- **WHEN** the graph shows run 2 of task `DF-7` and destination `github.com:443`, and no project uses `github.com`
+- **THEN** the sandbox node is a card with an icon tile, `#2` and `DF-7`, and the destination node shows the GitHub glyph, `github.com` and `443`
 
 #### Scenario: Unknown source
 - **WHEN** a connection comes from `10.0.0.9`, which is no active sandbox
@@ -278,7 +278,7 @@ With no event seen yet, the events panel SHALL say that nothing has tried to rea
 - **THEN** the table shows "No events match these filters" with a *Clear filters* button, and the count reads "0 of M"
 
 ### Requirement: Project host icons
-A destination whose host is a project's repository or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host shows the project's forge icon, the same as in the project list. An issue tracker host shows the forge icon when it equals the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, and does not cover subdomains.
+A destination whose host is a project's repository, forge API or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host and, when an integration serves the project, the forge API host (the `apiUrl` host of the route serving the repository) show the forge icon. An issue tracker host shows the forge icon on the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, not subdomains.
 
 #### Scenario: Self-hosted forge
 - **WHEN** the instance runs the forgejo integration, project `DF` with a forge credential has repository `https://git.example.internal/org/df.git`, and a sandbox connects to `git.example.internal:443`
@@ -301,12 +301,47 @@ A destination whose host is a project's repository or issue tracker host SHALL s
 - **THEN** the destination does not show the project's icon
 
 #### Scenario: Project host before provider monogram
-- **WHEN** the instance runs the github integration, project `DF` with a forge credential has repository `https://github.com/org/df.git`, and a sandbox connects to `github.com:443`
-- **THEN** the destination shows the GitHub icon instead of the `GH` monogram, and `api.github.com` keeps the `GH` monogram
+- **WHEN** the instance runs the github integration with route `github.com` → `apiUrl` `https://api.github.com`, project `DF` with a forge credential has repository `https://github.com/org/df.git`, and a sandbox connects to `github.com:443` and `api.github.com:443`
+- **THEN** both destinations show the GitHub forge icon instead of the provider glyph
+
+#### Scenario: Forge API on a separate host
+- **WHEN** the github integration routes `ghe.example.com` to `apiUrl` `https://api.ghe.example.com/v3`, project `DF` with a forge credential has repository `https://ghe.example.com/org/df.git`, and a sandbox connects to `api.ghe.example.com:443`
+- **THEN** the destination shows the GitHub forge icon, not the globe
+
+#### Scenario: Forge API host without a served project
+- **WHEN** the github integration routes `github.com` to `apiUrl` `https://api.github.com`, but no project with a forge credential is served by it
+- **THEN** a connection to `api.github.com:443` shows the GitHub provider glyph, not the forge icon
 
 #### Scenario: Project created while the page is open
 - **WHEN** a project is created while the network traffic page is open
 - **THEN** its hosts show the project icon after the page is reloaded
+
+### Requirement: Provider host icons
+A destination that is no project host SHALL show the glyph of a known provider when its host is the provider's domain or a subdomain of it, the provider's letter monogram when the provider has no glyph, the server icon for an IP literal and the generic globe otherwise. Glyphs SHALL be served by the control plane.
+
+#### Scenario: Known providers
+- **WHEN** a sandbox connects to a host of `github.com`, `githubusercontent.com`, `ghcr.io`, `github.io`, `anthropic.com`, `npmjs.org`, `golang.org`, `go.dev`, `goproxy.io`, `pypi.org`, `pythonhosted.org`, `googleapis.com`, `google.com`, `gcr.io`, `pkg.dev`, `bazel.build`, `k8s.io`, `kubernetes.io`, `helm.sh`, `nodejs.org`, `rust-lang.org`, `crates.io`, `gitlab.com`, `codeberg.org`, `amazonaws.com`, `ecr.aws`, `awsstatic.com`, `aws.amazon.com`, `cloudfront.net`, `debian.org`, `ubuntu.com`, `alpinelinux.org`, `fedoraproject.org`, `redhat.com` or `redhat.io`
+- **THEN** the destination shows the glyph of GitHub, GitHub, GitHub, GitHub, Anthropic, npm, Go, Go, Go, Python, Python, Google, Google, Google, Google, Bazel, Kubernetes, Kubernetes, Helm, Node.js, Rust, Rust, GitLab, Codeberg, AWS, AWS, AWS, AWS, AWS, Debian, Ubuntu, Alpine, Fedora, Red Hat or Red Hat respectively
+
+#### Scenario: Provider with a glyph
+- **WHEN** no project uses `github.com` and a sandbox connects to `api.github.com:443`
+- **THEN** the destination shows the GitHub glyph, not the `GH` letters
+
+#### Scenario: Anthropic API
+- **WHEN** a sandbox connects to `api.anthropic.com:443`
+- **THEN** the destination shows the Anthropic glyph
+
+#### Scenario: Provider without a glyph
+- **WHEN** a known provider has no glyph and a sandbox connects to its domain
+- **THEN** the destination shows the provider's letter monogram
+
+#### Scenario: Look-alike domain
+- **WHEN** a sandbox connects to `evilgithub.com:443`
+- **THEN** the destination shows the generic globe
+
+#### Scenario: Glyph in both themes
+- **WHEN** the page is shown in the light or the dark theme
+- **THEN** every provider glyph has a contrast ratio of at least 3:1 against its tile
 
 ### Requirement: Merged buffer has the same maximum age
 The control plane's merged buffer of the gateway pods' events SHALL drop events older than the configured maximum age, with the same exception for `opened` events of connections that are still open, so a viewer that opens the page while a relay session is already running gets the same time window as from the gateway pods.
