@@ -2,7 +2,7 @@
 
 The iteration 1 demo (`product/iterations/iteration-1.md` §2) runs in two ways:
 
-- **Automated** with the fake ACP agent: `just e2e-local` creates a throwaway kind cluster, runs the web UI flow with Playwright and deletes the cluster.
+- **Automated** with the fake ACP agent: `just e2e-local` creates a throwaway kind cluster, runs the web UI flow with Playwright and deletes the cluster. CI runs the same script on pull requests and pushes to `main` that change files outside `product/`, `design/` and `openspec/` (`.github/workflows/e2e.yaml`).
 - **By hand** with Claude Code on the homelab instance (`bazel run //deploy:dev`), partly on a phone.
 
 This page covers the automated run: commands, environment variables, seed data and what runs where.
