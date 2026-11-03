@@ -85,13 +85,13 @@ A crash between `ensure_task_volume` and the marker update re-runs both on the n
 A task started when `is_leader` becomes true and stopped when leadership is lost. It holds the registered handlers by `kind`, so a new consumer registers a handler and changes nothing else.
 
 **Main loop:**
-1. Claim due jobs with `SELECT … FROM outbox WHERE done_at IS NULL AND gave_up_at IS NULL AND next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at LIMIT 32 FOR UPDATE SKIP LOCKED`.
+1. Claim due jobs with `SELECT … FROM outbox WHERE done_at IS NULL AND gave_up_at IS NULL AND next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at LIMIT 8 FOR UPDATE SKIP LOCKED`. One claim is one wave, so no claimed job waits for a free slot while its lease runs.
 2. Set `lease_until = now() + lease` (the handler's timeout plus a margin), then commit.
-3. Run up to 8 handlers at once.
+3. Run the claimed handlers at once; a job claimed after the policy's give-up age is given up without running (the dispatcher alone decides on the age).
 4. Write the result back:
    - `Ok` sets `done_at`;
    - `Retry` sets `next_attempt_at` from the handler's `RetryPolicy`;
-   - `GiveUp`, or a job older than the policy's give-up age, sets `gave_up_at`.
+   - `GiveUp` sets `gave_up_at`.
 
 A job whose `kind` has no handler is left untouched, with a warning. This happens, for example, during a rolling update that adds a kind.
 
@@ -106,7 +106,7 @@ A job whose `kind` has no handler is left untouched, with a warning. This happen
 ### D4: SSRF protection in the resolver
 
 Project subscriptions are sent through a `reqwest::Client` with three properties:
-- **A custom DNS resolver** (`reqwest::dns::Resolve`). It resolves the host and drops every address that is loopback, private (RFC 1918), CGNAT (`100.64.0.0/10`), link-local, unique-local (`fc00::/7`), unspecified, broadcast or documentation, as well as IPv4-mapped IPv6 forms of these. If nothing remains, the attempt fails with `address refused`.
+- **A custom DNS resolver** (`reqwest::dns::Resolve`). It resolves the host and refuses it with `address refused` if any address is loopback, private (RFC 1918), CGNAT (`100.64.0.0/10`), link-local, unique-local (`fc00::/7`), unspecified, broadcast or documentation, or an IPv4-mapped IPv6 form of these (spec "Project subscription URL restrictions").
 - `redirect::Policy::none()`: a redirect counts as a non-2xx response.
 - `no_proxy()`.
 - **Literal IP addresses in the URL** are checked when the subscription is saved and again before sending, since IP-literal URLs never go through the resolver.

@@ -56,13 +56,6 @@ impl SigningKey {
         &self.public_key
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the delivery handler (lifecycle-events task 4.4) signs"
-        )
-    )]
     /// The `webhook-signature` value of one attempt: `v1a,<base64>` over `{id}.{timestamp}.{body}`.
     pub(crate) fn sign(&self, id: &str, timestamp: i64, body: &[u8]) -> String {
         let mut message = format!("{id}.{timestamp}.").into_bytes();
@@ -72,20 +65,21 @@ impl SigningKey {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
+    //! Keys and signature checks for tests.
+
     use ring::rand::{SecureRandom as _, SystemRandom};
     use ring::signature::{ED25519, UnparsedPublicKey};
-    use rsa::pkcs8::{EncodePrivateKey as _, LineEnding};
 
     use super::*;
 
     /// The RFC 8410 PKCS#8 v1 prefix of an Ed25519 private key; the 32-byte seed follows.
-    const PKCS8_V1_PREFIX: [u8; 16] = [
+    pub(crate) const PKCS8_V1_PREFIX: [u8; 16] = [
         0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
         0x20,
     ];
 
-    fn pem(der: &[u8]) -> String {
+    pub(crate) fn pem(der: &[u8]) -> String {
         let body = STANDARD.encode(der);
         let lines: Vec<&str> = body
             .as_bytes()
@@ -99,19 +93,19 @@ mod tests {
     }
 
     /// A key as cert-manager writes it, and its seed.
-    fn cert_manager_key() -> (String, [u8; 32]) {
+    pub(crate) fn cert_manager_key() -> (String, [u8; 32]) {
         let mut seed = [0; 32];
         SystemRandom::new().fill(&mut seed).unwrap();
         let der: Vec<u8> = PKCS8_V1_PREFIX.iter().chain(&seed).copied().collect();
         (pem(&der), seed)
     }
 
-    fn public_key_bytes(key: &SigningKey) -> Vec<u8> {
+    pub(crate) fn public_key_bytes(key: &SigningKey) -> Vec<u8> {
         let encoded = key.public_key().strip_prefix("whpk_").unwrap();
         STANDARD.decode(encoded).unwrap()
     }
 
-    fn verifies(key: &SigningKey, signature: &str, message: &[u8]) -> bool {
+    pub(crate) fn verifies(key: &SigningKey, signature: &str, message: &[u8]) -> bool {
         let signature = STANDARD
             .decode(signature.strip_prefix("v1a,").unwrap())
             .unwrap();
@@ -119,6 +113,19 @@ mod tests {
             .verify(message, &signature)
             .is_ok()
     }
+
+    /// A fresh key as cert-manager writes it.
+    pub(crate) fn generate() -> SigningKey {
+        SigningKey::from_pem(cert_manager_key().0.as_bytes()).expect("generated key")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rsa::pkcs8::{EncodePrivateKey as _, LineEnding};
+
+    use super::testing::*;
+    use super::*;
 
     #[test]
     fn cert_manager_pkcs8_v1_key_loads() {

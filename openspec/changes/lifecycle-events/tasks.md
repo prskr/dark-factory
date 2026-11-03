@@ -40,12 +40,12 @@
 
 ## 4. Dispatcher
 
-- [ ] 4.1 Write failing tests for the address filter (design D4), then implement it with `std::net` plus the CGNAT check. Verify with unit tests. The cases:
+- [x] 4.1 Write failing tests for the address filter (design D4), then implement it with `std::net` plus the CGNAT check. Verify with unit tests. The cases:
   - loopback, RFC 1918, CGNAT, link-local, unique-local, unspecified, broadcast, documentation and IPv4-mapped forms are refused;
   - public v4 and v6 addresses pass;
   - literal-IP URLs are checked.
-- [ ] 4.2 Build the two `reqwest` clients: project subscriptions get the filtering resolver, no redirects and no proxy; instance subscriptions get no filter; both have a 10 s timeout. Add `reqwest` to the control-plane crate via `.workspace = true`. Verify with a test against a local `axum` receiver that a project client refuses `127.0.0.1` and does not follow a 302, while the instance client delivers
-- [ ] 4.3 Write failing tests, then implement the generic outbox dispatcher with the `OutboxHandler` trait (design D3), using a fake handler. Use `tokio::time::pause()`, no sleeps. Verify with `cargo test -p df-db outbox` (container-backed). The tests cover:
+- [x] 4.2 Build the two `reqwest` clients: project subscriptions get the filtering resolver, no redirects and no proxy; instance subscriptions get no filter; both have a 10 s timeout. Add `reqwest` to the control-plane crate via `.workspace = true`. Verify with a test against a local `axum` receiver that a project client refuses `127.0.0.1` and does not follow a 302, while the instance client delivers
+- [x] 4.3 Write failing tests, then implement the generic outbox dispatcher with the `OutboxHandler` trait (design D3), using a fake handler. Use `tokio::time::pause()`, no sleeps. Verify with `cargo test -p df-db outbox` (container-backed). The tests cover:
   - `Ok` marks the job done;
   - `Retry` follows the handler's policy;
   - `GiveUp` and jobs past the give-up age are given up;
@@ -53,15 +53,15 @@
   - an expired lease is retried after a crash;
   - an unknown kind is left untouched;
   - one failing kind does not block another.
-- [ ] 4.4 Write failing tests, then implement the `lifecycle_event.deliver` handler. Verify the tests pass (container-backed). The tests cover:
+- [x] 4.4 Write failing tests, then implement the `lifecycle_event.deliver` handler. Verify the tests pass (container-backed). The tests cover:
   - a 2xx delivers and records status on the project subscription;
   - 503, 503, 200 delivers on the third attempt with the same `webhook-id` and a fresh `webhook-timestamp`;
   - the backoff schedule is 30 s, 1 m, 2 m, … capped at 1 h;
   - give-up after 24 h;
   - a deleted subscription gives up its jobs;
   - one dead receiver does not block another.
-- [ ] 4.5 Start the dispatcher on leadership gain and stop it on loss, next to the existing leader tasks in `crates/dark-factory/src/sandbox.rs`, keeping the `JoinHandle`. Add the hourly cleanup (7 days, plus unreferenced `lifecycle_events`). Verify with a test that a non-leader sends nothing and that the cleanup removes old rows
-- [ ] 4.6 Add the metric `df_outbox_jobs_total{kind,result}` and `df_lifecycle_event_deliveries_total{result}` (`delivered`, `failed`, `gave_up`, `refused`) and document both in `docs/content/observability/telemetry.md`; verify with the metrics test helper
+- [x] 4.5 Start the dispatcher on leadership gain and stop it on loss, next to the existing leader tasks in `crates/dark-factory/src/sandbox.rs`, keeping the `JoinHandle`. Add the hourly cleanup (7 days, plus unreferenced `lifecycle_events`). Verify with a test that a non-leader sends nothing and that the cleanup removes old rows
+- [x] 4.6 Add the metric `df_outbox_jobs_total{kind,result}` and `df_lifecycle_event_deliveries_total{result}` (`delivered`, `failed`, `refused`; give-ups in `df_outbox_jobs_total{result="gave_up"}`) and document both in `docs/content/observability/telemetry.md`; verify with the metrics test helper
 
 ## 5. Admin role and project subscription UI
 

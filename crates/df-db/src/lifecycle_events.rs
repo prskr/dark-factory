@@ -6,7 +6,7 @@ use df_core::lifecycle::matches_filter;
 use df_core::{EventType, InstanceSubscription, LifecycleEventsConfig, RunId, RunOutcome, TaskId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use sqlx::PgConnection;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::outbox;
@@ -139,6 +139,15 @@ pub enum Target {
     Instance { instance_url: String },
 }
 
+/// What one delivery attempt sends, and where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    /// The envelope, sent as the body.
+    pub payload: Value,
+    pub occurred_at: DateTime<Utc>,
+    pub url: String,
+}
+
 /// Project, task, persona and run an event is about, as of the event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subject {
@@ -248,6 +257,81 @@ pub fn envelope(id: Uuid, occurred_at: DateTime<Utc>, subject: &Subject, event: 
         "timestamp": rfc3339(&occurred_at),
         "data": data,
     })
+}
+
+/// Loads the event and the receiver URL of `job`. `None` when the event or the project
+/// subscription no longer exists.
+pub async fn load_delivery(pool: &PgPool, job: &DeliverJob) -> Result<Option<Delivery>, DbError> {
+    let Some(event) = sqlx::query!(
+        "SELECT payload, occurred_at FROM lifecycle_events WHERE id = $1",
+        job.event_id,
+    )
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let url = match &job.target {
+        Target::Instance { instance_url } => instance_url.clone(),
+        Target::Subscription { subscription_id } => {
+            let url = sqlx::query_scalar!(
+                "SELECT url FROM event_subscriptions WHERE id = $1",
+                subscription_id,
+            )
+            .fetch_optional(pool)
+            .await?;
+            let Some(url) = url else {
+                return Ok(None);
+            };
+            url
+        }
+    };
+    Ok(Some(Delivery {
+        payload: event.payload,
+        occurred_at: event.occurred_at,
+        url,
+    }))
+}
+
+/// Records the last delivery attempt of a project subscription: its HTTP status, or the error
+/// when no response came back.
+pub async fn record_attempt(
+    pool: &PgPool,
+    subscription_id: Uuid,
+    status: Option<u16>,
+    error: Option<&str>,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"
+        UPDATE event_subscriptions
+        SET last_attempt_at = now(), last_status = $2, last_error = $3
+        WHERE id = $1
+        "#,
+        subscription_id,
+        status.and_then(|status| i16::try_from(status).ok()),
+        error,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Deletes the events that no outbox job refers to any more (cleanup hook of the delivery
+/// handler). Returns how many were deleted.
+pub async fn delete_unreferenced(pool: &PgPool) -> Result<u64, DbError> {
+    let deleted = sqlx::query!(
+        r#"
+        DELETE FROM lifecycle_events e
+        WHERE NOT EXISTS (
+            SELECT 1 FROM outbox o
+            WHERE o.kind = $1 AND o.payload->>'event_id' = e.id::text
+        )
+        "#,
+        DELIVER_KIND,
+    )
+    .execute(pool)
+    .await?;
+    Ok(deleted.rows_affected())
 }
 
 /// Loads the subject of `event` and the transaction time as the event time.

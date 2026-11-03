@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox SET lease_until = NULL, last_error = $2,\n                 next_attempt_at = now() + make_interval(secs => $3)\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d29f49fab89e62fbf5b2426b6f6ac17e90501bfc38feb009b1414361fb782ee4"
+}

@@ -7,6 +7,7 @@ pub mod host;
 pub mod ids;
 pub mod keys;
 pub mod lifecycle;
+pub mod public_address;
 pub mod routing;
 pub mod seams;
 #[cfg(any(test, feature = "test-util"))]

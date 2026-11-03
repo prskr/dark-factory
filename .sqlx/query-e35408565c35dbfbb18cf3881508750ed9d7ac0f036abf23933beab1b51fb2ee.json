@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM lifecycle_events e\n        WHERE NOT EXISTS (\n            SELECT 1 FROM outbox o\n            WHERE o.kind = $1 AND o.payload->>'event_id' = e.id::text\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e35408565c35dbfbb18cf3881508750ed9d7ac0f036abf23933beab1b51fb2ee"
+}
