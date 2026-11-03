@@ -305,13 +305,15 @@ multi_deploy(
 )
 
 # Single-platform images for the throwaway kind cluster of `just e2e-local` (deploy/e2e/):
-# `bazel run //deploy:load_e2e_<name> -- --platform linux/<arch>` loads one into the local
-# docker/podman daemon, then `kind load docker-image` copies it into the node. The tag is the
-# one of deploy/values-e2e.yaml.
+# `bazel run --platforms=//build/platforms:linux_<arch>_musl
+# --@rules_img//img/settings:load_daemon=tar //deploy:load_e2e_<name>` writes an image tarball to
+# stdout for `kind load image-archive`. The manifest, not the multi-arch index: the tarball holds
+# one platform, and the node's import rejects an index that references missing manifests. The tag
+# is the one of deploy/values-e2e.yaml.
 [
     image_load(
         name = "load_e2e_" + name,
-        image = ":" + image + "_image",
+        image = ":" + image + "_manifest",
         tag = "ghcr.io/prskr/dark-factory/%s:e2e" % repository,
     )
     for name, image, repository in [

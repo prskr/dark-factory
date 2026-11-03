@@ -50,14 +50,14 @@ Allowlist changes need a board-member (later: a dedicated permission) and are wr
 
 ## 5. Sandbox wiring and generated policies
 
-### 5.1 Pod spec (set at Sandbox creation)
+### 5.1 Pod spec (set at Pod creation)
 - `HTTPS_PROXY` / `HTTP_PROXY` (and lower-case variants) pointing at the gateway Service's **ClusterIP**, so no DNS is needed to find it. The control plane endpoint is passed the same way.
 - `NO_PROXY` lists all `cluster-service` targets, so clients connect to them directly.
 - `hostAliases` map each `cluster-service` target's DNS name (`<svc>.<ns>.svc.<cluster-domain>` and `<svc>.<ns>.svc`) to its ClusterIP, so tools resolve them without DNS.
 - Headless services have no ClusterIP; a target can opt in to `allowDns`, which allows the cluster DNS for that run (plain `NetworkPolicy` can't restrict DNS by name).
 
 ### 5.2 Kubernetes mode (`NetworkPolicy`, default)
-One policy per run, selecting the run's pod by label, owned by the Sandbox (deleted with it):
+One policy per run, selecting the run's pod by label, owned by the Pod (deleted with it, also if someone else deletes the pod):
 - No ingress.
 - Egress to the control plane pods (agent port) and the gateway pods (proxy port).
 - Per `cluster-service` target: `namespaceSelector` on `kubernetes.io/metadata.name` plus a `podSelector` copied from the Service's selector, with the Service's **target ports** (policies apply after Service DNAT; named target ports stay named). Services without a selector are rendered from their EndpointSlice addresses as `/32` `ipBlock`s.

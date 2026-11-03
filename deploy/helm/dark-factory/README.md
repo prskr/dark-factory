@@ -9,7 +9,7 @@ Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031)
 - Private CA behind a `ClusterIssuer` (or reference to an existing `ClusterIssuer`) and mTLS `Certificate`s for control plane and gateway; sandbox pods request their client certificates from the same issuer
 - Instance namespace `NetworkPolicy` objects (`design/deployment.md` §5)
 
-The chart requires Kubernetes 1.36 or newer (`kubeVersion`): the runtime and the harness are delivered as image volumes.
+The chart requires Kubernetes 1.36 or newer (`kubeVersion`): the runtime and the harness are delivered as image volumes. Sandboxes are plain Pods created by the control plane; no agent-sandbox controller or CRDs are needed. Upgrading a cluster that still has `Sandbox` objects: `design/deployment.md`, section "Migration".
 
 ## Values Reference
 

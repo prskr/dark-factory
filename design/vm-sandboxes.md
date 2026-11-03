@@ -205,7 +205,7 @@ A static musl binary from this repository (`df-bootstrap` crate), delivered on t
 8. Arm a maximum-lifetime power-off timer (root-owned, independent of the control plane).
 
 ### 7.2 Pod spec
-The control plane renders the same Pod as for Kubernetes (plain-Pod change, `openspec/changes/k8s-plain-pod-sandboxes`). `df-proxmox` translates it mechanically:
+The control plane renders the same Pod as for Kubernetes (`render_pod`, `openspec/changes/archive/2026-11-03-k8s-plain-pod-sandboxes`). `df-proxmox` translates it mechanically:
 
 | Kubernetes | VM |
 |---|---|
@@ -431,7 +431,7 @@ Hetzner specifics, deferred to the Hetzner ADR:
 
 Order of work (roadmap backlog):
 1. Gateway DNS resolver (`egress.md` §12).
-2. Plain Pods instead of agent-sandbox (`openspec/changes/k8s-plain-pod-sandboxes`).
+2. ~~Plain Pods instead of agent-sandbox~~ — done (`openspec/changes/archive/2026-11-03-k8s-plain-pod-sandboxes`).
 3. vpn-gateway relay spike (boringtun + userspace stack + PROXY v2 against the gateway).
 4. `Enroll` and cert-manager spike; `Enroll` is added to `contract/` here.
 5. Proxmox provider.

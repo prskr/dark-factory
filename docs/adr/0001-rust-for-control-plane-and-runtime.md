@@ -11,14 +11,14 @@ Paperclip, the inspiration for Dark Factory, is mostly Node.js and comparatively
 
 - Both the control plane and the agent runtime are written in Rust.
 - One Cargo workspace; protocol and shared type crates are used by both components.
-- Kubernetes access via kube-rs; agent-sandbox types are generated from its CRDs with `kopium`.
+- Kubernetes access via kube-rs and the `k8s-openapi` types (no generated CRD types, ADR-0030 amendment of 2026-11-03).
 
 ## Consequences
 
 - Embedding Wasmtime from Rust is the most mature way to host Component Model plugins with `wasi:http`.
 - Shared crates keep protocol types identical on both ends of the agent stream.
 - Small static binaries (musl) fit the low-overhead goal for sandboxes.
-- agent-sandbox ships Go and Python SDKs but no Rust SDK; generated types and kube-rs replace it.
+- kube-rs with `k8s-openapi` covers all Kubernetes access; no Go SDK is needed.
 - Longer compile times than Go; existing Go experience doesn't carry over directly.
 
 ## Alternatives considered

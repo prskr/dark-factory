@@ -1,0 +1,86 @@
+name: E2E
+
+# `just e2e-local` (deploy/e2e/e2e-local.sh, docs/demo.md): a throwaway kind cluster with the images built
+# from this commit, the web UI driven by Playwright.
+on:
+  pull_request:
+    paths-ignore:
+      - "product/**"
+      - "design/**"
+      - "openspec/**"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "product/**"
+      - "design/**"
+      - "openspec/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Read by build/buildbuddy_credentials.sh; the script calls plain `bazel run`.
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+      # renovate: datasource=github-releases depName=protocolbuffers/protobuf
+      PROTOC_VERSION: "36.2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Bazel remote cache
+        run: echo 'common --config=cache --config=ci' > .bazelrc.user
+
+      # kind and helm pinned through multitool. Only these two go on PATH: the bazel_env cargo lacks
+      # the host's std (see ci.yaml), the suite uses the rustup toolchain.
+      - name: Pinned kind and helm
+        run: |
+          # `update-symlink` only creates .bazel_env; the default `status` fails without direnv.
+          bazel run //:bazel_env -- update-symlink
+          mkdir -p "$RUNNER_TEMP/bin"
+          for tool in kind helm; do
+            # The launchers find their runfiles next to their own path: wrap, don't symlink.
+            printf '#!/bin/sh\nexec %s "$@"\n' "$PWD/.bazel_env/tools/$tool" > "$RUNNER_TEMP/bin/$tool"
+            chmod +x "$RUNNER_TEMP/bin/$tool"
+          done
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # cargo builds df-proto for the seed program and the suite
+      - name: Install protoc
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/protoc.zip" \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "$RUNNER_TEMP/protoc/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # ~/.cargo and target/ of the seed program and the suite
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The Playwright driver and its installer (E2E_TOOLS_DIR of the script); the version comes from Cargo.lock
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/df-e2e
+          key: df-e2e-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: df-e2e-tools-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: E2E suite
+        run: deploy/e2e/e2e-local.sh

@@ -19,11 +19,22 @@ A task is due when its status is `queued` or `rate_limited`, it has no non-termi
 
 #### Scenario: Due rate-limited task
 - **WHEN** task `DF-2` is `rate_limited` with a resume time that has passed
-- **THEN** a run starts without a queued message
+- **THEN** a run starts without a message from a board member
 
 #### Scenario: Not yet due
 - **WHEN** task `DF-3` is `queued` with a resume time 5 minutes ahead
 - **THEN** no run starts until that time
+
+### Requirement: Resumed runs prompt the agent to continue
+When a run starts because the task's resume time passed (rate limit, automatic resume) and the task has no undelivered message, the control plane SHALL queue a system prompt (reason `run.resumed`, "Continue the task where the previous run stopped.") in the same transaction, so the run has a turn instead of ending idle. It SHALL NOT change the task's resume count.
+
+#### Scenario: Due rate-limited task continues
+- **WHEN** task `DF-2` is `rate_limited` with a resume time that has passed and all its messages were delivered
+- **THEN** a run starts and its first prompt is the `run.resumed` prompt
+
+#### Scenario: Resumed task with a queued message
+- **WHEN** task `DF-3` is `queued` with a resume time that has passed and an undelivered message
+- **THEN** a run starts with that message and no `run.resumed` prompt is queued
 
 ### Requirement: Concurrent run limit
 At most `runs.maxConcurrent` runs (default 4) SHALL be non-terminal at a time, counted across all replicas. Due tasks beyond the limit SHALL keep their status until a slot frees and SHALL then start oldest resume time first.

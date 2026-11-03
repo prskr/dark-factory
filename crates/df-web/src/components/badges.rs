@@ -7,7 +7,8 @@ const BADGE: &str =
     "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
 /// Color family of a badge; each has a background and a foreground token pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Tone {
     Running,
     Waiting,
@@ -23,7 +24,7 @@ pub enum Tone {
 }
 
 impl Tone {
-    const fn class(self) -> &'static str {
+    pub(crate) const fn class(self) -> &'static str {
         match self {
             Self::Running => "bg-status-running-bg text-status-running-fg",
             Self::Waiting => "bg-status-waiting-bg text-status-waiting-fg",

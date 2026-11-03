@@ -1,16 +1,16 @@
 # df-k8s
 
-Kubernetes integration crate for Dark Factory: `SandboxProvider` implementation (managing agent-sandbox `Sandbox` CRDs and persistent task volumes), identity resolution from pod informers, per-run `NetworkPolicy` rendering and reconciliation, and `SecretStore` implementation reading Kubernetes Secrets.
+Kubernetes integration crate for Dark Factory: `SandboxProvider` implementation (managing one plain `Pod` per run and persistent task volumes), identity resolution from pod informers, per-run `NetworkPolicy` rendering and reconciliation, and `SecretStore` implementation reading Kubernetes Secrets.
 
 ## Spike Results (Iteration 1 §7)
 
-Spikes 1.1-1.4 were run on the development cluster (Kata, cert-manager CSI driver, agent-sandbox, Cilium) and verified by the project owner (statement of 2026-10-21; the commands were not run or recorded by the implementing agent).
+Spikes 1.1-1.4 were run on the development cluster (Kata, cert-manager CSI driver, agent-sandbox at the time, Cilium) and verified by the project owner (statement of 2026-10-21; the commands were not run or recorded by the implementing agent).
 
 | Spike | Result |
 |---|---|
 | 1.1 Image volumes | An `image` volume mounted read-only at `/opt/factory` works with containerd and Kata. Image volumes are the only delivery of the runtime and the harness; the cluster must run Kubernetes 1.36 or newer (image volumes GA). |
 | 1.2 cert-manager CSI driver | `csi.cert-manager.io` volumes mount at `/run/factory/tls` (`tls.crt`, `tls.key`, `ca.crt`) and substitute `${POD_NAMESPACE}`, `${POD_NAME}`, `${POD_UID}` into the URI SAN. |
-| 1.3 `Sandbox` pod template | The pinned `agents.x-k8s.io/v1beta1` controller passes `runtimeClassName`, `automountServiceAccountToken: false`, `hostAliases`, the restricted `securityContext`, `image`/`csi`/PVC/`emptyDir` volumes to the pod. |
+| 1.3 Pod template | The pod (formerly through the agent-sandbox controller, since removed) carries `runtimeClassName`, `automountServiceAccountToken: false`, `hostAliases`, the restricted `securityContext`, `image`/`csi`/PVC/`emptyDir` volumes to the pod. |
 | 1.4 NetworkPolicy | Policies are enforced and pod source IPs are preserved. |
 
 ## Provisioning Configuration Keys
@@ -63,7 +63,7 @@ The chart always sets the three name keys from the release's `fullname`; the fal
   - Provisioning fails only if the allowlist itself cannot be read (database error). One bad entry does not fail provisioning of other runs; the affected run starts without that target.
   - Rules resolve one after another (worst case two API calls of `K8S_API_TIMEOUT` per rule).
 - **Named `targetPort`.** Resolved through the EndpointSlices of the Service. EndpointSlice ports are named after the Service port's `name`, so that name is matched; ports of all matching slices are allowed (pods may use different numbers for the same name).
-- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container (even if the pod never ran), a deleted Sandbox, or a pod / Sandbox that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known, and the scheduler does **not** resync active runs against the cluster: a run whose pod vanished while the control plane was down ends through the scheduler's connect timeout or wall-clock hard stop.
+- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container (even if the pod never ran), a pod that completed without a run report (phase `Succeeded`), or a pod that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known, and the scheduler does **not** resync active runs against the cluster: a run whose pod vanished while the control plane was down ends through the scheduler's connect timeout or wall-clock hard stop.
 - **Timeouts.** Every Kubernetes API call made by this crate is bounded by `K8S_API_TIMEOUT` (5 s).
 - **Loops.** The reconcile loop ends when shutdown is requested, or when the shutdown or leader channel sender is gone. A closed notification channel only disables that trigger; the 30 s resync continues.
 
@@ -84,10 +84,9 @@ Reconciliation of sandbox `NetworkPolicy` objects is managed by the leader insta
 
 The control plane verifies the following with `SelfSubjectAccessReview` at startup and refuses to start if one is missing; the error lists every missing permission of every checked namespace. The chart grants them (`templates/rbac.yaml`).
 - **Sandbox Namespace**:
-  - `agents.x-k8s.io` `sandboxes`: `create`, `get`, `delete`, `list`, `watch`, `patch`
   - `core` `persistentvolumeclaims`: `create`, `get`, `list`, `watch`, `patch`, `delete`
   - `networking.k8s.io` `networkpolicies`: `create`, `get`, `delete`, `list`, `watch`, `patch`
-  - `core` `pods`: `get`, `list`, `watch`
+  - `core` `pods`: `create`, `get`, `list`, `watch`, `delete`
 - **Instance Namespace**:
   - `coordination.k8s.io` `leases`: `create`, `get`, `update`
   - `core` `services`: `get`

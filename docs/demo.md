@@ -2,7 +2,7 @@
 
 The iteration 1 demo (`product/iterations/iteration-1.md` §2) runs in two ways:
 
-- **Automated** with the fake ACP agent: `just e2e-local` creates a throwaway kind cluster, runs the web UI flow with Playwright and deletes the cluster.
+- **Automated** with the fake ACP agent: `just e2e-local` creates a throwaway kind cluster, runs the web UI flow with Playwright and deletes the cluster. CI runs the same script on pull requests and pushes to `main` that change files outside `product/`, `design/` and `openspec/` (`.github/workflows/e2e.yaml`).
 - **By hand** with Claude Code on the homelab instance (`bazel run //deploy:dev`), partly on a phone.
 
 This page covers the automated run: commands, environment variables, seed data and what runs where.
@@ -26,8 +26,8 @@ kind delete cluster --name df-e2e
 
 ```mermaid
 flowchart TD
-    A[kind create cluster df-e2e] --> B[cert-manager, CSI driver, agent-sandbox]
-    A --> I[bazel run //deploy:load_e2e_*, kind load]
+    A[kind create cluster df-e2e] --> B[cert-manager, CSI driver]
+    A --> I[bazel run //deploy:load_e2e_*, kind load image-archive]
     B --> C[PostgreSQL, Dex, Playwright server, Forgejo]
     C --> D[Forgejo bot user, token, factory/demo, issue 1, Secret]
     D --> E[helm install values-e2e.yaml]
@@ -38,8 +38,8 @@ flowchart TD
 ```
 
 1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`).
-2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` loads each image into the local Podman/Docker image store, `kind load docker-image` copies it into the node. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, agent-sandbox, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
-3. Installs cert-manager and its CSI driver, agent-sandbox, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server and Forgejo (Helm chart, SQLite, no persistence).
+2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
+3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server and Forgejo (Helm chart, SQLite, no persistence).
 4. Creates the Forgejo user `factory`, its token, the repository `factory/demo` and issue 1, and the Secret `forgejo-token` for the credential reference.
 5. Installs the chart with `deploy/values-e2e.yaml`.
 6. Seeds the database, port-forwards PostgreSQL, Forgejo and the Playwright server, and runs the ignored tests of `crates/df-e2e` one at a time.
@@ -60,6 +60,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
 | `networkPolicy.ingressController.allowAll` | `true` | The browser pod and the port-forward reach the UI. |
 | `sandboxNamespace.resourceQuota.pods`, `limitRange` | 4 pods, 1 Gi default memory | Memory budget, see below. |
+| `sandboxNamespace.resourceQuota.persistentVolumeClaims`, `requestsStorage` | 32, `32Gi` | One 1 Gi volume per task, kept while the task is open; the suite leaves most of its tasks `waiting`. `local-path` does not reserve the size. |
 
 ## Environment variables
 
@@ -148,7 +149,7 @@ The test host needs the Playwright driver (about 130 MB). The workspace sets `PL
 
 ## Rootless Podman
 
-kind on Podman is experimental. The script sets `KIND_EXPERIMENTAL_PROVIDER=podman` when `docker` is not installed and gives Bazel a `docker` alias for `podman` (the image loader calls `docker load`). Known limits:
+kind on Podman is experimental. The script sets `KIND_EXPERIMENTAL_PROVIDER=podman` when `docker` is not installed. Known limits:
 
 - kind always mounts `/dev/mapper`; a host without it fails with `statfs /dev/mapper: no such file or directory`. Use a host that has it, or Docker.
 - Podman needs a running user socket (`systemctl --user start podman.socket`).
@@ -222,7 +223,7 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 |---|---|
 | Image volumes with Talos containerd and Kata | works |
 | cert-manager CSI volumes inside Kata sandboxes | works |
-| agent-sandbox passes image volumes, CSI volumes, PVCs and the runtime class through | works |
+| Pod passes image volumes, CSI volumes, PVCs and the runtime class through (formerly via agent-sandbox, since removed) | works |
 | Claude ACP adapter: headless with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load`, token usage | works; usage is reported by the adapter |
 | Claude with `ANTHROPIC_BASE_URL` and a placeholder token | works, see above |
 | Forgejo draft/WIP PRs via API | works |
@@ -234,4 +235,4 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 ### Open follow-ups
 
 - Token swap: long interactive session and the image's Claude Code version (iteration 3, inference endpoint).
-- Whether agent-sandbox still adds anything over plain scheduled Pods (roadmap backlog).
+- agent-sandbox was replaced by plain Pods (`k8s-plain-pod-sandboxes`).

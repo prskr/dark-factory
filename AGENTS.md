@@ -112,7 +112,7 @@ bazel --bazelrc=.bazelrc.agents test //...
 
 ### Lint and hooks
 
-`lefthook.yml` defines the checks: pre-commit runs rustfmt (via Bazel), `kingfisher`, `buildifier`, `shellcheck`, `buf format`, `hadolint`, `typos`, `cargo-machete` and the Helm lint/unit tests; pre-push runs `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Make sure clippy has no warnings and `cargo-machete` finds no unused dependencies before you finish. The pinned tool versions come from Bazel (`docs/development.md`, "Pinned linters").
+`lefthook.yml` defines the checks: pre-commit runs rustfmt (via Bazel), `kingfisher`, `buildifier`, `shellcheck`, `buf format`, `hadolint`, `typos`, `cargo-machete`, the Helm lint/unit tests and, for changes under `openspec/`, `openspec validate --all --strict` (the same command and version as the `OpenSpec` workflow); pre-push runs `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Make sure clippy has no warnings and `cargo-machete` finds no unused dependencies before you finish. The pinned tool versions come from Bazel (`docs/development.md`, "Pinned linters").
 
 ## Search of files and binaries
 
@@ -156,7 +156,7 @@ Function length:
 
 Lint attributes:
 
-- `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, kopium output, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
+- `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
 - `clippy::pedantic` is enabled. The workspace allows `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc`, `assert_is_empty`, `needless_pass_by_value`, `similar_names` and `struct_excessive_bools`, each with a reason in the root `Cargo.toml`.
 
 ## Adding a crate

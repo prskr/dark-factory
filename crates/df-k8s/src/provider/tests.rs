@@ -1,19 +1,16 @@
 //! Tests of the Kubernetes sandbox provider.
 
-#![expect(
-    clippy::too_many_lines,
-    reason = "scenario tests set up and check a whole run"
-)]
-
 use super::*;
 use k8s_openapi::api::core::v1::{
     ContainerState, ContainerStateWaiting, ContainerStatus, PodStatus,
 };
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::runtime::reflector;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use uuid::Uuid;
+
+const SANDBOX_NS: &str = "dark-factory-dev-sandboxes";
 
 fn test_config() -> ProvisioningConfig {
     ProvisioningConfig::from_sandbox_config(
@@ -50,51 +47,32 @@ fn test_parse_spiffe_san() {
     );
 }
 
-#[test]
-fn test_resolve_identity_scenarios() {
+/// Run 1 of task `DF-1` with a fresh run id; `harness` selects the harness volume.
+fn df1_run_spec(harness: Option<String>) -> RunSandboxSpec {
+    let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
+    RunSandboxSpec {
+        run_id: RunId::new(),
+        run_number: 1,
+        task_key: task.task_key.clone(),
+        project_id: df_core::ids::ProjectId::new(),
+        project_key: df_core::keys::ProjectKey::new("DF").unwrap(),
+        persona_id: df_core::ids::PersonaId::new(),
+        image: "alpine:latest".to_string(),
+        harness,
+        volume_name: task.volume_name,
+        labels: BTreeMap::new(),
+    }
+}
+
+/// A store holding one pod `run-df-1-1` with UID `pod-uid-1` and IP 10.0.3.7; `labels` are its labels.
+fn store_with_pod(labels: Option<BTreeMap<String, String>>) -> Store<Pod> {
     let (pod_store, mut pod_writer) = reflector::store();
-    let (sandbox_store, mut sb_writer) = reflector::store();
-
-    let run_id = RunId::from_uuid(Uuid::from_u128(42));
-    let sandbox_ns = "dark-factory-dev-sandboxes";
-    let instance_name = "test-instance";
-
-    // Seed Sandbox
-    let sandbox = Sandbox {
-        metadata: ObjectMeta {
-            name: Some("run-df-1-1".to_string()),
-            namespace: Some(sandbox_ns.to_string()),
-            uid: Some("sb-uid-1".to_string()),
-            labels: Some(BTreeMap::from([
-                (
-                    "dark-factory.io/instance".to_string(),
-                    instance_name.to_string(),
-                ),
-                ("dark-factory.io/run-id".to_string(), run_id.to_string()),
-            ])),
-            ..Default::default()
-        },
-        spec: crate::crd::SandboxSpec {
-            pod_template: crate::crd::SandboxPodTemplate::default(),
-            ..Default::default()
-        },
-        status: None,
-    };
-    sb_writer.apply_watcher_event(&watcher::Event::Apply(sandbox));
-
-    // Seed Pod
     let pod = Pod {
         metadata: ObjectMeta {
             name: Some("run-df-1-1".to_string()),
-            namespace: Some(sandbox_ns.to_string()),
+            namespace: Some(SANDBOX_NS.to_string()),
             uid: Some("pod-uid-1".to_string()),
-            owner_references: Some(vec![OwnerReference {
-                api_version: "agents.x-k8s.io/v1beta1".to_string(),
-                kind: "Sandbox".to_string(),
-                name: "run-df-1-1".to_string(),
-                uid: "sb-uid-1".to_string(),
-                ..Default::default()
-            }]),
+            labels,
             ..Default::default()
         },
         status: Some(PodStatus {
@@ -104,82 +82,87 @@ fn test_resolve_identity_scenarios() {
         ..Default::default()
     };
     pod_writer.apply_watcher_event(&watcher::Event::Apply(pod));
+    pod_store
+}
 
-    // Scenario: Valid peer
-    let valid_peer = PeerIdentity {
-        uri_san: format!("spiffe://dark-factory/ns/{sandbox_ns}/pod/run-df-1-1/pod-uid-1"),
-        peer_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 3, 7)),
+fn labels_of(instance: Option<&str>, run_id: Option<&str>) -> BTreeMap<String, String> {
+    let mut labels = BTreeMap::new();
+    if let Some(instance) = instance {
+        labels.insert("dark-factory.io/instance".to_string(), instance.to_string());
+    }
+    if let Some(run_id) = run_id {
+        labels.insert("dark-factory.io/run-id".to_string(), run_id.to_string());
+    }
+    labels
+}
+
+fn peer(uid: &str, ip: [u8; 4]) -> PeerIdentity {
+    PeerIdentity {
+        uri_san: format!("spiffe://dark-factory/ns/{SANDBOX_NS}/pod/run-df-1-1/{uid}"),
+        peer_ip: IpAddr::V4(Ipv4Addr::from(ip)),
+    }
+}
+
+#[test]
+fn identity_resolves_only_for_matching_uid_ip_and_instance() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(42));
+    let store = store_with_pod(Some(labels_of(
+        Some("test-instance"),
+        Some(&run_id.to_string()),
+    )));
+    let resolve = |peer: &PeerIdentity, instance: &str| {
+        resolve_identity_from_pod_store(peer, SANDBOX_NS, instance, &store)
     };
+
+    // Valid peer
     assert_eq!(
-        resolve_identity_from_stores(
-            &valid_peer,
-            sandbox_ns,
-            instance_name,
-            &pod_store,
-            &sandbox_store
-        ),
+        resolve(&peer("pod-uid-1", [10, 0, 3, 7]), "test-instance"),
         Some(run_id)
     );
-
-    // Scenario: Peer IP mismatch
-    let wrong_ip_peer = PeerIdentity {
-        uri_san: format!("spiffe://dark-factory/ns/{sandbox_ns}/pod/run-df-1-1/pod-uid-1"),
-        peer_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 3, 99)),
-    };
+    // Peer IP mismatch
     assert_eq!(
-        resolve_identity_from_stores(
-            &wrong_ip_peer,
-            sandbox_ns,
-            instance_name,
-            &pod_store,
-            &sandbox_store
-        ),
+        resolve(&peer("pod-uid-1", [10, 0, 3, 99]), "test-instance"),
         None
     );
-
-    // Scenario: UID mismatch after pod recreation
-    let old_uid_peer = PeerIdentity {
-        uri_san: format!("spiffe://dark-factory/ns/{sandbox_ns}/pod/run-df-1-1/old-uid"),
-        peer_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 3, 7)),
-    };
+    // UID mismatch after pod recreation
     assert_eq!(
-        resolve_identity_from_stores(
-            &old_uid_peer,
-            sandbox_ns,
-            instance_name,
-            &pod_store,
-            &sandbox_store
-        ),
+        resolve(&peer("old-uid", [10, 0, 3, 7]), "test-instance"),
         None
     );
-
-    // Scenario: Malformed SAN
-    let malformed_peer = PeerIdentity {
+    // Malformed SAN
+    let malformed = PeerIdentity {
         uri_san: "spiffe://other/bad".to_string(),
         peer_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 3, 7)),
     };
+    assert_eq!(resolve(&malformed, "test-instance"), None);
+    // Pod not created by this instance
     assert_eq!(
-        resolve_identity_from_stores(
-            &malformed_peer,
-            sandbox_ns,
-            instance_name,
-            &pod_store,
-            &sandbox_store
-        ),
+        resolve(&peer("pod-uid-1", [10, 0, 3, 7]), "other-instance"),
         None
     );
+}
 
-    // Scenario: Pod not created by this instance
-    assert_eq!(
-        resolve_identity_from_stores(
-            &valid_peer,
-            sandbox_ns,
-            "other-instance",
-            &pod_store,
-            &sandbox_store
-        ),
-        None
-    );
+#[test]
+fn pod_without_instance_label_or_valid_run_id_resolves_to_nothing() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(42)).to_string();
+    for labels in [
+        None,
+        Some(labels_of(None, Some(&run_id))),
+        Some(labels_of(Some("test-instance"), None)),
+        Some(labels_of(Some("test-instance"), Some("not-a-run-id"))),
+    ] {
+        let store = store_with_pod(labels.clone());
+        assert_eq!(
+            resolve_identity_from_pod_store(
+                &peer("pod-uid-1", [10, 0, 3, 7]),
+                SANDBOX_NS,
+                "test-instance",
+                &store
+            ),
+            None,
+            "{labels:?}"
+        );
+    }
 }
 
 #[test]
@@ -238,7 +221,20 @@ fn test_map_pod_event() {
         })
     );
 
-    // 3. Deletion timestamp -> Gone
+    // 3. Completed without a run report -> Gone
+    pod.status = Some(PodStatus {
+        phase: Some("Succeeded".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(
+        map_pod_event(&pod),
+        Some(SandboxEvent::Gone {
+            run_id,
+            reason: "pod completed".to_string(),
+        })
+    );
+
+    // 4. Deletion timestamp -> Gone
     pod.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
         k8s_openapi::jiff::Timestamp::now(),
     ));
@@ -261,10 +257,8 @@ async fn test_provider_live_cluster_integration() {
     let config = crate::test_support::live_config();
 
     let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
     let targets = Arc::new(StaticClusterTargetsProvider::new(vec![]));
-    let provider =
-        K8sSandboxProvider::new(client.clone(), config.clone(), targets, pod_store, sb_store);
+    let provider = K8sSandboxProvider::new(client.clone(), config.clone(), targets, pod_store);
 
     let task_key = "DF-999".parse().unwrap();
     let task = TaskVolumeSpec::for_task(task_key);
@@ -276,15 +270,9 @@ async fn test_provider_live_cluster_integration() {
     let run_id = RunId::new();
     let spec = RunSandboxSpec {
         run_id,
-        run_number: 1,
         task_key: task.task_key.clone(),
-        project_id: df_core::ids::ProjectId::new(),
-        project_key: df_core::keys::ProjectKey::new("DF").unwrap(),
-        persona_id: df_core::ids::PersonaId::new(),
-        image: "alpine:latest".to_string(),
-        harness: None,
         volume_name: task.volume_name.clone(),
-        labels: BTreeMap::new(),
+        ..df1_run_spec(None)
     };
 
     provider.provision(&spec).await.expect("provision sandbox");
@@ -315,18 +303,16 @@ async fn test_provider_live_cluster_integration() {
         ..spec.clone()
     };
     provider.provision(&second).await.expect("provision run 2");
-    let sandboxes: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-    let sandbox = sandboxes
-        .get("run-df-999-2")
-        .await
-        .expect("second run's sandbox");
-    let claims: Vec<String> = sandbox
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &config.sandbox.namespace);
+    let pod = pods.get("run-df-999-2").await.expect("second run's pod");
+    assert_eq!(
+        pod.spec.as_ref().and_then(|s| s.restart_policy.as_deref()),
+        Some("Never")
+    );
+    let claims: Vec<String> = pod
         .spec
-        .pod_template
-        .spec
-        .volumes
         .iter()
-        .flatten()
+        .flat_map(|s| s.volumes.iter().flatten())
         .filter_map(|v| v.persistent_volume_claim.as_ref())
         .map(|pvc| pvc.claim_name.clone())
         .collect();
@@ -488,8 +474,7 @@ fn image_pull_failure_pod(run_id: RunId) -> Pod {
 async fn run_loop(pod_events: Vec<watcher::Event<Pod>>) -> Vec<SandboxEvent> {
     let emitted = std::sync::Mutex::new(Vec::new());
     let pods = futures::stream::iter(pod_events.into_iter().map(Ok));
-    let sandboxes = futures::stream::pending();
-    forward_events(pods, sandboxes, |event| emitted.lock().unwrap().push(event)).await;
+    forward_events(pods, |event| emitted.lock().unwrap().push(event)).await;
     emitted.into_inner().unwrap()
 }
 
@@ -564,75 +549,60 @@ async fn event_loop_emits_gone_for_pods_that_vanished_during_a_relist() {
     );
 }
 
-fn sandbox_for(run_id: RunId) -> Sandbox {
-    Sandbox {
-        metadata: pod_for(run_id, "Pending", None).metadata,
-        spec: crate::crd::SandboxSpec {
-            pod_template: crate::crd::SandboxPodTemplate::default(),
-            ..Default::default()
-        },
-        status: None,
-    }
-}
-
 #[test]
-fn relist_reports_never_running_pods_and_sandboxes_that_vanished() {
+fn relist_reports_never_running_pods_that_vanished() {
     let run_id = RunId::from_uuid(Uuid::from_u128(8));
     let mut tracker = EventTracker::default();
-    // Pending pod: no event, but the pod and its Sandbox are known.
+    // Pending pod: no event, but the pod is known.
     assert!(
         tracker
             .pod_event(watcher::Event::Apply(pod_for(run_id, "Pending", None)))
             .is_empty()
     );
-    assert!(
-        tracker
-            .sandbox_event(watcher::Event::Apply(sandbox_for(run_id)))
-            .is_empty()
-    );
 
-    // Both watches restart and the relists return nothing.
-    assert!(tracker.sandbox_event(watcher::Event::Init).is_empty());
-    let from_sandboxes = tracker.sandbox_event(watcher::Event::InitDone);
+    // The watch restarts and the relist returns nothing: no `Delete`, only the comparison.
     assert!(tracker.pod_event(watcher::Event::Init).is_empty());
     let from_pods = tracker.pod_event(watcher::Event::InitDone);
 
-    // One Gone for the run, whichever watch reports it first.
-    let all: Vec<_> = from_sandboxes.into_iter().chain(from_pods).collect();
-    assert_eq!(all.len(), 1, "{all:?}");
-    assert!(matches!(&all[0], SandboxEvent::Gone { run_id: r, .. } if *r == run_id));
+    assert_eq!(
+        from_pods,
+        vec![SandboxEvent::Gone {
+            run_id,
+            reason: "pod no longer present".to_string()
+        }]
+    );
 }
 
 #[tokio::test]
-async fn tracker_emits_one_gone_when_the_sandbox_is_deleted() {
+async fn tracker_emits_one_gone_when_the_pod_is_deleted() {
     let run_id = RunId::from_uuid(Uuid::from_u128(6));
     let mut tracker = EventTracker::default();
-    let sandbox = Sandbox {
-        metadata: pod_for(run_id, "Running", None).metadata,
-        spec: crate::crd::SandboxSpec {
-            pod_template: crate::crd::SandboxPodTemplate::default(),
-            ..Default::default()
-        },
-        status: None,
-    };
+    let pod = pod_for(run_id, "Running", None);
 
-    let first = tracker.sandbox_event(watcher::Event::Delete(sandbox.clone()));
     assert_eq!(
-        first,
+        tracker.pod_event(watcher::Event::Delete(pod.clone())),
         vec![SandboxEvent::Gone {
             run_id,
-            reason: "sandbox deleted".to_string()
+            reason: "pod deleted".to_string()
         }]
     );
-    assert!(
-        tracker
-            .sandbox_event(watcher::Event::Delete(sandbox))
-            .is_empty()
-    );
-    assert!(
-        tracker
-            .pod_event(watcher::Event::Delete(pod_for(run_id, "Running", None)))
-            .is_empty()
+    assert!(tracker.pod_event(watcher::Event::Delete(pod)).is_empty());
+}
+
+#[tokio::test]
+async fn completed_pod_emits_one_gone() {
+    let run_id = RunId::from_uuid(Uuid::from_u128(9));
+    let events = run_loop(vec![
+        watcher::Event::Apply(pod_for(run_id, "Succeeded", None)),
+        watcher::Event::Delete(pod_for(run_id, "Succeeded", None)),
+    ])
+    .await;
+    assert_eq!(
+        events,
+        vec![SandboxEvent::Gone {
+            run_id,
+            reason: "pod completed".to_string()
+        }]
     );
 }
 
@@ -659,13 +629,11 @@ async fn delete_volume_answered_with(
     let (mock_service, mut handle) =
         tower_test::mock::pair::<http::Request<kube::client::Body>, http::Response<String>>();
     let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
     let provider = K8sSandboxProvider::new(
         Client::new(mock_service, "default"),
         test_config(),
         Arc::new(StaticClusterTargetsProvider::new(vec![])),
         pod_store,
-        sb_store,
     );
     let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
     let call = tokio::spawn(async move { provider.delete_task_volume(&task).await });
@@ -731,19 +699,7 @@ async fn provision_without_a_harness_image_is_invalid_and_names_the_harness() {
         harness_images: BTreeMap::new(),
         ..test_config()
     });
-    let task = TaskVolumeSpec::for_task("DF-1".parse().unwrap());
-    let spec = RunSandboxSpec {
-        run_id: RunId::new(),
-        run_number: 1,
-        task_key: task.task_key.clone(),
-        project_id: df_core::ids::ProjectId::new(),
-        project_key: df_core::keys::ProjectKey::new("DF").unwrap(),
-        persona_id: df_core::ids::PersonaId::new(),
-        image: "alpine:latest".to_string(),
-        harness: Some(df_core::CLAUDE_CODE_HARNESS.to_string()),
-        volume_name: task.volume_name.clone(),
-        labels: BTreeMap::new(),
-    };
+    let spec = df1_run_spec(Some(df_core::CLAUDE_CODE_HARNESS.to_string()));
 
     let err = provider.provision(&spec).await.unwrap_err();
     assert!(
@@ -813,13 +769,11 @@ fn send_json(
 fn mock_provider(config: ProvisioningConfig) -> (K8sSandboxProvider, MockHandle) {
     let (mock_service, handle) = tower_test::mock::pair();
     let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
     let provider = K8sSandboxProvider::new(
         Client::new(mock_service, "default"),
         config,
         Arc::new(StaticClusterTargetsProvider::new(vec![])),
         pod_store,
-        sb_store,
     );
     (provider, handle)
 }
@@ -1169,19 +1123,19 @@ async fn a_forbidden_response_without_quota_text_is_a_backend_error() {
 }
 
 /// Provider on a mocked Kubernetes API; `sandbox_exists` runs against the answer that
-/// the mock gives to the sandbox list request, and the request's query is returned with it.
+/// the mock gives to the pod list request, and the request's query is returned with it.
 async fn sandbox_exists_answered(
     run_id: RunId,
     status: u16,
-    items: Vec<Sandbox>,
+    items: Vec<Pod>,
 ) -> (Result<bool, ProviderError>, String) {
     let (provider, mut handle) = mock_provider(test_config());
     let call = tokio::spawn(async move { provider.sandbox_exists(run_id).await });
-    let (req, send) = handle.next_request().await.expect("sandbox list");
+    let (req, send) = handle.next_request().await.expect("pod list");
     let query = req.uri().query().unwrap_or_default().to_string();
     let body = if status == 200 {
         serde_json::json!({
-            "apiVersion": "agents.x-k8s.io/v1alpha1", "kind": "SandboxList",
+            "apiVersion": "v1", "kind": "PodList",
             "metadata": {}, "items": items,
         })
     } else {
@@ -1192,15 +1146,15 @@ async fn sandbox_exists_answered(
 }
 
 #[tokio::test]
-async fn sandbox_exists_is_true_for_a_listed_sandbox_and_selects_by_instance_and_run() {
+async fn sandbox_exists_is_true_for_a_listed_pod_and_selects_by_instance_and_run() {
     let run_id = RunId::from_uuid(Uuid::from_u128(7));
-    let (exists, query) = sandbox_exists_answered(run_id, 200, vec![sandbox_for(run_id)]).await;
+    let (exists, query) =
+        sandbox_exists_answered(run_id, 200, vec![pod_for(run_id, "Pending", None)]).await;
     assert!(exists.unwrap());
     let selector =
         format!("dark-factory.io%2Finstance%3Dtest-instance%2Cdark-factory.io%2Frun-id%3D{run_id}");
     assert!(query.contains(&selector), "{query}");
 }
-
 #[tokio::test]
 async fn sandbox_exists_is_false_for_an_empty_list() {
     let run_id = RunId::from_uuid(Uuid::from_u128(7));
@@ -1216,4 +1170,224 @@ async fn sandbox_exists_reports_an_api_error() {
         matches!(exists, Err(ProviderError::Backend(_))),
         "{exists:?}"
     );
+}
+
+/// What `provision` did against a mock API.
+struct Provisioned {
+    result: Result<(), ProviderError>,
+    /// `METHOD path` of each request, in order.
+    requests: Vec<String>,
+    /// JSON body of each request (null if it had none), in order.
+    bodies: Vec<serde_json::Value>,
+}
+
+/// Provisions run 1 of `DF-1` against a mock API that answers the requests with `first` (the
+/// Pod create) and then `followups`.
+async fn provision_with_pod_create_answered(
+    first: (u16, serde_json::Value),
+    followups: Vec<(u16, serde_json::Value)>,
+) -> Provisioned {
+    let (provider, mut handle) = mock_provider(test_config());
+    let spec = df1_run_spec(None);
+    let call = tokio::spawn(async move { provider.provision(&spec).await });
+    let mut requests = Vec::new();
+    let mut bodies = Vec::new();
+    for (status, body) in std::iter::once(first).chain(followups) {
+        let (req, send) = handle.next_request().await.expect("API request");
+        requests.push(format!("{} {}", req.method(), req.uri().path()));
+        let bytes = req.into_body().collect_bytes().await.unwrap();
+        bodies.push(serde_json::from_slice(&bytes).unwrap_or_default());
+        send_json(send, status, &body);
+    }
+    Provisioned {
+        result: call.await.unwrap(),
+        requests,
+        bodies,
+    }
+}
+
+fn existing_pod_json() -> serde_json::Value {
+    serde_json::json!({
+        "apiVersion": "v1", "kind": "Pod",
+        "metadata": { "name": "run-df-1-1", "uid": "existing-uid" },
+    })
+}
+
+#[tokio::test]
+async fn provision_creates_the_pod_and_owns_the_policy_by_it() {
+    let Provisioned {
+        result,
+        requests,
+        bodies,
+    } = provision_with_pod_create_answered(
+        (201, existing_pod_json()),
+        vec![(
+            200,
+            serde_json::json!({
+                "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+                "metadata": { "name": "run-df-1-1" },
+            }),
+        )],
+    )
+    .await;
+    result.unwrap();
+    assert!(
+        requests[0].starts_with("POST ") && requests[0].ends_with("/pods"),
+        "{requests:?}"
+    );
+    assert!(requests[1].starts_with("PATCH ") && requests[1].contains("networkpolicies"));
+    assert_eq!(bodies[0]["spec"]["restartPolicy"], "Never");
+    assert_eq!(
+        bodies[1]["metadata"]["ownerReferences"][0]["uid"],
+        "existing-uid"
+    );
+}
+
+#[tokio::test]
+async fn provisioning_an_existing_pod_succeeds_and_keeps_it() {
+    let Provisioned { result, requests, bodies } = provision_with_pod_create_answered(
+        (409, serde_json::json!({
+            "kind": "Status", "apiVersion": "v1", "status": "Failure",
+            "code": 409, "reason": "AlreadyExists", "message": "pods \"run-df-1-1\" already exists",
+        })),
+        vec![
+            (200, existing_pod_json()),
+            (200, serde_json::json!({
+                "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+                "metadata": { "name": "run-df-1-1" },
+            })),
+        ],
+    )
+    .await;
+    result.unwrap();
+    assert!(
+        requests[1].starts_with("GET ") && requests[1].ends_with("/pods/run-df-1-1"),
+        "{requests:?}"
+    );
+    assert_eq!(
+        bodies[2]["metadata"]["ownerReferences"][0]["uid"],
+        "existing-uid"
+    );
+}
+
+#[tokio::test]
+async fn a_pod_create_rejected_by_quota_is_a_capacity_error() {
+    let Provisioned {
+        result, requests, ..
+    } = provision_with_pod_create_answered(
+        (
+            403,
+            serde_json::json!({
+                "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 403,
+                "reason": "Forbidden", "message": "pods is forbidden: exceeded quota: sandboxes",
+            }),
+        ),
+        vec![],
+    )
+    .await;
+    assert!(
+        matches!(result, Err(ProviderError::Capacity(_))),
+        "{result:?}"
+    );
+    assert_eq!(requests.len(), 1, "no policy is applied without a pod");
+}
+
+#[tokio::test]
+async fn other_pod_create_rejections_are_backend_errors() {
+    for (code, reason) in [(422, "Invalid"), (403, "Forbidden"), (409, "Conflict")] {
+        let Provisioned {
+            result, requests, ..
+        } = provision_with_pod_create_answered((code, status_body(code, reason)), vec![]).await;
+        assert!(
+            matches!(result, Err(ProviderError::Backend(_))),
+            "{code}: {result:?}"
+        );
+        assert_eq!(requests.len(), 1);
+    }
+}
+
+/// Tears down a run against a mock API: the list is answered with `listed` pods, a following
+/// DELETE with `delete_status`. Returns the result, the list query and the DELETE path (if any).
+async fn teardown_answered(
+    listed: &[&str],
+    delete_status: u16,
+) -> (Result<(), ProviderError>, String, Option<String>) {
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let (provider, mut handle) = mock_provider(test_config());
+    let call = tokio::spawn(async move { provider.teardown(run_id).await });
+
+    let (req, send) = handle.next_request().await.expect("pod list");
+    let query = req.uri().query().unwrap_or_default().to_string();
+    let items: Vec<Pod> = listed
+        .iter()
+        .map(|name| Pod {
+            metadata: ObjectMeta {
+                name: Some((*name).to_string()),
+                ..pod_for(run_id, "Running", None).metadata
+            },
+            ..Default::default()
+        })
+        .collect();
+    let body = serde_json::json!({
+        "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": items,
+    });
+    send_json(send, 200, &body);
+
+    let mut deleted = None;
+    if !listed.is_empty() {
+        let (req, send) = handle.next_request().await.expect("pod DELETE");
+        assert_eq!(req.method(), http::Method::DELETE);
+        assert!(
+            req.uri().path().ends_with(&format!("/pods/{}", listed[0])),
+            "expected a pod DELETE, got {}",
+            req.uri()
+        );
+        deleted = Some(req.uri().path().to_string());
+        let body = if delete_status == 200 {
+            serde_json::json!({ "apiVersion": "v1", "kind": "Pod", "metadata": { "name": listed[0] } })
+        } else {
+            status_body(delete_status, "NotFound")
+        };
+        send_json(send, delete_status, &body);
+    }
+    // Teardown must be done now: any further request fails the test instead of hanging it.
+    // `None` means the provider (and its client) is gone without another request.
+    let extra = handle
+        .next_request()
+        .await
+        .map(|(req, _)| format!("{} {}", req.method(), req.uri()));
+    assert!(
+        extra.is_none(),
+        "unexpected request after teardown: {extra:?}"
+    );
+    let result = call.await.unwrap();
+    (result, query, deleted)
+}
+
+#[tokio::test]
+async fn teardown_deletes_the_pod_of_the_run_selected_by_instance_and_run_id() {
+    let (result, query, deleted) = teardown_answered(&["run-df-1-1"], 200).await;
+    result.unwrap();
+    assert!(
+        deleted.is_some_and(|path| path.ends_with("/pods/run-df-1-1")),
+        "no DELETE of the pod"
+    );
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let selector =
+        format!("dark-factory.io%2Finstance%3Dtest-instance%2Cdark-factory.io%2Frun-id%3D{run_id}");
+    assert!(query.contains(&selector), "{query}");
+}
+
+#[tokio::test]
+async fn teardown_succeeds_when_the_pod_vanishes_before_the_delete() {
+    let (result, _, deleted) = teardown_answered(&["run-df-1-1"], 404).await;
+    result.unwrap();
+    assert!(deleted.is_some());
+}
+
+#[tokio::test]
+async fn teardown_without_a_pod_succeeds_and_deletes_nothing() {
+    let (result, _, deleted) = teardown_answered(&[], 200).await;
+    result.unwrap();
+    assert_eq!(deleted, None);
 }

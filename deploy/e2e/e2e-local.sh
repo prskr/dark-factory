@@ -21,7 +21,6 @@ release=dark-factory
 # Pinned versions of what the cluster runs besides the images built from this repository.
 cert_manager_version=v1.21.3
 csi_driver_version=v0.16.1
-agent_sandbox_version=v1.0.9
 forgejo_chart_version=17.3.2
 
 # Ports of the host side of the port-forwards.
@@ -79,10 +78,6 @@ prepare_tools() {
   if ! command -v docker >/dev/null; then
     require podman
     export KIND_EXPERIMENTAL_PROVIDER=podman
-    # rules_img loads the images through `docker load`; podman understands the same command.
-    mkdir -p "$scratch/bin"
-    ln -s "$(command -v podman)" "$scratch/bin/docker"
-    export PATH="$scratch/bin:$PATH"
   fi
 }
 
@@ -92,20 +87,22 @@ create_cluster() {
   kind create cluster --name "$cluster" --config deploy/e2e/kind.yaml --wait 180s
 }
 
-# Builds the images with Bazel and loads them into the node: no registry.
+# Builds the single-platform images with Bazel and imports their tarballs into the node: no registry,
+# no container daemon. (`kind load docker-image` imports with --all-platforms, which fails on the
+# multi-arch index when only one platform was loaded into the daemon.)
 load_images() {
-  local name repository
-  for name in control_plane:control-plane runtime:runtime test_project:test-project plugin_forgejo:plugin-forgejo plugin_github:plugin-github; do
-    repository="${name#*:}"
-    "${bazel[@]}" run "//deploy:load_e2e_${name%%:*}" -- --platform "linux/$arch"
-    kind load docker-image "ghcr.io/prskr/dark-factory/${repository}:e2e" --name "$cluster"
+  local name archive
+  for name in control_plane runtime test_project plugin_forgejo plugin_github; do
+    archive="$scratch/$name.tar"
+    "${bazel[@]}" run --platforms="//build/platforms:linux_${arch}_musl" \
+      --@rules_img//img/settings:load_daemon=tar "//deploy:load_e2e_$name" >"$archive"
+    kind load image-archive "$archive" --name "$cluster"
   done
 }
 
 install_infrastructure() {
-  log "Installing cert-manager, PostgreSQL, Dex, agent-sandbox and the browser"
+  log "Installing cert-manager, PostgreSQL, Dex and the browser"
   kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
-  kc apply --server-side -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${agent_sandbox_version}/sandbox.yaml"
   kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
   hc upgrade --install cert-manager-csi-driver "oci://quay.io/jetstack/charts/cert-manager-csi-driver" \
@@ -116,7 +113,6 @@ install_infrastructure() {
     --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
-  kc -n agent-sandbox-system wait --for=condition=Available deployment --all --timeout=300s
   kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
 }
 

@@ -11,7 +11,7 @@ use df_core::seams::ProviderError;
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt as _, future};
 use k8s_openapi::api::coordination::v1::{Lease, LeaseSpec};
-use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::core::v1::{Pod, Service};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{MicroTime, ObjectMeta};
@@ -23,7 +23,6 @@ use tracing::{debug, info, warn};
 
 use crate::K8S_API_TIMEOUT;
 use crate::config::ProvisioningConfig;
-use crate::crd::Sandbox;
 use crate::provider::{ClusterTargetsProvider, run_id_from_metadata};
 use crate::render::render_network_policy;
 
@@ -176,15 +175,16 @@ pub async fn reconcile_active_runs(
     config: &ProvisioningConfig,
     targets_provider: &dyn ClusterTargetsProvider,
 ) -> Result<usize, ProviderError> {
-    let sandboxes: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &config.sandbox.namespace);
     let netpols: Api<NetworkPolicy> = Api::namespaced(client.clone(), &config.sandbox.namespace);
 
     let mut count = 0;
-    for sb in list_instance_sandboxes(&sandboxes, config).await? {
-        if sb.metadata.deletion_timestamp.is_some() {
+    for pod in list_instance_pods(&pods, config).await? {
+        // The policy goes with a pod that is being deleted.
+        if pod.metadata.deletion_timestamp.is_some() {
             continue;
         }
-        let Some((run_id, netpol)) = render_run_policy(&sb, targets_provider, config).await else {
+        let Some((run_id, netpol)) = render_run_policy(&pod, targets_provider, config).await else {
             continue;
         };
         if apply_network_policy(&netpols, run_id, &netpol).await {
@@ -194,55 +194,62 @@ pub async fn reconcile_active_runs(
     Ok(count)
 }
 
-/// Lists the Sandboxes that belong to this instance.
-async fn list_instance_sandboxes(
-    sandboxes: &Api<Sandbox>,
+/// Lists the Pods that belong to this instance.
+async fn list_instance_pods(
+    pods: &Api<Pod>,
     config: &ProvisioningConfig,
-) -> Result<Vec<Sandbox>, ProviderError> {
+) -> Result<Vec<Pod>, ProviderError> {
     let list_params = kube::api::ListParams::default().labels(&format!(
         "dark-factory.io/instance={}",
         config.instance_name
     ));
-    match tokio::time::timeout(K8S_API_TIMEOUT, sandboxes.list(&list_params)).await {
+    match tokio::time::timeout(K8S_API_TIMEOUT, pods.list(&list_params)).await {
         Ok(Ok(list)) => Ok(list.items),
         Ok(Err(e)) => Err(ProviderError::Backend(format!(
-            "failed to list sandboxes for reconcile: {e}"
+            "failed to list pods for reconcile: {e}"
         ))),
         Err(_) => Err(ProviderError::Backend(
-            "timeout listing sandboxes for reconcile".to_string(),
+            "timeout listing pods for reconcile".to_string(),
         )),
     }
 }
 
-/// Renders the `NetworkPolicy` of a run from its Sandbox. `None` (after a warning) if the Sandbox
-/// lacks the labels, the cluster targets can't be fetched, or the policy has no name: the run is
-/// skipped and keeps its existing policy.
+/// Renders the `NetworkPolicy` of a run from its Pod. `None` (after a warning) if the Pod
+/// lacks the labels or a UID, the cluster targets can't be fetched, or the policy has no name:
+/// the run is skipped and keeps its existing policy.
 async fn render_run_policy(
-    sb: &Sandbox,
+    pod: &Pod,
     targets_provider: &dyn ClusterTargetsProvider,
     config: &ProvisioningConfig,
 ) -> Option<(RunId, NetworkPolicy)> {
-    let sb_name = sb.metadata.name.as_deref().unwrap_or("<unknown>");
-    let Some(run_id) = run_id_from_metadata(&sb.metadata) else {
+    let Some(pod_name) = pod.metadata.name.as_deref() else {
+        warn!("pod without a name; skipping reconcile");
+        return None;
+    };
+    let Some(uid) = pod.metadata.uid.as_deref() else {
+        warn!(pod = pod_name, "pod has no UID; skipping reconcile");
+        return None;
+    };
+    let Some(run_id) = run_id_from_metadata(&pod.metadata) else {
         warn!(
-            sandbox = sb_name,
-            "sandbox has a missing or invalid dark-factory.io/run-id label; skipping reconcile"
+            pod = pod_name,
+            "pod has a missing or invalid dark-factory.io/run-id label; skipping reconcile"
         );
         return None;
     };
-    let labels = sb.metadata.labels.clone().unwrap_or_default();
+    let labels = pod.metadata.labels.clone().unwrap_or_default();
 
     let Some(task_key_str) = labels.get("dark-factory.io/task-key") else {
         warn!(
-            sandbox = sb_name,
-            "sandbox missing dark-factory.io/task-key label; skipping reconcile"
+            pod = pod_name,
+            "pod missing dark-factory.io/task-key label; skipping reconcile"
         );
         return None;
     };
     let task_key = match task_key_str.parse::<TaskKey>() {
         Ok(k) => k,
         Err(e) => {
-            warn!(sandbox = sb_name, task_key = task_key_str, error = %e, "invalid dark-factory.io/task-key label; skipping reconcile");
+            warn!(pod = pod_name, task_key = task_key_str, error = %e, "invalid dark-factory.io/task-key label; skipping reconcile");
             return None;
         }
     };
@@ -260,10 +267,10 @@ async fn render_run_policy(
         }
     };
 
-    let netpol = render_network_policy(run_id, &task_key, sb, &targets, config);
+    let netpol = render_network_policy(run_id, &task_key, pod_name, uid, &targets, config);
     if netpol.name_any().is_empty() {
         warn!(
-            sandbox = sb_name,
+            pod = pod_name,
             "failed to derive network policy name; skipping reconcile"
         );
         return None;

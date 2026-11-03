@@ -41,11 +41,15 @@ The `hostAliases` point to the ClusterIP while the policy allows the backing pod
 - **THEN** the connection fails
 
 ### Requirement: Generated per-run policy
-For each run the control plane SHALL create a `NetworkPolicy` selecting only that run's pod, owned by its Sandbox, with no ingress and egress only to: control plane pods on the agent port; gateway pods on the proxy port; each cluster target; kube-dns on port 53 only if a target sets `allowDns`.
+For each run the control plane SHALL create a `NetworkPolicy` selecting only that run's pod, owned by that pod, with no ingress and egress only to: control plane pods on the agent port; gateway pods on the proxy port; each cluster target; kube-dns on port 53 only if a target sets `allowDns`.
 
 #### Scenario: Internet blocked
 - **WHEN** the sandbox opens a direct TCP connection to 1.1.1.1:443
 - **THEN** the connection fails
+
+#### Scenario: Policy removed with the pod
+- **WHEN** the pod of run 1 of `DF-1` is deleted by anyone other than the control plane
+- **THEN** its NetworkPolicy is garbage-collected by Kubernetes
 
 ### Requirement: Cluster target egress rules
 The per-run policy SHALL allow each cluster target on the Service's target ports: for a Service with a selector, its pods (namespace selector plus the Service's selector); for a selector-less Service, its EndpointSlice addresses as `/32` (`/128` for IPv6) `ipBlock` rules.

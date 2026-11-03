@@ -318,6 +318,95 @@ async fn sandbox_lost_task_is_resumed_after_the_backoff_without_a_message() {
     assert_eq!(list_runs(&pool).await.len(), 2);
     assert_eq!(task_status(&pool, &env).await, "running");
     assert_eq!(resume_at(&pool, &env).await, None);
+    assert_eq!(auto_resumes(&pool, &env).await, 1);
+    assert_eq!(undelivered_authors(&pool, &env).await, [resume_author()]);
+}
+
+/// A rate-limited task whose prompts were all delivered gets a system prompt with its resumed
+/// run, so the agent has a turn to continue in instead of the run ending idle.
+#[tokio::test]
+async fn due_rate_limited_task_resumes_with_a_continuation_prompt() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    deliver_all_messages(&pool, &env).await;
+    env.insert_run(env.task.id, 1, "succeeded").await;
+    sqlx::query(
+        "UPDATE tasks SET status = 'rate_limited', resume_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(env.task.id.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(list_runs(&pool).await.len(), 2);
+    assert_eq!(undelivered_authors(&pool, &env).await, [resume_author()]);
+    let prompts = crate::assign::pending_prompts(&pool, env.task.id, false)
+        .await
+        .unwrap();
+    let expected = df_proto::transcript::v1::ContentBlock {
+        kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
+            df_proto::transcript::v1::TextContent {
+                text: df_db::tasks::RESUME_PROMPT.into(),
+            },
+        )),
+        hidden: false,
+    };
+    assert_eq!(
+        prompts.iter().map(|p| &p.content).collect::<Vec<_>>(),
+        [&vec![expected]]
+    );
+}
+
+/// A resumed task (queued after a failure, or rate-limited) that still has an undelivered
+/// message continues with it; no extra prompt.
+#[tokio::test]
+async fn due_task_with_an_undelivered_message_gets_no_continuation_prompt() {
+    for status in ["queued", "rate_limited"] {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let before = undelivered_authors(&pool, &env).await;
+        assert!(!before.is_empty());
+        sqlx::query(
+            "UPDATE tasks SET status = $2, resume_at = now() - interval '1 second' WHERE id = $1",
+        )
+        .bind(env.task.id.as_uuid())
+        .bind(status)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+            .await
+            .unwrap();
+
+        assert_eq!(list_runs(&pool).await.len(), 1, "{status}");
+        assert_eq!(undelivered_authors(&pool, &env).await, before, "{status}");
+    }
+}
+
+async fn deliver_all_messages(pool: &PgPool, env: &Env) {
+    sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE task_id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn resume_author() -> df_core::Principal {
+    df_core::Principal::system("run.resumed")
+}
+
+async fn undelivered_authors(pool: &PgPool, env: &Env) -> Vec<df_core::Principal> {
+    df_db::tasks::list_undelivered_messages(pool, env.task.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| m.author)
+        .collect()
 }
 
 async fn auto_resumes(pool: &PgPool, env: &Env) -> i32 {

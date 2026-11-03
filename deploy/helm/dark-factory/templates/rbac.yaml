@@ -27,9 +27,6 @@ metadata:
     {{- include "dark-factory.labels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
 rules:
-  - apiGroups: ["agents.x-k8s.io"]
-    resources: ["sandboxes"]
-    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "get", "list", "watch", "patch", "delete"]
@@ -43,7 +40,7 @@ rules:
   {{- end }}
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["create", "get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -53,6 +50,8 @@ metadata:
   labels:
     {{- include "dark-factory.labels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
+  annotations:
+    ignore-check.kube-linter.io/access-to-create-pods: "the control plane creates one Pod per run in the sandbox namespace (PSA restricted)"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

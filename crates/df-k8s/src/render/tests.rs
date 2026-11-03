@@ -76,8 +76,8 @@ fn unset_storage_class_and_runtime_class_render_as_absent_fields() {
     let pvc = render_pvc(&task, &config);
     assert_eq!(pvc.spec.unwrap().storage_class_name, None);
 
-    let sandbox = render_sandbox(&test_spec(), &[], &config).unwrap();
-    let pod_spec = sandbox.spec.pod_template.spec;
+    let pod = render_pod(&test_spec(), &[], &config).unwrap();
+    let pod_spec = pod.spec.unwrap();
     assert_eq!(pod_spec.runtime_class_name, None);
     let json = serde_json::to_value(&pod_spec).unwrap();
     assert!(json.get("runtimeClassName").is_none(), "{json}");
@@ -95,8 +95,8 @@ fn headless_target_is_listed_in_no_proxy_without_a_host_alias() {
         target_ports: vec![5432],
         endpoint_ips: vec![IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1))],
     };
-    let sandbox = render_sandbox(&test_spec(), &[target], &test_config()).unwrap();
-    let container = &sandbox.spec.pod_template.spec.containers[0];
+    let pod = render_pod(&test_spec(), &[target], &test_config()).unwrap();
+    let container = &pod.spec.as_ref().unwrap().containers[0];
     let no_proxy = container
         .env
         .as_ref()
@@ -107,7 +107,7 @@ fn headless_target_is_listed_in_no_proxy_without_a_host_alias() {
         .unwrap();
     assert!(no_proxy.contains("db.ns.svc.cluster.local"), "{no_proxy}");
     assert!(no_proxy.split(',').any(|e| e == "db.ns.svc"), "{no_proxy}");
-    let aliases = sandbox.spec.pod_template.spec.host_aliases.unwrap();
+    let aliases = pod.spec.unwrap().host_aliases.unwrap();
     assert!(
         aliases
             .iter()
@@ -120,7 +120,6 @@ fn headless_target_is_listed_in_no_proxy_without_a_host_alias() {
 #[test]
 fn target_without_ports_gets_no_egress_rule() {
     let config = test_config();
-    let sandbox = render_sandbox(&test_spec(), &[], &config).unwrap();
     let target = ResolvedClusterTarget {
         namespace: "ns".to_string(),
         service: "svc".to_string(),
@@ -134,14 +133,16 @@ fn target_without_ports_gets_no_egress_rule() {
     let with = render_network_policy(
         test_spec().run_id,
         &test_spec().task_key,
-        &sandbox,
+        "run-df-1-1",
+        "pod-uid-123",
         &[target],
         &config,
     );
     let without = render_network_policy(
         test_spec().run_id,
         &test_spec().task_key,
-        &sandbox,
+        "run-df-1-1",
+        "pod-uid-123",
         &[],
         &config,
     );
@@ -180,7 +181,7 @@ fn test_render_pvc_default() {
 }
 
 #[test]
-fn test_render_sandbox_spec_scenario() {
+fn pod_carries_labels_security_context_mounts_volumes_and_env() {
     let config = test_config();
     let spec = test_spec();
     let targets = vec![ResolvedClusterTarget {
@@ -197,10 +198,10 @@ fn test_render_sandbox_spec_scenario() {
         endpoint_ips: vec![],
     }];
 
-    let sandbox = render_sandbox(&spec, &targets, &config).expect("render_sandbox failed");
+    let pod = render_pod(&spec, &targets, &config).expect("render_pod failed");
 
-    assert_eq!(sandbox.metadata.name.as_deref(), Some("run-df-1-1"));
-    let labels = sandbox.metadata.labels.as_ref().unwrap();
+    assert_eq!(pod.metadata.name.as_deref(), Some("run-df-1-1"));
+    let labels = pod.metadata.labels.as_ref().unwrap();
     let run_id_str = spec.run_id.to_string();
     let persona_id_str = spec.persona_id.to_string();
     assert_eq!(
@@ -220,7 +221,7 @@ fn test_render_sandbox_spec_scenario() {
         Some(persona_id_str.as_str())
     );
 
-    let pod_spec = sandbox.spec.pod_template.spec;
+    let pod_spec = pod.spec.unwrap();
     assert_eq!(pod_spec.runtime_class_name.as_deref(), Some("kata"));
     assert_eq!(pod_spec.automount_service_account_token, Some(false));
     assert_eq!(
@@ -231,7 +232,7 @@ fn test_render_sandbox_spec_scenario() {
     let sec_ctx = pod_spec.security_context.unwrap();
     assert_eq!(sec_ctx.run_as_non_root, Some(true));
     assert_eq!(sec_ctx.run_as_user, Some(1000));
-    assert_eq!(sec_ctx.seccomp_profile.unwrap().r#type, "RuntimeDefault");
+    assert_eq!(sec_ctx.seccomp_profile.unwrap().type_, "RuntimeDefault");
 
     let container = &pod_spec.containers[0];
     assert_eq!(container.name, "agent");
@@ -353,8 +354,8 @@ fn documented_agent_variables() -> Vec<(&'static str, bool)> {
 }
 
 fn sandbox_env(config: &ProvisioningConfig, name: &str) -> Option<String> {
-    let sandbox = render_sandbox(&test_spec(), &[], config).unwrap();
-    sandbox.spec.pod_template.spec.containers[0]
+    let pod = render_pod(&test_spec(), &[], config).unwrap();
+    pod.spec.as_ref().unwrap().containers[0]
         .env
         .iter()
         .flatten()
@@ -382,8 +383,8 @@ fn sandbox_log_level_comes_from_the_sandbox_config() {
 
 #[test]
 fn sandbox_sets_the_variables_the_runtime_requires() {
-    let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
-    let env = sandbox.spec.pod_template.spec.containers[0]
+    let pod = render_pod(&test_spec(), &[], &test_config()).unwrap();
+    let env = pod.spec.as_ref().unwrap().containers[0]
         .env
         .clone()
         .unwrap();
@@ -397,20 +398,20 @@ fn sandbox_sets_the_variables_the_runtime_requires() {
         assert!(
             env.iter()
                 .any(|e| e.name == *name && e.value.as_deref().is_some_and(|v| !v.is_empty())),
-            "sandbox does not set {name}, which factory-agent requires"
+            "pod does not set {name}, which factory-agent requires"
         );
     }
     for e in env.iter().filter(|e| e.name.starts_with("DF_")) {
         assert!(
             documented.iter().any(|(name, _)| *name == e.name),
-            "sandbox sets {}, which factory-agent does not read",
+            "pod sets {}, which factory-agent does not read",
             e.name
         );
     }
 }
 
 #[test]
-fn test_render_sandbox_rejects_headless_without_allow_dns() {
+fn test_render_pod_rejects_headless_without_allow_dns() {
     let config = test_config();
     let spec = test_spec();
     let targets = vec![ResolvedClusterTarget {
@@ -424,7 +425,7 @@ fn test_render_sandbox_rejects_headless_without_allow_dns() {
         endpoint_ips: vec![],
     }];
 
-    let result = render_sandbox(&spec, &targets, &config);
+    let result = render_pod(&spec, &targets, &config);
     assert!(matches!(
         result,
         Err(RenderError::HeadlessServiceNotAllowed { .. })
@@ -433,8 +434,8 @@ fn test_render_sandbox_rejects_headless_without_allow_dns() {
 
 #[test]
 fn harness_image_is_a_read_only_volume_below_opt_harness() {
-    let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
-    let pod_spec = sandbox.spec.pod_template.spec;
+    let pod = render_pod(&test_spec(), &[], &test_config()).unwrap();
+    let pod_spec = pod.spec.unwrap();
 
     let volume = pod_spec
         .volumes
@@ -465,8 +466,8 @@ fn project_with_its_own_adapter_gets_no_harness_volume() {
         harness: None,
         ..test_spec()
     };
-    let sandbox = render_sandbox(&spec, &[], &test_config()).unwrap();
-    let pod_spec = sandbox.spec.pod_template.spec;
+    let pod = render_pod(&spec, &[], &test_config()).unwrap();
+    let pod_spec = pod.spec.unwrap();
     assert!(
         !pod_spec
             .volumes
@@ -490,7 +491,7 @@ fn missing_harness_image_names_the_harness() {
         harness_images: BTreeMap::new(),
         ..test_config()
     };
-    let err = render_sandbox(&test_spec(), &[], &config).unwrap_err();
+    let err = render_pod(&test_spec(), &[], &config).unwrap_err();
     assert_eq!(
         err,
         RenderError::NoHarnessImage {
@@ -501,15 +502,23 @@ fn missing_harness_image_names_the_harness() {
 }
 
 #[test]
+fn pod_never_restarts_and_has_no_owner() {
+    let pod = render_pod(&test_spec(), &[], &test_config()).unwrap();
+    assert_eq!(pod.metadata.name.as_deref(), Some("run-df-1-1"));
+    assert!(pod.metadata.owner_references.is_none());
+    assert_eq!(pod.spec.unwrap().restart_policy.as_deref(), Some("Never"));
+}
+
+#[test]
 fn pod_has_no_init_containers() {
-    let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
-    assert!(sandbox.spec.pod_template.spec.init_containers.is_none());
+    let pod = render_pod(&test_spec(), &[], &test_config()).unwrap();
+    assert!(pod.spec.unwrap().init_containers.is_none());
 }
 
 #[test]
 fn git_host_resolves_to_the_gateway_without_dns_and_bypasses_the_proxy() {
-    let sandbox = render_sandbox(&test_spec(), &[], &test_config()).unwrap();
-    let pod_spec = sandbox.spec.pod_template.spec;
+    let pod = render_pod(&test_spec(), &[], &test_config()).unwrap();
+    let pod_spec = pod.spec.unwrap();
 
     let aliases = pod_spec.host_aliases.unwrap();
     let gateway = aliases.iter().find(|a| a.ip == "10.105.68.86").unwrap();
@@ -538,8 +547,14 @@ fn git_host_resolves_to_the_gateway_without_dns_and_bypasses_the_proxy() {
 fn run_policy_allows_the_git_port_of_the_gateway_pods() {
     let config = test_config();
     let spec = test_spec();
-    let sandbox = render_sandbox(&spec, &[], &config).unwrap();
-    let netpol = render_network_policy(spec.run_id, &spec.task_key, &sandbox, &[], &config);
+    let netpol = render_network_policy(
+        spec.run_id,
+        &spec.task_key,
+        "run-df-1-1",
+        "pod-uid-123",
+        &[],
+        &config,
+    );
 
     let egress = netpol.spec.unwrap().egress.unwrap();
     let gateway_rule = egress
@@ -575,8 +590,6 @@ fn run_policy_allows_the_git_port_of_the_gateway_pods() {
 fn test_render_network_policy_scenarios() {
     let config = test_config();
     let spec = test_spec();
-    let mut sandbox = render_sandbox(&spec, &[], &config).unwrap();
-    sandbox.metadata.uid = Some("sandbox-uid-123".to_string());
 
     let targets = vec![
         // Target 1: Target port mapping scenario (service port 50051 maps to target port 8080)
@@ -609,7 +622,14 @@ fn test_render_network_policy_scenarios() {
         },
     ];
 
-    let netpol = render_network_policy(spec.run_id, &spec.task_key, &sandbox, &targets, &config);
+    let netpol = render_network_policy(
+        spec.run_id,
+        &spec.task_key,
+        "run-df-1-1",
+        "pod-uid-123",
+        &targets,
+        &config,
+    );
 
     assert_eq!(netpol.metadata.name.as_deref(), Some("run-df-1-1"));
     assert_eq!(
@@ -618,9 +638,12 @@ fn test_render_network_policy_scenarios() {
     );
 
     let owner = &netpol.metadata.owner_references.unwrap()[0];
-    assert_eq!(owner.kind, "Sandbox");
+    assert_eq!(owner.api_version, "v1");
+    assert_eq!(owner.kind, "Pod");
     assert_eq!(owner.name, "run-df-1-1");
-    assert_eq!(owner.uid, "sandbox-uid-123");
+    assert_eq!(owner.uid, "pod-uid-123");
+    assert_eq!(owner.controller, Some(true));
+    assert_eq!(owner.block_owner_deletion, None);
 
     let pol_spec = netpol.spec.unwrap();
     assert_eq!(pol_spec.policy_types.unwrap(), vec!["Ingress", "Egress"]);
@@ -695,22 +718,27 @@ fn test_snapshots() {
         endpoint_ips: vec![],
     }];
 
-    let sandbox = render_sandbox(&spec, &targets, &config).unwrap();
-    insta::assert_yaml_snapshot!("sandbox_image_volume", sandbox);
+    let pod = render_pod(&spec, &targets, &config).unwrap();
+    insta::assert_yaml_snapshot!("pod_image_volume", pod);
 
     // Network policy scenarios
     // 1. Baseline (internet blocked - only cp & gw)
-    let mut sandbox_with_uid = sandbox.clone();
-    sandbox_with_uid.metadata.uid = Some("test-uid-123".to_string());
-    let netpol_baseline =
-        render_network_policy(spec.run_id, &spec.task_key, &sandbox_with_uid, &[], &config);
+    let netpol_baseline = render_network_policy(
+        spec.run_id,
+        &spec.task_key,
+        "run-df-1-1",
+        "pod-uid-123",
+        &[],
+        &config,
+    );
     insta::assert_yaml_snapshot!("netpol_baseline", netpol_baseline);
 
     // 2. Target port mapping
     let netpol_target = render_network_policy(
         spec.run_id,
         &spec.task_key,
-        &sandbox_with_uid,
+        "run-df-1-1",
+        "pod-uid-123",
         &targets,
         &config,
     );
@@ -733,7 +761,8 @@ fn test_snapshots() {
     let netpol_no_sel = render_network_policy(
         spec.run_id,
         &spec.task_key,
-        &sandbox_with_uid,
+        "run-df-1-1",
+        "pod-uid-123",
         &targets_no_sel,
         &config,
     );

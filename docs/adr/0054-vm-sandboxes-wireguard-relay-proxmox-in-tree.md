@@ -25,7 +25,7 @@ Some tasks need what a Kata pod doesn't offer: starting containers (ADR-0023 for
 - No ports of the homelab are exposed to the internet for Proxmox; the vpn-gateway's exposure (Service type, `UDPRoute`, NetBird, …) is the operator's choice.
 - Nothing delivered at provisioning (token, bootstrap WireGuard key) is useful after enrollment.
 - New moving parts: the vpn-gateway, the enrollment listener, Proxmox ISO handling, task disks moved between VMs, a second Pod-spec target.
-- Prerequisites before the Proxmox provider: gateway DNS, plain Pods instead of agent-sandbox, the inference gateway (no model credentials in VMs), spikes for the relay and for enrollment.
+- Prerequisites before the Proxmox provider: gateway DNS, the inference gateway (no model credentials in VMs), spikes for the relay and for enrollment.
 - VM sandboxes have no cluster targets in the first version.
 - Operators build a VM template and provide an isolated bridge or VLAN; the control plane verifies the Proxmox firewall but not the router.
 

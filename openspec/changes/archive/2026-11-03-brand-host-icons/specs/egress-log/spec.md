@@ -6,8 +6,8 @@
 A destination that is no project host SHALL show the glyph of a known provider when its host is the provider's domain or a subdomain of it, the provider's letter monogram when the provider has no glyph, the server icon for an IP literal and the generic globe otherwise. Glyphs SHALL be served by the control plane.
 
 #### Scenario: Known providers
-- **WHEN** a sandbox connects to a host of `github.com`, `githubusercontent.com`, `anthropic.com`, `npmjs.org`, `golang.org`, `pypi.org`, `pythonhosted.org` or `googleapis.com`
-- **THEN** the destination shows the glyph of GitHub, GitHub, Anthropic, npm, Go, Python, Python or Google respectively
+- **WHEN** a sandbox connects to a host of `github.com`, `githubusercontent.com`, `ghcr.io`, `github.io`, `anthropic.com`, `npmjs.org`, `golang.org`, `go.dev`, `goproxy.io`, `pypi.org`, `pythonhosted.org`, `googleapis.com`, `google.com`, `gcr.io`, `pkg.dev`, `bazel.build`, `k8s.io`, `kubernetes.io`, `helm.sh`, `nodejs.org`, `rust-lang.org`, `crates.io`, `gitlab.com`, `codeberg.org`, `amazonaws.com`, `ecr.aws`, `awsstatic.com`, `aws.amazon.com`, `cloudfront.net`, `debian.org`, `ubuntu.com`, `alpinelinux.org`, `fedoraproject.org`, `redhat.com` or `redhat.io`
+- **THEN** the destination shows the glyph of GitHub, GitHub, GitHub, GitHub, Anthropic, npm, Go, Go, Go, Python, Python, Google, Google, Google, Google, Bazel, Kubernetes, Kubernetes, Helm, Node.js, Rust, Rust, GitLab, Codeberg, AWS, AWS, AWS, AWS, AWS, Debian, Ubuntu, Alpine, Fedora, Red Hat or Red Hat respectively
 
 #### Scenario: Provider with a glyph
 - **WHEN** no project uses `github.com` and a sandbox connects to `api.github.com:443`
@@ -47,7 +47,7 @@ Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows 
 - **THEN** the sandbox node shows the first 8 characters of the run id
 
 ### Requirement: Project host icons
-A destination whose host is a project's repository host, forge API host or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host shows the project's forge icon, the same as in the project list. The forge API host is the host of the `apiUrl` of the route that serves the project's repository; it shows the forge icon when an integration serves the project. An issue tracker host shows the forge icon when it equals the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, and does not cover subdomains.
+A destination whose host is a project's repository, forge API or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host and, when an integration serves the project, the forge API host (the `apiUrl` host of the route serving the repository) show the forge icon. An issue tracker host shows the forge icon on the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, not subdomains.
 
 #### Scenario: Self-hosted forge
 - **WHEN** the instance runs the forgejo integration, project `DF` with a forge credential has repository `https://git.example.internal/org/df.git`, and a sandbox connects to `git.example.internal:443`

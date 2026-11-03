@@ -237,6 +237,18 @@ pub(crate) fn forge_routes(plugins: &[(&str, &[&str])], loaded: &[&str]) -> Forg
     ForgeRoutes::new(table, loaded.iter().map(|name| (*name).to_string()))
 }
 
+/// Routes with the loaded `plugin` claiming `host`, whose API lives at `api_url`.
+pub(crate) fn forge_with_api(plugin: &str, host: &str, api_url: &str) -> ForgeRoutes {
+    let mut config = PluginConfig::new(format!("/plugins/{plugin}.wasm"));
+    config.hosts = vec![HostRoute::WithApiUrl(df_core::config::HostWithApiUrl {
+        host: host.into(),
+        api_url: api_url.into(),
+    })];
+    let table =
+        RoutingTable::from_plugins(&BTreeMap::from([(plugin.to_string(), config)])).unwrap();
+    ForgeRoutes::new(table, [plugin.to_string()])
+}
+
 /// Routes with `plugin` as the loaded default plugin: it serves every HTTPS repository.
 pub(crate) fn default_forge(plugin: &str) -> ForgeRoutes {
     forge_routes(&[(plugin, &[])], &[plugin])

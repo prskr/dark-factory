@@ -13,12 +13,11 @@ metadata:
   name: run-df-1-1
   namespace: dark-factory-dev-sandboxes
   ownerReferences:
-    - apiVersion: agents.x-k8s.io/v1beta1
-      blockOwnerDeletion: true
+    - apiVersion: v1
       controller: true
-      kind: Sandbox
+      kind: Pod
       name: run-df-1-1
-      uid: test-uid-123
+      uid: pod-uid-123
 spec:
   egress:
     - ports:

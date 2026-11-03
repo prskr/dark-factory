@@ -698,7 +698,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "FILE:@@//Cargo.lock d2efcd200fcc143700485d7893a66f1c08017275c43e2d32eef8e8cbde88e098",
-          "FILE:@@//Cargo.toml c36a14fa7fa88f48292994ac97c619c9b659645f9ece020852951e2605dd4e43",
+          "FILE:@@//Cargo.toml d40d24dbe1273c0656c79253461db09ddceadfc54997e30bc261badc42804f3d",
           "FILE:@@//crates/dark-factory/Cargo.toml 2c34519558b76d9ca64027d7f2ec6945e42c1ed425538fc822c7b1e966bbe03f",
           "FILE:@@//crates/df-agent-channel/Cargo.toml d7ed02d2a2469164a7115501a0b30b7631aac8d93a5143595c373f87466a59fd",
           "FILE:@@//crates/df-core/Cargo.toml 5b2e88d2833baea58a7367bf5ed92f6a91c9559c84dcbc882b95736487691e7b",

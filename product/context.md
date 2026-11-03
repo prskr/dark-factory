@@ -32,11 +32,11 @@
 ## 2. Target environment
 
 - The control plane and the gateways run **only** on Kubernetes. Sandboxes run as Kubernetes pods by default, or as VMs on Proxmox (in-tree) or at cloud providers (plugins) as a capability tier selected by sandbox profiles (ADR-0054). No SSH runtimes.
-- Agent runtime: **only** [agent-sandbox](https://agent-sandbox.sigs.k8s.io/) (kubernetes-sigs) for the beginning.
+- Agent runtime on Kubernetes: plain Kubernetes Pods, one per run.
 - Control plane: always a Kubernetes `Deployment`.
 - Infrastructure "perks" that may be assumed present: cert-manager (incl. csi-driver for per-pod certificates), a CNI that enforces `NetworkPolicy` (Cilium supported, not required — ADR-0029), an OIDC identity provider (Keycloak in the homelab).
 - Sandbox providers sit behind a `SandboxProvider` seam in the control plane (ADR-0030, amended by ADR-0054).
-- First target is the author's homelab: 5 bare-metal nodes on Talos Linux, Cilium, Longhorn storage, self-hosted Harbor (also pull-through cache), Forgejo, Keycloak, GitOps for all config, separate Postgres/etcd backups. Agent sandboxes already run with Kata Containers. Agent runtime hardening = agent-sandbox + Kata + network policies with explicit allowlists. Bazel RBE runs on an in-cluster NativeLink scheduler. Memory overhead of the sandbox runtime matters; raw performance does not.
+- First target is the author's homelab: 5 bare-metal nodes on Talos Linux, Cilium, Longhorn storage, self-hosted Harbor (also pull-through cache), Forgejo, Keycloak, GitOps for all config, separate Postgres/etcd backups. Agent sandboxes already run with Kata Containers. Agent runtime hardening = restricted pods + Kata + network policies with explicit allowlists. Bazel RBE runs on an in-cluster NativeLink scheduler. Memory overhead of the sandbox runtime matters; raw performance does not.
 - Container-based integration tests run via Bazel remote build execution (RBE), whose workers have container daemons — not inside Kubernetes sandboxes. VM sandboxes may start sibling containers (ADR-0054).
 
 ## 3. Components
@@ -64,7 +64,7 @@
 ### 5.1 Responsibilities
 - **Tools**: factory tools that let agents act on Dark Factory itself (executed by the control plane, ADR-0027), and third-party MCP servers bundled behind the gateway's MCP endpoint with a curated tool catalog per server (ADR-0032).
 - **Integration API**: API for integrations and automation.
-- **Sandbox provisioning** via agent-sandbox, including per-task PVCs.
+- **Sandbox provisioning** as one Kubernetes Pod per run, including per-task PVCs.
 - **Streaming API** the agent connects to, streaming LLM output to the control plane.
 - **Issue tracker integration** (Forgejo issues first): tasks link to issues; task progress is mirrored to the issue; agents can comment on issues (ADR-0014).
 - **PR handling**: draft PRs opened by the control plane, agents only rephrase/comment (ADR-0025).
@@ -113,7 +113,6 @@ Original options considered:
 ### Verify early
 - Whether the Claude ACP adapter (`@zed-industries/claude-agent-acp`) reports token usage; "what if" cost depends on it. Fallback: Claude Code's own session JSONL (`~/.claude/projects`) records usage.
 - Whether htmx 4's fetch-based SSE sends `Last-Event-ID` on reconnect; fallback: pass the last sequence number as a query parameter.
-- agent-sandbox is pre-1.0 (v0.5.x at time of writing): pin the version and generate types from the CRDs actually deployed.
 - Kubernetes image volume support on the cluster's Kubernetes version and Talos' containerd, also in combination with Kata (ADR-0022).
 - Forgejo token scoping and expiry options for the v1 Git credential helper.
 - Which Forgejo webhook events distinguish a submitted review from individual review comments (ADR-0015); Forgejo's draft/WIP PR mechanism via API (ADR-0025).
