@@ -6,7 +6,7 @@
 - **It is the source, not the runtime input.** Agents don't read this file; skills derived from it do the work at runtime.
 - **Principles (§1)** become a built-in skill shipped with Dark Factory (e.g. `dark-factory-basics`) that every persona gets.
 - **Patterns (§2)** become individual skills, enabled per persona or project (e.g. a `dependency-updates` skill for a maintenance persona).
-- **Project-specific conventions** (commit message format, test commands, architecture rules) belong in the project context or the repository's `AGENTS.md`, not here.
+- **Project-specific conventions** (commit message format, test commands, architecture rules) belong in the repository's `AGENTS.md`, not here. The project context holds planning knowledge for chats only (ADR-0026).
 - A pattern that depends on a capability not built yet links the ADR or future option it needs; the skill is written once the capability exists.
 
 ## 1. Principles

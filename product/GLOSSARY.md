@@ -52,6 +52,12 @@ _Avoid_: Chat title, subject
 A chat a human set aside: read-only and without runs until a human unarchives it. Its subtasks go on.
 _Avoid_: Closed chat, completed chat, deleted chat
 
+### Projects
+
+**Project context**:
+Human-approved planning knowledge for one project that every chat in it receives; tasks don't. Agents can only propose changes to it, and a human approves each one.
+_Avoid_: Project document, project memory, project instructions, AGENTS.md
+
 ### Transcript
 
 **Transcript**:
