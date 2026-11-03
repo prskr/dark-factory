@@ -147,7 +147,7 @@ Open <http://127.0.0.1:8080> and log in at Dex:
 
 | User | Password | Result |
 | --- | --- | --- |
-| `admin@example.com` | `password` | Member of the group `board-member`: full UI |
+| `admin@example.com` | `password` | Member of the groups `board-member` and `admin`: full UI, including the lifecycle event subscriptions of projects |
 | `viewer@example.com` | `password` | No role: `403` page |
 
 The flags `--no-cluster` and `--demo-flows` exist only in a build with the Cargo feature `dev-tools` (`cargo run -p dark-factory --features dev-tools -- serve --no-cluster`). A default or release build and the Bazel images have neither; `cargo clippy --all-targets --all-features` keeps the gated code linted. Limits of `serve --no-cluster` (local development only):
@@ -175,7 +175,7 @@ sequenceDiagram
     D-->>B: 302 /auth/callback?code
     B->>C: GET /auth/callback
     C->>D: POST /token
-    D-->>C: ID token (groups: [board-member])
+    D-->>C: ID token (groups: [board-member, admin])
     C->>P: store session
     C-->>B: 303 /tasks + df_session cookie
 ```

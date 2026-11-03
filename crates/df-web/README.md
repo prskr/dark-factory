@@ -28,10 +28,15 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `GET /egress/log/allow?host=&port=&task=&project=`, `POST /egress/log/allow` | "Allow egress" dialog of a blocked row or graph node (modal fragment; a plain request redirects to the log) and the entry it creates. The form posts `host`, `port` and `scope` (`task`, `project` or `instance`) with the `task` and `project` keys. The handler checks the scope itself (the task or project must exist), accepts only an exact host (no wildcard) and creates the entry like the allowlist form: validated, audited, announced to the gateways, and pending `network-access` requests it covers are approved. Answers 422 with the dialog and its error otherwise. |
 | `GET .../new`, `GET .../{key or id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. |
 | `GET /projects/forge?repo_url=&issue_tracker_url=` | Forge icons and hint of the project form (htmx partials). |
+| `/projects/{key}/subscriptions` | Lifecycle event subscriptions of the project (role `admin` as well; others get `403` naming it). The page shows the instance public key with a link to `/lifecycle-events/public-key` and per subscription the last delivery (time, HTTP status or error). `GET .../new`, `GET .../{id}/edit` (modal), `POST` (create), `POST .../{id}` (update) and `DELETE .../{id}`; each change is audited as `event_subscription.create`, `.update` or `.delete` with URL and event types. The form accepts only `https` URLs whose host is not a literal loopback, private, link-local, unique-local or unspecified address, and known event types (none checked: all). The project list links the page for admins only. |
 
-Everything except health, assets and login requires the role `board-member`. Non-GET requests need
-the `HX-Request: true` header (CSRF guard). `base_router(pool)` serves only health and assets;
-`router(state)` adds the UI. Other crates reuse `layout()` and `auth::require_board_member`.
+Everything except health, assets, login and the public key requires the role `board-member`;
+the project subscription routes require `admin` in addition (`auth::require_admin`). Non-GET
+requests need the `HX-Request: true` header (CSRF guard). `base_router(pool,
+lifecycle_public_key)` serves health, assets and the unauthenticated
+`GET /lifecycle-events/public-key` (the instance public key as text, `404` while lifecycle
+events are off); `router(state)` adds the UI. Other crates reuse `layout()` and
+`auth::require_board_member`.
 
 ## How to stop a run, cancel a task, reopen it and reset its workspace
 

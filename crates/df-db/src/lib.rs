@@ -6,6 +6,7 @@ pub mod audit;
 pub mod blobs;
 pub mod catalog;
 pub mod egress;
+pub mod event_subscriptions;
 pub mod git_pushes;
 pub mod lifecycle_events;
 pub mod migrate;

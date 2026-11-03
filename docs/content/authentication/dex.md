@@ -45,6 +45,9 @@ The group name must be exactly `board-member`: the control plane compares the cl
 strings. The GitHub connector names every team group `<org>:<team>` (for example
 `acme:board-member`), so it cannot provide the group; use Keycloak or another connector instead.
 
+Users who manage the lifecycle event subscriptions of projects also need a group named exactly
+`admin`, provided the same way.
+
 ## 3. Configure the control plane
 
 Dex returns `groups` only for the scope `groups`, and a refresh token only for `offline_access`.

@@ -1,5 +1,6 @@
 # Dex for local development only (compose.yml). Both users log in with the password `password`:
-# admin@example.com has the role `board-member`, viewer@example.com has none (403 page).
+# admin@example.com has the roles `board-member` and `admin` (project event subscriptions),
+# viewer@example.com has none (403 page).
 issuer: http://127.0.0.1:5556/dex
 
 storage:
@@ -31,6 +32,7 @@ staticPasswords:
     userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
     groups:
       - board-member
+      - admin
   - email: viewer@example.com
     hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
     username: viewer
