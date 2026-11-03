@@ -57,6 +57,12 @@ jobs:
     permissions:
       contents: read
       packages: write # push to ghcr.io/prskr/dark-factory/*
+    env:
+      # BuildBuddy remote cache, as in ci.yaml (docs/development.md). No platform flag: the image
+      # targets set their own platforms (amd64 and arm64).
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -76,12 +82,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify images
-        run: bazel test //deploy:images_structure_test //deploy/images/claude-harness:structure_test
+        run: bazel test $BAZEL_ARGS //deploy:images_structure_test //deploy/images/claude-harness:structure_test
 
       - name: Push images
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: bazel run --//build:version="$VERSION" //deploy:push_images
+        run: bazel run $BAZEL_ARGS --//build:version="$VERSION" //deploy:push_images
 
   # claude-project (Dockerfile) and claude-harness (Bazel); the harness digest goes into the chart
   reference-images:
@@ -92,6 +98,10 @@ jobs:
       packages: write # push to ghcr.io/prskr/dark-factory/*
     outputs:
       harness-digest: ${{ steps.harness.outputs.digest }}
+    env:
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -131,10 +141,11 @@ jobs:
         id: harness
         run: |
           version="$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"]' deploy/images/claude-harness/package.json)"
-          bazel run --//deploy/images/claude-harness:image_tag="$version" //deploy/images/claude-harness:push
-          # the digest of the image index that `push` uploads, computed by the build, not read back by tag
-          bazel build //deploy/images/claude-harness:digest
-          digest="$(cat "$(bazel cquery --output=files //deploy/images/claude-harness:digest)")"
+          bazel run $BAZEL_ARGS --//deploy/images/claude-harness:image_tag="$version" //deploy/images/claude-harness:push
+          # the digest of the image index that `push` uploads, computed by the build, not read back by tag;
+          # build and cquery need the same flags, or cquery names the file of another configuration
+          bazel build $BAZEL_ARGS //deploy/images/claude-harness:digest
+          digest="$(cat "$(bazel cquery $BAZEL_ARGS --output=files //deploy/images/claude-harness:digest)")"
           [[ "$digest" == sha256:* ]] || { echo "::error::no digest for claude-harness:$version"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
@@ -146,6 +157,10 @@ jobs:
     permissions:
       contents: read
       packages: write # push to ghcr.io/prskr/dark-factory/charts/*
+    env:
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -164,7 +179,7 @@ jobs:
           HARNESS_DIGEST: ${{ needs.reference-images.outputs.harness-digest }}
         run: |
           # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
-          bazel run //:bazel_env || test -x .bazel_env/bin/helm
+          bazel run $BAZEL_ARGS //:bazel_env || test -x .bazel_env/bin/helm
           # the repository's values.yaml keeps an empty digest; the packaged one pins the harness
           cp -r deploy/helm/dark-factory "$RUNNER_TEMP/dark-factory"
           build/with_tools.sh yq -i '.image.harness.claudeCode.digest = strenv(HARNESS_DIGEST)' "$RUNNER_TEMP/dark-factory/values.yaml"
