@@ -20,7 +20,7 @@ flowchart LR
 | Iteration | Theme | Main references |
 |---|---|---|
 | 1 | Thin vertical slice | [`iteration-1.md`](iteration-1.md) |
-| 1.1 | Operability | `openspec/changes/agent-session-logging`, `openspec/changes/otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
+| 1.1 | Operability | `openspec/changes/archive/2026-10-24-agent-session-logging`, `openspec/changes/archive/2026-10-24-otel-metrics-and-tracing`, [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | 2 | Closed Git boundary + human in the loop | [`iteration-2.md`](iteration-2.md), F1, ADR-0038 |
 | 3 | Team workflow | [`iteration-3.md`](iteration-3.md) (draft), ADR-0043, ADR-0044, ADR-0026, ADR-0034, ADR-0041, ADR-0033, ADR-0015, ADR-0016 |
 | 4 | Harnesses, tools and skills | [`iteration-4.md`](iteration-4.md) (draft), F12, F13, ADR-0011, ADR-0021, ADR-0032 |
@@ -116,7 +116,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
 | Subscription pools and fallback | idea | F6 |
-| Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/iter2-run-resilience` (Non-Goals, D6) |
+| Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/archive/2026-11-02-iter2-run-resilience` (Non-Goals, D6) |
 | Dependencies set by humans: `depends_on` in the new-task composer | idea | `openspec/changes/iter3-task-dependencies` |
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/iter3-task-dependencies` |
 | Dependencies set by humans also covers `base_task` in the new-task composer | idea | `openspec/changes/iter3-task-tree` |
@@ -127,7 +127,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/iter2-continuation-summary` |
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |
-| Push-check exceptions for a whole project instead of one task | idea | `openspec/changes/iter2-push-checks` (non-goal) |
+| Push-check exceptions for a whole project instead of one task | idea | `openspec/changes/archive/2026-11-02-iter2-push-checks` (non-goal) |
 | Declarative configuration import | idea | F4 |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
@@ -153,7 +153,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | idea | `crates/df-web/src/auth/store.rs` |
 | Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. The control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | decided | design canvas, "Later" row |
 | Phone layout of the network traffic page: at 390 px the page scrolls horizontally, because the Connections graph keeps its 398 px minimum width and the panels stay side by side instead of stacking | idea | `openspec/changes/archive/2026-10-30-ui-design-alignment/review-log.md` (browser check) |
-| Interrupt the current turn without ending the run: the agent stops the turn and waits in the same run (sandbox kept) for the next message; today "Stop" ends the run | idea | `openspec/changes/iter2-cancel` (review-log.md) |
+| Interrupt the current turn without ending the run: the agent stops the turn and waits in the same run (sandbox kept) for the next message; today "Stop" ends the run | idea | `openspec/changes/archive/2026-11-02-iter2-cancel` (review-log.md) |
 | Highlighting of tool-call content: diff colouring (+/− lines), file reads highlighted by extension | idea | ADR-0047, `openspec/changes/iter3-markdown-rendering` |
 | Operator-supplied `.tmTheme` code themes from a mounted path | idea | ADR-0047 |
 | Code themes that follow the inverted agent bubble (dark code theme in light-mode agent bubbles) | idea | ADR-0047 |
