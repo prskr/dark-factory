@@ -9,6 +9,7 @@ use axum::http::{Request, Response, header};
 use df_core::AuthConfig;
 use df_core::PluginConfig;
 use df_core::config::HostRoute;
+use df_core::public_address::ProjectTargets;
 use df_core::routing::{ForgeRoutes, RoutingTable};
 use http_body_util::BodyExt;
 use openidconnect::core::{
@@ -292,7 +293,30 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
-        Self::build(forges, flows, services, false, false, None).await
+        Self::build(
+            forges,
+            flows,
+            services,
+            false,
+            false,
+            None,
+            ProjectTargets::default(),
+        )
+        .await
+    }
+
+    /// An app of a development build started with `--unrestricted-project-subscriptions`.
+    pub(crate) async fn with_unrestricted_project_targets() -> Self {
+        Self::build(
+            default_forge("forgejo"),
+            None,
+            None,
+            false,
+            false,
+            None,
+            ProjectTargets::Unrestricted,
+        )
+        .await
     }
 
     /// An app with lifecycle events on: the settings show `public_key`.
@@ -304,6 +328,7 @@ impl TestApp {
             false,
             false,
             Some(public_key.into()),
+            ProjectTargets::default(),
         )
         .await
     }
@@ -317,12 +342,30 @@ impl TestApp {
         )]);
         let table = RoutingTable::from_plugins_allowing_plain_http(&configs).unwrap();
         let forges = ForgeRoutes::new(table, ["forgejo".to_string()]);
-        Self::build(forges, None, None, false, true, None).await
+        Self::build(
+            forges,
+            None,
+            None,
+            false,
+            true,
+            None,
+            ProjectTargets::default(),
+        )
+        .await
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
     pub(crate) async fn with_hidden_blocks() -> Self {
-        Self::build(default_forge("forgejo"), None, None, true, false, None).await
+        Self::build(
+            default_forge("forgejo"),
+            None,
+            None,
+            true,
+            false,
+            None,
+            ProjectTargets::default(),
+        )
+        .await
     }
 
     async fn build(
@@ -332,6 +375,7 @@ impl TestApp {
         show_hidden_blocks: bool,
         allow_plain_http: bool,
         lifecycle_public_key: Option<Arc<str>>,
+        project_targets: ProjectTargets,
     ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
@@ -366,6 +410,7 @@ impl TestApp {
             version: "2026.11.0".into(),
             events: df_db::lifecycle_events::EventSinks::default(),
             lifecycle_public_key,
+            project_targets,
         };
         Self {
             router: router(state),

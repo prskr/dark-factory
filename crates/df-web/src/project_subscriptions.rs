@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router, middleware};
 use df_core::EventType;
-use df_core::public_address::literal_host_is_public;
+use df_core::public_address::{ProjectTargets, literal_host_is_public};
 use df_db::DbError;
 use df_db::catalog::{Actor, ProjectRecord};
 use df_db::event_subscriptions::{self, Subscription, SubscriptionInput};
@@ -89,16 +89,21 @@ impl SubscriptionForm {
 }
 
 /// Checks the form: an `https` URL whose host is not a literal internal address, and known event
-/// types. The delivery checks the resolved addresses again before each attempt.
-fn validate(form: &SubscriptionForm) -> Result<SubscriptionInput, FormErrors> {
+/// types. The delivery checks the resolved addresses again before each attempt. With
+/// [`ProjectTargets::Unrestricted`] any valid URL is accepted.
+fn validate(
+    form: &SubscriptionForm,
+    targets: ProjectTargets,
+) -> Result<SubscriptionInput, FormErrors> {
     let mut errors = FormErrors::default();
     let url = form.url.trim();
+    let restricted = targets == ProjectTargets::PublicHttps;
     match Url::parse(url) {
-        Ok(parsed) if parsed.scheme() != "https" => {
+        Ok(parsed) if parsed.host().is_none() => errors.add("url", INVALID_URL),
+        Ok(parsed) if restricted && parsed.scheme() != "https" => {
             errors.add("url", "Project subscriptions need https.");
         }
-        Ok(parsed) if parsed.host().is_none() => errors.add("url", INVALID_URL),
-        Ok(parsed) if !literal_host_is_public(&parsed) => errors.add(
+        Ok(parsed) if restricted && !literal_host_is_public(&parsed) => errors.add(
             "url",
             "The address is not public: loopback, private and link-local addresses are refused.",
         ),
@@ -164,10 +169,17 @@ fn events_field(selected: &[String], errors: &FormErrors) -> Markup {
     }
 }
 
-/// The instance public key receivers verify signatures with, or a note that the feature is off.
-fn key_panel(public_key: Option<&str>) -> Markup {
+/// The instance public key receivers verify signatures with, or a note that the feature is off;
+/// a warning when the URL restrictions are off (development build).
+fn key_panel(public_key: Option<&str>, targets: ProjectTargets) -> Markup {
     html! {
         section class="rounded-xl border border-line bg-panel px-4 py-3 text-sm" {
+            @if targets == ProjectTargets::Unrestricted {
+                p class="mb-2 text-danger" {
+                    "Receiver URLs are unrestricted (development build): plain http and internal "
+                    "addresses are accepted."
+                }
+            }
             @if let Some(key) = public_key {
                 p class="text-muted" {
                     "Receivers verify the " code class="font-mono text-[13px]" { "webhook-signature" }
@@ -219,13 +231,14 @@ fn region(
     project: &ProjectRecord,
     subscriptions: &[Subscription],
     public_key: Option<&str>,
+    targets: ProjectTargets,
 ) -> Markup {
     let base = base_path(&project.key);
     let new = create_button(&format!("{base}/new"), "New subscription");
     html! {
         div id="config-list" class="space-y-4" {
             (list_header(&format!("Lifecycle events of {}", project.name), subscriptions.len(), new.clone(), None))
-            (key_panel(public_key))
+            (key_panel(public_key, targets))
             @if subscriptions.is_empty() {
                 (empty_panel(
                     "No subscriptions yet",
@@ -280,6 +293,7 @@ async fn region_markup(state: &WebState, project: &ProjectRecord) -> Result<Mark
         project,
         &subscriptions,
         state.lifecycle_public_key.as_deref(),
+        state.project_targets,
     ))
 }
 
@@ -379,7 +393,7 @@ async fn save(
         Err(response) => return *response,
     };
     let form = SubscriptionForm::parse(body);
-    let input = match validate(&form) {
+    let input = match validate(&form, state.project_targets) {
         Ok(input) => input,
         Err(errors) => {
             let base = base_path(&project.key);

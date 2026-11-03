@@ -8,6 +8,7 @@ pub(crate) mod signing;
 use std::sync::Arc;
 
 use df_core::LifecycleEventsConfig;
+use df_core::public_address::ProjectTargets;
 use df_db::outbox::Dispatcher;
 use df_db::{Notifier, PgPool};
 use opentelemetry::metrics::Meter;
@@ -16,6 +17,14 @@ pub(crate) use signing::SigningKey;
 
 use self::client::Clients;
 use self::handler::DeliverHandler;
+
+/// What the UI and the dispatcher share: the signing key (`None` while the feature is off) and
+/// which targets project subscriptions may use.
+#[derive(Clone, Default)]
+pub(crate) struct Delivery {
+    pub(crate) signing_key: Option<Arc<SigningKey>>,
+    pub(crate) project_targets: ProjectTargets,
+}
 
 /// Loads `lifecycleEvents.signingKeyFile`. Without the option the feature is off (`None`); a
 /// configured key that cannot be read or is not Ed25519 refuses the start.
@@ -33,13 +42,14 @@ pub(crate) fn load_signing_key(
 pub(crate) fn dispatcher(
     pool: &PgPool,
     notifier: &Arc<Notifier>,
-    signing_key: Option<Arc<SigningKey>>,
+    delivery: Delivery,
     meter: &Meter,
 ) -> Result<Option<Dispatcher>, reqwest::Error> {
-    let Some(key) = signing_key else {
+    let Some(key) = delivery.signing_key else {
         return Ok(None);
     };
-    let handler = DeliverHandler::new(pool.clone(), key, Arc::new(Clients::new()?), meter);
+    let clients = Clients::new(delivery.project_targets)?;
+    let handler = DeliverHandler::new(pool.clone(), key, Arc::new(clients), meter);
     Ok(Some(Dispatcher::new(
         pool.clone(),
         notifier.clone(),
@@ -75,11 +85,14 @@ mod tests {
         let notifier = Arc::new(Notifier::start(&pool).await.unwrap());
         let meter = opentelemetry::global::meter("test");
 
-        let off = dispatcher(&pool, &notifier, None, &meter).unwrap();
+        let off = dispatcher(&pool, &notifier, Delivery::default(), &meter).unwrap();
         let on = dispatcher(
             &pool,
             &notifier,
-            Some(Arc::new(signing::testing::generate())),
+            Delivery {
+                signing_key: Some(Arc::new(signing::testing::generate())),
+                project_targets: ProjectTargets::PublicHttps,
+            },
             &meter,
         );
 

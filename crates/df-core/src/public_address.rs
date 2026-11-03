@@ -8,6 +8,18 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::host::strip_brackets;
 
+/// Which targets project subscriptions may use.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectTargets {
+    /// `https` only, and no address this module refuses. Always the case in a release build.
+    #[default]
+    PublicHttps,
+    /// Any scheme and address, for local development and the e2e suite: set only by
+    /// `serve --unrestricted-project-subscriptions`, which exists only in a build with the Cargo
+    /// feature `dev-tools`.
+    Unrestricted,
+}
+
 /// Whether `addr` is a public unicast address: not loopback, private (RFC 1918), CGNAT
 /// (`100.64.0.0/10`), link-local, unique-local (`fc00::/7`), unspecified, broadcast or
 /// documentation, and not an IPv4-mapped IPv6 form of one of these.

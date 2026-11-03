@@ -76,6 +76,11 @@ pub struct WebState {
     pub events: df_db::lifecycle_events::EventSinks,
     /// The `whpk_` public key of the lifecycle event signatures; `None` while the feature is off.
     pub lifecycle_public_key: Option<Arc<str>>,
+    /// Which targets project subscriptions may use; [`ProjectTargets::Unrestricted`] only in a
+    /// development build started with `--unrestricted-project-subscriptions`.
+    ///
+    /// [`ProjectTargets::Unrestricted`]: df_core::public_address::ProjectTargets::Unrestricted
+    pub project_targets: df_core::public_address::ProjectTargets,
 }
 
 /// `/healthz`, `/readyz`, `/assets/*` and `/lifecycle-events/public-key`; no login required.
