@@ -43,7 +43,7 @@ When it reports:
 
 ## 3. Review
 
-1. Read `~/.claude/skills/code-review/SKILL.md`. Use step 3 for the standards sources and the smell baseline. Here the standards sources are at least `AGENTS.md`, `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`.
+1. Read `~/.claude/skills/code-review/SKILL.md`. Use step 3 for the standards sources and the smell baseline. Here the standards sources are at least `AGENTS.md`, the `AGENTS.md` of every crate the diff touches (for example `crates/df-web/AGENTS.md`), `.agents/skills/rust/SKILL.md`, `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`.
 2. Diff range:
    - Round 1: `BASE...HEAD`, the whole change.
    - Round 2 and later: `HEAD_prev...HEAD`, only what the last fix round changed, plus the ledger check.

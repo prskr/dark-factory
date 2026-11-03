@@ -23,6 +23,8 @@ The orchestrator sends one of:
 - You cannot ask the user anything. Where the apply skill says "pause and ask", stop working and return `BLOCKED` with the question (see report format). Don't guess.
 - If a task reveals a design problem in the change artifacts, don't edit the artifacts. Return `BLOCKED` with the problem and a proposed artifact change.
 - TDD: write the failing test first, see it fail, then implement.
+- During red/green run only the test you work on (`cargo test -p <crate> <test_name>`); the whole crate and the Bazel targets run once in the checks below (skill `rust`, "Feedback loop").
+- Change files with the Edit or Write tool, not with shell scripts (`python3` heredocs, `sed -i`); Edit calls are auto-approved in this agent's permission mode, shell edits are not.
 - Mark tasks done in `tasks.md` as you finish them.
 
 ## Checks before reporting
@@ -34,7 +36,7 @@ First probe for `protoc`, which plain `cargo` builds need (AGENTS.md): `command 
 1. `cargo fmt --all --check`
 2. `cargo clippy --all-targets --all-features -- -D warnings`
 3. `cargo machete`
-4. Tests of the touched crates (`cargo test -p <crate>`), including container-backed tests when a socket is available (below).
+4. Tests of the touched crates, once (`cargo test -p <crate>`), including container-backed tests when a socket is available (below). Then the affected Bazel test targets (`bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...`), which catch Bazel-only wiring and are cached for unchanged targets. Skip the Bazel step for cargo-only crates (an entry in `[workspace.metadata.check-crates.exempt]` of the root `Cargo.toml`, such as `crates/df-e2e`): they have no Bazel targets.
 5. If you changed a `sqlx::query!`/`query_as!` macro: regenerate `.sqlx/` (`docs/development.md`).
 
 Without `protoc`, use the Bazel equivalents and say so in the report:

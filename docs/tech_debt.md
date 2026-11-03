@@ -702,7 +702,7 @@ The Alpine components are served as written: no types, no minification. Today th
 - the plain `cargo` path (AGENTS.md, "Plain `cargo` builds") needs the compiled JS too, for example checked-in output or a `build.rs` step;
 - source maps for debugging in the browser.
 
-Update the "Web UI scripts" rule in `AGENTS.md` with the result.
+Update the "Web UI scripts" rule in `crates/df-web/AGENTS.md` with the result.
 
 ### TD-76 (SP7). Warnings for failed outbox and lock-release calls have no test
 
