@@ -146,9 +146,12 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
         .submit_line_comment(number, "greeting.txt", 1, "Please add a test.")
         .await?;
 
+    // The page has been open since the task was created, so the stream has replaced the
+    // composer's Send button at least once (queued → running → waiting): the shortcut must
+    // still find it.
     world
         .session
-        .send_message("also add a test for the greeting")
+        .send_message_with_shortcut("also add a test for the greeting")
         .await?;
 
     // `#transcript` holds delivered messages only; the queued row is in `#pending`.

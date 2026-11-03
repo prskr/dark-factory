@@ -175,6 +175,19 @@ impl Session {
             .context("send the message")
     }
 
+    /// Sends `message` to the open task with Ctrl+Enter in the message box.
+    pub async fn send_message_with_shortcut(&self, message: &str) -> Result<()> {
+        let input = self.page.locator("#message");
+        input
+            .fill(message, None)
+            .await
+            .context("fill the message")?;
+        input
+            .press("Control+Enter", None)
+            .await
+            .context("press Ctrl+Enter in the message box")
+    }
+
     /// Stops the active run of the open task with the "Stop" button of its run card.
     pub async fn stop_run(&self) -> Result<()> {
         self.open_runs().await?;
