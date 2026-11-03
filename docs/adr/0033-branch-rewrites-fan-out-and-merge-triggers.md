@@ -26,6 +26,7 @@ Dependency update PRs (e.g. from renovate) pile up when the build breaks or an u
 - Fan-out costs a cold start and clone per branch; accepted for clear ownership and parallelism.
 - Pushing agent commits onto a renovate branch typically makes renovate treat it as modified and stop updating it. For purely mechanical rebases, asking renovate to rebase (its PR checkbox) is often the lighter path; the agent playbook (`product/agent-playbook.md`) describes the pattern.
 - The force-with-lease semantics protect concurrent human and bot pushes without extra locking.
+  Amended 2026-11-03: only the runtime's own pushes are protected. Under `with-lease` the Git proxy forwards any non-fast-forward update of the task branch whose old value matches, and a plain `git push --force` from inside the sandbox sends exactly that. An agent that force-pushes by hand can therefore drop commits others pushed; every push is recorded with old and new SHA, the playbook forbids it, and projects that can't accept it use `never`.
 
 ## Alternatives considered
 
