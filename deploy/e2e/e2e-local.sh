@@ -78,10 +78,6 @@ prepare_tools() {
   if ! command -v docker >/dev/null; then
     require podman
     export KIND_EXPERIMENTAL_PROVIDER=podman
-    # rules_img loads the images through `docker load`; podman understands the same command.
-    mkdir -p "$scratch/bin"
-    ln -s "$(command -v podman)" "$scratch/bin/docker"
-    export PATH="$scratch/bin:$PATH"
   fi
 }
 
@@ -91,13 +87,16 @@ create_cluster() {
   kind create cluster --name "$cluster" --config deploy/e2e/kind.yaml --wait 180s
 }
 
-# Builds the images with Bazel and loads them into the node: no registry.
+# Builds the single-platform images with Bazel and imports their tarballs into the node: no registry,
+# no container daemon. (`kind load docker-image` imports with --all-platforms, which fails on the
+# multi-arch index when only one platform was loaded into the daemon.)
 load_images() {
-  local name repository
-  for name in control_plane:control-plane runtime:runtime test_project:test-project plugin_forgejo:plugin-forgejo plugin_github:plugin-github; do
-    repository="${name#*:}"
-    "${bazel[@]}" run "//deploy:load_e2e_${name%%:*}" -- --platform "linux/$arch"
-    kind load docker-image "ghcr.io/prskr/dark-factory/${repository}:e2e" --name "$cluster"
+  local name archive
+  for name in control_plane runtime test_project plugin_forgejo plugin_github; do
+    archive="$scratch/$name.tar"
+    "${bazel[@]}" run --platforms="//build/platforms:linux_${arch}_musl" \
+      --@rules_img//img/settings:load_daemon=tar "//deploy:load_e2e_$name" >"$archive"
+    kind load image-archive "$archive" --name "$cluster"
   done
 }
 
