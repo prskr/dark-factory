@@ -48,6 +48,10 @@ serve-local: db plugins
     printf 'local-dev-secret\n' > target/local-dev/oidc-client-secret
     [ -f target/local-dev/agent.crt ] || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
         -days 365 -subj /CN=localhost -keyout target/local-dev/agent.key -out target/local-dev/agent.crt 2>/dev/null
+    # Ed25519 PKCS#8 (RFC 8410 prefix + 32 random bytes); macOS' LibreSSL cannot `genpkey` Ed25519.
+    [ -f target/local-dev/lifecycle-events.key ] || { echo '-----BEGIN PRIVATE KEY-----'; \
+        { printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'; head -c 32 /dev/urandom; } | openssl base64; \
+        echo '-----END PRIVATE KEY-----'; } > target/local-dev/lifecycle-events.key
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml migrate
     cargo run -p dark-factory --features dev-tools -- --config dev/config.yaml serve --no-cluster --demo-flows
 
