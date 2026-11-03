@@ -186,8 +186,9 @@ pub async fn start_queued_runs(
     }
     // ponytail: `updated_at` approximates the time a task became queued; add a status change
     // column if other writes to a queued task make the order drift.
-    let task_ids: Vec<uuid::Uuid> = sqlx::query_scalar(concat!(
-        "SELECT t.id FROM tasks t
+    // `resumed`: the task starts from its resume time (rate limit, infrastructure failure).
+    let tasks: Vec<(uuid::Uuid, bool)> = sqlx::query_as(concat!(
+        "SELECT t.id, t.resume_at IS NOT NULL FROM tasks t
          WHERE t.status IN ('queued', 'rate_limited')
            AND (t.resume_at IS NULL OR t.resume_at <= now())
            AND NOT EXISTS (
@@ -202,8 +203,12 @@ pub async fn start_queued_runs(
     .fetch_all(&mut *tx)
     .await?;
 
-    let mut started = Vec::with_capacity(task_ids.len());
-    for task_id in task_ids {
+    let mut started = Vec::with_capacity(tasks.len());
+    for (task_id, resumed) in tasks {
+        // Without a prompt the resumed run would end idle at once.
+        if resumed {
+            df_db::tasks::queue_resume_prompt_tx(&mut tx, TaskId::from_uuid(task_id)).await?;
+        }
         let record = sqlx::query_as::<_, RunRecord>(concat!(
             "INSERT INTO runs (id, task_id, number)
              VALUES ($1, $2, (SELECT COALESCE(MAX(number), 0) + 1 FROM runs WHERE task_id = $2))
