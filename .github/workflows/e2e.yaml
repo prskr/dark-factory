@@ -70,5 +70,17 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
+      # ~/.cargo and target/ of the seed program and the suite
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The Playwright driver and its installer (E2E_TOOLS_DIR of the script); the version comes from Cargo.lock
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/df-e2e
+          key: df-e2e-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: df-e2e-tools-${{ runner.os }}-${{ runner.arch }}-
+
       - name: E2E suite
         run: deploy/e2e/e2e-local.sh
