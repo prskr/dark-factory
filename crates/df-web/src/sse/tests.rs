@@ -602,7 +602,10 @@ async fn streams_require_login() {
 async fn streams_end_when_the_session_token_is_due_for_refresh() {
     let f = fixture().await;
     for uri in ["/tasks/DF-1/events?after=0", "/tasks/events"] {
-        // Due for refresh one second from now (REFRESH_SKEW is 30 s).
+        // The middleware's clock stops before seeding, so the token (due one second after
+        // seeding, REFRESH_SKEW is 30 s) is not yet due when the stream opens, however slow the
+        // request is, and the stream ends one or two seconds later.
+        f.app.clock.freeze();
         let (cookie, _) = crate::auth::testing::seed_session(
             &f.app.pool,
             &["board-member"],

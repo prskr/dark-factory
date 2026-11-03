@@ -31,6 +31,22 @@ const REFRESH_SKEW: i64 = 30;
 const SESSION_USER: &str = "user";
 const SESSION_LOGIN: &str = "login";
 
+/// The time the session check compares token expiry against.
+pub trait Clock: std::fmt::Debug + Send + Sync {
+    /// Seconds since the Unix epoch.
+    fn now_unix(&self) -> i64;
+}
+
+/// The system clock.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now_unix(&self) -> i64 {
+        now_unix()
+    }
+}
+
 /// What the session holds about a logged-in user. Tokens never leave the server.
 #[derive(Clone, Serialize, Deserialize)]
 struct SessionUser {
@@ -43,9 +59,9 @@ struct SessionUser {
 }
 
 impl SessionUser {
-    /// The token expires within [`REFRESH_SKEW`]; the next request refreshes it.
-    fn token_expiring(&self) -> bool {
-        self.expires_at - REFRESH_SKEW <= now_unix()
+    /// At `now`, the token expires within [`REFRESH_SKEW`]; the next request refreshes it.
+    fn token_expiring(&self, now: i64) -> bool {
+        self.expires_at - REFRESH_SKEW <= now
     }
 }
 
@@ -65,8 +81,8 @@ pub struct CurrentUser {
     pub id: UserId,
     pub display_name: String,
     pub roles: Vec<String>,
-    /// Unix time at which the session's token is due for refresh.
-    refresh_at: i64,
+    /// When the session's token is due for refresh, set by the auth check after any refresh.
+    refresh_at: tokio::time::Instant,
 }
 
 impl CurrentUser {
@@ -77,7 +93,8 @@ impl CurrentUser {
     /// Time until the next request must pass this middleware again to refresh the token and
     /// re-check the roles. Long-lived responses (SSE) end then.
     pub fn until_refresh(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(u64::try_from(self.refresh_at - now_unix()).unwrap_or(0))
+        self.refresh_at
+            .saturating_duration_since(tokio::time::Instant::now())
     }
 }
 
@@ -108,8 +125,9 @@ pub async fn require_board_member(
     let Some(mut user) = load_user(&session).await else {
         return login_redirect(&request);
     };
-    if user.token_expiring() {
-        match refresh_user(&state, &session).await {
+    let now = state.clock.now_unix();
+    if user.token_expiring(now) {
+        match refresh_user(&state, &session, now).await {
             Some(refreshed) => user = refreshed,
             None => return login_redirect(&request),
         }
@@ -121,11 +139,14 @@ pub async fn require_board_member(
             &format!("Your account lacks the role `{REQUIRED_ROLE}`."),
         );
     }
+    // Read the clock again: a refresh above may have taken seconds.
+    let refresh_in = u64::try_from(user.expires_at - REFRESH_SKEW - state.clock.now_unix());
     request.extensions_mut().insert(CurrentUser {
         id: user.user_id,
         display_name: user.display_name,
         roles: user.roles,
-        refresh_at: user.expires_at - REFRESH_SKEW,
+        refresh_at: tokio::time::Instant::now()
+            + std::time::Duration::from_secs(refresh_in.unwrap_or(0)),
     });
     next.run(request).await
 }
@@ -281,7 +302,7 @@ async fn load_user(session: &Session) -> Option<SessionUser> {
 /// provider that rotates refresh tokens rejects.
 // ponytail: the lock holds a pool connection for up to the OIDC client timeout (10 s); fine for a
 // handful of users, use an advisory lock or a single-flight map if the pool runs dry.
-async fn refresh_user(state: &WebState, session: &Session) -> Option<SessionUser> {
+async fn refresh_user(state: &WebState, session: &Session, now: i64) -> Option<SessionUser> {
     let id = session.id()?;
     let (lock, stored) = match PgSessionStore::new(state.pool.clone())
         .lock(&id, SESSION_USER)
@@ -297,7 +318,7 @@ async fn refresh_user(state: &WebState, session: &Session) -> Option<SessionUser
     let user: SessionUser = serde_json::from_value(stored)
         .inspect_err(|error| tracing::warn!(%error, "reading the session failed"))
         .ok()?;
-    if !user.token_expiring() {
+    if !user.token_expiring(now) {
         // Another request refreshed while this one waited for the lock.
         return Some(user);
     }

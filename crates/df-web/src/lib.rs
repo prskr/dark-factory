@@ -68,6 +68,8 @@ pub struct WebState {
     pub approval_types: df_db::requests::ApprovalTypes,
     /// The release version shown in the profile menu (`dev` for unstamped builds).
     pub version: String,
+    /// The clock the session check compares token expiry against ([`auth::SystemClock`]).
+    pub clock: Arc<dyn auth::Clock>,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.
