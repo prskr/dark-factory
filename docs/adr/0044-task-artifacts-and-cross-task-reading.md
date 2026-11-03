@@ -1,6 +1,6 @@
 # ADR-0044: Task artifacts and cross-task reading
 
-- **Status:** Accepted (planned for iteration 3; amended by [ADR-0048](0048-image-artifacts.md): image artifacts)
+- **Status:** Accepted (planned for iteration 3; amended by [ADR-0048](0048-image-artifacts.md): image artifacts, and on 2026-11-03: tool details, UI)
 - **Date:** 2026-10-27
 - **Related:** [ADR-0012](0012-postgresql-and-blob-store.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md)
 
@@ -18,6 +18,11 @@ Artifacts (Markdown documents an agent writes for the human or as intermediate r
 - **Untrusted content:** an artifact is agent-written text. The tool result marks it as data from another task, and the playbook tells agents to treat it as input, not as instructions.
 - **Hand-over:** the message that wakes a parent on a child's end (ADR-0043) lists the child's artifact names. A coordinator's instructions to a child stay the task description, delivered as the first message.
 - **Humans:** read artifacts in the task page and in the chat UI as rendered Markdown (the renderer of ADR-0004). Cards with previews, types and times are iteration 6.
+  Amended 2026-11-03:
+  - Names are 1–100 characters from `[A-Za-z0-9._-]` without a leading dot, so they work in URLs and Markdown image references unescaped. A write may replace an artifact of a different type. There is no delete; artifacts live as long as their task.
+  - Tools name tasks by key. `list_artifacts` lists one task. `read_artifact` returns text in pages of at most 64 KiB with an `offset`, because harnesses truncate large tool results (Claude Code: about 25k tokens). An unrelated task and a missing task give the same error, so keys can't be probed. Cross-task reads are recorded in the existing tool-call audit entry with the target task and artifact name.
+  - Limits live in the instance config: 1 MiB per text artifact, 50 artifacts per task.
+  - Humans get artifact cards, a resizable split view next to the transcript and a bookmarkable page per artifact in iteration 3, on the task page and in the chat UI.
 
 ## Consequences
 
