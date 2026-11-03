@@ -584,6 +584,7 @@ fn web_router(
         approval_types,
         version: df_telemetry::VERSION.to_string(),
         clock: Arc::new(df_web::auth::SystemClock),
+        events: df_db::lifecycle_events::EventSinks::new(&cfg.lifecycle_events),
     }))
 }
 

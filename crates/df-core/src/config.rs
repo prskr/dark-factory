@@ -67,6 +67,8 @@ pub struct InstanceConfig {
     /// Integration plugins by name (`forgejo`, ...).
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginConfig>,
+    #[serde(default)]
+    pub lifecycle_events: crate::lifecycle::LifecycleEventsConfig,
 }
 
 impl InstanceConfig {
@@ -78,6 +80,7 @@ impl InstanceConfig {
                 "`runs.maxConcurrent` must be at least 1: with 0 no run ever starts".into(),
             ));
         }
+        cfg.lifecycle_events.validate()?;
         Ok(cfg)
     }
 

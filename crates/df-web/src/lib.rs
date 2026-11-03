@@ -70,6 +70,8 @@ pub struct WebState {
     pub version: String,
     /// The clock the session check compares token expiry against ([`auth::SystemClock`]).
     pub clock: Arc<dyn auth::Clock>,
+    /// Receivers of lifecycle events; resetting a workspace emits `volume.destroyed`.
+    pub events: df_db::lifecycle_events::EventSinks,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.

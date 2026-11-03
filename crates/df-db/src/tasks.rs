@@ -719,17 +719,6 @@ pub async fn update_task_status(
     Ok(())
 }
 
-/// Clears `tasks.volume_deleted_at` once the task's volume exists again.
-pub async fn clear_volume_deleted(pool: &PgPool, task_id: TaskId) -> Result<(), DbError> {
-    sqlx::query!(
-        "UPDATE tasks SET volume_deleted_at = NULL WHERE id = $1 AND volume_deleted_at IS NOT NULL",
-        task_id.as_uuid()
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 /// Sets a task's title to the sanitized `title` if `source` may replace the current title's
 /// source (`TitleSource::may_replace`; the rule lives in the `WHERE` so concurrent writers cannot
 /// violate it). Returns whether the title changed and publishes `task_changed` if it did.

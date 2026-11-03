@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use df_core::testing::{FakeForgeClient, FakeSandboxProvider, FakeSecretStore};
-use df_core::{PeerIdentity, PersonaId, ProjectId, RunId, TaskId};
+use df_core::{
+    InstanceSubscription, LifecycleEventsConfig, PeerIdentity, PersonaId, ProjectId, RunId, TaskId,
+};
+use df_db::lifecycle_events::EventSinks;
 use df_db::{NewTask, Notifier, TaskRow, create_task};
 use df_proto::agent::v1::agent_channel_client::AgentChannelClient;
 use df_proto::agent::v1::{AgentMessage, ControlMessage, Hello, agent_message};
@@ -337,6 +340,14 @@ pub async fn task_resume_state(pool: &PgPool, task_id: TaskId) -> TaskResumeStat
         .expect("read the resume state of a task")
 }
 
+/// The recorded lifecycle events (their envelopes) in the order they occurred.
+pub async fn recorded_events(pool: &PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar("SELECT payload FROM lifecycle_events ORDER BY occurred_at, id")
+        .fetch_all(pool)
+        .await
+        .expect("read lifecycle events")
+}
+
 /// Seeded database, fakes and a context wired to them.
 pub struct Env {
     pub ctx: ChannelContext,
@@ -428,6 +439,21 @@ impl Env {
             persona_id,
             task,
         }
+    }
+
+    /// Turns lifecycle events on with one instance subscription to every event type.
+    #[must_use]
+    pub fn with_events(mut self) -> Self {
+        let mut config = ChannelConfig::clone(&self.ctx.config);
+        config.events = EventSinks::new(&LifecycleEventsConfig {
+            signing_key_file: Some("signing.key".into()),
+            subscriptions: vec![InstanceSubscription {
+                url: "https://events.example.org/hook".into(),
+                events: Vec::new(),
+            }],
+        });
+        self.ctx.config = Arc::new(config);
+        self
     }
 
     /// A second context on the same database, as another replica would have it.

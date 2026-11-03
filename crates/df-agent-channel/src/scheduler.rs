@@ -23,8 +23,8 @@ use crate::ChannelContext;
 use crate::assign::load_run_context;
 use crate::error::ChannelError;
 use crate::runs::{
-    RunEnd, RunRow, finish_run, get_run, list_active_runs, list_unprovisioned_runs, mark_started,
-    start_queued_runs, teardown,
+    RunEnd, RunRow, begin_provisioning, finish_run, get_run, list_active_runs,
+    list_unprovisioned_runs, mark_started, start_queued_runs, teardown,
 };
 
 /// Interval of the tick: resume times and freed slots are noticed on it (a due task starts
@@ -182,22 +182,17 @@ impl Scheduler {
         }
     }
 
-    /// Ensures the task volume, creates the sandbox and moves the run to `provisioning`. Errors
+    /// Moves the run to `provisioning`, ensures the task volume and creates the sandbox. Errors
     /// are recorded by [`Self::provision_or_fail`].
     async fn provision(&self, run: RunRow) -> Result<(), ChannelError> {
         let run_id = run.id;
         let rc = load_run_context(&self.ctx.pool, run).await?;
         let provider = &self.ctx.provider;
 
-        let volume = TaskVolumeSpec::for_task(rc.task.key.clone());
-        let volume_name = volume.volume_name.clone();
-        provider.ensure_task_volume(&volume).await?;
-        df_db::tasks::clear_volume_deleted(&self.ctx.pool, rc.task.id).await?;
+        let events = &self.ctx.config.events;
         // The run may have ended meanwhile (sandbox lost, connect timeout on another replica):
         // nothing would tear a sandbox created now down again.
-        let moved =
-            crate::runs::set_run_state(&self.ctx.pool, run_id, RunState::Provisioning, None)
-                .await?;
+        let moved = begin_provisioning(&self.ctx.pool, events, run_id).await?;
         // Already `provisioning` is the retry of an interrupted run; anything else is over.
         if !moved
             && get_run(&self.ctx.pool, run_id)
@@ -207,6 +202,11 @@ impl Scheduler {
             tracing::info!(run_id = %run_id, "run ended before its sandbox was created; skipping provisioning");
             return Ok(());
         }
+
+        let volume = TaskVolumeSpec::for_task(rc.task.key.clone());
+        let volume_name = volume.volume_name.clone();
+        provider.ensure_task_volume(&volume).await?;
+        df_db::volumes::volume_ensured(&self.ctx.pool, events, rc.task.id, run_id).await?;
 
         let project_key = ProjectKey::new(rc.project.key.clone())
             .map_err(|e| ChannelError::InvalidData(e.to_string()))?;
@@ -266,7 +266,13 @@ impl Scheduler {
     pub async fn handle_event(&self, event: SandboxEvent) -> Result<(), ChannelError> {
         match event {
             SandboxEvent::Started { run_id, pod_ip } => {
-                mark_started(&self.ctx.pool, run_id, &pod_ip.to_string()).await?;
+                mark_started(
+                    &self.ctx.pool,
+                    &self.ctx.config.events,
+                    run_id,
+                    &pod_ip.to_string(),
+                )
+                .await?;
             }
             SandboxEvent::Gone { run_id, reason } => {
                 let end = RunEnd::failure(

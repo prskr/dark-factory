@@ -26,6 +26,7 @@ use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tonic::Status;
 
+use crate::ChannelConfig;
 use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts};
 use crate::error::ChannelError;
 use crate::metrics::Observation;
@@ -623,7 +624,7 @@ async fn persist_batch(
     let start = lock_run_and_read_seq(&mut tx, rc).await?;
     let mut applied = BatchApply {
         last: start,
-        max_auto_resumes: ctx.config.runs.max_auto_resumes,
+        config: Arc::clone(&ctx.config),
         ..Default::default()
     };
 
@@ -733,8 +734,8 @@ async fn lock_run_and_read_seq(
 /// What applying the messages of a batch has produced so far.
 #[derive(Default)]
 struct BatchApply {
-    /// `runs.maxAutoResumes`, for the run end.
-    max_auto_resumes: u32,
+    /// The channel configuration, for the run end.
+    config: Arc<ChannelConfig>,
     /// Sequence number of the last message applied (or already persisted).
     last: u64,
     /// Task-wide id of the newest transcript event stored by the batch.
@@ -799,9 +800,7 @@ impl BatchApply {
                 });
             }
             agent_message::Body::RunReport(report) => {
-                if let Some(ended) =
-                    end_run_tx(tx, &run_end(rc, &report), self.max_auto_resumes).await?
-                {
+                if let Some(ended) = end_run_tx(tx, &run_end(rc, &report), &self.config).await? {
                     self.observations.push(Observation::RunEnded {
                         outcome: report.outcome(),
                         duration: (Utc::now() - rc.run.started_at)

@@ -8,6 +8,7 @@
 //! - `task_message_changed` `{task_id}` (a queued message was edited or removed)
 //! - `request_changed` `{task_id, request_id}`
 //! - `egress_policy` `{}`
+//! - `outbox` `{}` (a job was enqueued)
 
 use std::time::Duration;
 
@@ -32,6 +33,7 @@ pub const CHANNEL_TASK_MESSAGE_QUEUED: &str = "task_message_queued";
 pub const CHANNEL_TASK_MESSAGE_CHANGED: &str = "task_message_changed";
 pub const CHANNEL_REQUEST_CHANGED: &str = "request_changed";
 pub const CHANNEL_EGRESS_POLICY: &str = "egress_policy";
+pub const CHANNEL_OUTBOX: &str = "outbox";
 
 pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_TASK_CHANGED,
@@ -41,6 +43,7 @@ pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_TASK_MESSAGE_CHANGED,
     CHANNEL_REQUEST_CHANGED,
     CHANNEL_EGRESS_POLICY,
+    CHANNEL_OUTBOX,
 ];
 
 /// Typed notification payload carried over PostgreSQL `LISTEN`/`NOTIFY`.
@@ -69,6 +72,8 @@ pub enum Notification {
         request_id: RequestId,
     },
     EgressPolicy,
+    /// An outbox job was enqueued.
+    Outbox,
     /// Emitted after the listener recovers from a connection loss so subscribers
     /// can resynchronize against the database.
     Reconnected,
@@ -112,6 +117,7 @@ impl Notification {
             Self::TaskMessageChanged { .. } => Some(CHANNEL_TASK_MESSAGE_CHANGED),
             Self::RequestChanged { .. } => Some(CHANNEL_REQUEST_CHANGED),
             Self::EgressPolicy => Some(CHANNEL_EGRESS_POLICY),
+            Self::Outbox => Some(CHANNEL_OUTBOX),
             Self::Reconnected => None,
         }
     }
@@ -137,7 +143,7 @@ impl Notification {
                 task_id,
                 request_id,
             }),
-            Self::EgressPolicy => serde_json::to_string(&EmptyPayload {}),
+            Self::EgressPolicy | Self::Outbox => serde_json::to_string(&EmptyPayload {}),
             Self::Reconnected => Err(serde::ser::Error::custom(
                 "Notification::Reconnected is local-only and has no wire payload",
             )),
@@ -186,6 +192,10 @@ impl Notification {
             CHANNEL_EGRESS_POLICY => {
                 let _: EmptyPayload = serde_json::from_str(payload)?;
                 Ok(Self::EgressPolicy)
+            }
+            CHANNEL_OUTBOX => {
+                let _: EmptyPayload = serde_json::from_str(payload)?;
+                Ok(Self::Outbox)
             }
             other => Err(serde::de::Error::custom(format!(
                 "unknown notification channel `{other}`"
@@ -352,6 +362,7 @@ mod tests {
                 request_id: RequestId::new(),
             },
             Notification::EgressPolicy,
+            Notification::Outbox,
         ];
 
         for expected in &notifications {

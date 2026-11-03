@@ -2,13 +2,13 @@
 
 ## 1. Storage and enqueue
 
-- [ ] 1.1 Add the event type enum (`volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`) with serde names to `df-core`; verify with a unit test that the serialized names match the spec
-- [ ] 1.2 Write failing `df-db` tests, then add the migration (design D1, D2, D9). Verify with `cargo test -p df-db lifecycle` (container-backed). The tests cover:
+- [x] 1.1 Add the event type enum (`volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`) with serde names to `df-core`; verify with a unit test that the serialized names match the spec
+- [x] 1.2 Write failing `df-db` tests, then add the migration (design D1, D2, D9). Verify with `cargo test -p df-db lifecycle` (container-backed). The tests cover:
   - the `outbox`, `lifecycle_events` and `event_subscriptions` tables;
   - `tasks.volume_provisioned_at`, backfilled for tasks with a run;
   - `runs.provisioning_started_at` and `runs.sandbox_started_at`;
   - deleting a project removes its subscriptions.
-- [ ] 1.3 Write failing tests, then implement the generic `df_db::outbox::enqueue(tx, kind, payload)` and `lifecycle_events::enqueue(tx, event, instance_subscriptions)` (design D1). Regenerate `.sqlx/`. Verify the tests pass. The tests cover:
+- [x] 1.3 Write failing tests, then implement the generic `df_db::outbox::enqueue(tx, kind, payload)` and `lifecycle_events::enqueue(tx, event, instance_subscriptions)` (design D1). Regenerate `.sqlx/`. Verify the tests pass. The tests cover:
   - a job is written with its kind and payload;
   - `outbox` is notified on commit;
   - a rolled-back transaction leaves no rows;
@@ -16,14 +16,14 @@
   - the event filter, where an empty list means all;
   - other projects' subscriptions are ignored;
   - nothing is written without a match or with the feature off.
-- [ ] 1.4 Add the envelope builder (`evt_<uuidv7>` ID, type, `timestamp`, `data` with project, task, run and persona per spec "Event envelope"); verify with a snapshot-style unit test of the JSON for each event type
+- [x] 1.4 Add the envelope builder (`evt_<uuidv7>` ID, type, `timestamp`, `data` with project, task, run and persona per spec "Event envelope"); verify with a snapshot-style unit test of the JSON for each event type
 
 ## 2. Trigger points
 
-- [ ] 2.1 Write failing scheduler tests: the first schedule of a task enqueues one `volume.provisioned` with that run; a second run enqueues none; a backfilled task enqueues none. Then add the marker update after `ensure_task_volume` (design D2). Verify with `cargo test -p df-agent-channel scheduler` (container-backed)
-- [ ] 2.2 Write failing tests: the scheduler's transition to `Provisioning` sets `provisioning_started_at` and enqueues `sandbox.provisioning` once, before the volume and sandbox are created; `mark_started` sets `sandbox_started_at` and enqueues `sandbox.provisioned` once; the `provisioning_failed` path enqueues `sandbox.provisioning_failed` with the error text and never `sandbox.destroyed`. Then implement. Verify the tests pass (container-backed)
-- [ ] 2.3 Write failing tests that `end_run_tx` enqueues one `sandbox.destroyed` with outcome, `started_at` and `ended_at` for `completed`, `connect_timeout` and `sandbox_lost`; with `started_at: null` for a run cancelled while `Provisioning`; none for a run that was never picked up; and that every run with `sandbox.provisioning` gets exactly one `sandbox.provisioning_failed` or `sandbox.destroyed`. Then implement. Verify the tests pass (container-backed)
-- [ ] 2.4 Write failing tests that the retention scan enqueues `volume.destroyed` with reason `retention` and reset workspace with reason `reset`, both without a run, and that both reset `volume_provisioned_at` so the next run emits `volume.provisioned` again. Then enqueue in the deletion transactions of `iter2-task-volume-lifecycle`. Verify the tests pass (container-backed)
+- [x] 2.1 Write failing scheduler tests: the first schedule of a task enqueues one `volume.provisioned` with that run; a second run enqueues none; a backfilled task enqueues none. Then add the marker update after `ensure_task_volume` (design D2). Verify with `cargo test -p df-agent-channel scheduler` (container-backed)
+- [x] 2.2 Write failing tests: the scheduler's transition to `Provisioning` sets `provisioning_started_at` and enqueues `sandbox.provisioning` once, before the volume and sandbox are created; `mark_started` sets `sandbox_started_at` and enqueues `sandbox.provisioned` once; the `provisioning_failed` path enqueues `sandbox.provisioning_failed` with the error text and never `sandbox.destroyed`. Then implement. Verify the tests pass (container-backed)
+- [x] 2.3 Write failing tests that `end_run_tx` enqueues one `sandbox.destroyed` with outcome, `started_at` and `ended_at` for `completed`, `connect_timeout` and `sandbox_lost`; with `started_at: null` for a run cancelled while `Provisioning`; none for a run that was never picked up; and that every run with `sandbox.provisioning` gets exactly one `sandbox.provisioning_failed` or `sandbox.destroyed`. Then implement. Verify the tests pass (container-backed)
+- [x] 2.4 Write failing tests that the retention scan enqueues `volume.destroyed` with reason `retention` and reset workspace with reason `reset`, both without a run, and that both reset `volume_provisioned_at` so the next run emits `volume.provisioned` again. Then enqueue in the deletion transactions of `iter2-task-volume-lifecycle`. Verify the tests pass (container-backed)
 
 ## 3. Signing and key endpoint
 
