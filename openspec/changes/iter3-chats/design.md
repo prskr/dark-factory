@@ -142,7 +142,7 @@ Only the runtime knows whether `session/load` succeeded or a new session was see
   Handlers reuse the task-page transcript, message box and SSE plumbing with `kind` checks. Task routes return 404 for chat keys and vice versa.
 - **Layout**: `workspace_layout` gets a chat `View`.
 - **Alpine components**:
-  - `chatLayout.js`: collapse state of both columns, the split divider width (both in `localStorage`, wrapped in `try`/`catch`), and the open artifact;
+  - `chatLayout.js`: collapse state of both columns (in `localStorage`, wrapped in `try`/`catch`); the open artifact and the split divider width live in `artifactSplit.js` from `iter3-artifacts`;
   - `archiveModal.js`: selection and tabs.
 
   Both are added to `COMPONENT_SCRIPTS`.
