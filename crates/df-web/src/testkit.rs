@@ -323,6 +323,7 @@ impl TestApp {
             allow_plain_http,
             max_auto_resumes: 3,
             approval_types: Self::approval_types(),
+            version: "2026.11.0".into(),
         };
         Self {
             router: router(state),

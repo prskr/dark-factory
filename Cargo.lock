@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "dark-factory"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "df-agent-channel"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "df-core"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1586,7 +1586,7 @@ dependencies = [
 
 [[package]]
 name = "df-db"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "df-e2e"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "df-core",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "df-gateway"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "df-harness"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "df-k8s"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "df-core",
@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "df-plugins"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1756,7 +1756,7 @@ dependencies = [
 
 [[package]]
 name = "df-proto"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "bytes",
  "pbjson",
@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "df-telemetry"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1794,7 +1794,7 @@ dependencies = [
 
 [[package]]
 name = "df-test-postgres"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "sqlx",
  "testcontainers",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "df-web"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "factory-agent"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2211,7 +2211,7 @@ dependencies = [
 
 [[package]]
 name = "fake-acp-agent"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2420,7 +2420,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "forgejo-plugin"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -2658,7 +2658,7 @@ dependencies = [
 
 [[package]]
 name = "github-plugin"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "percent-encoding",
@@ -7638,7 +7638,7 @@ dependencies = [
 
 [[package]]
 name = "test-probe-plugin"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "wit-bindgen 0.63.0",
 ]

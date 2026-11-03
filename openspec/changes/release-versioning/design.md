@@ -67,10 +67,9 @@ flowchart LR
   A[guard: ref is main] --> B[version: cargo xtask next-version]
   B --> C[images: bazel run //deploy:push_images --//build:version=V]
   B --> D[reference images: claude-project:V, claude-harness:adapter, digest output]
-  D --> E[chart: pin harness digest, helm package --version V --app-version V, helm push oci]
-  C --> F[publish: gh release create vV --target SHA --generate-notes]
-  D --> F
-  E --> F
+  C --> E[chart: pin harness digest, helm package --version V --app-version V, helm push oci]
+  D --> E
+  E --> F[publish: gh release create vV --target SHA --generate-notes]
 ```
 
 - Trigger: `workflow_dispatch` only, no inputs. `concurrency: { group: release, cancel-in-progress: false }` serializes runs, so two runs cannot compute the same version.
@@ -87,7 +86,7 @@ flowchart LR
 
 ### D6: Profile menu on the rail
 
-`profile_menu` becomes one component for both form factors, taking the display name and the version. The rail's bottom renders its avatar trigger in place of the log-out button; the menu opens to the right of the rail, aligned to its bottom edge. The phone placement stays as is. The footer line `Dark Factory <version>` uses `text-faint` (≥ 5.3:1 on `panel` in both themes). The Penpot rail board is updated first (`docs/design-workflow.md`); the code follows the board.
+`profile_menu` becomes one component for both form factors, taking the display name and the version. The rail's bottom renders its avatar trigger in place of the log-out button; the menu opens above the avatar, left-aligned with it (8 px gap), over the rail and the content. The phone placement stays as is. The footer line `Dark Factory <version>` uses `text-faint` (≥ 5.3:1 on `panel` in both themes). The Penpot rail board is updated first (`docs/design-workflow.md`); the code follows the board.
 
 ## Risks / Trade-offs
 

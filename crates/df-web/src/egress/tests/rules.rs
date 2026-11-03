@@ -441,7 +441,11 @@ async fn highlight_marks_every_row_of_the_target_and_scrolls_to_the_first() {
         1,
         "only the first row scrolls"
     );
-    assert_eq!(page.matches("bg-accent-soft").count(), 2);
+    assert_eq!(
+        page.matches("border-t border-line bg-accent-soft").count(),
+        2,
+        "the highlighted rows"
+    );
 
     for none in [
         "?highlight=nowhere.org:443",

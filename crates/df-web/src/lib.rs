@@ -19,7 +19,7 @@ mod testkit;
 pub mod transcript;
 
 pub use assets::{app_css, get_asset};
-pub use layout::{Nav, layout};
+pub use layout::{Nav, Shell, layout};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,6 +66,8 @@ pub struct WebState {
     pub max_auto_resumes: u32,
     /// The approval types of this instance; they define what a request asks and does.
     pub approval_types: df_db::requests::ApprovalTypes,
+    /// The release version shown in the profile menu (`dev` for unstamped builds).
+    pub version: String,
 }
 
 /// `/healthz`, `/readyz` and `/assets/*`; no login required.

@@ -7,13 +7,14 @@ instanceName: 'dark-factory'
 image:
   pullPolicy: IfNotPresent
   pullSecrets: []
+  # First-party images (control plane, runtime, test project) default to the chart appVersion, i.e. the release.
   controlPlane:
     repository: ghcr.io/prskr/dark-factory/control-plane
-    tag: '0.1.0'
+    tag: ''
     digest: ''
   runtime:
     repository: ghcr.io/prskr/dark-factory/runtime
-    tag: '0.1.0'
+    tag: ''
     digest: ''
   # Harness images; the control plane mounts the image of a run's harness at /opt/harness/<harness>.
   # The tag is the adapter version of deploy/images/claude-harness (keep it in step with the
@@ -25,7 +26,7 @@ image:
       digest: ''
   testProject:
     repository: ghcr.io/prskr/dark-factory/test-project
-    tag: '0.1.0'
+    tag: ''
     digest: ''
 
 database:

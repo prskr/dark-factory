@@ -27,7 +27,7 @@ use crate::auth::CurrentUser;
 use crate::components::{
     ButtonKind, EmptyPanel, EmptySize, FormErrors, Icon, action_class, icon, logo,
 };
-use crate::layout::{View, workspace_layout};
+use crate::layout::{Shell, View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
 use crate::transcript::{Folder, render_transcript};
@@ -143,6 +143,7 @@ async fn workspace(
     };
     let current = selected.as_ref().map(|s| s.detail.key.as_str());
     let compose = filters.compose_href();
+    let shell = Shell::new(user, state);
     let (title, view) = match &selected {
         Some(s) => (format!("{} {}", s.detail.key, s.detail.title), View::Task),
         None => ("Tasks".to_string(), View::List),
@@ -151,7 +152,7 @@ async fn workspace(
         // `collapsed` (the details column of 1280 px and more) is remembered in this browser.
         div class="ws" ":data-collapsed"="collapsed" "x-on:keydown.escape.window"="details = false"
             x-data="workspace" {
-            (list_column(&items, &projects, filters, current, &user.display_name))
+            (list_column(&items, &projects, filters, current, &shell))
             div id="ws-detail" {
                 @match &selected {
                     Some(s) => (selected_columns(s)),
@@ -172,7 +173,7 @@ async fn workspace(
             }
         }
     };
-    workspace_layout(&title, view, &compose, body).into_response()
+    workspace_layout(&title, view, &compose, &shell, body).into_response()
 }
 
 fn selected_columns(s: &Selected) -> Markup {

@@ -23,16 +23,16 @@ Every key in `values.yaml` is documented below:
 | `image.pullPolicy` | `string` | `"IfNotPresent"` | Image pull policy (`Always`, `IfNotPresent`, `Never`) for control plane, gateway, and migrate pods. |
 | `image.pullSecrets` | `list` | `[]` | List of image pull secret references (`[{ name: "..." }]`). |
 | `image.controlPlane.repository` | `string` | `"ghcr.io/prskr/dark-factory/control-plane"` | OCI repository for the control plane (`dark-factory`) image. |
-| `image.controlPlane.tag` | `string` | `"0.1.0"` | Tag used for the control plane image when `digest` is empty. |
+| `image.controlPlane.tag` | `string` | `""` | Tag used for the control plane image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.controlPlane.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.controlPlane.tag`. |
 | `image.runtime.repository` | `string` | `"ghcr.io/prskr/dark-factory/runtime"` | OCI repository for the `factory-agent` scratch runtime image that sandboxes mount (control plane config `sandbox.runtimeImage`). |
-| `image.runtime.tag` | `string` | `"0.1.0"` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
+| `image.runtime.tag` | `string` | `""` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
 | `image.harness.claudeCode.repository` | `string` | `"ghcr.io/prskr/dark-factory/claude-harness"` | OCI repository of the Claude Code harness image (adapter, Node.js, CLI) that sandboxes mount at `/opt/harness/claude-code`. Rendered as `harness.claudeCode.image`. |
 | `image.harness.claudeCode.tag` | `string` | `"0.95.0"` | Tag of the harness image when `digest` is empty (the adapter version). Required when `digest` is empty; the render fails otherwise. |
 | `image.harness.claudeCode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.claudeCode.tag`. |
 | `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. Create its project with the adapter command `/opt/harness/bin/fake-acp-agent`, so that no harness image is mounted. |
-| `image.testProject.tag` | `string` | `"0.1.0"` | Tag used for the test project image when `digest` is empty. |
+| `image.testProject.tag` | `string` | `""` | Tag used for the test project image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.testProject.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.testProject.tag`. |
 | `database.host` | `string` | `"postgres.default.svc"` | PostgreSQL server hostname. |
 | `database.port` | `int` | `5432` | PostgreSQL server TCP port. |
@@ -225,7 +225,7 @@ Set the new `plugins.forgejo.image.tag` (or `digest`) and run `helm upgrade`. Th
 Clusters without image volume support cannot mount plugin images (no init-container fallback: a `scratch` image has no copy tool). Build a control plane image that contains the component and configure a path:
 
 ```dockerfile
-FROM ghcr.io/prskr/dark-factory/control-plane:0.1.0
+FROM ghcr.io/prskr/dark-factory/control-plane:2026.11.0
 COPY plugin.wasm /custom/forgejo.wasm
 ```
 

@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-99.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-100.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -129,6 +129,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout |
 | TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
+| TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
 
 ## Entries
 
@@ -956,3 +957,15 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 - **At-most-once tool calls:** a crash between the forge call and storing its result loses the result; the call is not repeated (`crates/df-agent-channel/src/tools.rs`, spec `factory-tools`).
 - **Session ends the stream once its run ended:** after a `RunReport` a relevant notification closes the stream. The runtime sends `RunReport` last (`crates/factory-agent/src/runner.rs`), it is acked before the effects run, and in-flight handlers are drained, so nothing is lost.
 - **`Assign` may differ on reconnect:** `continuation.summary` is rebuilt from the transcript on every connect. The runtime uses only the first `Assign` per `run_id` (`CommandFilter`, `crates/factory-agent/src/connection.rs`).
+
+Origin of TD-99: implementation of `release-versioning` (2026-11-03).
+
+### TD-99 (release-versioning). Chart default values reference the test project image
+
+`deploy/helm/dark-factory/values.yaml` (`image.testProject`), `templates/_helpers.tpl` (`dark-factory.testProject.image`)
+
+The chart defaults carry `image.testProject` (`ghcr.io/prskr/dark-factory/test-project`), an image with the scripted `fake-acp-agent` that only demos and tests use. No template renders it today, but every release pushes it and every default install advertises it. Since the release the tag follows `appVersion` like the other first-party images.
+
+**Matters when:** a user reads the defaults as a list of what an installation needs, or someone relies on the helper without an owner.
+
+**Fix:** decide whether the test project is a chart value at all. Either move it to `values-dev.yaml`/`values-e2e.yaml` and drop the helper and schema entry, or keep it and use it in a template.

@@ -13,7 +13,7 @@ use futures::StreamExt;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::layout::{Nav, layout};
+use crate::layout::{Nav, Shell, layout};
 
 mod allow;
 mod context;
@@ -39,7 +39,11 @@ pub(super) use viewer::Viewer;
 /// Events sent to the browser in one message while a backlog is being replayed.
 const CHUNK: usize = 200;
 
-pub(super) async fn page(State(state): State<WebState>, Query(filter): Query<Filter>) -> Response {
+pub(super) async fn page(
+    State(state): State<WebState>,
+    shell: Shell,
+    Query(filter): Query<Filter>,
+) -> Response {
     let Some(flows) = &state.flows else {
         return crate::auth::error_page(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -61,6 +65,7 @@ pub(super) async fn page(State(state): State<WebState>, Query(filter): Query<Fil
     layout(
         "Network traffic",
         Nav::EgressLog,
+        &shell,
         page::page_body(&filter, &personas, &backlog),
     )
     .into_response()

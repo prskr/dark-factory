@@ -1,6 +1,7 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("//build:with_version.bzl", "with_version_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -24,6 +25,9 @@ _FULL = _SLIM + [
 
 _TEST = _FULL + ["test-util"]
 
+# `DF_VERSION` for `option_env!` in lib.rs (flag `//build:version`).
+_VERSION_ENV = ["//build:version_env"]
+
 rust_library(
     name = "df_telemetry",
     srcs = glob(["src/**/*.rs"]),
@@ -33,6 +37,7 @@ rust_library(
     edition = "2024",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env_files = _VERSION_ENV,
     deps = all_crate_deps(normal = True),
 )
 
@@ -47,6 +52,7 @@ rust_library(
     edition = "2024",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env_files = _VERSION_ENV,
     deps = all_crate_deps(normal = True),
 )
 
@@ -67,6 +73,7 @@ _SLIM_DEPS = [
         crate_name = "df_telemetry",
         edition = "2024",
         lint_config = ":lints",
+        rustc_env_files = _VERSION_ENV,
         deps = _SLIM_DEPS,
     )
     for name, features in {
@@ -106,3 +113,35 @@ rust_test(
         normal_dev = True,
     ) + [":df_telemetry"],
 )
+
+# Pass with and without `--//build:version=…`: compare `VERSION` with the flag's env file. The
+# slim library is the one the shipped `factory-agent` links. The `stamped_*` wrappers build the
+# test through a transition with `//build:version=2026.11.0` (whatever the command line sets); it
+# must report `2026.11.0`, which proves the `rustc_env_files` wiring.
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/version.rs"],
+        data = _VERSION_ENV,
+        edition = "2024",
+        env = {"DF_VERSION_ENV_FILE": "$(rootpath //build:version_env)"},
+        lint_config = ":lints",
+        deps = all_crate_deps(normal_dev = True) + [lib],
+    )
+    for name, lib in {
+        "version_test": ":df_telemetry",
+        "version_slim_test": ":df_telemetry_slim",
+    }.items()
+]
+
+[
+    with_version_test(
+        name = "stamped_" + name,
+        test = ":" + name,
+        version = "2026.11.0",
+    )
+    for name in [
+        "version_test",
+        "version_slim_test",
+    ]
+]

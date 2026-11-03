@@ -1101,11 +1101,15 @@ async fn the_projects_page_has_the_profile_menu_for_phones() {
             && html.contains("hx-post=\"/logout\""),
         "{html}"
     );
-    // Only the screens of the phone navigation have it.
-    assert!(
-        !text(app.get("/personas", &cookie).await)
+    // The rail has the menu on every page; only the screens of the phone navigation add the
+    // header copy (hidden from 768 px).
+    assert_eq!(html.matches("Account menu of Peter").count(), 2);
+    assert_eq!(
+        text(app.get("/personas", &cookie).await)
             .await
-            .contains("Account menu")
+            .matches("Account menu of Peter")
+            .count(),
+        1
     );
 }
 
@@ -1440,4 +1444,12 @@ async fn a_tracker_on_the_host_of_an_unserved_repository_shows_the_issue_icon() 
     )
     .await;
     assert!(html[html.find("#issue-forge").unwrap()..].contains("data-forge=\"issue\""));
+}
+
+#[tokio::test]
+async fn the_rail_menu_shows_the_version_of_the_instance() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let html = text(app.get("/tasks", &cookie).await).await;
+    assert!(html.contains("Dark Factory 2026.11.0"), "{html}");
 }

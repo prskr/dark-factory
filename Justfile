@@ -151,4 +151,4 @@ release-test:
 
 # Push the release images to ghcr.io/prskr/dark-factory (log in with `docker login ghcr.io` first)
 release-push TAG="dev":
-    bazel run --//deploy:image_tag={{TAG}} //deploy:push_images
+    bazel run --//build:version={{TAG}} //deploy:push_images

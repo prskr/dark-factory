@@ -31,7 +31,10 @@ Standard `OTEL_*` variables; Helm renders them from `telemetry.*` (see `deploy/h
 | `OTEL_RESOURCE_ATTRIBUTES` | no | none | Extra resource attributes. |
 
 Every metric and span carries the resource attributes `service.name`, `service.version` and
-`service.instance.id` (pod name, else host name).
+`service.instance.id` (pod name, else host name). `service.version` is the release version the binary was built
+with, `dev` for unstamped builds. Build-time variable `DF_VERSION` (optional, default `dev`; an empty value also
+gives `dev`): Bazel sets it from `--//build:version=<version>`, plain cargo with `DF_VERSION=<version> cargo build`.
+`OTEL_RESOURCE_ATTRIBUTES=service.version=…` overrides it.
 
 Export failures never affect the component; the SDK logs them at ERROR once per export interval. On shutdown
 pending exports are flushed within the shutdown grace period (30 s) counted from the signal: what the

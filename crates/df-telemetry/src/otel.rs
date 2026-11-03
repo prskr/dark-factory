@@ -463,7 +463,7 @@ fn resource(settings: &Settings, instance_id: &str, from_env: &Resource) -> Reso
     let builder = Resource::builder_empty()
         .with_attributes([
             KeyValue::new("service.name", settings.component_name),
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+            KeyValue::new("service.version", crate::VERSION),
             KeyValue::new("service.instance.id", instance_id.to_string()),
         ])
         .with_attributes(copy(from_env));
@@ -670,10 +670,7 @@ mod tests {
             Some("dark-factory-gateway")
         );
         assert_eq!(get(&r, "service.instance.id").as_deref(), Some("pod-1"));
-        assert_eq!(
-            get(&r, "service.version").as_deref(),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
+        assert_eq!(get(&r, "service.version").as_deref(), Some(crate::VERSION));
         Ok(())
     }
 
@@ -685,6 +682,13 @@ mod tests {
         );
         assert_eq!(get(&r, "service.name").as_deref(), Some("custom"));
         assert_eq!(get(&r, "service.instance.id").as_deref(), Some("pod-7"));
+        Ok(())
+    }
+
+    #[test]
+    fn resource_attributes_override_the_built_in_service_version() -> Result<()> {
+        let r = attrs(&settings(&[])?, &[("service.version", "custom")]);
+        assert_eq!(get(&r, "service.version").as_deref(), Some("custom"));
         Ok(())
     }
 
