@@ -112,7 +112,7 @@ bazel --bazelrc=.bazelrc.agents test //...
 
 ### Lint and hooks
 
-`lefthook.yml` defines the checks: pre-commit runs rustfmt (via Bazel), `kingfisher`, `buildifier`, `shellcheck`, `buf format`, `hadolint`, `typos`, `cargo-machete` and the Helm lint/unit tests; pre-push runs `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Make sure clippy has no warnings and `cargo-machete` finds no unused dependencies before you finish. The pinned tool versions come from Bazel (`docs/development.md`, "Pinned linters").
+`lefthook.yml` defines the checks: pre-commit runs rustfmt (via Bazel), `kingfisher`, `buildifier`, `shellcheck`, `buf format`, `hadolint`, `typos`, `cargo-machete`, the Helm lint/unit tests and, for changes under `openspec/`, `openspec validate --all --strict` (the same command and version as the `OpenSpec` workflow); pre-push runs `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Make sure clippy has no warnings and `cargo-machete` finds no unused dependencies before you finish. The pinned tool versions come from Bazel (`docs/development.md`, "Pinned linters").
 
 ## Search of files and binaries
 
