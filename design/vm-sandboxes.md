@@ -1,6 +1,6 @@
 # VM Sandboxes
 
-> Design for running agent sandboxes as full VMs next to the Kubernetes provider: Proxmox in-tree as the first provider, cloud providers (Hetzner Cloud, Scaleway, OVH, …) later as WASI plugins. VMs join the factory through a WireGuard tunnel to a userspace relay (the **vpn-gateway**) and then obey the same egress gateway, identity and mTLS rules as Kubernetes sandboxes. Decision: [ADR-0054](../docs/adr/0054-vm-sandboxes-wireguard-relay-proxmox-in-tree.md). Origin: handoff in issue #60. Status: **designed, not planned** — the prerequisites and their order are in the roadmap backlog (§16).
+> Design for running agent sandboxes as full VMs next to the Kubernetes provider: Proxmox in-tree as the first provider, cloud providers (Hetzner Cloud, Scaleway, OVH, …) later as WASI plugins. VMs join the factory through a WireGuard tunnel to a userspace relay (the **vpn-gateway**) and then obey the same egress gateway, identity and mTLS rules as Kubernetes sandboxes. Decision: [ADR-0054](../docs/adr/0054-vm-sandboxes-wireguard-relay-proxmox-in-tree.md). Replaces the handoff in issue #60. Status: **designed, not planned** — the prerequisites and their order are in the roadmap backlog (§16).
 
 ## 1. Motivation and scope
 
@@ -109,6 +109,7 @@ sequenceDiagram
 
 ### 5.1 Tunnel
 - **In the VM:** kernel WireGuard `wg0`, configured by `df-bootstrap` (root), never by the runtime. One peer, the vpn-gateway, with `AllowedIPs = 0.0.0.0/0, ::/0`, the run's tunnel /32, an explicit MTU and `PersistentKeepalive`. The VM's own UDP flow to the endpoint stays outside the tunnel (explicit route). Agent subprocesses (git, cargo, npm, sibling containers) use the tunnel as a normal interface.
+- **MTU:** WireGuard overhead lowers the effective MTU. `df-bootstrap` sets it explicitly on `wg0` and in the pasta configuration of the rootless pod, so TLS handshakes don't stall on fragmentation.
 - **In the vpn-gateway:** userspace WireGuard (boringtun) with a userspace TCP/IP stack (smoltcp or similar; `onetun` is prior art). One peer per run with `AllowedIPs = <tunnel /32>`, so cryptokey routing drops spoofed sources before the TCP stack sees them.
 
 ### 5.2 Relay
@@ -206,13 +207,16 @@ The control plane renders the same Pod as for Kubernetes (plain-Pod change, `ope
 
 Proxy variables and DNS are set explicitly; rootless networking (pasta) egresses through the host routing table, i.e. `wg0`.
 
-### 7.3 Agent-launched containers
+### 7.3 Time
+TLS and certificate renewal need a correct clock, and the VM has no NTP path. On Proxmox the guest syncs from the hypervisor clock without network access (`ptp_kvm` as a chrony reference clock; to verify on the template). Cloud plugins need an NTP source through the gateway or an allowlisted NTP host; deferred to the Hetzner ADR.
+
+### 7.4 Agent-launched containers
 - The sandbox user's rootless Podman socket is mounted into the harness container; the agent starts sibling containers instead of nesting Podman. Siblings join the pod network namespace or get the same proxy and DNS settings; bind-mount paths are identical inside and outside.
 - Allowed because the VM, not the container, is the security boundary (amends ADR-0023 for VM sandboxes only).
 - Any image from a registry on the run's egress allowlist may be pulled; there is no separate image allowlist for siblings. Every pull passes the egress proxy and its live log.
 - The seccomp profile from `containers.conf` applies to siblings too.
 
-### 7.4 Hardening
+### 7.5 Hardening
 
 | Layer | Measure | First version |
 |---|---|---|
@@ -362,7 +366,10 @@ Hetzner specifics, deferred to the Hetzner ADR:
 - **Firewall gaps:** the metadata server, the Hetzner DNS resolver and rescue traffic always pass the Cloud Firewall, and private networks are not covered. Mitigation: guest nftables drops `169.254.169.254` and DNS except the relay; no private networks attached; the firewall is bound by label and verified per server. User-data stays readable through the metadata server, which enrollment makes harmless (§6.1).
 - **Endpoint direction:** inbound UDP at home (default) or the vpn-gateway dialing the VM's public address.
 - **Hairpin:** every byte goes cloud VM → home uplink → egress proxy → internet and back. Mitigations in rising complexity: pre-pulled image layers in the snapshot, pull-through caches, a second gateway in the cloud.
+- **Traffic over the home uplink:** image pulls (often several GB), package installs, clones and model API calls cross the uplink twice; every request adds a round trip to the homelab; an uplink outage stops all cloud sandboxes (fail closed, by design).
+- **Credentials:** the Hetzner API token belongs to a dedicated project, so a stolen token reaches nothing else.
 - **Data residency:** repository contents live at the provider; not suitable for repositories that must not leave the homelab.
+- **To verify:** outbound Cloud Firewall rules that allow only the vpn-gateway UDP endpoint block everything else apart from the documented exceptions ([Hetzner Cloud Firewalls FAQ](https://docs.hetzner.com/cloud/firewalls/faq/)).
 
 ## 12. Alignment with the existing design
 
@@ -429,3 +436,10 @@ To verify (Proxmox facts from search results or unverified knowledge; pve.proxmo
 - Linked-clone storage requirements and clones across nodes from a template on shared storage.
 - Native sidecars (init containers with `restartPolicy: Always`) under `podman kube play`.
 - boringtun + userspace TCP/IP stack throughput at expected agent load.
+- Guest clock sync through `ptp_kvm` on the template (§7.3).
+
+## 17. Sources
+- Issue #60: original handoff (WireGuard relay, Enroll RPC, Podman pods, Hetzner and Proxmox comparison).
+- [podman-kube-play](https://docs.podman.io/en/stable/markdown/podman-kube-play.1.html): supported volume types, image volumes rootful only, `userns` annotation, ignored seccomp fields.
+- [Hetzner Cloud Firewalls FAQ](https://docs.hetzner.com/cloud/firewalls/faq/): outbound default deny, metadata, DNS resolver and private network exceptions.
+- Proxmox VE: snippet upload not in the storage upload API ([forum feature request](https://forum.proxmox.com/threads/feature-request-expand-the-storage-upload-api-to-support-snippets.185204/)); disk reassign between VMs on one node ([pve-devel](https://lists.proxmox.com/pipermail/pve-devel/2021-October/050491.html)); VM firewall needs the datacenter firewall ([forum](https://forum.proxmox.com/threads/enabling-datacenter-firewall-blocks-dns-ping-outbound-traffic.150778/)); no native pool resource limits ([pve-devel](https://lists.proxmox.com/pipermail/pve-devel/2024-April/063013.html)).
