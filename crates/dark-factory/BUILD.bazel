@@ -32,6 +32,32 @@ rust_binary(
     ],
 )
 
+# The Cargo feature `dev-tools` (development flags such as `--unrestricted-project-subscriptions`)
+# for the control plane image of the e2e cluster only (//deploy:load_e2e_control_plane). Never
+# pushed: the release image is built from `:dark-factory`.
+rust_binary(
+    name = "dark-factory-dev",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_features = ["dev-tools"],
+    crate_name = "dark_factory",
+    crate_root = "src/main.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-agent-channel:df_agent_channel",
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-gateway:df_gateway",
+        "//crates/df-k8s:df_k8s",
+        "//crates/df-plugins:df_plugins",
+        "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry",
+        "//crates/df-web:df_web",
+    ],
+)
+
 # Rebuilt from source (instead of `crate = ":dark-factory"`) so that the tests can use the
 # `test-util` variant of `df-agent-channel` without the binary linking it.
 rust_test(

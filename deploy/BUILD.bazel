@@ -33,6 +33,12 @@ optimized(
     src = "//crates/dark-factory",
 )
 
+# `dev-tools` build for the e2e cluster only (load_e2e_control_plane); never pushed.
+optimized(
+    name = "dark_factory_dev",
+    src = "//crates/dark-factory:dark-factory-dev",
+)
+
 optimized(
     name = "factory_agent",
     src = "//crates/factory-agent",
@@ -59,6 +65,24 @@ image_manifest(
     base = "@distroless_static_debian13_nonroot",
     entrypoint = ["/dark-factory"],
     layers = [":control_plane_layer"],
+)
+
+image_layer(
+    name = "control_plane_dev_layer",
+    srcs = {
+        "/dark-factory": ":dark_factory_dev",
+    },
+    file_metadata = {
+        "/dark-factory": file_metadata(mode = "0755"),
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "control_plane_dev_manifest",
+    base = "@distroless_static_debian13_nonroot",
+    entrypoint = ["/dark-factory"],
+    layers = [":control_plane_dev_layer"],
 )
 
 image_index(
@@ -306,7 +330,8 @@ multi_deploy(
 # --@rules_img//img/settings:load_daemon=tar //deploy:load_e2e_<name>` writes an image tarball to
 # stdout for `kind load image-archive`. The manifest, not the multi-arch index: the tarball holds
 # one platform, and the node's import rejects an index that references missing manifests. The tag
-# is the one of deploy/values-e2e.yaml.
+# is the one of deploy/values-e2e.yaml. The control plane is the `dev-tools` build, so the e2e
+# values can pass development flags (`controlPlane.extraArgs`).
 [
     image_load(
         name = "load_e2e_" + name,
@@ -314,7 +339,7 @@ multi_deploy(
         tag = "ghcr.io/prskr/dark-factory/%s:e2e" % repository,
     )
     for name, image, repository in [
-        ("control_plane", "control_plane", "control-plane"),
+        ("control_plane", "control_plane_dev", "control-plane"),
         ("runtime", "runtime", "runtime"),
         ("test_project", "test_project", "test-project"),
         ("plugin_forgejo", "plugin_forgejo", "plugin-forgejo"),

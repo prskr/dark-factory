@@ -119,6 +119,8 @@ Alternative: resolve, check, then connect by IP. That breaks TLS SNI and certifi
 
 Address classification uses `std::net` (`is_private`, `is_loopback`, `is_link_local`, `is_unique_local`, `to_ipv4_mapped`, …), plus one CIDR check for CGNAT.
 
+**Development switch:** a control plane built with the Cargo feature `dev-tools` accepts `--unrestricted-project-subscriptions`. It sends project subscriptions through the unfiltered client and lets the form accept `http://` and internal addresses; the subscription page and the startup log show a warning. Release builds don't have the flag. The e2e cluster runs a `dev-tools` image (`//deploy:load_e2e_control_plane`, never pushed) with the flag in `controlPlane.extraArgs`, so its project subscription reaches a plain-http receiver in the cluster.
+
 ### D5: Signing
 
 **Loading the key:** at startup the control plane reads `lifecycleEvents.signingKeyFile` (PEM, PKCS#8). cert-manager writes PKCS#8 v1 `PRIVATE KEY`, so the key is loaded with `ring::signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked`.
