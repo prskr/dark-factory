@@ -6,8 +6,8 @@
 A destination that is no project host SHALL show the glyph of a known provider when its host is the provider's domain or a subdomain of it, the provider's letter monogram when the provider has no glyph, the server icon for an IP literal and the generic globe otherwise. Glyphs SHALL be served by the control plane.
 
 #### Scenario: Known providers
-- **WHEN** a sandbox connects to a host of `github.com`, `githubusercontent.com`, `anthropic.com`, `npmjs.org`, `golang.org`, `pypi.org`, `pythonhosted.org` or `googleapis.com`
-- **THEN** the destination shows the glyph of GitHub, GitHub, Anthropic, npm, Go, Python, Python or Google respectively
+- **WHEN** a sandbox connects to a host of `github.com`, `githubusercontent.com`, `ghcr.io`, `github.io`, `anthropic.com`, `npmjs.org`, `golang.org`, `go.dev`, `goproxy.io`, `pypi.org`, `pythonhosted.org`, `googleapis.com`, `google.com`, `gcr.io`, `pkg.dev`, `bazel.build`, `k8s.io`, `kubernetes.io`, `helm.sh`, `nodejs.org`, `rust-lang.org`, `crates.io`, `gitlab.com`, `codeberg.org`, `amazonaws.com`, `ecr.aws`, `awsstatic.com`, `aws.amazon.com`, `cloudfront.net`, `debian.org`, `ubuntu.com`, `alpinelinux.org`, `fedoraproject.org`, `redhat.com` or `redhat.io`
+- **THEN** the destination shows the glyph of GitHub, GitHub, GitHub, GitHub, Anthropic, npm, Go, Go, Go, Python, Python, Google, Google, Google, Google, Bazel, Kubernetes, Kubernetes, Helm, Node.js, Rust, Rust, GitLab, Codeberg, AWS, AWS, AWS, AWS, AWS, Debian, Ubuntu, Alpine, Fedora, Red Hat or Red Hat respectively
 
 #### Scenario: Provider with a glyph
 - **WHEN** no project uses `github.com` and a sandbox connects to `api.github.com:443`

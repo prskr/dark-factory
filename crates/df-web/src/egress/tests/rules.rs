@@ -358,12 +358,22 @@ async fn the_rules_page_shows_title_count_and_header_actions() {
 }
 
 #[tokio::test]
+async fn an_api_host_without_a_served_project_shows_the_provider_glyph() {
+    let app = app_with_egress(vec![]).await;
+    let cookie = app.login().await;
+    add_host(&app, &cookie, "", "api.github.com", "443").await;
+    let page = text(app.get("/egress/allowlist", &cookie).await).await;
+    let row = row_of(&page, ">api.github.com<");
+    assert!(row.contains("data-host-icon=\"brand-github\""), "{row}");
+}
+
+#[tokio::test]
 async fn rule_rows_show_icon_port_scope_and_a_named_delete_button() {
     let app = app_with_egress(vec![]).await;
     seed(&app.pool).await;
     let cookie = app.login().await;
     add_host(&app, &cookie, "", "github.com", "443").await;
-    add_host(&app, &cookie, "DF", "ghcr.io", "443").await;
+    add_host(&app, &cookie, "DF", "example.org", "443").await;
     app.post(
         "/egress/allowlist/service",
         &form(&[
@@ -380,12 +390,14 @@ async fn rule_rows_show_icon_port_scope_and_a_named_delete_button() {
         github.contains(">443<") && github.contains(">Everywhere<"),
         "{github}"
     );
-    let github_row = &page[..page.find(">github.com<").unwrap()];
-    assert!(github_row.rfind("data-host-icon=\"GH\"").is_some());
-    let ghcr = &page[page.find(">ghcr.io<").unwrap() - 600..page.find(">ghcr.io<").unwrap()];
-    assert!(ghcr.contains("data-host-icon=\"globe\""), "{ghcr}");
     assert!(
-        row_of(&page, ">ghcr.io<").contains(">Project DF<"),
+        github.contains("data-host-icon=\"brand-github\""),
+        "{github}"
+    );
+    let unknown = row_of(&page, ">example.org<");
+    assert!(unknown.contains("data-host-icon=\"globe\""), "{unknown}");
+    assert!(
+        row_of(&page, ">example.org<").contains(">Project DF<"),
         "project scope"
     );
     assert!(page.contains(">nativelink/scheduler<"), "{page}");

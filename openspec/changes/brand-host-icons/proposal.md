@@ -6,7 +6,7 @@ Egress destinations of well-known providers show letter badges (`GH`, `A`, `Py`)
 
 ## What Changes
 
-- Known providers get an SVG brand glyph (GitHub Octocat, Anthropic, npm, Go, Python, Google) inside the existing tone tile. The letter monogram stays as the fallback for a provider without a glyph; the server icon and the globe stay last.
+- Known providers get an SVG brand glyph (GitHub Octocat, Anthropic, npm, Go, Python, Google, Bazel, Kubernetes, Helm, Node.js, Rust, GitLab, Codeberg, AWS, Debian, Ubuntu, Alpine, Fedora, Red Hat) inside the existing tone tile. The letter monogram stays as the fallback for a provider without a glyph; the server icon and the globe stay last.
 - The host of a forge route's `apiUrl` gets the forge role of the projects served through that route, like their repository host. `api.github.com` of a served GitHub project then shows the GitHub forge icon instead of the provider badge.
 - Precedence becomes: project host role (repository, forge API, issue tracker) → brand glyph → brand monogram → server icon (IP literal) → globe.
 - **BREAKING (UI only):** the scenario "`api.github.com` keeps the `GH` monogram" no longer holds; unit tests on `data-host-icon="GH"` and other monograms change.
@@ -24,10 +24,10 @@ None.
 
 ## Impact
 
-- `crates/df-web/src/components/host_icon.rs` (`BRANDS`, `host_icon`), `components/icons.rs` (new brand glyphs), `components/project_host.rs` (`ProjectHosts::from_projects`).
+- `crates/df-web/src/components/brands.json` (new: the provider table with glyph path data), `host_icon.rs` (loads it, `host_icon`), `components/icons.rs` (GitHub forge icon reads the table), `components/project_host.rs` (`ProjectHosts::from_projects`).
 - `crates/df-core/src/routing.rs`: `ForgeRoutes` exposes the API host of the route that serves a repository URL.
 - Unit tests in `df-web` (`egress/tests/icons.rs`, `host_icon.rs`, allowlist page tests).
-- No new dependencies; glyphs are inlined SVG paths (no third-party hosts, `web-ui-shell` "self-hosted assets").
+- No new dependencies (`serde_json` is already a df-web dependency); glyphs are embedded SVG path data (no third-party hosts, `web-ui-shell` "self-hosted assets").
 
 Out of scope:
 
