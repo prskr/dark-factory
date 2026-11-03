@@ -156,7 +156,7 @@ Function length:
 
 Lint attributes:
 
-- `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, kopium output, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
+- `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
 - `clippy::pedantic` is enabled. The workspace allows `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc`, `assert_is_empty`, `needless_pass_by_value`, `similar_names` and `struct_excessive_bools`, each with a reason in the root `Cargo.toml`.
 
 ## Adding a crate

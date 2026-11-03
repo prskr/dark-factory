@@ -1,4 +1,4 @@
-//! Pure functions rendering Kubernetes PVCs, agent-sandbox Sandboxes, and `NetworkPolicies`.
+//! Pure functions rendering Kubernetes PVCs, run Pods, and `NetworkPolicies`.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -6,7 +6,10 @@ use std::net::IpAddr;
 use df_core::seams::RunSandboxSpec;
 use df_core::{RunId, TaskKey, TaskVolumeSpec};
 use k8s_openapi::api::core::v1::{
-    PersistentVolumeClaim, PersistentVolumeClaimSpec, VolumeResourceRequirements,
+    CSIVolumeSource, Capabilities, Container, EmptyDirVolumeSource, EnvVar, HostAlias,
+    ImageVolumeSource, PersistentVolumeClaim, PersistentVolumeClaimSpec,
+    PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, SeccompProfile,
+    SecurityContext, Volume, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::api::networking::v1::{
     IPBlock, NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyPeer, NetworkPolicyPort,
@@ -18,17 +21,6 @@ use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use thiserror::Error;
 
 use crate::config::ProvisioningConfig;
-use crate::crd::{
-    Sandbox, SandboxOperatingMode, SandboxPodTemplate, SandboxPodTemplateMetadata,
-    SandboxPodTemplateSpec, SandboxPodTemplateSpecContainers, SandboxPodTemplateSpecContainersEnv,
-    SandboxPodTemplateSpecContainersSecurityContext,
-    SandboxPodTemplateSpecContainersSecurityContextCapabilities,
-    SandboxPodTemplateSpecContainersVolumeMounts, SandboxPodTemplateSpecHostAliases,
-    SandboxPodTemplateSpecSecurityContext, SandboxPodTemplateSpecSecurityContextSeccompProfile,
-    SandboxPodTemplateSpecVolumes, SandboxPodTemplateSpecVolumesCsi,
-    SandboxPodTemplateSpecVolumesEmptyDir, SandboxPodTemplateSpecVolumesImage,
-    SandboxPodTemplateSpecVolumesPersistentVolumeClaim, SandboxShutdownPolicy, SandboxSpec,
-};
 
 /// Errors encountered while rendering resources.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -97,12 +89,12 @@ pub fn render_pvc(task: &TaskVolumeSpec, config: &ProvisioningConfig) -> Persist
     }
 }
 
-/// Renders the agent-sandbox `Sandbox` CRD object for a run.
-pub fn render_sandbox(
+/// Renders the plain `Pod` of a run (`restartPolicy: Never`, no owner).
+pub fn render_pod(
     spec: &RunSandboxSpec,
     cluster_targets: &[ResolvedClusterTarget],
     config: &ProvisioningConfig,
-) -> Result<Sandbox, RenderError> {
+) -> Result<Pod, RenderError> {
     for target in cluster_targets {
         if target.is_headless && !target.allow_dns {
             return Err(RenderError::HeadlessServiceNotAllowed {
@@ -117,21 +109,22 @@ pub fn render_sandbox(
         spec.task_key.to_string().to_lowercase(),
         spec.run_number
     );
-    let labels = sandbox_labels(spec, config);
+    let labels = run_labels(spec, config);
     let (host_aliases, no_proxy_entries) = cluster_target_networking(cluster_targets, config);
     let (volume_mounts, volumes) = agent_volumes(spec, config)?;
 
-    let pod_template_spec = SandboxPodTemplateSpec {
+    let pod_spec = PodSpec {
+        restart_policy: Some("Never".to_string()),
         runtime_class_name: config.sandbox.runtime_class_name.clone(),
         automount_service_account_token: Some(false),
         service_account_name: Some(config.sandbox.service_account_name.clone()),
-        security_context: Some(SandboxPodTemplateSpecSecurityContext {
+        security_context: Some(PodSecurityContext {
             run_as_non_root: Some(true),
             run_as_user: Some(1000),
             run_as_group: Some(1000),
             fs_group: Some(1000),
-            seccomp_profile: Some(SandboxPodTemplateSpecSecurityContextSeccompProfile {
-                r#type: "RuntimeDefault".to_string(),
+            seccomp_profile: Some(SeccompProfile {
+                type_: "RuntimeDefault".to_string(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -146,31 +139,20 @@ pub fn render_sandbox(
         ..Default::default()
     };
 
-    Ok(Sandbox {
+    Ok(Pod {
         metadata: ObjectMeta {
             name: Some(name),
             namespace: Some(config.sandbox.namespace.clone()),
-            labels: Some(labels.clone()),
+            labels: Some(labels),
             ..Default::default()
         },
-        spec: SandboxSpec {
-            operating_mode: Some(SandboxOperatingMode::Running),
-            shutdown_policy: Some(SandboxShutdownPolicy::Retain),
-            pod_template: SandboxPodTemplate {
-                metadata: Some(SandboxPodTemplateMetadata {
-                    labels: Some(labels),
-                    ..Default::default()
-                }),
-                spec: pod_template_spec,
-            },
-            ..Default::default()
-        },
+        spec: Some(pod_spec),
         status: None,
     })
 }
 
-/// Labels of the Sandbox and its pod: the user labels plus the reserved system labels.
-fn sandbox_labels(spec: &RunSandboxSpec, config: &ProvisioningConfig) -> BTreeMap<String, String> {
+/// Labels of the run's pod: the user labels plus the reserved system labels.
+fn run_labels(spec: &RunSandboxSpec, config: &ProvisioningConfig) -> BTreeMap<String, String> {
     let mut labels = BTreeMap::new();
     // User labels are merged first so reserved system labels cannot be overridden
     for (k, v) in &spec.labels {
@@ -208,8 +190,8 @@ fn sandbox_labels(spec: &RunSandboxSpec, config: &ProvisioningConfig) -> BTreeMa
 fn cluster_target_networking(
     cluster_targets: &[ResolvedClusterTarget],
     config: &ProvisioningConfig,
-) -> (Vec<SandboxPodTemplateSpecHostAliases>, Vec<String>) {
-    let mut host_aliases = vec![SandboxPodTemplateSpecHostAliases {
+) -> (Vec<HostAlias>, Vec<String>) {
+    let mut host_aliases = vec![HostAlias {
         ip: config.gateway_ip.to_string(),
         hostnames: Some(vec![config.gateway_git_host.clone()]),
     }];
@@ -230,7 +212,7 @@ fn cluster_target_networking(
 
         if let Some(ip) = target.cluster_ip {
             no_proxy_entries.push(ip.to_string());
-            host_aliases.push(SandboxPodTemplateSpecHostAliases {
+            host_aliases.push(HostAlias {
                 ip: ip.to_string(),
                 hostnames: Some(vec![fqdn, short_svc]),
             });
@@ -240,12 +222,9 @@ fn cluster_target_networking(
 }
 
 /// Environment of the agent container: proxy settings, control plane address and logging.
-fn agent_env(
-    config: &ProvisioningConfig,
-    no_proxy: &str,
-) -> Vec<SandboxPodTemplateSpecContainersEnv> {
+fn agent_env(config: &ProvisioningConfig, no_proxy: &str) -> Vec<EnvVar> {
     let proxy_url = format!("http://{}:{}", config.gateway_ip, config.gateway_proxy_port);
-    let var = |name: &str, value: String| SandboxPodTemplateSpecContainersEnv {
+    let var = |name: &str, value: String| EnvVar {
         name: name.to_string(),
         value: Some(value),
         ..Default::default()
@@ -275,20 +254,12 @@ fn agent_env(
 fn agent_volumes(
     spec: &RunSandboxSpec,
     config: &ProvisioningConfig,
-) -> Result<
-    (
-        Vec<SandboxPodTemplateSpecContainersVolumeMounts>,
-        Vec<SandboxPodTemplateSpecVolumes>,
-    ),
-    RenderError,
-> {
-    let mount = |name: &str, path: &str, read_only: Option<bool>| {
-        SandboxPodTemplateSpecContainersVolumeMounts {
-            name: name.to_string(),
-            mount_path: path.to_string(),
-            read_only,
-            ..Default::default()
-        }
+) -> Result<(Vec<VolumeMount>, Vec<Volume>), RenderError> {
+    let mount = |name: &str, path: &str, read_only: Option<bool>| VolumeMount {
+        name: name.to_string(),
+        mount_path: path.to_string(),
+        read_only,
+        ..Default::default()
     };
     let mut volume_mounts = vec![
         mount("factory-runtime", "/opt/factory", Some(true)),
@@ -317,17 +288,17 @@ fn agent_volumes(
     }
 
     volumes.push(tls_volume(config));
-    volumes.push(SandboxPodTemplateSpecVolumes {
+    volumes.push(Volume {
         name: "task-data".to_string(),
-        persistent_volume_claim: Some(SandboxPodTemplateSpecVolumesPersistentVolumeClaim {
+        persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
             claim_name: spec.task_key.volume_name(),
             ..Default::default()
         }),
         ..Default::default()
     });
-    volumes.push(SandboxPodTemplateSpecVolumes {
+    volumes.push(Volume {
         name: "tmpfs".to_string(),
-        empty_dir: Some(SandboxPodTemplateSpecVolumesEmptyDir {
+        empty_dir: Some(EmptyDirVolumeSource {
             medium: Some("Memory".to_string()),
             ..Default::default()
         }),
@@ -337,10 +308,10 @@ fn agent_volumes(
 }
 
 /// A volume that mounts an OCI image.
-fn image_volume(name: String, reference: &str) -> SandboxPodTemplateSpecVolumes {
-    SandboxPodTemplateSpecVolumes {
+fn image_volume(name: String, reference: &str) -> Volume {
+    Volume {
         name,
-        image: Some(SandboxPodTemplateSpecVolumesImage {
+        image: Some(ImageVolumeSource {
             reference: Some(reference.to_string()),
             pull_policy: Some("IfNotPresent".to_string()),
         }),
@@ -349,7 +320,7 @@ fn image_volume(name: String, reference: &str) -> SandboxPodTemplateSpecVolumes 
 }
 
 /// The CSI volume that issues the pod certificate through cert-manager.
-fn tls_volume(config: &ProvisioningConfig) -> SandboxPodTemplateSpecVolumes {
+fn tls_volume(config: &ProvisioningConfig) -> Volume {
     let sandbox = &config.sandbox;
     let csi_attrs = BTreeMap::from([
         (
@@ -377,9 +348,9 @@ fn tls_volume(config: &ProvisioningConfig) -> SandboxPodTemplateSpecVolumes {
             sandbox.certificate_renew_before.clone(),
         ),
     ]);
-    SandboxPodTemplateSpecVolumes {
+    Volume {
         name: "tls".to_string(),
-        csi: Some(SandboxPodTemplateSpecVolumesCsi {
+        csi: Some(CSIVolumeSource {
             driver: "csi.cert-manager.io".to_string(),
             read_only: Some(true),
             volume_attributes: Some(csi_attrs),
@@ -392,10 +363,10 @@ fn tls_volume(config: &ProvisioningConfig) -> SandboxPodTemplateSpecVolumes {
 /// The agent container: unprivileged, all capabilities dropped.
 fn agent_container(
     spec: &RunSandboxSpec,
-    env: Vec<SandboxPodTemplateSpecContainersEnv>,
-    volume_mounts: Vec<SandboxPodTemplateSpecContainersVolumeMounts>,
-) -> SandboxPodTemplateSpecContainers {
-    SandboxPodTemplateSpecContainers {
+    env: Vec<EnvVar>,
+    volume_mounts: Vec<VolumeMount>,
+) -> Container {
+    Container {
         name: "agent".to_string(),
         image: Some(spec.image.clone()),
         command: Some(vec![
@@ -404,34 +375,27 @@ fn agent_container(
         ]),
         env: Some(env),
         volume_mounts: Some(volume_mounts),
-        security_context: Some(SandboxPodTemplateSpecContainersSecurityContext {
+        security_context: Some(SecurityContext {
             allow_privilege_escalation: Some(false),
-            capabilities: Some(
-                SandboxPodTemplateSpecContainersSecurityContextCapabilities {
-                    drop: Some(vec!["ALL".to_string()]),
-                    ..Default::default()
-                },
-            ),
+            capabilities: Some(Capabilities {
+                drop: Some(vec!["ALL".to_string()]),
+                ..Default::default()
+            }),
             ..Default::default()
         }),
         ..Default::default()
     }
 }
 
-/// Renders the per-run `NetworkPolicy` owned by the Sandbox.
+/// Renders the per-run `NetworkPolicy` owned by the Pod `pod_name` with UID `pod_uid`.
 pub fn render_network_policy(
     run_id: RunId,
     task_key: &TaskKey,
-    sandbox: &Sandbox,
+    pod_name: &str,
+    pod_uid: &str,
     cluster_targets: &[ResolvedClusterTarget],
     config: &ProvisioningConfig,
 ) -> NetworkPolicy {
-    let name = sandbox
-        .metadata
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("run-{run_id}"));
-
     let mut labels = BTreeMap::new();
     labels.insert(
         "app.kubernetes.io/managed-by".to_string(),
@@ -444,31 +408,24 @@ pub fn render_network_policy(
     labels.insert("dark-factory.io/run-id".to_string(), run_id.to_string());
     labels.insert("dark-factory.io/task-key".to_string(), task_key.to_string());
 
-    let mut owner_references = Vec::new();
-    if let (Some(sandbox_name), Some(uid)) = (&sandbox.metadata.name, &sandbox.metadata.uid) {
-        owner_references.push(OwnerReference {
-            api_version: "agents.x-k8s.io/v1beta1".to_string(),
-            kind: "Sandbox".to_string(),
-            name: sandbox_name.clone(),
-            uid: uid.clone(),
-            controller: Some(true),
-            block_owner_deletion: Some(true),
-        });
-    }
-
     let mut pod_match_labels = BTreeMap::new();
     pod_match_labels.insert("dark-factory.io/run-id".to_string(), run_id.to_string());
 
     NetworkPolicy {
         metadata: ObjectMeta {
-            name: Some(name),
+            name: Some(pod_name.to_string()),
             namespace: Some(config.sandbox.namespace.clone()),
             labels: Some(labels),
-            owner_references: if owner_references.is_empty() {
-                None
-            } else {
-                Some(owner_references)
-            },
+            // No blockOwnerDeletion: it needs `pods/finalizers` update where
+            // OwnerReferencesPermissionEnforcement is enabled.
+            owner_references: Some(vec![OwnerReference {
+                api_version: "v1".to_string(),
+                kind: "Pod".to_string(),
+                name: pod_name.to_string(),
+                uid: pod_uid.to_string(),
+                controller: Some(true),
+                block_owner_deletion: None,
+            }]),
             ..Default::default()
         },
         spec: Some(NetworkPolicySpec {

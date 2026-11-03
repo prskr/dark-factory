@@ -86,7 +86,7 @@ pub enum ProviderError {
     Backend(String),
 }
 
-/// Abstracts sandbox and task volume provisioning (Kubernetes `agent-sandbox` in production).
+/// Abstracts sandbox and task volume provisioning (one plain Kubernetes Pod per run in production).
 #[async_trait]
 pub trait SandboxProvider: Send + Sync {
     async fn ensure_task_volume(&self, task: &TaskVolumeSpec) -> Result<(), ProviderError>;

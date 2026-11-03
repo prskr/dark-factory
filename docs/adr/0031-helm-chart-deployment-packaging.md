@@ -13,7 +13,7 @@ An instance consists of two Deployments, a migrate Job, ServiceAccounts, Roles i
 - Dark Factory ships a Helm chart; one release is one instance.
 - The chart contains the control plane and gateway Deployments, Services, the `migrate` Job as a pre-install/pre-upgrade hook, ServiceAccounts, Roles/RoleBindings in the instance and sandbox namespaces, the sandbox namespace itself (optional — or a reference to an existing one) with Pod Security labels, default-deny policy and quotas, cert-manager Issuer/Certificates, and the instance's network policies.
 - Cluster-scoped objects are only created where enabled and are prefixed with the release name.
-- Prerequisites stay outside the chart: agent-sandbox, cert-manager and csi-driver, the CNI, PostgreSQL, the OIDC provider.
+- Prerequisites stay outside the chart: cert-manager and csi-driver, the CNI, PostgreSQL, the OIDC provider.
 - The dev loop uses the same chart (ADR-0024).
 
 ## Consequences

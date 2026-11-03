@@ -8,7 +8,7 @@
 |---|---|
 | **Task** | Unit of delegated work, linked to at most one issue (an issue can have many tasks). Owns a task branch, a PVC and one transcript shared by all its runs. Identified by a per-project key, e.g. `DF-42`. Tasks form a tree (optional parent, any depth, ADR-0034); the parent is also the escalation target (ADR-0043). A task has a kind: `work` (default) or `chat` (ADR-0043: no task branch, no PR). Every task has a persona. |
 | **Run** | One execution of an agent on a task inside one sandbox. A task has 1..n runs, strictly sequential. A run ends when the agent finishes, asks a question or requests approval, hits a limit, or fails. |
-| **Sandbox** | An agent-sandbox `Sandbox` (one pod) hosting exactly one run. Always cold-started; no warm pools. |
+| **Sandbox** | A plain Kubernetes `Pod` (`restartPolicy: Never`) hosting exactly one run. Always cold-started; no warm pools. |
 | **Runtime** | The Rust agent binary, mounted into the sandbox via an image volume. |
 | **Harness image** | Image volume with the harness (adapter, Node.js, CLI) mounted at `/opt/harness/<harness>`; the project image needs no Node.js. |
 | **Harness** | What drives the model: an external agent via ACP (e.g. Claude Code) or the runtime's built-in loop (full-harness mode). |
@@ -84,11 +84,11 @@ The control plane's authorization decision is always: *sandbox identity → boun
 Paths and `HOME` stay identical across runs so absolute symlinks (e.g. Bazel convenience symlinks into the output base) remain valid.
 
 ### 5.3 Sandbox creation
-- The control plane creates a `Sandbox` per run with: the project's image, the runtime image volume at `/opt/factory`, the image volume of the run's harness at `/opt/harness/<harness>` (unless the project sets an adapter command, ADR-0022), the csi-driver certificate volume, the task PVC at `/data`, a tmpfs at `/run/factory`, the configured runtime class (Kata in the homelab), resources, and run/persona labels for network policy selection.
-- Network wiring (details in [`egress.md`](egress.md) §5): `HTTP(S)_PROXY` with the gateway's ClusterIP, `NO_PROXY` and `hostAliases` for cluster targets, the control plane endpoint as an IP — no DNS needed. A generated `NetworkPolicy` (or `CiliumNetworkPolicy`) owned by the Sandbox is created alongside.
+- The control plane creates a `Pod` per run with: the project's image, the runtime image volume at `/opt/factory`, the image volume of the run's harness at `/opt/harness/<harness>` (unless the project sets an adapter command, ADR-0022), the csi-driver certificate volume, the task PVC at `/data`, a tmpfs at `/run/factory`, the configured runtime class (Kata in the homelab), resources, and run/persona labels for network policy selection.
+- Network wiring (details in [`egress.md`](egress.md) §5): `HTTP(S)_PROXY` with the gateway's ClusterIP, `NO_PROXY` and `hostAliases` for cluster targets, the control plane endpoint as an IP — no DNS needed. A generated `NetworkPolicy` (or `CiliumNetworkPolicy`) owned by the Pod is created alongside.
 - Entrypoint: `/opt/factory/factory-agent run`. The project image only needs git and a shell; the harness image brings the adapter and its runtime (glibc, Alpine and distroless project images work, ADR-0022).
 - No warm pools: every run cold-starts. Throughput comes from concurrent tasks, not start-up time.
-- After the run, the control plane deletes the Sandbox; the PVC stays. While a run waits for an answer to a blocking question, the sandbox stays alive for a short keep-alive window (§6.4).
+- After the run, the control plane deletes the Pod; the PVC stays. A pod that ends on its own (container exit without a run report) is reported as gone and the run fails as `sandbox_lost`. While a run waits for an answer to a blocking question, the sandbox stays alive for a short keep-alive window (§6.4).
 
 ### 5.4 Isolation
 - Runtime class configurable per instance/project; Kata Containers in the homelab.
@@ -482,7 +482,7 @@ Script snippets the runtime executes at fixed points of a run, defined in Dark F
 ## 15. Future option: sidecar services
 Service containers that run next to the agent in the sandbox pod — e.g. a PostgreSQL the agent develops against — defined in Dark Factory per project, so the agent never needs to provision containers itself (no nested containers, ADR-0023).
 
-- **Mechanism:** extra containers in the `Sandbox` pod template, as Kubernetes native sidecars (init containers with `restartPolicy: Always`). They start before the agent container, a startup or readiness probe gates the start of the runtime, and they stop with the pod at the end of the run.
+- **Mechanism:** extra containers in the run's Pod spec (`render_pod`), as Kubernetes native sidecars (init containers with `restartPolicy: Always`). They start before the agent container, a startup or readiness probe gates the start of the runtime, and they stop with the pod at the end of the run.
 - **Reachability:** containers of a pod share the network namespace, so the agent reaches a sidecar at `localhost:<port>`. That traffic never leaves the pod: no allowlist entry, no network policy, no proxy. The control plane lists the configured sidecars (name, ports, purpose) in the run's instructions so the agent knows they exist.
 - **Definition (project scope, humans only):** name, image, ports, env, resources, probe, data mode. Images come from the project configuration like the sandbox image (ADR-0022); agents can neither add sidecars nor change images — at most request it as a human decision (ADR-0038).
 - **Data:** `ephemeral` (default, `emptyDir` — a fresh service each run) or `task` (a directory on the task PVC, `/data/sidecars/<name>`, so state survives across runs of the task and is deleted with the PVC). Schema migrations and seed data run as workspace lifecycle hooks (§14), e.g. a `run-start` hook calling the project's migration command.
@@ -494,7 +494,7 @@ Service containers that run next to the agent in the sandbox pod — e.g. a Post
 - **Cost:** image pulls and service start-up add to the cold start of every run (accepted, ADR-0022); `task` data mode avoids re-seeding.
 - **Logs:** humans see sidecar logs in the UI (read through the Kubernetes API, desktop view); for the agent, a factory tool returning a sidecar's recent log lines — so it can debug e.g. failed queries — is a later addition.
 - **Not covered:** services that need their own pod or privileged setup (e.g. a Kubernetes cluster, Docker daemon) — container-based integration tests keep running via Bazel RBE (ADR-0023); and sidecars shared between tasks, which would couple tasks' state.
-- **To verify:** native sidecar support in agent-sandbox's pod template and with the Kata runtime class (native sidecars are stable since Kubernetes 1.33).
+- **To verify:** native sidecar support in the pod spec with the Kata runtime class (native sidecars are stable since Kubernetes 1.33).
 
 ## 16. Future option: repository configuration file
 Project settings maintained in the repository as `.dark-factory/config.toml`, activated only after a human approves them in Dark Factory. Decision and rejected alternatives: ADR-0039.

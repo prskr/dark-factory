@@ -6,7 +6,7 @@ use crate::render::ResolvedClusterTarget;
 use df_core::TaskVolumeSpec;
 use df_core::ids::RunId;
 use df_core::seams::{RunSandboxSpec, SandboxProvider};
-use k8s_openapi::api::core::v1::PersistentVolumeClaim;
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
 use kube::runtime::reflector;
 use std::collections::BTreeMap;
 use std::future::Future as _;
@@ -76,13 +76,11 @@ async fn test_reconciliation_live_cluster() {
     let dynamic_targets = Arc::new(DynamicTargetsProvider::default());
 
     let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
     let provider = K8sSandboxProvider::new(
         client.clone(),
         config.clone(),
         dynamic_targets.clone(),
         pod_store,
-        sb_store,
     );
 
     let task = TaskVolumeSpec::for_task("DF-888".parse().unwrap());
@@ -161,7 +159,7 @@ async fn test_reconciliation_live_cluster() {
 /// leadership forced (no Lease involved).
 ///
 /// Changes in the cluster (all in `dark-factory-dev-sandboxes`): a PVC `task-df-889`, a
-/// `Sandbox` and a `NetworkPolicy` named `run-df-889-1` (plus the sandbox's pod). It edits the
+/// `Pod` and a `NetworkPolicy` named `run-df-889-1`. It edits the
 /// policy once by hand. Everything is removed again at the end, also if an assertion failed.
 /// Run with: `cargo test -p df-k8s --lib policy_loop_live -- --ignored --nocapture`
 #[tokio::test]
@@ -174,14 +172,8 @@ async fn policy_loop_live_reverts_manual_edit_and_adds_new_target() {
     let config = crate::test_support::live_config();
     let targets = Arc::new(DynamicTargetsProvider::default());
     let (pod_store, _) = reflector::store();
-    let (sb_store, _) = reflector::store();
-    let provider = K8sSandboxProvider::new(
-        client.clone(),
-        config.clone(),
-        targets.clone(),
-        pod_store,
-        sb_store,
-    );
+    let provider =
+        K8sSandboxProvider::new(client.clone(), config.clone(), targets.clone(), pod_store);
     let task = TaskVolumeSpec::for_task("DF-889".parse().unwrap());
     let spec = RunSandboxSpec {
         run_id: RunId::new(),
@@ -225,18 +217,19 @@ async fn expected_egress(
     config: &ProvisioningConfig,
     targets: &DynamicTargetsProvider,
 ) -> Result<serde_json::Value, ProviderError> {
-    let sandboxes: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-    let sandbox = sandboxes
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &config.sandbox.namespace);
+    let pod = pods
         .get("run-df-889-1")
         .await
         .map_err(|e| ProviderError::Backend(e.to_string()))?;
-    let run_id = run_id_from_metadata(&sandbox.metadata)
-        .ok_or_else(|| ProviderError::Backend("sandbox has no run id".into()))?;
+    let run_id = run_id_from_metadata(&pod.metadata)
+        .ok_or_else(|| ProviderError::Backend("pod has no run id".into()))?;
     let task_key = "DF-889"
         .parse()
         .map_err(|e| ProviderError::Backend(format!("{e}")))?;
     let resolved = targets.get_targets(None).await?;
-    let policy = render_network_policy(run_id, &task_key, &sandbox, &resolved, config);
+    let uid = pod.metadata.uid.clone().unwrap_or_default();
+    let policy = render_network_policy(run_id, &task_key, "run-df-889-1", &uid, &resolved, config);
     serde_json::to_value(policy.spec.and_then(|s| s.egress))
         .map_err(|e| ProviderError::Backend(e.to_string()))
 }
@@ -498,34 +491,63 @@ fn test_config() -> ProvisioningConfig {
     )
 }
 
-/// Answers the API calls of one reconcile pass: a list with one active run, and any
-/// `NetworkPolicy` patch.
+/// A `PodList` with one run pod per `(name, deletion timestamp)`.
+fn pod_list(pods: &[(&str, Option<&str>)]) -> serde_json::Value {
+    let items: Vec<_> = pods
+        .iter()
+        .enumerate()
+        .map(|(n, (name, deleted))| {
+            serde_json::json!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": name,
+                    "uid": format!("uid-{n}"),
+                    "deletionTimestamp": deleted,
+                    "labels": {
+                        "dark-factory.io/run-id": RunId::from_uuid(uuid::Uuid::from_u128(n as u128 + 1)).to_string(),
+                        "dark-factory.io/task-key": "DF-1",
+                        "dark-factory.io/project": "DF"
+                    }
+                },
+                "spec": { "containers": [] }
+            })
+        })
+        .collect();
+    serde_json::json!({ "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": items })
+}
+
+/// Answers the API calls of one reconcile pass: a pod list with `pods` (name, deletion
+/// timestamp), and any `NetworkPolicy` patch. It asserts that every GET is the namespaced,
+/// instance-labelled pod list of the sandbox namespace.
+///
+/// The task ends once the client is dropped (the code under test owns it) and returns the
+/// bodies of the patches. Callers must await the handle after that: a failed assertion
+/// surfaces only there.
 fn spawn_api_responder(
     mut handle: tower_test::mock::Handle<http::Request<kube::client::Body>, http::Response<String>>,
-) {
+    pods: Vec<(&'static str, Option<&'static str>)>,
+) -> tokio::task::JoinHandle<Vec<serde_json::Value>> {
     tokio::spawn(async move {
+        let mut patches = Vec::new();
         while let Some((req, send)) = handle.next_request().await {
             let body = if req.method() == http::Method::GET {
-                serde_json::json!({
-                    "apiVersion": "agents.x-k8s.io/v1beta1",
-                    "kind": "SandboxList",
-                    "metadata": {},
-                    "items": [{
-                        "apiVersion": "agents.x-k8s.io/v1beta1",
-                        "kind": "Sandbox",
-                        "metadata": {
-                            "name": "run-df-1-1",
-                            "uid": "uid-1",
-                            "labels": {
-                                "dark-factory.io/run-id": RunId::from_uuid(uuid::Uuid::from_u128(1)).to_string(),
-                                "dark-factory.io/task-key": "DF-1",
-                                "dark-factory.io/project": "DF"
-                            }
-                        },
-                        "spec": { "podTemplate": { "spec": { "containers": [] } } }
-                    }]
-                })
+                let config = test_config();
+                assert_eq!(
+                    req.uri().path(),
+                    format!("/api/v1/namespaces/{}/pods", config.sandbox.namespace),
+                    "the reconcile loop lists pods in the sandbox namespace"
+                );
+                let selector = format!("dark-factory.io%2Finstance%3D{}", config.instance_name);
+                assert!(
+                    req.uri().query().is_some_and(|q| q.contains(&selector)),
+                    "the pod list selects by the instance label: {:?}",
+                    req.uri().query()
+                );
+                pod_list(&pods)
             } else {
+                let bytes = req.into_body().collect_bytes().await.unwrap();
+                patches.push(serde_json::from_slice(&bytes).unwrap());
                 serde_json::json!({
                     "apiVersion": "networking.k8s.io/v1",
                     "kind": "NetworkPolicy",
@@ -540,7 +562,8 @@ fn spawn_api_responder(
                     .unwrap(),
             );
         }
-    });
+        patches
+    })
 }
 
 /// Lets every runnable task run until the runtime is quiescent.
@@ -556,7 +579,7 @@ async fn closed_notification_channel_does_not_spin_the_reconcile_loop() {
 
     tokio::time::pause();
     let (mock_service, handle) = mock::pair();
-    spawn_api_responder(handle);
+    let responder = spawn_api_responder(handle, vec![("run-df-1-1", None)]);
     let client = Client::new(mock_service, "default");
     // Leader from the start, notification sender dropped: `recv()` is ready forever.
     let (_is_leader_tx, is_leader_rx) = watch::channel(true);
@@ -602,6 +625,7 @@ async fn closed_notification_channel_does_not_spin_the_reconcile_loop() {
         .await
         .expect("loop terminates on shutdown")
         .unwrap();
+    responder.await.unwrap();
 }
 
 #[tokio::test]
@@ -610,7 +634,7 @@ async fn reconcile_loop_stops_when_the_leader_channel_sender_is_gone() {
 
     // Real time: if the loop spun, the timeout below must still fire.
     let (mock_service, handle) = mock::pair();
-    spawn_api_responder(handle);
+    let responder = spawn_api_responder(handle, vec![("run-df-1-1", None)]);
     let client = Client::new(mock_service, "default");
     let (is_leader_tx, is_leader_rx) = watch::channel(true);
     let (_notify_tx, notify_rx) = tokio::sync::mpsc::channel(16);
@@ -632,6 +656,7 @@ async fn reconcile_loop_stops_when_the_leader_channel_sender_is_gone() {
         .await
         .expect("loop ends once the leader election task is gone")
         .unwrap();
+    responder.await.unwrap();
 }
 
 #[tokio::test]
@@ -781,7 +806,7 @@ async fn a_burst_of_notifications_causes_a_single_reconcile_pass() {
 
     tokio::time::pause();
     let (mock_service, handle) = mock::pair();
-    spawn_api_responder(handle);
+    let responder = spawn_api_responder(handle, vec![("run-df-1-1", None)]);
     let (_is_leader_tx, is_leader_rx) = watch::channel(true);
     let (notify_tx, notify_rx) = tokio::sync::mpsc::channel(16);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -813,6 +838,7 @@ async fn a_burst_of_notifications_causes_a_single_reconcile_pass() {
     assert_eq!(targets.calls.load(Ordering::SeqCst), after_startup + 1);
     shutdown_tx.send(true).unwrap();
     loop_handle.await.unwrap();
+    responder.await.unwrap();
 }
 
 #[tokio::test]
@@ -821,7 +847,7 @@ async fn notifications_within_the_debounce_window_share_one_pass() {
 
     tokio::time::pause();
     let (mock_service, handle) = mock::pair();
-    spawn_api_responder(handle);
+    let responder = spawn_api_responder(handle, vec![("run-df-1-1", None)]);
     let (_is_leader_tx, is_leader_rx) = watch::channel(true);
     let (notify_tx, notify_rx) = tokio::sync::mpsc::channel(16);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -855,4 +881,32 @@ async fn notifications_within_the_debounce_window_share_one_pass() {
     assert_eq!(targets.calls.load(Ordering::SeqCst), after_startup + 1);
     shutdown_tx.send(true).unwrap();
     loop_handle.await.unwrap();
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn reconcile_owns_each_policy_by_its_pod_and_skips_deleting_pods() {
+    let (mock_service, handle) = tower_test::mock::pair();
+    let responder = spawn_api_responder(
+        handle,
+        vec![
+            ("run-df-1-1", None),
+            ("run-df-2-1", Some("2026-01-01T00:00:00Z")),
+        ],
+    );
+    let client = Client::new(mock_service, "default");
+
+    let count = reconcile_active_runs(&client, &test_config(), &CountingTargets::default())
+        .await
+        .unwrap();
+    drop(client);
+
+    assert_eq!(count, 1);
+    let patches = responder.await.unwrap();
+    assert_eq!(patches.len(), 1);
+    let owner = &patches[0]["metadata"]["ownerReferences"][0];
+    assert_eq!(owner["kind"], "Pod");
+    assert_eq!(owner["apiVersion"], "v1");
+    assert_eq!(owner["name"], "run-df-1-1");
+    assert_eq!(owner["uid"], "uid-0");
 }
