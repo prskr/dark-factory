@@ -2,7 +2,6 @@
 
 Prerequisites, all merged before this change:
 - `iter3-task-dependencies`: `parent_id`, `create_task`, `list_personas`, `send_message`, `record_task_event`, persona descriptions.
-- `iter3-project-context`: the link target in the Overview tab.
 - `iter2-continuation-summary`: the summary the compaction notice shows.
 - `iter2-run-resilience`: `runs.maxConcurrent` in `start_queued_runs`.
 

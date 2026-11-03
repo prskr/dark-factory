@@ -61,7 +61,7 @@ A `context_compacted` notice SHALL be shown like other notices, one line with th
 - **THEN** the summary text is shown
 
 ### Requirement: Details tabs
-The right column SHALL have the tabs Overview, Subtasks and Artifacts, the latter two with counts. Overview SHALL show the persona with its description, the current activity, a link to the project context, and Status with an Archive action, Topic, Project, Persona (harness and model), Key, Checkout and the runs. Archive SHALL be disabled while archiving is not allowed.
+The right column SHALL have the tabs Overview, Subtasks and Artifacts, the latter two with counts. Overview SHALL show the persona with its description, the current activity, and Status with an Archive action, Topic, Project, Persona (harness and model), Key, Checkout and the runs. Archive SHALL be disabled while archiving is not allowed.
 
 #### Scenario: Archive disabled while running
 - **WHEN** `DF-12-CHAT` is `running`

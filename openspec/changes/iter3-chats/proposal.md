@@ -45,7 +45,7 @@
     - the column ends with an "Archived chats" entry.
   - **Center**: a header with only "+ New chat", the transcript and the message box.
   - **Details column** (Overview, Subtasks and Artifacts tabs):
-    - Overview shows the agent with its description, Now, the project-context link, Status with Archive, Topic, Project, Persona, Key, Checkout and the runs.
+    - Overview shows the agent with its description, Now, Status with Archive, Topic, Project, Persona, Key, Checkout and the runs.
     - Subtasks shows the direct subtasks.
     - Artifacts shows artifact cards.
   - **Artifacts**: a Markdown artifact opens in a resizable split view next to the transcript.
@@ -65,7 +65,7 @@
   - a how-to "Plan work in a chat".
 
 Out of scope:
-- **Project context document** (settings section, injection, `project:context:write`): `iter3-project-context`. This change only links to it from the Overview tab.
+- **Project context** (settings tab, injection into the chat prompt, proposals through `request_approval`, the Overview link, the archive exemption for `project-context` requests): `iter3-project-context`, which follows this change.
 - **Questions escalated to a chat**, and "archived chat → human": `iter3-parent-questions`.
 - **Stored, incremental transcript summary**: `iter2-continuation-summary`. This change adds only the notice.
 - **Model-generated compaction** for chats (F3): backlog ("Context compaction plugins").
@@ -116,6 +116,5 @@ Out of scope:
 - `crates/fake-acp-agent`, `crates/df-e2e`: a chat that creates two tasks, archiving with a running subtask, then unarchiving.
 - Depends on:
   - `iter3-task-dependencies` (`parent_id`, `create_task`, `send_message`, the child-ended message, persona descriptions);
-  - `iter3-project-context` (the link);
   - `iter2-continuation-summary` (the summary the notice shows).
 - Coordinates with `iter3-task-tree`: the Subtasks tab uses its "direct subtasks". Chats have no `complete_task` and can't be cancelled, so the completion gate and subtree cancel never apply to them.
