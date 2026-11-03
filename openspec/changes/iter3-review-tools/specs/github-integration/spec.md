@@ -14,11 +14,15 @@
 - **THEN** both review comments are in one review thread
 
 ### Requirement: Author roles
-Every author SHALL get role `bot` if it is the account that owns the plugin's credential, `member` if GitHub reports its association as owner, member or collaborator, and `outside` otherwise.
+Every author SHALL get role `bot` if it is the account that owns the plugin's credential, `member` if GitHub reports its association as owner, member or collaborator and its repository permission is write or admin, and `outside` otherwise, including a deleted author.
 
 #### Scenario: First-time contributor
 - **WHEN** a user with association `FIRST_TIME_CONTRIBUTOR` comments
 - **THEN** the comment's author role is `outside`
+
+#### Scenario: Collaborator without write access
+- **WHEN** a user with association `MEMBER` and repository permission `read` reviews
+- **THEN** the review's author role is `outside`
 
 ### Requirement: Reply in a review thread
 `reply` SHALL add a reply to the review thread on GitHub. A thread id the plugin didn't issue for that pull request SHALL yield `invalid-input` or `not-found`.

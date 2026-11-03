@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-95.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-97.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -37,7 +37,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
 - Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
-- Origin of TD-93 to TD-94: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, 2026-11-03). TD-94 existed before that change.
+- Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
 
 ## Summary
 
@@ -125,6 +125,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
 | TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
 | TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
+| TD-95 | low   | `df-agent-channel` feedback | Reviews are ranked for the size budget by `submitted_at` only |
+| TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout |
 
 ## Entries
 
@@ -878,9 +880,9 @@ On each `Assign` of a follow-up run, `continuation_summary` loads every event of
 
 `crates/df-e2e/tests/flow.rs` (`follow_up_resumes_the_session_and_completing_marks_the_pr_ready`), `crates/df-plugins/tests/homelab.rs` (`review_reply_joins_the_thread`)
 
-The e2e suite submits the line comment that run 2 answers with the bot's own Forgejo token. `read_pull_request_feedback` therefore labels it `bot`. The roles `member` and `outside` and the repository admin requirement of `list-feedback` (permission lookup per author) are only checked by the ignored homelab test against a live Forgejo.
+The e2e suite submits the line comment that run 2 answers with the bot's own Forgejo token. `read_pull_request_feedback` therefore labels it `bot`. The roles `member` and `outside` and the permission lookup of `list-feedback` (which needs repository admin) are covered only by mocked unit tests (`plugins/forgejo/src/api/feedback/tests.rs`, `plugins/github/src/api/feedback/tests.rs`). No live or e2e test asserts them; the ignored homelab test `review_reply_joins_the_thread` checks only the `bot` role.
 
-**Matters when:** the role mapping or the permission lookup breaks; the default test runs would not notice.
+**Matters when:** a real forge answers the permission lookup differently from the mocks (status, field values, the admin requirement); no test run would notice.
 
 **Fix:** create a second Forgejo user in `deploy/e2e/e2e-local.sh` (write access to the test repository), submit the review with its token and assert role `member` in the agent's tool result; optionally a third user without access for `outside`.
 
@@ -893,6 +895,26 @@ With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails
 **Matters when:** local e2e runs on macOS are interrupted or fail during cluster setup.
 
 **Fix:** iterate with `${pids[@]+"${pids[@]}"}` (or guard with `(( ${#pids[@]} ))`). Test: run the script with a failing first step under `/bin/bash` 3.2 and check that the cluster is gone.
+
+### TD-95. Reviews are ranked for the size budget by `submitted_at` only
+
+`crates/df-agent-channel/src/tools/feedback.rs` (`fit_to_budget`), `contract/wit/integrations/integrations.wit` (`review`)
+
+`read_pull_request_feedback` drops the least recently active items when the result exceeds 48 KiB. Comments and threads are ranked by their newest `created_at`/`updated_at`, reviews only by `submitted_at`: the WIT `review` record and the core `Review` have no `updated_at`, although both plugins use it for `since`. An old review whose body was edited is dropped first.
+
+**Matters when:** a pull request's feedback exceeds the budget and a reviewer edits an old review body instead of commenting.
+
+**Fix:** add `updated-at` to the WIT `review` record, the core `Review` and both plugin conversions, and use it in `latest`. Test: an old review with a recent `updated_at` survives the budget while newer comments are dropped.
+
+### TD-96. Forgejo `list-feedback` sends one request per review, sequentially
+
+`plugins/forgejo/src/api/feedback.rs` (`list_feedback`)
+
+The plugin reads every review's comments (`GET .../reviews/{id}/comments`) one after another and applies `since` afterwards. A pull request with many reviews can exceed the plugin call timeout (`plugins.<name>.callTimeoutSeconds`, default 30 s); the call fails with `plugin call timed out`, and every retry with the same `since` fails the same way.
+
+**Matters when:** long-lived pull requests with many review rounds on a slow Forgejo.
+
+**Fix:** skip the comment request for reviews that cannot hold anything newer than `since`. Careful: `reply` adds the reply to the review it answers, so an old review can get a new comment; a review's `updated_at` must cover that (check against Forgejo) before filtering on it. Otherwise cap the reviews read per call (newest first) and set `truncated`. Test: a listing with `since` sends no comment request for an untouched old review.
 
 ## Accepted decisions
 

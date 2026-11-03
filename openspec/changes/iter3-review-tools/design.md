@@ -67,6 +67,7 @@ reply: func(id: pull-request-ref, thread: string, body: string) -> result<posted
 ### GitHub plugin
 
 - One GraphQL query returns `viewer.login`, the PR comments, the reviews and `reviewThreads`. Thread fields: `id`, `isResolved`, `path`, `line`, and `comments` with `authorAssociation`. Connections are read with `last: 100` (the newest items, in chronological order) and no inner paging; the plugin sets `truncated` if any connection reports `hasPreviousPage`.
+- `authorAssociation` does not imply write access (an organization member with read access is `MEMBER`). For an owner, member or collaborator association the plugin reads `GET /repos/{owner}/{repo}/collaborators/{username}/permission` once per login; `admin` or `write` is `member`, anything else `outside`. Other associations are `outside` without a lookup.
 - The thread id is the GraphQL node id of the review thread. `reply` uses the mutation `addPullRequestReviewThreadReply`. Before posting, a `node(id:)` lookup reads the thread's `pullRequest.number`. A mismatch yields `invalid-input`; an unknown node id yields `not-found` (existing GraphQL error mapping).
 
 ### Control plane

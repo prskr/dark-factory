@@ -93,12 +93,12 @@ async fn pull_request_number(
     Ok(number.and_then(|n| u64::try_from(n).ok()))
 }
 
-/// Which list of the result an item belongs to.
+/// Which list of the result an item belongs to; the value indexes per-kind counts.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
-    Comment,
-    Review,
-    Thread,
+    Comment = 0,
+    Review = 1,
+    Thread = 2,
 }
 
 /// A PR comment, review or whole review thread, already encoded.
@@ -108,19 +108,23 @@ struct Item {
     position: usize,
     activity: Option<DateTime<FixedOffset>>,
     value: Value,
+    /// Encoded length plus the separating comma.
+    size: usize,
 }
 
 /// `feedback` as JSON, without its oldest items while it exceeds `budget` bytes.
 fn fit_to_budget(feedback: Feedback, budget: usize) -> Result<Value, serde_json::Error> {
     let plugin_truncated = feedback.truncated;
     let mut items = Vec::new();
-    let mut push = |kind, activity, value| {
+    let mut push = |kind, activity, value: Value| {
         let position = items.len();
+        let size = value.to_string().len() + 1;
         items.push(Item {
             kind,
             position,
             activity,
             value,
+            size,
         });
     };
     for c in feedback.comments {
@@ -138,28 +142,41 @@ fn fit_to_budget(feedback: Feedback, budget: usize) -> Result<Value, serde_json:
     // Oldest first; unparsable timestamps (`None`) count as oldest.
     items.sort_by_key(|i| i.activity);
 
+    // The encoded length is the envelope plus each item and its comma, less one comma per
+    // non-empty list. Drop the oldest items until that fits, then encode once.
+    let envelope = |truncated| assemble(&[], truncated).to_string().len();
+    let mut size: usize = items.iter().map(|i| i.size).sum();
+    let mut per_kind = [Kind::Comment, Kind::Review, Kind::Thread]
+        .map(|kind| items.iter().filter(|i| i.kind == kind).count());
+    let encoded = |size: usize, per_kind: &[usize; 3], truncated| {
+        envelope(truncated) + size - per_kind.iter().filter(|n| **n > 0).count()
+    };
     let mut dropped = 0;
-    loop {
-        let kept = items.get(dropped..).unwrap_or_default();
-        let result = assemble(kept, plugin_truncated || dropped > 0);
-        if dropped >= items.len() || result.to_string().len() <= budget {
-            return Ok(result);
+    while let Some(oldest) = items.get(dropped) {
+        if encoded(size, &per_kind, plugin_truncated || dropped > 0) <= budget {
+            break;
+        }
+        size -= oldest.size;
+        if let Some(n) = per_kind.get_mut(oldest.kind as usize) {
+            *n -= 1;
         }
         dropped += 1;
     }
+    let kept = items.get(dropped..).unwrap_or_default();
+    Ok(assemble(kept, plugin_truncated || dropped > 0))
 }
 
 /// The result of the `kept` items, in the plugin's order.
 fn assemble(kept: &[Item], truncated: bool) -> Value {
-    let kept = |kind: Kind| -> Vec<Value> {
-        let mut of_kind: Vec<&Item> = kept.iter().filter(|i| i.kind == kind).collect();
-        of_kind.sort_by_key(|i| i.position);
-        of_kind.into_iter().map(|i| i.value.clone()).collect()
+    let of_kind = |kind: Kind| -> Vec<Value> {
+        let mut items: Vec<&Item> = kept.iter().filter(|i| i.kind == kind).collect();
+        items.sort_by_key(|i| i.position);
+        items.into_iter().map(|i| i.value.clone()).collect()
     };
     serde_json::json!({
-        "comments": kept(Kind::Comment),
-        "reviews": kept(Kind::Review),
-        "threads": kept(Kind::Thread),
+        "comments": of_kind(Kind::Comment),
+        "reviews": of_kind(Kind::Review),
+        "threads": of_kind(Kind::Thread),
         "truncated": truncated,
     })
 }

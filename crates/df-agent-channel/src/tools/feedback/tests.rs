@@ -531,6 +531,54 @@ fn last_activity_compares_instants_not_strings() {
 }
 
 #[test]
+fn the_budget_is_filled_exactly_with_the_newest_items_in_plugin_order() {
+    // Plugin order differs from activity order; mixed kinds exercise the per-list commas.
+    let at = |minute: u32| format!("2026-11-03T08:{minute:02}:00Z");
+    let comments: Vec<PrComment> = [5, 1, 9, 3]
+        .iter()
+        .map(|m| pr_comment(&format!("c{m}"), AuthorRole::Member, &at(*m)))
+        .collect();
+    let reviews: Vec<Review> = [8, 2, 6]
+        .iter()
+        .map(|m| review(&format!("r{m}"), ReviewVerdict::Commented, &at(*m)))
+        .collect();
+    let threads = vec![thread("t7", 1, false, vec![review_comment("t7c", &at(7))])];
+    let feedback = Feedback {
+        comments: comments.clone(),
+        reviews: reviews.clone(),
+        threads: threads.clone(),
+        truncated: false,
+    };
+    // Items newer than minute 5 survive, in the plugin's order.
+    let pick = |items: &[PrComment], keep: &[&str]| -> Vec<PrComment> {
+        items
+            .iter()
+            .filter(|c| keep.contains(&c.id.as_str()))
+            .cloned()
+            .collect()
+    };
+    let expected = truncated(Feedback {
+        comments: pick(&comments, &["c5", "c9"]),
+        reviews: reviews
+            .iter()
+            .filter(|r| ["r8", "r6"].contains(&r.id.as_str()))
+            .cloned()
+            .collect(),
+        threads,
+        truncated: true,
+    });
+    let budget = encoded_len(&expected);
+
+    let fits = fit_to_budget(feedback.clone(), budget).unwrap();
+    let one_byte_less = fit_to_budget(feedback, budget - 1).unwrap();
+
+    assert_eq!(fits, serde_json::to_value(&expected).unwrap());
+    assert_eq!(fits.to_string().len(), budget);
+    assert!(one_byte_less.to_string().len() < budget);
+    assert_eq!(one_byte_less["comments"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn large_feedback_keeps_the_newest_items_within_48_kib() {
     let comments: Vec<PrComment> = (0..100)
         .map(|i| PrComment {

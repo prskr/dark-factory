@@ -528,6 +528,60 @@ done
     assert!(reply.contains("replied in the thread"), "{reply}");
 }
 
+#[tokio::test]
+async fn a_tool_error_is_reported_failed_and_its_values_are_not_saved() {
+    let yaml = r#"
+sessions:
+  new:
+    - - mcp:
+          server: factory
+          tool: read_pull_request_feedback
+          save:
+            thread: /threads/0/id
+      - mcp:
+          server: factory
+          tool: comment_on_pull_request
+          args:
+            thread: "${thread}"
+      - end: end_turn
+"#;
+    // The read fails but still carries structured content; the reply echoes the thread it got.
+    let mock_body = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *initialize*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"factory\",\"version\":\"1.0\"}}}"
+      ;;
+    *notifications/initialized*)
+      ;;
+    *read_pull_request_feedback*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no pull request\"}],\"structuredContent\":{\"threads\":[{\"id\":\"7:a.txt:1\"}]},\"isError\":true}}"
+      ;;
+    *'"thread":"7:a.txt:1"'*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"used the saved thread\"}],\"isError\":false}}"
+      ;;
+    *tools/call*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"placeholder kept\"}],\"isError\":false}}"
+      ;;
+  esac
+done
+"#;
+
+    let received = play_with_mock_mcp(yaml, mock_body).await;
+
+    assert_eq!(received.len(), 4, "two ToolCall/ToolCallUpdate pairs");
+    match &received[1] {
+        SessionUpdate::ToolCallUpdate(update) => assert_eq!(
+            update.fields.status,
+            Some(agent_client_protocol::schema::v1::ToolCallStatus::Failed)
+        ),
+        other => panic!("Expected ToolCallUpdate, got: {other:?}"),
+    }
+    let reply = tool_result_text(&received[3]);
+    assert!(reply.contains("placeholder kept"), "{reply}");
+}
+
 #[test]
 fn unknown_variables_and_other_strings_are_left_as_they_are() {
     let vars = std::collections::HashMap::from([("thread".to_owned(), "t-1".to_owned())]);

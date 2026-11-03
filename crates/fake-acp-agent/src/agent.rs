@@ -29,6 +29,8 @@ use crate::script::{
 const FETCH_RETRY: Duration = Duration::from_secs(1);
 /// Limit of one attempt of a `fetch` step.
 const FETCH_ATTEMPT: Duration = Duration::from_secs(10);
+/// Limit of the MCP handshake and of one tool call; factory tools wait up to 30 s for the forge.
+const MCP_CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Tracks active session state.
 #[derive(Debug, Clone)]
@@ -531,6 +533,10 @@ async fn play_mcp(mcp_step: McpStep, ctx: &mut TurnContext, cx: &ConnectionTo<Cl
         )),
     };
     let (tool_result_text, status) = match outcome {
+        Ok(res) if res.is_error == Some(true) => (
+            serde_json::to_string(&res).unwrap_or_default(),
+            ToolCallStatus::Failed,
+        ),
         Ok(res) => {
             if let Some(structured) = &res.structured_content {
                 ctx.vars.extend(saved_values(&mcp_step.save, structured));
@@ -612,17 +618,18 @@ async fn call_mcp_tool(
     let (Some(stdout), Some(stdin)) = (child.stdout.take(), child.stdin.take()) else {
         return Err("Failed to capture stdio".to_string());
     };
-    let client = ()
-        .serve((stdout, stdin))
+    // A timeout returns early and drops `child`, which kills the server.
+    let client = tokio::time::timeout(MCP_CALL_TIMEOUT, ().serve((stdout, stdin)))
         .await
+        .map_err(|_elapsed| "Timed out connecting to MCP server".to_string())?
         .map_err(|e| format!("Failed to connect to MCP server: {e}"))?;
     let mut params = rmcp::model::CallToolRequestParams::new(tool.to_owned());
     if let serde_json::Value::Object(map) = args {
         params = params.with_arguments(map.clone());
     }
-    client
-        .call_tool(params)
+    tokio::time::timeout(MCP_CALL_TIMEOUT, client.call_tool(params))
         .await
+        .map_err(|_elapsed| "Tool call timed out".to_string())?
         .map_err(|e| format!("Tool call failed: {e}"))
 }
 

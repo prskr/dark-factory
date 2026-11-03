@@ -1,18 +1,22 @@
 //! `list-feedback` and `reply` through GraphQL, which has review threads with ids and resolved state.
 //! One query reads the newest 100 items per connection with `last: 100` (in chronological order)
-//! and no inner paging; any older page sets `truncated`.
+//! and no inner paging; any older page sets `truncated`. Author roles need one REST permission
+//! lookup per distinct owner, member or collaborator.
 
+use std::collections::HashMap;
+
+use percent_encoding::utf8_percent_encode;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::darkfactory::integrations::types::{Error, PullRequestRef};
+use crate::darkfactory::integrations::types::{Error, PullRequestRef, RepoRef};
 use crate::exports::darkfactory::integrations::pull_requests::{
     Author, AuthorRole, Feedback, PostedComment, PrComment, Review, ReviewComment, ReviewThread,
     ReviewVerdict,
 };
 use crate::timestamp::{self, touched_since};
 
-use super::{Clock, GitHub, Log, Transport};
+use super::{Clock, GitHub, Log, Method, QUERY_VALUE, Transport, repo_path};
 
 /// Pending reviews are left out; only their author could see them.
 const FEEDBACK_QUERY: &str = r"query($owner: String!, $name: String!, $number: Int!) {
@@ -88,53 +92,48 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
                 .iter()
                 .flatten()
                 .any(|t| t.comments.page_info.has_previous_page);
-        let bot = data.viewer.login;
         let newer = |timestamps: &[&str]| since.is_none_or(|s| touched_since(timestamps, s));
+        let mut roles = Roles {
+            github: self,
+            repo: &id.repo,
+            bot: data.viewer.login,
+            known: HashMap::new(),
+        };
 
-        Ok(Feedback {
-            comments: pr
+        let comments = pr
+            .comments
+            .nodes
+            .into_iter()
+            .flatten()
+            .filter(|c| newer(&[&c.created_at, &c.updated_at]))
+            .map(|c| roles.pr_comment(c))
+            .collect::<Result<_, _>>()?;
+        let reviews = pr
+            .reviews
+            .nodes
+            .into_iter()
+            .flatten()
+            .filter_map(|r| verdict(&r.state).map(|verdict| (r, verdict)))
+            .filter(|(r, _)| newer(&[r.submitted_at.as_deref().unwrap_or(""), &r.updated_at]))
+            .map(|(r, verdict)| roles.review(r, verdict))
+            .collect::<Result<_, _>>()?;
+        let mut threads = Vec::new();
+        for t in pr.review_threads.nodes.into_iter().flatten() {
+            let t = without_pending(t);
+            let touched = t
                 .comments
                 .nodes
-                .into_iter()
+                .iter()
                 .flatten()
-                .filter(|c| newer(&[&c.created_at, &c.updated_at]))
-                .map(|c| PrComment {
-                    id: c.id,
-                    author: author(&bot, c.author, &c.author_association),
-                    body: c.body,
-                    url: c.url,
-                    created_at: c.created_at,
-                    updated_at: c.updated_at,
-                })
-                .collect(),
-            reviews: pr
-                .reviews
-                .nodes
-                .into_iter()
-                .flatten()
-                .filter_map(|r| verdict(&r.state).map(|verdict| (r, verdict)))
-                .filter(|(r, _)| newer(&[r.submitted_at.as_deref().unwrap_or(""), &r.updated_at]))
-                .map(|(r, verdict)| Review {
-                    id: r.id,
-                    author: author(&bot, r.author, &r.author_association),
-                    verdict,
-                    body: r.body,
-                    url: r.url,
-                    submitted_at: r.submitted_at.unwrap_or_default(),
-                })
-                .collect(),
-            threads: pr
-                .review_threads
-                .nodes
-                .into_iter()
-                .flatten()
-                .filter_map(|t| thread(&bot, t))
-                .filter(|t| {
-                    t.comments
-                        .iter()
-                        .any(|c| newer(&[&c.created_at, &c.updated_at]))
-                })
-                .collect(),
+                .any(|c| newer(&[&c.created_at, &c.updated_at]));
+            if touched {
+                threads.push(roles.thread(t)?);
+            }
+        }
+        Ok(Feedback {
+            comments,
+            reviews,
+            threads,
             truncated,
         })
     }
@@ -177,43 +176,104 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
     }
 }
 
-/// `bot` for the viewer, `member` for owner, member and collaborator associations.
-fn author(bot: &str, author: Option<ApiAuthor>, association: &str) -> Author {
-    let login = author.map(|a| a.login).unwrap_or_default();
-    let role = if !login.is_empty() && login.eq_ignore_ascii_case(bot) {
-        AuthorRole::Bot
-    } else if matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR") {
-        AuthorRole::Member
-    } else {
-        AuthorRole::Outside
-    };
-    Author { login, role }
+/// Assigns author roles: `bot` for the viewer; `member` for an owner, member or collaborator
+/// association with write permission, one permission lookup per distinct login.
+struct Roles<'a, T, C, L> {
+    github: &'a GitHub<T, C, L>,
+    repo: &'a RepoRef,
+    bot: String,
+    /// Keyed by lowercase login: GitHub logins are case-insensitive.
+    known: HashMap<String, AuthorRole>,
 }
 
-/// The thread without comments of a pending review; `None` if nothing is left.
-fn thread(bot: &str, t: ApiThread) -> Option<ReviewThread> {
-    let comments: Vec<_> = t
-        .comments
-        .nodes
-        .into_iter()
-        .flatten()
-        .filter(|c| c.state != "PENDING")
-        .map(|c| ReviewComment {
+impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
+    fn author(&mut self, author: Option<ApiAuthor>, association: &str) -> Result<Author, Error> {
+        let login = author.map(|a| a.login).unwrap_or_default();
+        let role = self.role(&login, association)?;
+        Ok(Author { login, role })
+    }
+
+    fn role(&mut self, login: &str, association: &str) -> Result<AuthorRole, Error> {
+        if login.is_empty() {
+            return Ok(AuthorRole::Outside);
+        }
+        if login.eq_ignore_ascii_case(&self.bot) {
+            return Ok(AuthorRole::Bot);
+        }
+        // Other associations never have write access; they need no lookup.
+        if !matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR") {
+            return Ok(AuthorRole::Outside);
+        }
+        let key = login.to_ascii_lowercase();
+        if let Some(role) = self.known.get(&key) {
+            return Ok(*role);
+        }
+        let path = format!(
+            "{}/collaborators/{}/permission",
+            repo_path(self.repo),
+            utf8_percent_encode(login, QUERY_VALUE)
+        );
+        let role = match self.github.rest::<ApiPermission>(Method::Get, &path, None) {
+            // `maintain` is reported as `write`.
+            Ok(p) if matches!(p.permission.as_str(), "admin" | "write") => AuthorRole::Member,
+            // A deleted account is not found.
+            Ok(_) | Err(Error::NotFound(_)) => AuthorRole::Outside,
+            Err(e) => return Err(e),
+        };
+        self.known.insert(key, role);
+        Ok(role)
+    }
+
+    fn pr_comment(&mut self, c: GqlComment) -> Result<PrComment, Error> {
+        Ok(PrComment {
+            author: self.author(c.author, &c.author_association)?,
             id: c.id,
-            author: author(bot, c.author, &c.author_association),
             body: c.body,
             url: c.url,
             created_at: c.created_at,
             updated_at: c.updated_at,
         })
-        .collect();
-    (!comments.is_empty()).then_some(ReviewThread {
-        id: t.id,
-        path: t.path,
-        line: t.line,
-        resolved: t.is_resolved,
-        comments,
-    })
+    }
+
+    fn review(&mut self, r: ApiReview, verdict: ReviewVerdict) -> Result<Review, Error> {
+        Ok(Review {
+            author: self.author(r.author, &r.author_association)?,
+            id: r.id,
+            verdict,
+            body: r.body,
+            url: r.url,
+            submitted_at: r.submitted_at.unwrap_or_default(),
+        })
+    }
+
+    fn thread(&mut self, t: ApiThread) -> Result<ReviewThread, Error> {
+        let mut comments = Vec::new();
+        for c in t.comments.nodes.into_iter().flatten() {
+            comments.push(ReviewComment {
+                author: self.author(c.author, &c.author_association)?,
+                id: c.id,
+                body: c.body,
+                url: c.url,
+                created_at: c.created_at,
+                updated_at: c.updated_at,
+            });
+        }
+        Ok(ReviewThread {
+            id: t.id,
+            path: t.path,
+            line: t.line,
+            resolved: t.is_resolved,
+            comments,
+        })
+    }
+}
+
+/// The thread without comments of a pending review; a thread with only those has no comments.
+fn without_pending(mut t: ApiThread) -> ApiThread {
+    t.comments
+        .nodes
+        .retain(|c| c.as_ref().is_some_and(|c| c.state != "PENDING"));
+    t
 }
 
 /// A dismissed review keeps its text but no longer its verdict.
@@ -314,6 +374,12 @@ struct ApiThread {
     /// `null` for a comment on the whole file or an outdated thread.
     line: Option<u32>,
     comments: Connection<GqlComment>,
+}
+
+/// `permission` is `admin`, `write` (also for `maintain`), `read` (also for `triage`) or `none`.
+#[derive(Deserialize)]
+struct ApiPermission {
+    permission: String,
 }
 
 #[derive(Deserialize)]

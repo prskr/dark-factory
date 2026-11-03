@@ -199,7 +199,8 @@ values route `github.com` to it.
 2. Create a fine-grained personal access token for an account with write access, restricted to the
    project's repositories ("Only select repositories"), with the repository permissions Pull
    requests read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata
-   read. A classic token needs `repo`.
+   read. A classic token needs `repo`. `list-feedback` reads each reviewer's repository permission
+   (`GET .../collaborators/{username}/permission`), which needs the account's write access.
 3. Store it in a Secret in the instance namespace (`sandbox.instanceNamespace`), for example
    `kubectl -n dark-factory create secret generic github-token --from-file=token=<file with the token>`.
 4. Credentials → "New credential reference": a name, Secret name `github-token`, key `token`.

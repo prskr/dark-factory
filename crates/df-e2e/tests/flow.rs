@@ -191,7 +191,9 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
     assert!(
         thread
             .iter()
-            .any(|c| c["body"] == "Added greeting_test.txt." && c["path"] == "greeting.txt"),
+            .any(|c| c["body"] == "Added greeting_test.txt."
+                && c["path"] == "greeting.txt"
+                && c["position"] == 1),
         "{thread:?}"
     );
     Ok(())
