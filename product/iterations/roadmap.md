@@ -59,7 +59,7 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 
 - **Agent-created tasks and delegation (ADR-0043, ADR-0026):** the creator of a task becomes a principal (human or task), agents create tasks for other personas (`create_task`, `list_personas`, personas get a description), `depends_on` dependencies gating the first start, a parent wakes on every child that ends and relays later rounds (ADR-0052). The task's parent is also the escalation target.
 - **Markdown rendering (`iter3-markdown-rendering`, ADR-0047):** syntect code highlighting with operator-chosen light and dark themes, Mermaid diagrams in a sandboxed iframe; the renderer for transcript and artifacts.
-- **Task artifacts (`iter3-artifacts`, ADR-0044, ADR-0048):** text and image artifacts per task (screenshots), chats included; `write_artifact` (own task), `list_artifacts` and `read_artifact` (own, ancestors, descendants, `depends_on`, `base_task`); research results travel between tasks without a commit. A plain rendered view in the task page and chat UI.
+- **Task artifacts (`iter3-artifacts`, ADR-0044, ADR-0048):** text and image artifacts per task (screenshots), chats included; `write_artifact` (own task), `list_artifacts` and `read_artifact` (own, ancestors, descendants, `depends_on`, `base_task`); research results travel between tasks without a commit. Artifact cards in an Artifacts tab, a resizable split view next to the transcript and a collapsible task list on the task page (shared with the chat UI), a bookmarkable page per artifact.
 - **Chats as tasks (ADR-0043, ADR-0026, ADR-0053):** a chat is a task of kind `chat`, several per (persona, project), each with a topic set by the agent, archived instead of completed; the root of the delegation chain, with a read-only checkout of the default branch, a `-CHAT` key suffix, its own chat UI (not in the task list, Markdown artifacts in a split view), its own concurrency limit and the project context document. Chats start with the summary of `iter2-continuation-summary`; plugin-based compaction (F3) stays in the backlog.
 - **Tasks based on another task's branch (ADR-0041):** `base_task` at task creation, prepare fast-forwards task branches without own commits to their base.
 - **Task tree, subtask branches and merging (ADR-0034, no group tasks)**, incl. `pull-requests.merge` and branch creation in the integrations package. UI: the details column becomes tabs (Overview, Subtasks with a progress bar and the subtasks with their status), and task rows with subtasks get a done/total chip (design canvas, "Later" row).
@@ -97,8 +97,6 @@ Dependency: API-key harnesses need the inference endpoint of iteration 3, otherw
 
 - Dashboard-wide live status.
 - Full-text search across tasks and transcripts.
-- Artifact cards in a details tab with a preview, title, time and type (design canvas, "Later" row); artifacts and their tools come with iteration 3 (ADR-0044).
-- Task page: Markdown artifacts open in a resizable split view next to the transcript, with a collapsible task list, as in the chat UI of iteration 3 (ADR-0053).
 - **Workspace changes view (F8)**, reading from the Git proxy's mirror.
 - **Agent memory (ADR-0040)**, explicit memories with full-text search first (phases 1 and 2).
 - Installable web app with push notifications (ADR-0035).
@@ -139,6 +137,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
 | Replace agent-sandbox with plain scheduled Pods, if it no longer adds anything the control plane needs | idea | `docs/demo.md` (iteration 1 spike results) |
 | CI job running the e2e suite (`just e2e-local` on Docker) | decided | `openspec/changes/archive/2026-10-31-iter1-demo-e2e/design.md` (Non-Goals) |
+| Automatic downscaling of image artifacts (e.g. to 2k or 4k on the long side) instead of rejecting images above the size and pixel limits | idea | ADR-0048 (amended 2026-11-03) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
 | SSH repository URLs, issue-only trackers | idea | `openspec/changes/archive/2026-10-30-iter2-multi-forge` |
 | GitHub App authentication for the GitHub plugin: installation tokens minted and cached by the host (JWT signed with the app key); needs an ADR | idea | `openspec/changes/archive/2026-11-01-iter2-github-plugin` |
