@@ -447,3 +447,112 @@ fn deliver_job_payload_shapes() {
         }
     );
 }
+
+#[tokio::test]
+async fn a_delivery_resolves_its_target_until_the_event_or_subscription_is_gone() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = seed(&pool, "DF").await;
+    let subscription_id = subscribe(&pool, df.project, &[]).await;
+    let event_id = record(
+        &pool,
+        &sinks(&[("http://audit.svc/all", &[])]),
+        &Event::SandboxProvisioning { run_id: df.run },
+    )
+    .await
+    .unwrap();
+    let to_subscription = DeliverJob {
+        event_id,
+        target: Target::Subscription { subscription_id },
+    };
+    let to_instance = DeliverJob {
+        event_id,
+        target: Target::Instance {
+            instance_url: "http://audit.svc/all".into(),
+        },
+    };
+
+    let delivery = load_delivery(&pool, &to_subscription)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(delivery.url, "https://hooks.example.org/x");
+    assert_eq!(delivery.payload["id"], json!(format!("evt_{event_id}")));
+    assert_eq!(
+        delivery.payload["timestamp"],
+        json!(rfc3339(&delivery.occurred_at))
+    );
+    let delivery = load_delivery(&pool, &to_instance).await.unwrap().unwrap();
+    assert_eq!(delivery.url, "http://audit.svc/all");
+
+    sqlx::query("DELETE FROM event_subscriptions WHERE id = $1")
+        .bind(subscription_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(load_delivery(&pool, &to_subscription).await.unwrap(), None);
+    assert!(load_delivery(&pool, &to_instance).await.unwrap().is_some());
+
+    sqlx::query("DELETE FROM lifecycle_events")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(load_delivery(&pool, &to_instance).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn an_attempt_records_its_status_or_error_on_the_subscription() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = seed(&pool, "DF").await;
+    let subscription_id = subscribe(&pool, df.project, &[]).await;
+    let last = || async {
+        let row: (bool, Option<i16>, Option<String>) = sqlx::query_as(
+            "SELECT last_attempt_at > now() - interval '1 minute', last_status, last_error
+             FROM event_subscriptions WHERE id = $1",
+        )
+        .bind(subscription_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        row
+    };
+
+    record_attempt(&pool, subscription_id, Some(503), None)
+        .await
+        .unwrap();
+    assert_eq!(last().await, (true, Some(503), None));
+
+    record_attempt(&pool, subscription_id, None, Some("timed out"))
+        .await
+        .unwrap();
+    assert_eq!(last().await, (true, None, Some("timed out".into())));
+}
+
+#[tokio::test]
+async fn cleanup_deletes_events_no_job_refers_to() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = seed(&pool, "DF").await;
+    let sinks = sinks(&[("http://audit.svc/all", &[])]);
+    let kept = record(
+        &pool,
+        &sinks,
+        &Event::SandboxProvisioning { run_id: df.run },
+    )
+    .await
+    .unwrap();
+    let orphan = record(&pool, &sinks, &Event::SandboxProvisioned { run_id: df.run })
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM outbox WHERE payload->>'event_id' = $1")
+        .bind(orphan.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(delete_unreferenced(&pool).await.unwrap(), 1);
+
+    let left: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM lifecycle_events")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, [kept]);
+}

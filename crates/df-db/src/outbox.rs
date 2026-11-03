@@ -4,8 +4,14 @@
 //! it, so the job exists exactly when the change commits. A dispatcher on the leader claims due
 //! jobs and runs the handler registered for their kind.
 
+mod dispatcher;
+
 use sqlx::PgConnection;
 
+pub use self::dispatcher::{
+    CLEANUP_INTERVAL, Dispatcher, JobError, JobResult, MAX_IN_FLIGHT, OutboxHandler, POLL_INTERVAL,
+    RETAIN_FINISHED, RetryPolicy,
+};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 

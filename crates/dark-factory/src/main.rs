@@ -366,7 +366,7 @@ where
     });
     let scheduler_stop = stop_rx.clone();
     if let Some(is_leader) = is_leader {
-        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx);
+        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx, signing_key)?;
     }
     listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
     listeners.spawn(serve_policy_watch(
@@ -382,16 +382,26 @@ where
     supervise_listeners("control plane", listeners, shutdown, SHUTDOWN_GRACE).await
 }
 
-/// Background work only the leader replica does; each task waits for `is_leader` itself.
+/// Background work only the leader replica does: retention and, with a signing key, the outbox
+/// dispatcher. Each task waits for `is_leader` itself.
 fn spawn_leader_tasks(
     listeners: &mut JoinSet<()>,
     ctx: &ChannelContext,
     is_leader: watch::Receiver<bool>,
     stop: &watch::Receiver<bool>,
-) {
+    signing_key: Option<Arc<lifecycle_events::SigningKey>>,
+) -> anyhow::Result<()> {
+    let meter = opentelemetry::global::meter("dark-factory");
+    if let Some(dispatcher) =
+        lifecycle_events::dispatcher(&ctx.pool, &ctx.notifier, signing_key, &meter)?
+    {
+        let (is_leader, stop) = (is_leader.clone(), stop.clone());
+        listeners.spawn(async move { dispatcher.run(is_leader, stop).await });
+    }
     let retention = df_agent_channel::Retention::new(ctx.clone());
     let retention_stop = stop.clone();
     listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
+    Ok(())
 }
 
 /// Resolves once `stop` was set.

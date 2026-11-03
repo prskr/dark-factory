@@ -251,6 +251,11 @@ impl Notifier {
     pub fn subscribe(&self) -> broadcast::Receiver<Notification> {
         self.tx.subscribe()
     }
+
+    #[cfg(test)]
+    pub(crate) fn subscribers(&self) -> usize {
+        self.tx.receiver_count()
+    }
 }
 
 impl Drop for Notifier {
