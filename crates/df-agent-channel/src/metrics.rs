@@ -259,7 +259,7 @@ fn outcome_attr(outcome: RunOutcome) -> KeyValue {
 }
 
 /// The lower-case enum value name without its type prefix, e.g. `end_turn`.
-fn label(name: &str, prefix: &str) -> String {
+pub(crate) fn label(name: &str, prefix: &str) -> String {
     name.strip_prefix(prefix).unwrap_or(name).to_lowercase()
 }
 

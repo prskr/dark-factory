@@ -1,6 +1,7 @@
 //! Tests of the agent session.
 
 use super::*;
+use crate::assign::{build_assign, load_run_context};
 use crate::metrics::probe::Probe;
 use crate::testing::Env;
 use df_core::testing::SandboxCall;
@@ -22,6 +23,10 @@ fn hello() -> AgentMessage {
 }
 
 fn text_event() -> agent_message::Body {
+    text_chunk("x")
+}
+
+fn text_chunk(text: &str) -> agent_message::Body {
     agent_message::Body::TranscriptEvent(Event {
         schema_version: 1,
         occurred_at: None,
@@ -30,7 +35,7 @@ fn text_event() -> agent_message::Body {
             message_id: "m".into(),
             content: Some(wire::ContentBlock {
                 kind: Some(wire::content_block::Kind::Text(wire::TextContent {
-                    text: "x".into(),
+                    text: text.into(),
                 })),
                 hidden: false,
             }),
@@ -1204,4 +1209,67 @@ async fn streams_are_counted_and_reconnects_noticed() {
         1.0
     );
     assert_eq!(probe.total("df.agent.connections", &[]), 0.0);
+}
+
+#[tokio::test]
+async fn a_reconnect_mid_run_summarizes_earlier_runs_only() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run1 = env.insert_run(env.task.id, 1, "running").await;
+    sqlx::query("UPDATE runs SET state = 'succeeded', harness_session_id = 'S' WHERE id = $1")
+        .bind(run1.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
+         VALUES ($1, $2, 1, now(), 'agent_message_chunk', $3)",
+    )
+    .bind(env.task.id.as_uuid())
+    .bind(run1.as_uuid())
+    .bind(serde_json::json!({"agentMessageChunk": {"messageId": "e", "content": {"text": {"text": "earlier"}}}}))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let run2 = env.insert_run(env.task.id, 2, "connecting").await;
+    env.bind_pod(run2);
+
+    run_session(
+        &env,
+        run2,
+        vec![
+            hello(),
+            msg(1, tool_call(ToolCallStatus::Pending)),
+            msg(2, text_chunk("a")),
+        ],
+    )
+    .await
+    .unwrap();
+    // The reconnect assigns run 2 again; the run is still active.
+    run_session(
+        &env,
+        run2,
+        vec![
+            hello(),
+            msg(3, tool_call_update(ToolCallStatus::Failed)),
+            msg(4, text_chunk("b")),
+            msg(5, report(WireOutcome::EndTurn)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    // The new `Assign` of run 2 has run 1's events and none of run 2's.
+    let rc = load_run_context(&pool, get_run(&pool, run2).await.unwrap().unwrap())
+        .await
+        .unwrap();
+    let summary = build_assign(&env.ctx, &rc)
+        .await
+        .unwrap()
+        .continuation
+        .unwrap()
+        .summary;
+    assert!(summary.contains("Agent: earlier"), "{summary}");
+    assert!(!summary.contains("Tool:"), "{summary}");
+    assert!(!summary.contains("Agent: a"), "{summary}");
 }

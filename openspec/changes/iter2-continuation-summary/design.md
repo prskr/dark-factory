@@ -8,44 +8,41 @@ This change ships the part of F3 that does not need a model, in the shape a plug
 
 **Goals:**
 - The fallback tells the agent what it did, not only what was said.
-- Old history is not lost because a run produced many events.
-- The summary is normally computed once per run end; `Assign` only folds what is still uncovered.
-- The computation is a pure function over `(previous summary, events)`, testable without a database.
+- Old history is not lost to a row window; only the size cap drops entries, and it drops the least useful ones first.
+- The computation is a pure function over the events, testable without a database.
+- No stored state: nothing to keep consistent across reconnects, late batches or runs that end without a report.
 
 **Non-Goals (wait for the F3 plugin):**
 - Model-generated or semantic summaries.
+- A stored summary with a cursor and incremental updates (D6).
 - Token-based budgets (the cap stays in bytes).
 - A WIT world, host inference access, plugin selection per persona or project.
-- Compacting the stored summary itself; the size cap drops the oldest entries.
 - Mid-run compaction: ACP offers no hook, the harness manages its context inside a run.
 - Exporting or restoring harness sessions (agent-specific, see the discussion of PVC loss: the fallback is the safety net).
 
 ## Decisions
 
-### D1 — Stored summary with a cursor
-`task_summaries(task_id PK, covers_through_event_id BIGINT, text TEXT, updated_at)`. `covers_through_event_id` refers to `transcript_events.id` (the task-wide ordering already used by `transcript_events_task_id_idx`). Updating reads `WHERE task_id = $1 AND id > $cursor AND kind IN (...) ORDER BY id`, folds, upserts. The upsert only writes when the new cursor is ahead of the stored one (`ON CONFLICT … DO UPDATE … WHERE task_summaries.covers_through_event_id < EXCLUDED.covers_through_event_id`), so a delayed update cannot replace a newer summary. *ponytail:* one row per task, no history of summaries; add versions when a plugin needs to compare strategies.
+### D1 — Rebuilt on every `Assign`, without the assigned run
+`Assign` of run N ≥ 2 reads all transcript events of the task with kinds `user_message`, `agent_message_chunk`, `tool_call`, `tool_call_update` and `run_id <> <run being assigned>`, ordered by `id`, and folds them. A reconnect mid-run therefore never sees its own half-finished run, and late batches of an ended run are simply included. Runs that ended without a report (lost sandbox, hard timeout) need no special path. The query selects only the payload fields the fold uses (text blocks with their `hidden` flag, title, status, turn and tool call ids), not raw tool input or output. *ponytail:* reads the whole transcript once per `Assign`; store the result with a cursor (D6) when a strategy is too expensive to rerun or a task's transcript makes the query measurably slow.
 
 ### D2 — The summary is a list of entries, rendered at the end
-User entries contain only the visible blocks of a message (`hidden` blocks, see `hide-system-prompt-blocks`), in incremental updates and rebuilds alike. Folding works on rendered entries (`"User: …"`, `"Agent: …"`, `"Tool: cargo test (failed)"`), so the stored text is the entries joined by blank lines under the header. To append, the stored text is split back into entries on the separator and the header is rebuilt from the task. Entries never contain the separator (it is replaced by a single newline when an entry is created). *Alternative:* a JSON column with entries. Rejected for now: the text is what `Assign` sends, and a plugin returns text.
+The fold produces entries (`"User: …"`, `"Agent: …"`, `"Tool: cargo test (failed)"`) in transcript order; the control plane renders the task header (title and description, cut to 4 KiB) followed by the kept entries, joined by blank lines. User entries contain only the visible blocks of a message (`hidden` blocks, see `hide-system-prompt-blocks`). Consecutive chunks of one agent message are merged into one entry.
 
-### D3 — Tool calls: one line per `tool_call_id`
-Events `tool_call` and `tool_call_update` are merged by `(run_id, turn_id, tool_call_id)` (the id is unique within a turn only, and a run can have several turns). The line is `Tool: <title> (<status>)` with the last known title and status. Raw input and output are not included: they are large and the workspace on the PVC or the pushed branch carries the result. Tool calls with origin `FACTORY` are included like any other.
+### D3 — Tool calls: one line per call, successful streaks collapsed
+`tool_call` and `tool_call_update` are merged by `(run_id, turn_id, tool_call_id)` (the id is unique within a turn only, and a run can have several turns). The line is `Tool: <title> (<status>)` with the last known title and status. Two or more consecutive calls with status `completed` (no other entry between them) become `Tool: <n> calls completed`; a failed, pending or in-progress call stays its own line and breaks the streak. Raw input and output are not included: they are large and the workspace on the PVC or the pushed branch carries the result. Tool calls with origin `FACTORY` are included like any other.
 
-### D4 — Update at run end, on the finalize path
-The update runs where the run report is persisted (`session.rs`, next to the `harness_session_id` update), after the final transcript events are stored. A failure is logged as a warning and does not fail the run end: the catch-up in `Assign` (D5) folds the missing events, because the cursor only advances on success.
+### D4 — Cap and drop order
+The cap is 64 KiB (the header's 4 KiB included). When the entries exceed what is left after the header, tool lines and agent messages are dropped oldest first; user messages are dropped (oldest first) only when no other entry is left. The newest entry is always kept, shortened if it alone exceeds the budget. Entries keep their transcript order after dropping.
 
-### D5 — `Assign` catches up before it reads
-`Assign` runs the same update as the run end (`update_task_summary`) before reading the row: it folds the events after the cursor, or the whole transcript if no row exists (tasks before this change), and stores the result. Normally there is nothing to fold. This covers every way a run can end (report, lost sandbox, hard timeout in `scheduler.rs`/`finish_run`, a failed or skipped update) with one code path and needs no data migration. The built-in fold is cheap and incremental, so it is fine in the `Assign` path; D7 forbids it for a model-based strategy.
+### D5 — A run that is still active is not covered
+The summary covers the events of all runs except the one being assigned. A follow-up run only starts after the previous run ended, so its summary is complete at that point. Keep-alive (`iter1-keep-alive-and-review`) continues in the same run and the same harness session, where no summary is used.
 
-### D6 — A run that is still active is not covered
-The summary covers events up to the last run end. A follow-up run only starts after the previous run ended, so the summary is current at that point. Keep-alive (`iter1-keep-alive-and-review`) continues in the same run and the same harness session, where no summary is used.
-
-### D7 — F3 interface, recorded here, built later
-A plugin strategy takes: previous summary text, transcript events after the cursor (including tool calls), and a budget. It returns the new summary text and the new cursor. The control plane persists the result and runs it at run end or idle, never in the `Assign` path (the built-in catch-up of D5 stays). The built-in fold of this change is the default strategy.
+### D6 — F3 interface, recorded here, built later
+A plugin strategy takes: previous summary text, transcript events after a cursor (including tool calls), and a budget. It returns the new entries text (no header, the control plane adds it) and the new cursor. Because a model-based strategy is too expensive to rerun per `Assign`, F3 adds the stored state this change does without: a table `task_summaries(task_id, covers_through_event_id, text)` updated at run end or idle, never in the `Assign` path. The built-in fold of this change stays the default strategy and the fallback when no stored summary exists.
 
 ## Risks / Trade-offs
 
-- [Splitting the stored text back into entries is fragile] → entries are created without the separator; a test round-trips a summary through split and join. If it proves brittle, switch to a JSON column (D2).
-- [Tool lines can crowd out messages within 16 KiB] → the oldest entries drop first, and a tool line is short. A noisy run (hundreds of calls) still keeps the recent part. A per-run cap on tool lines is the first knob if it matters.
-- [A crash between report persistence and summary update] → the cursor did not advance, `Assign` folds the missing events (D4, D5).
+- [Reading the whole transcript per `Assign` gets slow on very long tasks] → `Assign` happens once per run connect, the query uses `transcript_events_task_id_idx` and skips raw tool payloads. Store the result (D6) if it shows up in measurements.
+- [User messages can fill the cap on their own] → unlikely at 64 KiB; the oldest user messages go first, the header keeps the task's goal.
+- [Collapsed streaks hide which files were read or edited] → the workspace or the pushed branch shows the result; failed calls stay visible.
 - [The summary can contain secrets typed into messages] → same exposure as the transcript, which the harness already saw; not a new boundary.

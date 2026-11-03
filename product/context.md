@@ -156,6 +156,8 @@ Because the harness only sees tools through Dark Factory's MCP servers, custom t
 ### F3 — Context compaction strategies as plugins (idea, 2026-10-16)
 Chat and task context management (summaries across runs, compaction of long employee chats) as a WIT world, so different strategies can be swapped without implementing all of them in core. Such plugins need model access, so the world would import a host-provided inference interface backed by the gateway's inference endpoint.
 
+Interface (the built-in fold of `iter2-continuation-summary` rebuilds per `Assign` and is the default and fallback strategy): **input** the previous summary text, the transcript events after a cursor (including tool calls) and a size budget; **output** the new entries text (no header; the control plane adds it) and the new cursor; **trigger** run end or idle, never in the `Assign` path. The stored summary with a cursor (`task_summaries`) comes with F3, when a strategy is too expensive to rerun per `Assign`; chats (iteration 3) reuse this summary. Mid-run compaction is out of scope: the harness owns its context inside a run and ACP has no hook.
+
 ### F4 — Declarative configuration import (idea, 2026-10-16)
 A declarative format, inspired by the shape of Kubernetes custom resources but not backed by them, plus a CLI to push personas, skills, system prompts, … from a pipeline into an instance. The database stays authoritative (ADR-0020). Unlike the repository configuration (F11), the import may configure everything, including instance settings such as the image allowlist — which makes digest-pinned allowlist entries maintainable by a bot like renovate.
 
