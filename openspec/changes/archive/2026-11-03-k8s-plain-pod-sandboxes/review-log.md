@@ -72,3 +72,8 @@ User decision: fix R3-S1, R3-S2, R3-S3, verify with checks only (no further revi
 - Container-backed tests: df-k8s has none; no df_test_postgres tests were affected.
 - Tech debt: none. Deferred work: Proxmox/VM provider seam not added to the roadmap (user tracks it).
 - Status: done (15/15 tasks).
+
+## Correction after archive (2026-11-03)
+
+- The finish step ran only `bazel build //crates/... //plugins/...`; no `bazel test //...` ran during the change. `just bazel-test` (user) showed `//deploy:helm_chart_test` failing: KubeLinter `access-to-create-pods` on the sandbox RoleBinding (pods create, design D7).
+- Fix: scoped `ignore-check.kube-linter.io/access-to-create-pods` annotation with reason on that RoleBinding in `deploy/helm/dark-factory/templates/rbac.yaml`. `just bazel-test`: 41/41 pass.
