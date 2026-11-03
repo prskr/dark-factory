@@ -369,6 +369,37 @@ pub async fn queue_message_tx(
     })
 }
 
+/// Text of the prompt a resumed run starts with when nothing else is queued.
+pub const RESUME_PROMPT: &str = "Continue the task where the previous run stopped.";
+
+/// Queues [`RESUME_PROMPT`] (author `system`, reason `run.resumed`) for a task whose run starts
+/// from its resume time, unless the task has an undelivered message to continue with. Unlike
+/// [`queue_message_tx`] it leaves status, resume time and resume count to the caller. Returns
+/// whether a prompt was queued.
+pub async fn queue_resume_prompt_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+) -> Result<bool, DbError> {
+    let author = serde_json::to_value(Principal::system("run.resumed"))?;
+    let content = serde_json::to_value(vec![text_block(RESUME_PROMPT.into(), false)])?;
+    let inserted = sqlx::query(
+        "INSERT INTO task_messages (id, task_id, author, content)
+         SELECT $1, $2, $3, $4
+         WHERE NOT EXISTS (
+             SELECT 1 FROM task_messages
+             WHERE task_id = $2 AND delivered_at IS NULL AND discarded_at IS NULL
+         )",
+    )
+    .bind(PromptId::new().as_uuid())
+    .bind(task_id.as_uuid())
+    .bind(author)
+    .bind(content)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(inserted > 0)
+}
+
 /// Marks a queued prompt as delivered by `run_id` when its `UserMessage` event is persisted.
 /// Idempotent: returns `true` if a row existed for `prompt_id`.
 pub async fn mark_prompt_delivered(
