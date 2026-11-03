@@ -237,7 +237,7 @@ controlPlane:
       memory: 512Mi
 
 # Signed lifecycle events (volume and sandbox provisioning) sent to webhook receivers
-# (docs/lifecycle-events.md).
+# (docs/content/integrations/lifecycle-events.md).
 lifecycleEvents:
   signingKey:
     # Secret with the Ed25519 private key (PKCS#8 PEM). Empty: the chart creates a cert-manager

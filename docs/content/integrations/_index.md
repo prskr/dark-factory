@@ -8,3 +8,8 @@ control plane in a sandbox (Wasmtime). A plugin sees no credentials; the control
 each request and limits the plugin to the hosts of its route.
 
 - [Forges](forges/): Forgejo and GitHub, for pull requests, issues and review feedback.
+
+Outgoing, without a plugin:
+
+- [Lifecycle events](lifecycle-events.md): signed webhooks when a task volume or a run sandbox is
+  created or destroyed.
