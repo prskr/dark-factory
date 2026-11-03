@@ -31,13 +31,13 @@
 
 ## 2. Target environment
 
-- Runs **only** on Kubernetes. No SSH runtimes, no cloud-provider runtimes, no other Kubernetes primitives for agent execution.
+- The control plane and the gateways run **only** on Kubernetes. Sandboxes run as Kubernetes pods by default, or as VMs on Proxmox (in-tree) or at cloud providers (plugins) as a capability tier selected by sandbox profiles (ADR-0054). No SSH runtimes.
 - Agent runtime: **only** [agent-sandbox](https://agent-sandbox.sigs.k8s.io/) (kubernetes-sigs) for the beginning.
 - Control plane: always a Kubernetes `Deployment`.
 - Infrastructure "perks" that may be assumed present: cert-manager (incl. csi-driver for per-pod certificates), a CNI that enforces `NetworkPolicy` (Cilium supported, not required — ADR-0029), an OIDC identity provider (Keycloak in the homelab).
-- Kubernetes stays the only platform, behind a `SandboxProvider` seam in the control plane (ADR-0030).
+- Sandbox providers sit behind a `SandboxProvider` seam in the control plane (ADR-0030, amended by ADR-0054).
 - First target is the author's homelab: 5 bare-metal nodes on Talos Linux, Cilium, Longhorn storage, self-hosted Harbor (also pull-through cache), Forgejo, Keycloak, GitOps for all config, separate Postgres/etcd backups. Agent sandboxes already run with Kata Containers. Agent runtime hardening = agent-sandbox + Kata + network policies with explicit allowlists. Bazel RBE runs on an in-cluster NativeLink scheduler. Memory overhead of the sandbox runtime matters; raw performance does not.
-- Container-based integration tests run via Bazel remote build execution (RBE), whose workers have container daemons — not inside sandboxes.
+- Container-based integration tests run via Bazel remote build execution (RBE), whose workers have container daemons — not inside Kubernetes sandboxes. VM sandboxes may start sibling containers (ADR-0054).
 
 ## 3. Components
 

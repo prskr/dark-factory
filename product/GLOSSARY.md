@@ -157,3 +157,13 @@ _Avoid_: Silencer, blocklist, blacklist, mute
 **Model provider**:
 An upstream model service together with the one credential Dark Factory uses for it. Two accounts at the same service are two model providers. A persona uses exactly one.
 _Avoid_: Connection, provider account, LLM backend
+
+### Sandboxes
+
+**Sandbox profile**:
+A named, admin-defined choice of where and how a run's sandbox executes: a Kubernetes pod or a VM at a given provider, with its size and placement. A project has a default profile; a task may use another one the project allows.
+_Avoid_: Environment, runtime, sandbox class
+
+**VM sandbox**:
+A sandbox that runs as a full virtual machine instead of a Kubernetes pod and reaches the factory only through the vpn-gateway.
+_Avoid_: Cloud sandbox, VM runtime
