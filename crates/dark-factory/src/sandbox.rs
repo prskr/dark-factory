@@ -86,7 +86,7 @@ impl SandboxBackend for UnconfiguredBackend {
     }
 }
 
-/// Sandboxes as agent-sandbox resources in the connected Kubernetes cluster.
+/// Sandboxes as plain Pods in the connected Kubernetes cluster.
 pub(crate) struct KubernetesBackend {
     pub(crate) client: Client,
     /// The control plane's own log format, passed on to every sandbox.

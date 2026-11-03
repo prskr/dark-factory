@@ -15,7 +15,7 @@ The control plane is a single binary running as a Kubernetes Deployment, possibl
 | Runtime / HTTP | tokio, axum, utoipa (OpenAPI for the integration API) |
 | UI streaming | Server-sent events from axum |
 | Agent channel | tonic gRPC bidirectional stream on a separate port, mTLS (ADR-0006) |
-| Kubernetes | kube-rs, `kopium`-generated agent-sandbox types, Lease-based leader election |
+| Kubernetes | kube-rs with `k8s-openapi` types, Lease-based leader election |
 | Storage | PostgreSQL via sqlx, plus a blob store abstraction (ADR-0012) |
 | Full-text search | Postgres `tsvector` + `pg_trgm`; pgvector later for agent memory |
 | Task queue / routines | Postgres `FOR UPDATE SKIP LOCKED` + `croner` |

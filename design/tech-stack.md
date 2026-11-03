@@ -32,7 +32,7 @@
 | Integration API docs | utoipa (OpenAPI) | Decided | [0003](../docs/adr/0003-control-plane-stack.md) |
 | Agent port | tonic + prost, rustls with the `ring` provider, client-certificate verification | Decided | [0006](../docs/adr/0006-agent-dial-back-grpc-mtls.md), [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
 | Agent protocol semantics | Agent → CP sequenced with acks; CP → agent idempotent; typed tool calls | Decided | [0027](../docs/adr/0027-agent-protocol-delivery-and-typed-tool-calls.md) |
-| Kubernetes | kube-rs, `kopium`-generated agent-sandbox types, Lease-based leader election | Decided | [0001](../docs/adr/0001-rust-for-control-plane-and-runtime.md), [0003](../docs/adr/0003-control-plane-stack.md) |
+| Kubernetes | kube-rs with `k8s-openapi` types, Lease-based leader election | Decided | [0001](../docs/adr/0001-rust-for-control-plane-and-runtime.md), [0003](../docs/adr/0003-control-plane-stack.md) |
 | Database access | sqlx (offline mode for builds) | Decided | [0012](../docs/adr/0012-postgresql-and-blob-store.md), [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
 | Migrations | Embedded via `sqlx::migrate!`, applied by `dark-factory migrate` (same image, run as a Job with owner credentials), which optionally manages the application role and always applies its grants; the server runs without DDL rights; expand/contract | Decided | [0012](../docs/adr/0012-postgresql-and-blob-store.md) |
 | Job queue / routines | Postgres `FOR UPDATE SKIP LOCKED`, `croner` for schedules | Decided | [0003](../docs/adr/0003-control-plane-stack.md) |
@@ -46,7 +46,7 @@
 | Markdown rendering | comrak + syntect | Decided | [0004](../docs/adr/0004-server-rendered-ui-maud-htmx-alpine.md) |
 | Static assets | rust-embed | Decided | [0004](../docs/adr/0004-server-rendered-ui-maud-htmx-alpine.md) |
 | Telemetry | tracing + OpenTelemetry | Decided | [0003](../docs/adr/0003-control-plane-stack.md) |
-| Sandbox provisioning | `SandboxProvider` trait, agent-sandbox the only implementation; write access via a Role in the sandbox namespace only | Decided | [0030](../docs/adr/0030-kubernetes-only-with-sandbox-provider-seam.md) |
+| Sandbox provisioning | `SandboxProvider` trait, the Kubernetes provider (one plain Pod per run) the only implementation; write access via a Role in the sandbox namespace only | Decided | [0030](../docs/adr/0030-kubernetes-only-with-sandbox-provider-seam.md) |
 | Network policy rendering | Per-run `NetworkPolicy` (default) or `CiliumNetworkPolicy`, reconciled by the leader | Decided | [0029](../docs/adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Gateway policy push | `PolicyWatch` gRPC stream (snapshot + updates), fed by `LISTEN/NOTIFY` | Decided | [0029](../docs/adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Egress log relay | Merge `Tail` streams from all gateway pods, serve via SSE | Decided | [0029](../docs/adr/0029-egress-gateway-and-generated-network-policies.md) |
@@ -118,7 +118,7 @@
 | Concern | Choice | Status | ADR |
 |---|---|---|---|
 | Platform | Kubernetes only, behind a `SandboxProvider` seam (homelab: Talos Linux, 5 bare-metal nodes) | Decided | [0030](../docs/adr/0030-kubernetes-only-with-sandbox-provider-seam.md) |
-| Sandboxes | kubernetes-sigs agent-sandbox (pre-1.0, pinned) | Decided | [0006](../docs/adr/0006-agent-dial-back-grpc-mtls.md), [0022](../docs/adr/0022-project-images-runtime-volume-no-warm-pools.md) |
+| Sandboxes | Plain Kubernetes Pods, one per run (ADR-0030 amendment) | Decided | [0006](../docs/adr/0006-agent-dial-back-grpc-mtls.md), [0022](../docs/adr/0022-project-images-runtime-volume-no-warm-pools.md) |
 | Isolation | Kata Containers runtime class, restricted pod security | Decided | [0023](../docs/adr/0023-kata-isolation-no-nested-containers.md) |
 | Networking | Any CNI enforcing `NetworkPolicy`; Cilium optional (`CiliumNetworkPolicy`, FQDN rules, Hubble) — the homelab runs Cilium | Decided | [0029](../docs/adr/0029-egress-gateway-and-generated-network-policies.md) |
 | Certificates | cert-manager + csi-driver, private CA Issuer | Decided | [0006](../docs/adr/0006-agent-dial-back-grpc-mtls.md) |
@@ -139,7 +139,7 @@
 | Contract tooling | protoc (29.x), wasm-tools (≥ 1.245 for WASI 0.2.12) | Decided | — |
 | End-to-end tests | Fake ACP agent built on `agent-client-protocol` | Decided | [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
 | Inner loop | telepresence | Later | [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
-| CI integration environment | kind/k3d with Cilium, cert-manager, agent-sandbox | Later | [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
+| CI integration environment | kind/k3d with Cilium, cert-manager | Later | [0024](../docs/adr/0024-build-tooling-and-dev-loop.md) |
 
 ## Open choices
 - OIDC client, session store and JWT libraries (suggested above).

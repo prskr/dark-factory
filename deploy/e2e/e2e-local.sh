@@ -21,7 +21,6 @@ release=dark-factory
 # Pinned versions of what the cluster runs besides the images built from this repository.
 cert_manager_version=v1.21.3
 csi_driver_version=v0.16.1
-agent_sandbox_version=v1.0.9
 forgejo_chart_version=17.3.2
 
 # Ports of the host side of the port-forwards.
@@ -103,9 +102,8 @@ load_images() {
 }
 
 install_infrastructure() {
-  log "Installing cert-manager, PostgreSQL, Dex, agent-sandbox and the browser"
+  log "Installing cert-manager, PostgreSQL, Dex and the browser"
   kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
-  kc apply --server-side -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${agent_sandbox_version}/sandbox.yaml"
   kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
   hc upgrade --install cert-manager-csi-driver "oci://quay.io/jetstack/charts/cert-manager-csi-driver" \
@@ -116,7 +114,6 @@ install_infrastructure() {
     --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
-  kc -n agent-sandbox-system wait --for=condition=Available deployment --all --timeout=300s
   kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
 }
 

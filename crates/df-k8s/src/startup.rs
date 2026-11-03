@@ -25,36 +25,6 @@ pub struct RequiredPermission {
 /// Required permissions checked in the sandbox namespace at startup.
 pub const SANDBOX_PERMISSIONS: &[RequiredPermission] = &[
     RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "create",
-    },
-    RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "get",
-    },
-    RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "list",
-    },
-    RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "watch",
-    },
-    RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "patch",
-    },
-    RequiredPermission {
-        group: "agents.x-k8s.io",
-        resource: "sandboxes",
-        verb: "delete",
-    },
-    RequiredPermission {
         group: "",
         resource: "persistentvolumeclaims",
         verb: "create",
@@ -117,6 +87,11 @@ pub const SANDBOX_PERMISSIONS: &[RequiredPermission] = &[
     RequiredPermission {
         group: "",
         resource: "pods",
+        verb: "create",
+    },
+    RequiredPermission {
+        group: "",
+        resource: "pods",
         verb: "get",
     },
     RequiredPermission {
@@ -128,6 +103,11 @@ pub const SANDBOX_PERMISSIONS: &[RequiredPermission] = &[
         group: "",
         resource: "pods",
         verb: "watch",
+    },
+    RequiredPermission {
+        group: "",
+        resource: "pods",
+        verb: "delete",
     },
 ];
 
@@ -564,5 +544,39 @@ mod tests {
         );
         drop(client);
         responder.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_pod_create_permission_is_named() {
+        let (mock_service, handle) = mock::pair();
+        let responder = spawn_ssar_responder(handle, |ns, resource, verb| {
+            !(ns == Some("sandboxes") && resource == "pods" && verb == "create")
+        });
+        let client = Client::new(mock_service, "default");
+        let err = verify_startup(
+            &client,
+            "sandboxes",
+            "instance",
+            &ClusterTargetsConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err,
+            StartupCheckError::MissingPermissions {
+                missing: vec!["create pods in namespace `sandboxes`".to_string()],
+            }
+        );
+        drop(client);
+        responder.await.unwrap();
+    }
+
+    #[test]
+    fn no_agent_sandbox_permission_is_required() {
+        assert!(
+            SANDBOX_PERMISSIONS
+                .iter()
+                .all(|p| p.group != "agents.x-k8s.io")
+        );
     }
 }

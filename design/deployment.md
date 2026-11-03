@@ -7,11 +7,11 @@
 | Namespace | Contains | Created by |
 |---|---|---|
 | Instance namespace (e.g. `dark-factory`) | Control plane Deployment, gateway Deployment, `migrate` Job, Services, ServiceAccounts, credential Secrets (incl. a commit signing key, once used — created and rotated outside Dark Factory), Leases | Helm release (or pre-existing) |
-| Sandbox namespace (e.g. `dark-factory-sandboxes`) | Sandboxes, task PVCs, generated network policies | Helm chart (`sandboxNamespace.create: true`) **or** the operator beforehand — **never the control plane** |
+| Sandbox namespace (e.g. `dark-factory-sandboxes`) | Sandbox Pods, task PVCs, generated network policies | Helm chart (`sandboxNamespace.create: true`) **or** the operator beforehand — **never the control plane** |
 
 - The sandbox namespace is configured per instance (`sandboxNamespace.name` in the chart → control plane setting). Several instances in one cluster each get their own pair of namespaces.
 - At startup the control plane checks that the sandbox namespace exists and that it holds the permissions below (`SelfSubjectAccessReview`); otherwise it refuses to start with a message naming what's missing.
-- Prerequisites the chart doesn't install: agent-sandbox (CRDs + controller, pinned version), cert-manager and csi-driver, a CNI that enforces `NetworkPolicy`, PostgreSQL, an OIDC provider.
+- Prerequisites the chart doesn't install: cert-manager and csi-driver, a CNI that enforces `NetworkPolicy`, PostgreSQL, an OIDC provider.
 
 ## 2. Sandbox namespace (defined by the chart or the operator)
 - Pod Security Admission labels: `restricted`.
@@ -23,7 +23,7 @@
 
 | Component | Where | Permissions |
 |---|---|---|
-| Control plane | Role in the **sandbox namespace** | agent-sandbox API group (`agents.x-k8s.io`, verify against the pinned release): Sandboxes create/get/list/watch/patch/delete · `persistentvolumeclaims` create/get/list/watch/delete · `networkpolicies` (`networking.k8s.io`) create/get/list/watch/update/patch/delete · `ciliumnetworkpolicies` (`cilium.io`, Cilium mode only) same · `pods` get/list/watch · `events` create |
+| Control plane | Role in the **sandbox namespace** | `persistentvolumeclaims` create/get/list/watch/delete · `networkpolicies` (`networking.k8s.io`) create/get/list/watch/update/patch/delete · `ciliumnetworkpolicies` (`cilium.io`, Cilium mode only) same · `pods` create/get/list/watch/delete · `events` create |
 | Control plane | Role in the **instance namespace** | `leases` (`coordination.k8s.io`) get/create/update · `secrets` get (credential references) · `endpointslices` (`discovery.k8s.io`) get/list/watch (gateway pod discovery) |
 | Control plane | Role per **cluster-target namespace** (listed in values), or a read-only ClusterRole if `clusterTargets.anyNamespace: true` | `services`, `endpointslices` get/list/watch |
 | Gateway | — | None; `automountServiceAccountToken: false`. Everything comes from the control plane (`PolicyWatch`). |
@@ -93,3 +93,13 @@ One release = one instance. The chart contains:
 - Values for the instance configuration that isn't in the database: database connection, OIDC, sandbox namespace, enforcement mode (`kubernetes` / `cilium`), cluster-target namespaces, image references.
 
 The dev loop (ADR-0024) uses the same chart: the Bazel deploy target pushes images and runs `helm upgrade --install` with the new image digests and dev values.
+
+## Migration: from agent-sandbox to plain Pods
+
+For a cluster that ran runs as agent-sandbox `Sandbox` objects (change `k8s-plain-pod-sandboxes`):
+
+1. Wait for or stop active runs, then `kubectl -n <sandbox ns> delete sandboxes.agents.x-k8s.io -l dark-factory.io/instance=<instance>`.
+2. Upgrade the chart (new Role with `pods` create/delete). Task PVCs are untouched; the next run of each task mounts its PVC as before.
+3. Optionally uninstall agent-sandbox (controller and CRDs).
+
+Rollback: wait for or stop active runs, then `kubectl -n <sandbox ns> delete pods -l dark-factory.io/instance=<instance>` (run Pods have no owner, and the previous chart's Role cannot delete Pods); then reinstall agent-sandbox and the previous chart. No data migration is involved in either direction.

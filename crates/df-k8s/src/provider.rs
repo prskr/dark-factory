@@ -1,4 +1,4 @@
-//! Sandbox provider implementation for Kubernetes and agent-sandbox CRDs.
+//! Sandbox provider implementation for Kubernetes: one plain Pod per run.
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -17,7 +17,7 @@ use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Client;
-use kube::api::{Api, DeleteParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, Patch, PatchParams, PostParams};
 use kube::runtime::WatchStreamExt as _;
 use kube::runtime::reflector::{self, ObjectRef, Store};
 use kube::runtime::watcher;
@@ -28,9 +28,8 @@ use tracing::{info, warn};
 
 use crate::K8S_API_TIMEOUT;
 use crate::config::ProvisioningConfig;
-use crate::crd::Sandbox;
 use crate::render::{
-    RenderError, ResolvedClusterTarget, render_network_policy, render_pvc, render_sandbox,
+    RenderError, ResolvedClusterTarget, render_network_policy, render_pod, render_pvc,
 };
 
 /// Trait providing resolved cluster targets for sandbox provisioning.
@@ -394,13 +393,12 @@ pub fn parse_spiffe_san(san: &str) -> Option<(&str, &str, &str)> {
     Some((ns, name, uid))
 }
 
-/// Resolves peer mTLS identity using cached Pod and Sandbox reflectors.
-pub fn resolve_identity_from_stores(
+/// Resolves peer mTLS identity using the cached Pod reflector.
+pub fn resolve_identity_from_pod_store(
     peer: &PeerIdentity,
     sandbox_namespace: &str,
     instance_name: &str,
     pod_store: &Store<Pod>,
-    sandbox_store: &Store<Sandbox>,
 ) -> Option<RunId> {
     let (ns, pod_name, uid) = parse_spiffe_san(&peer.uri_san)?;
     if ns != sandbox_namespace {
@@ -422,33 +420,13 @@ pub fn resolve_identity_from_stores(
         return None;
     }
 
-    // Verify ownership by a Sandbox
-    let owner = pod
-        .metadata
-        .owner_references
-        .as_ref()?
-        .iter()
-        .find(|o| o.kind == "Sandbox" && o.api_version.starts_with("agents.x-k8s.io"))?;
-
-    let sb_ref = ObjectRef::new(&owner.name).within(sandbox_namespace);
-    let sandbox = sandbox_store.get(&sb_ref)?;
-
-    // Verify owner UID matches Sandbox UID
-    if sandbox.metadata.uid.as_deref() != Some(&owner.uid) {
+    // Verify instance label (a second line of defence: the reflector already filters by it)
+    let labels = pod.metadata.labels.as_ref()?;
+    if labels.get("dark-factory.io/instance").map(String::as_str) != Some(instance_name) {
         return None;
     }
 
-    // Verify instance label
-    let sb_labels = sandbox.metadata.labels.as_ref()?;
-    if sb_labels
-        .get("dark-factory.io/instance")
-        .map(String::as_str)
-        != Some(instance_name)
-    {
-        return None;
-    }
-
-    run_id_from_metadata(&sandbox.metadata)
+    run_id_from_metadata(&pod.metadata)
 }
 
 /// Derives a `SandboxEvent` transition from a Pod's current state.
@@ -475,7 +453,15 @@ pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
         return Some(SandboxEvent::Gone { run_id, reason });
     }
 
-    // 3. Container waiting errors (e.g. ErrImagePull, ImagePullBackOff, CreateContainerConfigError)
+    // 3. Completed without a run report
+    if status.phase.as_deref() == Some("Succeeded") {
+        return Some(SandboxEvent::Gone {
+            run_id,
+            reason: "pod completed".to_string(),
+        });
+    }
+
+    // 4. Container waiting errors (e.g. ErrImagePull, ImagePullBackOff, CreateContainerConfigError)
     {
         for cs in status.container_statuses.iter().flatten() {
             if let Some(ref state) = cs.state
@@ -494,7 +480,7 @@ pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
         }
     }
 
-    // 4. Running with IP -> Started
+    // 5. Running with IP -> Started
     if status.phase.as_deref() == Some("Running")
         && let Some(ref ip_str) = status.pod_ip
         && let Ok(ip) = ip_str.parse::<IpAddr>()
@@ -529,7 +515,6 @@ pub struct K8sSandboxProvider {
     config: ProvisioningConfig,
     targets_provider: Arc<dyn ClusterTargetsProvider>,
     pod_store: Store<Pod>,
-    sandbox_store: Store<Sandbox>,
     events_tx: broadcast::Sender<SandboxEvent>,
 }
 
@@ -540,7 +525,6 @@ impl K8sSandboxProvider {
         config: ProvisioningConfig,
         targets_provider: Arc<dyn ClusterTargetsProvider>,
         pod_store: Store<Pod>,
-        sandbox_store: Store<Sandbox>,
     ) -> Self {
         let (events_tx, _) = broadcast::channel(128);
         Self {
@@ -548,12 +532,11 @@ impl K8sSandboxProvider {
             config,
             targets_provider,
             pod_store,
-            sandbox_store,
             events_tx,
         }
     }
 
-    /// Starts the sandbox provider, spawning pod and sandbox reflectors with backoff.
+    /// Starts the sandbox provider, spawning the pod reflector with backoff.
     ///
     /// The returned future drives the reflectors and the event translation; the caller owns it
     /// and must run it for the provider to see changes.
@@ -573,26 +556,12 @@ impl K8sSandboxProvider {
             watcher(pod_api, watcher::Config::default().labels(&selector)).default_backoff();
         let pod_reflector = reflector::reflector(pod_writer, pod_watcher);
 
-        let (sb_store, sb_writer) = reflector::store();
-        let sb_api: Api<Sandbox> = Api::namespaced(client.clone(), &config.sandbox.namespace);
-        let sb_watcher =
-            watcher(sb_api, watcher::Config::default().labels(&selector)).default_backoff();
-        let sb_reflector = reflector::reflector(sb_writer, sb_watcher);
-
-        let provider = Arc::new(Self::new(
-            client,
-            config,
-            targets_provider,
-            pod_store,
-            sb_store,
-        ));
+        let provider = Arc::new(Self::new(client, config, targets_provider, pod_store));
 
         let prov_for_events = provider.clone();
-        let watcher_task = Box::pin(forward_events(
-            pod_reflector.boxed(),
-            sb_reflector.boxed(),
-            move |event| prov_for_events.emit_event(event),
-        ));
+        let watcher_task = Box::pin(forward_events(pod_reflector.boxed(), move |event| {
+            prov_for_events.emit_event(event);
+        }));
 
         (provider, watcher_task)
     }
@@ -603,21 +572,21 @@ impl K8sSandboxProvider {
         self.events_tx.send(event).ok(); // receiver may be gone
     }
 
-    fn sandbox_api(&self) -> Api<Sandbox> {
+    fn pod_api(&self) -> Api<Pod> {
         Api::namespaced(self.client.clone(), &self.config.sandbox.namespace)
     }
 
-    /// The sandboxes of this instance labelled with `run_id`.
-    async fn list_run_sandboxes(
+    /// The pods of this instance labelled with `run_id`.
+    async fn list_run_pods(
         &self,
         run_id: RunId,
         what: &str,
-    ) -> Result<kube::api::ObjectList<Sandbox>, ProviderError> {
+    ) -> Result<kube::api::ObjectList<Pod>, ProviderError> {
         let list_params = kube::api::ListParams::default().labels(&format!(
             "dark-factory.io/instance={},dark-factory.io/run-id={run_id}",
             self.config.instance_name
         ));
-        api_call(what, self.sandbox_api().list(&list_params)).await
+        api_call(what, self.pod_api().list(&list_params)).await
     }
 }
 
@@ -671,7 +640,6 @@ impl SandboxProvider for K8sSandboxProvider {
     }
 
     async fn provision(&self, spec: &RunSandboxSpec) -> Result<(), ProviderError> {
-        let sandboxes = self.sandbox_api();
         let netpols: Api<NetworkPolicy> =
             Api::namespaced(self.client.clone(), &self.config.sandbox.namespace);
 
@@ -680,7 +648,7 @@ impl SandboxProvider for K8sSandboxProvider {
             .get_targets(Some(spec.project_key.as_str()))
             .await?;
 
-        let sandbox = render_sandbox(spec, &targets, &self.config).map_err(|e| match e {
+        let pod = render_pod(spec, &targets, &self.config).map_err(|e| match e {
             RenderError::HeadlessServiceNotAllowed { namespace, service } => {
                 ProviderError::InvalidSpec(format!(
                     "headless service `{namespace}/{service}` not allowed without allowDns"
@@ -689,24 +657,34 @@ impl SandboxProvider for K8sSandboxProvider {
             e @ RenderError::NoHarnessImage { .. } => ProviderError::InvalidSpec(e.to_string()),
         })?;
 
-        let sandbox_name = sandbox
+        let pod_name = pod
             .metadata
             .name
             .clone()
-            .ok_or_else(|| ProviderError::InvalidSpec("sandbox name is missing".to_string()))?;
-        let patch = Patch::Apply(&sandbox);
-        let params = PatchParams::apply("dark-factory").force();
-
-        let applied_sandbox = api_call(
-            &format!("apply Sandbox `{sandbox_name}`"),
-            sandboxes.patch(&sandbox_name, &params, &patch),
-        )
+            .ok_or_else(|| ProviderError::InvalidSpec("pod name is missing".to_string()))?;
+        // A pod spec is immutable, so the pod is created, not applied: an existing pod of the
+        // run is kept (its UID is needed for the policy's owner reference either way).
+        let pods = self.pod_api();
+        let created = api_call(&format!("create Pod `{pod_name}`"), async {
+            match pods.create(&PostParams::default(), &pod).await {
+                Err(kube::Error::Api(status))
+                    if status.code == 409 && status.reason == "AlreadyExists" =>
+                {
+                    pods.get(&pod_name).await
+                }
+                other => other,
+            }
+        })
         .await?;
+        let pod_uid = created.metadata.uid.ok_or_else(|| {
+            ProviderError::Backend(format!("Pod `{pod_name}` has no UID in the API answer"))
+        })?;
 
         let netpol = render_network_policy(
             spec.run_id,
             &spec.task_key,
-            &applied_sandbox,
+            &pod_name,
+            &pod_uid,
             &targets,
             &self.config,
         );
@@ -714,42 +692,41 @@ impl SandboxProvider for K8sSandboxProvider {
             ProviderError::InvalidSpec("network policy name is missing".to_string())
         })?;
         let netpol_patch = Patch::Apply(&netpol);
+        let params = PatchParams::apply("dark-factory").force();
         api_call(
             &format!("apply NetworkPolicy `{netpol_name}`"),
             netpols.patch(&netpol_name, &params, &netpol_patch),
         )
         .await?;
 
-        info!(run_id = %spec.run_id, sandbox = %sandbox_name, "sandbox and network policy provisioned");
+        info!(run_id = %spec.run_id, pod = %pod_name, "pod and network policy provisioned");
         Ok(())
     }
 
     async fn teardown(&self, run_id: RunId) -> Result<(), ProviderError> {
-        let sandboxes = self.sandbox_api();
-        let matching = self
-            .list_run_sandboxes(run_id, "list sandboxes for teardown")
-            .await?;
+        let pods = self.pod_api();
+        let matching = self.list_run_pods(run_id, "list pods for teardown").await?;
 
-        for sb in matching {
-            if let Some(name) = sb.metadata.name {
+        for pod in matching {
+            if let Some(name) = pod.metadata.name {
                 let deleted = tokio::time::timeout(
                     K8S_API_TIMEOUT,
-                    sandboxes.delete(&name, &DeleteParams::default()),
+                    pods.delete(&name, &DeleteParams::default()),
                 )
                 .await;
                 match deleted {
                     Ok(Ok(_)) => {
-                        info!(run_id = %run_id, sandbox = %name, "sandbox deleted during teardown");
+                        info!(run_id = %run_id, pod = %name, "pod deleted during teardown");
                     }
                     Ok(Err(kube::Error::Api(e))) if e.code == 404 => {}
                     Ok(Err(e)) => {
                         return Err(ProviderError::Backend(format!(
-                            "failed to delete sandbox `{name}`: {e}"
+                            "failed to delete pod `{name}`: {e}"
                         )));
                     }
                     Err(_) => {
                         return Err(ProviderError::Backend(format!(
-                            "timeout deleting sandbox `{name}`"
+                            "timeout deleting pod `{name}`"
                         )));
                     }
                 }
@@ -760,19 +737,16 @@ impl SandboxProvider for K8sSandboxProvider {
     }
 
     async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError> {
-        let matching = self
-            .list_run_sandboxes(run_id, "list sandboxes of a run")
-            .await?;
+        let matching = self.list_run_pods(run_id, "list pods of a run").await?;
         Ok(!matching.items.is_empty())
     }
 
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId> {
-        resolve_identity_from_stores(
+        resolve_identity_from_pod_store(
             peer,
             &self.config.sandbox.namespace,
             &self.config.instance_name,
             &self.pod_store,
-            &self.sandbox_store,
         )
     }
 
@@ -828,10 +802,10 @@ fn is_quota_rejection(err: &kube::Error) -> bool {
             .any(|text| text.contains("exceeded quota"))
 }
 
-/// Translates pod and sandbox watch events into [`SandboxEvent`]s, at most one `Started` and one
+/// Translates pod watch events into [`SandboxEvent`]s, at most one `Started` and one
 /// `Gone` per run.
 ///
-/// A relist (`Init` .. `InitDone`) never sends `Delete`: runs whose pod or Sandbox vanished while
+/// A relist (`Init` .. `InitDone`) never sends `Delete`: runs whose pod vanished while
 /// the watch was down are only noticed by comparing what was known with what the relist
 /// returned. Only objects seen by this process are known; after a control plane restart nothing
 /// is known, and a run whose pod disappeared meanwhile ends through the scheduler's timeouts.
@@ -841,12 +815,10 @@ struct EventTracker {
     // One entry per run for the process lifetime.
     // ponytail: unbounded; prune when a run's teardown completes if this ever matters.
     gone: HashSet<RunId>,
-    /// Runs with a pod / Sandbox seen so far.
+    /// Runs with a pod seen so far.
     pods: HashSet<RunId>,
-    sandboxes: HashSet<RunId>,
     /// Runs returned between `Init` and `InitDone` of the current relist.
     relisted_pods: HashSet<RunId>,
-    relisted_sandboxes: HashSet<RunId>,
 }
 
 impl EventTracker {
@@ -913,68 +885,19 @@ impl EventTracker {
             .filter_map(|event| self.dedupe(event))
             .collect()
     }
-
-    fn sandbox_event(&mut self, event: watcher::Event<Sandbox>) -> Vec<SandboxEvent> {
-        match event {
-            watcher::Event::Init => {
-                self.relisted_sandboxes.clear();
-                Vec::new()
-            }
-            watcher::Event::InitApply(sandbox) => {
-                if let Some(run_id) = run_id_from_metadata(&sandbox.metadata) {
-                    self.relisted_sandboxes.insert(run_id);
-                    self.sandboxes.insert(run_id);
-                }
-                Vec::new()
-            }
-            watcher::Event::Apply(sandbox) => {
-                if let Some(run_id) = run_id_from_metadata(&sandbox.metadata) {
-                    self.sandboxes.insert(run_id);
-                }
-                Vec::new()
-            }
-            watcher::Event::Delete(sandbox) => {
-                let Some(run_id) = run_id_from_metadata(&sandbox.metadata) else {
-                    return Vec::new();
-                };
-                self.sandboxes.remove(&run_id);
-                self.gone_events(vec![run_id], "sandbox deleted")
-            }
-            watcher::Event::InitDone => {
-                let vanished: Vec<RunId> = self
-                    .sandboxes
-                    .difference(&self.relisted_sandboxes)
-                    .copied()
-                    .collect();
-                for run_id in &vanished {
-                    self.sandboxes.remove(run_id);
-                }
-                self.gone_events(vanished, "sandbox no longer present")
-            }
-        }
-    }
 }
 
-/// Consumes the pod and sandbox watch streams until one of them ends and calls `emit` for every
-/// resulting event. Stream errors are logged; the streams retry with backoff on their own.
-async fn forward_events<P, S>(mut pods: P, mut sandboxes: S, emit: impl Fn(SandboxEvent))
+/// Consumes the pod watch stream until it ends and calls `emit` for every resulting event.
+/// Stream errors are logged; the stream retries with backoff on its own.
+async fn forward_events<P>(mut pods: P, emit: impl Fn(SandboxEvent))
 where
     P: Stream<Item = Result<watcher::Event<Pod>, watcher::Error>> + Unpin,
-    S: Stream<Item = Result<watcher::Event<Sandbox>, watcher::Error>> + Unpin,
 {
     let mut tracker = EventTracker::default();
-    loop {
-        tokio::select! {
-            res = pods.next() => match res {
-                Some(Ok(event)) => tracker.pod_event(event).into_iter().for_each(&emit),
-                Some(Err(err)) => warn!(error = %err, "pod reflector error"),
-                None => break,
-            },
-            res = sandboxes.next() => match res {
-                Some(Ok(event)) => tracker.sandbox_event(event).into_iter().for_each(&emit),
-                Some(Err(err)) => warn!(error = %err, "sandbox reflector error"),
-                None => break,
-            },
+    while let Some(res) = pods.next().await {
+        match res {
+            Ok(event) => tracker.pod_event(event).into_iter().for_each(&emit),
+            Err(err) => warn!(error = %err, "pod reflector error"),
         }
     }
 }

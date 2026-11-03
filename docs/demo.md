@@ -26,7 +26,7 @@ kind delete cluster --name df-e2e
 
 ```mermaid
 flowchart TD
-    A[kind create cluster df-e2e] --> B[cert-manager, CSI driver, agent-sandbox]
+    A[kind create cluster df-e2e] --> B[cert-manager, CSI driver]
     A --> I[bazel run //deploy:load_e2e_*, kind load]
     B --> C[PostgreSQL, Dex, Playwright server, Forgejo]
     C --> D[Forgejo bot user, token, factory/demo, issue 1, Secret]
@@ -38,8 +38,8 @@ flowchart TD
 ```
 
 1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`).
-2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` loads each image into the local Podman/Docker image store, `kind load docker-image` copies it into the node. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, agent-sandbox, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
-3. Installs cert-manager and its CSI driver, agent-sandbox, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server and Forgejo (Helm chart, SQLite, no persistence).
+2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` loads each image into the local Podman/Docker image store, `kind load docker-image` copies it into the node. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
+3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server and Forgejo (Helm chart, SQLite, no persistence).
 4. Creates the Forgejo user `factory`, its token, the repository `factory/demo` and issue 1, and the Secret `forgejo-token` for the credential reference.
 5. Installs the chart with `deploy/values-e2e.yaml`.
 6. Seeds the database, port-forwards PostgreSQL, Forgejo and the Playwright server, and runs the ignored tests of `crates/df-e2e` one at a time.
@@ -222,7 +222,7 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 |---|---|
 | Image volumes with Talos containerd and Kata | works |
 | cert-manager CSI volumes inside Kata sandboxes | works |
-| agent-sandbox passes image volumes, CSI volumes, PVCs and the runtime class through | works |
+| Pod passes image volumes, CSI volumes, PVCs and the runtime class through (formerly via agent-sandbox, since removed) | works |
 | Claude ACP adapter: headless with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load`, token usage | works; usage is reported by the adapter |
 | Claude with `ANTHROPIC_BASE_URL` and a placeholder token | works, see above |
 | Forgejo draft/WIP PRs via API | works |
@@ -234,4 +234,4 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 ### Open follow-ups
 
 - Token swap: long interactive session and the image's Claude Code version (iteration 3, inference endpoint).
-- Whether agent-sandbox still adds anything over plain scheduled Pods (roadmap backlog).
+- agent-sandbox was replaced by plain Pods (`k8s-plain-pod-sandboxes`).

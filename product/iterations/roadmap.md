@@ -135,7 +135,6 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
-| Replace agent-sandbox with plain scheduled Pods, if it no longer adds anything the control plane needs | idea | `docs/demo.md` (iteration 1 spike results) |
 | CI job running the e2e suite (`just e2e-local` on Docker) | decided | `openspec/changes/archive/2026-10-31-iter1-demo-e2e/design.md` (Non-Goals) |
 | Automatic downscaling of image artifacts (e.g. to 2k or 4k on the long side) instead of rejecting images above the size and pixel limits | idea | ADR-0048 (amended 2026-11-03) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
