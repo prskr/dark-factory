@@ -95,7 +95,7 @@ sequenceDiagram
   CP->>VG: next key added to the peer via watch (bootstrap key stays valid)
   CP-->>VM: certificate (over the bootstrap session)
   VM->>VG: handshake with the new key
-  VG->>VG: drop the bootstrap key after the first new-key handshake
+  VG->>VG: drop the bootstrap key after the first authenticated data under the new-key session
   VM->>VM: extract runtime + harness, podman kube play
   VM->>CP: Hello over mTLS → Assign …
   VM->>CP: RunReport
@@ -163,10 +163,10 @@ The first Proxmox version has no cluster targets (e.g. NativeLink RBE): the rela
 3. `df-bootstrap` brings up `wg0` with the bootstrap key, generates the mTLS private key and a **new WireGuard key pair** locally, and calls `Enroll(token, CSR, new WireGuard public key)` on the enrollment port. The enrollment listener is server-authenticated TLS only, accepts exactly this RPC and is reachable only through the relay.
 4. The control plane checks token, expiry and that the PROXY header's tunnel IP is the run's, submits a cert-manager `CertificateRequest` with the CSR, records the CSR's public key and the new WireGuard key with the run (this marks the token spent), adds the new WireGuard key to the run's peer as its **next key**, and returns the certificate. The response travels over the bootstrap session, which stays valid.
 5. `df-bootstrap` writes `tls.crt`, `tls.key`, `ca.crt` to the directory the runtime reads (`DF_TLS_DIR`), the same interface csi-driver provides in pods, and switches `wg0` to the new key.
-6. The vpn-gateway drops the bootstrap key on the first successful handshake with the next key, and reports it to the control plane, which then removes the bootstrap key from the desired peer state. Until then, both keys map to the run's /32 (the vpn-gateway's peer table is its own, not the kernel's one-peer-per-address rule).
+6. The vpn-gateway drops the bootstrap key once it receives the first authenticated transport packet (data or keepalive) under a session with the next key — not on the handshake initiation alone, whose response may be lost — and reports it to the control plane, which then removes the bootstrap key from the desired peer state. Until then, both keys map to the run's /32 (the vpn-gateway's peer table is its own, not the kernel's one-peer-per-address rule).
 
 Key handoff rules:
-- **Ordering:** the next key is in the vpn-gateway before the certificate response is sent (the control plane waits for the watch acknowledgement, at most 10 s; otherwise `Enroll` fails and the VM retries). The bootstrap key is never removed before the VM has completed a handshake with the next key, so the response always has a valid session.
+- **Ordering:** the next key is in the vpn-gateway before the certificate response is sent (the control plane waits for the watch acknowledgement, at most 10 s; otherwise `Enroll` fails and the VM retries). The bootstrap key is never removed before the VM has completed a handshake with the next key and sent traffic over it, so the response always has a valid session and a lost handshake response leaves the bootstrap key usable.
 - **Fallback:** if `wg0` gets no handshake with the next key within 30 s, `df-bootstrap` switches back to the bootstrap key and calls `Enroll` again.
 - **Lost response or retry:** `Enroll` is idempotent per run. A repeated call with the same token and the same CSR public key and WireGuard key returns the recorded certificate (re-issued if needed) instead of being rejected; a call with the same token and different keys is rejected. This holds until the bootstrap key is dropped.
 - **Bounds:** the bootstrap token and key are valid for at most 5 minutes after the VM starts. A run that has not completed enrollment by then never reaches `Hello` and fails with `connect_timeout`; teardown and the usual automatic resume start a new run with a new token, key and tunnel address.
