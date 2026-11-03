@@ -21,6 +21,7 @@ pub mod runs;
 pub mod scheduler;
 pub mod server;
 pub mod session;
+pub mod summary;
 pub mod tools;
 pub mod transcript;
 

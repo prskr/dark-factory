@@ -1,25 +1,24 @@
 ## 1. Fold function
 
-- [ ] 1.1 Write failing unit tests for `fold_summary(previous_entries, events, cap)`: text messages and chunk merging (as today), tool call merge by `(run_id, turn_id, tool_call_id)` with last title and status (same id in two turns stays two lines), hidden blocks left out of user entries, oldest-first dropping at the cap, entries without the separator, split/join round trip
-- [ ] 1.2 Implement `fold_summary` in `df-agent-channel/src/assign.rs` (or a new `summary.rs`), reusing `fit_summary` semantics
-- [ ] 1.3 Add `tool_call` and `tool_call_update` to the event kinds read; keep the text extraction and chunk merging checks of the old tests; the "last 20 messages" assertion is replaced by the byte-cap retention
+- [x] 1.1 Unit tests for the fold: text messages and chunk merging, tool call merge by `(run_id, turn_id, tool_call_id)` with last title and status (same id in two turns stays two lines), hidden blocks left out of user entries
+- [x] 1.2 Pure fold in `df-agent-channel/src/summary.rs` with `EventKind`; header rendered from the task
+- [x] 1.3 Failing tests: consecutive `completed` calls collapse into `Tool: <n> calls completed`; a single completed call keeps its own line; failed, pending and in-progress calls stay individual and break a streak
+- [x] 1.4 Failing tests: drop order at the cap (tool lines and agent messages oldest first, user messages only when nothing else is left, newest entry always kept, order preserved)
+- [x] 1.5 Implement collapsing and the drop order; cap 64 KiB including the 4 KiB header; `fold_summary` takes events and a budget only (no previous entries, no split/join)
 
-## 2. Storage
+## 2. Remove the stored summary
 
-- [ ] 2.1 Migration `task_summaries (task_id PK → tasks ON DELETE CASCADE, covers_through_event_id, text, updated_at)`
-- [ ] 2.2 Failing DB test (`df_test_postgres`): update reads only events after the cursor and advances it; an update with an older cursor does not overwrite a newer row
-- [ ] 2.3 Implement `update_task_summary(pool, task)` in `df-agent-channel`; regenerate `.sqlx` metadata
+- [x] 2.1 Delete migration `20261103000002_task_summaries.sql` (never on `main`), `update_task_summary`, `stored_summary_text`, `stored`, `store_summary`, split/join helpers and their tests
+- [x] 2.2 Remove the summary update at run end from `session.rs` and its tests
 
-## 3. Wiring
+## 3. Build on `Assign`
 
-- [ ] 3.1 Failing test: run end stores the summary; a failing update is logged and does not fail the run end
-- [ ] 3.2 Call the update on the run-report path in `session.rs`
-- [ ] 3.3 Failing test: a run that ended without a summary update (stale or missing row) still has its events in the next `Assign` summary
-- [ ] 3.4 `Assign` runs `update_task_summary` and reads the row (replaces `transcript_summary`'s direct query); keep the existing scenario "Follow-up run" green
+- [x] 3.1 Failing DB tests (`df_test_postgres`): reconnect mid-run excludes the assigned run's events and keeps earlier runs'; a run that ended without a report is included; more than 500 events are all read; tool calls in the summary
+- [x] 3.2 `Assign` queries all events of the task with the four kinds and `run_id <> <assigned run>`, ordered by `id`, selecting only the payload fields the fold uses; keep "Follow-up run" green
 
-## 4. Docs
+## 4. Docs and checks
 
-- [ ] 4.1 `design/agent-run.md` continuity paragraph: stored summary, tool lines, update at run end
-- [ ] 4.2 F3 in `product/context.md`: input (events after a cursor incl. tool calls, previous summary), output (summary text and cursor), trigger (run end or idle), and that mid-run compaction is out of scope (design D7)
-- [ ] 4.3 `product/iterations/iteration-2.md` and `roadmap.md`: list `iter2-continuation-summary`; roadmap iteration 3 chats reuse the stored summary
-- [ ] 4.4 Clippy, `cargo fmt`, `cargo-machete`; state which container-backed tests could not be run in the sandbox
+- [x] 4.1 `design/agent-run.md` continuity paragraph: rebuilt per `Assign` without the assigned run, tool lines with collapsed streaks, 64 KiB cap with user messages kept first
+- [x] 4.2 F3 in `product/context.md` and `roadmap.md`: input, output, trigger as in design D6; the stored summary with a cursor comes with F3; chats (iteration 3) reuse this summary
+- [x] 4.3 `product/iterations/iteration-2.md`: list `iter2-continuation-summary`
+- [x] 4.4 Clippy, `cargo fmt`, `cargo-machete`; state which container-backed tests could not be run
