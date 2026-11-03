@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use df_core::public_address::{is_public, literal_host_is_public};
+use df_core::public_address::{ProjectTargets, is_public, literal_host_is_public};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use reqwest::{StatusCode, Url, redirect};
@@ -39,15 +39,17 @@ pub(crate) enum Trust {
     Instance,
 }
 
-/// One client per [`Trust`].
+/// One client per [`Trust`]. With [`ProjectTargets::Unrestricted`] (development build) project
+/// subscriptions use the instance client.
 #[derive(Debug, Clone)]
 pub(crate) struct Clients {
     project: reqwest::Client,
     instance: reqwest::Client,
+    project_targets: ProjectTargets,
 }
 
 impl Clients {
-    pub(crate) fn new() -> Result<Self, reqwest::Error> {
+    pub(crate) fn new(project_targets: ProjectTargets) -> Result<Self, reqwest::Error> {
         let project = reqwest::Client::builder()
             .timeout(TIMEOUT)
             .redirect(redirect::Policy::none())
@@ -60,7 +62,11 @@ impl Clients {
             .timeout(TIMEOUT)
             .redirect(redirect::Policy::none())
             .build()?;
-        Ok(Self { project, instance })
+        Ok(Self {
+            project,
+            instance,
+            project_targets,
+        })
     }
 
     /// POSTs `body` as JSON with `headers` and returns the response status, whatever it is.
@@ -71,6 +77,10 @@ impl Clients {
         headers: HeaderMap,
         body: Vec<u8>,
     ) -> Result<StatusCode, PostError> {
+        let trust = match self.project_targets {
+            ProjectTargets::PublicHttps => trust,
+            ProjectTargets::Unrestricted => Trust::Instance,
+        };
         let client = match trust {
             Trust::Project if !literal_host_is_public(url) => {
                 return Err(PostError::Refused(
@@ -214,11 +224,32 @@ mod tests {
     }
 
     async fn post_to(trust: Trust, url: &str) -> Result<StatusCode, PostError> {
-        let clients = Clients::new().unwrap();
+        post_with(ProjectTargets::PublicHttps, trust, url).await
+    }
+
+    async fn post_with(
+        targets: ProjectTargets,
+        trust: Trust,
+        url: &str,
+    ) -> Result<StatusCode, PostError> {
+        let clients = Clients::new(targets).unwrap();
         let url = Url::parse(url).unwrap();
         clients
             .post(trust, &url, HeaderMap::new(), b"{}".to_vec())
             .await
+    }
+
+    #[tokio::test]
+    async fn unrestricted_project_targets_deliver_to_loopback() {
+        let addr = receiver().await;
+        let port = addr.port();
+        for url in [
+            format!("http://127.0.0.1:{port}/hook"),
+            format!("http://localhost:{port}/hook"),
+        ] {
+            let status = post_with(ProjectTargets::Unrestricted, Trust::Project, &url).await;
+            assert_eq!(status.unwrap(), StatusCode::NO_CONTENT, "{url}");
+        }
     }
 
     #[tokio::test]

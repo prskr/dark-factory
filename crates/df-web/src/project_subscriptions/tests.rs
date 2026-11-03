@@ -163,6 +163,35 @@ async fn plain_http_internal_addresses_and_unknown_events_are_rejected_on_save()
 }
 
 #[tokio::test]
+async fn unrestricted_targets_accept_plain_http_and_internal_hosts() {
+    let app = TestApp::with_unrestricted_project_targets().await;
+    let seeded = seed(&app.pool).await;
+    let cookie = app.login_admin().await;
+
+    create(&app, &cookie, "http://receiver.receiver.svc:8080/hook", &[]).await;
+    create(&app, &cookie, "http://10.0.0.5/hook", &[]).await;
+    let page = text(app.get(PAGE, &cookie).await).await;
+
+    let urls: Vec<String> = subscriptions(&app, seeded.project)
+        .await
+        .into_iter()
+        .map(|s| s.url)
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "http://receiver.receiver.svc:8080/hook",
+            "http://10.0.0.5/hook"
+        ]
+    );
+    assert!(page.contains("unrestricted"), "{page}");
+    let invalid = app
+        .post(PAGE, &form(&[("url", "not a url")]), &cookie)
+        .await;
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn the_settings_show_the_last_delivery_and_the_public_key() {
     let app = TestApp::with_public_key("whpk_dGVzdC1rZXk").await;
     seed(&app.pool).await;

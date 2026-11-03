@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use df_agent_channel::{ChannelConfig, ChannelContext, Scheduler};
 use df_core::InstanceConfig;
 use df_core::config::DEFAULT_CONFIG_PATH;
+use df_core::public_address::ProjectTargets;
 use df_db::PgPool;
 use df_gateway::git::policy_checks::PolicyChecks;
 use df_gateway::git::secret_rules::SecretRules;
@@ -109,9 +110,35 @@ pub struct DevOptions {
         requires = "no_cluster"
     )]
     demo_flows: Option<demo_flows::DemoMode>,
+    /// Let project subscriptions use plain `http` and internal addresses (loopback, private,
+    /// cluster services): the UI accepts them and the delivery connects to them. For a local
+    /// receiver and the e2e suite.
+    #[cfg(feature = "dev-tools")]
+    #[arg(long)]
+    unrestricted_project_subscriptions: bool,
 }
 
 impl DevOptions {
+    /// Which targets project subscriptions may use; unrestricted only with
+    /// `--unrestricted-project-subscriptions`.
+    #[cfg(feature = "dev-tools")]
+    fn project_targets(self) -> ProjectTargets {
+        if self.unrestricted_project_subscriptions {
+            ProjectTargets::Unrestricted
+        } else {
+            ProjectTargets::PublicHttps
+        }
+    }
+
+    #[cfg(not(feature = "dev-tools"))]
+    #[expect(
+        clippy::unused_self,
+        reason = "same signature as the dev-tools variant"
+    )]
+    fn project_targets(self) -> ProjectTargets {
+        ProjectTargets::PublicHttps
+    }
+
     /// The scripted event source if `--demo-flows` is given.
     #[cfg(feature = "dev-tools")]
     fn demo_flows(self) -> Option<Arc<dyn df_web::egress::FlowSource>> {
@@ -281,7 +308,7 @@ where
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
     let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
-    let signing_key = lifecycle_events::load_signing_key(&cfg.lifecycle_events)?;
+    let delivery = lifecycle_delivery(&cfg, dev.project_targets())?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
     let forge_plugins =
         forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.forge.allow_plain_http)?;
@@ -318,7 +345,7 @@ where
         },
         EgressDeps { flows, services },
         approval_types.clone(),
-        signing_key.as_deref(),
+        &delivery,
     )?;
     let ctx_policy = PolicySources {
         pool: pool.clone(),
@@ -366,7 +393,7 @@ where
     });
     let scheduler_stop = stop_rx.clone();
     if let Some(is_leader) = is_leader {
-        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx, signing_key)?;
+        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx, delivery)?;
     }
     listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
     listeners.spawn(serve_policy_watch(
@@ -382,6 +409,21 @@ where
     supervise_listeners("control plane", listeners, shutdown, SHUTDOWN_GRACE).await
 }
 
+/// The signing key and receiver URL rules of the lifecycle event deliveries.
+fn lifecycle_delivery(
+    cfg: &InstanceConfig,
+    project_targets: ProjectTargets,
+) -> anyhow::Result<lifecycle_events::Delivery> {
+    let delivery = lifecycle_events::Delivery {
+        signing_key: lifecycle_events::load_signing_key(&cfg.lifecycle_events)?,
+        project_targets,
+    };
+    if delivery.project_targets == ProjectTargets::Unrestricted {
+        warn!("project subscriptions may target plain http and internal addresses");
+    }
+    Ok(delivery)
+}
+
 /// Background work only the leader replica does: retention and, with a signing key, the outbox
 /// dispatcher. Each task waits for `is_leader` itself.
 fn spawn_leader_tasks(
@@ -389,11 +431,11 @@ fn spawn_leader_tasks(
     ctx: &ChannelContext,
     is_leader: watch::Receiver<bool>,
     stop: &watch::Receiver<bool>,
-    signing_key: Option<Arc<lifecycle_events::SigningKey>>,
+    delivery: lifecycle_events::Delivery,
 ) -> anyhow::Result<()> {
     let meter = opentelemetry::global::meter("dark-factory");
     if let Some(dispatcher) =
-        lifecycle_events::dispatcher(&ctx.pool, &ctx.notifier, signing_key, &meter)?
+        lifecycle_events::dispatcher(&ctx.pool, &ctx.notifier, delivery, &meter)?
     {
         let (is_leader, stop) = (is_leader.clone(), stop.clone());
         listeners.spawn(async move { dispatcher.run(is_leader, stop).await });
@@ -586,9 +628,12 @@ fn web_router(
     backends: WebBackends,
     egress: EgressDeps,
     approval_types: df_db::requests::ApprovalTypes,
-    signing_key: Option<&lifecycle_events::SigningKey>,
+    delivery: &lifecycle_events::Delivery,
 ) -> anyhow::Result<axum::Router> {
-    let lifecycle_public_key = signing_key.map(|key| Arc::from(key.public_key()));
+    let lifecycle_public_key = delivery
+        .signing_key
+        .as_ref()
+        .map(|key| Arc::from(key.public_key()));
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
         return Ok(df_web::base_router(pool.clone(), lifecycle_public_key));
@@ -611,6 +656,7 @@ fn web_router(
         clock: Arc::new(df_web::auth::SystemClock),
         events: df_db::lifecycle_events::EventSinks::new(&cfg.lifecycle_events),
         lifecycle_public_key,
+        project_targets: delivery.project_targets,
     }))
 }
 
@@ -748,7 +794,11 @@ mod tests {
     #[cfg(not(feature = "dev-tools"))]
     #[test]
     fn development_flags_do_not_exist_without_the_dev_tools_feature() {
-        for flag in ["--no-cluster", "--demo-flows"] {
+        for flag in [
+            "--no-cluster",
+            "--demo-flows",
+            "--unrestricted-project-subscriptions",
+        ] {
             let err = Cli::try_parse_from(["dark-factory", "serve", flag]).unwrap_err();
             assert_eq!(
                 err.kind(),
@@ -757,6 +807,10 @@ mod tests {
             );
         }
         assert!(DevOptions::default().demo_flows().is_none());
+        assert_eq!(
+            DevOptions::default().project_targets(),
+            ProjectTargets::PublicHttps
+        );
     }
 
     #[cfg(feature = "dev-tools")]
@@ -789,6 +843,14 @@ mod tests {
 
         // Scripted events without the cluster stub would pretend to be a real gateway.
         assert!(Cli::try_parse_from(["dark-factory", "serve", "--demo-flows"]).is_err());
+
+        assert_eq!(
+            dev_options(&[]).project_targets(),
+            ProjectTargets::PublicHttps
+        );
+        // Works with a cluster too: the e2e suite runs it in kind.
+        let dev = dev_options(&["--unrestricted-project-subscriptions"]);
+        assert_eq!(dev.project_targets(), ProjectTargets::Unrestricted);
     }
 
     #[test]
@@ -839,7 +901,7 @@ mod tests {
             fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
-            None,
+            &lifecycle_events::Delivery::default(),
         )?;
 
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
@@ -863,7 +925,7 @@ mod tests {
             fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
-            None,
+            &lifecycle_events::Delivery::default(),
         )?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
