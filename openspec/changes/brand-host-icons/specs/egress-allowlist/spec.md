@@ -41,5 +41,5 @@ The host icon of an `http-host` row SHALL follow the precedence of the network t
 - **THEN** it shows the server icon, not the globe
 
 #### Scenario: Unknown host
-- **WHEN** an entry for `ghcr.io:443` exists
+- **WHEN** an entry for `example.org:443` exists
 - **THEN** its row shows the generic globe icon

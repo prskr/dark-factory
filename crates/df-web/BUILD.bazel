@@ -53,7 +53,7 @@ rust_library(
     name = "df_web",
     srcs = [":rs_srcs"],
     aliases = aliases(),
-    compile_data = glob(["assets/**"]),
+    compile_data = glob(["assets/**"]) + ["src/components/brands.json"],
     crate_name = "df_web",
     edition = "2024",
     lint_config = ":lints",

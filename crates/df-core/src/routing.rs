@@ -249,6 +249,15 @@ impl ForgeRoutes {
             ForgeServing::NotLoaded { plugin, default }
         }
     }
+
+    /// The normalized host of the API of the route that serves `repo_url`, when it differs from
+    /// the repository host (`None`: no `apiUrl`, same host or unrouted).
+    pub fn api_host_for_repo_url(&self, repo_url: &str) -> Option<String> {
+        let resolved = self.table.resolve(repo_url).ok()?;
+        let api = normalize_host(Url::parse(&resolved.base_url).ok()?.host_str()?);
+        let repo = normalize_host(Url::parse(repo_url).ok()?.host_str()?);
+        (api != repo).then_some(api)
+    }
 }
 
 /// Which plugin serves a repository URL.
@@ -700,6 +709,36 @@ mod tests {
             !message.contains("user") && !message.contains("token"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn api_host_is_the_normalized_host_of_the_route_api_url() {
+        let routes = ForgeRoutes::new(
+            table(vec![
+                (
+                    "github",
+                    plugin(vec![
+                        claim("github.com", "https://api.github.com"),
+                        claim("ghe.example.com", "https://API.ghe.example.com:8443/api/v3"),
+                    ]),
+                ),
+                ("forgejo", plugin(vec![host("git.example.org")])),
+            ])
+            .unwrap(),
+            ["github".to_string(), "forgejo".to_string()],
+        );
+        let api = |url| routes.api_host_for_repo_url(url);
+        assert_eq!(
+            api("https://github.com/o/r.git").as_deref(),
+            Some("api.github.com")
+        );
+        assert_eq!(
+            api("https://ghe.example.com/o/r").as_deref(),
+            Some("api.ghe.example.com")
+        );
+        assert_eq!(api("https://git.example.org/o/r"), None, "no apiUrl");
+        assert_eq!(api("https://other.example.com/o/r.git"), None, "unrouted");
+        assert_eq!(api("not a url"), None, "unparsable");
     }
 
     #[test]

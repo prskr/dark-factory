@@ -85,9 +85,16 @@ impl ProjectHosts {
         let mut hosts: HashMap<String, HostRole> = HashMap::new();
         for p in projects {
             let kind = project_forge_kind(forges, p);
-            for (host, role) in
-                project_roles(kind.as_ref(), &p.repo_url, p.issue_tracker_url.as_deref())
-            {
+            let api = kind.as_ref().and_then(|kind| {
+                forges.api_host_for_repo_url(&p.repo_url).map(|host| {
+                    (
+                        strip_brackets(&host).to_string(),
+                        HostRole::Forge(Some(kind.clone())),
+                    )
+                })
+            });
+            let roles = project_roles(kind.as_ref(), &p.repo_url, p.issue_tracker_url.as_deref());
+            for (host, role) in roles.into_iter().chain(api) {
                 match hosts.get(&host) {
                     Some(known) if known.strength() >= role.strength() => {}
                     _ => {
@@ -251,6 +258,46 @@ mod tests {
                 Some(&HostRole::Forge(None))
             );
         }
+    }
+
+    #[test]
+    fn an_ipv6_forge_api_host_is_found_with_and_without_brackets() {
+        let forges = crate::testkit::forge_with_api(
+            "github",
+            "ghe.example.com",
+            "https://[2001:db8::2]/api/v3",
+        );
+        let hosts = ProjectHosts::from_projects(
+            &forges,
+            &[project("https://ghe.example.com/org/df.git", None, true)],
+        );
+        let forge = HostRole::Forge(Some(ForgeKind::GitHub));
+        assert_eq!(hosts.get("2001:db8::2"), Some(&forge));
+        assert_eq!(hosts.get("[2001:db8::2]"), Some(&forge));
+    }
+
+    #[test]
+    fn the_forge_api_host_of_a_served_project_is_the_forge() {
+        let forges = crate::testkit::forge_with_api(
+            "github",
+            "ghe.example.com",
+            "https://API.ghe.example.com:8443/api/v3",
+        );
+        let github = ForgeKind::GitHub;
+        let hosts = ProjectHosts::from_projects(
+            &forges,
+            &[project("https://ghe.example.com/o/r.git", None, true)],
+        );
+        assert_eq!(
+            hosts.get("api.ghe.example.com"),
+            Some(&HostRole::Forge(Some(github)))
+        );
+        let unserved = ProjectHosts::from_projects(
+            &forges,
+            &[project("https://ghe.example.com/o/r.git", None, false)],
+        );
+        assert!(unserved.get("api.ghe.example.com").is_none());
+        assert!(hosts.get("v3.api.ghe.example.com").is_none());
     }
 
     #[test]

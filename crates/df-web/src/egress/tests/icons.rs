@@ -205,13 +205,13 @@ async fn project_hosts_show_their_icons_in_rows_graph_and_details() {
 }
 
 #[tokio::test]
-async fn a_project_host_beats_the_provider_monogram_on_a_github_instance() {
+async fn a_project_host_and_its_forge_api_host_beat_the_provider_glyph() {
     let events = vec![
         allowed("github.com", "DF", 1),
         allowed("api.github.com", "DF", 2),
     ];
     let app = TestApp::with_egress(
-        crate::testkit::default_forge("github"),
+        crate::testkit::forge_with_api("github", "github.com", "https://api.github.com"),
         Some(Arc::new(FakeFlows(events))),
         Some(Arc::new(FakeServices)),
     )
@@ -229,7 +229,24 @@ async fn a_project_host_beats_the_provider_monogram_on_a_github_instance() {
     .await;
     let body = events_frame(&app, &cookie).await;
     assert_eq!(row_icon(&body, "github.com"), "forge-github");
-    assert_eq!(row_icon(&body, "api.github.com"), "GH");
+    assert_eq!(row_icon(&body, "api.github.com"), "forge-github");
+}
+
+#[tokio::test]
+async fn the_api_host_of_a_forge_without_a_served_project_shows_the_provider_glyph() {
+    let app = TestApp::with_egress(
+        crate::testkit::forge_with_api("github", "github.com", "https://api.github.com"),
+        Some(Arc::new(FakeFlows(vec![allowed(
+            "api.github.com",
+            "DF",
+            1,
+        )]))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await;
+    let cookie = app.login().await;
+    let body = events_frame(&app, &cookie).await;
+    assert_eq!(row_icon(&body, "api.github.com"), "brand-github");
 }
 
 #[tokio::test]
@@ -321,5 +338,60 @@ async fn the_rules_page_shows_project_hosts_before_wildcards_and_brands() {
     let icon_of = |host: &str| icon_before(&page, &format!(">{host}<"));
     assert_eq!(icon_of("git.example.internal"), "forge-forgejo");
     assert_eq!(icon_of("*.git.example.internal"), "globe");
-    assert_eq!(icon_of("pypi.org"), "Py");
+    assert_eq!(icon_of("pypi.org"), "brand-python");
+}
+
+#[tokio::test]
+async fn a_forge_api_on_a_separate_host_shows_the_forge_icon() {
+    let app = TestApp::with_egress(
+        crate::testkit::forge_with_api(
+            "github",
+            "ghe.example.com",
+            "https://api.ghe.example.com/v3",
+        ),
+        Some(Arc::new(FakeFlows(vec![allowed(
+            "api.ghe.example.com",
+            "DF",
+            1,
+        )]))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://ghe.example.com/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    let body = events_frame(&app, &cookie).await;
+    assert_eq!(row_icon(&body, "api.ghe.example.com"), "forge-github");
+}
+
+#[tokio::test]
+async fn the_rules_page_shows_the_forge_icon_for_the_forge_api_host() {
+    let app = TestApp::with_egress(
+        crate::testkit::forge_with_api("github", "github.com", "https://api.github.com"),
+        Some(Arc::new(FakeFlows(vec![]))),
+        Some(Arc::new(FakeServices)),
+    )
+    .await;
+    let cookie = app.login().await;
+    let credential = add_credential(&app, &cookie).await;
+    add_project(
+        &app,
+        &cookie,
+        "DF",
+        "https://github.com/org/df.git",
+        "",
+        &credential,
+    )
+    .await;
+    add_host(&app, &cookie, "", "api.github.com", "443").await;
+    let page = text(app.get("/egress/allowlist", &cookie).await).await;
+    assert_eq!(icon_before(&page, ">api.github.com<"), "forge-github");
 }

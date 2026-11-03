@@ -20,19 +20,23 @@
 
 ## Decisions
 
-### D1: Optional glyph per `BRANDS` entry
+### D1: Provider table in an embedded data file
 
-`BRANDS` gains an `Option<Icon>`: `(domain, monogram, tone, glyph)`. `host_icon` renders the glyph in the tone tile (text colour = tone foreground, `fill="currentColor"`) when present, else the monogram. `data-host-icon` becomes `brand-<name>` for a glyph (`brand-github`, `brand-anthropic`) and stays the monogram for the fallback, so tests tell them apart.
+The providers live in `crates/df-web/src/components/brands.json`, one object per provider: `name`, `domains`, `monogram`, `tone`, `path` (optional). `include_str!` embeds it and `serde_json` parses it once into a `LazyLock<Vec<Brand>>`; the `expect` on that parse is an invariant by construction (the file is compiled in and a unit test parses it). `tone` deserializes into the existing `badges::Tone`, so the status classes stay in Rust where Tailwind sees them. `host_icon` renders the glyph in the tone tile (text colour = tone foreground) when `path` is present, else the monogram. `data-host-icon` is `brand-<name>` for a glyph and the monogram for the fallback, so tests tell them apart.
 
-Alternative: a separate glyph table keyed by domain. Rejected: two tables that must stay in sync for one concept.
+Adding a provider is one JSON object, no Rust change. A unit test guards the file: it parses; names are unique; every domain is lower-case, normalized and appears once across all entries; every `path` is non-empty and contains only digits, SVG path command letters, `e`/`E`, space, `.`, `,` and `-`; the monogram has 1 to 3 characters; unknown fields are rejected (`deny_unknown_fields`). The provider test pins a path prefix per provider, so swapped paths fail.
 
-### D2: Glyphs from Simple Icons, inlined
+Alternative: the table and one `Icon` variant per glyph in Rust (the first implementation). Rejected after it grew to 20 providers: each provider touched five places in two files and pushed `Icon::body` over the function-length limit. Alternative: SVG files with the table in Rust. Rejected: keeps the five places per provider.
 
-New `Icon` variants `Anthropic`, `Npm`, `Go`, `Python`, `Google`, each a single filled 24×24 path from Simple Icons (CC0), with the source noted in a doc comment as for Forgejo. GitHub reuses the existing `Icon::GitHub` path. Filled glyphs need `fill="currentColor" stroke="none"` on the path, as `Icon::GitHub` already does; `icon()` keeps its stroke defaults.
+### D2: Glyphs from Simple Icons, as path data
 
-Alternative: an icon crate or font. Rejected: a new dependency for six paths.
+Each glyph is the `d` attribute of a single filled 24×24 path from Simple Icons (CC0, simple-icons@14.0.0), stored in the `path` field; the source and licence are noted once in `docs/design-system.md` and next to the `include_str!`. `host_icon` renders `<svg viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d=…/></svg>` with maud escaping the path data, so no markup from the data file reaches the page unescaped. The forge icon of the GitHub integration renders the `github` entry's path from the same table, so the Octocat has one source; `Icon` keeps only the UI icons. If the `github` entry had no path, `brand_glyph` would fall back to the generic Git icon instead of an empty one; a unit test requires the path, so the fallback only guards against an edited data file.
 
-All six providers get a glyph, so the monogram fallback is currently exercised only by a unit test with a test entry. It stays because a provider added later may have no usable mark.
+Alternative: an icon crate or font. Rejected: a new dependency for path data that fits in one file.
+
+All providers have a glyph, so the monogram fallback is exercised only by a unit test with a test entry. It stays because a provider added later may have no usable mark.
+
+Provider domains map to the project or ecosystem whose packages they serve: `gcr.io`, `pkg.dev` → Google; `crates.io` → Rust; `ghcr.io`, `github.io` (GitHub Pages; the glyph names the operator, not the page owner) → GitHub; `goproxy.io` (a third-party Go module proxy) → Go; `amazonaws.com`, `ecr.aws`, `awsstatic.com`, `aws.amazon.com` (not `amazon.com`, the retail site) and `cloudfront.net` → AWS. For `cloudfront.net` the glyph names the CDN operator, not the owner of the content it serves. `gitlab.com` gets the GitLab glyph only as a provider; without a GitLab forge integration a GitLab project's repository host keeps the generic Git icon (project role wins). `codeberg.org` gets the Codeberg glyph as a provider; a Codeberg project served by the forgejo integration keeps the Forgejo forge icon on `codeberg.org` (project role wins).
 
 ### D3: Forge API host from the resolved route
 

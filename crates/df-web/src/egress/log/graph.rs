@@ -832,7 +832,7 @@ mod tests {
         assert!(
             html.contains(">github.com<")
                 && html.contains(">443<")
-                && html.contains("data-host-icon=\"GH\"")
+                && html.contains("data-host-icon=\"brand-github\"")
         );
         assert!(html.contains("Sandboxes 1") && html.contains("Destinations 1"));
         assert!(
