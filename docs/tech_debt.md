@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-92.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-93.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -121,6 +121,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
 | TD-91 | medium | `df-agent-channel` PR | Forge calls in `pr.rs` run inline and are retried only by the next push report or run end |
+| TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
 
 ## Entries
 
@@ -857,6 +858,18 @@ Opening the draft PR, marking it ready and posting the completion summary call t
 **Matters when:** the forge is briefly unavailable or rate limits at the end of a run. The PR then stays a draft, or misses its summary, until a human acts.
 
 **Fix:** after `lifecycle-events`, enqueue the forge actions as outbox jobs (`pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary`) in the transaction that records the push report or run end, with an `OutboxHandler` per kind (`openspec/changes/lifecycle-events/design.md` D1, D3). Handlers must be idempotent: they find an existing PR before opening one and check the ready state before updating. Tests: a forge failure on "mark ready" is retried until it succeeds; a restart between the run end and the forge call still marks the PR ready. Check TD-11 to TD-13 against the new flow and close what it fixes.
+
+Origin of TD-92: CodeRabbit review of PR #87 (`iter2-continuation-summary`, 2026-11-03).
+
+### TD-92 (CR1). The continuation summary reads every earlier transcript event of the task
+
+`crates/df-agent-channel/src/summary.rs` (`EVENTS_QUERY`, `continuation_summary`)
+
+On each `Assign` of a follow-up run, `continuation_summary` loads every event of the task's earlier runs with the four summary kinds (`fetch_all`, no `LIMIT`) before it folds them and applies the 64 KiB cap. This is deliberate (`iter2-continuation-summary` design D1): there is no row window, so old history is lost only to the cap. The query already skips raw tool input and output.
+
+**Matters when:** a task's transcript grows to tens of thousands of events. `Assign` then reads megabytes and gets slow before a reconnecting runtime receives its assignment.
+
+**Fix:** store the folded summary per task with a cursor and fold only new events (planned for F3, `product/context.md`), or read newest-first in pages and stop once the kept entries exceed the cap by a margin. Test: a task with more events than the bound still produces a summary with its newest entries, and old user messages survive as before.
 
 ## Accepted decisions
 
