@@ -79,17 +79,17 @@ A board member SHALL be able to collapse the details column to a strip as on the
 - **THEN** the details column becomes a strip and the transcript gets the freed width
 
 ### Requirement: Artifacts tab
-The Artifacts tab SHALL list the chat's artifacts as cards with a preview, the name, the time, the size and the type, newest first, and scroll when they don't fit.
+The Artifacts tab SHALL list the chat's artifacts as the artifact cards of `artifact-ui`, and scroll below the fixed tab bar when they don't fit.
 
 #### Scenario: Many artifacts
 - **WHEN** `DF-12-CHAT` has seven artifacts
 - **THEN** the tab shows the count 7 and the cards scroll below the fixed tab bar
 
 ### Requirement: Artifact split view
-Opening a Markdown artifact from the transcript or the Artifacts tab SHALL show it rendered next to the transcript, with a divider the board member can drag to change the split, a Preview/Source toggle and a close action.
+Opening an artifact from its row in the transcript or from the Artifacts tab SHALL show it in the artifact split view of `artifact-ui` next to the chat transcript.
 
 #### Scenario: Open from the transcript
-- **WHEN** a board member opens `task-dependencies-plan.md` from its card in the transcript
+- **WHEN** a board member opens `task-dependencies-plan.md` from its row in the transcript
 - **THEN** the center splits into transcript and the rendered artifact
 
 #### Scenario: Resize
@@ -115,7 +115,7 @@ The archived chats entry SHALL open a modal listing the project's archived chats
 - **THEN** the modal closes and `DF-24-CHAT` is opened in the chat view
 
 ### Requirement: Artifacts of an archived chat
-The Artifacts tab of the archive modal SHALL show the chat's artifacts as cards, several per row. Opening one SHALL show it in place of the cards, with a back action to the cards.
+The Artifacts tab of the archive modal SHALL show the chat's artifacts as the artifact cards of `artifact-ui`, several per row. Opening one SHALL show the rendered artifact of `artifact-ui` in place of the cards, with a back action to the cards.
 
 #### Scenario: Open an archived artifact
 - **WHEN** a board member opens `triage-summary.md` of archived `DF-3-CHAT`

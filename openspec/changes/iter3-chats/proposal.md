@@ -69,7 +69,7 @@ Out of scope:
 - **Questions escalated to a chat**, and "archived chat → human": `iter3-parent-questions`.
 - **Stored, incremental transcript summary**: `iter2-continuation-summary`. This change adds only the notice.
 - **Model-generated compaction** for chats (F3): backlog ("Context compaction plugins").
-- **Task page split view** for artifacts with a collapsible task list: iteration 6 (`roadmap.md`).
+- **Artifact cards, rendered view and split view**: built in `iter3-artifacts`, which also adds them and a collapsible task list to the task page; this change reuses them.
 - **Unread state per board member**: rejected. "Needs you" is derived from open requests.
 - **Deleting chats**: rejected. Transcripts, artifacts and subtasks' parents stay intact.
 - **Chats started by agents**: rejected (ADR-0053).

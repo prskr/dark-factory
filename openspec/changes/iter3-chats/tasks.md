@@ -71,17 +71,17 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - the empty state.
 
   Verify with tests for the `chat-ui` scenarios "Idle chat without badge", "Running chat", "Topic not set yet", "Open approval request" and "No chats yet".
-- [ ] 6.3 Write failing tests, then render the center (header with "New chat", transcript with `create_task` rows, `context_compacted` notice) and the details tabs (Overview with Archive state, Subtasks, Artifacts). Verify with tests for the `chat-ui` scenarios:
+- [ ] 6.3 Write failing tests, then render the center (header with "New chat", transcript with `create_task` rows, `context_compacted` notice) and the details tabs (Overview with Archive state, Subtasks, Artifacts with the cards of `iter3-artifacts`). Verify with tests for the `chat-ui` scenarios:
   - "Delegation in the transcript";
   - "Expand the summary";
   - "Archive disabled while running";
   - "Subtasks tab";
   - "Many artifacts".
-- [ ] 6.4 Add the Alpine component `chatLayout.js`, registered in `COMPONENT_SCRIPTS`, for collapsing both columns, the persona strip and the artifact split view with the draggable divider. Verify with:
+- [ ] 6.4 Add the Alpine component `chatLayout.js`, registered in `COMPONENT_SCRIPTS`, for collapsing both columns and the persona strip; the artifact split view is the component of `iter3-artifacts` (`artifactSplit.js`), reused as is. Verify with:
   - `script_source` tests for its state transitions;
   - the `chat-ui` scenarios "Persona with a chat that needs you", "Collapse details", "Open from the transcript" and "Resize", checked in a browser with `just serve-local`.
 - [ ] 6.5 Write failing tests, then add the new chat dialog (fixed project, persona picker with descriptions). Verify with a test for the `chat-ui` scenario "Start from the dialog".
-- [ ] 6.6 Write failing tests, then add the archive modal (`archiveModal.js`): list, search, sidebar with Transcript and Artifacts tabs, opened artifact, Unarchive. Verify with tests for the `chat-ui` scenarios "Search", "Unarchive from the modal" and "Open an archived artifact".
+- [ ] 6.6 Write failing tests, then add the archive modal (`archiveModal.js`): list, search, sidebar with Transcript and Artifacts tabs (cards and rendered view of `iter3-artifacts`), opened artifact, Unarchive. Verify with tests for the `chat-ui` scenarios "Search", "Unarchive from the modal" and "Open an archived artifact".
 - [ ] 6.7 Add the phone layouts of all chat screens. Verify the `chat-ui` scenarios "Open a chat on a phone" and "Artifact on a phone" with tests, and check every phone screen of the Penpot page "Chat" at 390 px in a browser with viewport control.
 
 ## 7. Docs and end-to-end
