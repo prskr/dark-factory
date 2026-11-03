@@ -39,7 +39,7 @@ flowchart LR
   RT[iter3-review-tools] --> WH[iter3-webhooks]
   WH --> TD[iter3-task-dependencies]
   TD --> CH[iter3-chats]
-  CS([iter2-continuation-summary, it. 2]) -.-> CH
+  CS([iter2-continuation-summary, it. 2, archived]) -.-> CH
   CH --> PC[iter3-project-context]
   CH --> PQ[iter3-parent-questions]
   TD --> PQ
