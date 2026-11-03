@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use df_core::routing::RoutingTable;
 use df_core::{
-    Comment, CredentialRef, ForgeClient, IntegrationError, Issue, NewPullRequest, ProjectId,
-    PullRequest, PullRequestUpdate,
+    Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
+    ProjectId, PullRequest, PullRequestUpdate,
 };
 
 use crate::forge::{PluginForgeClient, RepoTarget};
@@ -116,6 +116,31 @@ impl ForgeClient for ForgeRouter {
     ) -> Result<PullRequest, IntegrationError> {
         let (client, target) = self.resolve(p).await?;
         client.update_pull_request(&target, number, ch).await
+    }
+
+    async fn list_pull_request_feedback(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        since: Option<&str>,
+    ) -> Result<Feedback, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client
+            .list_pull_request_feedback(&target, number, since)
+            .await
+    }
+
+    async fn reply_to_review_thread(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        thread: &str,
+        body: &str,
+    ) -> Result<Comment, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client
+            .reply_to_review_thread(&target, number, thread, body)
+            .await
     }
 
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError> {

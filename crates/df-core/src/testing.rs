@@ -13,8 +13,8 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
-    Comment, CredentialRef, ForgeClient, IntegrationError, Issue, NewPullRequest, PeerIdentity,
-    ProviderError, PullRequest, PullRequestRef, PullRequestState, PullRequestUpdate,
+    Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
+    PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState, PullRequestUpdate,
     RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretStore, TaskVolumeSpec,
 };
 
@@ -218,6 +218,17 @@ pub enum ForgeCall {
         number: u64,
         body: String,
     },
+    ListPullRequestFeedback {
+        project_id: ProjectId,
+        number: u64,
+        since: Option<String>,
+    },
+    ReplyToReviewThread {
+        project_id: ProjectId,
+        number: u64,
+        thread: String,
+        body: String,
+    },
 }
 
 #[derive(Default)]
@@ -236,6 +247,9 @@ struct ForgeState {
     update_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     get_issue_results: VecDeque<Result<Issue, IntegrationError>>,
     add_comment_results: VecDeque<Result<Comment, IntegrationError>>,
+    feedback: HashMap<(ProjectId, u64), Feedback>,
+    feedback_results: VecDeque<Result<Feedback, IntegrationError>>,
+    reply_results: VecDeque<Result<Comment, IntegrationError>>,
 }
 
 /// In-memory fake [`ForgeClient`] that records calls and supports both default
@@ -337,6 +351,34 @@ impl FakeForgeClient {
             .lock()
             .expect("lock poisoned")
             .add_comment_results
+            .push_back(res);
+    }
+
+    /// Seeds the feedback of pull request `number`; `list_pull_request_feedback` returns it as is,
+    /// ignoring `since`, and `reply_to_review_thread` accepts its thread ids.
+    pub fn insert_feedback(&self, project_id: ProjectId, number: u64, feedback: Feedback) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .feedback
+            .insert((project_id, number), feedback);
+    }
+
+    /// Queues a scripted result for `list_pull_request_feedback`.
+    pub fn push_list_pull_request_feedback_result(&self, res: Result<Feedback, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .feedback_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `reply_to_review_thread`.
+    pub fn push_reply_to_review_thread_result(&self, res: Result<Comment, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .reply_results
             .push_back(res);
     }
 }
@@ -511,6 +553,62 @@ impl ForgeClient for FakeForgeClient {
             id,
         })
     }
+
+    async fn list_pull_request_feedback(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        since: Option<&str>,
+    ) -> Result<Feedback, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ListPullRequestFeedback {
+            project_id: *p,
+            number,
+            since: since.map(str::to_string),
+        });
+        if let Some(scripted) = state.feedback_results.pop_front() {
+            return scripted;
+        }
+        Ok(state
+            .feedback
+            .get(&(*p, number))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn reply_to_review_thread(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        thread: &str,
+        body: &str,
+    ) -> Result<Comment, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ReplyToReviewThread {
+            project_id: *p,
+            number,
+            thread: thread.to_string(),
+            body: body.to_string(),
+        });
+        if let Some(scripted) = state.reply_results.pop_front() {
+            return scripted;
+        }
+        let known = state
+            .feedback
+            .get(&(*p, number))
+            .is_some_and(|f| f.threads.iter().any(|t| t.id == thread));
+        if !known {
+            return Err(IntegrationError::InvalidInput(format!(
+                "review thread `{thread}` is not on PR #{number}"
+            )));
+        }
+        state.next_comment_id += 1;
+        let id = state.next_comment_id.to_string();
+        Ok(Comment {
+            url: format!("https://forge.example.test/pulls/{number}#comment-{id}"),
+            id,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +693,7 @@ mod tests {
     use super::*;
     use crate::ids::{CredentialRefId, PersonaId};
     use crate::keys::TaskKey;
-    use crate::seams::{IssueRef, IssueState, RepoRef};
+    use crate::seams::{IssueRef, IssueState, RepoRef, ReviewThread};
     use secrecy::ExposeSecret;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
@@ -668,6 +766,59 @@ mod tests {
 
         provider.teardown(run_id).await.unwrap();
         assert_eq!(provider.calls().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn fake_forge_client_lists_seeded_feedback_and_replies_only_in_its_threads() {
+        let forge = FakeForgeClient::new();
+        let project_id = ProjectId::new();
+        let feedback = Feedback {
+            threads: vec![ReviewThread {
+                id: "t1".into(),
+                path: "src/lib.rs".into(),
+                line: Some(3),
+                resolved: false,
+                comments: Vec::new(),
+            }],
+            ..Feedback::default()
+        };
+        forge.insert_feedback(project_id, 4, feedback.clone());
+
+        let listed = forge
+            .list_pull_request_feedback(&project_id, 4, Some("2026-11-01T00:00:00Z"))
+            .await;
+        let empty = forge.list_pull_request_feedback(&project_id, 5, None).await;
+        let reply = forge
+            .reply_to_review_thread(&project_id, 4, "t1", "done")
+            .await
+            .unwrap();
+        let foreign = forge
+            .reply_to_review_thread(&project_id, 5, "t1", "done")
+            .await;
+        forge.push_reply_to_review_thread_result(Err(IntegrationError::NotFound("gone".into())));
+        let scripted = forge
+            .reply_to_review_thread(&project_id, 4, "t1", "again")
+            .await;
+
+        assert_eq!(listed, Ok(feedback));
+        assert_eq!(empty, Ok(Feedback::default()));
+        assert!(!reply.id.is_empty());
+        assert!(matches!(foreign, Err(IntegrationError::InvalidInput(_))));
+        assert_eq!(scripted, Err(IntegrationError::NotFound("gone".into())));
+        assert_eq!(
+            forge.calls().first(),
+            Some(&ForgeCall::ListPullRequestFeedback {
+                project_id,
+                number: 4,
+                since: Some("2026-11-01T00:00:00Z".into()),
+            })
+        );
+        assert!(forge.calls().contains(&ForgeCall::ReplyToReviewThread {
+            project_id,
+            number: 4,
+            thread: "t1".into(),
+            body: "done".into(),
+        }));
     }
 
     #[tokio::test]

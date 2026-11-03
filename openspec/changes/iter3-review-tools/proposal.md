@@ -32,6 +32,7 @@ Out of scope:
 - `factory-tools`: adds `read_pull_request_feedback` and `comment_on_pull_request` to tool set v2.
 - `forgejo-integration`: Forgejo implements `pull-requests.list-feedback` and `pull-requests.reply`.
 - `github-integration`: GitHub implements `pull-requests.list-feedback` and `pull-requests.reply`.
+- `fake-acp-agent`: an `mcp` step can save values from a tool result for later calls of the turn (e2e reply to a review thread).
 
 ## Impact
 

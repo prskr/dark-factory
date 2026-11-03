@@ -10,6 +10,8 @@ use crate::exports::darkfactory::integrations::pull_requests::{
     NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
 
+mod feedback;
+
 const PAGE_SIZE: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

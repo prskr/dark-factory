@@ -19,6 +19,8 @@ use crate::ChannelContext;
 use crate::assign::{RunContext, tool_input_schemas};
 use crate::error::ChannelError;
 
+mod feedback;
+
 static VALIDATORS: LazyLock<HashMap<&'static str, Validator>> = LazyLock::new(|| {
     tool_input_schemas()
         .map(|(name, schema)| {
@@ -278,6 +280,8 @@ async fn run_handler(
         "complete_task" => complete_task(ctx, rc, args).await,
         "ask_question" => ask_question(ctx, rc, args).await,
         "request_approval" => request_approval(ctx, rc, args).await,
+        "read_pull_request_feedback" => feedback::read_feedback(ctx, rc, args).await,
+        "comment_on_pull_request" => feedback::comment(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -558,6 +562,7 @@ fn forge_error(err: &IntegrationError) -> Outcome {
             None => "the forge rate-limited this request; retry later".to_string(),
         },
         IntegrationError::NotFound(what) => format!("not found on the forge: {what}"),
+        IntegrationError::InvalidInput(what) => format!("the forge rejected the request: {what}"),
         IntegrationError::Unauthorized(_) => {
             "the forge rejected the credentials; ask a human to check the project's forge credential".to_string()
         }
@@ -575,7 +580,7 @@ mod tests {
     use df_core::{Comment, ForgeClient, RateLimit};
     use sqlx::PgPool;
 
-    async fn setup(pool: PgPool) -> (Env, RunContext) {
+    pub(super) async fn setup(pool: PgPool) -> (Env, RunContext) {
         let env = Env::new(pool.clone()).await;
         let run = env.insert_run(env.task.id, 1, "running").await;
         let rc = load_run_context(&pool, get_run(&pool, run).await.unwrap().unwrap())
@@ -584,7 +589,7 @@ mod tests {
         (env, rc)
     }
 
-    fn call(tool: &str, args: Value) -> ToolCallRequest {
+    pub(super) fn call(tool: &str, args: Value) -> ToolCallRequest {
         ToolCallRequest {
             call_id: uuid::Uuid::now_v7().to_string(),
             tool_name: tool.into(),
@@ -592,7 +597,7 @@ mod tests {
         }
     }
 
-    fn message(result: &ToolCallResult) -> String {
+    pub(super) fn message(result: &ToolCallResult) -> String {
         match &result.content[0].kind {
             Some(content_block::Kind::Text(t)) => t.text.clone(),
             other => panic!("unexpected content {other:?}"),
@@ -601,7 +606,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 7);
+        assert_eq!(VALIDATORS.len(), 9);
     }
 
     #[tokio::test]
@@ -764,6 +769,23 @@ mod tests {
             _: u64,
             _: PullRequestUpdate,
         ) -> Result<df_core::PullRequest, IntegrationError> {
+            panic!("not used")
+        }
+        async fn list_pull_request_feedback(
+            &self,
+            _: &df_core::ProjectId,
+            _: u64,
+            _: Option<&str>,
+        ) -> Result<df_core::Feedback, IntegrationError> {
+            panic!("not used")
+        }
+        async fn reply_to_review_thread(
+            &self,
+            _: &df_core::ProjectId,
+            _: u64,
+            _: &str,
+            _: &str,
+        ) -> Result<Comment, IntegrationError> {
             panic!("not used")
         }
         async fn get_issue(

@@ -28,13 +28,25 @@ sessions:
             body: "First pass pushed; waiting for feedback."
       - say: "Pushed the greeting. Tell me what to change."
       - end: end_turn
-  # Run 2 (after a follow-up message): a second commit on the same branch, then done.
+  # Run 2 (after a follow-up message): a second commit on the same branch, a reply in the first
+  # review thread (the e2e suite adds a line comment before the follow-up), then done.
   loaded:
     - - say: "Adding the requested test."
       - shell: |
           printf 'greeting is present\n' > greeting_test.txt
           git add greeting_test.txt
           git commit -q -m 'Add greeting test'
+      - mcp:
+          server: factory
+          tool: read_pull_request_feedback
+          save:
+            thread: /threads/0/id
+      - mcp:
+          server: factory
+          tool: comment_on_pull_request
+          args:
+            body: "Added greeting_test.txt."
+            thread: "${thread}"
       - mcp:
           server: factory
           tool: complete_task

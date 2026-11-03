@@ -324,19 +324,9 @@ sessions:
     assert!(log_msg.contains("add"));
 }
 
-#[tokio::test]
-async fn test_scenario_factory_tool_call() {
-    let yaml = r#"
-sessions:
-  new:
-    - - mcp:
-          server: factory
-          tool: report_progress
-          args:
-            summary: "tests pass"
-      - end: end_turn
-"#;
-
+/// Plays the first turn of `yaml` with the stdio MCP server `factory` that runs the shell script
+/// `mock_body`, and returns the session updates of the turn.
+async fn play_with_mock_mcp(yaml: &str, mock_body: &str) -> Vec<SessionUpdate> {
     let script = Script::from_yaml_str(yaml).expect("script should parse");
     let temp_session = tempfile::tempdir().expect("tempdir");
     let state = Arc::new(Mutex::new(AgentState::new(
@@ -360,22 +350,7 @@ sessions:
     );
 
     let mock_script = temp_session.path().join("mock_mcp.sh");
-    let script_body = r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *initialize*)
-      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"factory\",\"version\":\"1.0\"}}}"
-      ;;
-    *notifications/initialized*)
-      ;;
-    *tools/call*)
-      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"tests pass\"}],\"isError\":false}}"
-      ;;
-  esac
-done
-"#;
-    std::fs::write(&mock_script, script_body).expect("write mock script");
+    std::fs::write(&mock_script, mock_body).expect("write mock script");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -428,7 +403,57 @@ done
     let (client_res, _) = tokio::join!(client_task, agent_task);
     client_res.expect("client panic").expect("client error");
 
-    let received = updates.lock().await.clone();
+    updates.lock().await.clone()
+}
+
+/// Text of the first content block of a `ToolCallUpdate`.
+fn tool_result_text(update: &SessionUpdate) -> String {
+    let SessionUpdate::ToolCallUpdate(update) = update else {
+        panic!("Expected ToolCallUpdate, got: {update:?}");
+    };
+    match update.fields.content.as_deref() {
+        Some(
+            [
+                agent_client_protocol::schema::v1::ToolCallContent::Content(c),
+                ..,
+            ],
+        ) => match &c.content {
+            ContentBlock::Text(t) => t.text.clone(),
+            other => panic!("Expected Text block, got: {other:?}"),
+        },
+        other => panic!("Expected content, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_scenario_factory_tool_call() {
+    let yaml = r#"
+sessions:
+  new:
+    - - mcp:
+          server: factory
+          tool: report_progress
+          args:
+            summary: "tests pass"
+      - end: end_turn
+"#;
+    let mock_body = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *initialize*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"factory\",\"version\":\"1.0\"}}}"
+      ;;
+    *notifications/initialized*)
+      ;;
+    *tools/call*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"tests pass\"}],\"isError\":false}}"
+      ;;
+  esac
+done
+"#;
+
+    let received = play_with_mock_mcp(yaml, mock_body).await;
     assert_eq!(received.len(), 2, "Expected ToolCall and ToolCallUpdate");
 
     match &received[0] {
@@ -445,27 +470,105 @@ done
                 update.fields.status,
                 Some(agent_client_protocol::schema::v1::ToolCallStatus::Completed)
             );
-            let content = update.fields.content.as_ref().expect("content present");
-            assert!(!content.is_empty(), "Expected content in ToolCallUpdate");
-            // Verify result text mentions "tests pass"
-            match &content[0] {
-                agent_client_protocol::schema::v1::ToolCallContent::Content(c) => {
-                    match &c.content {
-                        ContentBlock::Text(t) => {
-                            assert!(
-                                t.text.contains("tests pass"),
-                                "Expected result to mention 'tests pass', got: {}",
-                                t.text
-                            );
-                        }
-                        other => panic!("Expected Text block, got: {other:?}"),
-                    }
-                }
-                other => panic!("Expected Content variant, got: {other:?}"),
-            }
         }
         other => panic!("Expected ToolCallUpdate, got: {other:?}"),
     }
+    let text = tool_result_text(&received[1]);
+    assert!(
+        text.contains("tests pass"),
+        "Expected result to mention 'tests pass', got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn saved_result_value_is_passed_to_a_later_call_of_the_turn() {
+    let yaml = r#"
+sessions:
+  new:
+    - - mcp:
+          server: factory
+          tool: read_pull_request_feedback
+          save:
+            thread: /threads/0/id
+      - mcp:
+          server: factory
+          tool: comment_on_pull_request
+          args:
+            body: "Done"
+            thread: "${thread}"
+      - end: end_turn
+"#;
+    // Answers the read with a thread id and the reply by whether it got that id.
+    let mock_body = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *initialize*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"factory\",\"version\":\"1.0\"}}}"
+      ;;
+    *notifications/initialized*)
+      ;;
+    *read_pull_request_feedback*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"feedback\"}],\"structuredContent\":{\"threads\":[{\"id\":\"7:a.txt:1\"}]},\"isError\":false}}"
+      ;;
+    *'"thread":"7:a.txt:1"'*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"replied in the thread\"}],\"isError\":false}}"
+      ;;
+    *tools/call*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wrong thread\"}],\"isError\":true}}"
+      ;;
+  esac
+done
+"#;
+
+    let received = play_with_mock_mcp(yaml, mock_body).await;
+
+    assert_eq!(received.len(), 4, "two ToolCall/ToolCallUpdate pairs");
+    let reply = tool_result_text(&received[3]);
+    assert!(reply.contains("replied in the thread"), "{reply}");
+}
+
+#[test]
+fn unknown_variables_and_other_strings_are_left_as_they_are() {
+    let vars = std::collections::HashMap::from([("thread".to_owned(), "t-1".to_owned())]);
+    let args = serde_json::json!({
+        "thread": "${thread}",
+        "other": "${missing}",
+        "body": "see ${thread}",
+        "list": ["${thread}"],
+    });
+
+    let substituted = crate::agent::substitute_vars(&args, &vars);
+
+    assert_eq!(
+        substituted,
+        serde_json::json!({
+            "thread": "t-1",
+            "other": "${missing}",
+            "body": "see ${thread}",
+            "list": ["t-1"],
+        })
+    );
+}
+
+#[test]
+fn saved_values_skip_missing_pointers_and_encode_non_strings() {
+    let save = std::collections::BTreeMap::from([
+        ("id".to_owned(), "/threads/0/id".to_owned()),
+        ("line".to_owned(), "/threads/0/line".to_owned()),
+        ("none".to_owned(), "/threads/1/id".to_owned()),
+    ]);
+    let result = serde_json::json!({ "threads": [{ "id": "t-1", "line": 3 }] });
+
+    let saved = crate::agent::saved_values(&save, &result);
+
+    assert_eq!(
+        saved,
+        [
+            ("id".to_owned(), "t-1".to_owned()),
+            ("line".to_owned(), "3".to_owned())
+        ]
+    );
 }
 
 #[tokio::test]

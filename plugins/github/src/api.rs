@@ -26,6 +26,8 @@ const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
 /// GitHub's message when a repository or instance rejects native drafts.
 const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
+mod feedback;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -261,15 +263,36 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
                 "GitHub returned no `node_id` for the pull request".to_string(),
             ));
         }
-        let body = json!({
-            "query": mutation.document(),
-            "variables": { "id": node_id },
-        });
+        self.post_graphql(mutation.document(), json!({ "id": node_id }))
+            .map(drop)
+    }
+
+    /// Runs a GraphQL `document` and decodes its `data`.
+    fn query<R: DeserializeOwned>(
+        &self,
+        document: &str,
+        variables: serde_json::Value,
+    ) -> Result<R, Error> {
+        let response = self.post_graphql(document, variables)?;
+        let body: GraphqlData<R> = serde_json::from_slice(&response.body)
+            .map_err(|e| Error::Internal(format!("unexpected GitHub response: {e}")))?;
+        body.data
+            .ok_or_else(|| Error::Internal("GitHub returned no GraphQL `data`".to_string()))
+    }
+
+    /// Sends a GraphQL request; HTTP and GraphQL errors become an [`Error`].
+    fn post_graphql(
+        &self,
+        document: &str,
+        variables: serde_json::Value,
+    ) -> Result<Response, Error> {
+        let body = json!({ "query": document, "variables": variables });
         let response = self.send(Method::Post, self.settings.graphql_url.clone(), Some(body))?;
         if !(200..300).contains(&response.status) {
             return Err(error::from_response(&response, self.clock.now()));
         }
-        error::from_graphql(&response.body)
+        error::from_graphql(&response.body)?;
+        Ok(response)
     }
 
     /// Sends a request to `path` below `base-url` and decodes the JSON response.
@@ -413,6 +436,11 @@ struct ApiIssue {
 struct ApiComment {
     id: u64,
     html_url: String,
+}
+
+#[derive(Deserialize)]
+struct GraphqlData<R> {
+    data: Option<R>,
 }
 
 #[cfg(test)]

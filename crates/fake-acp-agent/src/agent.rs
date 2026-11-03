@@ -1,6 +1,6 @@
 //! ACP Agent implementation for `fake-acp-agent`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -209,6 +209,8 @@ struct TurnContext {
     mcp_servers: Vec<McpServer>,
     cancel_notify: Arc<Notify>,
     cancelled: Arc<AtomicBool>,
+    /// Values saved by `mcp` steps of the turn (`save`), used as `${name}` in later arguments.
+    vars: HashMap<String, String>,
 }
 
 /// How a step affects the rest of the turn.
@@ -228,7 +230,7 @@ async fn handle_prompt(
     responder: Responder<PromptResponse>,
     cx: &ConnectionTo<Client>,
 ) -> Result<(), Error> {
-    let (turn, ctx) = match take_next_turn(state, &req.session_id).await {
+    let (turn, mut ctx) = match take_next_turn(state, &req.session_id).await {
         NextTurn::Missing => {
             return responder.respond_with_error(Error::invalid_params().data("session not found"));
         }
@@ -240,7 +242,7 @@ async fn handle_prompt(
 
     let mut stop_reason = StopReason::EndTurn;
     for step in turn.steps {
-        match play_step(step, &ctx, cx).await {
+        match play_step(step, &mut ctx, cx).await {
             StepOutcome::Continue => {}
             StepOutcome::Stop(reason) => stop_reason = reason,
             StepOutcome::RateLimited {
@@ -305,6 +307,7 @@ async fn take_next_turn(state: &Mutex<AgentState>, session_id: &SessionId) -> Ne
             mcp_servers: session.mcp_servers.clone(),
             cancel_notify,
             cancelled,
+            vars: HashMap::new(),
         },
     )
 }
@@ -326,7 +329,7 @@ fn text_chunk_update(text: String, thought: bool) -> SessionUpdate {
 }
 
 /// Plays one step of a turn.
-async fn play_step(step: Step, ctx: &TurnContext, cx: &ConnectionTo<Client>) -> StepOutcome {
+async fn play_step(step: Step, ctx: &mut TurnContext, cx: &ConnectionTo<Client>) -> StepOutcome {
     match step {
         Step::Say(text) => send_update(cx, &ctx.session_id, text_chunk_update(text, false)),
         Step::Think(thought) => send_update(cx, &ctx.session_id, text_chunk_update(thought, true)),
@@ -505,8 +508,9 @@ async fn fetch_once(url: &str, limit: Duration) -> Result<(), String> {
     }
 }
 
-/// Reports a tool call to a stdio MCP server of the session and its result.
-async fn play_mcp(mcp_step: McpStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+/// Reports a tool call to a stdio MCP server of the session and its result, and saves the values
+/// of `save` from the structured result.
+async fn play_mcp(mcp_step: McpStep, ctx: &mut TurnContext, cx: &ConnectionTo<Client>) {
     let matched_server = ctx.mcp_servers.iter().find_map(|s| match s {
         McpServer::Stdio(stdio) if stdio.name == mcp_step.server => Some(stdio.clone()),
         _ => None,
@@ -518,12 +522,25 @@ async fn play_mcp(mcp_step: McpStep, ctx: &TurnContext, cx: &ConnectionTo<Client
     call.name = Some(tool_title);
     send_update(cx, &ctx.session_id, SessionUpdate::ToolCall(call));
 
-    let (tool_result_text, status) = match matched_server {
-        Some(stdio) => call_mcp_tool(&stdio, &mcp_step).await,
-        None => (
-            format!("MCP server '{}' not found in session", mcp_step.server),
-            ToolCallStatus::Failed,
-        ),
+    let args = substitute_vars(&mcp_step.args, &ctx.vars);
+    let outcome = match matched_server {
+        Some(stdio) => call_mcp_tool(&stdio, &mcp_step.tool, &args).await,
+        None => Err(format!(
+            "MCP server '{}' not found in session",
+            mcp_step.server
+        )),
+    };
+    let (tool_result_text, status) = match outcome {
+        Ok(res) => {
+            if let Some(structured) = &res.structured_content {
+                ctx.vars.extend(saved_values(&mcp_step.save, structured));
+            }
+            (
+                serde_json::to_string(&res).unwrap_or_default(),
+                ToolCallStatus::Completed,
+            )
+        }
+        Err(e) => (e, ToolCallStatus::Failed),
     };
 
     let update_fields = ToolCallUpdateFields::new()
@@ -533,8 +550,52 @@ async fn play_mcp(mcp_step: McpStep, ctx: &TurnContext, cx: &ConnectionTo<Client
     send_update(cx, &ctx.session_id, SessionUpdate::ToolCallUpdate(update));
 }
 
-/// Starts the MCP server, calls the tool of `mcp_step` and returns the result text and status.
-async fn call_mcp_tool(stdio: &McpServerStdio, mcp_step: &McpStep) -> (String, ToolCallStatus) {
+/// `args` with every string `${name}` replaced by the saved value `name`; unknown names stay.
+pub(crate) fn substitute_vars(
+    args: &serde_json::Value,
+    vars: &HashMap<String, String>,
+) -> serde_json::Value {
+    use serde_json::Value;
+    match args {
+        Value::String(s) => s
+            .strip_prefix("${")
+            .and_then(|rest| rest.strip_suffix('}'))
+            .and_then(|name| vars.get(name))
+            .map_or_else(|| args.clone(), |v| Value::String(v.clone())),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|i| substitute_vars(i, vars)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), substitute_vars(v, vars)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// The values `save` points to in `result`; strings as they are, other values as JSON.
+pub(crate) fn saved_values(
+    save: &BTreeMap<String, String>,
+    result: &serde_json::Value,
+) -> Vec<(String, String)> {
+    save.iter()
+        .filter_map(|(name, pointer)| {
+            let value = result.pointer(pointer)?;
+            let text = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            Some((name.clone(), text))
+        })
+        .collect()
+}
+
+/// Starts the MCP server and calls `tool` with `args`.
+async fn call_mcp_tool(
+    stdio: &McpServerStdio,
+    tool: &str,
+    args: &serde_json::Value,
+) -> Result<rmcp::model::CallToolResult, String> {
     let mut child_cmd = tokio::process::Command::new(&stdio.command);
     child_cmd.args(&stdio.args);
     for env in &stdio.env {
@@ -545,41 +606,24 @@ async fn call_mcp_tool(stdio: &McpServerStdio, mcp_step: &McpStep) -> (String, T
     // Don't leave the MCP server running after the call
     child_cmd.kill_on_drop(true);
 
-    let mut child = match child_cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => {
-            return (
-                format!("Failed to spawn MCP server '{}': {e}", stdio.name),
-                ToolCallStatus::Failed,
-            );
-        }
-    };
+    let mut child = child_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn MCP server '{}': {e}", stdio.name))?;
     let (Some(stdout), Some(stdin)) = (child.stdout.take(), child.stdin.take()) else {
-        return (
-            "Failed to capture stdio".to_string(),
-            ToolCallStatus::Failed,
-        );
+        return Err("Failed to capture stdio".to_string());
     };
-    let client = match ().serve((stdout, stdin)).await {
-        Ok(client) => client,
-        Err(e) => {
-            return (
-                format!("Failed to connect to MCP server: {e}"),
-                ToolCallStatus::Failed,
-            );
-        }
-    };
-    let mut params = rmcp::model::CallToolRequestParams::new(mcp_step.tool.clone());
-    if let serde_json::Value::Object(map) = &mcp_step.args {
+    let client = ()
+        .serve((stdout, stdin))
+        .await
+        .map_err(|e| format!("Failed to connect to MCP server: {e}"))?;
+    let mut params = rmcp::model::CallToolRequestParams::new(tool.to_owned());
+    if let serde_json::Value::Object(map) = args {
         params = params.with_arguments(map.clone());
     }
-    match client.call_tool(params).await {
-        Ok(res) => (
-            serde_json::to_string(&res).unwrap_or_default(),
-            ToolCallStatus::Completed,
-        ),
-        Err(e) => (format!("Tool call failed: {e}"), ToolCallStatus::Failed),
-    }
+    client
+        .call_tool(params)
+        .await
+        .map_err(|e| format!("Tool call failed: {e}"))
 }
 
 /// Plays an `end` step: the stop reason of the turn, a crash, a hang until cancelled, or a rate

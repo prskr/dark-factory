@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use df_core::{
-    AuthScheme, Comment, CredentialRef, IntegrationError, Issue, NewPullRequest, PullRequest,
-    PullRequestUpdate, RepoRef, SecretStore,
+    AuthScheme, Comment, CredentialRef, Feedback, IntegrationError, Issue, NewPullRequest,
+    PullRequest, PullRequestUpdate, RepoRef, SecretStore,
 };
 use futures::future::BoxFuture;
 use wasmtime::Store;
@@ -109,6 +109,43 @@ impl PluginForgeClient {
         })
         .await
         .map(convert::from_pull_request)
+    }
+
+    pub(crate) async fn list_pull_request_feedback(
+        &self,
+        target: &RepoTarget,
+        number: u64,
+        since: Option<&str>,
+    ) -> Result<Feedback, IntegrationError> {
+        let id = convert::pull_request_ref(&target.repo, number);
+        self.call(target, |plugin, store| {
+            let (id, since) = (id.clone(), since.map(str::to_string));
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_list_feedback(store, &id, since.as_deref()).await
+            })
+        })
+        .await
+        .map(convert::from_feedback)
+    }
+
+    pub(crate) async fn reply_to_review_thread(
+        &self,
+        target: &RepoTarget,
+        number: u64,
+        thread: &str,
+        body: &str,
+    ) -> Result<Comment, IntegrationError> {
+        let id = convert::pull_request_ref(&target.repo, number);
+        self.call(target, |plugin, store| {
+            let (id, thread, body) = (id.clone(), thread.to_string(), body.to_string());
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_reply(store, &id, &thread, &body).await
+            })
+        })
+        .await
+        .map(convert::from_posted_comment)
     }
 
     pub(crate) async fn get_issue(

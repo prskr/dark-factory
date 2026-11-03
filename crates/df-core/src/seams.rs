@@ -226,11 +226,94 @@ pub struct Issue {
     pub labels: Vec<String>,
 }
 
-/// Comment record (`darkfactory:integrations/issues.comment`).
+/// Comment record (`darkfactory:integrations/issues.comment`); also the reply posted in a review
+/// thread (`pull-requests.posted-comment`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
     pub id: String,
     pub url: String,
+}
+
+/// The author's relationship to the repository (`pull-requests.author-role`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorRole {
+    /// The account that owns the project's forge credential.
+    Bot,
+    /// A user with write access, or the forge's equivalent.
+    Member,
+    /// Anyone else; their text is untrusted input.
+    Outside,
+}
+
+/// Author of feedback (`pull-requests.author`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Author {
+    pub login: String,
+    pub role: AuthorRole,
+}
+
+/// Verdict of a submitted review (`pull-requests.review-verdict`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Approved,
+    ChangesRequested,
+    Commented,
+}
+
+/// Top-level comment on a pull request (`pull-requests.pr-comment`). Timestamps are RFC 3339.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrComment {
+    pub id: String,
+    pub author: Author,
+    pub body: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Submitted review (`pull-requests.review`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Review {
+    pub id: String,
+    pub author: Author,
+    pub verdict: ReviewVerdict,
+    pub body: String,
+    pub url: String,
+    pub submitted_at: String,
+}
+
+/// Comment in a review thread (`pull-requests.review-comment`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewComment {
+    pub id: String,
+    pub author: Author,
+    pub body: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Review comments on one place in the diff (`pull-requests.review-thread`). `id` is opaque.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewThread {
+    pub id: String,
+    pub path: String,
+    /// `None` for a comment on the whole file.
+    pub line: Option<u32>,
+    pub resolved: bool,
+    pub comments: Vec<ReviewComment>,
+}
+
+/// Feedback on a pull request (`pull-requests.feedback`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    pub comments: Vec<PrComment>,
+    pub reviews: Vec<Review>,
+    pub threads: Vec<ReviewThread>,
+    /// The plugin stopped at a forge listing limit.
+    pub truncated: bool,
 }
 
 /// Host-side interface to code forge and issue tracker capability plugins.
@@ -268,6 +351,25 @@ pub trait ForgeClient: Send + Sync {
         };
         self.update_pull_request(p, number, ready).await
     }
+
+    /// PR comments, reviews and review threads of pull request `number`; `since` (RFC 3339) keeps
+    /// only newer items and whole threads with a newer review comment.
+    async fn list_pull_request_feedback(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        since: Option<&str>,
+    ) -> Result<Feedback, IntegrationError>;
+
+    /// Replies in review thread `thread`, an id from [`Self::list_pull_request_feedback`] for the
+    /// same pull request.
+    async fn reply_to_review_thread(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        thread: &str,
+        body: &str,
+    ) -> Result<Comment, IntegrationError>;
 
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError>;
 

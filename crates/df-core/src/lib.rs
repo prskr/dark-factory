@@ -28,10 +28,11 @@ pub use ids::{
 };
 pub use keys::{KeyError, ProjectKey, TaskKey};
 pub use seams::{
-    Comment, CredentialRef, ForgeClient, IntegrationError, Issue, IssueRef, IssueState,
-    NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState,
-    PullRequestUpdate, RateLimit, RepoRef, RunSandboxSpec, SandboxEvent, SandboxProvider,
-    SecretError, SecretStore, TaskVolumeSpec, UpstreamError,
+    Author, AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
+    IssueRef, IssueState, NewPullRequest, PeerIdentity, PrComment, ProviderError, PullRequest,
+    PullRequestRef, PullRequestState, PullRequestUpdate, RateLimit, RepoRef, Review, ReviewComment,
+    ReviewThread, ReviewVerdict, RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError,
+    SecretStore, TaskVolumeSpec, UpstreamError,
 };
 pub use title::{
     FALLBACK_TITLE, TITLE_MAX_CHARS, TitleSource, placeholder_title, sanitize_title, title_too_long,

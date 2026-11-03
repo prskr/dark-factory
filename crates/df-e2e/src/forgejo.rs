@@ -56,6 +56,37 @@ impl Forgejo {
         self.json(&format!("commits?sha={branch}&limit=50")).await
     }
 
+    /// Submits a review of pull request `number` with one comment on the new side of `path`
+    /// at `line`, and returns the review id.
+    pub async fn submit_line_comment(
+        &self,
+        number: u64,
+        path: &str,
+        line: u32,
+        body: &str,
+    ) -> Result<u64> {
+        let review: Value = self
+            .post(
+                &format!("pulls/{number}/reviews"),
+                &serde_json::json!({
+                    "event": "COMMENT",
+                    "body": "",
+                    "comments": [{ "path": path, "new_position": line, "body": body }],
+                }),
+            )
+            .await?;
+        review
+            .get("id")
+            .and_then(Value::as_u64)
+            .context("review id")
+    }
+
+    /// Comments of review `review` of pull request `number`.
+    pub async fn review_comments(&self, number: u64, review: u64) -> Result<Vec<Value>> {
+        self.json(&format!("pulls/{number}/reviews/{review}/comments"))
+            .await
+    }
+
     /// Content of `path` on `branch`.
     pub async fn file(&self, branch: &str, path: &str) -> Result<String> {
         let response = self
@@ -77,17 +108,38 @@ impl Forgejo {
     }
 
     async fn get(&self, path: &str) -> Result<reqwest::Response> {
-        let url = format!(
-            "{}/api/v1/repos/{}/{}/{path}",
-            self.base_url,
-            data::FORGE_OWNER,
-            data::FORGE_REPO
-        );
+        let url = self.url(path);
         self.http
             .get(&url)
             .header("Authorization", format!("token {}", self.token))
             .send()
             .await
             .with_context(|| format!("GET {url}"))
+    }
+
+    async fn post(&self, path: &str, body: &Value) -> Result<Value> {
+        let url = self.url(path);
+        let response = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?
+            .error_for_status()?;
+        response
+            .json()
+            .await
+            .with_context(|| format!("decode POST {path}"))
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!(
+            "{}/api/v1/repos/{}/{}/{path}",
+            self.base_url,
+            data::FORGE_OWNER,
+            data::FORGE_REPO
+        )
     }
 }

@@ -98,7 +98,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 |---|---|
 | `login_shows_the_demo_project_on_the_board` | login, seeded project on the board |
 | `assigned_task_gets_a_draft_pr_with_the_shaped_title_and_an_issue_comment` | DF-1 with the fake agent; tools during the first run |
-| `follow_up_resumes_the_session_and_completing_marks_the_pr_ready` | follow-up message; `complete_task` in run 2 (the task is `in_review`, run 2 ends `completed`) |
+| `follow_up_resumes_the_session_and_completing_marks_the_pr_ready` | line comment on the PR, follow-up message; `read_pull_request_feedback` and a reply in the review thread (`comment_on_pull_request`), `complete_task` in run 2 (the task is `in_review`, run 2 ends `completed`) |
 | `rate_limited_run_shows_the_limit_and_the_next_message_continues` | rate-limited run (the UI shows "rate limited"; the retry time is checked on the run in the database) |
 | `rate_limited_task_resumes_at_the_retry_time_without_a_message` | the rate-limited task resumes at the retry time (60 s in the script) and run 2 starts without a message |
 | `denied_host_is_requested_and_the_approval_lets_the_retry_through` | demo step 4 of iteration 2 (`openspec/changes/archive/2026-11-02-iter2-egress-approvals`): the proxy denies `pypi.org:443`, the control plane raises a non-blocking `network-access` request, the test approves it for the task in `/requests`, and the agent's retry in the same turn succeeds within 10 s of the approval (UI included). Needs internet access from the cluster: the gateway never connects to private or cluster addresses, so no in-cluster host can stand in |
@@ -129,7 +129,7 @@ There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git p
 
 `crates/fake-acp-agent/scripts/` is part of the test project image under `/opt/harness/scripts/`:
 
-- `demo.yaml`: run 1 plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, calls `complete_task` and ends.
+- `demo.yaml`: run 1 plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, reads the PR feedback, replies in the first review thread, calls `complete_task` and ends. Without a line comment on the PR the reply is a tool error. An `mcp` step can `save` a value of the structured result (variable name to JSON pointer) that later steps of the turn pass as the string argument `${name}`.
 - `rate-limit.yaml`: run 1 ends with a rate limit (60 s); the next turn continues after a message or, without one, when the task resumes.
 - `network-access.yaml`: run 1 fetches `https://pypi.org/simple/pip/` with a `fetch` step (`curl` through the sandbox's proxy settings, retried once a second for up to 240 s) and says `Fetched <url>.` or `Could not fetch <url>: <error>`; the decision message is the next prompt of the same session, and the agent only answers it.
 - `push-secret.yaml`: run 1 commits `config.py` with a GitHub token assembled by the shell step (the file holds no string a scanner matches); the turn after the `push.rejected` message (same or resumed session) replaces the token by an environment lookup and amends the commit.

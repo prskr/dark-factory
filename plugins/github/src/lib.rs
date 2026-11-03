@@ -18,12 +18,14 @@ mod error;
 #[cfg(test)]
 mod operations;
 mod settings;
+mod timestamp;
 mod wasi_transport;
 
 use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use exports::darkfactory::integrations::issues::{Comment, Guest as IssuesGuest, Issue};
 use exports::darkfactory::integrations::pull_requests::{
-    Guest as PullRequestsGuest, NewPullRequest, PullRequest, PullRequestUpdate,
+    Feedback, Guest as PullRequestsGuest, NewPullRequest, PostedComment, PullRequest,
+    PullRequestUpdate,
 };
 use wasi_transport::{StderrLog, WallClock, WasiTransport};
 
@@ -47,6 +49,14 @@ impl PullRequestsGuest for GitHubPlugin {
 
     fn update(id: PullRequestRef, changes: PullRequestUpdate) -> Result<PullRequest, Error> {
         instance()?.update(&id, &changes)
+    }
+
+    fn list_feedback(id: PullRequestRef, since: Option<String>) -> Result<Feedback, Error> {
+        instance()?.list_feedback(&id, since.as_deref())
+    }
+
+    fn reply(id: PullRequestRef, thread: String, body: String) -> Result<PostedComment, Error> {
+        instance()?.reply(&id, &thread, &body)
     }
 }
 
