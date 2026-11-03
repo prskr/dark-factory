@@ -175,17 +175,21 @@ impl Session {
             .context("send the message")
     }
 
-    /// Sends `message` to the open task with Ctrl+Enter in the message box.
+    /// Sends `message` to the open task with Ctrl+Enter in the message box, pressed twice in a
+    /// row: the second press must not send it again.
     pub async fn send_message_with_shortcut(&self, message: &str) -> Result<()> {
         let input = self.page.locator("#message");
         input
             .fill(message, None)
             .await
             .context("fill the message")?;
-        input
-            .press("Control+Enter", None)
-            .await
-            .context("press Ctrl+Enter in the message box")
+        for _ in 0..2 {
+            input
+                .press("Control+Enter", None)
+                .await
+                .context("press Ctrl+Enter in the message box")?;
+        }
+        Ok(())
     }
 
     /// Stops the active run of the open task with the "Stop" button of its run card.

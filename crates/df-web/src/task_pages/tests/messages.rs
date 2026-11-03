@@ -33,12 +33,10 @@ async fn follow_up_message_is_pending_and_requeues_the_task() {
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header_str(&response, "hx-trigger"), "message-queued");
-    let fragment = text(response).await;
-    assert!(fragment.contains("also add a test for X") && fragment.contains("1 queued"));
-    assert!(
-        fragment.contains("aria-label=\"Edit queued message\""),
-        "{fragment}"
-    );
+    // The stream is the only writer of `#pending`: a late response must not put back a row the
+    // stream has already removed.
+    assert_eq!(header_str(&response, "hx-reswap"), "none");
+    assert!(!text(response).await.contains("id=\"pending\""));
 
     let status: String = sqlx::query_scalar("SELECT status FROM tasks")
         .fetch_one(&app.pool)
@@ -214,7 +212,7 @@ async fn message_input_can_switch_to_editing_with_cancel_and_save() {
 }
 
 #[tokio::test]
-async fn editing_a_queued_message_replaces_its_text_and_answers_with_the_stack() {
+async fn editing_a_queued_message_replaces_its_text_and_leaves_the_stack_to_the_stream() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -230,16 +228,14 @@ async fn editing_a_queued_message_replaces_its_text_and_answers_with_the_stack()
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header_str(&response, "hx-trigger"), "message-saved");
-    let stack = text(response).await;
-    assert!(
-        stack.contains("id=\"pending\"")
-            && stack.contains("also check logout")
-            && !stack.contains(">first<")
-    );
+    assert_eq!(header_str(&response, "hx-reswap"), "none");
+    assert!(!text(response).await.contains("id=\"pending\""));
     let stored = df_db::list_undelivered_messages(&app.pool, task.id)
         .await
         .unwrap();
     assert_eq!(stored[0].id, message.id);
+    let page = text(app.get("/tasks/DF-1", &cookie).await).await;
+    assert!(page.contains("also check logout") && !page.contains(">first<"));
 }
 
 #[tokio::test]
@@ -277,7 +273,8 @@ async fn editing_a_forwarded_message_is_a_conflict_that_keeps_it() {
 }
 
 #[tokio::test]
-async fn empty_edit_is_unprocessable_and_removing_a_queued_message_empties_the_stack() {
+async fn empty_edit_is_unprocessable_and_removing_a_queued_message_leaves_the_stack_to_the_stream()
+{
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -290,8 +287,8 @@ async fn empty_edit_is_unprocessable_and_removing_a_queued_message_empties_the_s
 
     let removed = app.delete(&uri, &cookie).await;
     assert_eq!(removed.status(), StatusCode::OK);
-    let stack = text(removed).await;
-    assert!(stack.contains("id=\"pending\"") && !stack.contains("first"));
+    assert_eq!(header_str(&removed, "hx-reswap"), "none");
+    assert!(!text(removed).await.contains("id=\"pending\""));
     let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
         .bind(task.id.as_uuid())
         .fetch_one(&app.pool)

@@ -646,18 +646,14 @@ async fn message_create(
             hidden: false,
         }];
         match df_db::queue_message(&state.pool, id, user.principal(), content).await {
-            Ok(_) => None,
+            Ok(_) => return stream_renders_stack(Some("message-queued")),
             Err(e) => return internal_error(&e),
         }
     };
-    let body = match stack(&state, &task, error).await {
-        Ok(body) => body,
-        Err(response) => return *response,
-    };
-    if error.is_some() {
-        return invalid(body);
+    match stack(&state, &task, error).await {
+        Ok(body) => invalid(body),
+        Err(response) => *response,
     }
-    with_trigger(body, "message-queued")
 }
 
 /// `PATCH /tasks/{key}/messages/{id}`: replaces the text of a queued message that the agent has
@@ -717,33 +713,41 @@ async fn queued_target(
     Ok((task, prompt))
 }
 
-/// Answers an edit or removal with the re-rendered stack: 409 when the agent has the message
-/// already, 422 for an empty text.
+/// Answers a successful edit or removal without a body (the stream re-renders the stack), a
+/// failed one with the stack and the error: 409 when the agent has the message already, 422 for
+/// an empty text.
 async fn queued_change(
     state: &WebState,
     task: &TaskDetail,
     result: Result<(), df_db::DbError>,
     saved: Option<&'static str>,
 ) -> Response {
-    let (status, error, trigger) = match result {
-        Ok(()) => (StatusCode::OK, None, saved),
+    let (status, error) = match result {
+        Ok(()) => return stream_renders_stack(saved),
         Err(df_db::DbError::Conflict(_)) => (
             StatusCode::CONFLICT,
-            Some("The agent has already received this message."),
-            None,
+            "The agent has already received this message.",
         ),
-        Err(df_db::DbError::InvalidData(_)) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Some("Write a message first."),
-            None,
-        ),
+        Err(df_db::DbError::InvalidData(_)) => {
+            (StatusCode::UNPROCESSABLE_ENTITY, "Write a message first.")
+        }
         Err(e) => return internal_error(&e),
     };
-    let body = match stack(state, task, error).await {
-        Ok(body) => body,
-        Err(response) => return *response,
-    };
-    let response = (status, body).into_response();
+    match stack(state, task, Some(error)).await {
+        Ok(body) => (status, body).into_response(),
+        Err(response) => *response,
+    }
+}
+
+/// The answer to a successful queue change. The event stream is the only writer of `#pending`
+/// on success: it renders the stack after the change's notification, and a response that
+/// arrived after a newer stream update would otherwise put back a stale stack that the stream,
+/// which only sends changed regions, never corrects.
+fn stream_renders_stack(trigger: Option<&'static str>) -> Response {
+    let mut response = StatusCode::OK.into_response();
+    response
+        .headers_mut()
+        .insert("HX-Reswap", HeaderValue::from_static("none"));
     match trigger {
         Some(name) => with_header(response, name),
         None => response,
@@ -767,10 +771,6 @@ async fn stack(
         state.show_hidden_blocks,
         error,
     ))
-}
-
-fn with_trigger(body: Markup, name: &'static str) -> Response {
-    with_header(body.into_response(), name)
 }
 
 fn with_header(mut response: Response, trigger: &'static str) -> Response {
