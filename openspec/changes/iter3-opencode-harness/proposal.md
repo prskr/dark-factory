@@ -1,6 +1,6 @@
 # Proposal
 
-> **Partial (2026-11-02):** proposal and design only. Specs and tasks follow once `iter3-inference-gateway` is implemented and the spike in design.md (Open Questions) is done.
+> **Partial (2026-11-02):** proposal and design only. Specs and tasks follow once `iter3-inference-gateway` is implemented and the spike in design.md (Open Questions) is done. Until then `.openspec.yaml` sets `skip_specs: true`; remove it together with writing the specs.
 
 ## Why
 

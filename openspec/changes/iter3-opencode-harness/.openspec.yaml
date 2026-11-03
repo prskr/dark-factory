@@ -1,2 +1,5 @@
 schema: spec-driven
 created: 2026-11-02
+# Temporary: the change is partial (proposal and design only, see proposal.md). Remove when the
+# specs are written, otherwise the change would archive without syncing them.
+skip_specs: true
