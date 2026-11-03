@@ -113,7 +113,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
 | TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
-| TD-83 | low   | `df-web` tests | SSE refresh test depends on the wall clock |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
@@ -773,18 +772,6 @@ The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of 
 **Matters when:** many runs reach their first push together against a slow forge, and the default pool of 16 connections runs dry for UI and session queries.
 
 **Fix:** state the ceiling in the code comment and set `idle_in_transaction_session_timeout` on this transaction (`statement_timeout` does not cover the idle wait for the forge); if the pool does run dry, serialize per task in-process before taking the DB lock.
-
-### TD-83 (flaky). SSE refresh test depends on the wall clock
-
-`crates/df-web/src/sse/tests.rs` (`streams_end_when_the_session_token_is_due_for_refresh`)
-
-The test seeds a session token that is due for refresh one second later (`expires_at` in whole seconds, `REFRESH_SKEW` 30 s, checked against `now_unix()`). If seeding and the request take longer than that second, the auth middleware refreshes the token at the request and the stream stays open. It failed once in CI of PR #84 and passed on the re-run. A paused tokio clock does not help: the check reads the system clock.
-
-The gateway tests listed here before (proxy upstream timeout, relay grace period, records shutdown) are fixed: real time while loopback I/O is in flight, a paused clock only for the waits, and an idempotent fake control plane.
-
-**Matters when:** CI or the pre-push run fails because of it and red builds get ignored.
-
-**Fix:** an injectable clock for the session check, or a larger margin than one second.
 
 ### TD-84 (S4). `request_approval` copies the raise logic of `ask_question`
 

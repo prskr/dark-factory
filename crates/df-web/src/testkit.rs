@@ -26,7 +26,7 @@ use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request as MockRequest, Respond, ResponseTemplate};
 
-use crate::auth::OidcClient;
+use crate::auth::{Clock, OidcClient, SystemClock};
 use crate::{WebState, router};
 
 pub(crate) const CLIENT_ID: &str = "dark-factory";
@@ -216,7 +216,31 @@ pub(crate) struct TestApp {
     pub forge: df_core::testing::FakeForgeClient,
     /// The sandbox provider the handlers call; records the calls.
     pub provider: df_core::testing::FakeSandboxProvider,
+    /// The clock of the auth middleware; follows the system clock until a test freezes it.
+    pub clock: Arc<TestClock>,
     _dir: tempfile::TempDir,
+}
+
+/// A [`Clock`] that follows the system clock until [`TestClock::freeze`].
+#[derive(Debug, Default)]
+pub(crate) struct TestClock {
+    frozen: Mutex<Option<i64>>,
+}
+
+impl TestClock {
+    /// Stops the clock at the current system time.
+    pub(crate) fn freeze(&self) {
+        *self.frozen.lock().unwrap() = Some(SystemClock.now_unix());
+    }
+}
+
+impl Clock for TestClock {
+    fn now_unix(&self) -> i64 {
+        self.frozen
+            .lock()
+            .unwrap()
+            .unwrap_or_else(|| SystemClock.now_unix())
+    }
 }
 
 /// Routes of the plugins `(name, hosts)`, an entry without hosts being the default; `loaded` are
@@ -310,7 +334,9 @@ impl TestApp {
         };
         let forge = df_core::testing::FakeForgeClient::new();
         let provider = df_core::testing::FakeSandboxProvider::new();
+        let clock = Arc::new(TestClock::default());
         let state = WebState {
+            clock: clock.clone(),
             forge: Arc::new(forge.clone()),
             provider: Arc::new(provider.clone()),
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
@@ -331,6 +357,7 @@ impl TestApp {
             idp,
             forge,
             provider,
+            clock,
             _dir: dir,
         }
     }

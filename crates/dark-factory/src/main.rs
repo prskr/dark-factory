@@ -583,6 +583,7 @@ fn web_router(
         max_auto_resumes: cfg.runs.max_auto_resumes,
         approval_types,
         version: df_telemetry::VERSION.to_string(),
+        clock: Arc::new(df_web::auth::SystemClock),
     }))
 }
 

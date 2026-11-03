@@ -361,6 +361,22 @@ async fn login_fails_when_the_session_id_cannot_be_replaced() {
     assert_eq!(logged_in, 0);
 }
 
+#[tokio::test(start_paused = true)]
+async fn time_until_refresh_counts_down_from_the_auth_check() {
+    let user = super::CurrentUser {
+        id: df_core::UserId::new(),
+        display_name: "Peter".into(),
+        roles: vec![super::REQUIRED_ROLE.into()],
+        refresh_at: tokio::time::Instant::now() + std::time::Duration::from_secs(10),
+    };
+    // Time the request spends in the handler before it opens a stream counts against the
+    // deadline.
+    tokio::time::advance(std::time::Duration::from_secs(3)).await;
+    assert_eq!(user.until_refresh(), std::time::Duration::from_secs(7));
+    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    assert_eq!(user.until_refresh(), std::time::Duration::ZERO);
+}
+
 #[tokio::test]
 async fn health_and_assets_need_no_login() {
     let app = TestApp::new().await;
