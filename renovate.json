@@ -66,6 +66,19 @@
       ],
       "depNameTemplate": "rust",
       "datasourceTemplate": "rust-version"
+    },
+    {
+      "customType": "regex",
+      "description": "OpenSpec CLI run through npx in CI and in the pre-commit hook",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/openspec\\.yaml$/",
+        "/^lefthook\\.yml$/"
+      ],
+      "matchStrings": [
+        "npx --yes @fission-ai/openspec@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "@fission-ai/openspec",
+      "datasourceTemplate": "npm"
     }
   ],
   "packageRules": [
@@ -92,6 +105,13 @@
         "rust-version"
       ],
       "groupName": "Rust toolchain"
+    },
+    {
+      "description": "One PR for OpenSpec: the CI workflow and the lefthook hook",
+      "matchPackageNames": [
+        "@fission-ai/openspec"
+      ],
+      "groupName": "OpenSpec CLI"
     }
   ]
 }

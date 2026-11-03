@@ -69,7 +69,7 @@ pre-commit:
       glob: 'deploy/helm/**'
       run: build/with_tools.sh helm-unittest deploy/helm/dark-factory
 
-    # Same command and version as .github/workflows/openspec.yaml; bump both together.
+    # Same command and version as .github/workflows/openspec.yaml; Renovate updates both in one PR.
     openspec-validate:
       glob: 'openspec/**'
       run: npx --yes @fission-ai/openspec@1.14.3 validate --all --strict --no-interactive

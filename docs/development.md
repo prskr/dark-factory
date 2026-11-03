@@ -218,7 +218,7 @@ The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
 `buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `tailwindcss` and `yq` come from Bazel, so the
-lefthook hooks use the same versions on every machine. The exception is OpenSpec: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml` (needs Node.js and, on first use, network access); bump both files together.
+lefthook hooks use the same versions on every machine. The exception is OpenSpec: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml` (needs Node.js and, on first use, network access); a Renovate regex manager updates both copies in one PR.
 
 | Task | Command |
 |------|---------|
