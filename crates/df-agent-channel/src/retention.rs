@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use df_core::TaskId;
+use df_db::lifecycle_events::VolumeDestroyedReason;
 use df_db::volumes::{self, DELETE_TIMEOUT};
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
@@ -137,12 +138,17 @@ impl Retention {
             return Ok(false);
         }
 
+        let deletion = volumes::Deletion {
+            reason: VolumeDestroyedReason::Retention,
+            events: &self.ctx.config.events,
+            timeout: self.delete_timeout,
+        };
         let volume = volumes::delete_volume(
             &mut tx,
             self.ctx.provider.as_ref(),
             TaskId::from_uuid(task_id),
             task_key,
-            self.delete_timeout,
+            deletion,
         )
         .await?;
         tx.commit().await?;

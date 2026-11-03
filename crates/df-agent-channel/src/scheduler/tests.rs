@@ -138,6 +138,7 @@ async fn the_next_run_after_a_workspace_reset_recreates_the_volume() {
     df_db::volumes::reset_workspace(
         &pool,
         env.ctx.provider.as_ref(),
+        &env.ctx.config.events,
         env.task.id,
         env.human(),
         df_db::volumes::DELETE_TIMEOUT,

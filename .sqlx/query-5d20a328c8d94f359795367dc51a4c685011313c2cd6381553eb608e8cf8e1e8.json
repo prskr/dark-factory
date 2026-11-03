@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tasks SET volume_deleted_at = now(), volume_provisioned_at = NULL WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d20a328c8d94f359795367dc51a4c685011313c2cd6381553eb608e8cf8e1e8"
+}

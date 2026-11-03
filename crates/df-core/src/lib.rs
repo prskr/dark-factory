@@ -6,6 +6,7 @@ pub mod forge;
 pub mod host;
 pub mod ids;
 pub mod keys;
+pub mod lifecycle;
 pub mod routing;
 pub mod seams;
 #[cfg(any(test, feature = "test-util"))]
@@ -27,6 +28,7 @@ pub use ids::{
     ToolCallId, UserId,
 };
 pub use keys::{KeyError, ProjectKey, TaskKey};
+pub use lifecycle::{EventType, InstanceSubscription, LifecycleEventsConfig};
 pub use seams::{
     Author, AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
     IssueRef, IssueState, NewPullRequest, PeerIdentity, PrComment, ProviderError, PullRequest,

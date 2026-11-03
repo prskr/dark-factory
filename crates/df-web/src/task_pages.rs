@@ -577,6 +577,7 @@ async fn task_reset_workspace(
     let reset = df_db::volumes::reset_workspace(
         &state.pool,
         state.provider.as_ref(),
+        &state.events,
         id,
         user.principal(),
         df_db::volumes::DELETE_TIMEOUT,

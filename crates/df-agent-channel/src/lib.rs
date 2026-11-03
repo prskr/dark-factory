@@ -8,6 +8,7 @@ use std::sync::Arc;
 use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig, VolumesConfig};
 use df_core::{ForgeClient, InstanceConfig, SandboxProvider, SecretStore};
 use df_db::Notifier;
+use df_db::lifecycle_events::EventSinks;
 use sqlx::PgPool;
 
 pub mod assign;
@@ -28,6 +29,9 @@ pub mod transcript;
 #[cfg(feature = "test-util")]
 pub mod testing;
 
+#[cfg(test)]
+mod lifecycle_event_tests;
+
 pub use error::ChannelError;
 pub use metrics::Metrics;
 pub use retention::Retention;
@@ -42,6 +46,8 @@ pub struct ChannelConfig {
     pub runs: RunsConfig,
     pub volumes: VolumesConfig,
     pub git_proxy: GitProxy,
+    /// Receivers of lifecycle events; off by default.
+    pub events: EventSinks,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -55,6 +61,7 @@ impl From<&InstanceConfig> for ChannelConfig {
                 host: cfg.gateway.git_host_name(&cfg.instance_name),
                 port: cfg.gateway.git_port,
             },
+            events: EventSinks::new(&cfg.lifecycle_events),
         }
     }
 }

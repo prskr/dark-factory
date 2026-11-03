@@ -6,6 +6,12 @@ use crate::testing::{Env, task_resume_state};
 /// `runs.maxAutoResumes` of the tests.
 const MAX_AUTO_RESUMES: u32 = 3;
 
+fn config() -> ChannelConfig {
+    let mut config = ChannelConfig::default();
+    config.runs.max_auto_resumes = MAX_AUTO_RESUMES;
+    config
+}
+
 fn failure_of(outcome: RunOutcome, detail: &str) -> RunEnd {
     RunEnd::failure(RunId::new(), outcome, detail)
 }
@@ -92,14 +98,10 @@ async fn blocked_run_is_terminal_and_blocks_the_task() {
     let env = Env::new(pool.clone()).await;
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
-    let ended = end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Blocked),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let ended = end_run(&pool, &end_with(run_id, RunOutcome::Blocked), &config())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ended.run_state, RunState::Succeeded);
     assert_eq!(status_of(&pool, env.task.id).await, "blocked");
     // No further phase changes are accepted for it.
@@ -122,13 +124,9 @@ async fn blocked_run_with_an_undelivered_message_queues_the_task() {
     let env = Env::new(pool.clone()).await;
     // The seeded message is still undelivered.
     let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Blocked),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Blocked), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "queued");
 }
 
@@ -154,13 +152,9 @@ async fn stopped_run_with_a_message_queued_before_the_stop_leaves_the_task_waiti
     // The seeded message is undelivered and older than the stop.
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     stop(&pool, run_id).await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Cancelled),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "waiting");
 }
 
@@ -174,13 +168,9 @@ async fn stopped_run_with_a_message_queued_after_the_stop_queues_the_task() {
     df_db::queue_message(&pool, env.task.id, env.human(), vec![])
         .await
         .unwrap();
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Cancelled),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "queued");
 }
 
@@ -192,14 +182,10 @@ async fn run_ending_after_its_task_was_cancelled_keeps_the_task_cancelled() {
     df_db::cancel_task(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    let ended = end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Cancelled),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let ended = end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ended.task_status, TaskStatus::Cancelled);
     assert_eq!(status_of(&pool, env.task.id).await, "cancelled");
 }
@@ -217,7 +203,7 @@ async fn task_reopened_before_the_stopped_run_ended_stays_queued() {
         df_db::queue_message(&pool, env.task.id, env.human(), vec![])
             .await
             .unwrap();
-        let ended = end_run(&pool, &end_with(run_id, outcome), MAX_AUTO_RESUMES)
+        let ended = end_run(&pool, &end_with(run_id, outcome), &config())
             .await
             .unwrap()
             .unwrap();
@@ -235,13 +221,9 @@ async fn a_stop_during_finalizing_still_requeues_the_task_for_its_undelivered_me
     df_db::stop_run(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Completed),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Completed), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "queued");
 }
 
@@ -264,7 +246,7 @@ async fn rate_limit_sets_the_resume_time_to_the_reported_retry_time() {
         retry_after: Some(retry),
         ..end_with(run_id, RunOutcome::RateLimited)
     };
-    end_run(&pool, &end, MAX_AUTO_RESUMES).await.unwrap();
+    end_run(&pool, &end, &config()).await.unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(state.status, "rate_limited");
     assert_eq!(
@@ -280,13 +262,9 @@ async fn rate_limit_without_a_retry_time_resumes_in_an_hour() {
     let env = Env::new(pool.clone()).await;
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::RateLimited),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::RateLimited), &config())
+        .await
+        .unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(state.status, "rate_limited");
     assert_eq!(minutes_from_now(state.resume_at), 60);
@@ -303,7 +281,7 @@ async fn infrastructure_failures_resume_with_a_growing_backoff_until_the_cap() {
         (3, RunOutcome::ProvisioningFailed),
     ] {
         let run_id = env.insert_run(env.task.id, number, "running").await;
-        end_run(&pool, &end_with(run_id, outcome), MAX_AUTO_RESUMES)
+        end_run(&pool, &end_with(run_id, outcome), &config())
             .await
             .unwrap();
         let state = task_resume_state(&pool, env.task.id).await;
@@ -316,7 +294,7 @@ async fn infrastructure_failures_resume_with_a_growing_backoff_until_the_cap() {
     end_run(
         &pool,
         &end_with(run_id, RunOutcome::ConnectTimeout),
-        MAX_AUTO_RESUMES,
+        &config(),
     )
     .await
     .unwrap();
@@ -338,13 +316,9 @@ async fn a_run_report_resets_the_resume_count() {
         .await
         .unwrap();
     let run_id = env.insert_run(env.task.id, 3, "finalizing").await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::EndTurn),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::EndTurn), &config())
+        .await
+        .unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(
         (state.status.as_str(), state.resume_at, state.auto_resumes),
@@ -358,13 +332,9 @@ async fn a_harness_crash_is_not_resumed() {
     let env = Env::new(pool.clone()).await;
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "running").await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Failed),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Failed), &config())
+        .await
+        .unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!((state.status.as_str(), state.resume_at), ("failed", None));
 }
@@ -384,7 +354,7 @@ async fn capacity_rejection_requeues_in_two_minutes_and_keeps_the_count() {
         detail: CAPACITY_DETAIL.into(),
         ..end_with(run_id, RunOutcome::ProvisioningFailed)
     };
-    end_run(&pool, &end, MAX_AUTO_RESUMES).await.unwrap();
+    end_run(&pool, &end, &config()).await.unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(state.status, "queued");
     assert_eq!(state.auto_resumes, 3);
@@ -399,13 +369,9 @@ async fn infrastructure_failure_of_a_cancelled_task_does_not_reopen_it() {
     df_db::cancel_task(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::SandboxLost),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::SandboxLost), &config())
+        .await
+        .unwrap();
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(
         (state.status.as_str(), state.resume_at, state.auto_resumes),
@@ -531,24 +497,16 @@ async fn completed_run_puts_the_task_in_review_or_queues_a_waiting_message() {
     let env = Env::new(pool.clone()).await;
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     // The seeded task has an undelivered message.
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Completed),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Completed), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "queued");
 
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 2, "running").await;
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Completed),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Completed), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "in_review");
 }
 
@@ -563,14 +521,10 @@ async fn run_end_keeps_a_task_a_human_marked_done() {
         .execute(&pool)
         .await
         .unwrap();
-    let ended = end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Cancelled),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let ended = end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ended.task_status, TaskStatus::Completed);
     assert_eq!(status_of(&pool, env.task.id).await, "completed");
 }
@@ -586,13 +540,9 @@ async fn run_end_of_a_task_marked_done_queues_a_message_that_arrived_since() {
         .execute(&pool)
         .await
         .unwrap();
-    end_run(
-        &pool,
-        &end_with(run_id, RunOutcome::Cancelled),
-        MAX_AUTO_RESUMES,
-    )
-    .await
-    .unwrap();
+    end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+        .await
+        .unwrap();
     assert_eq!(status_of(&pool, env.task.id).await, "queued");
 }
 
@@ -636,7 +586,7 @@ async fn message_queued_while_the_run_ends_is_not_stranded() {
                 wip_sha: String::new(),
                 diverged: false,
             };
-            end_run(&pool, &end, MAX_AUTO_RESUMES).await
+            end_run(&pool, &end, &config()).await
         }
     });
     // The run end is now waiting for the task row.

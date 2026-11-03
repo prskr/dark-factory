@@ -4,10 +4,11 @@
 
 use std::time::Duration;
 
-use df_core::{Principal, ProviderError, SandboxProvider, TaskId, TaskKey, TaskVolumeSpec};
+use df_core::{Principal, ProviderError, RunId, SandboxProvider, TaskId, TaskKey, TaskVolumeSpec};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
+use crate::lifecycle_events::{self, Event, EventSinks, VolumeDestroyedReason};
 use crate::pool::DbError;
 
 /// Upper bound of one volume deletion; the task row stays locked meanwhile.
@@ -44,15 +45,56 @@ pub async fn lock_task(
         .map_err(|e| DbError::InvalidData(format!("task key `{key}`: {e}")))
 }
 
-/// Deletes the volume of task `key` within `timeout` and sets `tasks.volume_deleted_at`. Call it
-/// while holding the row lock of [`lock_task`].
+/// What a volume deletion needs besides the task: why, where events go and how long it may take.
+#[derive(Debug, Clone, Copy)]
+pub struct Deletion<'a> {
+    pub reason: VolumeDestroyedReason,
+    pub events: &'a EventSinks,
+    pub timeout: Duration,
+}
+
+/// Records that the volume of `task_id` exists after `run_id`'s scheduling ensured it: clears
+/// `tasks.volume_deleted_at` and, the first time since the volume last did not exist, sets
+/// `tasks.volume_provisioned_at` and emits `volume.provisioned` with that run.
+pub async fn volume_ensured(
+    pool: &PgPool,
+    events: &EventSinks,
+    task_id: TaskId,
+    run_id: RunId,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "UPDATE tasks SET volume_deleted_at = NULL WHERE id = $1 AND volume_deleted_at IS NOT NULL",
+        task_id.as_uuid()
+    )
+    .execute(&mut *tx)
+    .await?;
+    let first = sqlx::query!(
+        "UPDATE tasks SET volume_provisioned_at = now() WHERE id = $1 AND volume_provisioned_at IS NULL",
+        task_id.as_uuid()
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+    if first {
+        lifecycle_events::enqueue(&mut tx, events, &Event::VolumeProvisioned { run_id }).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Deletes the volume of task `key` within `deletion.timeout`, sets `tasks.volume_deleted_at`
+/// and, if the volume was provisioned, emits `volume.destroyed`. Call it while holding the row
+/// lock of [`lock_task`].
 pub async fn delete_volume(
     tx: &mut Transaction<'_, Postgres>,
     provider: &dyn SandboxProvider,
     task_id: TaskId,
     key: TaskKey,
-    timeout: Duration,
+    deletion: Deletion<'_>,
 ) -> Result<TaskVolumeSpec, VolumeError> {
+    let timeout = deletion.timeout;
     let volume = TaskVolumeSpec::for_task(key);
     tokio::time::timeout(timeout, provider.delete_task_volume(&volume))
         .await
@@ -63,12 +105,25 @@ pub async fn delete_volume(
                 timeout.as_secs()
             ))
         })??;
+    let provisioned = sqlx::query_scalar!(
+        "SELECT volume_provisioned_at IS NOT NULL AS \"provisioned!\" FROM tasks WHERE id = $1",
+        task_id.as_uuid()
+    )
+    .fetch_one(&mut **tx)
+    .await?;
     sqlx::query!(
-        "UPDATE tasks SET volume_deleted_at = now() WHERE id = $1",
+        "UPDATE tasks SET volume_deleted_at = now(), volume_provisioned_at = NULL WHERE id = $1",
         task_id.as_uuid()
     )
     .execute(&mut **tx)
     .await?;
+    if provisioned {
+        let event = Event::VolumeDestroyed {
+            task_id,
+            reason: deletion.reason,
+        };
+        lifecycle_events::enqueue(tx, deletion.events, &event).await?;
+    }
     Ok(volume)
 }
 
@@ -78,6 +133,7 @@ pub async fn delete_volume(
 pub async fn reset_workspace(
     pool: &PgPool,
     provider: &dyn SandboxProvider,
+    events: &EventSinks,
     task_id: TaskId,
     actor: Principal,
     timeout: Duration,
@@ -87,7 +143,12 @@ pub async fn reset_workspace(
     if crate::tasks::has_active_run(&mut tx, task_id).await? {
         return Err(DbError::Conflict("the task has an active run".into()).into());
     }
-    let volume = delete_volume(&mut tx, provider, task_id, key, timeout).await?;
+    let deletion = Deletion {
+        reason: VolumeDestroyedReason::Reset,
+        events,
+        timeout,
+    };
+    let volume = delete_volume(&mut tx, provider, task_id, key, deletion).await?;
     let entry = NewAuditEntry::new(
         actor,
         Vec::new(),

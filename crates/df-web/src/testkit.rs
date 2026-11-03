@@ -350,6 +350,7 @@ impl TestApp {
             max_auto_resumes: 3,
             approval_types: Self::approval_types(),
             version: "2026.11.0".into(),
+            events: df_db::lifecycle_events::EventSinks::default(),
         };
         Self {
             router: router(state),
