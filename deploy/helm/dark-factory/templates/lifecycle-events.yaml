@@ -1,0 +1,26 @@
+{{- if not .Values.lifecycleEvents.signingKey.existingSecret }}
+{{- /*
+Ed25519 key that signs lifecycle event deliveries. Receivers pin its public key, so renewals must
+keep it: `rotationPolicy: Never` (cert-manager >= 1.18 defaults to `Always`). The certificate
+itself is unused; the issuer needs a common name.
+*/}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "dark-factory.fullname" . }}-lifecycle-events
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dark-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  secretName: {{ include "dark-factory.lifecycleEvents.secretName" . }}
+  duration: {{ .Values.tls.duration }}
+  renewBefore: {{ .Values.tls.renewBefore }}
+  commonName: {{ include "dark-factory.fullname" . }}-lifecycle-events
+  privateKey:
+    algorithm: Ed25519
+    encoding: PKCS8
+    rotationPolicy: Never
+  issuerRef:
+    {{- include "dark-factory.issuerRef" . | nindent 4 }}
+{{- end }}

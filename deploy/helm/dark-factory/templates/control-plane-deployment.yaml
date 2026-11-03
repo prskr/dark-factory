@@ -48,6 +48,9 @@ spec:
             - "--config"
             - "/etc/dark-factory/config.yaml"
             - "serve"
+            {{- range .Values.controlPlane.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.controlPlane.ports.http }}
@@ -96,6 +99,9 @@ spec:
             - name: tls
               mountPath: /etc/dark-factory/tls
               readOnly: true
+            - name: lifecycle-events-key
+              mountPath: /run/secrets/lifecycle-events
+              readOnly: true
             {{- range $name, $plugin := .Values.plugins }}
             {{- if $plugin.image }}
             - name: plugin-{{ $name }}
@@ -126,6 +132,12 @@ spec:
         - name: tls
           secret:
             secretName: {{ include "dark-factory.fullname" . }}-control-plane-tls
+        - name: lifecycle-events-key
+          secret:
+            secretName: {{ include "dark-factory.lifecycleEvents.secretName" . }}
+            items:
+              - key: {{ .Values.lifecycleEvents.signingKey.key }}
+                path: tls.key
         {{- range $name, $plugin := .Values.plugins }}
         {{- if $plugin.image }}
         - name: plugin-{{ $name }}

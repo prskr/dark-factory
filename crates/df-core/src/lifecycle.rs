@@ -163,6 +163,20 @@ mod tests {
         assert!(serde_json::from_str::<EventType>("\"sandbox.started\"").is_err());
     }
 
+    #[test]
+    fn helm_values_schema_lists_every_event_type() {
+        const SCHEMA: &str = include_str!("../../../deploy/helm/dark-factory/values.schema.json");
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        let listed: Vec<&str> = schema["$defs"]["lifecycleEventType"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        let all: Vec<&str> = EventType::ALL.iter().map(EventType::as_str).collect();
+        assert_eq!(listed, all);
+    }
+
     const BASE: &str = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
 
     fn parse(section: &str) -> Result<crate::InstanceConfig, ConfigError> {

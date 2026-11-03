@@ -14,6 +14,7 @@
     "enforcement",
     "clusterTargets",
     "controlPlane",
+    "lifecycleEvents",
     "gateway",
     "tls",
     "httpRoute",
@@ -274,7 +275,38 @@
             "internalGrpc": { "type": "integer", "minimum": 1, "maximum": 65535 }
           }
         },
-        "resources": { "type": "object" }
+        "resources": { "type": "object" },
+        "extraArgs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "lifecycleEvents": {
+      "type": "object",
+      "required": ["signingKey", "subscriptions"],
+      "properties": {
+        "signingKey": {
+          "type": "object",
+          "required": ["existingSecret", "key"],
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["url"],
+            "additionalProperties": false,
+            "properties": {
+              "url": { "type": "string", "pattern": "^https?://[^/?#]+" },
+              "events": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/lifecycleEventType" }
+              }
+            }
+          }
+        }
       }
     },
     "gateway": {
@@ -440,6 +472,16 @@
         "existingSecret": { "type": "string", "minLength": 1 },
         "passwordKey": { "type": "string", "minLength": 1 }
       }
+    },
+    "lifecycleEventType": {
+      "enum": [
+        "volume.provisioned",
+        "volume.destroyed",
+        "sandbox.provisioning",
+        "sandbox.provisioned",
+        "sandbox.provisioning_failed",
+        "sandbox.destroyed"
+      ]
     }
   }
 }

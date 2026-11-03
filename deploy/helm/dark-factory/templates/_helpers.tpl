@@ -168,6 +168,13 @@ group: cert-manager.io
 {{- end }}
 
 {{/*
+Secret holding the lifecycle event signing key: the existing one or the chart's Certificate.
+*/}}
+{{- define "dark-factory.lifecycleEvents.secretName" -}}
+{{- .Values.lifecycleEvents.signingKey.existingSecret | default (printf "%s-lifecycle-events-key" (include "dark-factory.fullname" .)) }}
+{{- end }}
+
+{{/*
 Kind of the issuer for sandbox client certificates. Sandbox certificates are requested from the
 sandbox namespace, where only a ClusterIssuer can be referenced, so anything else is refused.
 */}}

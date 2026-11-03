@@ -1,0 +1,158 @@
+suite: Dark Factory Helm Chart - lifecycle events
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+  - lifecycle-events.yaml
+tests:
+  - it: issues an Ed25519 signing key that cert-manager never rotates
+    template: lifecycle-events.yaml
+    release:
+      name: df
+      namespace: factory
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Certificate
+      - equal:
+          path: metadata.namespace
+          value: factory
+      - equal:
+          path: spec.secretName
+          value: df-dark-factory-lifecycle-events-key
+      - equal:
+          path: spec.commonName
+          value: df-dark-factory-lifecycle-events
+      - equal:
+          path: spec.privateKey
+          value:
+            algorithm: Ed25519
+            encoding: PKCS8
+            rotationPolicy: Never
+      - equal:
+          path: spec.duration
+          value: 2160h
+      - equal:
+          path: spec.renewBefore
+          value: 360h
+      - equal:
+          path: spec.issuerRef.name
+          value: factory-df-dark-factory-ca-issuer
+
+  - it: mounts the issued signing key read-only into the control plane
+    template: control-plane-deployment.yaml
+    release:
+      name: df
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: lifecycle-events-key
+            mountPath: /run/secrets/lifecycle-events
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: lifecycle-events-key
+            secret:
+              secretName: df-dark-factory-lifecycle-events-key
+              items:
+                - key: tls.key
+                  path: tls.key
+
+  - it: writes the key path into the control plane configuration
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^lifecycleEvents:\n  signingKeyFile: /run/secrets/lifecycle-events/tls.key$'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'subscriptions:'
+        documentIndex: 0
+
+  - it: uses an existing Secret instead of a Certificate
+    template: lifecycle-events.yaml
+    set:
+      lifecycleEvents.signingKey.existingSecret: df-events-key
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: mounts the configured key of an existing Secret
+    template: control-plane-deployment.yaml
+    set:
+      lifecycleEvents.signingKey.existingSecret: df-events-key
+      lifecycleEvents.signingKey.key: signing.pem
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: lifecycle-events-key
+            secret:
+              secretName: df-events-key
+              items:
+                - key: signing.pem
+                  path: tls.key
+
+  - it: renders instance subscriptions into the configuration
+    template: configmap.yaml
+    set:
+      lifecycleEvents.subscriptions:
+        - url: http://audit.svc/events
+          events: [sandbox.destroyed]
+        - url: https://hooks.example.org/all
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  subscriptions: \[\{"events":\["sandbox.destroyed"\],"url":"http://audit.svc/events"\},\{"url":"https://hooks.example.org/all"\}\]$'
+        documentIndex: 0
+
+  - it: rejects an unknown event type
+    template: configmap.yaml
+    set:
+      lifecycleEvents.subscriptions:
+        - url: http://audit.svc/events
+          events: [sandbox.started]
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects a subscription without a URL
+    template: configmap.yaml
+    set:
+      lifecycleEvents.subscriptions:
+        - events: [sandbox.destroyed]
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects a subscription URL that is not http(s)
+    template: configmap.yaml
+    set:
+      lifecycleEvents.subscriptions:
+        - url: ftp://audit.svc/events
+    asserts:
+      - failedTemplate: {}
+
+  - it: passes extra arguments to the serve command
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.extraArgs: [--unrestricted-project-subscriptions]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --config
+            - /etc/dark-factory/config.yaml
+            - serve
+            - --unrestricted-project-subscriptions
+
+  - it: ends the arguments with the serve command by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --config
+            - /etc/dark-factory/config.yaml
+            - serve

@@ -64,6 +64,11 @@ data:
       anyNamespace: {{ .Values.clusterTargets.anyNamespace }}
       namespaces: {{ .Values.clusterTargets.namespaces | toJson }}
     {{- include "dark-factory.pluginsConfig" . | nindent 4 }}
+    lifecycleEvents:
+      signingKeyFile: /run/secrets/lifecycle-events/tls.key
+      {{- with .Values.lifecycleEvents.subscriptions }}
+      subscriptions: {{ toJson . }}
+      {{- end }}
     agent:
       tls:
         certFile: /etc/dark-factory/tls/tls.crt
