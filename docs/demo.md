@@ -60,6 +60,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
 | `networkPolicy.ingressController.allowAll` | `true` | The browser pod and the port-forward reach the UI. |
 | `sandboxNamespace.resourceQuota.pods`, `limitRange` | 4 pods, 1 Gi default memory | Memory budget, see below. |
+| `sandboxNamespace.resourceQuota.persistentVolumeClaims`, `requestsStorage` | 32, `32Gi` | One 1 Gi volume per task, kept while the task is open; the suite leaves most of its tasks `waiting`. `local-path` does not reserve the size. |
 
 ## Environment variables
 

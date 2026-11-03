@@ -77,8 +77,10 @@ sandboxNamespace:
     requestsMemory: '2Gi'
     limitsCpu: '4'
     limitsMemory: '4Gi'
-    requestsStorage: '8Gi'
-    persistentVolumeClaims: '8'
+    # One volume per task, kept until the task ends: the suite leaves most of its tasks waiting.
+    # local-path does not reserve the requested size.
+    requestsStorage: '32Gi'
+    persistentVolumeClaims: '32'
   limitRange:
     defaultCpu: '1'
     defaultMemory: '1Gi'
