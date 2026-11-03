@@ -90,13 +90,14 @@
 ### 2.1 Dependency update pile-up (e.g. renovate)
 **Situation:** several dependency PRs are failing or need extra work.
 
-1. **Survey.** The coordinator lists the open dependency PRs and their CI status (needs `list-open` and `checks`, ADR-0033).
+1. **Survey.** The coordinator lists the open dependency PRs and their CI status with `list_pull_requests` and `read_ci_status` (ADR-0033).
 2. **Classify** the failures: a *shared root cause* (base branch broken, common configuration, toolchain) or *individual breaking changes* of one dependency.
 3. **Shared root cause:**
    - One task fixes it on a new branch from the base, with a regular PR.
    - Create one child task per affected dependency PR, depending on the fix being Done (`done`, PR merged).
-   - Once unblocked, prefer asking renovate to rebase (its PR checkbox) over pushing a rebase yourself — renovate stops managing branches that contain foreign commits. The child then only verifies CI and steps in if it's still red.
-4. **Individual breaking change:** one child task per branch, started from the renovate branch with PR mode "attach" (ADR-0025). Fix on top of the update; rebase with lease if the base moved (ADR-0033). Note in the PR that renovate will no longer update the branch automatically.
+   - Once unblocked, prefer a renovate rebase over pushing one yourself — renovate stops managing branches that contain foreign commits. You can't tick its rebase checkbox: comment on the PR asking a human to. The child then only verifies CI and steps in if it's still red; CI success wakes nobody, a failure does.
+   - At most 10 subtasks are open at once: create the next children as earlier ones end.
+4. **Individual breaking change:** one child task per branch, started from the renovate branch; its PR is attached (ADR-0025). Fix on top of the update; rebase with lease if the base moved (ADR-0033). Note in the PR that renovate will no longer update the branch automatically.
 5. **Report.** Children summarize in their PRs; the coordinator gives the human one overview (what was fixed, what was merged, what still needs a decision).
 
 ### 2.2 Implementation and review

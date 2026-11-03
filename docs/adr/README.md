@@ -28,7 +28,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0022](0022-project-images-runtime-volume-no-warm-pools.md) | Per-project sandbox images, runtime via image volume, no warm pools | Accepted |
 | [ADR-0023](0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
-| [ADR-0025](0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033) |
+| [ADR-0025](0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033 and on 2026-11-03: existing branches, attached PRs, stored branch) |
 | [ADR-0026](0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043, ADR-0052, ADR-0053 and on 2026-11-03: project context) |
 | [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
@@ -36,7 +36,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0030](0030-kubernetes-only-with-sandbox-provider-seam.md) | Kubernetes only, with a sandbox provider seam and scoped RBAC | Accepted |
 | [ADR-0031](0031-helm-chart-deployment-packaging.md) | Helm chart as deployment packaging | Accepted |
 | [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md) | Third-party MCP servers through the gateway, with tool catalog filtering | Accepted |
-| [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted (amended by ADR-0052) |
+| [ADR-0033](0033-branch-rewrites-fan-out-and-merge-triggers.md) | Branch rewrites, fan-out across branches and merge triggers | Accepted (amended by ADR-0052 and on 2026-11-03: two policy values, forge reads as plugin capabilities) |
 | [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md) | Task hierarchy, subtask branches and merging | Accepted (planned for iteration 3, amended by ADR-0041 and ADR-0043, revised 2026-11-02) |
 | [ADR-0035](0035-ui-form-factors-phone-for-core-flows.md) | UI form factors: one responsive web UI, phone for core flows | Accepted |
 | [ADR-0036](0036-code-review-stays-in-the-forge.md) | Code review stays in the forge | Accepted |

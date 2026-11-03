@@ -42,6 +42,20 @@ _Avoid_: Blocker, blocked by, prerequisite
 An agent handing part of its work to another persona by creating a task whose parent task is its own.
 _Avoid_: Sub-agent, hand-off
 
+### Branches
+
+**Task branch**:
+The one branch a task commits to: a branch created for the task, or an existing branch the task was started from. At most one open task holds a given branch.
+_Avoid_: Work branch, feature branch
+
+**Branch rewrite policy**:
+A project's rule whether agents may rewrite already pushed history of their task branches: never, or only when nobody else pushed in the meantime.
+_Avoid_: Force-push policy, rebase policy
+
+**Attached pull request**:
+An open pull request someone else created for an existing branch that a task was started from. The task works on it and is Done when it is merged, but never changes its title, description or draft state.
+_Avoid_: Foreign PR, linked PR, adopted PR
+
 ### Chats
 
 **Chat**:

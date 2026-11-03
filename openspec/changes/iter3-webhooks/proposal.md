@@ -2,7 +2,7 @@
 
 ## Why
 
-Nothing the forge does reaches a task on its own. A human has to tell the agent that a review was submitted, that CI failed or that someone mentioned the bot, and a merged PR leaves its task `in_review` with its volume kept for the retention grace period. Iteration 3 needs forge events to drive the work ([ADR-0015](../../../docs/adr/0015-webhook-filtering-and-routing.md)). "PR merged" dependencies (`iter3-task-dependencies`) and CI triggers (`iter3-branch-workflows`) build on this.
+Nothing the forge does reaches a task on its own. A human has to tell the agent that a review was submitted, that CI failed or that someone mentioned the bot, and a merged PR leaves its task `in_review` with its volume kept for the retention grace period. Iteration 3 needs forge events to drive the work ([ADR-0015](../../../docs/adr/0015-webhook-filtering-and-routing.md)). "PR merged" dependencies (`iter3-task-dependencies`) and existing-branch tasks (`iter3-branch-workflows`) build on this.
 
 ## What Changes
 
@@ -47,7 +47,7 @@ Out of scope:
 - Forge events as transcript rows: backlog ("Forge activity outside runs", already listed).
 - A deliveries table for deduplicating redeliveries: rejected. A duplicate only adds a line to a debounced message, and completing on merge is idempotent.
 - A configurable debounce window: rejected. It is a constant until someone needs it.
-- Waking on CI success or CI recovery: rejected. Nothing waits for it before `iter3-branch-workflows`, and that change adds CI status reads.
+- Waking on CI success or CI recovery: rejected. Nothing waits for it; `iter3-ci-tools` adds CI status reads, and waking on success stays out of iteration 3.
 
 ## Capabilities
 

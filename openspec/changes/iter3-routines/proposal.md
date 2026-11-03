@@ -32,7 +32,7 @@ Recurring work, such as a nightly dependency check or a CEO sweeping stale Renov
 - **Audit**: `routine.create`, `routine.update`, `routine.delete` and `routine.run_now`, with before and after values.
 - **Docs**:
   - a routines reference;
-  - a how-to "Check stale Renovate PRs with a CEO routine", which needs `iter3-branch-workflows`;
+  - a how-to "Check stale Renovate PRs with a CEO routine", which needs `iter3-branch-workflows` and `iter3-ci-tools`;
   - glossary term Routine (written).
 
 Out of scope:

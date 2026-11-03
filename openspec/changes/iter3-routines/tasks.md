@@ -68,7 +68,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - audit entries;
   - a Mermaid flowchart of a firing (due → open check → create or skip → next time).
 - [ ] 5.2 Write the how-to "Check stale Renovate PRs with a CEO routine" in `docs/routines.md`. Verify that the steps match the UI from group 4 and the prerequisites are named. Content:
-  - prerequisite `iter3-branch-workflows`;
+  - prerequisites `iter3-branch-workflows` and `iter3-ci-tools`;
   - routine setup;
   - an example prompt;
   - what happens on a night when the previous sweep is still running.

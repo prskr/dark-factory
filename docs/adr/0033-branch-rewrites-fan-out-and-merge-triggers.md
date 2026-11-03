@@ -1,6 +1,6 @@
 # ADR-0033: Branch rewrites, fan-out across branches and merge triggers
 
-- **Status:** Accepted (amended by ADR-0052)
+- **Status:** Accepted (amended by ADR-0052 and on 2026-11-03: two policy values, forge reads as plugin capabilities)
 - **Date:** 2026-10-16
 - **Related:** [ADR-0015](0015-webhook-filtering-and-routing.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0028](0028-integrations-wit-capability-interfaces.md), [ADR-0052](0052-dependencies-gate-the-first-start.md)
 
@@ -11,12 +11,14 @@ Dependency update PRs (e.g. from renovate) pile up when the build breaks or an u
 ## Decision
 
 - **Branch rewrite policy per project** for task branches: `never`, `with-lease` (default) or `always`.
+  Amended 2026-11-03: only `never` and `with-lease` (default); `always` is dropped, since an unconditional force push is the alternative rejected below. The policy is a project setting without per-task overrides. Existing projects migrate to `with-lease`. A failed lease keeps the existing diverged path: the runtime rewrites nothing on its own, the agent rebases onto the fetched remote.
   - With `with-lease`, the runtime pushes non-fast-forward updates with `--force-with-lease=<ref>:<expected>`, where `<expected>` is the remote SHA it last fetched or pushed. Commits someone else pushed in between (a human, renovate) are never overwritten; the push fails and the task is marked diverged as before.
   - The Git proxy allows non-fast-forward updates of the task's branch when the policy permits; `receive-pack` already rejects updates whose expected old value no longer matches. The WIP snapshot ref is always force-pushed; base and other branches are never writable.
   - Rewrites are reported (`PushReport`) and visible in the transcript.
 - **Several branches are handled by fan-out, not multi-branch tasks:** a coordinating task (or the CEO) creates one child task per branch, each started from that existing branch with PR mode "attach" (ADR-0025). Children run in parallel with their own sandbox, workspace and PR.
 - **"PR merged" is a dependency:** a task can wait until another task is Done (`depends_on` kind `done`): its PR was merged or a board member marked it done — not only until its Completion (ADR-0016, ADR-0026, ADR-0052). The merge comes from the routed forge webhooks (ADR-0015). A PR closed without merge doesn't release the dependent; the PR's own task is told (ADR-0051).
 - **Forge capabilities for this flow** (integrations package, ADR-0028): list open pull requests with filters (head prefix, author, label), and CI status plus job logs for a ref or PR — as plugin capabilities, or through a forge MCP server via the gateway (ADR-0032).
+  Amended 2026-11-03: plugin capabilities only. `pull-requests.list-open(repo, filter)` and a separate `ci` interface (`status`, `job-log`); head-prefix filtering happens in the plugin, since neither forge supports it. The host strips ANSI codes and pages logs in 64 KiB. Job logs on Forgejo need v16 or later; older versions return an unsupported error. Agent tools `list_pull_requests`, `read_ci_status`, `read_ci_log` read any PR or ref of the task's project repository. CI success wakes no task.
 
 ## Consequences
 

@@ -195,7 +195,7 @@ Deviations from the design in this section:
 - Control plane → `Assign { run_id, task, workspace, harness, tools, budgets, continuation }`, followed by harness credentials and the queued prompts. Budgets cover wall-clock time, tokens and turns; both runtime and control plane enforce them.
 
 ### 6.2 Prepare workspace
-Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. Tasks starting from existing branches (ADR-0025) are not covered here yet. `<base>` is the project's default branch, or for tasks with a `base_task` (including subtasks based on their parent) that task's branch (ADR-0034, ADR-0041); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
+Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. A task started from an existing branch (ADR-0025) uses that branch as its task branch and still snapshots to `factory/wip/<key>`; the control plane sends the stored branch as `Workspace.task_branch`, so prepare and finalize don't distinguish it either. A branch missing at the first prepare fails the task. `<base>` is the project's default branch, the base of an attached pull request, or for tasks with a `base_task` (including subtasks based on their parent) that task's branch (ADR-0034, ADR-0041); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
 
 ```
 if /data/repo/.git does not exist:
@@ -586,8 +586,6 @@ Resolved like the subtask settings of ADR-0034: the task's own value, else the n
 Configuration from the base branch can be ahead of or behind the code on an older task branch, e.g. a hook calling a command the branch doesn't have yet. `warn` as the default failure policy and `ref` for testing cover this.
 
 ## 17. Open questions
-- Divergence policy: agent rebases automatically vs human decides.
 - Separate UIDs for runtime and harness to protect `/data/runtime` and `.git/config` within the sandbox.
 - Keep-alive window length for `AwaitingInput` (responsiveness vs resource use).
-- Tasks starting from existing branches (ADR-0025): prepare/finalize with a non-`factory/task/` branch.
 - [gitoxide](https://github.com/GitoxideLabs/gitoxide) instead of the Git CLI for the runtime's own operations (prepare, push, WIP snapshot): no hooks or config-triggered programs by construction, typed errors. Blocked as of 2026-10 by missing push and partial-clone (promisor) support; revisit when both exist. Until then a mixed setup would put two Git implementations on one repository, and the runtime would have to read whatever format the agent's `git` writes (index versions, extensions, reftable).
