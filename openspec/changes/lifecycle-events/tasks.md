@@ -93,7 +93,7 @@
 
 ## 7. Receiver documentation and roadmap
 
-- [ ] 7.1 Write `docs/lifecycle-events.md`. Verify the Python example against a captured delivery from 5.6. It covers:
+- [x] 7.1 Write `docs/content/integrations/lifecycle-events.md`. Verify the Python example against a captured delivery from 5.6. It covers:
   - a how-to for adding a project subscription and verifying events;
   - a how-to "Wake a node before a sandbox starts": an instance subscription to `sandbox.provisioning` (private LAN addresses need an instance subscription); boot must finish within `runs.connectTimeoutSeconds`; shut down by matching `sandbox.provisioning` against `sandbox.provisioning_failed` / `sandbox.destroyed` per `run.id`;
   - the event catalog with fields;
@@ -104,8 +104,10 @@
   - Ed25519 verification examples (Python, Go);
   - key rotation;
   - the address-filter limits and the NetworkPolicy hint.
-- [ ] 7.2 Extend the run sequence diagram in `design/agent-run.md` §6 with the points where the implemented events are enqueued: `sandbox.provisioning`, `volume.provisioned`, `sandbox.provisioned`, `sandbox.provisioning_failed` and `sandbox.destroyed` on the run path, and `volume.destroyed` as a note for retention and reset. Verify each marker against the trigger points of design D2 and the code, and check that the diagram renders on the forge.
-- [ ] 7.3 Check `product/iterations/roadmap.md` (iteration 2 entry and backlog "Lifecycle event extensions") against the final scope; verify every out-of-scope item of the proposal and design names an entry
+  - Note: the Python and the Go example verified the captured delivery from 5.6 and rejected a tampered body (timestamp tolerance raised for the old capture). The example in the doc is that delivery.
+- [x] 7.2 Extend the run sequence diagram in `design/agent-run.md` §6 with the points where the implemented events are enqueued: `sandbox.provisioning`, `volume.provisioned`, `sandbox.provisioned`, `sandbox.provisioning_failed` and `sandbox.destroyed` on the run path, and `volume.destroyed` as a note for retention and reset. Verify each marker against the trigger points of design D2 and the code, and check that the diagram renders on the forge.
+  - Note: the diagram had `Provisioning` after `ensure_task_volume`; the code calls `begin_provisioning` first, so the order now matches the code. Rendering on the forge is checked in review (not checked locally).
+- [x] 7.3 Check `product/iterations/roadmap.md` (iteration 2 entry and backlog "Lifecycle event extensions") against the final scope; verify every out-of-scope item of the proposal and design names an entry
 
 ## 8. Integration checks
 

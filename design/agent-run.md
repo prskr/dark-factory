@@ -108,7 +108,7 @@ States: `Pending → Provisioning → Connecting → Preparing → Running ⇄ A
 
 ### 6.0 Sequence as implemented
 
-The diagram shows one run as the code runs it today (2026-11-02). Run states are in notes. Where the code deviates from this section's design, the deviation is listed below the diagram.
+The diagram shows one run as the code runs it today (2026-11-02). Run states are in notes. Where the code deviates from this section's design, the deviation is listed below the diagram. Notes with `⇒ event` mark where a lifecycle event is enqueued, in the transaction of that state change ([lifecycle-events.md](../docs/content/integrations/lifecycle-events.md)).
 
 ```mermaid
 sequenceDiagram
@@ -125,11 +125,12 @@ sequenceDiagram
     UI->>S: task queued or message queued (TaskMessageQueued, 15 s tick)
     S->>S: insert run, task → running
     Note over S: Pending
+    Note over S: Provisioning (begin_provisioning) ⇒ event sandbox.provisioning
     S->>K: ensure_task_volume (PVC task-KEY)
-    Note over S: Provisioning
+    Note over S: volume_ensured ⇒ event volume.provisioned (first volume of the task only)
     S->>K: provision (Sandbox + NetworkPolicy)
     K-->>S: SandboxEvent::Started (pod IP)
-    Note over S: Connecting (mark_started)
+    Note over S: Connecting (mark_started) ⇒ event sandbox.provisioned
     R->>CP: AgentChannel.Connect (mTLS), Hello
     CP->>CP: resolve_identity, harness_credentials
     Note over CP: Preparing (mark_connected, budget starts)
@@ -165,12 +166,13 @@ sequenceDiagram
     R->>H: stop
     R->>G: push task branch, force-push WIP snapshot
     R->>CP: PushReport*, RunReport(outcome, WorkspaceState)
-    Note over CP: Succeeded | Failed | Cancelled (end_run_tx, task status from outcome)
+    Note over CP: Succeeded | Failed | Cancelled (end_run_tx, task status from outcome) ⇒ event sandbox.destroyed
     CP->>K: teardown (delete Sandbox, NetworkPolicy via ownerRef, PVC kept)
     CP->>F: on_run_end (background): retry missing PR, on Completed mark ready + completion summary
+    Note over UI,K: Outside a run: the retention scan or "Reset workspace" deletes the PVC ⇒ event volume.destroyed (reason retention or reset)
 ```
 
-Failure and stop paths, each ending in `end_run_tx` and teardown:
+Failure and stop paths, each ending in `end_run_tx` and teardown. Each emits `sandbox.destroyed` with the outcome, except a failed provisioning, which emits `sandbox.provisioning_failed` instead:
 
 | Path | Trigger | Outcome → state |
 |---|---|---|
