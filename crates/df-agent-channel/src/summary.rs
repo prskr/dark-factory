@@ -163,6 +163,7 @@ type ToolKey = (Uuid, String, String);
 enum Entry {
     User(String),
     Agent {
+        run_id: Uuid,
         message_id: String,
         text: String,
     },
@@ -240,10 +241,16 @@ fn fold_chunk(entries: &mut Vec<Entry>, event: &SummaryEvent) {
         return;
     }
     match entries.last_mut() {
-        Some(Entry::Agent { message_id, text }) if *message_id == event.message_id => {
+        // Message ids restart per run, so the run has to match as well.
+        Some(Entry::Agent {
+            run_id,
+            message_id,
+            text,
+        }) if *run_id == event.run_id && *message_id == event.message_id => {
             text.push_str(&event.text);
         }
         _ => entries.push(Entry::Agent {
+            run_id: event.run_id,
             message_id: event.message_id.clone(),
             text: event.text.clone(),
         }),
@@ -258,7 +265,9 @@ fn fold_tool(entries: &mut Vec<Entry>, tools: &mut HashMap<ToolKey, usize>, even
     );
     let title = event.title.as_deref().filter(|t| !t.is_empty());
     let status = event.status.filter(|s| *s != ToolCallStatus::Unspecified);
-    if let Some(&at) = tools.get(&key) {
+    // Without an id a call cannot be matched: a call gets its own line, an update is dropped.
+    let has_id = !event.tool_call_id.is_empty();
+    if let Some(&at) = tools.get(&key).filter(|_| has_id) {
         if let Some(Entry::Tool {
             title: t,
             status: s,
@@ -272,7 +281,9 @@ fn fold_tool(entries: &mut Vec<Entry>, tools: &mut HashMap<ToolKey, usize>, even
             }
         }
     } else if event.kind == EventKind::ToolCall {
-        tools.insert(key, entries.len());
+        if has_id {
+            tools.insert(key, entries.len());
+        }
         entries.push(Entry::Tool {
             title: title.unwrap_or("tool call").to_string(),
             status,

@@ -1,7 +1,6 @@
 //! Tests of the agent session.
 
 use super::*;
-use crate::assign::{build_assign, load_run_context};
 use crate::metrics::probe::Probe;
 use crate::testing::Env;
 use df_core::testing::SandboxCall;
@@ -1246,7 +1245,7 @@ async fn a_reconnect_mid_run_summarizes_earlier_runs_only() {
     .await
     .unwrap();
     // The reconnect assigns run 2 again; the run is still active.
-    run_session(
+    let (result, sent) = run_session_with_output(
         &env,
         run2,
         vec![
@@ -1256,18 +1255,17 @@ async fn a_reconnect_mid_run_summarizes_earlier_runs_only() {
             msg(5, report(WireOutcome::EndTurn)),
         ],
     )
-    .await
-    .unwrap();
+    .await;
+    result.unwrap();
 
-    // The new `Assign` of run 2 has run 1's events and none of run 2's.
-    let rc = load_run_context(&pool, get_run(&pool, run2).await.unwrap().unwrap())
-        .await
-        .unwrap();
-    let summary = build_assign(&env.ctx, &rc)
-        .await
-        .unwrap()
-        .continuation
-        .unwrap()
+    // The `Assign` of the reconnect has run 1's events and none of run 2's.
+    let summary = sent
+        .into_iter()
+        .find_map(|c| match c.body {
+            Some(control_message::Body::Assign(a)) => a.continuation,
+            _ => None,
+        })
+        .expect("assign with continuation")
         .summary;
     assert!(summary.contains("Agent: earlier"), "{summary}");
     assert!(!summary.contains("Tool:"), "{summary}");
