@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Kubernetes resources that host a run — one cold-started agent-sandbox `Sandbox` per run and one persistent volume per task — and their lifecycle (`design/agent-run.md` §5, ADR-0022, ADR-0030).
+Defines the Kubernetes resources that host a run — one cold-started Pod per run and one persistent volume per task — and their lifecycle (`design/agent-run.md` §5, ADR-0022, ADR-0030).
 
 ## Requirements
 
