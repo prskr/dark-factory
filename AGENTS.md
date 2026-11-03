@@ -6,21 +6,10 @@ This is currently PRE MVP. There are no real users yet and no production install
 In consequence this is the time for breaking changes.
 If there are good reasons to break something now or to clean something up in a way that would be breaking, always suggest this in this stage, to get the best and cleanest possible MVP.
 
-## First step in a sandbox: Rust toolchain
+## Skills and crate rules
 
-Sandbox environments have no Rust toolchain pre-installed, but `rustup` is available. Before running anything else (`cargo`, `rustc`, `rust-analyzer`, Bazel targets that call `cargo`), install the toolchain pinned in `rust-toolchain.toml`:
-
-```bash
-# from the repository root: rustup reads rust-toolchain.toml (channel, components, targets)
-rustup show active-toolchain || rustup toolchain install
-rustc --version   # must print the channel from rust-toolchain.toml
-cargo clippy --version && cargo fmt --version
-```
-
-- Always run these from inside the repository, otherwise `rustup` picks its default toolchain instead of the pinned one.
-- `rust-toolchain.toml` is the source of truth. The same version is repeated in `MODULE.bazel` (`versions`); when you bump one, bump the other.
-- If `rustup` reports a missing component or target, run `rustup component add <name>` / `rustup target add <triple>` with the names from the file instead of changing the file.
-- A plain `cargo build` additionally needs `protoc` (>= 29.x) on `PATH` (or `PROTOC`). If the sandbox has none, build and test through Bazel instead (see below).
+- Task-specific details live in skills under `.agents/skills/` (symlinked into `.claude/skills/`). Skill `rust` covers the sandbox toolchain setup, running tests (cargo vs. Bazel, filters, no container socket), adding dependencies and crates, `MODULE.bazel.lock`, and lint mechanics. Its rules are as binding as this file.
+- Crates with their own rules have an `AGENTS.md` next to their `Cargo.toml` (`crates/df-web`, `crates/factory-agent`).
 
 ## Bazel usage
 
@@ -29,9 +18,7 @@ When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` li
 ## Containers and integration tests in a sandbox
 
 - Some environments have a container socket (often Podman, for example `$XDG_RUNTIME_DIR/podman/podman.sock`), sandboxes usually don't. Probe before skipping container-backed tests: `curl -sf --max-time 3 --unix-socket <socket> http://d/_ping`. If one answers, run the tests with `DOCKER_HOST=unix://<socket>`.
-- Never start or install Docker/Podman. Without a socket, tests that need containers (for example the PostgreSQL started by `df-test-postgres`) fail; CI runs them.
-- Checking the web UI in a browser: with a socket, `just serve-local` runs the control plane on `http://127.0.0.1:8080` with PostgreSQL and Dex from `compose.yml` (login `admin@example.com` / `password`, see `docs/development.md`, section 6). The `obscura` browser has a fixed 1280 px viewport, so narrower widths need a browser with viewport control.
-- Without a socket, run only tests you have identified as needing no containers, not broad targets such as `bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...` or `cargo test -p <crate> --lib`, which may include container-backed tests (anything using `df_test_postgres` or testcontainers; find them with `grep -rl "df_test_postgres\|testcontainers" crates/<crate>`). Select them explicitly: `cargo test -p <crate> <filter>` / `--test <name>`, `cargo test -p <crate> -- --skip <container test>`, or specific Bazel test targets. State in your report which container-backed tests you could not run.
+- Never start or install Docker/Podman. Without a socket, tests that need containers (for example the PostgreSQL started by `df-test-postgres`) fail; CI runs them. Which tests to select then: skill `rust`. State in your report which container-backed tests you could not run.
 
 ## Plain `cargo` builds
 
@@ -47,6 +34,8 @@ Readability and maintainability have a higher priority than performance (in a se
 Even if an algorithm has a few more allocations but can be understood in seconds, it is generally to be preferred over a slightly more performant one, if that one increases the maintenance burden significantly.
 
 Follow the user's global rules as well: TDD (write the failing test first, then the minimum code to pass it), >70% coverage as a target, concise and fact-based documentation.
+
+Change files with the harness's file edit tool, not with shell scripts (`python3` heredocs, `sed -i`, `cat >`, `perl -pi`). Edits stay reviewable and fail loudly when the target text doesn't match. Shell is fine for generated output (`cargo fmt`, lock files, code generators).
 
 When addressing review feedback after the WIP commits of a multi-step implementation iteration were already squashed prefer to 'absorb' changes into the squashed commits.
 This can be done either with `git absorb` if installed or otherwise with `git commit --fixup`.
@@ -79,40 +68,11 @@ Read `docs/development.md` for the local setup (PostgreSQL, `DATABASE_URL`, cove
 - **Logging:** `tracing` (subscriber set up in the binary)
 - **Deployment:** Helm chart in `deploy/helm/dark-factory`
 
-## Building and Running
+## Building, testing and hooks
 
-### Development
-
-```bash
-# Build and run through cargo (toolchain installed as described above)
-cargo build --workspace
-cargo run -p dark-factory -- --help
-
-# Same through Bazel
-bazel --bazelrc=.bazelrc.agents build //...
-
-# Format check (pinned, hermetic rustfmt) - this is what the pre-commit hook runs
-bazel --bazelrc=.bazelrc.agents build --config=fmt //crates/... //plugins/...
-# Local formatting when the toolchain is installed
-cargo fmt --all
-```
-
-### Testing
-
-```bash
-# Unit tests of one crate
-cargo test -p factory-agent
-
-# Whole workspace; database tests start PostgreSQL through testcontainers (needs a Docker socket)
-cargo test --workspace
-
-# Everything through Bazel (container-backed tests need a Docker socket)
-bazel --bazelrc=.bazelrc.agents test //...
-```
-
-### Lint and hooks
-
-`lefthook.yml` defines the checks: pre-commit runs rustfmt (via Bazel), `kingfisher`, `buildifier`, `shellcheck`, `buf format`, `hadolint`, `typos`, `cargo-machete`, the Helm lint/unit tests and, for changes under `openspec/`, `openspec validate --all --strict` (the same command and version as the `OpenSpec` workflow); pre-push runs `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Make sure clippy has no warnings and `cargo-machete` finds no unused dependencies before you finish. The pinned tool versions come from Bazel (`docs/development.md`, "Pinned linters").
+- Build: `cargo build --workspace`, or `bazel --bazelrc=.bazelrc.agents build //...`. Format: `cargo fmt --all` (the pre-commit hook checks with the pinned rustfmt through Bazel).
+- Tests: `cargo test -p <crate>`, everything with `bazel --bazelrc=.bazelrc.agents test //...`; which to run when: skill `rust`.
+- `lefthook.yml` runs the pre-commit checks (rustfmt, linters, Helm tests, `openspec validate`) and pre-push `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Before you finish, clippy has no warnings and `cargo-machete` finds no unused dependencies.
 
 ## Search of files and binaries
 
@@ -144,31 +104,24 @@ Test organization:
 - Keep an inline `#[cfg(test)] mod tests { … }` up to about 500 lines. Beyond that, move the body to `<module>/tests.rs` and declare `#[cfg(test)] mod tests;`.
 - A test file beyond about 1,500 lines becomes a directory `tests/` with a `mod.rs` for shared fixtures and one file per topic (the module or behavior the tests exercise).
 - Name tests after the behavior they check, never after a review round or finding (`test_erase_and_expiry_drop_cached_credentials`, not `test_review_r38_…`). `cargo xtask check-test-names` fails for a test name with a word `finding`, `round<n>`, `r<n>` or `td<n>`.
-- Source files (`rs`, `proto`, `wit`, `bzl`, `bazel`, `sh`, `js`, `ts`, `css`, `html`, `toml`, `yaml`, `yml`) have at most 1,500 lines; `cargo xtask check-file-length` enforces it. A file over the limit needs an entry with a reason (generated code, or a tracked split) in `[workspace.metadata.file-length.allow]` of the root `Cargo.toml`; an entry for a missing file, for a file within the limit, or without a reason fails the check too.
+- Source files have at most 1,500 lines (`cargo xtask check-file-length`; exceptions: skill `rust`, "Lints").
 - The 500-line threshold for inline test modules is guidance, not a check.
 - Blocks nest at most 5 levels deep (`excessive-nesting-threshold` in `clippy.toml`, `clippy::excessive_nesting`). Flatten with early returns, `let … else`, iterator chains or an extracted function.
 
 Function length:
 
-- A function has at most 100 lines (`too-many-lines-threshold` in `clippy.toml`, `clippy::too_many_lines`; comments and blank lines do not count). Lint levels are declared only in `[workspace.lints]` of the root `Cargo.toml` (plugins repeat both tables in their own `[lints]`, except that `unsafe_code` may have any level; `tools/xtask` mirrors both) and in `clippy.toml`; Bazel reads them from the manifests (`extract_cargo_lints` and `lint_config` in `BUILD.bazel`). Never add lint flags to `.bazelrc` beyond `-Dwarnings`.
+- A function has at most 100 lines (`clippy::too_many_lines`; comments and blank lines do not count). Lint levels and thresholds live only in `[workspace.lints]` and `clippy.toml` (details: skill `rust`, "Lints").
 - Split a function that gets longer. A production function that cannot be split yet gets `#[expect(clippy::too_many_lines, reason = "…")]` naming the follow-up; use `expect`, never `allow`, so the attribute fails once the function is short enough.
 - Test modules with scenario tests opt out once at module level with `#![expect(clippy::too_many_lines, reason = "…")]` (or `#[expect]` on an inline `mod tests`), only where a test needs it.
 
 Lint attributes:
 
 - `#[allow]` is forbidden (`clippy::allow_attributes`, `clippy::allow_attributes_without_reason`). Use `#[expect(…, reason = "…")]`, which fails once the lint no longer fires. Generated code (`df-proto`, `wit_bindgen::generate!`) expects the lints it triggers at module or crate level.
-- `clippy::pedantic` is enabled. The workspace allows `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc`, `assert_is_empty`, `needless_pass_by_value`, `similar_names` and `struct_excessive_bools`, each with a reason in the root `Cargo.toml`.
+- `clippy::pedantic` is enabled.
 
 ## Adding a crate
 
-Run `cargo xtask check-crates` when done (pre-commit hook and CI run it); it checks every item below.
-
-1. Directory `crates/<name>` with a `Cargo.toml` that has `[lints]` with `workspace = true`. A plugin (`plugins/<name>`) instead copies `[lints.rust]` and `[lints.clippy]` of the workspace into its own `Cargo.toml`, without `workspace = true` (Cargo rejects both in one manifest); `unsafe_code` only has to be present, at any level.
-2. `BUILD.bazel` with `extract_cargo_lints(name = "lints", manifest = "Cargo.toml", workspace = "//:Cargo.toml")` and `lint_config = ":lints"` on every `rust_library`, `rust_binary`, `rust_test` and `rust_shared_library`.
-3. One `rust_test` per `tests/*.rs`, plus one for the unit tests. Never tag a test `manual`: the lint run skips manual targets.
-4. `"//crates/<name>:Cargo.toml"` (or `"//plugins/<name>:Cargo.toml"`) in the `crate.from_cargo` manifests of `MODULE.bazel`, then update `MODULE.bazel.lock` (skill `rust`).
-
-A crate that only `cargo` builds (`crates/df-e2e`) skips items 2 to 4 if it has an entry with a reason in `[workspace.metadata.check-crates.exempt]` of the root `Cargo.toml`. It must not have a `BUILD.bazel`.
+Follow the checklist in skill `rust` and run `cargo xtask check-crates` when done (pre-commit hook and CI run it).
 
 ## Traits over closures
 
@@ -184,14 +137,12 @@ Always prefer returning a `Result` over panicking. `unwrap()`, `expect()`, index
 - `expect("<why this cannot fail>")` is acceptable for invariants that are guaranteed by construction (for example a compiled-in regex), never for input or I/O.
 - Don't silently drop errors with `let _ =` unless ignoring is the intended behavior (for example a best-effort send on a closed channel); then say so in a short comment.
 - Lints enforce this: `clippy::unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable` and `indexing_slicing` (use `.get()`, iterators or pattern matching), `let_underscore_must_use` and `let_underscore_future` (handle the error, log it, or discard it explicitly with `.ok()` and a comment), and `map_err_ignore` (bind the error as `|_elapsed|` or include it in the new error instead of `|_|`).
-- Tests are exempt from `unwrap_used`, `panic`, `indexing_slicing`, `dbg_macro` and the print lints through `clippy.toml` (`allow-*-in-tests`). That covers `#[test]` functions and `#[cfg(test)]` code; helper functions of integration tests and test utilities (`df-test-postgres`) take a module-level `#![expect(…, reason = "…")]`. `unreachable!` is not exempt: use `panic!` in tests.
-- `expect("<why>")` stays allowed for invariants that hold by construction.
+- Tests are exempt (next section).
 
 ## Tests
 
-- Test code may use `unwrap()`, `panic!`, indexing, `dbg!` and print macros: `clippy.toml` sets `allow-unwrap-in-tests`, `allow-panic-in-tests`, `allow-indexing-slicing-in-tests`, `allow-dbg-in-tests` and `allow-print-in-tests`. Helper functions of integration tests and test utilities need a module-level `#![expect(…, reason = "…")]` (see "Errors over panics"). `unreachable!` is not exempt: use `panic!`.
-- Write the failing test first, then the implementation.
-- Use the standard assertion macros (`assert!`, `assert_eq!`, `assert_ne!`, `matches!`) and return `Result<()>` from tests that use `?` instead of unwrapping. `unwrap()`/`expect()` are fine in tests. Don't hand-write `if … { panic!(…) }` guards.
+- Test code may use `unwrap()`, `expect()`, `panic!`, indexing, `dbg!` and print macros (`allow-*-in-tests` in `clippy.toml`). That covers `#[test]` functions and `#[cfg(test)]` code; helper functions of integration tests and test utilities (`df-test-postgres`) take a module-level `#![expect(…, reason = "…")]`. `unreachable!` is not exempt: use `panic!`.
+- Use the standard assertion macros (`assert!`, `assert_eq!`, `assert_ne!`, `matches!`) and return `Result<()>` from tests that use `?` instead of unwrapping. Don't hand-write `if … { panic!(…) }` guards.
 - Use `#[tokio::test]` for async tests and `tempfile` for files and directories. Never write to fixed paths; `std::env::temp_dir` is a disallowed method (`clippy.toml`).
 - Database tests use `df_test_postgres::{migrated_pool, empty_pool, server}` (dev-dependency crate `df-test-postgres`) instead of `#[sqlx::test]`. They start a PostgreSQL container through testcontainers and therefore cannot run in a sandbox without a container socket.
 - Avoid timing-based tests (`sleep` to wait for an effect). Wait on the condition, use a channel, or use `tokio::time::pause()`.
@@ -216,19 +167,12 @@ The order of preference MUST BE this:
 
 Hand-rolling is always a tradeoff: an extra dependency on one side, extra code to write, test and maintain on the other. Don't hand-roll only to keep the dependency list short. If a crate is already in the dependency graph as a transitive dependency, using it directly costs little (a line in `[workspace.dependencies]` and one in the crate's `Cargo.toml`). Prefer that over reimplementing its functionality whenever it makes the code easier to read or cheaper to maintain.
 
-Rules for adding one:
-- Declare it in the root `[workspace.dependencies]` and reference it with `.workspace = true`.
-- Start on the latest release. `cargo xtask outdated` (also a pre-commit hook for changed dependencies) fails when a requirement excludes the newest stable release. Holding a dependency back needs an entry with a reason under `[workspace.metadata.outdated.ignore]` in the root `Cargo.toml`.
-- Enable only the features that are needed (`default-features = false` where sensible).
-- Remove dependencies that are no longer used; `cargo-machete` runs in the pre-commit hook. Don't silence it with `ignored = [...]` to keep an unused dependency.
-- `cargo deny check` must pass (licenses, advisories).
-- Adding a dependency changes `Cargo.lock` and the Bazel lock files. Commit them together with the change.
+How to add one (workspace declaration, latest release, minimal features, `cargo deny`, lock files): skill `rust`.
 
 ## CLI args parsing
 
 - Binaries use `clap` with the derive API (`#[derive(Parser)]`, `#[derive(Subcommand)]`).
 - Prefer clap's built-in features (`env`, `default_value`, `value_enum`, `requires`) over hand-written parsing.
-- Runtime configuration of the sandbox agent comes from environment variables and is documented in `crates/factory-agent/docs/configuration.md`. Keep that reference in sync when you add or change a setting.
 
 ## Logging
 
@@ -236,15 +180,6 @@ Rules for adding one:
 - Never log secrets (tokens, passwords, credential helper input) and don't log whole request/response bodies.
 - Library code only emits events. Subscriber setup belongs in the binary's `main`.
 - `clippy::print_stdout`, `print_stderr` and `dbg_macro` enforce it. A function that prints CLI output carries `#[expect(clippy::print_stdout, reason = "CLI output")]` (or `print_stderr`); there is no crate-level exemption.
-
-## Web UI scripts (`df-web`)
-
-JavaScript that is code lives in JS files, not in Rust strings.
-
-- Inline `x-data="{ … }"` holds plain data only: flags, strings, numbers, `null`, including values the server fills in. Short expressions in `x-on:*`, `:class` and similar attributes stay inline.
-- State with a method, getter or `init()` is an Alpine component in `crates/df-web/assets/<name>.js` that calls `Alpine.data('<name>', …)` on `alpine:init`. Add the file to `COMPONENT_SCRIPTS` in `crates/df-web/src/layout.rs`, which loads it before Alpine. Server values go in as a JSON argument (`x-data="egressLog({…})"`, escaped by maud).
-- Tests read a component's source with `crate::assets::script_source`.
-- Scripts are served as written: no bundler or minifier. Responses are compressed and cached by content hash.
 
 ## Security
 
