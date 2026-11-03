@@ -28,6 +28,9 @@ const PERSONA_SELECT: &str =
     "min-h-11 rounded-full bg-transparent px-3 text-sm text-ink lg:min-h-8";
 /// A native modal `<dialog>`, centered from `md` and anchored to the bottom on a phone.
 const DIALOG_CLASS: &str = "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-md md:p-0";
+/// Ctrl/Cmd+Enter in the message box: Save while editing a queued message, otherwise the Send
+/// button that `#composer-action` holds at that moment.
+const SEND_SHORTCUT: &str = "(editing ? $refs.save : document.querySelector('#composer-action [aria-label=Send]'))?.click()";
 
 /// The status filter of the task list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -427,9 +430,11 @@ pub(super) fn message_area(
                 label for="message" class="sr-only" { "Message" }
                 // One rounded box holds the text and the round action, as on the canvas.
                 div id="message-box" class="group flex items-end gap-3 rounded-2xl border border-line bg-panel py-2.5 pr-2.5 pl-4 focus-within:border-line-strong" {
+                    // The stream replaces `#composer-action`, which drops an `x-ref` inside it:
+                    // the shortcut looks up the Send button when the key is pressed.
                     textarea id="message" name="message" rows="2" placeholder="Message the agent" x-model="draft" x-ref="message"
-                        "x-on:keydown.ctrl.enter.prevent"="(editing ? $refs.save : $refs.send).click()"
-                        "x-on:keydown.meta.enter.prevent"="(editing ? $refs.save : $refs.send).click()"
+                        "x-on:keydown.ctrl.enter.prevent"=(SEND_SHORTCUT)
+                        "x-on:keydown.meta.enter.prevent"=(SEND_SHORTCUT)
                         class="min-h-11 w-full min-w-0 flex-1 resize-none bg-transparent py-2 text-base text-ink placeholder:text-faint focus-visible:outline-none" {}
                     (composer_action(key, stoppable(task_status, runs)))
                     button type="button" x-ref="save" x-show="editing" x-cloak aria-label="Save"
@@ -467,7 +472,7 @@ pub(crate) fn composer_action(key: &str, stoppable: bool) -> Markup {
                     class="hidden size-11 shrink-0 items-center justify-center rounded-full bg-ink text-panel hover:brightness-95 group-has-[textarea:placeholder-shown]:inline-flex"
                     x-show="!editing" { (icon(Icon::Stop)) }
             }
-            button type="button" x-ref="send" x-show="!editing" aria-label="Send"
+            button type="button" x-show="!editing" aria-label="Send"
                 hx-post=(messages) hx-include="#message" hx-target="#pending" hx-swap="outerMorph"
                 class=(send_class) { (icon(Icon::Send)) }
         }
@@ -1343,6 +1348,28 @@ mod tests {
             "title=\"1234567 / 12\">1.2M / 12<",
         ] {
             assert!(html.contains(cell), "{cell}: {html}");
+        }
+    }
+
+    /// The stream replaces `#composer-action` on every task refresh, and Alpine drops an
+    /// `x-ref` inside it with the old element. The shortcut therefore looks up the Send button
+    /// when the key is pressed.
+    #[test]
+    fn the_send_shortcut_finds_the_button_the_stream_swapped_in() {
+        let area =
+            message_area("DF-1", "Linus", TaskStatus::Running, &[], &[], false).into_string();
+        let action = composer_action("DF-1", true).into_string();
+        assert!(
+            !area.contains("$refs.send") && !action.contains("x-ref"),
+            "{area}"
+        );
+        let textarea = crate::testkit::tag_around(&area, "id=\"message\"");
+        for key in ["ctrl", "meta"] {
+            assert!(
+                textarea.contains(&format!("x-on:keydown.{key}.enter.prevent"))
+                    && textarea.contains("#composer-action [aria-label=Send]"),
+                "{textarea}"
+            );
         }
     }
 
