@@ -41,7 +41,7 @@ fails as `upstream` until the project's URL is updated.
 | `update` | `GET .../pulls/{number}` when title or draft change, GraphQL `markPullRequestReadyForReview` / `convertPullRequestToDraft` (with the pull request's `node_id`) for the native draft state, `PATCH .../pulls/{number}` for title and body; a final `GET` when only the native draft state changed |
 | issues `get` | `GET .../issues/{number}` |
 | issues `add-comment` | `POST .../issues/{number}/comments` (pull request numbers work as issue numbers) |
-| `list-feedback` | one GraphQL query: `viewer.login`, and the pull request's `comments`, `reviews` and `reviewThreads` (each `last: 100`, the newest items) |
+| `list-feedback` | one GraphQL query: `viewer.login`, and the pull request's `comments`, `reviews` and `reviewThreads` (each `last: 100`, the newest items); then `GET .../collaborators/{username}/permission` once per distinct author with association `OWNER`, `MEMBER` or `COLLABORATOR` |
 | `reply` | GraphQL `node(id:)` for the thread's pull request, then `addPullRequestReviewThreadReply` |
 
 `src/operations.rs` lists these REST calls by GitHub's `operationId`. The host tests
@@ -104,9 +104,13 @@ Switching the mode while drafts are open is safe: reading recognizes both forms.
 - Pending reviews (`states` filter) and comments of a pending review are not listed; a thread with
   only such comments is dropped. A dismissed review is listed as `commented`.
 - IDs of comments and reviews are GraphQL node ids, also the one `reply` returns.
-- Roles: the `viewer` login (case-insensitive) is `bot`. Otherwise `authorAssociation` `OWNER`,
-  `MEMBER` or `COLLABORATOR` is `member`, anything else (`CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`,
-  `FIRST_TIMER`, `MANNEQUIN`, `NONE`) is `outside`. A deleted author has an empty login.
+- Roles: the `viewer` login (case-insensitive) is `bot`. An author with `authorAssociation`
+  `OWNER`, `MEMBER` or `COLLABORATOR` is `member` only if the permission lookup returns `admin` or
+  `write` (`maintain` is reported as `write`); `read`, `none` or a 404 is `outside`. The
+  association alone says nothing about write access: an organization member with read access is
+  `MEMBER`. Other associations (`CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, `FIRST_TIMER`, `MANNEQUIN`,
+  `NONE`) are `outside` without a lookup. A deleted author has an empty login and is `outside`.
+  Any other failed lookup fails `list-feedback`. The lookup was not verified against github.com.
 - `since` (RFC 3339, any offset) is applied in the plugin: comments by `createdAt` or `updatedAt`,
   reviews by `submittedAt` or `updatedAt`, threads if one comment matches, each kept whole.
 - `reply` checks the thread's pull request number and repository (case-insensitive) first: a

@@ -554,6 +554,8 @@ impl ForgeClient for FakeForgeClient {
         })
     }
 
+    /// Records `since` but returns the seeded feedback unfiltered; the plugins apply `since` and
+    /// test it.
     async fn list_pull_request_feedback(
         &self,
         p: &ProjectId,

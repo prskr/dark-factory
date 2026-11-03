@@ -70,10 +70,31 @@ fn scenario() -> Value {
     }})
 }
 
+const PERMISSION_URL: &str = "https://api.github.com/repos/o/r/collaborators";
+
+fn permission(level: &str) -> Response {
+    reply(200, json!({ "permission": level, "role_name": level }))
+}
+
+/// Lists with every permission lookup answered `write`.
 fn list(response: Value, since: Option<&str>) -> Result<(Feedback, Fake), Error> {
-    let fake = fake(vec![reply(200, response)]);
+    let mut responses = vec![reply(200, response)];
+    responses.extend((0..8).map(|_| permission("write")));
+    let fake = fake(responses);
     let feedback = github(&fake, &[]).list_feedback(&pr_ref(), since)?;
     Ok((feedback, fake))
+}
+
+/// The logins whose permission was looked up, in order.
+fn lookups(fake: &Fake) -> Vec<String> {
+    calls(fake)
+        .into_iter()
+        .filter_map(|(_, url)| {
+            url.strip_prefix(&format!("{PERMISSION_URL}/"))?
+                .strip_suffix("/permission")
+                .map(str::to_string)
+        })
+        .collect()
 }
 
 fn ids<'a>(items: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
@@ -85,7 +106,12 @@ fn list_feedback_sends_one_graphql_query_for_viewer_comments_reviews_and_threads
 -> anyhow::Result<()> {
     let (_, fake) = list(scenario(), None)?;
 
-    assert_eq!(calls(&fake), [(Method::Post, GRAPHQL_URL.to_string())]);
+    let graphql: Vec<_> = calls(&fake)
+        .into_iter()
+        .filter(|(_, url)| url == GRAPHQL_URL)
+        .collect();
+    assert_eq!(graphql, [(Method::Post, GRAPHQL_URL.to_string())]);
+    assert_eq!(calls(&fake)[0].1, GRAPHQL_URL);
     let sent = sent_json(&fake, 0);
     assert_eq!(
         sent["variables"],
@@ -238,7 +264,8 @@ fn a_dismissed_review_is_listed_as_commented() -> anyhow::Result<()> {
 }
 
 #[test]
-fn owner_member_and_collaborator_are_members_everyone_else_is_outside() -> anyhow::Result<()> {
+fn owner_member_and_collaborator_with_write_permission_are_members_everyone_else_is_outside()
+-> anyhow::Result<()> {
     for (association, role) in [
         ("OWNER", AuthorRole::Member),
         ("MEMBER", AuthorRole::Member),
@@ -296,16 +323,98 @@ fn the_viewer_is_the_bot_whatever_its_association_or_case() -> anyhow::Result<()
 }
 
 #[test]
-fn a_deleted_author_has_an_empty_login_and_is_outside() -> anyhow::Result<()> {
-    let mut response = scenario();
-    response["data"]["repository"]["pullRequest"]["comments"]["nodes"][0]["author"] = Value::Null;
-    let (feedback, _) = list(response, None)?;
-    let author = &feedback.comments[0].author;
+fn a_deleted_author_has_an_empty_login_and_is_outside_whatever_its_association()
+-> anyhow::Result<()> {
+    for association in ["NONE", "OWNER", "MEMBER", "COLLABORATOR"] {
+        let mut response = scenario();
+        let comment = &mut response["data"]["repository"]["pullRequest"]["comments"]["nodes"][0];
+        comment["author"] = Value::Null;
+        comment["authorAssociation"] = json!(association);
+        let (feedback, fake) = list(response, None)?;
+        let author = &feedback.comments[0].author;
+        assert_eq!(
+            (author.login.as_str(), author.role),
+            ("", AuthorRole::Outside),
+            "{association}"
+        );
+        assert!(!lookups(&fake).contains(&String::new()), "{association}");
+    }
+    Ok(())
+}
+
+// Scenario "Collaborator without write access".
+#[test]
+fn a_member_with_read_permission_is_outside() -> anyhow::Result<()> {
+    // Lookups in order of first appearance: alice (read), carol (write).
+    let fake = fake(vec![
+        reply(200, scenario()),
+        permission("read"),
+        permission("write"),
+    ]);
+    let feedback = github(&fake, &[]).list_feedback(&pr_ref(), None)?;
+
+    let reviewers: Vec<_> = feedback
+        .reviews
+        .iter()
+        .map(|r| (r.author.login.as_str(), r.author.role))
+        .collect();
     assert_eq!(
-        (author.login.as_str(), author.role),
-        ("", AuthorRole::Outside)
+        reviewers,
+        vec![
+            ("alice", AuthorRole::Outside),
+            ("Factory-Bot", AuthorRole::Bot),
+            ("carol", AuthorRole::Member),
+        ]
+    );
+    assert_eq!(
+        feedback.threads[0].comments[0].author.role,
+        AuthorRole::Outside
     );
     Ok(())
+}
+
+#[test]
+fn permission_is_looked_up_once_per_member_login_and_not_for_others() -> anyhow::Result<()> {
+    let (_, fake) = list(scenario(), None)?;
+    // alice has a review and two thread comments; bob is a first-time contributor; the bot needs
+    // no lookup.
+    assert_eq!(lookups(&fake), vec!["alice", "carol"]);
+    assert!(
+        calls(&fake)
+            .iter()
+            .skip(1)
+            .all(|(method, _)| *method == Method::Get)
+    );
+    Ok(())
+}
+
+#[test]
+fn admin_is_a_member_and_none_or_an_unknown_user_is_outside() -> anyhow::Result<()> {
+    for (answer, role) in [
+        (permission("admin"), AuthorRole::Member),
+        (permission("none"), AuthorRole::Outside),
+        (
+            reply(404, json!({ "message": "Not Found" })),
+            AuthorRole::Outside,
+        ),
+    ] {
+        let fake = fake(vec![reply(200, scenario()), answer, permission("write")]);
+        let feedback = github(&fake, &[]).list_feedback(&pr_ref(), None)?;
+        assert_eq!(feedback.reviews[0].author.role, role);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_failed_permission_lookup_fails_the_listing() {
+    let fake = fake(vec![
+        reply(200, scenario()),
+        reply(500, json!({ "message": "boom" })),
+    ]);
+    let err = github(&fake, &[])
+        .list_feedback(&pr_ref(), None)
+        .unwrap_err();
+    assert!(matches!(err, Error::Upstream(_)), "{err:?}");
 }
 
 #[test]
@@ -428,6 +537,8 @@ fn plugin(fake: &Fake) -> GitHub<&Fake, FixedClock, &Fake> {
 fn reply_checks_the_thread_and_adds_the_reply_to_it() -> anyhow::Result<()> {
     let fake = fake(vec![
         reply(200, scenario()),
+        permission("write"),
+        permission("write"),
         thread_node(7, "o/r"),
         reply_posted(),
     ]);
@@ -440,15 +551,15 @@ fn reply_checks_the_thread_and_adds_the_reply_to_it() -> anyhow::Result<()> {
         (posted.id.as_str(), posted.url.as_str()),
         ("PRRC_130", "https://github.com/o/r/pull/7#discussion_r130")
     );
-    assert_eq!(calls(&fake).len(), 3);
-    let lookup = sent_json(&fake, 1);
+    assert_eq!(calls(&fake).len(), 5);
+    let lookup = sent_json(&fake, 3);
     let lookup_query = lookup["query"].as_str().unwrap_or_default();
     assert!(
         lookup_query.contains("node(id: $id)") && lookup_query.contains("PullRequestReviewThread"),
         "{lookup_query}"
     );
     assert_eq!(lookup["variables"], json!({ "id": "PRRT_1" }));
-    let mutation = sent_json(&fake, 2);
+    let mutation = sent_json(&fake, 4);
     assert!(
         mutation["query"]
             .as_str()

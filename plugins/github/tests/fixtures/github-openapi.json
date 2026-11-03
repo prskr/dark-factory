@@ -55,6 +55,14 @@
         "schema": {
           "type": "string"
         }
+      },
+      "username": {
+        "in": "path",
+        "name": "username",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
       }
     },
     "responses": {
@@ -206,6 +214,142 @@
           }
         },
         "title": "Basic Error",
+        "type": "object"
+      },
+      "collaborator": {
+        "properties": {
+          "avatar_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "events_url": {
+            "type": "string"
+          },
+          "followers_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "following_url": {
+            "type": "string"
+          },
+          "gists_url": {
+            "type": "string"
+          },
+          "gravatar_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "html_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "login": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "organizations_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "permissions": {
+            "properties": {
+              "admin": {
+                "type": "boolean"
+              },
+              "maintain": {
+                "type": "boolean"
+              },
+              "pull": {
+                "type": "boolean"
+              },
+              "push": {
+                "type": "boolean"
+              },
+              "triage": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pull",
+              "push",
+              "admin"
+            ],
+            "type": "object"
+          },
+          "received_events_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "repos_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "site_admin": {
+            "type": "boolean"
+          },
+          "starred_url": {
+            "type": "string"
+          },
+          "subscriptions_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "user_view_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "avatar_url",
+          "events_url",
+          "followers_url",
+          "following_url",
+          "gists_url",
+          "gravatar_id",
+          "html_url",
+          "id",
+          "node_id",
+          "login",
+          "organizations_url",
+          "received_events_url",
+          "repos_url",
+          "site_admin",
+          "starred_url",
+          "subscriptions_url",
+          "type",
+          "url",
+          "role_name"
+        ],
+        "title": "Collaborator",
         "type": "object"
       },
       "enterprise": {
@@ -2453,6 +2597,33 @@
         "title": "Repository",
         "type": "object"
       },
+      "repository-collaborator-permission": {
+        "properties": {
+          "permission": {
+            "type": "string"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/collaborator"
+              }
+            ]
+          }
+        },
+        "required": [
+          "permission",
+          "role_name",
+          "user"
+        ],
+        "title": "Repository Collaborator Permission",
+        "type": "object"
+      },
       "simple-user": {
         "properties": {
           "avatar_url": {
@@ -2855,6 +3026,36 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/repos/{owner}/{repo}/collaborators/{username}/permission": {
+      "get": {
+        "operationId": "repos/get-collaborator-permission-level",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "$ref": "#/components/parameters/username"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/repository-collaborator-permission"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/issues/{issue_number}": {
       "get": {
         "operationId": "issues/get",
