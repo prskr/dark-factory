@@ -47,7 +47,7 @@ Graph nodes SHALL be cards with an icon tile on the panel: a sandbox node shows 
 - **THEN** the sandbox node shows the first 8 characters of the run id
 
 ### Requirement: Project host icons
-A destination whose host is a project's repository host, forge API host or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host shows the project's forge icon, the same as in the project list. The forge API host is the host of the `apiUrl` of the route that serves the project's repository; it shows the forge icon when an integration serves the project. An issue tracker host shows the forge icon when it equals the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, and does not cover subdomains.
+A destination whose host is a project's repository, forge API or issue tracker host SHALL show that project's icon in the events table, graph nodes and details panel. The repository host and, when an integration serves the project, the forge API host (the `apiUrl` host of the route serving the repository) show the forge icon. An issue tracker host shows the forge icon on the repository host, otherwise the issue-tracker icon. Matching ignores case, a trailing dot and the port, not subdomains.
 
 #### Scenario: Self-hosted forge
 - **WHEN** the instance runs the forgejo integration, project `DF` with a forge credential has repository `https://git.example.internal/org/df.git`, and a sandbox connects to `git.example.internal:443`
