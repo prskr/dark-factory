@@ -24,7 +24,7 @@ use crate::components::{
 use crate::config_pages::{
     create_button, form_footer, form_grid, full_row, list_page, modal, open_modal, saved,
 };
-use crate::layout::Nav;
+use crate::layout::{Nav, Shell};
 use crate::responses::{internal_error, invalid, not_found};
 
 pub(super) mod paging;
@@ -514,7 +514,11 @@ fn service_form(options: &[(String, String)], values: &ServiceForm, errors: &For
 // Handlers
 // ---------------------------------------------------------------------------------------------
 
-pub(super) async fn list(State(state): State<WebState>, Query(view): Query<View>) -> Response {
+pub(super) async fn list(
+    State(state): State<WebState>,
+    shell: Shell,
+    Query(view): Query<View>,
+) -> Response {
     let entries = match df_db::list_entries(&state.pool).await {
         Ok(entries) => entries,
         Err(e) => return internal_error(&e),
@@ -523,6 +527,7 @@ pub(super) async fn list(State(state): State<WebState>, Query(view): Query<View>
     list_page(
         "Egress rules",
         Nav::Allowlist,
+        &shell,
         region(&entries, &view, &projects),
     )
 }

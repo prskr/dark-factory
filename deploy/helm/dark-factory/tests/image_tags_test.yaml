@@ -1,0 +1,43 @@
+suite: Dark Factory Helm Chart - first-party image tags follow the chart version
+templates:
+  - configmap.yaml
+  - control-plane-deployment.yaml
+chart:
+  appVersion: 2026.11.0
+tests:
+  - it: renders the control plane image with the appVersion by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/prskr/dark-factory/control-plane:2026.11.0
+        documentIndex: 0
+
+  - it: renders the runtime image with the appVersion by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'runtimeImage: "ghcr.io/prskr/dark-factory/runtime:2026.11.0"'
+        documentIndex: 0
+
+  - it: lets a set tag win over the appVersion
+    template: control-plane-deployment.yaml
+    set:
+      image.controlPlane.tag: 2026.10.3
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/prskr/dark-factory/control-plane:2026.10.3
+        documentIndex: 0
+
+  - it: lets a set digest win over the tag
+    template: control-plane-deployment.yaml
+    set:
+      image.controlPlane.tag: 2026.10.3
+      image.controlPlane.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/prskr/dark-factory/control-plane@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        documentIndex: 0

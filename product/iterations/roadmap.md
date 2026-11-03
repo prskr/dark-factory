@@ -93,6 +93,7 @@ Dependency: API-key harnesses need the inference endpoint of iteration 3, otherw
 - **Workspace lifecycle hooks (F9)** and **sidecar services (F10).**
 - **Build and test secrets** (private registries, test databases; ADR-0010 "out of scope for now"): injected by the gateway like Git, inference and MCP credentials, never stored in the sandbox. Needs an ADR.
 - **Egress:** persona allowlist scope, CIDR targets (task scope moved to iteration 2).
+- **Settings entry in the profile menu** (`release-versioning`, Out of scope): instance and user settings pages land with the configuration UI.
 
 ## 6 — Visibility and memory
 
@@ -172,3 +173,5 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Waking a task on CI success or recovery | idea | `openspec/changes/iter3-ci-tools` |
 | Re-running or cancelling CI jobs from a factory tool | idea | `openspec/changes/iter3-ci-tools` |
 | CI and PR read tools (`list_pull_requests`, `read_ci_status`, `read_ci_log`) in chats | idea | `openspec/changes/iter3-ci-tools` |
+| Signing of images and the Helm chart (cosign) and SBOMs for releases | idea | `openspec/changes/release-versioning` |
+| Pruning old images and chart versions from GHCR | idea | `openspec/changes/release-versioning` |

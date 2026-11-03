@@ -1,91 +1,72 @@
 name: Release
 
+# Started manually from `main`, without inputs (openspec change release-versioning, design D4,
+# docs/releasing.md). Computes the next version `YYYY.M.N`, pushes every image and the Helm chart
+# and only then creates the tag and the GitHub Release, so a failed run leaves neither.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
+# Two releases must not compute the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io/prskr/dark-factory
+
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      sha: ${{ steps.next.outputs.sha }}
+    steps:
+      # Before anything is built or pushed
+      - name: Only main can be released
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" != refs/heads/main ]]; then
+            echo "::error::Releases are cut from main, not from $REF"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # all tags
+          persist-credentials: false
+
+      - name: Next version
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }} # `gh release list`
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          version="$(cargo xtask next-version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version from $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+  # Control plane, runtime, plugins and test project (Bazel, static musl binaries for amd64 and arm64)
   images:
+    needs: version
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write # push to ghcr.io/prskr/dark-factory/*
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
 
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           bazelisk-cache: true
           repository-cache: true
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Static musl binaries for amd64 and arm64 (see docs/development.md)
-      - name: Verify images
-        run: bazel test //deploy:images_structure_test //deploy/images/claude-harness:structure_test
-
-      # Version tag for release tags (v1.2.3), `dev` for manual runs from a branch
-      - name: Push images
-        env:
-          IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
-        run: bazel run --//deploy:image_tag="$IMAGE_TAG" //deploy:push_images
-
-      # The harness image is tagged with the adapter version from its package.json (`<version>-dev` for
-      # manual runs from a branch, so a release tag is never overwritten), `latest` only for release tags.
-      - name: Push harness image
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-        run: |
-          version="$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"]' deploy/images/claude-harness/package.json)"
-          if [[ "$REF_TYPE" != tag ]]; then version+="-dev"; fi
-          bazel run --//deploy/images/claude-harness:image_tag="$version" //deploy/images/claude-harness:push
-          if [[ "$REF_TYPE" == tag ]]; then
-            bazel run --//deploy/images/claude-harness:image_tag=latest //deploy/images/claude-harness:push
-          fi
-
-  # Reference project image built from a Dockerfile (openspec change harness-images, design D10)
-  harness-images:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # push to ghcr.io/prskr/dark-factory/*
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [claude-project]
-    env:
-      REGISTRY_IMAGE: ghcr.io/prskr/dark-factory/${{ matrix.image }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      # The release tag (`dev` for manual runs), `latest` only for release tags
-      - name: Tags
-        id: tags
-        run: |
-          tags="$REGISTRY_IMAGE:${REF_TYPE_TAG:-dev}"
-          if [[ "$REF_TYPE" == tag ]]; then tags+=$'\n'"$REGISTRY_IMAGE:latest"; fi
-          {
-            echo "tags<<EOF"
-            echo "$tags"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_TYPE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-
-      - uses: ./.github/actions/check-image
-        with:
-          image: ${{ matrix.image }}
 
       - name: Log in to GHCR
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
@@ -94,11 +75,121 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push ${{ matrix.image }} (linux/amd64, linux/arm64)
+      - name: Verify images
+        run: bazel test //deploy:images_structure_test //deploy/images/claude-harness:structure_test
+
+      - name: Push images
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bazel run --//build:version="$VERSION" //deploy:push_images
+
+  # claude-project (Dockerfile) and claude-harness (Bazel); the harness digest goes into the chart
+  reference-images:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io/prskr/dark-factory/*
+    outputs:
+      harness-digest: ${{ steps.harness.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: ./.github/actions/check-image
+        with:
+          image: claude-project
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push claude-project (linux/amd64, linux/arm64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/images/${{ matrix.image }}
+          context: deploy/images/claude-project
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha,scope=${{ matrix.image }}
+          tags: ${{ env.REGISTRY }}/claude-project:${{ needs.version.outputs.version }}
+          cache-from: type=gha,scope=claude-project
+
+      # Tagged with the adapter version from its package.json. GHCR tags are mutable and later
+      # releases push the same tag again, so the chart pins the digest this run pushed.
+      - name: Push claude-harness
+        id: harness
+        run: |
+          version="$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"]' deploy/images/claude-harness/package.json)"
+          bazel run --//deploy/images/claude-harness:image_tag="$version" //deploy/images/claude-harness:push
+          # the digest of the image index that `push` uploads, computed by the build, not read back by tag
+          bazel build //deploy/images/claude-harness:digest
+          digest="$(cat "$(bazel cquery --output=files //deploy/images/claude-harness:digest)")"
+          [[ "$digest" == sha256:* ]] || { echo "::error::no digest for claude-harness:$version"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+  # After all images: the chart references them by the release version, and it is installable
+  # from the registry even without a GitHub Release.
+  chart:
+    needs: [version, images, reference-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io/prskr/dark-factory/charts/*
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      # the pinned helm and yq of the repo (docs/development.md, "Pinned linters")
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Package the chart
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          HARNESS_DIGEST: ${{ needs.reference-images.outputs.harness-digest }}
+        run: |
+          # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
+          bazel run //:bazel_env || test -x .bazel_env/bin/helm
+          # the repository's values.yaml keeps an empty digest; the packaged one pins the harness
+          cp -r deploy/helm/dark-factory "$RUNNER_TEMP/dark-factory"
+          build/with_tools.sh yq -i '.image.harness.claudeCode.digest = strenv(HARNESS_DIGEST)' "$RUNNER_TEMP/dark-factory/values.yaml"
+          build/with_tools.sh helm package "$RUNNER_TEMP/dark-factory" --version "$VERSION" --app-version "$VERSION" --destination "$RUNNER_TEMP/out"
+
+      - name: Push the chart
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | build/with_tools.sh helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
+          build/with_tools.sh helm push "$RUNNER_TEMP/out/dark-factory-$VERSION.tgz" oci://ghcr.io/prskr/dark-factory/charts
+
+  # Everything is pushed: only now the tag and the release exist
+  publish:
+    needs: [version, images, reference-images, chart]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag and release
+    steps:
+      - name: Create the tag and the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$SHA" --title "$VERSION" --generate-notes

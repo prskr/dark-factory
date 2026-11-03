@@ -409,7 +409,7 @@ impl ConnectionManager {
         let hello = AgentMessage {
             seq: 0,
             body: Some(agent_message::Body::Hello(Hello {
-                runtime_version: env!("CARGO_PKG_VERSION").to_string(),
+                runtime_version: df_telemetry::VERSION.to_string(),
                 capabilities: vec!["darkfactory.agent.v1".to_string()],
                 previous_run_id,
             })),

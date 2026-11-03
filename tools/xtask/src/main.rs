@@ -3,6 +3,7 @@
 //! - `update-tools [--check]` generates `multitool.lock.json` from the latest upstream releases.
 //!   `--check` fails if the committed lock differs from what upstream would produce now.
 //!   Set `GITHUB_TOKEN` to avoid API rate limits.
+//! - `next-version` prints the next release version `YYYY.M.N` (see `next_version.rs`).
 //! - `check-crates` fails when a workspace member escapes the lint, build or test setup (see
 //!   `check_crates.rs`).
 //! - `check-file-length [<file>...]` fails for source files over the line limit (see
@@ -19,6 +20,7 @@ mod check_crates;
 mod check_file_length;
 mod check_test_names;
 mod common;
+mod next_version;
 mod outdated;
 mod update_github_spec;
 
@@ -367,6 +369,7 @@ fn main() -> Result<()> {
         }
         ["outdated"] => outdated::run(None)?,
         ["outdated", "--since", rev] => outdated::run(Some(rev))?,
+        ["next-version"] => next_version::run()?,
         ["check-crates"] => check_crates::run(Path::new("."))?,
         ["check-file-length", files @ ..] => check_file_length::run(Path::new("."), &owned(files))?,
         ["check-test-names", files @ ..] => check_test_names::run(Path::new("."), &owned(files))?,
@@ -376,7 +379,7 @@ fn main() -> Result<()> {
             update_github_spec::run(Path::new("."), Mode::Commit(commit))?;
         }
         _ => bail!(
-            "usage: cargo xtask update-tools [--check] | outdated [--since <rev>] | check-crates\n       | check-file-length [<file>...]\n       | check-test-names [<file>...]\n       | update-github-spec [--commit <sha> | --check]"
+            "usage: cargo xtask update-tools [--check] | outdated [--since <rev>] | check-crates | next-version\n       | check-file-length [<file>...]\n       | check-test-names [<file>...]\n       | update-github-spec [--commit <sha> | --check]"
         ),
     }
     Ok(())

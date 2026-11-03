@@ -1,10 +1,9 @@
-//! The frame around pages: navigation rail (desktop), bottom bar and profile menu (phone), page
-//! header, avatar.
+//! The frame around pages: navigation rail and bottom bar, profile menu, page header, avatar.
 
 use maud::{Markup, html};
 
 use super::icons::{Icon, icon, logo};
-use crate::layout::Nav;
+use crate::layout::{Nav, Shell};
 use crate::requests::count_badge;
 
 const SECTIONS: [(Nav, &str, &str, Icon); 7] = [
@@ -61,9 +60,9 @@ pub struct CreateAction<'a> {
     pub href: &'a str,
 }
 
-/// Navigation rail from 768 px: logo, new task, the sections and log out. Links show icons only;
-/// the section name is their accessible name and tooltip.
-pub fn rail(active: Nav, compose_href: &str) -> Markup {
+/// Navigation rail from 768 px: logo, new task, the sections and the profile menu of
+/// `shell`. Links show icons only; the section name is their accessible name and tooltip.
+pub fn rail(active: Nav, compose_href: &str, shell: &Shell) -> Markup {
     html! {
         aside class="sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col items-center gap-1 bg-rail py-3 md:flex" {
             a href="/tasks" aria-label="Dark Factory" title="Dark Factory"
@@ -81,10 +80,7 @@ pub fn rail(active: Nav, compose_href: &str) -> Markup {
                     }
                 }
             }
-            button type="button" hx-post="/logout" aria-label="Log out" title="Log out"
-                class="flex size-11 items-center justify-center rounded-lg text-rail-ink hover:bg-rail-hover" {
-                (icon(Icon::LogOut))
-            }
+            (profile_menu(shell))
         }
     }
 }
@@ -125,28 +121,41 @@ fn bar_link(active: Nav, target: Nav, href: &str, label: &str, glyph: Icon) -> M
     }
 }
 
-/// The avatar of the signed-in board member on phones (top right of the task list and Projects)
-/// with a menu: name, role and log out.
-pub fn profile_menu(display_name: &str) -> Markup {
+/// The avatar of the signed-in board member with a menu: name, role, log out and the version.
+/// The caller decides where it shows (phone header: `md:hidden`; rail). The menu opens below the
+/// avatar on phones and above it, left-aligned, from 768 px.
+pub fn profile_menu(shell: &Shell) -> Markup {
+    let Shell {
+        display_name,
+        version,
+    } = shell;
     html! {
-        div class="relative md:hidden" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
+        div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
             button type="button" aria-haspopup="true" ":aria-expanded"="open" "x-on:click"="open = !open"
                 aria-label=(format!("Account menu of {display_name}"))
                 class="inline-flex size-11 items-center justify-center rounded-full" {
                 (avatar(&initials(display_name)))
             }
-            div x-show="open" x-cloak class="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-line bg-panel p-2 shadow-lg" {
+            div x-show="open" x-cloak class="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-line bg-panel p-2 text-ink shadow-lg md:bottom-full md:left-0 md:right-auto md:mb-2 md:mt-0" {
                 div class="px-2 py-2" {
                     div class="truncate text-sm font-medium" { (display_name) }
                     div class="text-xs text-faint" { "board member" }
                 }
+                div class="my-1 border-t border-line" {}
                 button type="button" hx-post="/logout"
                     class="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm text-ink hover:bg-sunk" {
                     (icon(Icon::LogOut)) "Log out"
                 }
+                div class="my-1 border-t border-line" {}
+                div class="px-3 py-2 text-xs text-faint" { "Dark Factory " (version) }
             }
         }
     }
+}
+
+/// The profile menu in the header of a phone page (hidden from 768 px, where the rail has it).
+pub fn phone_profile_menu(shell: &Shell) -> Markup {
+    html! { div class="md:hidden" { (profile_menu(shell)) } }
 }
 
 /// Up to two initials of a name, upper case; `?` for an empty name.
@@ -182,9 +191,16 @@ mod tests {
         href: "/tasks/compose",
     };
 
+    fn shell(display_name: &str, version: &str) -> Shell {
+        Shell {
+            display_name: display_name.into(),
+            version: version.into(),
+        }
+    }
+
     #[test]
     fn rail_has_the_logo_first_and_icon_only_links_with_tooltips() {
-        let html = rail(Nav::Tasks, "/tasks/compose").into_string();
+        let html = rail(Nav::Tasks, "/tasks/compose", &shell("Peter Kurfer", "dev")).into_string();
         let logo_at = html.find("aria-label=\"Dark Factory\"").expect("logo");
         assert!(logo_at < html.find("aria-label=\"New task\"").unwrap());
         assert!(
@@ -193,7 +209,7 @@ mod tests {
         );
         assert!(html.contains("hx-get=\"/tasks/compose\""), "{html}");
         assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
-        for label in ["Tasks", "Projects", "Personas", "Credentials", "Log out"] {
+        for label in ["Tasks", "Projects", "Personas", "Credentials"] {
             assert!(
                 html.contains(&format!("aria-label=\"{label}\" title=\"{label}\"")),
                 "{label}"
@@ -206,6 +222,26 @@ mod tests {
         assert!(
             html.contains("hidden") && html.contains("md:flex"),
             "desktop only"
+        );
+    }
+
+    #[test]
+    fn rail_ends_with_the_avatar_trigger_and_has_no_logout_button_outside_the_menu() {
+        let html = rail(Nav::Tasks, "/tasks/compose", &shell("Peter Kurfer", "dev")).into_string();
+        assert!(
+            html.contains("aria-label=\"Account menu of Peter Kurfer\""),
+            "{html}"
+        );
+        assert!(html.contains(">PK<"));
+        let menu_at = html.find("Account menu of").expect("trigger");
+        assert!(
+            !html[..menu_at].contains("hx-post=\"/logout\""),
+            "log out only inside the menu"
+        );
+        assert_eq!(html.matches("hx-post=\"/logout\"").count(), 1);
+        assert!(
+            html.find("</nav>").unwrap() < menu_at,
+            "the trigger is the last entry of the rail"
         );
     }
 
@@ -276,15 +312,32 @@ mod tests {
     }
 
     #[test]
-    fn profile_menu_holds_name_role_and_logout_and_has_an_accessible_name() {
-        let html = profile_menu("Peter Kurfer").into_string();
+    fn profile_menu_holds_name_role_logout_and_version_and_has_an_accessible_name() {
+        let html = profile_menu(&shell("Peter Kurfer", "2026.11.0")).into_string();
         assert!(html.contains(">PK<"), "{html}");
         assert!(html.contains("aria-label=\"Account menu of Peter Kurfer\""));
         assert!(html.contains("Peter Kurfer</div>") && html.contains("board member"));
         assert!(html.contains("hx-post=\"/logout\""));
-        assert!(
-            html.contains("md:hidden") && html.contains("size-11") && html.contains("min-h-11")
-        );
+        assert!(html.contains("Dark Factory 2026.11.0"), "{html}");
+        assert!(html.contains("size-11") && html.contains("min-h-11"));
+    }
+
+    #[test]
+    fn profile_menu_shows_dev_for_an_unstamped_build() {
+        let html = profile_menu(&shell("Ada", "dev")).into_string();
+        assert!(html.contains("Dark Factory dev"), "{html}");
+    }
+
+    #[test]
+    fn phone_and_rail_render_the_same_menu() {
+        let rail = rail(
+            Nav::Tasks,
+            "/tasks/compose",
+            &shell("Ada Byron", "2026.11.0"),
+        )
+        .into_string();
+        let menu = profile_menu(&shell("Ada Byron", "2026.11.0")).into_string();
+        assert!(rail.contains(&menu), "{rail}");
     }
 
     #[test]

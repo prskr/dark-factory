@@ -21,7 +21,7 @@ tests:
           content:
             name: plugin-forgejo
             image:
-              reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.1.0
+              reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.0.0
               pullPolicy: IfNotPresent
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -34,7 +34,7 @@ tests:
           content:
             name: plugin-github
             image:
-              reference: ghcr.io/prskr/dark-factory/plugin-github:0.1.0
+              reference: ghcr.io/prskr/dark-factory/plugin-github:0.0.0
               pullPolicy: IfNotPresent
       - contains:
           path: spec.template.spec.containers[0].volumeMounts

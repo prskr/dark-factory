@@ -31,7 +31,7 @@ use crate::auth::CurrentUser;
 use crate::components::forms::INPUT_CLASS;
 use crate::components::{ButtonKind, EmptyPanel, EmptySize, action_class, page_header, tone_badge};
 use crate::components::{Tone, chip};
-use crate::layout::{Nav, layout};
+use crate::layout::{Nav, Shell, layout};
 use crate::responses::{internal_error, not_found};
 use crate::transcript::markdown;
 
@@ -194,7 +194,7 @@ async fn pending_cards(state: &WebState) -> Result<Vec<CardData>, df_db::DbError
         .collect())
 }
 
-async fn inbox(State(state): State<WebState>) -> Response {
+async fn inbox(State(state): State<WebState>, shell: Shell) -> Response {
     let cards = match pending_cards(&state).await {
         Ok(cards) => cards,
         Err(e) => return internal_error(&e),
@@ -202,6 +202,7 @@ async fn inbox(State(state): State<WebState>) -> Response {
     layout(
         "Requests",
         Nav::Requests,
+        &shell,
         html! {
             (page_header("Requests", None, html! {}))
             (request_list(&cards))

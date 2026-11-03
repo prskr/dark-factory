@@ -1,5 +1,19 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load(":protoc.bzl", "protoc")
+load(":version.bzl", "version_env")
 
 package(default_visibility = ["//visibility:public"])
 
 protoc(name = "protoc")
+
+# Release version: `--//build:version=2026.11.0`. Tags the pushed images and is compiled into
+# `df_telemetry::VERSION`. `dev` for every other build.
+string_flag(
+    name = "version",
+    build_setting_default = "dev",
+)
+
+version_env(
+    name = "version_env",
+    version = ":version",
+)

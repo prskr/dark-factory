@@ -2,7 +2,7 @@ name: Harness images
 
 # Checks the harness image (Bazel: structure of both architectures, ACP handshake) and builds the
 # reference project image for amd64 and runs its checks (openspec change harness-images, design
-# D9/D10). The release workflow publishes them.
+# D9/D10). Only checks run here; the release workflow (release.yaml) publishes the images.
 on:
   pull_request:
     paths:

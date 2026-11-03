@@ -15,10 +15,11 @@ use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, chip, definition_list, details_panel, dialog_close, dialog_with, field_error,
-    filter_chip, form_error, harness_label, icon, profile_menu, search_menu, section, status_badge,
-    tone_badge,
+    filter_chip, form_error, harness_label, icon, phone_profile_menu, search_menu, section,
+    status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
+use crate::layout::Shell;
 use crate::transcript::block_parts;
 
 const CHIP_SELECT: &str =
@@ -240,13 +241,13 @@ fn empty_list(filters: &Filters) -> Markup {
 }
 
 /// The list column: title row with the project menu, status chips, the live list and its stream.
-/// `user` is the signed-in board member, shown as the profile menu on phones.
+/// `shell` is the signed-in board member and version, shown as the profile menu on phones.
 pub(crate) fn list_column(
     items: &[TaskListItem],
     projects: &[ProjectFilterItem],
     filters: &Filters,
     current: Option<&str>,
-    user: &str,
+    shell: &Shell,
 ) -> Markup {
     let base = current.map_or_else(|| "/tasks".to_string(), |key| format!("/tasks/{key}"));
     let href = |f: &Filters| format!("{base}{}", f.query());
@@ -274,7 +275,7 @@ pub(crate) fn list_column(
                 div class="flex items-center justify-between gap-2" {
                     h1 class="text-lg font-semibold" { "Tasks" }
                     div class="hidden md:block" { (search_menu(menu_label, &menu)) }
-                    (profile_menu(user))
+                    (phone_profile_menu(shell))
                 }
                 div class="flex flex-wrap items-center gap-2" {
                     @for status in StatusFilter::CHIPS {

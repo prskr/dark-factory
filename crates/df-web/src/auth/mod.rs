@@ -20,7 +20,7 @@ use tower_sessions::Session;
 
 use crate::WebState;
 use crate::components::{ButtonKind, action_class, link_button};
-use crate::layout::{Nav, layout};
+use crate::layout::{Nav, Shell, layout};
 use crate::responses::htmx_redirect;
 
 /// Role every page and action requires.
@@ -142,7 +142,7 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
             }
         }
     };
-    (status, layout(title, Nav::None, body)).into_response()
+    (status, layout(title, Nav::None, &Shell::default(), body)).into_response()
 }
 
 #[derive(Debug, Deserialize)]

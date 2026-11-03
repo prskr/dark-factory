@@ -25,10 +25,10 @@ use crate::components::forms::{INPUT_CLASS, field};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, avatar, data_table, dialog_with, empty_panel, forge_icon, form_error,
-    harness_label, icon, initials, issue_role, page_header, profile_menu, project_forge_kind,
+    harness_label, icon, initials, issue_role, page_header, phone_profile_menu, project_forge_kind,
     readonly_field, role_icon, select_field, submit_button, td, text_field, textarea_field, th, tr,
 };
-use crate::layout::{Nav, layout};
+use crate::layout::{Nav, Shell, layout};
 use crate::responses::{internal_error, invalid, not_found};
 
 mod push_policy;
@@ -306,20 +306,25 @@ pub(crate) fn create_button(href: &str, label: &str) -> Markup {
 }
 
 /// A list page around its live region (`#config-list`), at the full width of the content area.
-pub(crate) fn list_page(title: &str, nav: Nav, region: Markup) -> Response {
-    layout(title, nav, region).into_response()
+pub(crate) fn list_page(title: &str, nav: Nav, shell: &Shell, region: Markup) -> Response {
+    layout(title, nav, shell, region).into_response()
 }
 
 /// Header of a list: title with the number of entries, the create button and, on phones, the
-/// profile menu of `user`. Part of the live region, so a save updates the count.
-pub(crate) fn list_header(title: &str, count: usize, create: Markup, user: Option<&str>) -> Markup {
+/// profile menu of `shell`. Part of the live region, so a save updates the count.
+pub(crate) fn list_header(
+    title: &str,
+    count: usize,
+    create: Markup,
+    shell: Option<&Shell>,
+) -> Markup {
     page_header(
         title,
         Some(count),
         html! {
             div class="flex items-center gap-2" {
                 (create)
-                @if let Some(user) = user { (profile_menu(user)) }
+                @if let Some(shell) = shell { (phone_profile_menu(shell)) }
             }
         },
     )
@@ -465,9 +470,9 @@ async fn credentials_markup(state: &WebState) -> Result<Markup, Box<Response>> {
     Ok(credentials_region(&refs))
 }
 
-async fn credentials_list(State(state): State<WebState>) -> Response {
+async fn credentials_list(State(state): State<WebState>, shell: Shell) -> Response {
     match credentials_markup(&state).await {
-        Ok(region) => list_page("Credentials", Nav::Credentials, region),
+        Ok(region) => list_page("Credentials", Nav::Credentials, &shell, region),
         Err(response) => *response,
     }
 }
@@ -859,11 +864,11 @@ fn projects_region(
     projects: &[ProjectRecord],
     counts: &[ProjectStatusCount],
     forges: &ForgeRoutes,
-    user: &str,
+    shell: &Shell,
 ) -> Markup {
     html! {
         div id="config-list" {
-            (list_header("Projects", projects.len(), create_button("/projects/new", "New project"), Some(user)))
+            (list_header("Projects", projects.len(), create_button("/projects/new", "New project"), Some(shell)))
             @if projects.is_empty() {
                 (empty_panel(
                     "No projects yet",
@@ -944,21 +949,18 @@ fn projects_region(
     }
 }
 
-async fn projects_markup(state: &WebState, user: &str) -> Result<Markup, Box<Response>> {
+async fn projects_markup(state: &WebState, shell: &Shell) -> Result<Markup, Box<Response>> {
     let (projects, counts) = tokio::try_join!(
         df_db::catalog::list_projects(&state.pool),
         df_db::task_views::project_status_counts(&state.pool)
     )
     .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(projects_region(&projects, &counts, &state.forges, user))
+    Ok(projects_region(&projects, &counts, &state.forges, shell))
 }
 
-async fn projects_list(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-) -> Response {
-    match projects_markup(&state, &user.display_name).await {
-        Ok(region) => list_page("Projects", Nav::Projects, region),
+async fn projects_list(State(state): State<WebState>, shell: Shell) -> Response {
+    match projects_markup(&state, &shell).await {
+        Ok(region) => list_page("Projects", Nav::Projects, &shell, region),
         Err(response) => *response,
     }
 }
@@ -1109,7 +1111,7 @@ async fn save_project(
         };
         match stored {
             Ok(_) => {
-                return match projects_markup(&state, &user.display_name).await {
+                return match projects_markup(&state, &Shell::new(&user, &state)).await {
                     Ok(region) => saved(region),
                     Err(response) => *response,
                 };
@@ -1230,9 +1232,9 @@ async fn personas_markup(state: &WebState) -> Result<Markup, Box<Response>> {
     Ok(personas_region(&personas, &credentials))
 }
 
-async fn personas_list(State(state): State<WebState>) -> Response {
+async fn personas_list(State(state): State<WebState>, shell: Shell) -> Response {
     match personas_markup(&state).await {
-        Ok(region) => list_page("Personas", Nav::Personas, region),
+        Ok(region) => list_page("Personas", Nav::Personas, &shell, region),
         Err(response) => *response,
     }
 }

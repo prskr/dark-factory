@@ -2,6 +2,6 @@ apiVersion: v2
 name: dark-factory
 description: Single-tenant Dark Factory control plane, egress gateway, and sandbox environment
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.0.0
+appVersion: "0.0.0"
 kubeVersion: ">=1.36.0-0"
