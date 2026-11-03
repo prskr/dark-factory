@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Sandbox per run
-The control plane SHALL create one Pod per run in the sandbox namespace, with `restartPolicy: Never` and no other workload resource wrapping it, with: the project image; entrypoint `/opt/factory/factory-agent run`; the runtime image as a read-only image volume at `/opt/factory`; the run's harness image likewise at `/opt/harness/<harness>` unless the project sets an adapter command; the task PVC at `/data`; a memory-backed volume at `/run/factory`; a cert-manager csi-driver volume with the per-pod URI SAN; labels for instance, run, task, project and persona.
+The control plane SHALL create one bare Pod per run (`restartPolicy: Never`) in the sandbox namespace with: the project image; entrypoint `/opt/factory/factory-agent run`; the runtime image read-only at `/opt/factory`, the run's harness image at `/opt/harness/<harness>` unless the project sets an adapter command; the task PVC at `/data`; a memory volume at `/run/factory`; a cert-manager csi volume with the per-pod URI SAN; labels for instance, run, task, project and persona.
 
 #### Scenario: Sandbox spec
 - **WHEN** run 1 of `DF-1` is provisioned and project `DF` has no adapter command

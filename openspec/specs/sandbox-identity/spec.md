@@ -7,7 +7,7 @@ Maps an mTLS peer (certificate URI SAN plus source IP) to the run it is allowed 
 ## Requirements
 
 ### Requirement: Identity resolution
-Given a URI SAN `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>` and a peer IP, the provider SHALL return the run id only if: the namespace is the sandbox namespace; the pod exists in the provider's cache with that UID; the pod is owned by a Sandbox carrying this instance's label and a run id label; and the pod IP equals the peer IP. Otherwise it SHALL return nothing.
+Given a URI SAN `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>` and a peer IP, the provider SHALL return the run id only if: the namespace is the sandbox namespace; the pod exists in the provider's cache with that UID; the pod carries this instance's label and a run id label; and the pod IP equals the peer IP. Otherwise it SHALL return nothing.
 
 #### Scenario: Valid peer
 - **WHEN** pod `run-df-1-1` with UID U and IP 10.0.3.7 connects from 10.0.3.7 with SAN for U
@@ -18,7 +18,11 @@ Given a URI SAN `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>` and a peer IP, 
 - **THEN** nothing is returned
 
 #### Scenario: Pod not created by this instance
-- **WHEN** the pod belongs to a Sandbox without this instance's label
+- **WHEN** the pod doesn't carry this instance's label
+- **THEN** nothing is returned
+
+#### Scenario: Pod without a run id
+- **WHEN** the pod carries this instance's label but no valid run id label
 - **THEN** nothing is returned
 
 #### Scenario: Malformed SAN
