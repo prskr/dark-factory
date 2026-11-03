@@ -9,6 +9,8 @@ load("//build:optimized.bzl", "optimized")
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(["helm/dark-factory/values.schema.json"])
+
 LINUX_MUSL_PLATFORMS = [
     "//build/platforms:linux_amd64_musl",
     "//build/platforms:linux_arm64_musl",

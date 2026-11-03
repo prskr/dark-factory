@@ -61,13 +61,14 @@ tests:
     values:
       - values/plugin-baked-in.yaml
     asserts:
-      # config, db-app, oidc and tls only; the default release adds the two plugin volumes
+      # config, db-app, oidc, tls and the lifecycle event key only; the default release adds the
+      # two plugin volumes
       - lengthEqual:
           path: spec.template.spec.volumes
-          count: 4
+          count: 5
       - lengthEqual:
           path: spec.template.spec.containers[0].volumeMounts
-          count: 4
+          count: 5
 
   - it: rejects a plugin name that is not a lowercase DNS label
     # the values schema rejects the name before any template renders

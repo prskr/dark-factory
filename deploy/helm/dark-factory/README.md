@@ -130,9 +130,13 @@ Every key in `values.yaml` is documented below:
 | `controlPlane.ports.http` | `int` | `8080` | Control plane UI and health HTTP port (`/healthz`, `/readyz`). |
 | `controlPlane.ports.agent` | `int` | `9443` | Control plane agent mTLS gRPC port. |
 | `controlPlane.ports.internalGrpc` | `int` | `9444` | Control plane internal gRPC port (`PolicyWatch`, mTLS). |
+| `controlPlane.extraArgs` | `list` | `[]` | Optional. Extra arguments of `dark-factory serve`, e.g. `--unrestricted-project-subscriptions` with a `dev-tools` image in the e2e cluster. A release image refuses flags it does not know. |
 | `controlPlane.resources.requests.cpu` | `string` | `"50m"` | Control plane CPU request. |
 | `controlPlane.resources.requests.memory` | `string` | `"128Mi"` | Control plane memory request. |
 | `controlPlane.resources.limits.memory` | `string` | `"512Mi"` | Control plane memory limit. No CPU limit is set by default. |
+| `lifecycleEvents.signingKey.existingSecret` | `string` | `""` | Optional. `Secret` with the Ed25519 private key (PKCS#8 PEM) that signs lifecycle event deliveries. Empty: the chart creates the `Certificate` `<fullname>-lifecycle-events` (Secret `<fullname>-lifecycle-events-key`), see [Lifecycle event signing key](#lifecycle-event-signing-key). |
+| `lifecycleEvents.signingKey.key` | `string` | `tls.key` | Key of the private key in the `Secret`. It is mounted read-only at `/run/secrets/lifecycle-events/tls.key`. |
+| `lifecycleEvents.subscriptions` | `list` | `[]` | Optional. Instance subscriptions: receive the events of every project. Each entry has `url` (required, `http://` or `https://`, cluster-internal addresses allowed) and `events` (optional list of `volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`; empty or missing: all types, including later ones). The schema rejects unknown types and entries without `url`. Receiver guide: [`docs/lifecycle-events.md`](../../../docs/lifecycle-events.md). |
 | `gateway.replicas` | `int` | `2` | Number of egress gateway pod replicas (minimum `2`). |
 | `gateway.serviceAccountName` | `string` | `""` | Optional override for the gateway `ServiceAccount` name (`automountServiceAccountToken: false`). |
 | `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget`. |
@@ -312,6 +316,20 @@ The release namespace is part of the names so that releases with the same name i
 One CA signs everything. The control plane trusts sandbox client certificates through the `ca.crt` of its own certificate, so sandboxes must use the same CA. Sandbox certificates are requested by the cert-manager CSI driver from the sandbox namespace, where only a `ClusterIssuer` can be referenced; the sandbox namespace itself holds no `Secret`.
 
 Installing the chart with `tls.ca.create: true` needs permission to create cert-manager `Issuer`s and `Certificate`s in `tls.ca.clusterResourceNamespace`. Without it, set `tls.ca.create: false` and point `tls.ca.existingIssuer` at a `ClusterIssuer` that already exists.
+
+## Lifecycle event signing key
+
+The control plane signs every lifecycle event delivery with an Ed25519 key. Receivers pin its public key (`GET /lifecycle-events/public-key`, also shown on the subscription page of a project), so the key must stay stable.
+
+Without `lifecycleEvents.signingKey.existingSecret` the chart creates the `Certificate` `<fullname>-lifecycle-events` from the chart's issuer with `privateKey: {algorithm: Ed25519, encoding: PKCS8, rotationPolicy: Never}`. cert-manager renews the certificate after `tls.duration` but keeps the key. The chart sets `rotationPolicy` explicitly because cert-manager 1.18 and later default to `Always`. Only the private key is used; the certificate is required by the issuer.
+
+Rotate the key manually:
+
+1. Delete the Secret: `kubectl -n <namespace> delete secret <fullname>-lifecycle-events-key`. cert-manager issues a new key.
+2. Restart the control plane: `kubectl -n <namespace> rollout restart deployment <fullname>-control-plane`. It reads the key only at startup.
+3. Give receivers the new public key. Deliveries signed with the new key fail verification at a receiver that still pins the old one.
+
+With `existingSecret`, replace the key in that Secret and restart the control plane.
 
 ## PostgreSQL Role Setup (`owner` & `app`)
 

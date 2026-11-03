@@ -31,6 +31,8 @@ alias(
 
 rust_test(
     name = "df_core_test",
+    # `lifecycle` compares its event types with the Helm values schema
+    compile_data = ["//deploy:helm/dark-factory/values.schema.json"],
     crate = ":df_core",
     crate_features = ["test-util"],
     lint_config = ":lints",

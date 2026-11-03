@@ -139,7 +139,7 @@ With subscriptions configured but no key, the control plane refuses to start. `j
 ```yaml
 # control plane config.yaml (rendered by the chart)
 lifecycleEvents:
-  signingKeyFile: /var/run/dark-factory/lifecycle-events/tls.key
+  signingKeyFile: /run/secrets/lifecycle-events/tls.key
   subscriptions:
     - url: http://audit.observability.svc:8080/events
       events: [sandbox.destroyed]

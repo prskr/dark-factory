@@ -82,13 +82,13 @@
 
 ## 6. Helm chart
 
-- [ ] 6.1 Write failing chart unit tests (spec `helm-deployment`), then implement in `templates/` and `values.schema.json` (design D6, D7). Verify with `deploy/test_chart_unit.sh`. The tests cover:
+- [x] 6.1 Write failing chart unit tests (spec `helm-deployment`), then implement in `templates/` and `values.schema.json` (design D6, D7). Verify with `deploy/test_chart_unit.sh`. The tests cover:
   - with default values, an Ed25519 Certificate with `rotationPolicy: Never` exists and its key is mounted read-only;
   - with `existingSecret`, no Certificate exists;
   - subscriptions are rendered into `config.yaml`;
   - the schema rejects unknown event types and entries without a URL;
   - the schema's event type list equals the `df-core` enum.
-- [ ] 6.2 Document `lifecycleEvents.*` in `deploy/helm/dark-factory/README.md` (each value: required or optional, default, effect) and the manual rotation steps; verify the README lists every new value
+- [x] 6.2 Document `lifecycleEvents.*` in `deploy/helm/dark-factory/README.md` (each value: required or optional, default, effect) and the manual rotation steps; verify the README lists every new value
 
 ## 7. Receiver documentation and roadmap
 

@@ -226,12 +226,32 @@ controlPlane:
     http: 8080
     agent: 9443
     internalGrpc: 9444
+  # Extra arguments of `dark-factory serve`, e.g. the flags of a `dev-tools` build in the e2e
+  # cluster. A release image rejects unknown flags.
+  extraArgs: []
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
     limits:
       memory: 512Mi
+
+# Signed lifecycle events (volume and sandbox provisioning) sent to webhook receivers
+# (docs/lifecycle-events.md).
+lifecycleEvents:
+  signingKey:
+    # Secret with the Ed25519 private key (PKCS#8 PEM). Empty: the chart creates a cert-manager
+    # Certificate `<fullname>-lifecycle-events` that keeps its key on renewal
+    # (`rotationPolicy: Never`). Rotation: delete the Secret and restart the control plane.
+    existingSecret: ''
+    # Key of the private key in the Secret.
+    key: tls.key
+  # Instance subscriptions: receive the events of every project. Trusted: any http(s) URL,
+  # including cluster-internal addresses. `events` lists the types to send; empty or missing
+  # means all, including types added later.
+  #   - url: http://audit.observability.svc:8080/events
+  #     events: [sandbox.destroyed]
+  subscriptions: []
 
 gateway:
   replicas: 2
