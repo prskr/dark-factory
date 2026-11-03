@@ -26,6 +26,10 @@ _Avoid_: Escalation request, query, ask
 A task whose parent task is set.
 _Avoid_: Child task, sub-task
 
+**Routine**:
+A schedule that creates a new task with a fixed persona and prompt in a project each time it fires, unless the task from its previous firing is still open.
+_Avoid_: Cron job, scheduled task, recurring task
+
 **Base task**:
 The task whose branch another task's branch starts from, so that task's workspace contains the base task's work.
 _Avoid_: Source task, upstream task
