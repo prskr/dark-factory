@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO egress_allowlist (id, scope, kind, host) VALUES ($1, 'instance', 'http-deny', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c5cf46fc09b543e6e37c22931885aabc66a17f013512209f9b0273db84251aaf"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT host AS \"host!\" FROM egress_allowlist\n           WHERE kind = 'http-deny' AND host IS NOT NULL ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "host!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "host"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "95581312541a684df0374f0cd9f8ad8ec409bdd0d0c5a3bfd59808ec6f83950f"
+}

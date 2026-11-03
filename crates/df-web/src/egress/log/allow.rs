@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use axum::Extension;
 use axum::extract::{Form, Query, State};
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use df_core::host::validate_exact_host;
 use df_db::catalog::Actor;
@@ -16,17 +16,16 @@ use maud::{Markup, html};
 use serde::{Deserialize, Deserializer};
 
 use super::filter::is_blocked;
+use super::toast::{self, highlight_href, into_toast};
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::{
-    FormErrors, ICON_BUTTON_CLASS, Icon, field_error, form_error, icon, readonly_field_compact,
-};
+use crate::components::{FormErrors, field_error, form_error, readonly_field_compact};
 use crate::config_pages::{form_footer, modal, open_modal};
 use crate::egress::allowlist::{ScopeName, validate_required_port};
 use crate::responses::{internal_error, invalid};
 
 /// The dialog (`GET`) and the entry it creates (`POST`).
-pub(super) const ALLOW: &str = "/egress/log/allow";
+pub(in crate::egress) const ALLOW: &str = "/egress/log/allow";
 /// The only denial reason the action is offered for: an IP literal or an unknown source cannot
 /// be fixed with an `http-host` entry.
 const NOT_ALLOWLISTED: &str = "not-allowlisted";
@@ -173,9 +172,15 @@ pub(in crate::egress) async fn create(
     invalid(allow_form(&form, &errors))
 }
 
+/// Whether the event is a denial for `not-allowlisted`: the ones that deny rules label and that
+/// offer "Deny always".
+pub(super) fn not_allowlisted(event: &FlowEvent) -> bool {
+    is_blocked(event) && event.reason == NOT_ALLOWLISTED
+}
+
 /// Whether the event offers the action: denied for `not-allowlisted`, from a run.
 fn allowable(event: &FlowEvent) -> bool {
-    is_blocked(event) && event.reason == NOT_ALLOWLISTED && !event.run_id.is_empty()
+    not_allowlisted(event) && !event.run_id.is_empty()
 }
 
 /// The value if all `values` are the same and not empty.
@@ -293,24 +298,15 @@ async fn store(
 /// The answer to a created entry: the dialog closes and the page's `#allow-toast` says so.
 fn created(host: &str, port: u16, record: &EntryRecord) -> Response {
     let scope = ScopeName::of(record.project_key.as_deref(), record.task_key.as_deref()).phrase();
-    let mut rule = url::form_urlencoded::Serializer::new(String::new());
-    rule.append_pair("highlight", &format!("{host}:{port}"));
-    let toast = html! {
-        div x-data="{ open: true }" x-show="open" class="flex w-80 items-start gap-3 rounded-xl border border-line bg-panel p-4 text-sm shadow-lg" {
-            span aria-hidden="true" class="mt-0.5 text-status-completed-fg" { (icon(Icon::Check)) }
-            div class="min-w-0 flex-1" {
-                p class="font-semibold" { "Rule created" }
-                p class="mt-0.5 text-muted" { span class="font-mono" { (host) ":" (port) } " is allowed " (scope) "." }
-                a href={"/egress/allowlist?" (rule.finish())} class="mt-1 inline-block text-accent-text hover:underline" { "View rule" }
-            }
-            button type="button" aria-label="Dismiss" "x-on:click"="open = false" class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
-        }
-    };
-    let mut response = toast.into_response();
-    let headers = response.headers_mut();
-    headers.insert("HX-Retarget", HeaderValue::from_static("#allow-toast"));
-    headers.insert("HX-Reswap", HeaderValue::from_static("innerHTML"));
-    headers.insert("HX-Trigger", HeaderValue::from_static("modal-close"));
+    let toast = toast::created(
+        "Rule created",
+        html! { span class="font-mono" { (host) ":" (port) } " is allowed " (scope) "." },
+        &highlight_href(&format!("{host}:{port}")),
+    );
+    let mut response = into_toast(StatusCode::OK, toast);
+    response
+        .headers_mut()
+        .insert("HX-Trigger", HeaderValue::from_static("modal-close"));
     response
 }
 

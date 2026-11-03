@@ -23,7 +23,7 @@ pub fn action_class(kind: ButtonKind) -> &'static str {
             "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-semibold lg:min-h-10 bg-accent text-on-accent hover:brightness-95"
         }
         ButtonKind::Secondary => {
-            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 border border-line bg-panel text-ink hover:bg-sunk"
+            "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 border border-line bg-panel text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:bg-sunk disabled:text-faint"
         }
         ButtonKind::Ghost => {
             "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium lg:min-h-10 text-muted hover:bg-sunk hover:text-ink"

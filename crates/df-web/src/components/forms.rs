@@ -45,7 +45,7 @@ impl FormErrors {
 }
 
 /// Classes of text inputs, selects and textareas; 16 px text so phones do not zoom on focus.
-pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-base text-ink placeholder:text-faint lg:min-h-10";
+pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-base text-ink placeholder:text-faint disabled:border-line disabled:bg-sunk disabled:text-faint lg:min-h-10";
 
 /// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
 const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";

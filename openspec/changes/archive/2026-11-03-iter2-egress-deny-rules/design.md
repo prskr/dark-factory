@@ -17,6 +17,7 @@
 **Non-Goals:**
 - Labelling denied hosts in the gateway's own flow events (`reason` or `matched_rule` from the gateway): rejected. That would need deny rules in the snapshot; the viewer labels the rows instead.
 - Showing a new deny rule on an open traffic page before the stream reconnects: backlog, together with the existing per-connection `project_hosts`.
+- Editing egress rules: backlog. The edit board is drawn, but there is no edit route.
 
 ## Decisions
 
@@ -48,7 +49,7 @@ Add `async fn refused(&self, tx, payload) -> Result<Option<String>, RequestError
 - Rejected alternative: changing `granted` into a three-state result. That touches every approval type for a concern only one of them has.
 
 ### D5: "Deny always" in the inbox
-Add a new form action on `network-access` cards: `POST /requests/{id}/deny-always` (with CSRF and `approval:decide`). In one transaction it:
+Add a new form action on `network-access` cards: `POST /requests/{id}/deny-always` (with CSRF, behind the `board-member` role like every board action). In one transaction it:
 1. Locks through the type.
 2. Denies the request as the board member, with their comment.
 3. Calls `create_deny_rule(tx, host, actor, Some(id))`, which denies the other matching requests through the system principal.
@@ -56,17 +57,26 @@ Add a new form action on `network-access` cards: `POST /requests/{id}/deny-alway
 A conflict, meaning the deny rule already exists, counts as success. The exact host comes from the request payload, never from a wildcard.
 
 ### D6: Rules page and traffic page
-- **Dialog:** the existing "New egress rule" dialog gets a radio group `effect = allow | deny`. Its Alpine component hides port and scope for `deny`. The POST handler sends `deny` to `create_deny_rule` after `validate_allowlist_host` (no IP literals and no bare `*`).
-- **Rules table:** for `http-deny` rows the table renders a "Deny" badge, port "any" and scope "instance". The highlight parameter `highlight=<host>:any` marks deny rules.
+- **Dialog:** the existing "New egress rule" dialog gets a radio group `effect = allow | deny` (Allow green, Deny red when selected) in one row with "Applies to". For `deny` its Alpine component disables "Applies to" (showing "Every project (instance)") and Port (showing `any`); disabled fields are not submitted. The POST handler ignores project and port for `deny` and sends the host to `create_deny_rule` after `validate_allowlist_host` (no IP literals and no bare `*`).
+- **Rules table:** a new Effect column renders an Allow or Deny badge for every row. `http-deny` rows show port "any" and scope "Everywhere". The highlight parameter `highlight=<host>:any` marks deny rules.
 - **Traffic page:** `Viewer::new` receives the deny patterns next to `project_hosts`, loaded in `page` and `events`. For a `not-allowlisted` event whose host matches a pattern:
   - the row's matched-rule cell and the details panel show "Deny rule `<pattern>`", linked with `highlight=<pattern>:any`;
   - the row has no action slot or menu;
   - the graph node drops its allow actions.
 
-  Other `not-allowlisted` rows get "Deny always" next to their allow actions, which posts to the dialog's deny path with the exact host.
+  Other `not-allowlisted` rows get "Deny always" next to their allow actions, which posts to `POST /egress/log/deny` with the exact host (validated, audited; an existing rule counts as success) and answers with a toast.
 
 ### D7: PenPot first
-The dialog toggle, the Deny badge row, the "Deny always" button on the request card (Desktop and Phone) and the traffic row action are drawn in "App Design" before the `df-web` changes. Each one gets a row in `docs/design-workflow.md`.
+The dialog toggle, the Effect column, search and pagination, the "Deny always" button on the request card (Desktop and Phone) and the traffic row action are drawn in "App Design" before the `df-web` changes (done, task 3.1). Each board has a row in `docs/design-workflow.md`.
+
+### D8: Search and pagination of the rules table
+`list` takes `q`, `page` and `highlight`:
+1. It loads every entry with `list_entries`. The list is small (instance, project and task rules), so there is no SQL paging and no cache.
+2. It keeps the entries whose target (`host`, or `namespace/service`) or scope label contains `q`, case-insensitively.
+3. It slices 25 rows. Without `page` and with a `highlight`, it picks the page of the first highlighted row. A page beyond the end shows the last page.
+
+The search input sends `hx-get` with `hx-trigger="input changed delay:300ms"`, swaps only `#rules-results` (the table or the empty search, and the count line) and pushes the URL, so the search field keeps its text and focus; Previous and Next swap the same part. A new search starts at page 1. Delete buttons carry `q` and `page`, and delete and create re-render the whole `#config-list` (the header count changes): delete shows the same view, create page 1 without a search, as today.
+- Rejected alternative: filtering in the browser. It breaks as soon as rows are spread over pages.
 
 ## Risks / Trade-offs
 

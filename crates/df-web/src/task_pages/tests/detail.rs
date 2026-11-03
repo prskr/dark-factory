@@ -728,7 +728,7 @@ async fn mark_done_is_offered_in_the_status_select_only_for_allowed_statuses() {
         let listed = status != "completed";
         assert_eq!(dl.contains(">Mark done<"), listed, "{status}");
         assert_eq!(
-            dl.contains("disabled") && listed,
+            crate::testkit::count_disabled_attributes(dl) > 0 && listed,
             !offered && listed,
             "{status}"
         );

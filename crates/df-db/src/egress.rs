@@ -14,6 +14,10 @@ use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 use crate::requests::Scope;
 
+mod deny;
+
+pub use deny::{add_deny_rule, create_deny_rule, deny_patterns, deny_rule_for};
+
 /// Key of the transaction-level advisory lock that serializes `http-host` entry creation with
 /// denial handling (iter2-egress-approvals design D2, D3).
 const ALLOWLIST_LOCK_KEY: i64 = 0x6466_5f65_6772_6573; // "df_egres"
@@ -31,6 +35,9 @@ pub enum EntryKind {
         ports: Vec<u16>,
         allow_dns: bool,
     },
+    /// A deny rule: a silencer for one host (or `*.suffix`) on every port, instance scope only.
+    /// It does not change what the gateway allows.
+    HttpDeny { host: String },
 }
 
 /// A stored allowlist entry: `project_key` is set for project scope, `task_key` for task scope,
@@ -81,6 +88,9 @@ impl TryFrom<EntryRow> for EntryRecord {
                     .map(|p| port_from_db(*p).map_err(|_out_of_range| corrupt("invalid port")))
                     .collect::<Result<_, _>>()?,
                 allow_dns: row.allow_dns,
+            },
+            "http-deny" => EntryKind::HttpDeny {
+                host: row.host.clone().ok_or_else(|| corrupt("no host"))?,
             },
             other => return Err(corrupt(&format!("unknown kind `{other}`"))),
         };
@@ -323,6 +333,11 @@ pub async fn add_entry(
             ports,
             allow_dns,
         } => (namespace, service, ports, allow_dns),
+        EntryKind::HttpDeny { .. } => {
+            return Err(DbError::InvalidData(
+                "deny rules are created with create_deny_rule".into(),
+            ));
+        }
     };
     let duplicate = sqlx::query_scalar!(
         r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'
@@ -364,7 +379,7 @@ pub async fn add_entry(
         task_key: None,
         kind: kind.clone(),
     };
-    audit_and_notify(&mut tx, actor, "create", &record).await?;
+    record_entry_change(&mut tx, actor, "create", &record).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -473,7 +488,7 @@ pub async fn create_http_host_entry(
             port,
         },
     };
-    audit_and_notify(tx, actor, "create", &record).await?;
+    record_entry_change(tx, actor, "create", &record).await?;
     crate::network_access::settle(tx, scope, host, port, actor, deciding).await?;
     Ok(record)
 }
@@ -502,26 +517,36 @@ pub async fn delete_entry(
     sqlx::query!("DELETE FROM egress_allowlist WHERE id = $1", id)
         .execute(&mut *tx)
         .await?;
-    audit_and_notify(&mut tx, actor, "delete", &record).await?;
+    record_entry_change(&mut tx, actor, "delete", &record).await?;
     tx.commit().await?;
     Ok(record)
 }
 
-async fn audit_and_notify(
+/// Audits the change of `record`. Deny rules write `egress_deny_rule.<verb>` and publish nothing:
+/// the gateway does not know them.
+async fn record_entry_change(
     tx: &mut Transaction<'_, Postgres>,
     actor: Actor<'_>,
     verb: &str,
     record: &EntryRecord,
 ) -> Result<(), DbError> {
+    let is_deny = matches!(record.kind, EntryKind::HttpDeny { .. });
     let entry = NewAuditEntry::new(
         actor.principal.clone(),
         actor.roles.to_vec(),
-        format!("egress_allowlist.{verb}"),
+        if is_deny {
+            format!("egress_deny_rule.{verb}")
+        } else {
+            format!("egress_allowlist.{verb}")
+        },
         "egress_allowlist",
         record.id.to_string(),
     )
     .with_details(record)?;
     write_audit_entry(&mut **tx, &entry).await?;
+    if is_deny {
+        return Ok(());
+    }
     publish(&mut **tx, &Notification::EgressPolicy).await
 }
 

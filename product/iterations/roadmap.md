@@ -43,6 +43,7 @@ Remaining OpenSpec changes: `iter1-control-plane-web`, `iter1-egress-gateway`, `
 - **Questions and approval requests (ADR-0038):** `ask_question` and `request_approval` factory tools, `AwaitingInput`, pending-requests inbox (phone and desktop), audit entries. Initial approval types: `push-check-exception` and `network-access`.
 - **Egress rule editing (`egress-rule-editing`):** edit an existing rule (host, port, scope) from the egress rules page instead of delete and add; update route, validation, audit action and policy announcement.
 - **Egress from approvals ([`design/egress.md`](../../design/egress.md) §8):** task-scoped allowlist entries; allow a denied host from the live log; denied hosts raise a `network-access` request automatically.
+- **Egress deny rules (`iter2-egress-deny-rules`):** instance-wide deny rules for hosts that must never be allowed (for example harness telemetry): no `network-access` request is raised or accepted for them, "Deny always" in the inbox and the traffic page, Allow/Deny dialog, Effect column, search and pages on the egress rules page.
 - **Cancel button** for tasks and runs.
 - **Unattended runs (`iter2-run-resilience`):** rate-limited tasks resume at the retry time, bounded automatic resume after lost sandboxes and provisioning failures, concurrency limit per instance, final report flush across control plane restarts (TD-2, TD-18).
 - **Continuation summary (`iter2-continuation-summary`):** the fallback summary of a follow-up run includes tool calls (successful streaks collapsed), is rebuilt from the whole transcript per `Assign` with a 64 KiB cap; the stored summary with a cursor comes with F3, iteration 3 chats reuse this summary.
@@ -131,6 +132,11 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
 | Persisted per-run egress aggregates (host, verdict, connections, bytes) | designed | [`design/egress.md`](../../design/egress.md) §8, §13 |
+| Deny rules at project scope | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
+| Hide or filter denied rows on the traffic page | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal), together with the traffic filter work |
+| Live refresh of deny rules (and project hosts) on an open traffic page, without a reconnect | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
+| Editing egress rules (the edit dialog is drawn; see the roadmap line `egress-rule-editing`) | decided | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
+| SQL paging of the egress rules (today all rules are loaded and sliced in memory), when lists exceed a few hundred rules | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
 | `dark-factory egress tail` CLI | idea | [`design/egress.md`](../../design/egress.md) §8 |
 | Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |

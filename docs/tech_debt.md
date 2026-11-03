@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-97.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-99.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -127,6 +127,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
 | TD-95 | low   | `df-agent-channel` feedback | Reviews are ranked for the size budget by `submitted_at` only |
 | TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout |
+| TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
+| TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 
 ## Entries
 
@@ -915,6 +917,28 @@ The plugin reads every review's comments (`GET .../reviews/{id}/comments`) one a
 **Matters when:** long-lived pull requests with many review rounds on a slow Forgejo.
 
 **Fix:** skip the comment request for reviews that cannot hold anything newer than `since`. Careful: `reply` adds the reply to the review it answers, so an old review can get a new comment; a review's `updated_at` must cover that (check against Forgejo) before filtering on it. Otherwise cap the reviews read per call (newest first) and set `truncated`. Test: a listing with `since` sends no comment request for an untouched old review.
+
+Origin of TD-97 to TD-98: code review of `iter2-egress-deny-rules` (2026-11-03).
+
+### TD-97 (O1). "Deny always" copies a wildcard request host into the deny rule
+
+`crates/df-db/src/network_access.rs` (`deny_always`)
+
+An agent may request a wildcard host (`*.com` passes `validate_allowlist_host`). "Deny always" then creates a deny rule for the same wildcard, which silences every future request below it. It never grants egress.
+
+**Matters when:** agents request wildcard hosts, and a board member clicks "Deny always" without reading the host.
+
+**Fix:** offer "Deny always" only for exact hosts. The card hides the button and the handler answers 422 for a wildcard payload. Test: a wildcard request has no "Deny always", and a POST is rejected.
+
+### TD-98 (SP17). Truncated long hosts have no tooltip
+
+`crates/df-web/src/egress/allowlist.rs` (target cell)
+
+With the fixed column widths, long hosts are cut off with `truncate`. Only the delete button's accessible name carries the full target.
+
+**Matters when:** rules for long hosts (cloud endpoints, CDN names) look alike in the table.
+
+**Fix:** a `title` with the full target on the truncated span. Test: the cell has the title.
 
 ## Accepted decisions
 

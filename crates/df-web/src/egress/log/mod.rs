@@ -16,14 +16,19 @@ use crate::auth::CurrentUser;
 use crate::layout::{Nav, layout};
 
 mod allow;
+mod context;
+mod deny;
 mod details;
 mod filter;
 mod graph;
 mod page;
 mod rows;
+mod toast;
 mod viewer;
 
-pub(super) use allow::{create as allow, dialog as allow_dialog};
+pub(super) use allow::{ALLOW, create as allow, dialog as allow_dialog};
+pub(super) use context::Context;
+pub(super) use deny::{DENY, create as deny};
 pub(super) use filter::Filter;
 #[cfg(test)]
 pub(super) use filter::VerdictFilter;
@@ -51,7 +56,7 @@ pub(super) async fn page(State(state): State<WebState>, Query(filter): Query<Fil
         .map(|p| (p.id.to_string(), p.name))
         .collect::<Vec<_>>();
     // The same backlog as the stream's first message; the stream replaces it once connected.
-    let mut viewer = Viewer::new(filter.clone(), super::project_hosts(&state).await);
+    let mut viewer = Viewer::new(filter.clone(), super::context(&state).await);
     let backlog = viewer.apply_backlog(&collect_backlog(&mut flows.subscribe()).await);
     layout(
         "Network traffic",
@@ -87,12 +92,12 @@ pub(super) async fn events(
     // The subscription is not filtered: the graph and the counts need every event.
     let mut source = flows.subscribe();
     // Built once per connection: a project created later shows after a reconnect.
-    let projects = super::project_hosts(&state).await;
+    let context = super::context(&state).await;
     // The source sends the backlog, a `backlog_end` marker, then live events. The backlog is the
     // first message and replaces the table body: after a reconnect the page already shows rows.
     let stream = futures::stream::once(async move {
         let backlog = collect_backlog(&mut source).await;
-        let mut viewer = Viewer::new(filter, projects);
+        let mut viewer = Viewer::new(filter, context);
         let first = viewer.backlog_message(&backlog);
         let live = source.ready_chunks(CHUNK).filter_map(move |batch| {
             let body = viewer.live_message(&batch);
