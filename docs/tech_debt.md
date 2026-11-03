@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-93.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-95.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -37,6 +37,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
 - Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
+- Origin of TD-93 to TD-94: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, 2026-11-03). TD-94 existed before that change.
 
 ## Summary
 
@@ -122,6 +123,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
 | TD-91 | medium | `df-agent-channel` PR | Forge calls in `pr.rs` run inline and are retried only by the next push report or run end |
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
+| TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
+| TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
 
 ## Entries
 
@@ -870,6 +873,26 @@ On each `Assign` of a follow-up run, `continuation_summary` loads every event of
 **Matters when:** a task's transcript grows to tens of thousands of events. `Assign` then reads megabytes and gets slow before a reconnecting runtime receives its assignment.
 
 **Fix:** store the folded summary per task with a cursor and fold only new events (planned for F3, `product/context.md`), or read newest-first in pages and stop once the kept entries exceed the cap by a margin. Test: a task with more events than the bound still produces a summary with its newest entries, and old user messages survive as before.
+
+### TD-93 (P5). The e2e review comment comes from the bot account
+
+`crates/df-e2e/tests/flow.rs` (`follow_up_resumes_the_session_and_completing_marks_the_pr_ready`), `crates/df-plugins/tests/homelab.rs` (`review_reply_joins_the_thread`)
+
+The e2e suite submits the line comment that run 2 answers with the bot's own Forgejo token. `read_pull_request_feedback` therefore labels it `bot`. The roles `member` and `outside` and the repository admin requirement of `list-feedback` (permission lookup per author) are only checked by the ignored homelab test against a live Forgejo.
+
+**Matters when:** the role mapping or the permission lookup breaks; the default test runs would not notice.
+
+**Fix:** create a second Forgejo user in `deploy/e2e/e2e-local.sh` (write access to the test repository), submit the review with its token and assert role `member` in the agent's tool result; optionally a third user without access for `outside`.
+
+### TD-94. `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster
+
+`deploy/e2e/e2e-local.sh` (`cleanup`)
+
+With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails with `pids[@]: unbound variable`. An abort before the first background job (Ctrl-C or a failure while creating the cluster) ends the trap there, so `kind delete cluster` never runs and the next run fails until the `df-e2e` cluster is deleted by hand.
+
+**Matters when:** local e2e runs on macOS are interrupted or fail during cluster setup.
+
+**Fix:** iterate with `${pids[@]+"${pids[@]}"}` (or guard with `(( ${#pids[@]} ))`). Test: run the script with a failing first step under `/bin/bash` 3.2 and check that the cluster is gone.
 
 ## Accepted decisions
 

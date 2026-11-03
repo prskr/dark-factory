@@ -94,6 +94,82 @@ pub(crate) fn from_comment(c: issues::Comment) -> df_core::Comment {
     }
 }
 
+pub(crate) fn from_posted_comment(c: prs::PostedComment) -> df_core::Comment {
+    df_core::Comment {
+        id: c.id,
+        url: c.url,
+    }
+}
+
+pub(crate) fn from_feedback(f: prs::Feedback) -> df_core::Feedback {
+    df_core::Feedback {
+        comments: f
+            .comments
+            .into_iter()
+            .map(|c| df_core::PrComment {
+                id: c.id,
+                author: from_author(c.author),
+                body: c.body,
+                url: c.url,
+                created_at: c.created_at,
+                updated_at: c.updated_at,
+            })
+            .collect(),
+        reviews: f
+            .reviews
+            .into_iter()
+            .map(|r| df_core::Review {
+                id: r.id,
+                author: from_author(r.author),
+                verdict: match r.verdict {
+                    prs::ReviewVerdict::Approved => df_core::ReviewVerdict::Approved,
+                    prs::ReviewVerdict::ChangesRequested => {
+                        df_core::ReviewVerdict::ChangesRequested
+                    }
+                    prs::ReviewVerdict::Commented => df_core::ReviewVerdict::Commented,
+                },
+                body: r.body,
+                url: r.url,
+                submitted_at: r.submitted_at,
+            })
+            .collect(),
+        threads: f
+            .threads
+            .into_iter()
+            .map(|t| df_core::ReviewThread {
+                id: t.id,
+                path: t.path,
+                line: t.line,
+                resolved: t.resolved,
+                comments: t
+                    .comments
+                    .into_iter()
+                    .map(|c| df_core::ReviewComment {
+                        id: c.id,
+                        author: from_author(c.author),
+                        body: c.body,
+                        url: c.url,
+                        created_at: c.created_at,
+                        updated_at: c.updated_at,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        truncated: f.truncated,
+    }
+}
+
+fn from_author(a: prs::Author) -> df_core::Author {
+    df_core::Author {
+        login: a.login,
+        role: match a.role {
+            prs::AuthorRole::Bot => df_core::AuthorRole::Bot,
+            prs::AuthorRole::Member => df_core::AuthorRole::Member,
+            prs::AuthorRole::Outside => df_core::AuthorRole::Outside,
+        },
+    }
+}
+
 pub(crate) fn from_error(e: wit::Error) -> df_core::IntegrationError {
     use df_core::IntegrationError as E;
     match e {

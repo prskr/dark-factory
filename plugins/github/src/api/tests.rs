@@ -10,12 +10,12 @@ use crate::darkfactory::integrations::types::{RateLimit, UpstreamError};
 use crate::settings::DraftMode;
 
 const PR_URL: &str = "https://api.github.com/repos/o/r/pulls/7";
-const GRAPHQL_URL: &str = "https://api.github.com/graphql";
+pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 /// Replays canned responses and records the requests and warnings.
-struct Fake {
+pub(super) struct Fake {
     responses: RefCell<VecDeque<Response>>,
-    requests: RefCell<Vec<Request>>,
+    pub(super) requests: RefCell<Vec<Request>>,
     warnings: RefCell<Vec<String>>,
 }
 
@@ -36,7 +36,7 @@ impl Transport for &Fake {
     }
 }
 
-struct FixedClock;
+pub(super) struct FixedClock;
 
 impl Clock for FixedClock {
     fn now(&self) -> u64 {
@@ -44,7 +44,7 @@ impl Clock for FixedClock {
     }
 }
 
-fn fake(responses: Vec<Response>) -> Fake {
+pub(super) fn fake(responses: Vec<Response>) -> Fake {
     Fake {
         responses: RefCell::new(responses.into()),
         requests: RefCell::default(),
@@ -52,7 +52,7 @@ fn fake(responses: Vec<Response>) -> Fake {
     }
 }
 
-fn reply(status: u16, body: serde_json::Value) -> Response {
+pub(super) fn reply(status: u16, body: serde_json::Value) -> Response {
     Response {
         status,
         body: body.to_string().into_bytes(),
@@ -67,7 +67,10 @@ fn settings(values: &[(&str, &str)]) -> Result<Settings, Error> {
     Settings::read(|key| Ok(values.get(key).map(|v| (*v).to_string())))
 }
 
-fn github<'a>(fake: &'a Fake, values: &[(&str, &str)]) -> GitHub<&'a Fake, FixedClock, &'a Fake> {
+pub(super) fn github<'a>(
+    fake: &'a Fake,
+    values: &[(&str, &str)],
+) -> GitHub<&'a Fake, FixedClock, &'a Fake> {
     GitHub::new(
         fake,
         FixedClock,
@@ -85,7 +88,7 @@ fn pr_json(title: &str, draft: bool) -> serde_json::Value {
     })
 }
 
-fn pr_ref() -> PullRequestRef {
+pub(super) fn pr_ref() -> PullRequestRef {
     PullRequestRef {
         repo: RepoRef {
             owner: "o".into(),
@@ -389,7 +392,7 @@ fn new_pr(draft: bool) -> NewPullRequest {
 }
 
 /// JSON body of the `index`th request.
-fn sent_json(fake: &Fake, index: usize) -> serde_json::Value {
+pub(super) fn sent_json(fake: &Fake, index: usize) -> serde_json::Value {
     let requests = fake.requests.borrow();
     serde_json::from_slice(requests[index].body.as_deref().expect("a request body"))
         .expect("JSON body")
@@ -696,7 +699,7 @@ fn changes(title: Option<&str>, body: Option<&str>, draft: Option<bool>) -> Pull
 }
 
 /// Method and URL of every request sent.
-fn calls(fake: &Fake) -> Vec<(Method, String)> {
+pub(super) fn calls(fake: &Fake) -> Vec<(Method, String)> {
     fake.requests
         .borrow()
         .iter()

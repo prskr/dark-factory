@@ -160,6 +160,8 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Lifecycle event extensions: a "started" event for volumes (`volume.provisioning`), run and task state events, two signatures during key rotation, delivery history and manual redelivery, hot reload of key and instance subscriptions, per-subscription concurrency, the `can()` permission check instead of the `admin` role check | idea | ADR-0049, `openspec/changes/lifecycle-events` |
 | New task from an issue mention on an issue without an active task (persona choice, prompt, guard against outsiders spending compute) | decided | ADR-0015, ADR-0051, `openspec/changes/iter3-webhooks` |
 | Webhook secret override per project: optional project credential reference, route `POST /webhooks/{plugin}/projects/{key}` verified with the project's secret (else the plugin's) and routed only to that project; additive, no WIT change | idea | ADR-0051, `openspec/changes/iter3-webhooks` |
+| Edit own PR comments: agents edit or delete PR comments and review comments they posted | idea | `openspec/changes/iter3-review-tools` |
+| Agents review in the forge: agents submit reviews (verdict, line comments) and read other tasks' pull requests, as the reviewer of [`iteration-3.md`](iteration-3.md) demo step 2 | idea | ADR-0036, `openspec/changes/iter3-review-tools` |
 | Branch suggestions in the composer's "Existing branch" field from the head branches of open PRs (`pull-requests.list-open`, native `<datalist>`) | idea | `openspec/changes/iter3-branch-workflows` |
 | Waking a task on CI success or recovery | idea | `openspec/changes/iter3-ci-tools` |
 | Re-running or cancelling CI jobs from a factory tool | idea | `openspec/changes/iter3-ci-tools` |

@@ -139,6 +139,12 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
     assert_eq!(first_run.len(), 1, "{first_run:?}");
     let pulls = world.pulls_of(&branch_of(&key)).await?;
     assert_eq!(pulls.len(), 1, "{pulls:?}");
+    let number = pulls[0]["number"].as_u64().context("number")?;
+    // The review thread `read_pull_request_feedback` of run 2 returns first.
+    let review = world
+        .forgejo
+        .submit_line_comment(number, "greeting.txt", 1, "Please add a test.")
+        .await?;
 
     world
         .session
@@ -179,6 +185,14 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
             .as_str()
             .is_some_and(|m| m.contains("Add greeting test"))),
         "{commits:?}"
+    );
+    // `comment_on_pull_request` of run 2 replied in the thread it read.
+    let thread = world.forgejo.review_comments(number, review).await?;
+    assert!(
+        thread
+            .iter()
+            .any(|c| c["body"] == "Added greeting_test.txt." && c["path"] == "greeting.txt"),
+        "{thread:?}"
     );
     Ok(())
 }

@@ -31,9 +31,43 @@ Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:i
 | `update` | `PATCH .../pulls/{index}` (preceded by a `GET` when title or draft change) |
 | issues `get` | `GET .../issues/{index}` |
 | issues `add-comment` | `POST .../issues/{index}/comments` (pull request numbers work as issue numbers) |
+| `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments?since=` (PR comments), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` per submitted review, `GET .../collaborators/{login}/permission` once per distinct non-bot author |
+| `reply` | `GET .../pulls/{index}/reviews/{review-id}`, `GET .../pulls/{index}/reviews/{review-id}/comments` (a path and line without a comment in that review yields `invalid-input`), then `POST .../pulls/{index}/reviews/{review-id}/comments` with `path` and `new_position` (or `old_position` for a negative line) |
 
 `find-open` lists and filters instead of using `GET .../pulls/{base}/{head}`, because that route
 breaks for base branches containing `/`.
+
+## Review feedback
+
+Forgejo has no review thread id.
+
+- Review comments of the same review with the same path and line form a thread, as Forgejo 15's UI
+  shows one conversation per review and line; a reply lands in the review it answers. Comments of
+  two reviews on the same line are two threads. Old-side lines are negative in Forgejo; `line` is
+  the absolute number. The thread is `resolved` if any comment has a `resolver`.
+- The thread id is `<review-id>:<path>:<line>` (signed line). `reply`
+  parses the review id from the front and the line from the back, so paths may contain `:`. A
+  malformed id, a review of another pull request (404, or a `pull_request_url` of another pull
+  request) or a pending review yields `invalid-input`.
+- Reviews in state `PENDING` (drafts) and `REQUEST_REVIEW` (review requests) and their comments are
+  not listed.
+- Roles: the login of `GET /user` is `bot`. Otherwise the repository permission `write`, `admin` or
+  `owner` is `member`; anything else, including an unknown user (404), is `outside`. Other lookup
+  errors fail the call. Forgejo answers 403 unless the token's account is a site admin or an
+  admin of the repository, so the plugin's credential needs repository admin: with write access
+  only, `list-feedback` fails with `unauthorized`.
+- `since` (RFC 3339, any offset) is passed to Forgejo for PR comments. Reviews are kept if submitted
+  or updated at or after it, threads if one of their comments was created or updated at or after it;
+  the plugin compares instants, because Forgejo writes timestamps in the server's time zone.
+- Issue comments and reviews are read 50 per page, at most 20 pages each; `truncated` is set when
+  the limit stopped a listing.
+
+Status: verified against Forgejo 15.0.11 in a container
+(`cargo test -p df-plugins --test homelab -- --ignored review_reply`, 2026-11-03): the reply to a
+thread from another user's review lands in that review at the same line, the next `list-feedback`
+returns it as the last comment of the thread with role `bot`, and the UI shows it in the same
+conversation; a second review on the same line stays a separate thread; a thread id used on
+another pull request yields `invalid-input` (Forgejo answers 404 for the review).
 
 ## Draft emulation
 

@@ -107,6 +107,7 @@ EXTRAS = {
             "GITHUB_PLUGIN_WASM": GITHUB,
             "TEST_PROBE_WASM": PROBE,
         },
+        "review": {"TEST_PROBE_WASM": PROBE},
         "routing": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,

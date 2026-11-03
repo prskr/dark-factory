@@ -1,5 +1,6 @@
 //! Script definition and parsing for `fake-acp-agent`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -119,13 +120,17 @@ fn default_fetch_timeout() -> u64 {
     60
 }
 
-/// Scripted MCP call.
+/// Scripted MCP call. A string argument `${name}` is replaced by the value saved as `name` by an
+/// earlier call of the turn.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpStep {
     pub server: String,
     pub tool: String,
     #[serde(default)]
     pub args: serde_json::Value,
+    /// Variable name to JSON pointer into the call's structured result, saved for later calls.
+    #[serde(default)]
+    pub save: BTreeMap<String, String>,
 }
 
 /// Scripted plan details.

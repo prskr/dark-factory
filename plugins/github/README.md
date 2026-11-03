@@ -41,13 +41,16 @@ fails as `upstream` until the project's URL is updated.
 | `update` | `GET .../pulls/{number}` when title or draft change, GraphQL `markPullRequestReadyForReview` / `convertPullRequestToDraft` (with the pull request's `node_id`) for the native draft state, `PATCH .../pulls/{number}` for title and body; a final `GET` when only the native draft state changed |
 | issues `get` | `GET .../issues/{number}` |
 | issues `add-comment` | `POST .../issues/{number}/comments` (pull request numbers work as issue numbers) |
+| `list-feedback` | one GraphQL query: `viewer.login`, and the pull request's `comments`, `reviews` and `reviewThreads` (each `last: 100`, the newest items) |
+| `reply` | GraphQL `node(id:)` for the thread's pull request, then `addPullRequestReviewThreadReply` |
 
 `src/operations.rs` lists these REST calls by GitHub's `operationId`. The host tests
 (`crates/df-plugins/tests/github.rs`) check every request and mocked response against
 `tests/fixtures/github-openapi.json`, an extract of GitHub's OpenAPI description with only these
 operations and the components they reference; a request to an operation missing from the list fails.
 Mocked responses are checked without `required`, since they carry only the fields the plugin reads.
-GraphQL has no description; the live test covers the two mutations.
+GraphQL has no description; the live test covers the two draft mutations, and the documents of
+`list-feedback` and `reply` were validated against github.com with `gh api graphql` (2026-11-03).
 
 | Task | Command |
 |---|---|
@@ -88,6 +91,27 @@ depends on GitHub's message text; if it changes, `auto` fails like `native`. `dr
 ready pull request adds the prefix.
 
 Switching the mode while drafts are open is safe: reading recognizes both forms.
+
+## Review feedback
+
+- Threads, their ids and `resolved` come from GitHub's review threads (`isResolved`). The thread
+  id is the GraphQL node id. `line` is GitHub's `line`: `none` for a comment on the whole file and
+  for an outdated thread.
+- Every connection is read with `last: 100` (the newest 100, in chronological order) and no further
+  pages; `truncated` is set if any of them, including a thread's comments, has an older page. Threads
+  are picked by creation order, so on a pull request with more than 100 threads an old thread with a
+  new reply is left out.
+- Pending reviews (`states` filter) and comments of a pending review are not listed; a thread with
+  only such comments is dropped. A dismissed review is listed as `commented`.
+- IDs of comments and reviews are GraphQL node ids, also the one `reply` returns.
+- Roles: the `viewer` login (case-insensitive) is `bot`. Otherwise `authorAssociation` `OWNER`,
+  `MEMBER` or `COLLABORATOR` is `member`, anything else (`CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`,
+  `FIRST_TIMER`, `MANNEQUIN`, `NONE`) is `outside`. A deleted author has an empty login.
+- `since` (RFC 3339, any offset) is applied in the plugin: comments by `createdAt` or `updatedAt`,
+  reviews by `submittedAt` or `updatedAt`, threads if one comment matches, each kept whole.
+- `reply` checks the thread's pull request number and repository (case-insensitive) first: a
+  mismatch or a node that is not a review thread is `invalid-input`, an unknown id `not-found`
+  (GraphQL `NOT_FOUND`).
 
 ## Token
 

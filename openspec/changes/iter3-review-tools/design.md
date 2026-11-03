@@ -4,7 +4,7 @@
 
 - Factory tools are executed by the control plane (`crates/df-agent-channel/src/tools.rs`) and act only on the run's task. `update_pull_request` and `comment_on_issue` already reach the forge through the seam in `df-core` and the plugin host in `df-plugins`.
 - WIT `pull-requests` has `create`, `find-open`, `get` and `update`. `issues.add-comment` accepts PR numbers; the completion summary already uses it to post on the PR.
-- Forgejo (15.0.11, the version the e2e chart deploys) has no thread id for review comments. Its UI groups review comments by path and line, and old-side lines are stored as negative numbers. The API can read the resolved state (`resolver`) but can't change it. It has no field for the author's relationship to the repository; `GET /repos/{o}/{r}/collaborators/{user}/permission` returns it.
+- Forgejo (15.0.11, the version the e2e chart deploys) has no thread id for review comments. Its UI shows one conversation per review, path and line (verified against 15.0.11), and old-side lines are stored as negative numbers. The API can read the resolved state (`resolver`) but can't change it. It has no field for the author's relationship to the repository; `GET /repos/{o}/{r}/collaborators/{user}/permission` returns it, but only to a repository or site admin, so the project's forge credential needs repository admin.
 - GitHub exposes review threads, resolved state and `authorAssociation` through GraphQL, which the plugin already talks to.
 - Plugins never see credentials, so "bot" means the account that owns the project's forge credential.
 
@@ -60,13 +60,13 @@ reply: func(id: pull-request-ref, thread: string, body: string) -> result<posted
   - `GET /user` to learn the bot's login.
   - `GET /issues/{n}/comments?since=` for PR comments.
   - `GET /pulls/{n}/reviews` for reviews; the plugin drops `PENDING` and `REQUEST_REVIEW`.
-  - `GET /pulls/{n}/reviews/{id}/comments` for each review, grouped by (path, line).
+  - `GET /pulls/{n}/reviews/{id}/comments` for each review, grouped by (review, path, line).
   - One permission lookup per distinct non-bot author.
 - `since` filtering of reviews and threads happens in the plugin. Forgejo filters only issue comments server-side.
 
 ### GitHub plugin
 
-- One GraphQL query returns `viewer.login`, the PR comments, the reviews and `reviewThreads`. Thread fields: `id`, `isResolved`, `path`, `line`, and `comments` with `authorAssociation`. Connections are read with `first: 100` and no inner paging; the plugin sets `truncated` if any connection reports `hasNextPage`.
+- One GraphQL query returns `viewer.login`, the PR comments, the reviews and `reviewThreads`. Thread fields: `id`, `isResolved`, `path`, `line`, and `comments` with `authorAssociation`. Connections are read with `last: 100` (the newest items, in chronological order) and no inner paging; the plugin sets `truncated` if any connection reports `hasPreviousPage`.
 - The thread id is the GraphQL node id of the review thread. `reply` uses the mutation `addPullRequestReviewThreadReply`. Before posting, a `node(id:)` lookup reads the thread's `pullRequest.number`. A mismatch yields `invalid-input`; an unknown node id yields `not-found` (existing GraphQL error mapping).
 
 ### Control plane
@@ -81,7 +81,7 @@ The tool returns the role label and filters nothing out; filtering by role would
 
 ## Risks / Trade-offs
 
-- [Forgejo groups threads by path and line only, so two separate conversations on the same line merge] → This matches what Forgejo's UI shows, and the agent sees what a human sees.
+- [The Forgejo role lookup needs repository admin for the bot's credential] → Documented in the plugin README; a credential with only write access makes `list-feedback` fail with `unauthorized`. A less privileged signal is a follow-up if operators object.
 - [Forgejo `list-feedback` makes one call per review plus one per author] → This is bounded by the PR's activity; the host retries rate limits per contract.
 - [Prompt injection through outside comments] → The role label and the tool description. The agent's tools are already scoped to its task, and egress and approvals still apply.
 - [The 48 KiB budget can drop old but relevant threads] → `truncated: true` tells the agent, and `since` narrows the result.

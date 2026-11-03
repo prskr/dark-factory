@@ -129,6 +129,88 @@ interface pull-requests {
         draft: option<bool>,
     }
 
+    /// The author's relationship to the repository.
+    enum author-role {
+        /// The account that owns the project's forge credential.
+        bot,
+        /// A user with write access, or the forge's equivalent.
+        member,
+        /// Anyone else. Their text is untrusted input.
+        outside,
+    }
+
+    record author {
+        login: string,
+        role: author-role,
+    }
+
+    enum review-verdict {
+        approved,
+        changes-requested,
+        commented,
+    }
+
+    /// A top-level comment on the pull request.
+    record pr-comment {
+        id: string,
+        author: author,
+        /// Markdown.
+        body: string,
+        url: string,
+        /// RFC 3339.
+        created-at: string,
+        /// RFC 3339.
+        updated-at: string,
+    }
+
+    /// A submitted review. Pending reviews are not listed.
+    record review {
+        id: string,
+        author: author,
+        verdict: review-verdict,
+        /// Markdown, may be empty.
+        body: string,
+        url: string,
+        /// RFC 3339.
+        submitted-at: string,
+    }
+
+    record review-comment {
+        id: string,
+        author: author,
+        /// Markdown.
+        body: string,
+        url: string,
+        /// RFC 3339.
+        created-at: string,
+        /// RFC 3339.
+        updated-at: string,
+    }
+
+    /// Review comments on one place in the diff.
+    record review-thread {
+        /// Opaque; pass it to `reply`.
+        id: string,
+        path: string,
+        /// `none` for a comment on the whole file.
+        line: option<u32>,
+        resolved: bool,
+        comments: list<review-comment>,
+    }
+
+    record feedback {
+        comments: list<pr-comment>,
+        reviews: list<review>,
+        threads: list<review-thread>,
+        /// The plugin stopped at a forge listing limit.
+        truncated: bool,
+    }
+
+    record posted-comment {
+        id: string,
+        url: string,
+    }
+
     /// Opens a pull request. Fails with `conflict` if an open pull request
     /// for the same head and base exists; callers then use `find-open`.
     create: func(request: new-pull-request) -> result<pull-request, error>;
@@ -140,6 +222,18 @@ interface pull-requests {
     get: func(id: pull-request-ref) -> result<pull-request, error>;
 
     update: func(id: pull-request-ref, changes: pull-request-update) -> result<pull-request, error>;
+
+    /// PR comments, reviews and review threads. With `since` (RFC 3339) only
+    /// PR comments and reviews created or updated at or after it, and threads
+    /// with at least one such review comment, each with all its comments.
+    /// Top-level PR comments are posted with `issues.add-comment`.
+    list-feedback: func(id: pull-request-ref, since: option<string>) -> result<feedback, error>;
+
+    /// Replies in a review thread. `thread` is an id from `list-feedback`
+    /// for the same pull request; any other id yields `invalid-input` or
+    /// `not-found`. Not idempotent: the host only retries when the error is
+    /// `rate-limited` or `transport` and accepts rare duplicates.
+    reply: func(id: pull-request-ref, thread: string, body: string) -> result<posted-comment, error>;
 }
 
 /// Issues in an issue tracker.

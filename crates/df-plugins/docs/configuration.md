@@ -269,7 +269,13 @@ private repositories on GitHub Free.
 
 ## Forgejo token scopes
 
-The bot account's token needs `write:repository` (create and update pull requests, read branches)
-and `write:issue` (comments on issues and pull requests). Read-only use needs `read:repository` and
-`read:issue`. The account needs write access to the repository.
+The bot account's token needs `write:repository` (create and update pull requests, read branches),
+`write:issue` (comments on issues and pull requests) and `read:user` (`list-feedback` reads the
+token's own account to label its comments `bot`; Forgejo 15 answers 403 without this scope).
+Read-only use needs `read:repository`, `read:issue` and `read:user`.
+
+The account needs write access to the repository for pull requests and comments. The review loop
+(`list-feedback`) needs repository admin: it reads each author's permission, which Forgejo only
+answers for site or repository admins. With write access only, `list-feedback` fails with
+`unauthorized`.
 
