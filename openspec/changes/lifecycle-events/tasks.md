@@ -111,7 +111,8 @@
 
 ## 8. Integration checks
 
-- [ ] 8.1 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo deny check`, `cargo xtask check-file-length` and `bazel --bazelrc=.bazelrc.agents build //...`; verify all pass
+- [x] 8.1 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo deny check`, `cargo xtask check-file-length` and `bazel --bazelrc=.bazelrc.agents build //...`; verify all pass
+  - Note: all pass, plus typos, `check-test-names`, `check-crates` and xtask clippy. `bazel build --lockfile_mode=error //...` built 157 of 158 top-level targets on macOS; the remaining one depends on `//deploy/images/claude-harness:layer`, whose musl runtime archive cannot be extracted on a case-insensitive file system (`hp70092A` vs `hp70092a`). Unrelated to this change; CI (Linux) builds it.
 
 ## Workflow follow-up
 
