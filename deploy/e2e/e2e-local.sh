@@ -27,6 +27,7 @@ forgejo_chart_version=17.3.2
 pg_port=15432
 forgejo_port=13000
 playwright_port=13001
+receiver_port=13002
 
 # Credentials of the throwaway cluster (not secrets).
 owner_password=e2e-owner-password
@@ -101,9 +102,10 @@ load_images() {
 }
 
 install_infrastructure() {
-  log "Installing cert-manager, PostgreSQL, Dex and the browser"
+  log "Installing cert-manager, PostgreSQL, Dex, the browser and the event receiver"
   kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
-  kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml
+  kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml \
+    -f deploy/e2e/receiver.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
   hc upgrade --install cert-manager-csi-driver "oci://quay.io/jetstack/charts/cert-manager-csi-driver" \
     --version "$csi_driver_version" --namespace cert-manager --wait --timeout 5m
@@ -114,6 +116,7 @@ install_infrastructure() {
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
   kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
+  kc -n receiver wait --for=condition=Available deployment/receiver --timeout=300s
 }
 
 forward() { # namespace service host-port service-port
@@ -192,16 +195,18 @@ run_suite() {
   log "Seeding and running the suite"
   forward postgres postgres "$pg_port" 5432
   forward playwright playwright "$playwright_port" 3000
+  forward receiver receiver "$receiver_port" 8080
   export E2E_DATABASE_URL="postgres://dark_factory_app:$app_password@127.0.0.1:$pg_port/dark_factory"
   cargo run -q -p df-e2e --bin seed
   export E2E_BASE_URL="http://$release-control-plane.$namespace.svc:8080"
   export E2E_PLAYWRIGHT_WS="ws://127.0.0.1:$playwright_port/?browser=chromium"
   export E2E_FORGEJO_URL="http://127.0.0.1:$forgejo_port"
   export E2E_FORGEJO_TOKEN="$forgejo_token"
+  export E2E_RECEIVER_URL="http://127.0.0.1:$receiver_port"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=1}"
-  cargo test -p df-e2e --test demo --test flow -- "${test_args[@]}"
+  cargo test -p df-e2e --test demo --test flow --test lifecycle_events -- "${test_args[@]}"
 }
 
 prepare_tools

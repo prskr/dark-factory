@@ -28,21 +28,21 @@ kind delete cluster --name df-e2e
 flowchart TD
     A[kind create cluster df-e2e] --> B[cert-manager, CSI driver]
     A --> I[bazel run //deploy:load_e2e_*, kind load image-archive]
-    B --> C[PostgreSQL, Dex, Playwright server, Forgejo]
+    B --> C[PostgreSQL, Dex, Playwright server, event receiver, Forgejo]
     C --> D[Forgejo bot user, token, factory/demo, issue 1, Secret]
     D --> E[helm install values-e2e.yaml]
     I --> E
     E --> F[seed, port-forwards]
-    F --> G["cargo test -p df-e2e --test demo --test flow -- --ignored --test-threads=1"]
+    F --> G["cargo test -p df-e2e --test demo --test flow --test lifecycle_events -- --ignored --test-threads=1"]
     G --> H[kind delete cluster]
 ```
 
 1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`).
-2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
-3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server and Forgejo (Helm chart, SQLite, no persistence).
+2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
+3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server, the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET) and Forgejo (Helm chart, SQLite, no persistence).
 4. Creates the Forgejo user `factory`, its token, the repository `factory/demo` and issue 1, and the Secret `forgejo-token` for the credential reference.
 5. Installs the chart with `deploy/values-e2e.yaml`.
-6. Seeds the database, port-forwards PostgreSQL, Forgejo and the Playwright server, and runs the ignored tests of `crates/df-e2e` one at a time.
+6. Seeds the database, port-forwards PostgreSQL, Forgejo, the Playwright server and the receiver, and runs the ignored tests of `crates/df-e2e` one at a time.
 7. Deletes the cluster on exit, also after a failure or `Ctrl-C`, unless `E2E_KEEP=1`.
 
 The browser runs in the cluster (`playwright` namespace). It opens the control plane at its Service URL and is redirected to Dex through cluster DNS, so the control plane and the browser see the same issuer URL (`http://dex.dex.svc:5556/dex`). The test host only needs the WebSocket of the Playwright server.
@@ -54,6 +54,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `image.*.tag` | `e2e`, `pullPolicy: IfNotPresent` | Images are loaded into the node. |
 | `oidc.issuerUrl`, `oidc.publicUrl` | `http://dex.dex.svc:5556/dex`, `http://dark-factory-control-plane.dark-factory.svc:8080` | Plain `http://` is accepted on any host; the control plane logs a startup warning. |
 | `oidc.rolesClaim`, `oidc.extraScopes` | `groups`, `[groups, offline_access]` | Dex returns the role as `groups`, as in local development. |
+| `controlPlane.extraArgs` | `[--unrestricted-project-subscriptions]` | The project subscription of the lifecycle event test targets the plain-http receiver in the cluster. Only the `dev-tools` image has the flag. |
 | `forge.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy and the project form accept `http://` repository URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |
 | `runs.keepAliveSeconds` | `0` | A run ends with its turn, so the follow-up message starts run 2 (the `loaded` session of the script). |
 | `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
@@ -77,22 +78,23 @@ All targets come from the environment, so the same tests run against any instanc
 | `E2E_FORGEJO_URL` | yes (tests) | Forgejo as the test host reaches it. |
 | `E2E_FORGEJO_TOKEN` | yes (tests) | Token of the bot user. |
 | `E2E_USER`, `E2E_PASSWORD` | yes (tests) | Login at the identity provider. |
+| `E2E_RECEIVER_URL` | yes (`lifecycle_events`) | The lifecycle event receiver as the test host reaches it, e.g. `http://127.0.0.1:13002`. The control plane reaches it as `http://receiver.receiver.svc:8080/hook`. |
 
 ### `just e2e-local` (`deploy/e2e/e2e-local.sh`)
 
 | Variable | Default | Effect |
 |---|---|---|
 | `E2E_KEEP` | unset | `1` keeps the cluster after the run. |
-| `E2E_TEST_ARGS` | `--ignored --test-threads=1` | Arguments after `--` of `cargo test -p df-e2e --test demo --test flow`, e.g. a test name. |
+| `E2E_TEST_ARGS` | `--ignored --test-threads=1` | Arguments after `--` of `cargo test -p df-e2e --test demo --test flow --test lifecycle_events`, e.g. a test name. |
 | `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver installer is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
 
-Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright).
+Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright), `13002` (event receiver).
 
 ## Tests
 
-`cargo test -p df-e2e --test demo --test flow -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
+`cargo test -p df-e2e --test demo --test flow --test lifecycle_events -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
 
 | Test | Scenarios (`openspec/specs/task-delivery/spec.md`) |
 |---|---|
@@ -104,6 +106,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 | `denied_host_is_requested_and_the_approval_lets_the_retry_through` | demo step 4 of iteration 2 (`openspec/changes/archive/2026-11-02-iter2-egress-approvals`): the proxy denies `pypi.org:443`, the control plane raises a non-blocking `network-access` request, the test approves it for the task in `/requests`, and the agent's retry in the same turn succeeds within 10 s of the approval (UI included). Needs internet access from the cluster: the gateway never connects to private or cluster addresses, so no in-cluster host can stand in |
 | `committed_secret_is_rejected_and_the_amended_commit_closes_the_request` | demo step 2 of iteration 2 (`openspec/changes/iter2-push-checks`): the Git proxy rejects the commit with a test GitHub token (`df:secret-scan`, masked `ghp_********`), the control plane raises a `push-check-exception` request and queues `push.rejected`; the agent amends its unpushed commit, the next push passes and closes the request (`push-accepted`). No push record, message or forge file holds the token |
 | `protected_path_passes_after_the_exception_is_approved` | demo step 3 of iteration 2 without the agent's question: every push of the `.forgejo/workflows/ci.yml` change is rejected (`df:protected-path`) until the test approves the request in `/requests`; the commit reaches Forgejo after the next turn |
+| `project_subscription_receives_a_signed_sandbox_provisioned_event` | lifecycle events (`openspec/changes/lifecycle-events`): the admin adds a project subscription for `sandbox.provisioned` in the UI, a task of `DF` starts a run, the receiver gets the event of that task, and its `webhook-signature` verifies with the public key shown on the page; the page then shows `HTTP 204` |
 
 Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-local`.
 
@@ -142,7 +145,7 @@ Scripts commit with the identity of the runtime-owned `.git/config`; the Git pro
 The suite contains nothing specific to kind. Point the `E2E_*` variables at an instance that has the seed data and run:
 
 ```bash
-cargo test -p df-e2e --test demo --test flow -- --ignored --test-threads=1
+cargo test -p df-e2e --test demo --test flow --test lifecycle_events -- --ignored --test-threads=1
 ```
 
 The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` installs the driver into the user cache with `cargo install playwright-rs` from a directory outside the repository (which does not read that setting); on another machine run `playwright-rs install --driver-only` once.

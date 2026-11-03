@@ -1623,12 +1623,14 @@ name = "df-e2e"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "base64 0.23.1",
  "df-core",
  "df-db",
  "df-test-postgres",
  "playwright-rs",
  "regex",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "sqlx",

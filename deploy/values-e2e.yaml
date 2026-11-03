@@ -103,6 +103,9 @@ networkPolicy:
     allowAll: true
 
 controlPlane:
+  # The e2e image is a `dev-tools` build (//deploy:load_e2e_control_plane): project subscriptions
+  # may target the plain-http receiver in the cluster (deploy/e2e/receiver.yaml).
+  extraArgs: [--unrestricted-project-subscriptions]
   resources:
     requests:
       cpu: 50m

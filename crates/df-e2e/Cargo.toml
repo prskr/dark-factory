@@ -24,4 +24,6 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 df-test-postgres.workspace = true
+ring.workspace = true

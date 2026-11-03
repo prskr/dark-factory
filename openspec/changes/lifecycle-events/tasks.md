@@ -78,7 +78,8 @@
   - unknown event types are rejected;
   - each change writes an `event_subscription.*` audit entry with URL and events;
   - last delivery status and the public key are shown.
-- [ ] 5.6 Add an e2e scenario: the admin adds a subscription to a local receiver, a run starts, and the receiver gets a verifiable `sandbox.provisioned`. Verify with `just e2e-local`
+- [x] 5.6 Add an e2e scenario: the admin adds a subscription to a local receiver, a run starts, and the receiver gets a verifiable `sandbox.provisioned`. Verify with `just e2e-local`
+  - Note: the receiver runs in the cluster (`deploy/e2e/receiver.yaml`) at a plain-http, cluster-internal address. The e2e therefore uses a control plane image built with the `dev-tools` feature (`//crates/dark-factory:dark-factory-dev`, loaded only by `e2e-local.sh`, never pushed) and `controlPlane.extraArgs: [--unrestricted-project-subscriptions]` (design D4, "Development switch"). Verified with `deploy/e2e/e2e-local.sh` (`project_subscription_receives_a_signed_sandbox_provisioned_event` passes).
 
 ## 6. Helm chart
 
