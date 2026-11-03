@@ -92,9 +92,11 @@ sequenceDiagram
   VM->>CP: Enroll(token, CSR, new WireGuard public key)  via relay
   CP->>CM: CertificateRequest (SAN set by CP)
   CM-->>CP: certificate
-  CP->>VG: peer key replaced via watch
-  CP-->>VM: certificate
-  VM->>VM: switch wg0 to new key, extract runtime + harness, podman kube play
+  CP->>VG: next key added to the peer via watch (bootstrap key stays valid)
+  CP-->>VM: certificate (over the bootstrap session)
+  VM->>VG: handshake with the new key
+  VG->>VG: drop the bootstrap key after the first new-key handshake
+  VM->>VM: extract runtime + harness, podman kube play
   VM->>CP: Hello over mTLS → Assign …
   VM->>CP: RunReport
   CP->>PX: stop VM, move task disk back to parking VM, delete VM and ISO
@@ -142,7 +144,8 @@ The vpn-gateway listens on its tunnel address (default `10.200.0.1`) for a fixed
 - **CIDR:** configurable, default `10.200.0.0/16`, the vpn-gateway on `.0.1`. IPv4 only. The chart rejects overlaps with the configured pod and Service CIDRs.
 - **Allocation:** one /32 per run, allocated by the control plane in PostgreSQL (unique constraint). An address is reused only 24 h after its run ended, longer than any certificate issued for it.
 - **Exposure:** the chart exposes the vpn-gateway's UDP port as a Service of a configurable type and optionally a Gateway API `UDPRoute` with configurable `parentRefs`. How it becomes reachable (LoadBalancer, NetBird, a Gateway) is the operator's choice.
-- **Endpoint:** VMs dial `vpnGateway.endpoint` (`host:port`). The VM has no DNS before its tunnel is up, so the control plane resolves the host at provisioning and writes the IP into the VM's WireGuard configuration and into the per-VM firewall rule (§9.4). `vpnGateway.endpointCIDRs` overrides the firewall rule's destination when the endpoint sits behind several or changing addresses. NAT on the way (NetBird, load balancers) is irrelevant: the WireGuard key is the identity.
+- **Endpoint:** VMs dial `vpnGateway.endpoint` (`host:port`). The VM has no DNS before its tunnel is up, so the control plane resolves the host at provisioning and writes the IP into the VM's WireGuard configuration and into the per-VM firewall rule (§9.4). `vpnGateway.endpointCIDRs` overrides the firewall rule's destination when the endpoint sits behind several addresses. NAT on the way (NetBird, load balancers) is irrelevant: the WireGuard key is the identity.
+- **Stable endpoint:** the resolved IP is fixed for the lifetime of a VM; there is no re-resolution inside the VM (it has no DNS before the tunnel). Operators expose the vpn-gateway on a stable address (a reserved LoadBalancer IP, a fixed NetBird address). If the address changes anyway, running VMs lose the tunnel, their runs fail as `sandbox_lost` or `connect_timeout` and resume on new VMs that get the new address; `endpointCIDRs` widens the firewall rule, it does not update running VMs.
 
 ### 5.6 DNS
 - VM sandboxes require the gateway DNS resolver (`egress.md` §12); there is no interim solution. The gateway attributes queries by tunnel IP like proxy connections and answers only allowlisted and internal names (control plane, gateway), so DNS stays closed as an exfiltration channel.
@@ -158,10 +161,17 @@ The first Proxmox version has no cluster targets (e.g. NativeLink RBE): the rela
 1. Before the VM is created, the control plane creates a **single-use bootstrap token** (random, minutes TTL, stored hashed, bound to the run and its tunnel IP) and a **bootstrap WireGuard key pair**, and registers the public key as the run's peer.
 2. Token, bootstrap WireGuard private key, CA bundle, relay endpoint and image digests go onto the per-run ISO (§9.2). No mTLS key does.
 3. `df-bootstrap` brings up `wg0` with the bootstrap key, generates the mTLS private key and a **new WireGuard key pair** locally, and calls `Enroll(token, CSR, new WireGuard public key)` on the enrollment port. The enrollment listener is server-authenticated TLS only, accepts exactly this RPC and is reachable only through the relay.
-4. The control plane checks token, expiry and that the PROXY header's tunnel IP is the run's, marks the token spent, submits a cert-manager `CertificateRequest` with the CSR, replaces the peer's public key with the new one, and returns the certificate.
-5. `df-bootstrap` switches `wg0` to the new key and writes `tls.crt`, `tls.key`, `ca.crt` to the directory the runtime reads (`DF_TLS_DIR`), the same interface csi-driver provides in pods.
+4. The control plane checks token, expiry and that the PROXY header's tunnel IP is the run's, submits a cert-manager `CertificateRequest` with the CSR, records the CSR's public key and the new WireGuard key with the run (this marks the token spent), adds the new WireGuard key to the run's peer as its **next key**, and returns the certificate. The response travels over the bootstrap session, which stays valid.
+5. `df-bootstrap` writes `tls.crt`, `tls.key`, `ca.crt` to the directory the runtime reads (`DF_TLS_DIR`), the same interface csi-driver provides in pods, and switches `wg0` to the new key.
+6. The vpn-gateway drops the bootstrap key on the first successful handshake with the next key, and reports it to the control plane, which then removes the bootstrap key from the desired peer state. Until then, both keys map to the run's /32 (the vpn-gateway's peer table is its own, not the kernel's one-peer-per-address rule).
 
-Everything on the ISO — token and bootstrap key — is worthless after enrollment.
+Key handoff rules:
+- **Ordering:** the next key is in the vpn-gateway before the certificate response is sent (the control plane waits for the watch acknowledgement, at most 10 s; otherwise `Enroll` fails and the VM retries). The bootstrap key is never removed before the VM has completed a handshake with the next key, so the response always has a valid session.
+- **Fallback:** if `wg0` gets no handshake with the next key within 30 s, `df-bootstrap` switches back to the bootstrap key and calls `Enroll` again.
+- **Lost response or retry:** `Enroll` is idempotent per run. A repeated call with the same token and the same CSR public key and WireGuard key returns the recorded certificate (re-issued if needed) instead of being rejected; a call with the same token and different keys is rejected. This holds until the bootstrap key is dropped.
+- **Bounds:** the bootstrap token and key are valid for at most 5 minutes after the VM starts. A run that has not completed enrollment by then never reaches `Hello` and fails with `connect_timeout`; teardown and the usual automatic resume start a new run with a new token, key and tunnel address.
+
+Everything on the ISO — token and bootstrap key — is worthless once the vpn-gateway has dropped the bootstrap key.
 
 ### 6.2 Certificates
 - URI SAN `spiffe://dark-factory/sandbox/<run-id>`, set by the control plane, never taken from the CSR. Kubernetes pods keep the csi-driver SAN `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>`; identity resolution dispatches by SAN shape to the provider that issued it.
