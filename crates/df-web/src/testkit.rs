@@ -322,7 +322,7 @@ impl TestApp {
             show_hidden_blocks,
             allow_plain_http,
             max_auto_resumes: 3,
-            approval_types: df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval)),
+            approval_types: Self::approval_types(),
         };
         Self {
             router: router(state),
@@ -336,7 +336,9 @@ impl TestApp {
 
     /// The approval types the app was built with.
     pub(crate) fn approval_types() -> df_db::requests::ApprovalTypes {
-        df_db::requests::ApprovalTypes::default().with(Arc::new(FakeApproval))
+        df_db::requests::ApprovalTypes::default()
+            .with(Arc::new(FakeApproval))
+            .with(Arc::new(df_db::network_access::NetworkAccess))
     }
 
     /// A logged-in `board-member` session: the `Cookie` header value.
@@ -660,6 +662,16 @@ pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{marker}: {html}"));
     let start = html[..at].rfind('<').unwrap();
     &html[start..=(start + html[start..].find('>').unwrap())]
+}
+
+/// Whether the tag has the `disabled` attribute (not just a `disabled:` class variant).
+pub(crate) fn has_disabled_attribute(tag: &str) -> bool {
+    tag.contains(" disabled>") || tag.contains(" disabled ")
+}
+
+/// How many elements of `html` have the `disabled` attribute.
+pub(crate) fn count_disabled_attributes(html: &str) -> usize {
+    html.matches(" disabled>").count() + html.matches(" disabled ").count()
 }
 
 /// An approval type for tests: scopes task and project, applying it does nothing.

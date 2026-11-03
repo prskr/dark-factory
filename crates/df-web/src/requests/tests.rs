@@ -7,6 +7,8 @@ use serde_json::json;
 
 use crate::testkit::{SseReader, TestApp, add_event, form, insert_run, new_task, seed, text};
 
+mod deny_always;
+
 const LIVE: Duration = Duration::from_secs(1);
 const _: () = assert!(LIVE.as_millis() * 2 <= super::POLL.as_millis());
 

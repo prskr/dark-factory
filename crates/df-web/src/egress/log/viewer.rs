@@ -8,10 +8,11 @@ use std::collections::{HashMap, VecDeque};
 use df_proto::gateway::v1::{FlowEvent, Phase};
 use maud::{Markup, html};
 
+use super::context::Context;
 use super::filter::Filter;
 use super::graph::{self, Edges};
 use super::rows::{row, row_id};
-use crate::components::{ButtonKind, ProjectHosts, action_class};
+use crate::components::{ButtonKind, action_class};
 
 /// Flows a viewer keeps track of (open ones and their edges). A gateway pod keeps 10,000
 /// events, so more are rare; past the cap the set is cleared and the closes of those flows are
@@ -85,7 +86,7 @@ pub(in crate::egress) struct Viewer {
     /// The rows the page has, newest first, by row id (`None` for a gap row). The page drops
     /// rows past the row limit from the bottom, and so does this list.
     table: VecDeque<Option<String>>,
-    projects: ProjectHosts,
+    context: Context,
     edges: Edges,
     counts: Counts,
     sent_graph: Option<String>,
@@ -93,10 +94,10 @@ pub(in crate::egress) struct Viewer {
 }
 
 impl Viewer {
-    pub(in crate::egress) fn new(filter: Filter, projects: ProjectHosts) -> Self {
+    pub(in crate::egress) fn new(filter: Filter, context: Context) -> Self {
         Self {
             filter,
-            projects,
+            context,
             open: HashMap::new(),
             table: VecDeque::new(),
             edges: Edges::default(),
@@ -169,7 +170,7 @@ impl Viewer {
                         }
                     }
                     None => batch.replacements.push_str(
-                        &partial(&format!("#{id}"), "outerMorph", &row(event, &self.projects))
+                        &partial(&format!("#{id}"), "outerMorph", &row(event, &self.context))
                             .into_string(),
                     ),
                 },
@@ -197,7 +198,7 @@ impl Viewer {
             self.forget_row(row_key(event));
         }
         Backlog {
-            rows: html! { @for event in kept { (row(event, &self.projects)) } },
+            rows: html! { @for event in kept { (row(event, &self.context)) } },
             graph: self.render_graph(),
             counts: self.counts.clone(),
         }
@@ -232,7 +233,7 @@ impl Viewer {
                 let trimmed = self.table.pop_back().flatten();
                 self.forget_row(trimmed);
             }
-            let rows = html! { @for event in rows.iter().rev() { (row(event, &self.projects)) } };
+            let rows = html! { @for event in rows.iter().rev() { (row(event, &self.context)) } };
             body.push_str(&partial("#flows tbody", "afterbegin", &rows).into_string());
         }
         body.push_str(&replacements);
@@ -248,7 +249,7 @@ impl Viewer {
     }
 
     fn render_graph(&self) -> String {
-        graph::render(&graph::model(&self.edges, &self.filter), &self.projects).into_string()
+        graph::render(&graph::model(&self.edges, &self.filter), &self.context).into_string()
     }
 
     /// The graph and the counts, each only if it differs from what the page has.

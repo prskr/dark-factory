@@ -4,12 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use df_db::catalog::Actor;
-use df_db::{EntryKind, HostScope, Notification};
+use df_db::{EntryKind, Notification};
 
-use super::{BrokenServices, add_host, allowed, app_with_egress, new_viewer};
+use super::{BrokenServices, add_host, add_task_host, allowed, app_with_egress, new_viewer};
 use crate::egress::log::Filter;
-use crate::testkit::{TestApp, actor, form, header_str, new_task, seed, text};
+use crate::testkit::{TestApp, form, header_str, new_task, seed, text};
 
 #[tokio::test]
 async fn an_instance_entry_applies_to_every_project_and_is_listed() {
@@ -260,23 +259,7 @@ async fn task_entries_are_listed_with_their_task_key_and_can_be_removed() {
     let seed = seed(&app.pool).await;
     let task = new_task(&app.pool, &seed, "Fix CI").await;
     let cookie = app.login().await;
-    let (principal, roles) = actor();
-    let actor = Actor {
-        principal: &principal,
-        roles: &roles,
-    };
-    let mut tx = app.pool.begin().await.unwrap();
-    let entry = df_db::create_http_host_entry(
-        &mut tx,
-        HostScope::Task(task.id.as_uuid()),
-        "pypi.org",
-        443,
-        actor,
-        None,
-    )
-    .await
-    .unwrap();
-    tx.commit().await.unwrap();
+    let entry = add_task_host(&app, task.id.as_uuid(), "pypi.org").await;
 
     let page = text(app.get("/egress/allowlist", &cookie).await).await;
     let row = row_of(&page, ">pypi.org<");
@@ -309,7 +292,7 @@ async fn task_entries_are_listed_with_their_task_key_and_can_be_removed() {
 }
 
 /// The markup of the table row that contains `marker`.
-fn row_of<'a>(page: &'a str, marker: &str) -> &'a str {
+pub(super) fn row_of<'a>(page: &'a str, marker: &str) -> &'a str {
     let at = page.find(marker).unwrap();
     let start = page[..at].rfind("<tr").unwrap();
     &page[start..at + page[at..].find("</tr>").unwrap()]

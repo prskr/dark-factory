@@ -482,6 +482,7 @@ async fn ask_question(
         Err(
             e @ (RequestError::Invalid(_)
             | RequestError::TooManyPending
+            | RequestError::Refused(_)
             | RequestError::UnknownType(_)),
         ) => Outcome::error(e.to_string()),
         Err(e) => return Err(e.into()),
@@ -548,6 +549,7 @@ async fn request_approval(
         Err(
             e @ (RequestError::Invalid(_)
             | RequestError::TooManyPending
+            | RequestError::Refused(_)
             | RequestError::UnknownType(_)),
         ) => Outcome::error(e.to_string()),
         Err(e) => return Err(e.into()),
@@ -1255,6 +1257,45 @@ mod tests {
             message(&res).contains("already allowed"),
             "{}",
             message(&res)
+        );
+        assert!(!res.await_input_after_turn);
+        let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0);
+    }
+
+    #[tokio::test]
+    async fn request_approval_for_a_denied_host_returns_the_policy_error_and_stores_nothing() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let (peter, roles) = (
+            Principal::human(df_core::UserId::new(), "Peter"),
+            Vec::new(),
+        );
+        let actor = df_db::catalog::Actor {
+            principal: &peter,
+            roles: &roles,
+        };
+        let mut tx = pool.begin().await.unwrap();
+        df_db::egress::create_deny_rule(&mut tx, "*.datadoghq.com", actor, None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let res = execute(
+            &env.ctx,
+            &rc,
+            network_access("http-intake.logs.us5.datadoghq.com", true),
+        )
+        .await;
+
+        assert!(res.is_error);
+        assert_eq!(
+            message(&res),
+            "http-intake.logs.us5.datadoghq.com is denied by instance policy (deny rule \
+             *.datadoghq.com); do not request it again"
         );
         assert!(!res.await_input_after_turn);
         let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_requests")

@@ -11,18 +11,23 @@ Every denied `not-allowlisted` host raises a `network-access` request. Some host
   - The control plane ignores denial reports for a host that matches a deny rule.
   - It rejects a `network-access` request that the agent raises for such a host, with an error saying the host is denied by instance policy.
   - Creating a deny rule denies matching pending requests on behalf of the system principal.
-- **Egress rules page:** the "New egress rule" dialog gets an Allow/Deny toggle (Allow is the default). Deny rules are listed in the same table with a Deny badge, port "any" and scope "instance".
+- **Egress rules page:**
+  - The "New egress rule" dialog gets an Allow/Deny toggle (Allow is the default) in one row with "Applies to". Deny disables "Applies to" (every project) and Port (`any`).
+  - The rules table gets an Effect column (Allow or Deny badge). Deny rules show port "any" and scope "Everywhere".
+  - The table gets a search field (host, service or scope) and pages of 25 rows.
 - **Request inbox:** a `network-access` request offers "Deny always". It denies the request and creates an exact-host deny rule.
 - **Network traffic page:**
   - A `not-allowlisted` row offers "Deny always" next to the allow actions.
   - Rows and graph nodes whose host matches a deny rule show "Deny rule" as the matched rule and offer no actions.
-- **PenPot:** the egress rule dialog, the Deny badge, the "Deny always" action on the request card and the traffic row action are drawn before the code changes.
+- **PenPot:** the egress rule dialog, the Effect column, search and pagination, the "Deny always" action on the request card and the traffic row action are drawn before the code changes.
 
 Out of scope:
 - Hard deny that overrides allow rules and is enforced by the gateway: rejected. The silencer covers the need without protocol changes.
 - Deny rules at project scope: backlog, add when a real case appears.
 - Hiding or filtering denied rows on the traffic page: backlog, together with the existing traffic filter work.
 - Checks for overlap between allow and deny rules: rejected. An allow rule is a deliberate human act.
+- Editing egress rules (the design has an edit dialog): backlog.
+- Paging the rules in SQL: backlog, add when lists exceed a few hundred rules.
 
 ## Capabilities
 
@@ -43,7 +48,11 @@ None.
 - Code:
   - `df-db` `egress.rs`: create, list and match deny rules, and deny pending requests under the existing serialization lock.
   - The control plane's denial-report handler and request raise path.
-  - `df-web`: the egress rules dialog and table, the request card, and the traffic viewer, which loads deny rules once per connection like `project_hosts`.
+  - `df-web`: the egress rules dialog and table (Effect column, search, pagination), the request card, and the traffic viewer, which loads deny rules once per connection like `project_hosts`.
 - No changes to the contract, the gateway or `PolicyWatch`.
 - Depends on the archived `iter2-egress-approvals` (task scope, `network-access` requests, actions in the traffic log).
-- PenPot file "App Design": Egress rules board (dialog, table), Requests boards (Desktop, Phone), Network traffic board.
+- PenPot file "App Design" (done):
+  - Network: Egress rules · new rule, allow; · new rule, deny; · deny rule listed; · search and pages; · search results; · table with task entries; · edit (from traffic view).
+  - Network - Graph: Network · deny rule and deny always.
+  - Tasks: Requests · deny always.
+  - Tasks - Phone: Phone · requests, deny always.

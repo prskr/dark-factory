@@ -5,12 +5,13 @@ use df_proto::gateway::v1::{FlowEvent, Phase};
 use maud::{Markup, html};
 use serde_json::json;
 
-use super::allow::AllowTarget;
+use super::allow::{AllowTarget, not_allowlisted};
+use super::context::{Context, deny_rule_href};
+use super::deny;
 use super::details::reason_explanation;
 use super::filter::is_blocked;
-use crate::components::{
-    HostIconSize, ICON_BUTTON_CLASS, Icon, ProjectHosts, Tone, host_icon, icon, tone_badge,
-};
+use super::toast::highlight_href;
+use crate::components::{HostIconSize, ICON_BUTTON_CLASS, Icon, Tone, host_icon, icon, tone_badge};
 
 const CELL: &str = "px-3 py-3";
 
@@ -151,19 +152,21 @@ pub(super) fn bytes_label(bytes: u64) -> String {
 /// Link to the rules page with the rules of the matched pattern highlighted; `None` if no rule
 /// matched.
 pub(super) fn rule_href(event: &FlowEvent) -> Option<String> {
-    (!event.matched_rule.is_empty()).then(|| {
-        let mut query = url::form_urlencoded::Serializer::new(String::new());
-        query.append_pair(
-            "highlight",
-            &format!("{}:{}", event.matched_rule, event.port),
-        );
-        format!("/egress/allowlist?{}", query.finish())
-    })
+    (!event.matched_rule.is_empty())
+        .then(|| highlight_href(&format!("{}:{}", event.matched_rule, event.port)))
+}
+
+/// The deny rule pattern that silences the event: a blocked `not-allowlisted` event whose host a
+/// deny rule matches.
+fn deny_rule<'a>(event: &FlowEvent, context: &'a Context) -> Option<&'a str> {
+    not_allowlisted(event)
+        .then(|| context.deny_rule_for(&event.host))
+        .flatten()
 }
 
 /// The event as the details panel shows it. Everything is text, formatted here; the two pieces of
 /// markup (`icon`, `pill`) are built from fixed tables, never from the event's strings.
-fn flow_json(event: &FlowEvent, target: &str, projects: &ProjectHosts) -> String {
+fn flow_json(event: &FlowEvent, target: &str, context: &Context) -> String {
     let outcome = Outcome::of(event);
     let status = if event.http_status != 0 {
         event.http_status.to_string()
@@ -171,9 +174,10 @@ fn flow_json(event: &FlowEvent, target: &str, projects: &ProjectHosts) -> String
         outcome.label().to_string()
     };
     let closed = event.phase() == Phase::Closed;
+    let deny_rule = deny_rule(event, context);
     json!({
         "destination": target,
-        "icon": host_icon(&event.host, HostIconSize::Panel, projects).into_string(),
+        "icon": host_icon(&event.host, HostIconSize::Panel, &context.projects).into_string(),
         "pill": outcome.pill().into_string(),
         "time": time_label(event),
         "sandbox": sandbox_label(event),
@@ -188,15 +192,15 @@ fn flow_json(event: &FlowEvent, target: &str, projects: &ProjectHosts) -> String
         "gateway_pod": event.gateway_pod,
         "reason": event.reason,
         "explanation": reason_explanation(&event.reason).unwrap_or(""),
-        "rule": event.matched_rule,
-        "rule_href": rule_href(event),
+        "rule": deny_rule.unwrap_or(&event.matched_rule),
+        "rule_href": deny_rule.map(deny_rule_href).or_else(|| rule_href(event)),
     })
     .to_string()
 }
 
 /// A row of the events table. In a narrow panel (container query, `@[680px]` is the wide
 /// variant) the verdict column is hidden and the verdict shows as the edge of the row.
-pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
+pub(super) fn row(event: &FlowEvent, context: &Context) -> Markup {
     if event.gap {
         return html! {
             tr class="border-t border-line" {
@@ -220,9 +224,12 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
         }
     };
     let rule = rule_href(event).filter(|_| outcome != Outcome::Blocked);
-    let allow = AllowTarget::of_event(event);
+    let denied = deny_rule(event, context);
+    // A denied host offers neither allow nor deny; the other `not-allowlisted` rows offer both.
+    let allow = AllowTarget::of_event(event).filter(|_| denied.is_none());
+    let deny_host = (not_allowlisted(event) && denied.is_none()).then_some(event.host.as_str());
     html! {
-        tr id=[id.as_deref()] class={"border-t border-line" (tint)} data-flow=(flow_json(event, &target, projects)) data-outcome=(outcome.label().to_ascii_lowercase()) {
+        tr id=[id.as_deref()] class={"border-t border-line" (tint)} data-flow=(flow_json(event, &target, context)) data-outcome=(outcome.label().to_ascii_lowercase()) {
             td class={"font-mono text-[13px] text-muted " (CELL) " " (edge) " @[680px]:border-l-0"} { (time) }
             td class=(CELL) {
                 span class="font-mono text-[13px]" { (sandbox_label(event)) }
@@ -232,7 +239,7 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
             }
             td class=(CELL) {
                 span class="flex items-center gap-2" {
-                    (host_icon(&event.host, HostIconSize::Table, projects))
+                    (host_icon(&event.host, HostIconSize::Table, &context.projects))
                     span class="min-w-0 truncate font-mono text-[13px]" { (target) }
                     span class="sr-only @[680px]:hidden" { (outcome.label()) }
                 }
@@ -247,6 +254,12 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
                     (details_button(&target, &time, "inline-flex h-9 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk hover:text-ink", html! { "Details" }))
                     @if let Some(allow) = &allow {
                         (allow.button("inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-accent-text hover:bg-sunk [&_svg]:size-4", html! { (icon(Icon::Plus)) "Allow" }))
+                    }
+                    @if let Some(host) = deny_host {
+                        (deny::button(host, "inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-muted hover:bg-sunk hover:text-ink", html! { "Deny always" }))
+                    }
+                    @if let Some(pattern) = denied {
+                        a href=(deny_rule_href(pattern)) aria-label={"Deny rule " (pattern)} class="inline-flex h-9 items-center rounded-lg px-3 text-sm text-accent-text hover:bg-sunk" { "Deny rule" }
                     }
                     @if let Some(href) = &rule {
                         a href=(href) class="inline-flex h-9 items-center rounded-lg px-3 text-sm text-accent-text hover:bg-sunk" { "Rule" }
@@ -263,6 +276,12 @@ pub(super) fn row(event: &FlowEvent, projects: &ProjectHosts) -> Markup {
                         (details_button(&target, &time, "flex min-h-10 w-full items-center rounded-lg px-3 text-sm hover:bg-sunk", html! { "Request details" }))
                         @if let Some(allow) = &allow {
                             (allow.button("flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm hover:bg-sunk [&_svg]:size-4", html! { (icon(Icon::Plus)) "Allow…" }))
+                        }
+                        @if let Some(host) = deny_host {
+                            (deny::button(host, "flex min-h-10 w-full items-center rounded-lg px-3 text-sm hover:bg-sunk", html! { "Deny always" }))
+                        }
+                        @if let Some(pattern) = denied {
+                            a href=(deny_rule_href(pattern)) aria-label={"Deny rule " (pattern)} class="flex min-h-10 items-center rounded-lg px-3 text-sm hover:bg-sunk" { "Deny rule" }
                         }
                         @if let Some(href) = &rule {
                             a href=(href) class="flex min-h-10 items-center rounded-lg px-3 text-sm hover:bg-sunk" { "Rule" }
@@ -299,7 +318,7 @@ mod tests {
 
     /// The row without project hosts.
     fn row(event: &FlowEvent) -> Markup {
-        super::row(event, &ProjectHosts::default())
+        super::row(event, &Context::default())
     }
 
     fn event(verdict: Verdict, phase: Phase) -> FlowEvent {
@@ -512,7 +531,7 @@ mod tests {
         let mut denied = event(Verdict::Denied, Phase::Closed);
         denied.reason = "not-allowlisted".into();
         let json: serde_json::Value =
-            serde_json::from_str(&flow_json(&denied, "x:22", &ProjectHosts::default())).unwrap();
+            serde_json::from_str(&flow_json(&denied, "x:22", &Context::default())).unwrap();
         assert_eq!(json["reason"], "not-allowlisted");
         assert!(
             json["explanation"]
@@ -526,7 +545,7 @@ mod tests {
         // An unknown code is shown as it is, without explanation.
         denied.reason = "from-the-future".into();
         let json: serde_json::Value =
-            serde_json::from_str(&flow_json(&denied, "x:22", &ProjectHosts::default())).unwrap();
+            serde_json::from_str(&flow_json(&denied, "x:22", &Context::default())).unwrap();
         assert_eq!(json["explanation"], "");
     }
 
@@ -536,12 +555,12 @@ mod tests {
         plain.http_status = 200;
         plain.method = "GET".into();
         let json: serde_json::Value =
-            serde_json::from_str(&flow_json(&plain, "x:22", &ProjectHosts::default())).unwrap();
+            serde_json::from_str(&flow_json(&plain, "x:22", &Context::default())).unwrap();
         assert_eq!(json["status"], "200");
         let mut open = event(Verdict::Allowed, Phase::Opened);
         open.bytes_out = 99;
         let json: serde_json::Value =
-            serde_json::from_str(&flow_json(&open, "x:22", &ProjectHosts::default())).unwrap();
+            serde_json::from_str(&flow_json(&open, "x:22", &Context::default())).unwrap();
         assert_eq!(json["bytes_out"], "");
         assert_eq!(json["duration"], "");
         assert_eq!(json["status"], "Open");

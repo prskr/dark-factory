@@ -9,6 +9,7 @@ use futures::stream::BoxStream;
 
 use crate::WebState;
 use crate::components::ProjectHosts;
+use log::Context;
 
 mod allowlist;
 mod log;
@@ -56,6 +57,16 @@ async fn project_hosts(state: &WebState) -> ProjectHosts {
     }
 }
 
+/// What the traffic page needs per connection: the project hosts and the deny rules. Like the
+/// hosts, a failed query is logged and the page works without the deny labels.
+async fn context(state: &WebState) -> Context {
+    let deny = df_db::egress::deny_patterns(&state.pool)
+        .await
+        .inspect_err(|error| tracing::warn!(%error, "listing deny rules for the traffic page"))
+        .unwrap_or_default();
+    Context::new(project_hosts(state).await, deny)
+}
+
 pub fn routes() -> Router<WebState> {
     Router::new()
         .route("/egress/allowlist", get(allowlist::list))
@@ -66,5 +77,6 @@ pub fn routes() -> Router<WebState> {
         .route("/egress/allowlist/{id}", delete(allowlist::remove))
         .route("/egress/log", get(log::page))
         .route("/egress/log/events", get(log::events))
-        .route("/egress/log/allow", get(log::allow_dialog).post(log::allow))
+        .route(log::ALLOW, get(log::allow_dialog).post(log::allow))
+        .route(log::DENY, post(log::deny))
 }

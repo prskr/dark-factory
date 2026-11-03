@@ -10,10 +10,13 @@ use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::catalog::Actor;
-use crate::egress::{HostScope, allowlist_covers, create_http_host_entry, lock_allowlist};
+use crate::egress::{
+    HostScope, allowlist_covers, create_deny_rule, create_http_host_entry, deny_rule_for,
+    lock_allowlist,
+};
 use crate::pool::DbError;
 use crate::requests::{
-    ApprovalType, NewRequest, Raise, Raised, RequestError, RequestKind, RequestRow, Scope,
+    ApprovalType, NewRequest, Raise, Raised, RequestError, RequestKind, RequestRow, Scope, deny_in,
     raise_in, record_approval_in,
 };
 use crate::tasks::TaskRow;
@@ -73,6 +76,19 @@ impl ApprovalType for NetworkAccess {
         lock_allowlist(tx).await
     }
 
+    async fn refused(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        payload: &Value,
+    ) -> Result<Option<String>, RequestError> {
+        let (host, _port) = requested_target(payload)?;
+        Ok(deny_rule_for(&mut **tx, &host).await?.map(|pattern| {
+            format!(
+                "{host} is denied by instance policy (deny rule {pattern}); do not request it again"
+            )
+        }))
+    }
+
     async fn granted(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -124,6 +140,8 @@ pub enum DenialOutcome {
     RunEnded,
     /// The run's task is completed or cancelled.
     TaskClosed,
+    /// A deny rule matches the host; nothing was raised.
+    DenyRule,
 }
 
 /// Raises a non-blocking `network-access` request, raised by the control plane, for a
@@ -170,6 +188,9 @@ pub async fn raise_from_denial(
         TaskStatus::Completed | TaskStatus::Cancelled
     ) {
         return Ok(DenialOutcome::TaskClosed);
+    }
+    if deny_rule_for(&mut *tx, &host).await?.is_some() {
+        return Ok(DenialOutcome::DenyRule);
     }
     if allowlist_covers(&mut tx, task_id, &host, port).await? {
         return Ok(DenialOutcome::Raised(Raised::AlreadyGranted));
@@ -233,6 +254,79 @@ pub(crate) async fn settle(
         }
     }
     Ok(())
+}
+
+/// Denies, as the system principal, the pending `network-access` requests that the new deny rule
+/// `pattern` matches on any port, except `deciding`. Runs in the rule's transaction, under the
+/// allowlist lock.
+pub(crate) async fn deny_matching(
+    tx: &mut Transaction<'_, Postgres>,
+    pattern: &str,
+    deciding: Option<RequestId>,
+) -> Result<(), DbError> {
+    let pending = sqlx::query!(
+        "SELECT id, payload FROM agent_requests
+         WHERE state = 'pending' AND kind = 'approval' AND approval_type = $1
+         ORDER BY created_at, id",
+        NETWORK_ACCESS
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    let system = Principal::system("egress.deny_rule");
+    let actor = Actor {
+        principal: &system,
+        roles: &[],
+    };
+    let comment = format!("Denied by deny rule {pattern}");
+    for row in pending {
+        let id = RequestId::from_uuid(row.id);
+        let covered = requested_target(&row.payload)
+            .is_ok_and(|(host, _port)| pattern_matches(pattern, &host));
+        if !covered || deciding == Some(id) {
+            continue;
+        }
+        match deny_in(tx, Some(&NetworkAccess), id, actor, Some(&comment)).await {
+            // Decided in the meantime: nothing left to deny.
+            Ok(_) | Err(RequestError::AlreadyDecided | RequestError::NotFound) => {}
+            Err(RequestError::Db(error)) => return Err(error),
+            Err(other) => return Err(DbError::InvalidData(other.to_string())),
+        }
+    }
+    Ok(())
+}
+
+/// Denies the pending `network-access` request `request_id` as `decider`, with their `comment`,
+/// and creates a deny rule for exactly its host ("Deny always", design D5). A deny rule that
+/// exists already counts as created. Returns [`RequestError::Invalid`] for a request of another
+/// type; the caller checked `approval:decide`.
+pub async fn deny_always(
+    pool: &PgPool,
+    request_id: RequestId,
+    decider: &Principal,
+    roles: &[String],
+    comment: Option<&str>,
+) -> Result<RequestRow, RequestError> {
+    let mut tx = pool.begin().await?;
+    // Same lock order as deciding: the type's locks, then the task.
+    NetworkAccess.lock(&mut tx).await?;
+    let actor = Actor {
+        principal: decider,
+        roles,
+    };
+    let denied = deny_in(&mut tx, Some(&NetworkAccess), request_id, actor, comment).await?;
+    if denied.approval_type.as_deref() != Some(NETWORK_ACCESS) {
+        return Err(RequestError::Invalid(
+            "only network-access requests can be denied always".into(),
+        ));
+    }
+    let (host, _port) = requested_target(&denied.payload)?;
+    match create_deny_rule(&mut tx, &host, actor, Some(request_id)).await {
+        // The rule exists already: what the decision asks for is in place.
+        Ok(_) | Err(DbError::Conflict(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
+    tx.commit().await?;
+    Ok(denied)
 }
 
 #[cfg(test)]

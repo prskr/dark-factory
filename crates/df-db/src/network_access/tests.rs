@@ -4,7 +4,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::*;
-use crate::egress::{EntryKind, HostScope, add_entry, http_host_entries};
+use crate::Notification;
+use crate::egress::{EntryKind, HostScope, add_entry, create_deny_rule, http_host_entries};
 use crate::requests::{
     ApprovalTypes, Decision, Raise, Raised, RequestError, RequestRow, RequestState, Scope, decide,
     get_request, list_for_task, raise_approval,
@@ -620,4 +621,245 @@ async fn a_denial_handled_while_an_entry_is_created_leaves_no_pending_request() 
     );
     add_project_entry(&pool, &human(), "DF", "files.pythonhosted.org", 443).await;
     assert!(pending_for(&pool, &df7).await.is_empty());
+}
+
+async fn add_deny_rule(pool: &PgPool, host: &str) {
+    let (principal, roles) = (human(), roles());
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let mut tx = pool.begin().await.unwrap();
+    create_deny_rule(&mut tx, host, actor, None).await.unwrap();
+    tx.commit().await.unwrap();
+}
+
+const DATADOG: &str = "http-intake.logs.us5.datadoghq.com";
+
+#[tokio::test]
+async fn a_denial_of_a_denied_host_raises_nothing() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let run_id = run(&pool, &df7, "running").await;
+    add_deny_rule(&pool, "*.datadoghq.com").await;
+
+    let denied = raise_from_denial(&pool, run_id, DATADOG, 443)
+        .await
+        .unwrap();
+    let other = raise_from_denial(&pool, run_id, "statsig.anthropic.com", 443)
+        .await
+        .unwrap();
+
+    assert_eq!(denied, DenialOutcome::DenyRule);
+    assert!(matches!(other, DenialOutcome::Raised(_)), "{other:?}");
+    assert_eq!(pending_for(&pool, &df7).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_request_for_a_denied_host_is_refused_and_not_stored() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    add_deny_rule(&pool, "*.datadoghq.com").await;
+    let agent = Principal::agent(PersonaId::new(), "Linus", None, df7.id);
+    let from = Raise {
+        task_id: df7.id,
+        run_id: None,
+        actor: &agent,
+        blocking: false,
+    };
+
+    let error = raise_approval(
+        &pool,
+        &types(),
+        from,
+        NETWORK_ACCESS,
+        json!({ "host": DATADOG }),
+        "telemetry",
+    )
+    .await
+    .unwrap_err();
+
+    let RequestError::Refused(text) = error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(
+        text,
+        format!(
+            "{DATADOG} is denied by instance policy (deny rule *.datadoghq.com); do not request it again"
+        )
+    );
+    assert!(list_for_task(&pool, df7.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_new_deny_rule_denies_the_matching_pending_requests_of_every_task() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let ops3 = task(&pool, project(&pool, "OPS").await).await;
+    let on_df = request(&pool, &df7, json!({ "host": DATADOG })).await;
+    let on_ops = request(&pool, &ops3, json!({ "host": DATADOG, "port": 8443 })).await;
+    let unrelated = request(&pool, &df7, json!({ "host": "pypi.org" })).await;
+
+    add_deny_rule(&pool, "*.datadoghq.com").await;
+
+    for denied in [&on_df, &on_ops] {
+        let denied = reload(&pool, denied).await;
+        assert_eq!(denied.state, RequestState::Denied);
+        assert_eq!(
+            denied.comment(),
+            Some("Denied by deny rule *.datadoghq.com")
+        );
+    }
+    assert_eq!(reload(&pool, &unrelated).await.state, RequestState::Pending);
+    assert_eq!(decided_messages(&pool, df7.id).await, 1);
+    assert_eq!(decided_messages(&pool, ops3.id).await, 1);
+}
+
+/// What the listener delivered before a marker that is published after the action under test:
+/// notifications arrive in commit order, so a published deny rule would show up before it.
+async fn notifications_before_marker(
+    pool: &PgPool,
+    notifications: &mut tokio::sync::broadcast::Receiver<Notification>,
+) -> Vec<Notification> {
+    let marker = Notification::TaskChanged {
+        task_id: TaskId::new(),
+    };
+    crate::notify::publish(pool, &marker).await.unwrap();
+    let mut before = Vec::new();
+    loop {
+        let received =
+            tokio::time::timeout(std::time::Duration::from_secs(5), notifications.recv())
+                .await
+                .expect("the marker never arrived")
+                .unwrap();
+        if received == marker {
+            return before;
+        }
+        before.push(received);
+    }
+}
+
+#[tokio::test]
+async fn deny_rules_are_audited_with_the_actor_and_not_published_to_the_gateways() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let notifier = crate::notify::Notifier::start(&pool).await.unwrap();
+    let mut notifications = notifier.subscribe();
+    let (principal, roles) = (human(), roles());
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let mut tx = pool.begin().await.unwrap();
+    let rule = create_deny_rule(&mut tx, "*.datadoghq.com", actor, None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    crate::egress::delete_entry(&pool, actor, rule.id)
+        .await
+        .unwrap();
+
+    let audited: Vec<(String, serde_json::Value, serde_json::Value)> = sqlx::query_as(
+        "SELECT action, actor, details FROM audit_log
+         WHERE resource_type = 'egress_allowlist' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let actions: Vec<_> = audited.iter().map(|(action, ..)| action.as_str()).collect();
+    assert_eq!(
+        actions,
+        ["egress_deny_rule.create", "egress_deny_rule.delete"]
+    );
+    for (_, logged_actor, details) in &audited {
+        assert_eq!(logged_actor, &serde_json::to_value(&principal).unwrap());
+        assert_eq!(details["host"], "*.datadoghq.com");
+    }
+    let published = notifications_before_marker(&pool, &mut notifications).await;
+    assert!(
+        !published.contains(&Notification::EgressPolicy),
+        "{published:?}"
+    );
+    // Deleted rules raise requests again.
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let run_id = run(&pool, &df7, "running").await;
+    let raised = raise_from_denial(&pool, run_id, DATADOG, 443)
+        .await
+        .unwrap();
+    assert!(matches!(raised, DenialOutcome::Raised(_)), "{raised:?}");
+}
+
+#[tokio::test]
+async fn a_denial_handled_while_a_deny_rule_is_created_leaves_no_pending_request() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let run_id = run(&pool, &df7, "running").await;
+    let (principal, roles) = (human(), roles());
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+
+    // The rule's transaction holds the allowlist lock while the denial is handled.
+    let mut rule = pool.begin().await.unwrap();
+    create_deny_rule(&mut rule, "*.datadoghq.com", actor, None)
+        .await
+        .unwrap();
+    let denial = tokio::spawn({
+        let pool = pool.clone();
+        async move { raise_from_denial(&pool, run_id, DATADOG, 443).await }
+    });
+    advisory_lock_waiter(&pool).await;
+    rule.commit().await.unwrap();
+
+    assert_eq!(denial.await.unwrap().unwrap(), DenialOutcome::DenyRule);
+    assert!(pending_for(&pool, &df7).await.is_empty());
+}
+
+#[tokio::test]
+async fn deny_always_denies_the_request_and_creates_an_exact_host_rule() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let ops3 = task(&pool, project(&pool, "OPS").await).await;
+    let asked = request(&pool, &df7, json!({ "host": DATADOG })).await;
+    let same_host = request(&pool, &ops3, json!({ "host": DATADOG, "port": 80 })).await;
+    let sibling = request(&pool, &ops3, json!({ "host": "other.datadoghq.com" })).await;
+    let (principal, roles) = (human(), roles());
+
+    let decided = deny_always(&pool, asked.id, &principal, &roles, Some(" no "))
+        .await
+        .unwrap();
+
+    assert_eq!(decided.state, RequestState::Denied);
+    assert_eq!(decided.comment(), Some("no"));
+    assert_eq!(decided.decided_by.as_ref(), Some(&principal));
+    let rules = crate::egress::deny_patterns(&pool).await.unwrap();
+    assert_eq!(rules, [DATADOG]);
+    assert_eq!(reload(&pool, &same_host).await.state, RequestState::Denied);
+    assert_eq!(reload(&pool, &sibling).await.state, RequestState::Pending);
+    assert_eq!(decided_messages(&pool, df7.id).await, 1);
+}
+
+#[tokio::test]
+async fn deny_always_on_a_decided_request_fails_and_creates_no_second_rule() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let asked = request(&pool, &df7, json!({ "host": DATADOG })).await;
+    let (principal, roles) = (human(), roles());
+    // A deny rule denies the request already.
+    let mut tx = pool.begin().await.unwrap();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    create_deny_rule(&mut tx, DATADOG, actor, None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let asked = reload(&pool, &asked).await;
+    assert_eq!(asked.state, RequestState::Denied);
+
+    let decided = deny_always(&pool, asked.id, &principal, &roles, None).await;
+
+    assert!(matches!(decided, Err(RequestError::AlreadyDecided)));
+    assert_eq!(crate::egress::deny_patterns(&pool).await.unwrap().len(), 1);
 }

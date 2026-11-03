@@ -1,6 +1,7 @@
 //! Shared fixtures of the tests; the tests themselves live in the topic modules.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
@@ -9,14 +10,17 @@ use df_proto::pbjson_types::Timestamp;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 
-use super::log::{Filter, Viewer};
+use super::log::{Context, Filter, Viewer};
 use super::{FlowSource, LookupError, ServiceLookup};
 use crate::testkit::{TestApp, form};
 
 mod allow;
+mod deny_log;
+mod deny_rules;
 mod flows;
 mod icons;
 mod log;
+mod paging;
 mod rules;
 
 /// Replays `events` to every viewer and then stays open.
@@ -101,6 +105,40 @@ async fn add_host(app: &TestApp, cookie: &str, project: &str, host: &str, port: 
     assert_eq!(response.status(), StatusCode::OK, "{host}");
 }
 
+/// Adds a task-scoped `http-host` entry on port 443 directly in the database.
+async fn add_task_host(app: &TestApp, task: uuid::Uuid, host: &str) -> df_db::EntryRecord {
+    let (principal, roles) = crate::testkit::actor();
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let mut tx = app.pool.begin().await.unwrap();
+    let entry = df_db::create_http_host_entry(
+        &mut tx,
+        df_db::HostScope::Task(task),
+        host,
+        443,
+        actor,
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    entry
+}
+
+/// Adds a deny rule directly in the database.
+async fn add_deny_rule(app: &TestApp, host: &str) {
+    let (principal, roles) = crate::testkit::actor();
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    df_db::egress::add_deny_rule(&app.pool, host, actor)
+        .await
+        .unwrap();
+}
+
 /// The content of the `<hx-partial>` for `target` in a message; `None` if the message has none.
 fn part<'a>(body: &'a str, target: &str) -> Option<&'a str> {
     inner(
@@ -117,11 +155,41 @@ fn inner<'a>(html: &'a str, open: &str, end: &str) -> Option<&'a str> {
     Some(&content[..content.find(end)?])
 }
 
-/// A viewer without project hosts.
+/// A viewer without project hosts and deny rules.
 fn new_viewer(filter: Filter) -> Viewer {
+    Viewer::new(filter, Context::default())
+}
+
+/// What the listener delivered before a marker that is published after the action under test:
+/// notifications arrive in commit order, so a wrongly published `egress_policy` would show up
+/// before the marker.
+async fn notifications_before_marker(
+    app: &TestApp,
+    notifications: &mut tokio::sync::broadcast::Receiver<df_db::Notification>,
+) -> Vec<df_db::Notification> {
+    let marker = df_db::Notification::TaskChanged {
+        task_id: df_core::TaskId::new(),
+    };
+    df_db::publish(&app.pool, &marker).await.unwrap();
+    let mut before = Vec::new();
+    loop {
+        let received = tokio::time::timeout(Duration::from_secs(5), notifications.recv())
+            .await
+            .expect("the marker never arrived")
+            .unwrap();
+        if received == marker {
+            return before;
+        }
+        before.push(received);
+    }
+}
+
+/// A viewer that knows the deny rules `patterns`.
+fn viewer_with_deny(patterns: &[&str]) -> Viewer {
+    let deny = patterns.iter().map(ToString::to_string).collect();
     Viewer::new(
-        filter,
-        crate::components::project_host::ProjectHosts::default(),
+        Filter::default(),
+        Context::new(crate::components::ProjectHosts::default(), deny),
     )
 }
 

@@ -16,6 +16,7 @@ use axum::{Extension, Form, Router};
 use chrono::{DateTime, Utc};
 use df_core::{RequestId, TaskId};
 use df_db::Notification;
+use df_db::network_access::{NETWORK_ACCESS, deny_always as deny_host_always};
 use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, PushCheck, request_findings};
 use df_db::requests::{
     ApprovalTypes, Decision, RequestError, RequestKind, RequestRow, RequestState, Scope,
@@ -46,6 +47,7 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/requests/{id}/answer", post(answer))
         .route("/requests/{id}/approve", post(approve))
         .route("/requests/{id}/deny", post(deny))
+        .route("/requests/{id}/deny-always", post(deny_always))
 }
 
 /// A request with what its card shows besides the row.
@@ -322,6 +324,11 @@ fn actions(card: &CardData, target: &str) -> Markup {
                         class=(action_class(ButtonKind::Primary)) { (approve_label(&card.scopes)) }
                     button type="submit" hx-post=(post("deny")) hx-target=(target) hx-swap="outerHTML"
                         class=(button_class) { "Deny" }
+                    // Denies the request and the exact host for good (a deny rule).
+                    @if row.approval_type.as_deref() == Some(NETWORK_ACCESS) {
+                        button type="submit" hx-post=(post("deny-always")) hx-target=(target) hx-swap="outerHTML"
+                            class=(button_class) { "Deny always" }
+                    }
                 }
             }
         },
@@ -406,6 +413,28 @@ async fn deny(
     decide(state.0, user.0, &id, Ok(Decision::Deny(comment))).await
 }
 
+/// "Deny always": denies a `network-access` request and creates a deny rule for its exact host.
+async fn deny_always(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Form(form): Form<DenyForm>,
+) -> Response {
+    let Ok(request_id) = id.parse::<RequestId>() else {
+        return not_found("The request");
+    };
+    let comment = Some(form.comment.as_str()).filter(|c| !c.trim().is_empty());
+    let result = deny_host_always(
+        &state.pool,
+        request_id,
+        &user.principal(),
+        &user.roles,
+        comment,
+    )
+    .await;
+    respond(&state, request_id, result).await
+}
+
 /// Stores the decision and answers with the card as it is now. A failed decision answers with
 /// the card and the reason (htmx swaps 409 and 422 too).
 async fn decide(
@@ -431,6 +460,15 @@ async fn decide(
         }
         Err(e) => Err(e),
     };
+    respond(&state, request_id, result).await
+}
+
+/// The card after a decision attempt. A failed one answers with the card and the reason.
+async fn respond(
+    state: &WebState,
+    request_id: RequestId,
+    result: Result<RequestRow, RequestError>,
+) -> Response {
     let (status, error) = match &result {
         Ok(_) => (StatusCode::OK, None),
         Err(RequestError::NotFound) => return not_found("The request"),
@@ -443,6 +481,7 @@ async fn decide(
             | RequestError::ScopeNotOffered(_)
             | RequestError::ApplyFailed(_)
             | RequestError::UnknownType(_)
+            | RequestError::Refused(_)
             | RequestError::TooManyPending),
         ) => (StatusCode::UNPROCESSABLE_ENTITY, Some(e.to_string())),
         Err(RequestError::Db(e)) => return internal_error(e),
