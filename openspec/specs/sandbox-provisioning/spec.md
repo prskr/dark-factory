@@ -7,7 +7,7 @@ Defines the Kubernetes resources that host a run — one cold-started agent-sand
 ## Requirements
 
 ### Requirement: Task volume
-The control plane SHALL create one ReadWriteOnce PVC per task named `task-<key lower case>` in the sandbox namespace, using the configured StorageClass (the cluster's default StorageClass when none is configured) and size, before the task's first run, and SHALL keep it after runs end.
+The control plane SHALL create one ReadWriteOnce PVC per task named `task-<key lower case>` in the sandbox namespace, using the configured StorageClass (the cluster's default StorageClass when none is configured) and size, before the task's first run and before any run that follows a volume deletion, and SHALL keep it after runs end.
 
 #### Scenario: First run of DF-1
 - **WHEN** run 1 of `DF-1` is provisioned
@@ -16,6 +16,10 @@ The control plane SHALL create one ReadWriteOnce PVC per task named `task-<key l
 #### Scenario: Second run reuses the volume
 - **WHEN** run 2 of `DF-1` is provisioned
 - **THEN** no new PVC is created and the same PVC is mounted
+
+#### Scenario: Recreated on the next run
+- **WHEN** the volume of `DF-1` was deleted and a message is queued on `DF-1`
+- **THEN** a new PVC `task-df-1` is created before the run and the runtime clones afresh
 
 ### Requirement: Sandbox per run
 The control plane SHALL create one `Sandbox` per run in the sandbox namespace with: the project image; entrypoint `/opt/factory/factory-agent run`; the runtime image as a read-only image volume at `/opt/factory`; the run's harness image likewise at `/opt/harness/<harness>` unless the project sets an adapter command; the task PVC at `/data`; a memory-backed volume at `/run/factory`; a cert-manager csi-driver volume with the per-pod URI SAN; labels for instance, run, task, project and persona.
@@ -88,3 +92,14 @@ The runtime and the harness SHALL be delivered only as Kubernetes image volumes;
 #### Scenario: Pod without init containers
 - **WHEN** a sandbox pod is rendered
 - **THEN** it has no init container for delivering the runtime or the harness
+
+### Requirement: Deleting a task volume
+The provider SHALL delete a task's PVC on request. Deleting a volume that doesn't exist SHALL succeed. A volume SHALL only be deleted for tasks without a non-terminal run.
+
+#### Scenario: Volume deleted
+- **WHEN** the volume of `DF-1`, which has no active run, is deleted
+- **THEN** PVC `task-df-1` no longer exists
+
+#### Scenario: Already gone
+- **WHEN** the volume of a task whose PVC was removed by hand is deleted
+- **THEN** the call succeeds

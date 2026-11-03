@@ -335,3 +335,10 @@ The task detail SHALL show the resume time of a task that waits for one, and the
 #### Scenario: Rate-limited task
 - **WHEN** a board member opens a `rate_limited` task with resume time 04:30
 - **THEN** the page shows that the task resumes at 04:30
+
+### Requirement: Reset workspace action
+The task detail SHALL offer "Reset workspace" for tasks without an active run, with a confirmation that names what is lost (unpushed commits, uncommitted changes without a WIP snapshot).
+
+#### Scenario: Reset needs confirmation
+- **WHEN** a board member clicks "Reset workspace"
+- **THEN** nothing changes until the confirmation is accepted
