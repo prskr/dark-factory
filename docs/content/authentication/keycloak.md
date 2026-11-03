@@ -3,9 +3,9 @@ title: Keycloak
 weight: 1
 ---
 
-Keycloak as the OIDC provider: a confidential client `dark-factory` and its client role
-`board-member` in a top-level `roles` claim of the ID token. How the login works and every control
-plane setting: [Authentication](_index.md).
+Keycloak as the OIDC provider: a confidential client `dark-factory` and its client roles
+`board-member` and `admin` in a top-level `roles` claim of the ID token. How the login works and
+every control plane setting: [Authentication](_index.md).
 
 ## 1. Create the client
 
@@ -31,12 +31,14 @@ kubectl -n dark-factory create secret generic dark-factory-oidc \
   --from-literal=client-secret='<secret from Keycloak>'
 ```
 
-## 2. Create the role and map it into the token
+## 2. Create the roles and map them into the token
 
 1. **Clients > dark-factory > Roles > Create role**: name `board-member`. Assign it to the users (or
    a group) who may operate the factory.
-2. **Clients > dark-factory > Client scopes > dark-factory-dedicated > Configure a new mapper >
-   User Client Role**:
+2. **Create role** again: name `admin`. Assign it to the users who manage the lifecycle event
+   subscriptions of projects. They need `board-member` as well; `admin` alone opens no page.
+3. **Clients > dark-factory > Client scopes > dark-factory-dedicated > Configure a new mapper >
+   User Client Role** (one mapper; it puts every client role of the user into the claim):
 
    | Setting | Value |
    | --- | --- |
@@ -49,7 +51,7 @@ kubectl -n dark-factory create secret generic dark-factory-oidc \
    | Add to access token | optional |
 
    The default `resource_access.dark-factory.roles` claim is nested and is not read. The claim must be
-   a top-level list, for example `"roles": ["board-member"]`.
+   a top-level list, for example `"roles": ["board-member", "admin"]`.
 
 A role removed in Keycloak takes effect when the access token expires (default 5 minutes) and is
 refreshed.

@@ -292,7 +292,20 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
-        Self::build(forges, flows, services, false, false).await
+        Self::build(forges, flows, services, false, false, None).await
+    }
+
+    /// An app with lifecycle events on: the settings show `public_key`.
+    pub(crate) async fn with_public_key(public_key: &str) -> Self {
+        Self::build(
+            default_forge("forgejo"),
+            None,
+            None,
+            false,
+            false,
+            Some(public_key.into()),
+        )
+        .await
     }
 
     /// An app of an instance with `forge.allowPlainHttp` on: the routing table and the project
@@ -304,12 +317,12 @@ impl TestApp {
         )]);
         let table = RoutingTable::from_plugins_allowing_plain_http(&configs).unwrap();
         let forges = ForgeRoutes::new(table, ["forgejo".to_string()]);
-        Self::build(forges, None, None, false, true).await
+        Self::build(forges, None, None, false, true, None).await
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
     pub(crate) async fn with_hidden_blocks() -> Self {
-        Self::build(default_forge("forgejo"), None, None, true, false).await
+        Self::build(default_forge("forgejo"), None, None, true, false, None).await
     }
 
     async fn build(
@@ -318,6 +331,7 @@ impl TestApp {
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
         show_hidden_blocks: bool,
         allow_plain_http: bool,
+        lifecycle_public_key: Option<Arc<str>>,
     ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
@@ -351,7 +365,7 @@ impl TestApp {
             approval_types: Self::approval_types(),
             version: "2026.11.0".into(),
             events: df_db::lifecycle_events::EventSinks::default(),
-            lifecycle_public_key: None,
+            lifecycle_public_key,
         };
         Self {
             router: router(state),
@@ -376,6 +390,18 @@ impl TestApp {
         crate::auth::testing::seed_session(&self.pool, &["board-member"], 3600, Some("refresh-0"))
             .await
             .0
+    }
+
+    /// A logged-in session with the roles `board-member` and `admin`.
+    pub(crate) async fn login_admin(&self) -> String {
+        crate::auth::testing::seed_session(
+            &self.pool,
+            &["board-member", crate::auth::ADMIN_ROLE],
+            3600,
+            Some("refresh-0"),
+        )
+        .await
+        .0
     }
 
     pub(crate) async fn send(&self, request: Request<Body>) -> Response<Body> {

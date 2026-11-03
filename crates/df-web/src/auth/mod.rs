@@ -25,6 +25,9 @@ use crate::responses::htmx_redirect;
 
 /// Role every page and action requires.
 pub const REQUIRED_ROLE: &str = "board-member";
+/// Role that manages the lifecycle event subscriptions of projects (design D8 of
+/// `lifecycle-events`).
+pub const ADMIN_ROLE: &str = "admin";
 /// Seconds before expiry at which a token counts as expired.
 const REFRESH_SKEW: i64 = 30;
 
@@ -90,6 +93,10 @@ impl CurrentUser {
         Principal::human(self.id, self.display_name.clone())
     }
 
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
+    }
+
     /// Time until the next request must pass this middleware again to refresh the token and
     /// re-check the roles. Long-lived responses (SSE) end then.
     pub fn until_refresh(&self) -> std::time::Duration {
@@ -133,11 +140,7 @@ pub async fn require_board_member(
         }
     }
     if !user.roles.iter().any(|r| r == REQUIRED_ROLE) {
-        return error_page(
-            StatusCode::FORBIDDEN,
-            "Forbidden",
-            &format!("Your account lacks the role `{REQUIRED_ROLE}`."),
-        );
+        return lacks_role(REQUIRED_ROLE);
     }
     // Read the clock again: a refresh above may have taken seconds.
     let refresh_in = u64::try_from(user.expires_at - REFRESH_SKEW - state.clock.now_unix());
@@ -149,6 +152,27 @@ pub async fn require_board_member(
             + std::time::Duration::from_secs(refresh_in.unwrap_or(0)),
     });
     next.run(request).await
+}
+
+/// Requires the `admin` role on top of [`require_board_member`], which must run first.
+pub async fn require_admin(request: Request, next: Next) -> Response {
+    let admin = request
+        .extensions()
+        .get::<CurrentUser>()
+        .is_some_and(|user| user.has_role(ADMIN_ROLE));
+    if !admin {
+        return lacks_role(ADMIN_ROLE);
+    }
+    next.run(request).await
+}
+
+/// The 403 page naming the missing `role`.
+fn lacks_role(role: &str) -> Response {
+    error_page(
+        StatusCode::FORBIDDEN,
+        "Forbidden",
+        &format!("Your account lacks the role `{role}`."),
+    )
 }
 
 /// A full page for errors outside the normal flow.

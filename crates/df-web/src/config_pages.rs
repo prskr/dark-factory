@@ -29,6 +29,7 @@ use crate::components::{
     readonly_field, role_icon, select_field, submit_button, td, text_field, textarea_field, th, tr,
 };
 use crate::layout::{Nav, Shell, layout};
+use crate::project_subscriptions::settings_link as subscriptions_link;
 use crate::responses::{internal_error, invalid, not_found};
 
 mod push_policy;
@@ -865,6 +866,7 @@ fn projects_region(
     counts: &[ProjectStatusCount],
     forges: &ForgeRoutes,
     shell: &Shell,
+    admin: bool,
 ) -> Markup {
     html! {
         div id="config-list" {
@@ -914,7 +916,12 @@ fn projects_region(
                                     }))
                                     (td(Cell::Mono, html! { (p.base_branch) }))
                                     @for (label, status, n) in c.columns() { (td(Cell::Number, count_link(&p.key, status, label, n, None))) }
-                                    (td(Cell::Actions, edit_button(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key))))
+                                    (td(Cell::Actions, html! {
+                                        span class="flex justify-end" {
+                                            @if admin { (subscriptions_link(&p.key, ICON_BUTTON_CLASS)) }
+                                            (edit_button(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key)))
+                                        }
+                                    }))
                                 }))
                             }
                         },
@@ -939,6 +946,9 @@ fn projects_region(
                                     @for ((label, status, n), (_, tone)) in c.columns().into_iter().zip(COLUMN_TONES) { (count_link(&p.key, status, label, n, Some(tone))) }
                                 }
                             }
+                            @if admin {
+                                (subscriptions_link(&p.key, "flex w-12 shrink-0 items-center justify-center self-stretch text-muted"))
+                            }
                             (open_modal(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key),
                                 "flex w-12 shrink-0 items-center justify-center self-stretch text-muted", icon(Icon::Pencil)))
                         }
@@ -949,18 +959,32 @@ fn projects_region(
     }
 }
 
-async fn projects_markup(state: &WebState, shell: &Shell) -> Result<Markup, Box<Response>> {
+async fn projects_markup(state: &WebState, user: &CurrentUser) -> Result<Markup, Box<Response>> {
     let (projects, counts) = tokio::try_join!(
         df_db::catalog::list_projects(&state.pool),
         df_db::task_views::project_status_counts(&state.pool)
     )
     .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(projects_region(&projects, &counts, &state.forges, shell))
+    Ok(projects_region(
+        &projects,
+        &counts,
+        &state.forges,
+        &Shell::new(user, state),
+        user.has_role(crate::auth::ADMIN_ROLE),
+    ))
 }
 
-async fn projects_list(State(state): State<WebState>, shell: Shell) -> Response {
-    match projects_markup(&state, &shell).await {
-        Ok(region) => list_page("Projects", Nav::Projects, &shell, region),
+async fn projects_list(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+) -> Response {
+    match projects_markup(&state, &user).await {
+        Ok(region) => list_page(
+            "Projects",
+            Nav::Projects,
+            &Shell::new(&user, &state),
+            region,
+        ),
         Err(response) => *response,
     }
 }
@@ -1111,7 +1135,7 @@ async fn save_project(
         };
         match stored {
             Ok(_) => {
-                return match projects_markup(&state, &Shell::new(&user, &state)).await {
+                return match projects_markup(&state, &user).await {
                     Ok(region) => saved(region),
                     Err(response) => *response,
                 };

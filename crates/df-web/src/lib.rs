@@ -11,6 +11,7 @@ mod config_pages;
 pub mod egress;
 pub mod layout;
 mod lifecycle_events;
+mod project_subscriptions;
 mod requests;
 mod responses;
 mod sse;
@@ -108,6 +109,7 @@ pub fn router(state: WebState) -> Router {
         .merge(task_pages::routes())
         .merge(requests::routes())
         .merge(config_pages::routes())
+        .merge(project_subscriptions::routes())
         .merge(egress::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),
