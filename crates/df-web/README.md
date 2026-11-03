@@ -13,6 +13,7 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | --- | --- |
 | `GET /healthz`, `GET /readyz` | Liveness, readiness (database ping). No login. |
 | `GET /assets/*` | Embedded assets, content-hashed URLs, `Cache-Control: immutable`. No login. |
+| `GET /lifecycle-events/public-key` | Public key of the lifecycle event signatures (`whpk_<base64>`, `text/plain`); `404` without `lifecycleEvents.signingKeyFile`. No login. |
 | `GET /login`, `GET /auth/callback`, `POST /logout` | OIDC login (`docs/content/authentication/_index.md`). |
 | `/tasks?status=&project=`, `/tasks/{key}` | Task workspace: list with filters, transcript, details (one template). |
 | `GET /tasks/compose?project=`, `POST /tasks` | New-task composer (dialog), creation. |

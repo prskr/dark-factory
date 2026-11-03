@@ -29,6 +29,7 @@ use tracing::{error, info, warn};
 #[cfg(feature = "dev-tools")]
 mod demo_flows;
 mod forge;
+mod lifecycle_events;
 mod sandbox;
 #[cfg(any(test, feature = "dev-tools"))]
 mod unconfigured;
@@ -280,6 +281,7 @@ where
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
     let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
+    let signing_key = lifecycle_events::load_signing_key(&cfg.lifecycle_events)?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
     let forge_plugins =
         forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.forge.allow_plain_http)?;
@@ -316,6 +318,7 @@ where
         },
         EgressDeps { flows, services },
         approval_types.clone(),
+        signing_key.as_deref(),
     )?;
     let ctx_policy = PolicySources {
         pool: pool.clone(),
@@ -363,9 +366,7 @@ where
     });
     let scheduler_stop = stop_rx.clone();
     if let Some(is_leader) = is_leader {
-        let retention = df_agent_channel::Retention::new(ctx.clone());
-        let retention_stop = stop_rx.clone();
-        listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
+        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx);
     }
     listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
     listeners.spawn(serve_policy_watch(
@@ -379,6 +380,18 @@ where
     }
 
     supervise_listeners("control plane", listeners, shutdown, SHUTDOWN_GRACE).await
+}
+
+/// Background work only the leader replica does; each task waits for `is_leader` itself.
+fn spawn_leader_tasks(
+    listeners: &mut JoinSet<()>,
+    ctx: &ChannelContext,
+    is_leader: watch::Receiver<bool>,
+    stop: &watch::Receiver<bool>,
+) {
+    let retention = df_agent_channel::Retention::new(ctx.clone());
+    let retention_stop = stop.clone();
+    listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
 }
 
 /// Resolves once `stop` was set.
@@ -563,10 +576,12 @@ fn web_router(
     backends: WebBackends,
     egress: EgressDeps,
     approval_types: df_db::requests::ApprovalTypes,
+    signing_key: Option<&lifecycle_events::SigningKey>,
 ) -> anyhow::Result<axum::Router> {
+    let lifecycle_public_key = signing_key.map(|key| Arc::from(key.public_key()));
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
-        return Ok(df_web::base_router(pool.clone()));
+        return Ok(df_web::base_router(pool.clone(), lifecycle_public_key));
     };
     let oidc = df_web::auth::OidcClient::new(auth).context("invalid `auth` configuration")?;
     Ok(df_web::router(df_web::WebState {
@@ -585,6 +600,7 @@ fn web_router(
         version: df_telemetry::VERSION.to_string(),
         clock: Arc::new(df_web::auth::SystemClock),
         events: df_db::lifecycle_events::EventSinks::new(&cfg.lifecycle_events),
+        lifecycle_public_key,
     }))
 }
 
@@ -813,6 +829,7 @@ mod tests {
             fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
+            None,
         )?;
 
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
@@ -836,6 +853,7 @@ mod tests {
             fake_backends(),
             EgressDeps::default(),
             df_db::requests::ApprovalTypes::default(),
+            None,
         )?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");

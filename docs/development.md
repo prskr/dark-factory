@@ -11,7 +11,7 @@ This guide covers setting up a local development environment for Dark Factory, r
   - `sqlx-cli` (`cargo sqlx migrate`, `cargo sqlx prepare`)
   - `cargo-llvm-cov` (`cargo llvm-cov --workspace`)
 - **Docker / OrbStack or Podman** with compose (`docker compose`, or `podman compose` with `podman-compose`): for the local services in [`compose.yml`](../compose.yml).
-- **OpenSSL**: `just serve-local` generates a throwaway agent certificate with it.
+- **OpenSSL**: `just serve-local` generates a throwaway agent certificate and lifecycle event signing key with it.
 
 ## 2. Local Services (PostgreSQL and Dex)
 
@@ -140,7 +140,7 @@ The end-to-end suite and the demo data (`just seed`) are described in [`demo.md`
 `just serve-local` runs the control plane against the compose services without a Kubernetes cluster:
 
 1. starts the compose services (`just db`) and builds the plugin components (`just plugins`),
-2. writes the password files, the OIDC client secret and a self-signed agent certificate to `target/local-dev/`,
+2. writes the password files, the OIDC client secret, a self-signed agent certificate and an Ed25519 lifecycle event signing key to `target/local-dev/`,
 3. runs `migrate` and `serve --no-cluster --demo-flows` with [`dev/config.yaml`](../dev/config.yaml), built with the Cargo feature `dev-tools`.
 
 Open <http://127.0.0.1:8080> and log in at Dex:

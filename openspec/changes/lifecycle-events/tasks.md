@@ -27,14 +27,14 @@
 
 ## 3. Signing and key endpoint
 
-- [ ] 3.1 Write failing tests, then implement key loading and signing with `ring` (design D5). Verify with `cargo test` on the module. The tests cover:
+- [x] 3.1 Write failing tests, then implement key loading and signing with `ring` (design D5). Verify with `cargo test` on the module. The tests cover:
   - a PKCS#8 v1 Ed25519 PEM, as cert-manager writes it, loads;
   - an RSA key or garbage fails with a typed error;
   - `whpk_` encoding of the public key;
   - the signature over `id.timestamp.body` verifies with the public key;
   - the signature fails for a changed body.
-- [ ] 3.2 Add `lifecycleEvents.signingKeyFile` and `lifecycleEvents.subscriptions` to the control plane config, with startup validation: subscriptions without a key refuse to start, and a missing key turns the feature off. Generate a throwaway key in `just serve-local`. Document the options in the configuration reference (`docs/development.md` and the chart README). Verify with config parsing tests
-- [ ] 3.3 Write failing `df-web` tests, then add the route outside the auth layer. Verify with `cargo test -p df-web public_key`. The tests cover:
+- [x] 3.2 Add `lifecycleEvents.signingKeyFile` and `lifecycleEvents.subscriptions` to the control plane config, with startup validation: subscriptions without a key refuse to start, and a missing key turns the feature off. Generate a throwaway key in `just serve-local`. Document the options in the configuration reference (`docs/development.md` and the chart README). Verify with config parsing tests
+- [x] 3.3 Write failing `df-web` tests, then add the route outside the auth layer. Verify with `cargo test -p df-web public_key`. The tests cover:
   - unauthenticated `GET /lifecycle-events/public-key` returns 200 `text/plain` `whpk_…`;
   - with the feature off it returns 404.
 

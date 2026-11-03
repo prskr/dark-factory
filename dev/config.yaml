@@ -22,6 +22,9 @@ agent:
     certFile: target/local-dev/agent.crt
     keyFile: target/local-dev/agent.key
     clientCaFile: target/local-dev/agent.crt
+# Throwaway Ed25519 key; signs lifecycle events and is served at /lifecycle-events/public-key.
+lifecycleEvents:
+  signingKeyFile: target/local-dev/lifecycle-events.key
 plugins:
   forgejo:
     path: target/wasm32-wasip2/debug/forgejo_plugin.wasm

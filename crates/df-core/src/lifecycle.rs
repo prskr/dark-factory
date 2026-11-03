@@ -113,7 +113,8 @@ impl LifecycleEventsConfig {
     }
 }
 
-/// A receiver of every project's events, trusted: any scheme and target address.
+/// A receiver of every project's events, trusted: any `http(s)` URL, including cluster-internal
+/// addresses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstanceSubscription {

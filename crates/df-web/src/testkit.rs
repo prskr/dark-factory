@@ -351,6 +351,7 @@ impl TestApp {
             approval_types: Self::approval_types(),
             version: "2026.11.0".into(),
             events: df_db::lifecycle_events::EventSinks::default(),
+            lifecycle_public_key: None,
         };
         Self {
             router: router(state),

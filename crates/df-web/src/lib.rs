@@ -10,6 +10,7 @@ pub mod components;
 mod config_pages;
 pub mod egress;
 pub mod layout;
+mod lifecycle_events;
 mod requests;
 mod responses;
 mod sse;
@@ -72,23 +73,26 @@ pub struct WebState {
     pub clock: Arc<dyn auth::Clock>,
     /// Receivers of lifecycle events; resetting a workspace emits `volume.destroyed`.
     pub events: df_db::lifecycle_events::EventSinks,
+    /// The `whpk_` public key of the lifecycle event signatures; `None` while the feature is off.
+    pub lifecycle_public_key: Option<Arc<str>>,
 }
 
-/// `/healthz`, `/readyz` and `/assets/*`; no login required.
+/// `/healthz`, `/readyz`, `/assets/*` and `/lifecycle-events/public-key`; no login required.
 ///
 /// Both routers compress responses (brotli or gzip, as the browser accepts) with one layer
 /// around all routes. Its default predicate leaves SSE uncompressed, so live updates are not
 /// held back in compression buffers.
-pub fn base_router(pool: PgPool) -> Router {
-    base_routes(pool).layer(CompressionLayer::new())
+pub fn base_router(pool: PgPool, lifecycle_public_key: Option<Arc<str>>) -> Router {
+    base_routes(pool, lifecycle_public_key).layer(CompressionLayer::new())
 }
 
-fn base_routes(pool: PgPool) -> Router {
+fn base_routes(pool: PgPool, lifecycle_public_key: Option<Arc<str>>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readyz))
         .with_state(pool)
         .merge(assets::routes())
+        .merge(lifecycle_events::routes(lifecycle_public_key))
 }
 
 async fn readyz(State(pool): State<PgPool>) -> (StatusCode, &'static str) {
@@ -123,7 +127,7 @@ pub fn router(state: WebState) -> Router {
         .layer(middleware::from_fn(auth::csrf_guard))
         .layer(sessions)
         .with_state(state.clone());
-    base_routes(state.pool)
+    base_routes(state.pool, state.lifecycle_public_key)
         .merge(ui)
         .layer(CompressionLayer::new())
 }
@@ -147,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn assets_are_compressed_without_login() {
         let pool = sqlx::PgPool::connect_lazy("postgres://unused/db").unwrap();
-        let css = crate::base_router(pool)
+        let css = crate::base_router(pool, None)
             .oneshot(get("/assets/app.css", ""))
             .await
             .unwrap();
