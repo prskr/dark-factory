@@ -51,6 +51,19 @@ pub async fn task_status(pool: &PgPool, key: &str) -> Result<String> {
         .with_context(|| format!("status of task {key}"))
 }
 
+/// Number of messages of task `key` whose content contains `text`.
+pub async fn messages_containing(pool: &PgPool, key: &str, text: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM task_messages m JOIN tasks t ON t.id = m.task_id \
+         WHERE t.key = $1 AND strpos(m.content::text, $2) > 0",
+    )
+    .bind(key)
+    .bind(text)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("messages of task {key}"))
+}
+
 /// The pull request number and URL linked to task `key`.
 pub async fn task_pull_request(pool: &PgPool, key: &str) -> Result<Option<(i64, String)>> {
     let row = sqlx::query("SELECT pr_number, pr_url FROM tasks WHERE key = $1")

@@ -301,6 +301,20 @@ async fn pull_request_link_and_pending_messages_update_live() {
     assert!(!stack.contains("Queued"), "{stack}");
 }
 
+/// The send response no longer carries the stack, so a message queued while the page is open
+/// reaches `#pending` only through the stream.
+#[tokio::test]
+async fn a_message_queued_on_an_open_stream_shows_in_the_stack() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    assert!(!sse.next().await.data.contains("queued while open"));
+
+    f.queue("queued while open").await;
+    let frame = sse.next_within(LIVE).await;
+    let stack = &frame.data[frame.data.find(r##"hx-target="#pending""##).expect("stack")..];
+    assert!(stack.contains("queued while open"), "{}", frame.data);
+}
+
 #[tokio::test]
 async fn editing_and_removing_a_queued_message_rerenders_the_stack() {
     let f = fixture().await;

@@ -472,8 +472,12 @@ pub(crate) fn composer_action(key: &str, stoppable: bool) -> Markup {
                     class="hidden size-11 shrink-0 items-center justify-center rounded-full bg-ink text-panel hover:brightness-95 group-has-[textarea:placeholder-shown]:inline-flex"
                     x-show="!editing" { (icon(Icon::Stop)) }
             }
+            // Drop a second send while one is in flight: it would repeat the draft, which only
+            // the first response clears. The queue lives on `#message` because the stream
+            // replaces this button while the request is in flight (sending requeues the task).
             button type="button" x-show="!editing" aria-label="Send"
                 hx-post=(messages) hx-include="#message" hx-target="#pending" hx-swap="outerMorph"
+                hx-sync="#message:drop"
                 class=(send_class) { (icon(Icon::Send)) }
         }
     }
@@ -1370,6 +1374,22 @@ mod tests {
                     && textarea.contains("#composer-action [aria-label=Send]"),
                 "{textarea}"
             );
+        }
+    }
+
+    /// A second Ctrl+Enter while the first send is in flight is dropped, not queued behind it:
+    /// the draft is only cleared by the first response, so a queued send would repeat it. The
+    /// queue lives on the message box, because the stream replaces the Send button (sending
+    /// requeues the task) while the request is still in flight.
+    #[test]
+    fn a_second_send_while_one_is_in_flight_is_dropped() {
+        let area =
+            message_area("DF-1", "Linus", TaskStatus::Waiting, &[], &[], false).into_string();
+        assert!(area.contains("id=\"message\""), "{area}");
+        for stoppable in [false, true] {
+            let action = composer_action("DF-1", stoppable).into_string();
+            let send = crate::testkit::tag_around(&action, "aria-label=\"Send\"");
+            assert!(send.contains("hx-sync=\"#message:drop\""), "{send}");
         }
     }
 

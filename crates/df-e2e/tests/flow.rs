@@ -148,7 +148,7 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
 
     // The page has been open since the task was created, so the stream has replaced the
     // composer's Send button at least once (queued → running → waiting): the shortcut must
-    // still find it.
+    // still find it, and pressing it twice sends the message once.
     world
         .session
         .send_message_with_shortcut("also add a test for the greeting")
@@ -163,6 +163,12 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
             RUN_TIMEOUT,
         )
         .await?;
+
+    assert_eq!(
+        db::messages_containing(&world.pool, &key, "also add a test for the greeting").await?,
+        1,
+        "a double Ctrl+Enter sent the message twice"
+    );
 
     // `complete_task` ends run 2 as `completed` and puts the task in review.
     world.wait_for_status(&key, "in_review").await?;
