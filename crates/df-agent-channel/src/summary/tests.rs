@@ -121,6 +121,34 @@ fn consecutive_completed_calls_collapse_into_one_counted_line() {
 }
 
 #[test]
+fn agent_messages_of_two_runs_stay_separate_even_with_the_same_message_id() {
+    let mut first = chunk("msg-1", "run one");
+    first.run_id = Uuid::from_u128(1);
+    let mut second = chunk("msg-1", "run two");
+    second.run_id = Uuid::from_u128(2);
+
+    assert_eq!(
+        fold_summary(&[first, second], CAP),
+        ["Agent: run one", "Agent: run two"]
+    );
+}
+
+#[test]
+fn tool_calls_without_an_id_each_get_their_own_line() {
+    let run = Uuid::from_u128(1);
+    let events = [
+        tool(run, "t", "", "first", "TOOL_CALL_STATUS_FAILED"),
+        tool(run, "t", "", "second", "TOOL_CALL_STATUS_FAILED"),
+        tool_update(run, "t", "", "ignored", "TOOL_CALL_STATUS_COMPLETED"),
+    ];
+
+    assert_eq!(
+        fold_summary(&events, CAP),
+        ["Tool: first (failed)", "Tool: second (failed)"]
+    );
+}
+
+#[test]
 fn a_single_completed_call_keeps_its_own_line() {
     let run = Uuid::from_u128(1);
 
