@@ -1,6 +1,6 @@
 # ADR-0023: Kata isolation, no nested containers
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0054](0054-vm-sandboxes-wireguard-relay-proxmox-in-tree.md))
 - **Date:** 2026-10-16
 - **Related:** [ADR-0022](0022-project-images-runtime-volume-no-warm-pools.md)
 

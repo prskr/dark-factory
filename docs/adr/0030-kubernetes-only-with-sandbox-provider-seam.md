@@ -1,6 +1,6 @@
 # ADR-0030: Kubernetes only, with a sandbox provider seam and scoped RBAC
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0054](0054-vm-sandboxes-wireguard-relay-proxmox-in-tree.md))
 - **Date:** 2026-10-16
 - **Related:** [ADR-0006](0006-agent-dial-back-grpc-mtls.md), [ADR-0022](0022-project-images-runtime-volume-no-warm-pools.md), [ADR-0029](0029-egress-gateway-and-generated-network-policies.md), [ADR-0031](0031-helm-chart-deployment-packaging.md)
 

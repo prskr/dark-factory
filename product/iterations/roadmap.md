@@ -135,7 +135,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Showcase seed: tasks with runs, transcripts, queued messages and requests in `just seed` (design-workflow build order step 2); then real screenshots of the task views for the landing page cards | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
-| Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
+| Cilium mode, DNS server in the gateway (the DNS server is a prerequisite for VM sandboxes, ADR-0054) | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
 | Persisted per-run egress aggregates (host, verdict, connections, bytes) | designed | [`design/egress.md`](../../design/egress.md) §8, §13 |
 | Deny rules at project scope | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
 | Hide or filter denied rows on the traffic page | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal), together with the traffic filter work |
@@ -158,7 +158,13 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | WASI 0.3 guests for plugins | idea | ADR-0002 |
 | Separate UIDs for runtime and harness | idea | [`design/agent-run.md`](../../design/agent-run.md) §17 |
 | LSP support | idea | context §4.2 |
-| Cloud VM sandboxes (conflicts with current non-goals) | idea | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
+| VM sandboxes, step 1: vpn-gateway relay spike (userspace WireGuard, PROXY v2 to the gateway and control plane); needs gateway DNS first | designed | ADR-0054, [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §5, §16 |
+| VM sandboxes, step 2: `Enroll` RPC and cert-manager `CertificateRequest` spike, `Enroll` added to `contract/` | designed | ADR-0054, [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §6 |
+| VM sandboxes, step 3: Proxmox provider (`df-proxmox`, `df-bootstrap`, sandbox profiles in the instance configuration); revisit task disks between runs first | designed | ADR-0054, [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §7–§9 |
+| VM sandboxes, step 4: cloud provider plugins (`darkfactory:sandbox` WIT), Hetzner first, with its own ADR | idea | ADR-0054, [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §11 |
+| Cluster targets for VM sandboxes: gateway connects to `cluster-service` entries via `CONNECT`, non-TLS TCP allowlist kind | idea | [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §5.7 |
+| Sandbox profiles editable in the admin UI | idea | [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §3 |
+| VM guest hardening: kernel sysctls and lockdown, Landlock, eBPF audit | idea | [`design/vm-sandboxes.md`](../../design/vm-sandboxes.md) §7.5 |
 | Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | idea | `crates/df-web/src/auth/store.rs` |
 | Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. The control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | decided | design canvas, "Later" row |
 | Phone layout of the network traffic page: at 390 px the page scrolls horizontally, because the Connections graph keeps its 398 px minimum width and the panels stay side by side instead of stacking | idea | `openspec/changes/archive/2026-10-30-ui-design-alignment/review-log.md` (browser check) |
