@@ -75,7 +75,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 ## 6. Integration
 
-- [ ] 6.1 If `iter3-chats` was archived before this change, rebase the `web-ui-shell` "Desktop navigation rail" MODIFIED block on the archived text (Chats, Tasks, Projects, Routines, Personas, Credentials). Verify with `openspec validate iter3-routines --strict`.
+- [ ] 6.1 If `iter3-chats` was archived before this change, rebase the `web-ui-shell` "Desktop navigation rail" MODIFIED block on the archived text (Chats, Tasks, Requests, Projects, Routines, Network traffic, Settings). Verify with `openspec validate iter3-routines --strict`.
 - [ ] 6.2 Extend the e2e suite (`crates/df-e2e`). Verify with `just e2e-local`. The test:
   - creates a routine in the UI;
   - presses Run now;
