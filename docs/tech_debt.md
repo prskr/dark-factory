@@ -858,7 +858,7 @@ Opening the draft PR, marking it ready and posting the completion summary call t
 
 **Matters when:** the forge is briefly unavailable or rate limits at the end of a run. The PR then stays a draft, or misses its summary, until a human acts.
 
-**Fix:** after `lifecycle-events`, enqueue the forge actions as outbox jobs (`pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary`) in the transaction that records the push report or run end, with an `OutboxHandler` per kind (`openspec/changes/lifecycle-events/design.md` D1, D3). Handlers must be idempotent: they find an existing PR before opening one and check the ready state before updating. Tests: a forge failure on "mark ready" is retried until it succeeds; a restart between the run end and the forge call still marks the PR ready. Check TD-11 to TD-13 against the new flow and close what it fixes.
+**Fix:** after `lifecycle-events`, enqueue the forge actions as outbox jobs (`pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary`) in the transaction that records the push report or run end, with an `OutboxHandler` per kind (`openspec/changes/archive/2026-11-04-lifecycle-events/design.md` D1, D3). Handlers must be idempotent: they find an existing PR before opening one and check the ready state before updating. Tests: a forge failure on "mark ready" is retried until it succeeds; a restart between the run end and the forge call still marks the PR ready. Check TD-11 to TD-13 against the new flow and close what it fixes.
 
 Origin of TD-92: CodeRabbit review of PR #87 (`iter2-continuation-summary`, 2026-11-03).
 
