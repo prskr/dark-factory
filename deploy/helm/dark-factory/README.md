@@ -97,8 +97,8 @@ Every key in `values.yaml` is documented below:
 | `sandboxNamespace.limitRange.defaultRequestCpu` | `string` | `"250m"` | Default container CPU request in the sandbox namespace. |
 | `sandboxNamespace.limitRange.defaultRequestMemory` | `string` | `"512Mi"` | Default container memory request in the sandbox namespace. |
 | `enforcement.mode` | `string` | `"kubernetes"` | Network policy enforcement backend (`"kubernetes"` for `networking.k8s.io/v1` or `"cilium"` to also grant `ciliumnetworkpolicies`). |
-| `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a release-prefixed read-only `ClusterRole`/`ClusterRoleBinding` for `services` and `endpointslices`. |
-| `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s are created when `anyNamespace` is `false`. |
+| `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a read-only `ClusterRole`/`ClusterRoleBinding` `<base>-cluster-targets-reader` for `services` and `endpointslices` (names: [Several instances in one cluster](#several-instances-in-one-cluster)). |
+| `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s `<base>-cluster-target-reader` are created when `anyNamespace` is `false`. |
 | `plugins.forgejo.image.repository` | `string` | forgejo: `"ghcr.io/prskr/dark-factory/plugin-forgejo"` | Plugin image. With an image, the control plane pod mounts it read-only as an image volume at `/plugins/<name>` and the instance config sets `plugins.<name>.path` to `/plugins/<name>/plugin.wasm`. Set `plugins.<name>.image: null` for an entry without an image. |
 | `plugins.forgejo.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `plugins.forgejo.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
@@ -303,6 +303,21 @@ From this chart version on, harnesses reach their model provider through the gat
 
 `clusterTargets.anyNamespace` and `clusterTargets.namespaces` are also written to the control plane config (`clusterTargets.*`). The control plane watches `services` and `endpointslices` exactly in these namespaces (cluster-wide with `anyNamespace`) to keep run NetworkPolicies current, and verifies the matching permissions at startup. An egress allowlist rule that names a Service outside these namespaces cannot be resolved, which fails provisioning of the affected runs. The egress allowlist page applies the same restriction when a `cluster-service` entry is saved: Services outside these namespaces are rejected.
 
+## Several instances in one cluster
+
+Releases may share a cluster, also under the same release name in different namespaces. Objects that are cluster-scoped, or that live in a namespace several releases can use, are named after a base `<release-namespace>-<fullname>`:
+
+| Object | Namespace | Name |
+|---|---|---|
+| `ClusterRole`, `ClusterRoleBinding` (read the sandbox namespace) | cluster-scoped | `<base>-sandbox-ns-reader` |
+| `ClusterRole`, `ClusterRoleBinding` (`clusterTargets.anyNamespace: true`) | cluster-scoped | `<base>-cluster-targets-reader` |
+| `Role`, `RoleBinding` (`clusterTargets.namespaces`) | each target namespace | `<base>-cluster-target-reader` |
+| CA objects ([TLS issuer](#tls-issuer)) | `tls.ca.clusterResourceNamespace`, cluster-scoped | `<base>-selfsigned-issuer`, `<base>-ca`, `<base>-ca-issuer` |
+
+The base has at most 40 characters, so every name stays within 63. A longer base keeps its first 31 characters and gets the first 8 hex characters of its SHA-256, for example `team-platform-engineering-produ-38b26355` for `team-platform-engineering-production-dark-factory`.
+
+Each release needs its own sandbox namespace (`sandboxNamespace.name`); the chart cannot detect a namespace another release uses. A shared sandbox namespace collides on the `Namespace` object and its policies (`sandboxNamespace.create: true`) and on the control plane `Role` in it, and each control plane would see the other's pods and volumes. With `sandboxNamespace.create: false`, create the namespace yourself with the labels, `NetworkPolicy`, `ResourceQuota`, `LimitRange` and `ServiceAccount` of `templates/sandbox-namespace.yaml`.
+
 ## TLS issuer
 
 A CA `ClusterIssuer` reads its key pair `Secret` from cert-manager's cluster resource namespace (`tls.ca.clusterResourceNamespace`), not from the release namespace. With `tls.ca.create: true` the chart therefore creates:
@@ -313,7 +328,7 @@ A CA `ClusterIssuer` reads its key pair `Secret` from cert-manager's cluster res
 | `Certificate` (CA, `isCA: true`) | `tls.ca.clusterResourceNamespace` | `<release-namespace>-<fullname>-ca` |
 | `ClusterIssuer` | cluster-scoped | `<release-namespace>-<fullname>-ca-issuer` |
 
-The release namespace is part of the names so that releases with the same name in different namespaces do not collide.
+The release namespace is part of the names so that releases with the same name in different namespaces do not collide (base and length limit: [Several instances in one cluster](#several-instances-in-one-cluster)).
 
 **Why the CA is not in the release namespace.** A CA `ClusterIssuer` can only read its `Secret` from cert-manager's cluster resource namespace (`--cluster-resource-namespace`, default `cert-manager`). Sandboxes need a `ClusterIssuer`: their CSI `CertificateRequest`s are created in the sandbox namespace, which must hold no `Secret`s, so a namespaced `Issuer` cannot serve them. Sandbox and control plane certificates must come from the same CA, so the CA lives in the cluster resource namespace. Setting `tls.ca.clusterResourceNamespace` to the release namespace only works if cert-manager runs with `--cluster-resource-namespace=<release namespace>`.
 

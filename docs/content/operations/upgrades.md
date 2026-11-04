@@ -42,6 +42,18 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Cluster-scoped RBAC names
+
+The cluster-scoped `ClusterRole`s and `ClusterRoleBinding`s and the reader `Role`s in
+`clusterTargets.namespaces` now carry the release namespace in their names
+(`<release-namespace>-<fullname>-…`), so that [several instances](multiple-instances.md) can share
+a cluster. `helm upgrade` removes the old objects and creates the new ones; no step is needed.
+
+If `<release-namespace>-<fullname>` is longer than 40 characters, it is now shortened with a hash
+instead of being cut off, which also renames the chart-created CA (`tls.ca.create: true`).
+cert-manager then issues new certificates from a new CA: let active runs finish before the upgrade,
+since sandboxes with a certificate of the old CA lose their connection.
+
 ### Model providers (inference endpoint)
 
 From this release on, harnesses reach their model through the gateway's

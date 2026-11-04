@@ -133,10 +133,18 @@ Gateway ServiceAccount name
 
 {{/*
 Cluster-scoped name base: release namespace and fullname, so releases with the same name in
-different namespaces do not collide on cluster-scoped objects or in the cert-manager namespace.
+different namespaces do not collide on cluster-scoped objects, in the cert-manager namespace or in
+shared cluster target namespaces. At most 40 characters, so that base plus the longest suffix
+(`-cluster-targets-reader`, 23) stays within 63; a longer base keeps its first 31 characters and
+gets an 8-character hash of the full base, so two long namespaces with the same prefix still differ.
 */}}
-{{- define "dark-factory.ca.base" -}}
-{{- printf "%s-%s" .Release.Namespace (include "dark-factory.fullname" .) | trunc 40 | trimSuffix "-" }}
+{{- define "dark-factory.clusterScoped.base" -}}
+{{- $base := printf "%s-%s" .Release.Namespace (include "dark-factory.fullname" .) }}
+{{- if gt (len $base) 40 }}
+{{- printf "%s-%s" ($base | trunc 31 | trimSuffix "-") ($base | sha256sum | trunc 8) }}
+{{- else }}
+{{- $base }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -144,7 +152,7 @@ Name of the issuer that signs all certificates (control plane, gateway, sandboxe
 */}}
 {{- define "dark-factory.issuer.name" -}}
 {{- if .Values.tls.ca.create }}
-{{- printf "%s-ca-issuer" (include "dark-factory.ca.base" .) }}
+{{- printf "%s-ca-issuer" (include "dark-factory.clusterScoped.base" .) }}
 {{- else }}
 {{- .Values.tls.ca.existingIssuer.name }}
 {{- end }}
