@@ -34,7 +34,7 @@ The tab sits inside `<form id="form">`, and HTML forbids nested forms. The inlin
 
 ### D3 Responses swap the subscriptions region
 
-`new` and `edit` return the editor fragment into a slot at the top of the list (new) or in place of the row (edit). A successful create, update or delete returns the whole region (`#lifecycle-events`), which also refreshes the count. A validation error returns the editor with status 422 and the values kept, as the other forms do.
+`new` and `edit` return the whole region (`#lifecycle-events`) with at most one editor open: the new editor above the list, or the edit editor in place of its row. Opening one closes the other and discards its unsaved values. A successful create, update or delete returns the whole region (`#lifecycle-events`), which also refreshes the count. A validation error returns the editor with status 422 and the values kept, as the other forms do.
 
 ### D4 Delete confirmation is client state of the row
 

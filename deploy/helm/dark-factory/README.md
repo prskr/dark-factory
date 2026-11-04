@@ -323,7 +323,7 @@ Installing the chart with `tls.ca.create: true` needs permission to create cert-
 
 ## Lifecycle event signing key
 
-The control plane signs every lifecycle event delivery with an Ed25519 key. Receivers pin its public key (`GET /lifecycle-events/public-key`, also shown on the subscription page of a project), so the key must stay stable.
+The control plane signs every lifecycle event delivery with an Ed25519 key. Receivers pin its public key (`GET /lifecycle-events/public-key`, also shown in the tab "Lifecycle events" of a project's edit dialog), so the key must stay stable.
 
 Without `lifecycleEvents.signingKey.existingSecret` the chart creates the `Certificate` `<fullname>-lifecycle-events` from the chart's issuer with `privateKey: {algorithm: Ed25519, encoding: PKCS8, rotationPolicy: Never}`. cert-manager renews the certificate after `tls.duration` but keeps the key. The chart sets `rotationPolicy` explicitly because cert-manager 1.18 and later default to `Always`. Only the private key is used; the certificate is required by the issuer.
 

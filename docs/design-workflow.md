@@ -121,6 +121,9 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
+- The tab "Context" of the "Lifecycle events" boards is not built (`iter3-project-context`); the dialog has three tabs, and the phone board's four-tab row scrolls only where the tabs do not fit.
+- The key panel of the "Lifecycle events" tab uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the dialog footer; the boards draw it dark.
+- After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
 ## Mapping views to boards
@@ -171,6 +174,14 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Phone / Phone · requests, deny always | `/requests` | as Requests · deny always | 390 |
 | Config - Projects / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |
 | Config - Projects / Projects · edit modal, push checks, invalid glob | `/projects/<key>/edit` | as above; `deploy/[` added as fifth glob and saved | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events | `/projects/<key>/edit` | `just serve-local`, login as `admin@example.com`; tab "Lifecycle events"; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); the board shows the planned tab "Context" before it (not built) | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, new subscription | `/projects/<key>/edit` | as above with one subscription; "New subscription" clicked, URL and event types filled | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, invalid URL | `/projects/<key>/edit` | as above; `https://10.0.4.12/hooks/df` submitted | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, delete subscription | `/projects/<key>/edit` | as the first board; trash icon of the second subscription clicked | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, empty | `/projects/<key>/edit` | as the first board without subscriptions | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, feature off | `/projects/<key>/edit` | control plane without `lifecycleEvents.signingKeyFile` (no key panel), with subscriptions | 1440 |
+| Config - Projects / Projects · edit modal, lifecycle events, unrestricted URLs | `/projects/<key>/edit` | control plane started with `--unrestricted-project-subscriptions` (`dev-tools` build) | 1440 |
+| Config - Projects / Phone · edit project sheet, lifecycle events | `/projects/<key>/edit` | as the first board; tab "Lifecycle events" chosen | 390 |
 | Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
 | Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
 | Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |

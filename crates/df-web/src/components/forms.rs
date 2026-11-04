@@ -106,13 +106,39 @@ pub fn text_field(
     errors: &FormErrors,
     hint: Option<&str>,
 ) -> Markup {
+    text_input(label, name, value, errors, hint, None, INPUT_CLASS)
+}
+
+/// A monospace single-line input that belongs to the form with the ID `form` (the `form`
+/// attribute), for a field outside that form's element.
+pub fn mono_text_field_of_form(
+    label: &str,
+    name: &str,
+    value: &str,
+    errors: &FormErrors,
+    hint: Option<&str>,
+    form: &str,
+) -> Markup {
+    let class = format!("{INPUT_CLASS} font-mono");
+    text_input(label, name, value, errors, hint, Some(form), &class)
+}
+
+fn text_input(
+    label: &str,
+    name: &str,
+    value: &str,
+    errors: &FormErrors,
+    hint: Option<&str>,
+    form: Option<&str>,
+    class: &str,
+) -> Markup {
     field(
         label,
         name,
         errors,
         hint,
         html! {
-            input id=(name) name=(name) type="text" value=(value) class=(INPUT_CLASS)
+            input id=(name) name=(name) type="text" value=(value) form=[form] class=(class)
                 aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)];
         },
     )
