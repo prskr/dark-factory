@@ -13,7 +13,7 @@ use gix::objs::TreeRefIter;
 use gix::objs::tree::EntryMode;
 
 use super::refs::ObjectId;
-use super::server::BoxError;
+use crate::upstream::BoxError;
 
 /// Most commits one pushed ref may add; above it the push is rejected with `df:push-too-large`.
 pub const MAX_COMMITS: usize = 10_000;

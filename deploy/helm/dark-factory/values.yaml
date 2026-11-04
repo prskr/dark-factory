@@ -204,11 +204,11 @@ volumes:
   # Seconds after the last run of any task (30 days).
   idleTtlSeconds: 2592000
 
-forge:
-  # Accept `http://` repository URLs (plugin calls, the gateway's Git proxy towards the forge and
-  # the project form; sandboxes always use HTTPS to the gateway). Off, only
-  # `https://` works. The forge token travels unencrypted then, so use it for throwaway clusters
-  # (the e2e cluster) only. The control plane and the gateway log a warning at startup when it is
+network:
+  # Accept `http://` upstream URLs: forge plugin calls, the gateway's Git proxy towards the forge,
+  # the model provider upstreams of the inference endpoint and the project form (sandboxes always
+  # use HTTPS to the gateway). Off, only `https://` works. Forge and model provider credentials
+  # travel unencrypted then, so use it for throwaway clusters (the e2e cluster) only. The control plane and the gateway log a warning at startup when it is
   # on; changing it restarts both.
   allowPlainHttp: false
 

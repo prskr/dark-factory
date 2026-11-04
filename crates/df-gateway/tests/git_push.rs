@@ -14,10 +14,12 @@ use common::{Seen, certificate, forge, forge_repository, git, serve_connection};
 use df_gateway::git::mirror::Mirrors;
 use df_gateway::git::push::{NoRecorder, Push, PushRecord, PushRecorder, RecordError};
 use df_gateway::git::server::{
-    Body, ForgeTarget, GitEndpoint, GitRequest, Operation, ServerTls, Upstream,
+    ForgeTarget, GitEndpoint, GitRequest, Operation, ServerTls, Upstream,
 };
-use df_gateway::git::upstream::{ForgeConnector, ForgeUpstream};
+use df_gateway::git::upstream::ForgeUpstream;
 use df_gateway::policy::{Policy, Sandbox};
+use df_gateway::upstream::Body;
+use df_gateway::upstream::UpstreamConnector;
 use df_proto::gateway::v1::{ForgeCredential, GitRoute, PushVerdict};
 use hyper::body::Incoming;
 use rustls::RootCertStore;
@@ -96,7 +98,7 @@ impl Fixture {
     fn mirrors(&self) -> Result<Arc<Mirrors>> {
         Ok(Arc::new(Mirrors::new(
             self.dir.path().join("mirrors"),
-            ForgeConnector::with_roots(self.forge_roots.clone())?,
+            UpstreamConnector::with_roots(self.forge_roots.clone())?,
         )))
     }
 
@@ -304,8 +306,8 @@ async fn plain_http_gateway(
     fixture: &Fixture,
     allow_plain_http: bool,
 ) -> Result<(u16, JoinHandle<()>)> {
-    let tls =
-        ForgeConnector::with_roots(RootCertStore::empty())?.allowing_plain_http(allow_plain_http);
+    let tls = UpstreamConnector::with_roots(RootCertStore::empty())?
+        .allowing_plain_http(allow_plain_http);
     let mirrors = Arc::new(Mirrors::new(
         fixture.dir.path().join("mirrors"),
         tls.clone(),
@@ -1252,7 +1254,7 @@ async fn push_with_a_mirror_forge_answering(
     let (forge_port, roots, forge_task) = status_forge(status).await?;
     let mirrors = Arc::new(Mirrors::new(
         fixture.dir.path().join("mirrors"),
-        ForgeConnector::with_roots(roots)?,
+        UpstreamConnector::with_roots(roots)?,
     ));
     let upstream = Arc::new(ForgeAt {
         forge: ForgeUpstream::with_roots(fixture.forge_roots.clone())?,

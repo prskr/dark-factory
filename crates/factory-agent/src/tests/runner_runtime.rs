@@ -240,7 +240,6 @@ async fn test_df_harness_complete_task_ends_run_completed() {
 
     let params = RunDriverParams {
         assign,
-        credentials: None,
         initial_prompts,
         repo_dir: repo_dir.clone(),
         home_dir,
@@ -480,7 +479,6 @@ sessions:
 
     let params1 = RunDriverParams {
         assign: assign1,
-        credentials: None,
         initial_prompts: initial_prompts1,
         repo_dir: repo_dir.clone(),
         home_dir: home_dir.clone(),
@@ -656,7 +654,6 @@ sessions:
 
     let params2 = RunDriverParams {
         assign: assign2,
-        credentials: None,
         initial_prompts: initial_prompts2,
         repo_dir: repo_dir.clone(),
         home_dir: home_dir.clone(),
@@ -746,8 +743,8 @@ async fn test_manual_claude_acp_run() {
     use crate::outbox::Outbox;
     use crate::runner::{RunDriverParams, run_session};
     use df_proto::agent::v1::{
-        Assign, Harness, HarnessCredentials, Prompt, RunOutcome, ToolCallResult, ToolDescriptor,
-        Workspace, control_message,
+        Assign, Harness, Prompt, RunOutcome, ToolCallResult, ToolDescriptor, Workspace,
+        control_message,
     };
     use tokio::sync::mpsc;
 
@@ -806,7 +803,11 @@ async fn test_manual_claude_acp_run() {
                         "-y".to_string(),
                         "@agentclientprotocol/claude-agent-acp".to_string(),
                     ],
-                    env: std::collections::HashMap::new(),
+                    // The manual test talks to Anthropic directly, not through the gateway.
+                    env: std::collections::HashMap::from([(
+                        "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+                        token,
+                    )]),
                     model: None,
                     settings_json: String::new(),
                 },
@@ -824,10 +825,6 @@ async fn test_manual_claude_acp_run() {
         budgets: None,
         continuation: None,
     };
-
-    let mut creds_env = std::collections::HashMap::new();
-    creds_env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), token);
-    let credentials = HarnessCredentials { env: creds_env };
 
     let initial_prompts = vec![Prompt {
         prompt_id: "prompt-1".to_string(),
@@ -873,7 +870,6 @@ async fn test_manual_claude_acp_run() {
 
     let params = RunDriverParams {
         assign,
-        credentials: Some(credentials),
         initial_prompts,
         repo_dir,
         home_dir,
@@ -935,7 +931,6 @@ async fn test_cancel_before_assign_skips_prepare() {
             budgets: None,
             continuation: None,
         },
-        credentials: None,
         initial_prompts: vec![],
         cancel_requested: true,
         repo_dir: repo_dir.clone(),

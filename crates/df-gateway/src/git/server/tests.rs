@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 
-use hyper::header::AUTHORIZATION;
+use hyper::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 
 use super::*;
 use crate::git::mirror::Mirrors;
-use crate::git::upstream::ForgeConnector;
 use crate::policy::Sandbox;
+use crate::upstream::UpstreamConnector;
 
 const POD: &str = "10.1.0.7";
 const OTHER_POD: &str = "10.1.0.8";
@@ -97,7 +97,7 @@ fn policy(credential_ref: &str) -> Policy {
 
 fn push() -> Arc<Push> {
     let dir = Path::new("/nonexistent/df-gateway-test");
-    let mirrors = Mirrors::new(dir, ForgeConnector::new().unwrap());
+    let mirrors = Mirrors::new(dir, UpstreamConnector::new().unwrap());
     Arc::new(Push::new(Arc::new(mirrors), dir, 1024))
 }
 
@@ -336,4 +336,81 @@ async fn stalled_fetch_body_times_out() {
 
     assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
     assert!(upstream.0.lock().unwrap()[0].body.is_none());
+}
+
+fn endpoint_with_inference(policy: Option<Policy>) -> GitEndpoint {
+    use crate::inference::Inference;
+    use crate::inference::testing::Collector;
+
+    let (endpoint, _) = endpoint(policy);
+    endpoint.with_inference(Arc::new(Inference::new(
+        UpstreamConnector::new().unwrap(),
+        Arc::new(Collector::default()),
+        Arc::default(),
+    )))
+}
+
+#[tokio::test]
+async fn inference_requests_go_to_the_inference_endpoint_next_to_git() {
+    let endpoint = endpoint_with_inference(Some(policy("forge")));
+
+    // A sandbox of the policy without a model provider is known to the inference endpoint.
+    let (status, body) = answer(
+        &endpoint,
+        POD,
+        request(Method::POST, "/inference/v1/messages"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body.contains("no model provider"), "{body}");
+    let (status, body) = answer(
+        &endpoint,
+        "10.9.9.9",
+        request(Method::POST, "/inference/v1/messages"),
+    )
+    .await;
+    assert_eq!(
+        (status, body.trim()),
+        (StatusCode::FORBIDDEN, "df: unknown source")
+    );
+
+    // Git keeps working on the same port.
+    let (status, _) = answer(
+        &endpoint,
+        POD,
+        request(
+            Method::GET,
+            "/git/DF-1.git/info/refs?service=git-upload-pack",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn inference_paths_are_not_served_without_an_inference_endpoint() {
+    let (endpoint, _) = endpoint(Some(policy("forge")));
+
+    let (status, _) = answer(
+        &endpoint,
+        POD,
+        request(Method::POST, "/inference/v1/messages"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_inference_endpoint_waits_for_the_first_snapshot_like_git() {
+    let endpoint = endpoint_with_inference(None);
+
+    let (status, _) = answer(
+        &endpoint,
+        POD,
+        request(Method::POST, "/inference/v1/messages"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }

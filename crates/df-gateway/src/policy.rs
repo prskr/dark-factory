@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use df_proto::gateway::v1::{ForgeCredential, GitRoute, PolicyUpdate, PushPolicy, SandboxEntry};
+use df_proto::gateway::v1::{
+    ForgeCredential, GitRoute, InferenceRoute, PolicyUpdate, ProviderCredential, PushPolicy,
+    SandboxEntry,
+};
 
 /// Reason of a denied request, as shown in the egress log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +101,8 @@ pub struct Sandbox {
 }
 
 /// The sandbox registry with the allowlists of the latest snapshot.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Not `Eq`: the inference routes of the snapshot are messages with nested messages.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Policy {
     pub version: u64,
     sandboxes: HashMap<IpAddr, Sandbox>,
@@ -106,6 +110,8 @@ pub struct Policy {
     forge_credentials: HashMap<String, ForgeCredential>,
     push_policies: HashMap<String, PushPolicy>,
     exceptions: HashMap<IpAddr, Vec<String>>,
+    inference_routes: HashMap<IpAddr, InferenceRoute>,
+    provider_credentials: HashMap<String, ProviderCredential>,
 }
 
 impl Policy {
@@ -117,6 +123,8 @@ impl Policy {
             forge_credentials: HashMap::new(),
             push_policies: HashMap::new(),
             exceptions: HashMap::new(),
+            inference_routes: HashMap::new(),
+            provider_credentials: HashMap::new(),
         }
     }
 
@@ -145,19 +153,34 @@ impl Policy {
         self
     }
 
+    /// Adds the model providers of the sandboxes (by pod IP) and the credentials they refer to.
+    #[must_use]
+    pub fn with_inference(
+        mut self,
+        routes: impl IntoIterator<Item = (IpAddr, InferenceRoute)>,
+        credentials: impl IntoIterator<Item = (String, ProviderCredential)>,
+    ) -> Self {
+        self.inference_routes = routes.into_iter().collect();
+        self.provider_credentials = credentials.into_iter().collect();
+        self
+    }
+
     /// Entries whose `pod_ip` does not parse are skipped: they can never match a connection.
     pub fn from_update(update: PolicyUpdate) -> Self {
         let snapshot = update.snapshot.unwrap_or_default();
         let mut routes = Vec::new();
+        let mut inference = Vec::new();
         let mut exceptions = Vec::new();
         let sandboxes: Vec<_> = snapshot
             .sandboxes
             .into_iter()
             .filter_map(|mut entry| {
                 let route = entry.git.take();
+                let model = entry.inference.take();
                 let excepted = std::mem::take(&mut entry.exceptions);
                 let (ip, sandbox) = sandbox_from_entry(entry)?;
                 routes.extend(route.map(|route| (ip, route)));
+                inference.extend(model.map(|route| (ip, route)));
                 exceptions.push((ip, excepted));
                 Some((ip, sandbox))
             })
@@ -165,6 +188,7 @@ impl Policy {
         Self::new(update.version, sandboxes)
             .with_git(routes, snapshot.forge_credentials)
             .with_push_checks(snapshot.push_policies, exceptions)
+            .with_inference(inference, snapshot.provider_credentials)
     }
 
     pub fn sandbox(&self, ip: IpAddr) -> Option<&Sandbox> {
@@ -184,6 +208,16 @@ impl Policy {
     /// The credential a [`GitRoute::credential_ref`] names.
     pub fn forge_credential(&self, reference: &str) -> Option<&ForgeCredential> {
         self.forge_credentials.get(reference)
+    }
+
+    /// The model provider route of the sandbox at `ip`, if its run has one.
+    pub fn inference_route(&self, ip: IpAddr) -> Option<&InferenceRoute> {
+        self.inference_routes.get(&ip)
+    }
+
+    /// The credential an [`InferenceRoute::credential_ref`] names.
+    pub fn provider_credential(&self, reference: &str) -> Option<&ProviderCredential> {
+        self.provider_credentials.get(reference)
     }
 
     /// The push policy of the project `project_key`.

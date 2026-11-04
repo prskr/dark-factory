@@ -159,22 +159,22 @@ tests:
     asserts:
       - failedTemplate: {}
 
-  - it: allows only https to the forge by default
+  - it: allows only https to upstreams by default
     template: configmap.yaml
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'forge:\n  allowPlainHttp: false\n'
+          pattern: 'network:\n  allowPlainHttp: false\n'
         documentIndex: 0
 
-  - it: renders forge.allowPlainHttp
+  - it: renders network.allowPlainHttp
     template: configmap.yaml
     set:
-      forge.allowPlainHttp: true
+      network.allowPlainHttp: true
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'forge:\n  allowPlainHttp: true\n'
+          pattern: 'network:\n  allowPlainHttp: true\n'
         documentIndex: 0
 
   - it: hides hidden transcript blocks by default

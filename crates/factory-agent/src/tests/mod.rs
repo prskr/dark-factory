@@ -26,7 +26,6 @@ mod runner;
 mod runner_idle;
 mod runner_runtime;
 mod transcript;
-mod usage;
 mod workspace;
 mod workspace_finalize;
 
@@ -278,7 +277,6 @@ impl RunScenario {
             });
         RunDriverParams {
             assign,
-            credentials: None,
             initial_prompts: vec![Prompt {
                 prompt_id: "prompt-1".to_string(),
                 author: None,

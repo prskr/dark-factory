@@ -27,7 +27,9 @@ The task view has three columns: the task list, the transcript and the details.
   turn boundary, without restarting anything; while it waits it is shown as queued and can be
   edited or removed. A message to a finished task reopens it.
 - **Details**: what the agent is doing now, the pull request and issue links, project, persona,
-  branch and the list of runs with model and token usage.
+  branch and the list of runs with model and token usage. The tokens are summed per model from the
+  [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
+  no usage are counted separately ("2 requests without usage") instead of as zero.
 
 ## Status
 

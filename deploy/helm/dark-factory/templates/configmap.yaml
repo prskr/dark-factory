@@ -42,8 +42,8 @@ data:
     volumes:
       retainAfterCloseSeconds: {{ .Values.volumes.retainAfterCloseSeconds | int64 }}
       idleTtlSeconds: {{ .Values.volumes.idleTtlSeconds | int64 }}
-    forge:
-      allowPlainHttp: {{ .Values.forge.allowPlainHttp }}
+    network:
+      allowPlainHttp: {{ .Values.network.allowPlainHttp }}
     web:
       showHiddenBlocks: {{ .Values.web.showHiddenBlocks }}
     harness:

@@ -5,6 +5,10 @@ sessions:
   # Run 1: first commit, then shape the pull request and comment on the issue.
   new:
     - - say: "I will add a greeting file for this task."
+      # Model traffic goes through the gateway's inference endpoint; the e2e suite checks the
+      # answer of the fake upstream and the usage record.
+      - model:
+          prompt: "Say hello."
       - plan:
           entries:
             - content: "Write greeting.txt"

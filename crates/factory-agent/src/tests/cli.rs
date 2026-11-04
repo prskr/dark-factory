@@ -204,8 +204,8 @@ fn log_outbound_chunks_only_at_debug() {
 fn log_outbound_turn_plan_notice_and_reports() {
     use df_proto::agent::v1::{PushReport, PushStatus, RunOutcome, RunReport, agent_message::Body};
     use df_proto::transcript::v1::{
-        Notice, NoticeLevel, Plan, PlanEntry, StopReason, TurnEnded, TurnStarted, Usage,
-        UserMessage, event::Kind,
+        Notice, NoticeLevel, Plan, PlanEntry, StopReason, TurnEnded, TurnStarted, UserMessage,
+        event::Kind,
     };
 
     let f = |body: &Body| logged("info", body).remove(0);
@@ -253,24 +253,16 @@ fn log_outbound_turn_plan_notice_and_reports() {
             "t1",
             Kind::TurnEnded(TurnEnded {
                 stop_reason: StopReason::EndTurn as i32,
-                usage: vec![
-                    Usage {
-                        output_tokens: 10,
-                        ..Default::default()
-                    },
-                    Usage {
-                        output_tokens: 5,
-                        ..Default::default()
-                    },
-                ],
                 detail: detail.into(),
-                ..Default::default()
             }),
         )
     };
     let v = f(&ended(""));
     assert_eq!(v["fields"]["stop_reason"], "EndTurn");
-    assert_eq!(v["fields"]["output_tokens"], 15);
+    assert!(
+        v["fields"].get("output_tokens").is_none(),
+        "usage comes from the gateway"
+    );
     assert!(v["fields"].get("detail").is_none());
     assert_eq!(f(&ended("slow down"))["fields"]["detail"], "slow down");
 

@@ -122,7 +122,7 @@ Every key in `values.yaml` is documented below:
 | `volumes.idleTtlSeconds` | `int` | `2592000` | Seconds after the last run of any task without an active run until its volume is deleted (`volumes.idleTtlSeconds` of the instance config). At most `9007199254740991`, which means never. |
 | `runs.maxConcurrent` | `int` | `4` | Runs that may be active at the same time across all replicas (`runs.maxConcurrent` of the instance config). Further due tasks wait. |
 | `runs.maxAutoResumes` | `int` | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` before the task fails (`runs.maxAutoResumes` of the instance config). |
-| `forge.allowPlainHttp` | `bool` | `false` | Accept `http://` repository URLs: forge plugin calls, the gateway's Git proxy towards the forge (sandboxes always use HTTPS to the gateway) and the project form (`forge.allowPlainHttp` of the instance config). Off, only `https://` works. The forge token travels unencrypted, so use it for throwaway clusters only; the control plane and the gateway log a warning at startup. A change restarts both. |
+| `network.allowPlainHttp` | `bool` | `false` | Accept `http://` upstream URLs: forge plugin calls, the gateway's Git proxy towards the forge (sandboxes always use HTTPS to the gateway) and the project form (`network.allowPlainHttp` of the instance config). This setting was `forge.allowPlainHttp` before. Off, only `https://` works; this includes the upstream URLs of model providers, which the gateway's inference endpoint forwards over plain `http://` only when this is on (the provider form requires `https://` either way). The forge token and provider credentials travel unencrypted, so use it for throwaway clusters only; the control plane and the gateway log a warning at startup. A change restarts both. |
 | `web.showHiddenBlocks` | `bool` | `false` | Show transcript content blocks marked `hidden` (instructions for the agent, such as the title request) in the task UI, muted and labeled (`web.showHiddenBlocks` of the instance config). For debugging prompts. Read at startup: a change restarts the control plane. |
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
 | `controlPlane.logLevel` | `string` | `info` | `RUST_LOG` (`EnvFilter` syntax, e.g. `info,df_web=debug`) of the control plane and the migrate job. |
@@ -294,6 +294,10 @@ A plugin whose component is missing or invalid is logged at `error` ("forge plug
 ## Upgrade to the Git proxy
 
 From this chart version on, sandboxes clone and push only through the gateway's Git proxy (`gateway.ports.git`), which injects the forge credential; the egress proxy no longer carries Git traffic. After the upgrade, remove the forge host from the instance egress allowlist (UI, egress allowlist page). An entry left there lets an agent reach the forge's API and web UI directly, outside the proxy's ref rules and push records.
+
+## Upgrade to the inference endpoint
+
+From this chart version on, harnesses reach their model provider through the gateway's inference endpoint (`gateway.ports.git`, path `/inference`), which injects the provider credential and reports token usage; the egress proxy no longer carries model traffic. `api.anthropic.com` no longer needs to be on the instance egress allowlist (leaving it there is harmless). The `migrate` job turns the harness credential of every persona into a model provider "Claude subscription (<credential name>)"; a persona without a harness credential stops the migration with a message naming it. Run the gateway and the control plane from the same chart version.
 
 ## Cluster targets
 

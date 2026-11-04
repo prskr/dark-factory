@@ -333,7 +333,7 @@ impl TestApp {
         .await
     }
 
-    /// An app of an instance with `forge.allowPlainHttp` on: the routing table and the project
+    /// An app of an instance with `network.allowPlainHttp` on: the routing table and the project
     /// form accept `http://` repository URLs.
     pub(crate) async fn with_plain_http() -> Self {
         let configs = BTreeMap::from([(
@@ -529,6 +529,55 @@ pub(crate) fn form(pairs: &[(&str, &str)]) -> String {
 pub(crate) struct Seed {
     pub project: uuid::Uuid,
     pub persona: uuid::Uuid,
+    pub provider: uuid::Uuid,
+}
+
+/// The model provider "Claude subscription" (Anthropic Messages, scheme `claude-subscription`)
+/// with its credential reference; created once.
+pub(crate) async fn seed_provider(pool: &PgPool) -> uuid::Uuid {
+    use df_core::model_provider::{CredentialScheme, ProviderApi, WireApi};
+    use df_db::catalog::{Actor, CredentialRefInput, save_credential_ref};
+    use df_db::model_providers::{ModelProviderInput, list_model_providers, save_model_provider};
+    if let Some(existing) = list_model_providers(pool).await.unwrap().first() {
+        return existing.id;
+    }
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let credential = save_credential_ref(
+        pool,
+        actor,
+        None,
+        &CredentialRefInput {
+            name: "claude-subscription".into(),
+            secret_name: "claude".into(),
+            secret_key: "token".into(),
+        },
+    )
+    .await
+    .unwrap();
+    save_model_provider(
+        pool,
+        actor,
+        None,
+        &ModelProviderInput {
+            name: "Claude subscription".into(),
+            credential_ref_id: credential.id.as_uuid(),
+            scheme: CredentialScheme::ClaudeSubscription,
+            credential_header: None,
+            credential_prefix: None,
+            headers: Vec::new(),
+            apis: vec![ProviderApi {
+                wire_api: WireApi::AnthropicMessages,
+                upstream_url: "https://api.anthropic.com".into(),
+            }],
+        },
+    )
+    .await
+    .unwrap()
+    .id
 }
 
 pub(crate) fn actor() -> (df_core::Principal, Vec<String>) {
@@ -562,6 +611,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
     )
     .await
     .unwrap();
+    let provider = seed_provider(pool).await;
     let persona = save_persona(
         pool,
         actor,
@@ -571,7 +621,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             system_prompt: "Be Linus.".into(),
             harness: "claude-code".into(),
             model: None,
-            harness_credential_id: None,
+            model_provider_id: provider,
         },
     )
     .await
@@ -579,6 +629,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
     Seed {
         project: project.id,
         persona: persona.id,
+        provider,
     }
 }
 
@@ -615,6 +666,30 @@ pub(crate) async fn insert_run(
         .await
         .unwrap();
     id
+}
+
+/// Stores a gateway usage record of `run`; `model` `None` makes it a request without usage.
+pub(crate) async fn add_usage(
+    pool: &PgPool,
+    run: uuid::Uuid,
+    model: Option<&str>,
+    tokens: [i64; 4],
+) {
+    sqlx::query(
+        "INSERT INTO model_usage (request_id, run_id, recorded_at, model, wire_api, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, usage_known)
+         VALUES ($1, $2, now(), $3, 'anthropic-messages', $4, $5, $6, $7, $8)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(run)
+    .bind(model)
+    .bind(tokens[0])
+    .bind(tokens[1])
+    .bind(tokens[2])
+    .bind(tokens[3])
+    .bind(model.is_some())
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 /// Stores a transcript event (`kind` is the `snake_case` name of the event's oneof field) and

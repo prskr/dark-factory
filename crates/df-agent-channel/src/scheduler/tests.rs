@@ -715,8 +715,8 @@ async fn wall_clock_budget_counts_from_the_runtime_connect() {
 async fn bookkeeping_failure_after_the_run_was_created_ends_it_as_provisioning_failed() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    // `load_run_context` joins `credential_refs`; without it, provisioning cannot start.
-    sqlx::query("ALTER TABLE credential_refs RENAME TO credential_refs_gone")
+    // `load_run_context` reads `personas`; without it, provisioning cannot start.
+    sqlx::query("ALTER TABLE personas RENAME TO personas_gone")
         .execute(&pool)
         .await
         .unwrap();

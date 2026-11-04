@@ -13,6 +13,8 @@
 //     its push checks (iter2-push-checks design D2).
 //   * GatewayEvents (served by the control plane): the egress proxy reports `not-allowlisted`
 //     denials with ReportDenial (iter2-egress-approvals design D2).
+//   * GatewayUsage (served by the control plane): the inference endpoint reports the token usage
+//     of every model request with Report (iter3-inference-gateway design D4).
 //
 // Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
 // gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
@@ -47,6 +49,12 @@ service GatewayEvents {
   rpc ReportDenial(Denial) returns (ReportDenialResponse);
 }
 
+service GatewayUsage {
+  // Stores the usage records of a batch. Idempotent by `UsageRecord.request_id`: a record that is
+  // already stored is ignored; records of unknown runs are dropped.
+  rpc Report(UsageBatch) returns (ReportUsageResponse);
+}
+
 // ---------------------------------------------------------------------------
 // Policy
 // ---------------------------------------------------------------------------
@@ -69,6 +77,9 @@ message Snapshot {
   // project has an entry; the control plane fills in the defaults for a project without a stored
   // policy.
   map<string, PushPolicy> push_policies = 3;
+  // Credentials of the model providers the inference routes use, keyed by
+  // `InferenceRoute.credential_ref`.
+  map<string, ProviderCredential> provider_credentials = 4;
 }
 
 // An active sandbox: where its traffic comes from and what it may reach.
@@ -86,6 +97,64 @@ message SandboxEntry {
   // Fingerprints of the push check findings approved for the run's task
   // (`PushFinding.fingerprint`); a push passes findings with a listed fingerprint.
   repeated string exceptions = 9;
+  // The model provider the run's harness talks to through the inference endpoint; unset if none.
+  InferenceRoute inference = 10;
+}
+
+// The API protocol of a model endpoint.
+enum WireApi {
+  WIRE_API_UNSPECIFIED = 0;
+  // Anthropic Messages: `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`.
+  WIRE_API_ANTHROPIC_MESSAGES = 1;
+  // OpenAI Chat Completions: `/v1/chat/completions`, `/v1/models`.
+  WIRE_API_OPENAI_CHAT = 2;
+  // OpenAI Responses: `/v1/responses`, `/v1/models`.
+  WIRE_API_OPENAI_RESPONSES = 3;
+}
+
+// How the gateway presents the provider credential to the upstream.
+enum CredentialScheme {
+  CREDENTIAL_SCHEME_UNSPECIFIED = 0;
+  // `x-api-key: <value>`
+  CREDENTIAL_SCHEME_X_API_KEY = 1;
+  // `Authorization: Bearer <value>`
+  CREDENTIAL_SCHEME_BEARER = 2;
+  // `<credential_header>: <credential_prefix><value>`
+  CREDENTIAL_SCHEME_HEADER = 3;
+  // `Authorization: Bearer <value>`; Anthropic Messages only.
+  CREDENTIAL_SCHEME_CLAUDE_SUBSCRIPTION = 4;
+}
+
+// A run's model provider (iter3-inference-gateway design D8). The gateway does no templating:
+// `headers` are rendered for the run.
+message InferenceRoute {
+  // The wire API chosen for the run; `/v1/models` goes to its upstream.
+  WireApi wire_api = 1;
+  // Upstream base URL per wire API the provider offers, `https://` only.
+  repeated ApiUpstream upstreams = 2;
+  // Key into `Snapshot.provider_credentials`.
+  string credential_ref = 3;
+  CredentialScheme scheme = 4;
+  // Header name and value prefix of `CREDENTIAL_SCHEME_HEADER`.
+  string credential_header = 5;
+  string credential_prefix = 6;
+  // Extra headers the provider sets for the run; they replace client headers of the same name.
+  repeated Header headers = 7;
+}
+
+message ApiUpstream {
+  WireApi wire_api = 1;
+  string upstream_url = 2;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}
+
+// Credential value of a model provider. Secret: never logged; the Rust `Debug` redacts `value`.
+message ProviderCredential {
+  string value = 1;
 }
 
 // A run's repository behind the Git proxy. Branches are full ref names (`refs/heads/main`).
@@ -344,3 +413,35 @@ message Denial {
 }
 
 message ReportDenialResponse {}
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+message UsageBatch {
+  // Name of the reporting gateway pod, for logs.
+  string gateway_pod = 1;
+  repeated UsageRecord records = 2;
+}
+
+// The usage of one model request (iter3-inference-gateway design D3).
+message UsageRecord {
+  // UUIDv7 chosen by the gateway; idempotency key of the record.
+  string request_id = 1;
+  string run_id = 2;
+  // When the request ended.
+  google.protobuf.Timestamp at = 3;
+  // The model named in the response; empty if unknown.
+  string model = 4;
+  WireApi wire_api = 5;
+  // Status of the upstream response; 0 if there was none (upstream unreachable).
+  uint32 upstream_status = 6;
+  // False if the response carried no usage; the token counts are then 0.
+  bool usage_known = 7;
+  uint64 input_tokens = 8;
+  uint64 output_tokens = 9;
+  uint64 cache_read_tokens = 10;
+  uint64 cache_write_tokens = 11;
+}
+
+message ReportUsageResponse {}

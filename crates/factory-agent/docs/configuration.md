@@ -47,9 +47,15 @@ These are compiled in and not configurable.
 
 - **Outbox.** The outbox opens with the state stored in `$DF_DATA_DIR/runtime/run.json`. The run id in
   `HelloAck` or `Assign` decides whether that state is kept or discarded.
-- **Message order.** `HarnessCredentials` must arrive before `Assign`. Credentials that arrive later are
-  ignored and reported as a `runtime.harness_credentials_late` notice. A `Cancel` that arrives before
-  `Assign` ends the run as `CANCELLED` without preparing the workspace.
+- **Message order.** A `Cancel` that arrives before `Assign` ends the run as `CANCELLED` without
+  preparing the workspace.
+- **Harness environment.** The harness starts with the environment of `Assign` (`AcpHarness.env`):
+  the gateway's inference endpoint as base URL, the placeholder API key `df-placeholder` and the
+  instance CA file; for `claude-code` that is `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN` (provider
+  scheme `claude-subscription`) or `ANTHROPIC_API_KEY` (other schemes), and `NODE_EXTRA_CA_CERTS`
+  (`/run/factory/tls/ca.crt`), plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so Claude Code sends
+  no telemetry or update checks past the endpoint. The runtime holds no model credential and reports no token usage: the
+  gateway measures it, and usage the harness reports over ACP is not forwarded.
 - **Idle wait.** After a turn that ended normally with no queued prompt (and no `complete_task`,
   rate limit, budget limit, cancel or crash), the runtime reports `AWAITING_INPUT` and keeps the
   harness session up. A `Prompt` starts the next turn in the same session (reported as `RUNNING`),

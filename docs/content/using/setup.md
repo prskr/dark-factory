@@ -21,7 +21,7 @@ Two kinds of credentials are referenced:
 | Credential | Used by | Reaches the sandbox |
 | --- | --- | --- |
 | Forge credential (a token of a bot account) | the forge plugins (API) and the Git proxy | never |
-| Harness credential (for example a Claude subscription token, `CLAUDE_CODE_OAUTH_TOKEN`) | the agent harness | yes, in memory over the agent channel, at every connect |
+| Model credential (for example a Claude subscription token or an API key), referenced by a [model provider](model-providers.md) | the gateway's inference endpoint | never; the harness gets a placeholder |
 
 ## Projects
 
@@ -53,7 +53,7 @@ A **persona** is an agent with a role. **Personas → New persona**:
 | System prompt | The role and the working rules of this agent. |
 | Harness | The coding agent that runs in the sandbox (`claude-code`). |
 | Model | Optional; empty uses the harness default. |
-| Harness credential | The credential reference the harness logs in with. |
+| Model provider | The [model provider](model-providers.md) the harness talks to. Only providers that offer a wire API of the harness are listed. |
 
 Every task is assigned to one persona; the persona's harness, model and prompt apply to all runs of
 the task.

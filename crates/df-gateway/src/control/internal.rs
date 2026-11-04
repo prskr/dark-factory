@@ -1,9 +1,12 @@
-//! The control plane's internal gateway server: `PolicyWatch`, `GatewayGit`, `GatewayEvents` and
-//! the stale push scan on one port.
+//! The control plane's internal gateway server: `PolicyWatch`, `GatewayGit`, `GatewayEvents`,
+//! `GatewayUsage` and the stale push scan on one port.
 
 use df_proto::gateway::v1::gateway_events_server::GatewayEventsServer;
 use df_proto::gateway::v1::gateway_git_server::GatewayGitServer;
 use df_proto::gateway::v1::gateway_policy_server::GatewayPolicyServer;
+use df_proto::gateway::v1::gateway_usage_server::GatewayUsageServer;
+use std::sync::Arc;
+
 use futures::Stream;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
@@ -12,6 +15,7 @@ use tonic::transport::Server;
 use super::denial_events::DenialEvents;
 use super::git_records::{GitRecords, scan_stale_pushes};
 use super::policy_service::PolicyService;
+use super::usage_records::{TokenCounter, UsageRecords};
 use crate::peer::require_dns_san;
 
 /// Serves `PolicyWatch`, `GatewayGit` and `GatewayEvents` on `incoming`, and runs the stale push
@@ -21,6 +25,7 @@ use crate::peer::require_dns_san;
 /// let in (tests without TLS).
 pub async fn serve_internal<I, IO>(
     service: PolicyService,
+    tokens: Arc<dyn TokenCounter>,
     incoming: I,
     gateway_name: Option<String>,
     shutdown: CancellationToken,
@@ -40,6 +45,7 @@ where
     };
     let records = GitRecords::new(service.pool.clone());
     let denials = DenialEvents::new(service.pool.clone());
+    let usage = UsageRecords::new(service.pool.clone(), tokens);
     let scan = tokio::spawn(scan_stale_pushes(service.pool.clone(), shutdown.clone()));
     let served = Server::builder()
         .add_service(GatewayPolicyServer::with_interceptor(
@@ -47,7 +53,11 @@ where
             guard.clone(),
         ))
         .add_service(GatewayGitServer::with_interceptor(records, guard.clone()))
-        .add_service(GatewayEventsServer::with_interceptor(denials, guard))
+        .add_service(GatewayEventsServer::with_interceptor(
+            denials,
+            guard.clone(),
+        ))
+        .add_service(GatewayUsageServer::with_interceptor(usage, guard))
         .serve_with_incoming_shutdown(incoming, shutdown.clone().cancelled_owned())
         .await;
     scan.abort();

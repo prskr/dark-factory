@@ -26,6 +26,7 @@ pub enum Nav {
     Projects,
     Personas,
     Credentials,
+    ModelProviders,
     /// Pending questions and approval requests.
     Requests,
     /// Egress rules (desktop only).

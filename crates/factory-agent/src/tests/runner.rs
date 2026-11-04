@@ -79,21 +79,6 @@ fn test_determine_run_outcome_priority() {
         }
     );
 
-    // 5. Budgets: output tokens
-    let input_tok = TurnOutcomeInput {
-        output_tokens_exceeded: true,
-        has_queued_prompts: true,
-        ..Default::default()
-    };
-    assert_eq!(
-        determine_run_outcome(&input_tok),
-        RunOutcomeDecision::Finalize {
-            outcome: RunOutcome::LimitReached,
-            detail: "Output token budget exceeded".to_string(),
-            retry_after: None,
-        }
-    );
-
     // 6. StopReason: MaxTokens / MaxTurnRequests
     let input_mt = TurnOutcomeInput {
         stop_reason: Some(StopReason::MaxTokens),
@@ -347,7 +332,6 @@ sessions:
     // Limit to max 2 turns
     let budgets = Budgets {
         max_wall_clock: None,
-        max_output_tokens: None,
         max_turns: Some(2),
     };
     // Queue prompts for turn 2 and a potential turn 3 during execution
@@ -405,7 +389,6 @@ sessions:
             seconds: 0,
             nanos: 200_000_000,
         }),
-        max_output_tokens: None,
         max_turns: None,
     };
     let (result, _) = scenario
@@ -513,7 +496,6 @@ async fn run_with_workspace(
             budgets: None,
             continuation: None,
         },
-        credentials: None,
         initial_prompts: vec![],
         cancel_requested: false,
         repo_dir: repo_dir.clone(),
@@ -561,4 +543,23 @@ async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
         "got: {}",
         result.run_report.detail
     );
+}
+
+#[tokio::test]
+async fn a_usage_update_of_the_harness_is_not_forwarded() {
+    use agent_client_protocol::schema::v1::{SessionUpdate, UsageUpdate};
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let translator = tokio::sync::Mutex::new(crate::transcript::TranscriptTranslator::new("t1"));
+
+    crate::runner::forward_session_update(
+        &tx,
+        &translator,
+        SessionUpdate::UsageUpdate(UsageUpdate::new(350, 200_000)),
+    )
+    .await;
+    drop(tx);
+
+    // Usage comes from the gateway's records only: nothing reaches the control plane.
+    assert!(rx.recv().await.is_none());
 }

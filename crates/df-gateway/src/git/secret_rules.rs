@@ -7,8 +7,8 @@ use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use serde::Deserialize;
 
 use super::checks::{ScanError, SecretMatch, SecretMatcher};
-use super::server::BoxError;
 use super::view::{AddedBlob, escape};
+use crate::upstream::BoxError;
 
 const BUILTIN: &str = include_str!("../../rules/secrets.yml");
 /// Lazy DFA cache of the rule set; halves the scan time compared to the default 2 MiB (README).

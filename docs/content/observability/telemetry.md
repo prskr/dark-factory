@@ -57,7 +57,7 @@ never for replayed messages, so a crash between commit and recording loses the s
 | `df.runs.ended` | counter | | `project`, `outcome` | `RunReport` |
 | `df.run.duration` | histogram | s | `project`, `outcome` | run start to `RunReport` |
 | `df.agent.turns` | counter | | `project`, `stop_reason` | `TurnEnded` |
-| `df.agent.tokens` | counter | | `project`, `model`, `token_type` (`input`, `output`, `cache_read`, `cache_write`) | `TurnEnded.usage` |
+| `df.agent.tokens` | counter | | `model`, `token_type` (`input`, `output`, `cache_read`, `cache_write`) | stored gateway usage records (a record that is stored twice counts once) |
 | `df.agent.tool_calls` | counter | | `project`, `kind`, `origin`, `status` (`completed`, `failed`) | terminal status of a tool call |
 | `df.agent.pushes` | counter | | `project`, `target`, `status` | `PushReport` |
 | `df.agent.runtime.duration` | histogram | s | `project`, `operation`, `result` (`ok`, `error`) | `RuntimeTiming` |
@@ -84,6 +84,9 @@ never attributes.
 | `df.gateway.active_connections` | up-down counter | | | requests connected to their destination |
 | `df.gateway.bytes` | counter | By | `direction` (`upstream`: sandbox to destination, `downstream`) | relayed bytes |
 | `df.gateway.policy_version` | gauge | | | version of the last applied allowlist snapshot |
+| `df.gateway.inference.requests` | counter | | `wire_api` (`anthropic-messages`, `openai-chat`, `openai-responses`), `status_class` (`2xx`, `4xx`, `5xx`, `error`) | model requests of the inference endpoint, counted when their response ends |
+| `df.gateway.inference.duration` | histogram | s | `wire_api` | time from the request to the end of its response |
+| `df.gateway.inference.usage_dropped` | counter | | | usage records dropped because the buffer was full or the control plane refused them |
 
 ## Spans
 

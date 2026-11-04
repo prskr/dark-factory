@@ -82,7 +82,7 @@ pub enum Step {
     Fetch(FetchStep),
     Mcp(McpStep),
     Plan(PlanStep),
-    Usage(UsageStep),
+    Model(crate::model::ModelStep),
     End(EndStep),
 }
 
@@ -150,19 +150,6 @@ pub struct PlanEntryStep {
 
 fn default_plan_status() -> String {
     "completed".to_string()
-}
-
-/// Scripted usage details.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct UsageStep {
-    #[serde(default)]
-    pub used: Option<u64>,
-    #[serde(default)]
-    pub size: Option<u64>,
-    #[serde(default)]
-    pub input_tokens: Option<u64>,
-    #[serde(default)]
-    pub output_tokens: Option<u64>,
 }
 
 /// End condition of a turn.

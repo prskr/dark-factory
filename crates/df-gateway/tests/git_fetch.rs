@@ -11,8 +11,9 @@ use common::{certificate, forge, forge_repository, git};
 use df_gateway::git::mirror::Mirrors;
 use df_gateway::git::push::Push;
 use df_gateway::git::server::{GitEndpoint, ServerTls};
-use df_gateway::git::upstream::{ForgeConnector, ForgeUpstream};
+use df_gateway::git::upstream::ForgeUpstream;
 use df_gateway::policy::{Policy, Sandbox};
+use df_gateway::upstream::UpstreamConnector;
 use df_proto::gateway::v1::{ForgeCredential, GitRoute};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -61,7 +62,7 @@ async fn git_clone_through_the_gateway_uses_protocol_v2_and_the_injected_credent
     let (_policy_tx, policy_rx) = watch::channel(Some(Arc::new(policy)));
     let mirrors = Mirrors::new(
         dir.path().join("mirrors"),
-        ForgeConnector::with_roots(forge_roots.clone())?,
+        UpstreamConnector::with_roots(forge_roots.clone())?,
     );
     let push = Push::new(Arc::new(mirrors), &dir.path().join("mirrors"), 1 << 20);
     let endpoint = Arc::new(GitEndpoint::new(

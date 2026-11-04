@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 use tokio::runtime::Handle;
 
 use super::server::ForgeTarget;
-use super::upstream::{ForgeConnector, basic};
+use super::upstream::basic;
+use crate::upstream::UpstreamConnector;
 
 mod transport;
 
@@ -23,7 +24,7 @@ pub const FETCH_DEADLINE: Duration = Duration::from_secs(300);
 /// The mirrors under one directory, one per upstream URL.
 pub struct Mirrors {
     dir: PathBuf,
-    connector: ForgeConnector,
+    connector: UpstreamConnector,
     locks: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -64,7 +65,7 @@ pub enum MirrorError {
 
 impl Mirrors {
     /// Mirrors under `dir`, fetched through `connector`.
-    pub fn new(dir: impl Into<PathBuf>, connector: ForgeConnector) -> Self {
+    pub fn new(dir: impl Into<PathBuf>, connector: UpstreamConnector) -> Self {
         Self {
             dir: dir.into(),
             connector,
@@ -77,10 +78,7 @@ impl Mirrors {
     /// keeps the mirror locked until it ends, at the latest after [`FETCH_DEADLINE`].
     pub async fn fetch(&self, forge: ForgeTarget<'_>) -> Result<MirrorRepo, MirrorError> {
         let url = forge.route.upstream_url.clone();
-        let forge_url = self
-            .connector
-            .forge_url(&url)
-            .ok_or(MirrorError::InvalidUrl)?;
+        let forge_url = self.connector.url(&url).ok_or(MirrorError::InvalidUrl)?;
         let path = self.dir.join(hex::encode(Sha256::digest(url.as_bytes())));
         let guard = self.lock_for(&path).lock_owned().await;
         let deadline = tokio::time::Instant::now() + FETCH_DEADLINE;

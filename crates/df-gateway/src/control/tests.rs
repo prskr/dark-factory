@@ -10,6 +10,7 @@ use df_agent_channel::{TlsReloader, mtls_incoming};
 use df_core::config::AgentTlsConfig;
 use df_core::{CredentialRef, SecretError, SecretStore};
 use df_db::{Notification, Notifier, PgPool};
+use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::gateway_policy_client::GatewayPolicyClient;
 use df_proto::gateway::v1::{PolicyUpdate, PolicyWatchRequest};
 use secrecy::SecretString;
@@ -23,6 +24,13 @@ use uuid::Uuid;
 use super::snapshot::{self, GitSettings};
 use super::{PolicyService, serve_internal};
 use crate::link::{GrpcConnector, MtlsConnector};
+
+/// Tokens are not checked here.
+struct NoTokens;
+
+impl super::TokenCounter for NoTokens {
+    fn record_tokens(&self, _model: &str, _counts: [(&'static str, u64); 4]) {}
+}
 
 const CONTROL_PLANE: &str = "df-control-plane";
 const GATEWAY: &str = "df-gateway";
@@ -60,6 +68,8 @@ pub(crate) struct Seed {
     pub project: Uuid,
     pub persona: Uuid,
     pub task: Uuid,
+    /// The credential reference of `provider`.
+    pub credential: Uuid,
 }
 
 /// A project `DF` with task `DF-1`.
@@ -72,15 +82,45 @@ pub(crate) async fn seed(pool: &PgPool) -> Result<Seed> {
     .bind(project)
     .execute(pool)
     .await?;
-    sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, 'Linus', 'x')")
-        .bind(persona)
-        .execute(pool)
-        .await?;
+    let provider = Uuid::now_v7();
+    let credential = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO credential_refs (id, name, secret_name, secret_key)
+         VALUES ($1, 'claude', 'df-claude', 'token')",
+    )
+    .bind(credential)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO model_providers (id, name, credential_ref_id, credential_scheme, headers)
+         VALUES ($1, 'Claude subscription', $2, 'claude-subscription',
+                 '[{\"name\": \"x-session\", \"template\": \"{{ task_id | sha256 }}\"}]')",
+    )
+    .bind(provider)
+    .bind(credential)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+         VALUES ($1, 'anthropic-messages', 'https://api.anthropic.com')",
+    )
+    .bind(provider)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO personas (id, name, system_prompt, model_provider_id)
+         VALUES ($1, 'Linus', 'x', $2)",
+    )
+    .bind(persona)
+    .bind(provider)
+    .execute(pool)
+    .await?;
     let task = insert_task(pool, project, persona, 1).await?;
     Ok(Seed {
         project,
         persona,
         task,
+        credential,
     })
 }
 
@@ -180,9 +220,15 @@ impl Replica {
         .debounce(Duration::from_millis(10));
         let served = stop.clone();
         let task = tokio::spawn(async move {
-            serve_internal(service, incoming, Some(GATEWAY.into()), served)
-                .await
-                .ok();
+            serve_internal(
+                service,
+                Arc::new(NoTokens),
+                incoming,
+                Some(GATEWAY.into()),
+                served,
+            )
+            .await
+            .ok();
         });
         Ok(Self {
             addr,
@@ -319,6 +365,149 @@ async fn snapshot_has_the_git_route_of_an_active_run_and_the_current_forge_crede
     let second = snapshot::build(&pool, &secrets, &git_settings()).await?;
     let credentials = second.snapshot.unwrap().forge_credentials;
     assert_eq!(credentials[&route.credential_ref].password, "token-2");
+    Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_has_the_inference_route_of_an_active_run_and_the_current_provider_credential()
+-> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let second = insert_task(&pool, seed.project, seed.persona, 2).await?;
+    insert_run(&pool, second, 1, "running", Some("10.1.0.8")).await?;
+    let secrets = TestSecrets::new("sk-1");
+
+    let first = snapshot::build(&pool, &secrets, &git_settings()).await?;
+    let snapshot = first.snapshot.unwrap();
+    let route = snapshot.sandboxes[0].inference.clone().unwrap();
+    assert_eq!(route.wire_api(), pb::WireApi::AnthropicMessages);
+    assert_eq!(route.scheme(), pb::CredentialScheme::ClaudeSubscription);
+    assert_eq!(route.credential_ref, seed.credential.to_string());
+    assert_eq!(route.upstreams.len(), 1);
+    assert_eq!(route.upstreams[0].upstream_url, "https://api.anthropic.com");
+    // Both runs share one credential, and the session header differs per task.
+    assert_eq!(snapshot.provider_credentials.len(), 1);
+    assert_eq!(
+        snapshot.provider_credentials[&route.credential_ref].value,
+        "sk-1"
+    );
+    let other = snapshot.sandboxes[1].inference.clone().unwrap();
+    assert_eq!(other.credential_ref, route.credential_ref);
+    assert_eq!(route.headers[0].name, "x-session");
+    assert_eq!(route.headers[0].value.len(), 64);
+    assert_ne!(route.headers[0].value, other.headers[0].value);
+
+    // The Secret changed: the next snapshot carries the new value.
+    secrets.set("sk-2");
+    let rotated = snapshot::build(&pool, &secrets, &git_settings()).await?;
+    let credentials = rotated.snapshot.unwrap().provider_credentials;
+    assert_eq!(credentials[&route.credential_ref].value, "sk-2");
+    Ok(())
+}
+
+/// A secret store that cannot read the Secret `unreadable` and returns `value` for any other.
+struct SecretsExcept {
+    unreadable: &'static str,
+    value: &'static str,
+}
+
+#[async_trait::async_trait]
+impl SecretStore for SecretsExcept {
+    async fn get(&self, reference: &CredentialRef) -> Result<SecretString, SecretError> {
+        if reference.secret_name == self.unreadable {
+            return Err(SecretError::NotFound {
+                secret_name: reference.secret_name.clone(),
+                secret_key: reference.secret_key.clone(),
+            });
+        }
+        Ok(SecretString::from(self.value))
+    }
+}
+
+/// A second provider (`x-api-key`) with its own credential reference and Secret `df-other`, a
+/// persona using it, and a task `DF-2` of that persona. Returns the credential id and the task.
+async fn seed_second_provider(pool: &PgPool, project: Uuid) -> Result<(Uuid, Uuid)> {
+    let (credential, provider, persona) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+    sqlx::query(
+        "INSERT INTO credential_refs (id, name, secret_name, secret_key)
+         VALUES ($1, 'other', 'df-other', 'key')",
+    )
+    .bind(credential)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO model_providers (id, name, credential_ref_id, credential_scheme)
+         VALUES ($1, 'Anthropic API', $2, 'x-api-key')",
+    )
+    .bind(provider)
+    .bind(credential)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+         VALUES ($1, 'anthropic-messages', 'https://llm.example.test')",
+    )
+    .bind(provider)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO personas (id, name, system_prompt, model_provider_id)
+         VALUES ($1, 'Ada', 'x', $2)",
+    )
+    .bind(persona)
+    .bind(provider)
+    .execute(pool)
+    .await?;
+    let task = insert_task(pool, project, persona, 2).await?;
+    Ok((credential, task))
+}
+
+#[tokio::test]
+async fn an_unreadable_provider_credential_leaves_its_route_without_credential_and_others_intact()
+-> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    let (other_credential, other_task) = seed_second_provider(&pool, seed.project).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    insert_run(&pool, other_task, 1, "running", Some("10.1.0.8")).await?;
+    let secrets = SecretsExcept {
+        unreadable: "df-claude",
+        value: "sk-other",
+    };
+
+    let update = snapshot::build(&pool, &secrets, &git_settings()).await?;
+
+    let snapshot = update.snapshot.unwrap();
+    assert_eq!(snapshot.sandboxes.len(), 2);
+    let route_of = |key: &str| {
+        snapshot
+            .sandboxes
+            .iter()
+            .find(|sandbox| sandbox.task_key == key)
+            .and_then(|sandbox| sandbox.inference.clone())
+            .unwrap()
+    };
+    // The route of the unreadable credential stays; only the credential is missing.
+    let broken = route_of("DF-1");
+    assert_eq!(broken.credential_ref, seed.credential.to_string());
+    assert!(
+        !snapshot
+            .provider_credentials
+            .contains_key(&broken.credential_ref)
+    );
+    // The other provider still has route and credential.
+    let working = route_of("DF-2");
+    assert_eq!(working.credential_ref, other_credential.to_string());
+    assert_eq!(
+        working.upstreams[0].upstream_url,
+        "https://llm.example.test"
+    );
+    assert_eq!(snapshot.provider_credentials.len(), 1);
+    assert_eq!(
+        snapshot.provider_credentials[&working.credential_ref].value,
+        "sk-other"
+    );
     Ok(())
 }
 

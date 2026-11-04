@@ -3,10 +3,13 @@
 pub mod config;
 pub mod domain;
 pub mod forge;
+pub mod harness;
+pub mod header_template;
 pub mod host;
 pub mod ids;
 pub mod keys;
 pub mod lifecycle;
+pub mod model_provider;
 pub mod public_address;
 pub mod routing;
 pub mod seams;
@@ -16,7 +19,7 @@ pub mod title;
 
 pub use config::{
     AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
-    ForgeConfig, InstanceConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
+    InstanceConfig, NetworkConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
     SandboxSectionConfig,
 };
 pub use domain::{

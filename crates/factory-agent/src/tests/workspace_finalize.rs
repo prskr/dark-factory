@@ -738,9 +738,9 @@ fn scan_dir_for_secret(dir: &std::path::Path, secret: &str) {
 }
 
 #[tokio::test]
-async fn test_scenario_token_stays_off_the_volume() {
+async fn test_scenario_assign_environment_stays_off_the_volume() {
     use crate::harness::prepare_harness_environment;
-    use df_proto::agent::v1::{AcpHarness, Assign, Harness, HarnessCredentials, harness::Kind};
+    use df_proto::agent::v1::{AcpHarness, Assign, Harness, harness::Kind};
     use std::collections::HashMap;
 
     let temp = tempfile::tempdir().unwrap();
@@ -753,16 +753,15 @@ async fn test_scenario_token_stays_off_the_volume() {
     std::fs::create_dir_all(&repo_dir).unwrap();
     std::fs::create_dir_all(&runtime_dir).unwrap();
 
+    // Even an environment variable that holds a secret value only lives in the process
+    // environment; nothing of the `Assign` environment is written to the volume.
     let secret_token = "CLAUDE_SECRET_TOKEN_XYZ_1234567890_NEVER_PERSIST";
-    let mut creds_env = HashMap::new();
-    creds_env.insert(
+    let mut acp_env = HashMap::new();
+    acp_env.insert("FOO".to_string(), "bar".to_string());
+    acp_env.insert(
         "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
         secret_token.to_string(),
     );
-    let credentials = HarnessCredentials { env: creds_env };
-
-    let mut acp_env = HashMap::new();
-    acp_env.insert("FOO".to_string(), "bar".to_string());
 
     let assign = Assign {
         run_id: "run-token-test".to_string(),
@@ -782,9 +781,9 @@ async fn test_scenario_token_stays_off_the_volume() {
         continuation: None,
     };
 
-    let env = prepare_harness_environment(&assign, Some(&credentials), &home_dir).unwrap();
+    let env = prepare_harness_environment(&assign, &home_dir).unwrap();
 
-    // Environment contains the credentials
+    // Environment contains the variables of `Assign`
     assert_eq!(
         env.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str),
         Some(secret_token)

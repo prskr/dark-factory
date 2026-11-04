@@ -1,6 +1,6 @@
 //! The data table of the configuration lists (Projects, Credentials): one card, header row, cell
-//! padding and row borders (`PenPot`: Config / "Projects · table with task counters" and
-//! "Credentials · table").
+//! padding and row borders (`PenPot`: Config - Projects / "Projects · table with task counters"
+//! and Config - Credentials / "Credentials · table").
 
 use maud::{Markup, html};
 

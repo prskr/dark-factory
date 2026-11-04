@@ -15,8 +15,8 @@ use tempfile::TempDir;
 use super::push::PushObjects;
 use super::refs::{Ancestry, ObjectId};
 use super::secret_rules::BlobSource;
-use super::server::BoxError;
 use super::view::{PushView, TaskRefs, ViewError, push_view};
+use crate::upstream::BoxError;
 
 /// Failure to quarantine a pack or to answer an ancestry query.
 #[derive(Debug, thiserror::Error)]

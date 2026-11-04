@@ -28,7 +28,7 @@ any `Authorization` header from the client, and never returns the credential to 
 writes it to a log. The runtime's Git configuration has no credential helper, so nothing in the
 sandbox could hold a credential either.
 
-`http://` repositories get no route unless the instance setting `forge.allowPlainHttp` is on; the
+`http://` repositories get no route unless the instance setting `network.allowPlainHttp` is on; the
 sandbox always talks HTTPS to the gateway.
 
 ## Allowed ref updates
@@ -67,6 +67,9 @@ rejected. The agent gets a message with the masked findings either way. Board me
 modes on the project's **Push checks** tab.
 
 ## Push records
+
+Git traffic is not part of the **Network traffic** graph or the egress log, which show only
+connections through the [egress proxy](egress-gateway.md); the push records below are its trace.
 
 Every push attempt is stored with the control plane before the client gets an answer: run, task,
 ref updates with old and new SHA, verdict, reasons, bytes and duration. A push is recorded as

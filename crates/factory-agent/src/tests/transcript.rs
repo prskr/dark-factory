@@ -162,8 +162,7 @@ fn test_transcript_plan_and_tool_origin() {
         ToolCallId,
     };
     use df_proto::transcript::v1::{
-        PlanEntryPriority, PlanEntryStatus, StopReason, ToolOrigin, Usage, UsageSource,
-        event::Kind as EventKind,
+        PlanEntryPriority, PlanEntryStatus, StopReason, ToolOrigin, event::Kind as EventKind,
     };
 
     let mut translator = TranscriptTranslator::new("turn-1");
@@ -209,26 +208,11 @@ fn test_transcript_plan_and_tool_origin() {
     }
 
     // 3. TurnEnded translation
-    let usage = vec![Usage {
-        model_id: "claude-3-5-sonnet".to_string(),
-        input_tokens: 1500,
-        output_tokens: 300,
-        cache_read_tokens: 50,
-        cache_write_tokens: 10,
-    }];
-    let ev_ended = translator.translate_turn_ended(
-        AcpStopReason::EndTurn,
-        usage,
-        UsageSource::Harness,
-        "finished normally",
-    );
+    let ev_ended = translator.translate_turn_ended(AcpStopReason::EndTurn, "finished normally");
     match ev_ended.kind.unwrap() {
         EventKind::TurnEnded(te) => {
             assert_eq!(te.stop_reason, StopReason::EndTurn as i32);
-            assert_eq!(te.usage_source, UsageSource::Harness as i32);
             assert_eq!(te.detail, "finished normally");
-            assert_eq!(te.usage.len(), 1);
-            assert_eq!(te.usage[0].input_tokens, 1500);
         }
         _ => panic!("Expected TurnEnded"),
     }

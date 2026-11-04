@@ -29,12 +29,7 @@ async fn seed(pool: &PgPool, key: &str) -> Fixture {
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, $2, '')")
-        .bind(persona_id)
-        .bind(format!("Linus {key}"))
-        .execute(pool)
-        .await
-        .unwrap();
+    insert_persona(pool, persona_id, &format!("Linus {key}")).await;
     sqlx::query(
         "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id) VALUES ($1, $2, 42, $3, 't', 'user', $4)",
     )
@@ -56,6 +51,35 @@ async fn seed(pool: &PgPool, key: &str) -> Fixture {
         task: task_id,
         run: run_id,
     }
+}
+
+/// A persona with a model provider; the migration test seeds a schema from before model
+/// providers existed, where a persona needs none.
+async fn insert_persona(pool: &PgPool, id: Uuid, name: &str) {
+    let providers: Option<String> =
+        sqlx::query_scalar("SELECT to_regclass('public.model_providers')::text")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    if providers.is_none() {
+        sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, $2, '')")
+            .bind(id)
+            .bind(name)
+            .execute(pool)
+            .await
+            .unwrap();
+        return;
+    }
+    let provider = crate::model_providers::tests::seed_provider(pool).await;
+    sqlx::query(
+        "INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, $2, '', $3)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(provider)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 async fn subscribe(pool: &PgPool, project_id: Uuid, events: &[&str]) -> Uuid {

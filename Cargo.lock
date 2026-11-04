@@ -1553,7 +1553,6 @@ dependencies = [
  "opentelemetry_sdk",
  "rcgen",
  "rustls",
- "secrecy",
  "serde",
  "serde_json",
  "sqlx",
@@ -1578,11 +1577,14 @@ dependencies = [
  "chrono",
  "df-core",
  "futures",
+ "hex",
+ "minijinja",
  "regex",
  "secrecy",
  "serde",
  "serde-saphyr 2.0.0",
  "serde_json",
+ "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1647,6 +1649,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "bytes",
+ "chrono",
  "df-agent-channel",
  "df-core",
  "df-db",
@@ -1674,6 +1677,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde-saphyr 2.0.0",
+ "serde_json",
  "sha2 0.11.1",
  "sqlx",
  "tempfile",
@@ -4784,6 +4788,12 @@ dependencies = [
  "mime",
  "unicase",
 ]
+
+[[package]]
+name = "minijinja"
+version = "3.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f5a04892e86ddb4fc254e9160835370b63a0d44042d3ab4725bc2dbcbab136"
 
 [[package]]
 name = "minimal-lexical"

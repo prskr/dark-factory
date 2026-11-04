@@ -53,6 +53,24 @@ pub const CREDENTIAL_NAME: &str = "forgejo-bot";
 pub const CREDENTIAL_SECRET: &str = "forgejo-token";
 pub const CREDENTIAL_KEY: &str = "token";
 
+/// The model provider of the persona: the fake Anthropic upstream in the `fake-upstream`
+/// namespace (plain HTTP, the cluster allows it like for Forgejo), and the credential reference
+/// the gateway sends to it (Secret `fake-llm-key`, key `key`).
+pub const MODEL_PROVIDER_NAME: &str = "Fake Anthropic";
+pub const MODEL_CREDENTIAL_NAME: &str = "fake-llm";
+pub const MODEL_CREDENTIAL_SECRET: &str = "fake-llm-key";
+pub const MODEL_CREDENTIAL_KEY: &str = "key";
+pub const FAKE_UPSTREAM_NAMESPACE: &str = "fake-upstream";
+pub const FAKE_UPSTREAM_SERVICE: &str = "fake-anthropic";
+pub const FAKE_UPSTREAM_PORT: u16 = 8080;
+/// The key the fake upstream expects, and the placeholder the sandbox must never get.
+pub const MODEL_API_KEY: &str = "e2e-model-api-key";
+
+/// Base URL of the fake upstream as the gateway addresses it.
+pub fn fake_upstream_url() -> String {
+    format!("http://{FAKE_UPSTREAM_SERVICE}.{FAKE_UPSTREAM_NAMESPACE}.svc:{FAKE_UPSTREAM_PORT}")
+}
+
 /// Test project image (`//deploy:test_project_image`, loaded into the kind node).
 pub const PROJECT_IMAGE: &str = "ghcr.io/prskr/dark-factory/test-project:e2e";
 

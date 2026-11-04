@@ -115,6 +115,8 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
+| Provider adapters as WASI plugins (protocol translation, custom auth) | idea | F5, `openspec/changes/iter3-inference-gateway` (out of scope) |
+| Allowed models per model provider, enforced in the gateway | idea | `openspec/changes/iter3-inference-gateway` (out of scope) |
 | Subscription pools and fallback | idea | F6 |
 | Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/archive/2026-11-02-iter2-run-resilience` (Non-Goals, D6) |
 | Dependencies set by humans: `depends_on` in the new-task composer | idea | `openspec/changes/iter3-task-dependencies` |

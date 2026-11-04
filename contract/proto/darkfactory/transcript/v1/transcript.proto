@@ -62,11 +62,14 @@ message UserMessage {
 }
 
 message TurnEnded {
+  // 2 was `usage` and 3 was `usage_source`: token usage comes from the gateway's inference
+  // endpoint (iter3-inference-gateway, `darkfactory.gateway.v1.UsageRecord`). Stored events keep
+  // the old JSON; the readers of stored events (`df-db` `task_views`) strip `usage` and
+  // `usageSource` before decoding, because the generated decoder rejects unknown fields.
+  reserved 2, 3;
+  reserved "usage", "usage_source";
+
   StopReason stop_reason = 1;
-  // One entry per model used in the turn (harnesses may call several models,
-  // e.g. a small model for sub-tasks). Empty if the harness didn't report usage.
-  repeated Usage usage = 2;
-  UsageSource usage_source = 3;
   // Human-readable detail, e.g. the provider's rate-limit message.
   string detail = 4;
 }
@@ -83,25 +86,6 @@ enum StopReason {
   STOP_REASON_RATE_LIMITED = 6;
   // The harness failed (crash, protocol error, ...).
   STOP_REASON_ERROR = 7;
-}
-
-// Token usage per model (D21). Prices are applied by the control plane.
-message Usage {
-  string model_id = 1;
-  uint64 input_tokens = 2;
-  uint64 output_tokens = 3;
-  uint64 cache_read_tokens = 4;
-  uint64 cache_write_tokens = 5;
-}
-
-enum UsageSource {
-  USAGE_SOURCE_UNSPECIFIED = 0;
-  // Reported by the harness over ACP.
-  USAGE_SOURCE_HARNESS = 1;
-  // Parsed by the runtime from the harness's own session files.
-  USAGE_SOURCE_SESSION_LOG = 2;
-  // Measured by the gateway's inference endpoint (full-harness mode).
-  USAGE_SOURCE_GATEWAY = 3;
 }
 
 // ---------------------------------------------------------------------------

@@ -810,7 +810,7 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
         @if let Some(retry) = run.retry_after { p class="text-xs text-status-limited-fg" { "retry at " (format_time(retry)) } }
         @if !run.detail.is_empty() { (run_detail(&run.detail)) }
         @if let Some(ended) = run.ended_at { p class="font-mono text-xs text-faint" { "ended " (format_time(ended)) } }
-        @if run.usage.is_empty() {
+        @if run.usage.is_empty() && run.unknown_usage_requests == 0 {
             p class="text-xs text-muted" { (persona_model.unwrap_or("default model")) " · no token usage recorded" }
         }
         // Per model: the name on its own line, then its counts under the column header; the
@@ -832,6 +832,12 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
                         }
                     } }
                 }
+            }
+        }
+        @if run.unknown_usage_requests > 0 {
+            p class="pt-1 text-xs text-muted" {
+                (run.unknown_usage_requests)
+                @if run.unknown_usage_requests == 1 { " request without usage" } @else { " requests without usage" }
             }
         }
     }
@@ -1152,6 +1158,7 @@ mod tests {
             started_at: DateTime::UNIX_EPOCH,
             ended_at: None,
             usage: vec![],
+            unknown_usage_requests: 0,
         }
     }
 
@@ -1316,6 +1323,30 @@ mod tests {
             [
                 "0", "999", "1.0k", "9.4k", "9.9k", "10k", "182k", "999k", "1.0M", "1.2M", "12M"
             ]
+        );
+    }
+
+    #[test]
+    fn requests_without_usage_are_counted_below_the_token_table() {
+        let mut r = run(3);
+        r.unknown_usage_requests = 2;
+        let html = run_card("DF-1", &r, None).into_string();
+        assert!(html.contains("2 requests without usage"), "{html}");
+        assert!(
+            !html.contains("no token usage recorded"),
+            "the run did make requests: {html}"
+        );
+        r.unknown_usage_requests = 1;
+        assert!(
+            run_card("DF-1", &r, None)
+                .into_string()
+                .contains("1 request without usage")
+        );
+        r.unknown_usage_requests = 0;
+        assert!(
+            !run_card("DF-1", &r, None)
+                .into_string()
+                .contains("without usage")
         );
     }
 
