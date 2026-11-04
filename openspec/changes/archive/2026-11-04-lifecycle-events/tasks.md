@@ -69,9 +69,9 @@
   - `board-member` alone gets 403 naming `admin` on the subscription routes;
   - `board-member` plus `admin` gets 200.
 - [x] 5.2 Add the `admin` group to `admin@example.com` in `dev/dex.yaml` and `deploy/e2e/dex.yaml` and update the comments there; verify `just serve-local` login shows the subscription settings
-- [ ] 5.3 Manual (df-dev Keycloak, realm `apps`): create the client role `admin` on the Dark Factory client next to `board-member`; verify the existing client-role mapper emits it in the `roles` claim (see `docs/content/authentication/keycloak.md`); document the steps in `docs/content/authentication/keycloak.md`
-- [ ] 5.4 Manual (df-dev Keycloak): assign `admin` to the operators who manage project subscriptions; verify a fresh login on `df-dev` shows the subscription settings and a user without the role gets 403
-  - Note: 5.3 and 5.4 are with Peter (Keycloak roles); the df-dev check follows after the PR is merged and deployed.
+- [x] 5.3 Manual (df-dev Keycloak, realm `apps`): create the client role `admin` on the Dark Factory client next to `board-member`; verify the existing client-role mapper emits it in the `roles` claim (see `docs/content/authentication/keycloak.md`); document the steps in `docs/content/authentication/keycloak.md`
+- [x] 5.4 Manual (df-dev Keycloak): assign `admin` to the operators who manage project subscriptions; verify a fresh login on `df-dev` shows the subscription settings and a user without the role gets 403
+  - Note: 5.3 and 5.4 done by Peter; verified on df-dev on 2026-11-04 (admin sees the subscription settings, a user without the role gets 403).
 - [x] 5.5 Write failing tests, then build the subscription section in project settings. Verify with `cargo test -p df-web subscriptions` (container-backed). The tests cover:
   - list, create, edit and delete;
   - `http://` is rejected on save;

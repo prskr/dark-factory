@@ -15,7 +15,7 @@ Prerequisite: the change `lifecycle-events` is archived (its manual tasks 5.3 an
 
 ## 3. Tabs on phones
 
-- [x] 3.1 Tests first: the tab list has the horizontal overflow classes below `md`, and `tabs.js` (read with `crate::assets::script_source`) scrolls the selected tab into view on init and change (design D5); implement; verify with `cargo test -p df-web` and a Playwright check at 390 px against "Phone · edit project sheet, lifecycle events"
+- [x] 3.1 Tests first: the tab list has the horizontal overflow classes below `md`, and `tabs.js` (read with `crate::assets::script_source`) scrolls the selected tab into view on init and change (design D5); implement; verify with `cargo test -p df-web` and a Playwright check against "Phone · edit project sheet, lifecycle events" (done by hand at 300 px, because the three tabs fit at 390 px until the "Context" tab exists; an automated 390 px check is TD-104)
 
 ## 4. Docs and design mapping
 
