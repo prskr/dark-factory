@@ -12,7 +12,7 @@ use bytes::Bytes;
 use common::{certificate, forge, forge_repository, git};
 use df_gateway::git::mirror::{MirrorError, Mirrors};
 use df_gateway::git::server::ForgeTarget;
-use df_gateway::git::upstream::ForgeConnector;
+use df_gateway::upstream::UpstreamConnector;
 use df_proto::gateway::v1::{ForgeCredential, GitRoute};
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -75,7 +75,7 @@ async fn fetch_creates_the_mirror_and_picks_up_new_upstream_commits() -> Result<
     let (addr, roots, seen, task) = forge(root.clone()).await?;
     let mirrors = Mirrors::new(
         dir.path().join("mirrors"),
-        ForgeConnector::with_roots(roots)?,
+        UpstreamConnector::with_roots(roots)?,
     );
     let route = route(addr.port());
 
@@ -125,7 +125,7 @@ async fn concurrent_fetches_of_one_mirror_both_succeed() -> Result<()> {
     let (addr, roots, _seen, task) = forge(root.clone()).await?;
     let mirrors = Mirrors::new(
         dir.path().join("mirrors"),
-        ForgeConnector::with_roots(roots)?,
+        UpstreamConnector::with_roots(roots)?,
     );
     let route = route(addr.port());
     let credential = credential();
@@ -169,7 +169,7 @@ async fn a_rejected_credential_fails_the_fetch_without_prompting() -> Result<()>
     });
     let mirrors = Mirrors::new(
         dir.path().join("mirrors"),
-        ForgeConnector::with_roots(roots)?,
+        UpstreamConnector::with_roots(roots)?,
     );
 
     let result = tokio::time::timeout(
@@ -212,7 +212,7 @@ async fn a_cancelled_fetch_keeps_the_mirror_locked_until_it_ends() -> Result<()>
     });
     let mirrors = Arc::new(Mirrors::new(
         dir.path().join("mirrors"),
-        ForgeConnector::with_roots(roots)?,
+        UpstreamConnector::with_roots(roots)?,
     ));
     let fetch = |mirrors: Arc<Mirrors>| {
         tokio::spawn(async move {
@@ -247,7 +247,7 @@ async fn a_cancelled_fetch_keeps_the_mirror_locked_until_it_ends() -> Result<()>
 #[tokio::test]
 async fn fetch_refuses_a_url_with_userinfo_or_without_https() -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let mirrors = Mirrors::new(dir.path(), ForgeConnector::new()?);
+    let mirrors = Mirrors::new(dir.path(), UpstreamConnector::new()?);
     for url in ["http://forge/app.git", "https://u:p@forge/app.git"] {
         let route = GitRoute {
             upstream_url: url.into(),

@@ -15,8 +15,8 @@ use df_db::transcript::lock_run_and_task;
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Cancel, ControlMessage, HarnessCredentials, HelloAck, PushReport,
-    Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
+    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, PushReport, Release, RunPhase,
+    RunReport, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
@@ -31,11 +31,11 @@ use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts}
 use crate::error::ChannelError;
 use crate::metrics::Observation;
 use crate::runs::{
-    EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, has_undelivered_message,
-    mark_connected, set_idle_tx, set_run_state_tx,
+    EndedRun, RunEnd, RunRow, end_run_tx, get_run, has_undelivered_message, mark_connected,
+    set_idle_tx, set_run_state_tx,
 };
 use crate::scheduler::cancel_deadline;
-use crate::{ChannelContext, credentials, pr, tools, transcript};
+use crate::{ChannelContext, pr, tools, transcript};
 
 /// Time the runtime has to send `Hello` after the stream was accepted.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -92,18 +92,6 @@ where
         .metrics
         .connection(&rc.project.key, rc.run.connected_at.is_some());
 
-    let credentials = match credentials::harness_credentials(&ctx, &rc).await {
-        Ok(c) => c,
-        Err(missing) => {
-            let detail = missing.to_string();
-            finish_run(
-                &ctx,
-                &RunEnd::failure(rc.run.id, RunOutcome::Failed, &detail),
-            )
-            .await?;
-            return Err(Status::failed_precondition(detail));
-        }
-    };
     // The runtime is up: stop the connect timeout clock and start the wall-clock budget.
     rc.run = mark_connected(&ctx.pool, rc.run.id)
         .await?
@@ -128,9 +116,7 @@ where
         human_cancel_sent: false,
         release_sent: false,
     };
-    let result = session
-        .serve(inbound, hello_ack, credentials, assign, stop)
-        .await;
+    let result = session.serve(inbound, hello_ack, assign, stop).await;
     session.drain().await;
     result
 }
@@ -185,17 +171,14 @@ impl Session {
         &mut self,
         mut inbound: S,
         hello_ack: HelloAck,
-        credentials: HarnessCredentials,
         assign: Assign,
         mut stop: watch::Receiver<bool>,
     ) -> Result<(), Status>
     where
         S: Stream<Item = Result<AgentMessage, Status>> + Unpin,
     {
-        // HarnessCredentials precede Assign: the runtime ignores credentials that arrive later.
         let handshake = [
             control(control_message::Body::HelloAck(hello_ack)),
-            control(control_message::Body::HarnessCredentials(credentials)),
             control(control_message::Body::Assign(assign)),
         ];
         for msg in handshake {
@@ -854,7 +837,6 @@ async fn observe_event(
     Ok(match &event.kind {
         Some(event::Kind::TurnEnded(ended)) => Some(Observation::Turn {
             stop_reason: ended.stop_reason(),
-            usage: ended.usage.clone(),
         }),
         Some(event::Kind::ToolCall(call)) if terminal(call.status()) => {
             Some(Observation::ToolCall {

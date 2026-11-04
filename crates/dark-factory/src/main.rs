@@ -16,6 +16,7 @@ use df_core::public_address::ProjectTargets;
 use df_db::PgPool;
 use df_gateway::git::policy_checks::PolicyChecks;
 use df_gateway::git::secret_rules::SecretRules;
+use df_gateway::git::upstream::ForgeUpstream;
 use df_telemetry::logging;
 use df_telemetry::otel as telemetry;
 use kube::Client;
@@ -311,7 +312,7 @@ where
     let delivery = lifecycle_delivery(&cfg, dev.project_targets())?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
     let forge_plugins =
-        forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.forge.allow_plain_http)?;
+        forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.network.allow_plain_http)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
 
@@ -347,12 +348,8 @@ where
         approval_types.clone(),
         &delivery,
     )?;
-    let ctx_policy = PolicySources {
-        pool: pool.clone(),
-        notifier: notifier.clone(),
-        secrets: secrets.clone(),
-        git: df_gateway::control::snapshot::GitSettings::from_config(&cfg.agent, &cfg.forge),
-    };
+    let metrics: Arc<df_agent_channel::Metrics> = Arc::default();
+    let ctx_policy = PolicySources::new(&cfg, &pool, &notifier, &secrets, &metrics);
     let ctx = ChannelContext {
         notifier,
         pool,
@@ -360,7 +357,7 @@ where
         forge,
         secrets,
         config: Arc::new(ChannelConfig::from(&cfg)),
-        metrics: Arc::default(),
+        metrics,
         approval_types,
     };
 
@@ -527,10 +524,10 @@ async fn run_gateway_command(
         signal.cancel();
     });
     let (policy_tx, policy_rx) = watch::channel(None);
-    let forge_connector = gateway_forge_connector(&cfg.forge)?;
-    let upstream =
-        df_gateway::git::upstream::ForgeUpstream::from_connector(forge_connector.clone());
-    let mirrors = df_gateway::git::mirror::Mirrors::new(mirror_dir.clone(), forge_connector);
+    let upstream_connector = gateway_upstream_connector(&cfg.network)?;
+    let upstream = ForgeUpstream::from_connector(upstream_connector.clone());
+    let mirrors =
+        df_gateway::git::mirror::Mirrors::new(mirror_dir.clone(), upstream_connector.clone());
     let recorder = Arc::new(df_gateway::git::records::GrpcRecorder::new(
         outside.connector.clone(),
         settings.control_plane.clone(),
@@ -541,11 +538,11 @@ async fn run_gateway_command(
     let push = df_gateway::git::push::Push::new(Arc::new(mirrors), &mirror_dir, max_push_size)
         .with_checks(checks)
         .with_recorder(recorder.clone());
-    let git = Arc::new(df_gateway::git::server::GitEndpoint::new(
-        policy_rx,
-        Arc::new(upstream),
-        Arc::new(push),
-    ));
+    let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector);
+    let git = Arc::new(
+        df_gateway::git::server::GitEndpoint::new(policy_rx, Arc::new(upstream), Arc::new(push))
+            .with_inference(inference),
+    );
     let git_task = tokio::spawn(git.serve(
         git_listener,
         Arc::new(git_tls),
@@ -567,23 +564,49 @@ async fn run_gateway_command(
         error!(%error, "git endpoint task failed");
     }
     recorder.shutdown(RECORD_DRAIN_GRACE).await;
+    usage.shutdown(RECORD_DRAIN_GRACE).await;
     signals.abort();
     Ok(result?)
 }
 
-/// The gateway's connection settings for the forge, with a startup warning if plain HTTP is on.
-fn gateway_forge_connector(
-    forge: &df_core::config::ForgeConfig,
-) -> anyhow::Result<df_gateway::git::upstream::ForgeConnector> {
-    if forge.allow_plain_http {
+/// The inference endpoint of a gateway pod and the reporter that sends its usage records.
+fn inference_endpoint(
+    outside: &df_gateway::gateway::Outside,
+    settings: &df_gateway::gateway::Settings,
+    connector: df_gateway::upstream::UpstreamConnector,
+) -> (
+    Arc<df_gateway::inference::Inference>,
+    Arc<df_gateway::inference::report::UsageReporter>,
+) {
+    let usage = Arc::new(df_gateway::inference::report::UsageReporter::new(
+        outside.connector.clone(),
+        settings.control_plane.clone(),
+        settings.pod.clone(),
+        settings.metrics.clone(),
+        df_gateway::inference::report::Timing::default(),
+    ));
+    let inference = Arc::new(df_gateway::inference::Inference::new(
+        connector,
+        usage.clone(),
+        settings.metrics.clone(),
+    ));
+    (inference, usage)
+}
+
+/// The gateway's connection settings for upstreams (forges for Git, model providers for inference),
+/// with a startup warning if plain HTTP is on.
+fn gateway_upstream_connector(
+    network: &df_core::config::NetworkConfig,
+) -> anyhow::Result<df_gateway::upstream::UpstreamConnector> {
+    if network.allow_plain_http {
         warn!(
-            setting = "forge.allowPlainHttp",
-            "plain HTTP allowed for Git routes: the forge credential may travel unencrypted; use it for throwaway clusters only"
+            setting = "network.allowPlainHttp",
+            "plain HTTP allowed for Git and inference routes: the forge and model provider credentials may travel unencrypted; use it for throwaway clusters only"
         );
     }
-    Ok(df_gateway::git::upstream::ForgeConnector::new()
-        .context("failed to build the TLS client for the forge")?
-        .allowing_plain_http(forge.allow_plain_http))
+    Ok(df_gateway::upstream::UpstreamConnector::new()
+        .context("failed to build the TLS client for upstreams")?
+        .allowing_plain_http(network.allow_plain_http))
 }
 
 /// Runs until `shutdown` resolves or a listener exits. After a shutdown the listeners get `grace`
@@ -649,7 +672,7 @@ fn web_router(
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
-        allow_plain_http: cfg.forge.allow_plain_http,
+        allow_plain_http: cfg.network.allow_plain_http,
         max_auto_resumes: cfg.runs.max_auto_resumes,
         approval_types,
         version: df_telemetry::VERSION.to_string(),
@@ -703,6 +726,34 @@ struct PolicySources {
     notifier: Arc<df_db::Notifier>,
     secrets: Arc<dyn df_core::SecretStore>,
     git: df_gateway::control::snapshot::GitSettings,
+    metrics: Arc<df_agent_channel::Metrics>,
+}
+
+/// Records the tokens of stored gateway usage records as `df.agent.tokens`.
+struct AgentTokens(Arc<df_agent_channel::Metrics>);
+
+impl df_gateway::control::TokenCounter for AgentTokens {
+    fn record_tokens(&self, model: &str, counts: [(&'static str, u64); 4]) {
+        self.0.record_tokens(model, counts);
+    }
+}
+
+impl PolicySources {
+    fn new(
+        cfg: &InstanceConfig,
+        pool: &PgPool,
+        notifier: &Arc<df_db::Notifier>,
+        secrets: &Arc<dyn df_core::SecretStore>,
+        metrics: &Arc<df_agent_channel::Metrics>,
+    ) -> Self {
+        Self {
+            pool: pool.clone(),
+            notifier: notifier.clone(),
+            secrets: secrets.clone(),
+            git: df_gateway::control::snapshot::GitSettings::from_config(&cfg.agent, &cfg.network),
+            metrics: metrics.clone(),
+        }
+    }
 }
 
 /// Serves `PolicyWatch` to the gateway pods on the internal port until `stop` is set.
@@ -726,7 +777,13 @@ async fn serve_policy_watch(
         cancel.cancel();
     };
     let (served, ()) = tokio::join!(
-        df_gateway::control::serve_internal(service, incoming, Some(gateway), token),
+        df_gateway::control::serve_internal(
+            service,
+            Arc::new(AgentTokens(sources.metrics)),
+            incoming,
+            Some(gateway),
+            token
+        ),
         canceller
     );
     if let Err(err) = served {

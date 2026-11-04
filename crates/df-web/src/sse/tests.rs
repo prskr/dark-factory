@@ -485,12 +485,14 @@ async fn a_turn_end_refreshes_the_runs_and_details_regions_without_adding_an_ite
     let first = sse.next().await;
     assert!(!first.data.contains("182k"), "{}", first.data);
 
-    // Nothing is published: only the turn end itself can trigger the refresh.
+    // The gateway's record was stored before the turn ended. Nothing is published: only the turn
+    // end itself can trigger the refresh.
+    crate::testkit::add_usage(&f.app.pool, f.run, Some("opus"), [182_345, 0, 0, 0]).await;
     let id = f
         .add(
             1,
             "t1",
-            json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN", "usage": [{"modelId": "opus", "inputTokens": "182345"}]}}),
+            json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
         )
         .await;
     let frame = sse.next_within(LIVE).await;

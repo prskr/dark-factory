@@ -102,8 +102,7 @@ fn every_kind() -> Vec<StoredEvent> {
         stored(
             10,
             "t1",
-            json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN", "detail": "done",
-            "usage": [{"modelId": "opus", "inputTokens": "10", "outputTokens": "5", "cacheReadTokens": "2", "cacheWriteTokens": "1"}]}}),
+            json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN", "detail": "done"}}),
         ),
     ]
 }

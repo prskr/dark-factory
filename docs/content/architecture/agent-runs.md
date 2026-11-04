@@ -26,9 +26,11 @@ sequenceDiagram
     CP->>K: task volume task-<key>, sandbox pod, NetworkPolicy
     K-->>CP: pod started (pod IP)
     R->>CP: connect (mTLS), Hello
-    CP->>R: harness credential, Assign, prompt
+    CP->>R: Assign (gateway URL, placeholder key), prompt
     R->>G: clone or fetch through the Git proxy
     G->>F: forward with the forge credential
+    H->>G: model requests (placeholder key)
+    G->>CP: usage records
     R->>H: start session (new or resumed)
     loop each turn
         R->>H: prompt
@@ -57,10 +59,11 @@ sequenceDiagram
    project's image with the runtime and harness mounted read-only, the configured runtime class) and a
    NetworkPolicy for the run.
 3. **Connecting.** The runtime dials the control plane with its pod certificate. The control plane
-   resolves the certificate to the run, sends the persona's harness credential (memory only, never in
-   the pod spec) and the `Assign`: repository URL through the Git proxy, branches, commit identity,
-   system prompt, harness settings, budgets and the continuation of earlier runs (harness session id
-   and a transcript summary).
+   resolves the certificate to the run and sends the `Assign`: repository URL through the Git proxy,
+   branches, commit identity, system prompt, harness settings, the harness environment (the gateway's
+   [inference endpoint](../security/inference-endpoint.md) as base URL, a placeholder API key and the
+   instance CA; no credential), budgets and the continuation of earlier runs (harness session id and
+   a transcript summary).
 4. **Preparing.** The runtime clones or updates the workspace through the Git proxy and writes its
    own `.git/config`; anything left on the volume is treated as untrusted.
 5. **Turns.** The harness works on the prompt. Every message and tool call is streamed to the

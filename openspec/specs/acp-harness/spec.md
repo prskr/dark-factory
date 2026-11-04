@@ -7,7 +7,7 @@ Runs an external agent (Claude Code first) through the Agent Client Protocol for
 ## Requirements
 
 ### Requirement: Harness start
-The runtime SHALL write the harness settings from `Assign` under `/data/home` (overwriting what's there), start the adapter command of `Assign` (the project's adapter command if it sets one, otherwise the harness default, by default `/opt/harness/claude-code/bin/claude-agent-acp` from the harness image volume) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment, `Assign` env and `HarnessCredentials` env, and SHALL NOT advertise ACP file-system or terminal client capabilities.
+The runtime SHALL write the harness settings from `Assign` under `/data/home` (overwriting what's there) and start the adapter command of `Assign` (the project's, otherwise the harness image's default) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment and the `Assign` env: gateway base URL, placeholder key, CA variables and, for `claude-code`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. It SHALL NOT advertise ACP file-system or terminal client capabilities.
 
 #### Scenario: Adapter from the harness image
 - **WHEN** a run of a project without an adapter command starts
@@ -17,12 +17,13 @@ The runtime SHALL write the harness settings from `Assign` under `/data/home` (o
 - **WHEN** a run of a project with adapter command `/opt/harness/bin/fake-acp-agent` starts
 - **THEN** the runtime starts that command
 
-### Requirement: Harness credentials stay off the volume
-Harness credentials SHALL never be written to `/data`.
+#### Scenario: Claude Code sends no non-essential traffic
+- **WHEN** a run of the `claude-code` harness starts, with a subscription or an API key provider
+- **THEN** the harness environment contains `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so its telemetry and update checks do not bypass the inference endpoint
 
-#### Scenario: Token stays off the volume
-- **WHEN** the harness runs with `CLAUDE_CODE_OAUTH_TOKEN`
-- **THEN** no file under `/data` contains the token value
+#### Scenario: Model traffic bypasses the egress proxy
+- **WHEN** the harness calls its base URL
+- **THEN** the request goes directly to the gateway's inference endpoint, not through the CONNECT proxy
 
 ### Requirement: Session continuity
 With `Assign.continuation.harness_session_id` set, the runtime SHALL resume via `session/load`; if loading fails or isn't supported, it SHALL start a new session and prepend `continuation.summary` to the first prompt. The factory MCP server SHALL be registered in every session.
@@ -50,7 +51,7 @@ Harness permission requests SHALL be answered with an allow option.
 - **THEN** the runtime approves it without involving the control plane
 
 ### Requirement: Transcript translation
-The runtime SHALL translate ACP updates into transcript v1 events: agent text and thought chunks with a message id that changes whenever text resumes after another event, tool calls and updates (origin `FACTORY` for the factory server's tools, raw input/output truncated above 64 KiB with `truncated` set), plans, and `TurnStarted`/`TurnEnded` with stop reason and per-model usage.
+The runtime SHALL translate ACP updates into transcript v1 events: agent text and thought chunks with a message id that changes whenever text resumes after another event, tool calls and updates (origin `FACTORY` for the factory server's tools, raw input/output truncated above 64 KiB with `truncated` set), plans, and `TurnStarted`/`TurnEnded` with stop reason.
 
 #### Scenario: Text after a tool call
 - **WHEN** the agent writes text, calls a tool, then writes more text
@@ -59,13 +60,6 @@ The runtime SHALL translate ACP updates into transcript v1 events: agent text an
 #### Scenario: Large tool output
 - **WHEN** a tool returns 200 KiB of output
 - **THEN** the event contains at most 64 KiB of it and `truncated: true`
-
-### Requirement: Usage capture
-`TurnEnded.usage` SHALL contain input, output, cache-read and cache-write tokens per model, from the harness if it reports them (`USAGE_SOURCE_HARNESS`), otherwise parsed from the harness's session files (`USAGE_SOURCE_SESSION_LOG`).
-
-#### Scenario: Adapter without usage
-- **WHEN** the adapter reports no usage for a turn
-- **THEN** usage is read from the Claude Code session log for that turn
 
 ### Requirement: Run outcome
 After each turn the runtime SHALL continue with queued prompts if any; otherwise it SHALL finalize with outcome: `COMPLETED` if a tool result requested ending the run; `RATE_LIMITED` (with retry time if known) if the provider rate-limited; `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit; `CANCELLED` on `Cancel`; `FAILED` if the harness crashed.
@@ -90,7 +84,7 @@ When a turn ended normally and no prompt is queued, the runtime SHALL wait as de
 - **THEN** the run finalizes with `RUN_OUTCOME_BLOCKED`
 
 ### Requirement: Budgets enforced locally
-The runtime SHALL enforce `Assign.budgets` (wall clock, output tokens, turns) by cancelling the current turn and finalizing with `LIMIT_REACHED`.
+The runtime SHALL enforce `Assign.budgets` (wall clock, turns) by cancelling the current turn and finalizing with `LIMIT_REACHED`.
 
 #### Scenario: Turn limit
 - **WHEN** `max_turns` is 3 and a fourth turn would start

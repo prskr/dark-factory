@@ -4,14 +4,15 @@ weight: 2
 ---
 
 Sandboxes reach external hosts only through the gateway's HTTPS proxy. The proxy enforces the
-egress rules per run and reports every connection to the live traffic view. Sandboxes resolve no
+egress rules per run and reports every connection through it to the live traffic view. Git and
+model traffic use their own endpoints on the gateway and do not appear there. Sandboxes resolve no
 DNS names themselves, which also closes DNS as an exfiltration channel.
 
 ```mermaid
 flowchart LR
   S["Sandbox<br/>HTTPS_PROXY = gateway IP"] -- "CONNECT host:443" --> P["Egress proxy"]
   P -- "source IP → run → rules" --> P
-  P -- "allowed" --> H["api.anthropic.com, registries, …"]
+  P -- "allowed" --> H["registries, …"]
   P -. "denied: 403, event" .-> L["Live traffic view"]
   CP["Control plane"] -- "PolicyWatch: registry + rules" --> P
 ```
@@ -23,6 +24,7 @@ flowchart LR
 | Agent channel | Direct to the control plane agent port, mTLS | NetworkPolicy |
 | HTTP(S) to external hosts | Egress proxy (`CONNECT` or plain HTTP forwarding) | Egress rules in the proxy; the NetworkPolicy lets the sandbox reach only the gateway |
 | Git | Git proxy on the gateway | [Git proxy](git-proxy.md) |
+| Model traffic | Inference endpoint on the gateway, direct (not through the egress proxy) | [Inference endpoint](inference-endpoint.md) |
 | In-cluster services | Direct, as `cluster-service` rules | Generated NetworkPolicy |
 | DNS | Denied | NetworkPolicy |
 
@@ -54,7 +56,7 @@ re-rendered when rules or the referenced Services change, and manual edits to th
 ## Live traffic
 
 Each gateway pod keeps the latest connection events in memory (nothing is persisted per event). The
-**Network traffic** page merges them live from all gateway pods: a graph of sandboxes and
+**Network traffic** page, which shows only connections through the egress proxy, merges them live from all gateway pods: a graph of sandboxes and
 destinations, and a table with verdicts and reasons. A `not-allowlisted` denial raises a
 `network-access` request on the task, so the agent's need shows up in the inbox. How to allow or
 deny hosts: [Network access](../using/network-access.md).

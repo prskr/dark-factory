@@ -13,8 +13,7 @@ use df_proto::transcript::v1::{
     AgentMessageChunk, AgentThoughtChunk, ContentBlock, Event, Location, LocationList, Plan,
     PlanEntry, PlanEntryPriority, PlanEntryStatus, StopReason, TextContent, ToolCall,
     ToolCallContent, ToolCallContentList, ToolCallStatus, ToolCallUpdate, ToolKind, ToolOrigin,
-    TurnEnded, Usage, UsageSource, content_block::Kind as ContentBlockKind,
-    event::Kind as EventKind,
+    TurnEnded, content_block::Kind as ContentBlockKind, event::Kind as EventKind,
 };
 
 /// Builds a transcript event carrying `notice`.
@@ -330,8 +329,6 @@ impl TranscriptTranslator {
     pub fn translate_turn_ended_with_stop_reason(
         &mut self,
         stop_reason: StopReason,
-        usage: Vec<Usage>,
-        usage_source: UsageSource,
         detail: &str,
     ) -> Event {
         self.last_event_kind = Some(LastEventKind::Other);
@@ -342,8 +339,6 @@ impl TranscriptTranslator {
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::TurnEnded(TurnEnded {
                 stop_reason: stop_reason as i32,
-                usage,
-                usage_source: usage_source as i32,
                 detail: detail.to_string(),
             })),
         }
@@ -351,15 +346,9 @@ impl TranscriptTranslator {
 
     /// Translates turn completion into a `TurnEnded` event.
     #[cfg(test)]
-    pub fn translate_turn_ended(
-        &mut self,
-        stop_reason: AcpStopReason,
-        usage: Vec<Usage>,
-        usage_source: UsageSource,
-        detail: &str,
-    ) -> Event {
+    pub fn translate_turn_ended(&mut self, stop_reason: AcpStopReason, detail: &str) -> Event {
         let reason = acp_to_proto_stop_reason(stop_reason);
-        self.translate_turn_ended_with_stop_reason(reason, usage, usage_source, detail)
+        self.translate_turn_ended_with_stop_reason(reason, detail)
     }
 }
 

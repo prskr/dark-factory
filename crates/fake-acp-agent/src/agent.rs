@@ -12,7 +12,7 @@ use agent_client_protocol::schema::v1::{
     McpServerStdio, NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority,
     PlanEntryStatus, PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate,
     StopReason, TextContent, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, UsageUpdate,
+    ToolCallUpdateFields,
 };
 use agent_client_protocol::{
     Agent, Builder, Client, ConnectionTo, HandleDispatchFrom, Responder, Stdio,
@@ -21,9 +21,8 @@ use rmcp::ServiceExt;
 use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
 
-use crate::script::{
-    EndStep, FetchStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn, UsageStep,
-};
+use crate::model::{ModelEnv, ModelStep};
+use crate::script::{EndStep, FetchStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn};
 
 /// Pause between the attempts of a `fetch` step.
 const FETCH_RETRY: Duration = Duration::from_secs(1);
@@ -337,9 +336,9 @@ async fn play_step(step: Step, ctx: &mut TurnContext, cx: &ConnectionTo<Client>)
         Step::Think(thought) => send_update(cx, &ctx.session_id, text_chunk_update(thought, true)),
         Step::ToolCall(tool_step) => play_tool_call(tool_step, ctx, cx),
         Step::Plan(plan_step) => play_plan(plan_step, ctx, cx),
-        Step::Usage(usage_step) => play_usage(&usage_step, ctx, cx),
         Step::Shell(cmd) => run_shell(&cmd, &ctx.cwd).await,
         Step::Fetch(fetch) => play_fetch(&fetch, ctx, cx).await,
+        Step::Model(model) => play_model(&model, ctx, cx).await,
         Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
         Step::End(end_step) => return play_end(end_step, ctx).await,
     }
@@ -388,15 +387,6 @@ fn play_plan(plan_step: PlanStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) 
     send_update(cx, &ctx.session_id, SessionUpdate::Plan(Plan::new(entries)));
 }
 
-fn play_usage(usage_step: &UsageStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
-    let used = usage_step
-        .used
-        .unwrap_or(usage_step.input_tokens.unwrap_or(0) + usage_step.output_tokens.unwrap_or(0));
-    let size = usage_step.size.unwrap_or(200_000);
-    let usage = UsageUpdate::new(used, size);
-    send_update(cx, &ctx.session_id, SessionUpdate::UsageUpdate(usage));
-}
-
 /// Runs a shell command in the session's working directory; failures are only logged.
 #[expect(
     clippy::print_stderr,
@@ -422,6 +412,27 @@ async fn run_shell(cmd: &str, cwd: &Path) {
             eprintln!("fake-acp-agent: failed to execute shell command '{cmd}': {e}");
         }
     }
+}
+
+/// Plays a `model` step and says the answer, or `Model call failed: <status or error>`, the key
+/// the harness environment holds (`Model key in the sandbox: <key>`) and the whole environment
+/// (`NAME=value` per line), so a test can check that no real credential is in it.
+async fn play_model(step: &ModelStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) {
+    let (outcome, key) = match ModelEnv::from_env() {
+        Ok(env) => (crate::model::call(step, &env).await, Some(env.key)),
+        Err(error) => (Err(format!("Model call failed: {error}")), None),
+    };
+    let answer = outcome.unwrap_or_else(|failure| failure);
+    let text = match key {
+        Some(key) => format!("{answer}\nModel key in the sandbox: {key}"),
+        None => answer,
+    };
+    let mut variables: Vec<String> = std::env::vars()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    variables.sort();
+    let text = format!("{text}\nSandbox environment:\n{}", variables.join("\n"));
+    send_update(cx, &ctx.session_id, text_chunk_update(text, false));
 }
 
 /// Plays a `fetch` step and says its outcome: `Fetched <url>.` or `Could not fetch <url>: <error>`.

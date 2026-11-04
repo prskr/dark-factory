@@ -49,7 +49,7 @@ The task detail page SHALL have a message input that queues a message on the tas
 - **THEN** the message appears in the queued message stack and the task status becomes `queued`
 
 ### Requirement: Runs, PR and issue
-The task details SHALL show the task's status line, the pull request and linked issue as links when they exist, project, persona and task branch, and the task's runs with number, state, outcome, detail, start/end time and compact token counts (k and M, the exact value as tooltip) for input, output, cache read and cache write, summed per model. Runs SHALL be listed newest first. The run number in the runs list SHALL link to the start of that run in the transcript.
+The task details SHALL show the task's status line, links to the pull request and linked issue when they exist, project, persona, task branch and the runs, newest first. A run shows number, state, outcome, detail, start/end time, compact token counts (k and M, exact value as tooltip) for input, output, cache read and cache write per model from the gateway's usage records, and the number of requests with unknown usage. The run number SHALL link to that run in the transcript.
 
 #### Scenario: Rate-limited run
 - **WHEN** a run ended with outcome `rate_limited` and a retry time
@@ -70,6 +70,14 @@ The task details SHALL show the task's status line, the pull request and linked 
 #### Scenario: Token table
 - **WHEN** a run used model `claude-sonnet-5-5` with 182,000 input tokens
 - **THEN** the run card shows the model name on its own line, `182k` under "in", and the tooltip shows `182000`
+
+#### Scenario: Requests without usage
+- **WHEN** two model requests of a run reported no usage
+- **THEN** the run card shows "2 requests without usage" below the token table
+
+#### Scenario: Usage refreshed at turn end
+- **WHEN** a turn of a running run ends while the page is open
+- **THEN** the run card shows the usage stored up to then without a reload
 
 ### Requirement: Collapsible runs list
 The runs list SHALL be collapsible to its header; it starts collapsed, shows the run count in its header and keeps its state across live updates.

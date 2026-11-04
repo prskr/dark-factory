@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use df_db::MIGRATOR;
 use df_db::catalog::{get_project_by_key, list_credential_refs, list_personas};
+use df_db::model_providers::list_model_providers;
 use df_e2e::{data, seed};
 
 async fn audit_entries(pool: &df_db::PgPool) -> Result<i64> {
@@ -18,18 +19,26 @@ async fn seed_writes_the_demo_data() -> Result<()> {
     seed::run(&pool).await?;
 
     let credentials = list_credential_refs(&pool).await?;
-    assert_eq!(credentials.len(), 1);
-    assert_eq!(credentials[0].name, data::CREDENTIAL_NAME);
+    assert_eq!(credentials.len(), 2, "forge and model credential");
+    let forge = credentials
+        .iter()
+        .find(|c| c.name == data::CREDENTIAL_NAME)
+        .context("forge credential")?;
+    let providers = list_model_providers(&pool).await?;
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].input.name, data::MODEL_PROVIDER_NAME);
+    assert_eq!(
+        providers[0].input.apis[0].upstream_url,
+        data::fake_upstream_url()
+    );
     let personas = list_personas(&pool).await?;
     assert_eq!(personas[0].name, data::PERSONA_NAME);
+    assert_eq!(personas[0].model_provider_id, providers[0].id);
     let project = get_project_by_key(&pool, data::PROJECT_KEY)
         .await?
         .context("project DF")?;
     assert_eq!(project.repo_url, data::repo_url());
-    assert_eq!(
-        project.forge_credential_id,
-        Some(credentials[0].id.as_uuid())
-    );
+    assert_eq!(project.forge_credential_id, Some(forge.id.as_uuid()));
     assert_eq!(
         project.adapter_command,
         data::adapter_command(data::DEMO_SCRIPT)

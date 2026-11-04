@@ -66,7 +66,7 @@ pub struct PersonaInput {
     pub system_prompt: String,
     pub harness: String,
     pub model: Option<String>,
-    pub harness_credential_id: Option<Uuid>,
+    pub model_provider_id: Uuid,
 }
 
 /// A stored persona.
@@ -77,7 +77,7 @@ pub struct PersonaRecord {
     pub system_prompt: String,
     pub harness: String,
     pub model: Option<String>,
-    pub harness_credential_id: Option<Uuid>,
+    pub model_provider_id: Uuid,
 }
 
 #[derive(FromRow)]
@@ -117,7 +117,7 @@ macro_rules! select_persona {
     ($tail:literal) => {
         concat!(
             "SELECT id, name, system_prompt, harness, model, \
-             harness_credential_id FROM personas ",
+             model_provider_id FROM personas ",
             $tail
         )
     };
@@ -355,14 +355,14 @@ pub async fn save_persona(
     let record: PersonaRecord = match &before {
         Some(b) => sqlx::query_as(
             "UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5, \
-             harness_credential_id = $6, updated_at = now() WHERE id = $1 \
-             RETURNING id, name, system_prompt, harness, model, harness_credential_id",
+             model_provider_id = $6, updated_at = now() WHERE id = $1 \
+             RETURNING id, name, system_prompt, harness, model, model_provider_id",
         )
         .bind(b.id),
         None => sqlx::query_as(
-            "INSERT INTO personas (id, name, system_prompt, harness, model, harness_credential_id) \
+            "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id) \
              VALUES ($1, $2, $3, $4, $5, $6) \
-             RETURNING id, name, system_prompt, harness, model, harness_credential_id",
+             RETURNING id, name, system_prompt, harness, model, model_provider_id",
         )
         .bind(Uuid::now_v7()),
     }
@@ -370,7 +370,7 @@ pub async fn save_persona(
     .bind(&input.system_prompt)
     .bind(&input.harness)
     .bind(&input.model)
-    .bind(input.harness_credential_id)
+    .bind(input.model_provider_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| conflict_or(e, "a persona with this name already exists"))?;
@@ -380,7 +380,7 @@ pub async fn save_persona(
         system_prompt: b.system_prompt,
         harness: b.harness,
         model: b.model,
-        harness_credential_id: b.harness_credential_id,
+        model_provider_id: b.model_provider_id,
     });
     audit(
         &mut tx,
@@ -468,13 +468,13 @@ mod tests {
         }
     }
 
-    fn persona(prompt: &str) -> PersonaInput {
+    fn persona(prompt: &str, provider: Uuid) -> PersonaInput {
         PersonaInput {
             name: "Linus".into(),
             system_prompt: prompt.into(),
             harness: "claude-code".into(),
             model: None,
-            harness_credential_id: None,
+            model_provider_id: provider,
         }
     }
 
@@ -489,6 +489,7 @@ mod tests {
     #[tokio::test]
     async fn credential_refs_and_personas_are_audited_with_before_and_after() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let provider = crate::model_providers::tests::seed_provider(&pool).await;
         let (principal, roles) = actor();
         let actor = Actor {
             principal: &principal,
@@ -507,18 +508,15 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(
-            list_credential_refs(&pool).await.unwrap(),
-            vec![cred.clone()]
-        );
+        assert!(list_credential_refs(&pool).await.unwrap().contains(&cred));
         let created = audit_details(&pool, "credential_ref.create").await;
         assert_eq!(created[0]["after"]["secret_name"], "claude");
         assert!(created[0]["before"].is_null());
 
-        let p = save_persona(&pool, actor, None, &persona("old"))
+        let p = save_persona(&pool, actor, None, &persona("old", provider))
             .await
             .unwrap();
-        save_persona(&pool, actor, Some(p.id), &persona("new"))
+        save_persona(&pool, actor, Some(p.id), &persona("new", provider))
             .await
             .unwrap();
         let updated = audit_details(&pool, "persona.update").await;
@@ -533,7 +531,7 @@ mod tests {
             "new"
         );
 
-        let duplicate = save_persona(&pool, actor, None, &persona("x")).await;
+        let duplicate = save_persona(&pool, actor, None, &persona("x", provider)).await;
         assert!(matches!(duplicate, Err(DbError::Conflict(_))));
     }
 
@@ -642,6 +640,7 @@ mod tests {
     #[tokio::test]
     async fn project_key_is_immutable_after_creation() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let provider = crate::model_providers::tests::seed_provider(&pool).await;
         let (principal, roles) = actor();
         let actor = Actor {
             principal: &principal,
@@ -661,7 +660,7 @@ mod tests {
             p.id
         );
 
-        let persona = save_persona(&pool, actor, None, &persona("p"))
+        let persona = save_persona(&pool, actor, None, &persona("p", provider))
             .await
             .unwrap();
         crate::create_task(

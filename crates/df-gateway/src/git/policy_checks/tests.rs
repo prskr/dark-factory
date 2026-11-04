@@ -6,8 +6,8 @@ use df_proto::gateway::v1::{CheckMode, GitRoute, PushCheck, PushPolicy};
 use super::*;
 use crate::git::refs::{ObjectId, Reason, RefCommand};
 use crate::git::secret_rules::BlobSource;
-use crate::git::server::BoxError;
 use crate::git::view::{AddedBlob, AddedCommit, PathChange, PushView, TaskRefs, ViewError};
+use crate::upstream::BoxError;
 use df_proto::push_reasons::{CHECK_FAILED, PUSH_TOO_LARGE};
 
 const AGENT: &str = "agent@factory.test";

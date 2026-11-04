@@ -12,7 +12,7 @@ ACP is the protocol between the runtime and the harness. Using it toward the con
 
 - A custom protobuf protocol: one stream `Connect(stream AgentMessage) returns (stream ControlMessage)` with `oneof` payloads and sequence numbers/acks.
 - Agent → control plane: hello, phase changes, transcript events, tool calls, credential requests, push and run reports (later: artifacts).
-- Control plane → agent: assign, harness credentials, prompts, cancel, tool results, credential grants.
+- Control plane → agent: assign, prompts, cancel, tool results. (Harness credentials and credential grants were removed: ADR-0050 and the Git proxy.)
 - Both harness modes normalize into Dark Factory's own transcript schema (ADR-0017).
 - The runtime serves the factory tools to the harness and forwards their calls; the control plane authorizes them per task and executes them (database, run control, WASI plugins). Third-party MCP servers are a data path through the gateway (ADR-0032).
 - **Scope:** the protocol is the control channel between runtime and control plane only. Data paths don't use it: model inference (full-harness mode), HTTP egress and, later, Git go through the gateway Deployment using their native protocols (OpenAI-compatible HTTP, HTTP `CONNECT`, Git smart HTTP), see ADR-0029. The gateway's own link to the control plane is a separate internal API.

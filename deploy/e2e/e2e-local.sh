@@ -102,10 +102,10 @@ load_images() {
 }
 
 install_infrastructure() {
-  log "Installing cert-manager, PostgreSQL, Dex, the browser and the event receiver"
+  log "Installing cert-manager, PostgreSQL, Dex, the browser, the event receiver and the fake model upstream"
   kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
   kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml \
-    -f deploy/e2e/receiver.yaml
+    -f deploy/e2e/receiver.yaml -f deploy/e2e/fake-upstream.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
   hc upgrade --install cert-manager-csi-driver "oci://quay.io/jetstack/charts/cert-manager-csi-driver" \
     --version "$csi_driver_version" --namespace cert-manager --wait --timeout 5m
@@ -117,6 +117,17 @@ install_infrastructure() {
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
   kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
   kc -n receiver wait --for=condition=Available deployment/receiver --timeout=300s
+}
+
+# The model provider's credential reference points at this Secret (the fake upstream expects the
+# same key); the sandboxes never see it.
+create_model_secret() {
+  kc -n "$namespace" create secret generic fake-llm-key --from-literal=key=e2e-model-api-key
+}
+
+# The fake upstream runs from the test project image, which is imported by `load_images`.
+wait_for_fake_upstream() {
+  kc -n fake-upstream wait --for=condition=Available deployment/fake-anthropic --timeout=300s
 }
 
 forward() { # namespace service host-port service-port
@@ -169,6 +180,7 @@ install_release() {
   kc -n "$namespace" create secret generic dark-factory-db-owner --from-literal=password="$owner_password"
   kc -n "$namespace" create secret generic dark-factory-db-app --from-literal=password="$app_password"
   kc -n "$namespace" create secret generic dark-factory-oidc --from-literal=client-secret="$oidc_secret"
+  create_model_secret
 }
 
 helm_install_release() {
@@ -218,6 +230,7 @@ install_infrastructure
 install_release
 setup_forgejo
 wait "$images_pid"
+wait_for_fake_upstream
 helm_install_release
 install_driver
 run_suite

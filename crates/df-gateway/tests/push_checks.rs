@@ -17,8 +17,9 @@ use df_gateway::git::policy_checks::PolicyChecks;
 use df_gateway::git::push::{Push, PushRecord, PushRecorder, RecordError};
 use df_gateway::git::secret_rules::SecretRules;
 use df_gateway::git::server::{GitEndpoint, ServerTls};
-use df_gateway::git::upstream::{ForgeConnector, ForgeUpstream};
+use df_gateway::git::upstream::ForgeUpstream;
 use df_gateway::policy::{Policy, Sandbox};
+use df_gateway::upstream::UpstreamConnector;
 use df_proto::gateway::v1::{
     CheckMode, ForgeCredential, GitRoute, PushCheck, PushPolicy, PushVerdict,
 };
@@ -64,7 +65,7 @@ impl Gateway {
 
         let mirrors = Mirrors::new(
             dir.path().join("mirrors"),
-            ForgeConnector::with_roots(forge_roots.clone())?,
+            UpstreamConnector::with_roots(forge_roots.clone())?,
         );
         let upstream = ForgeUpstream::with_roots(forge_roots)?;
         let (snapshot, snapshots) = watch::channel(Some(Arc::new(policy(forge_addr.port(), &[])?)));

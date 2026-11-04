@@ -11,7 +11,8 @@ creating tasks and answering questions also works on a phone.
 ```mermaid
 flowchart LR
   C[Credential references] --> P[Projects]
-  C --> PE[Personas]
+  C --> MP[Model providers]
+  MP --> PE[Personas]
   P --> T[Tasks]
   PE --> T
   T --> R[Requests]
@@ -20,8 +21,9 @@ flowchart LR
 
 Set up in this order:
 
-1. [Credentials, projects and personas](setup.md): references to the forge and harness
+1. [Credentials, projects and personas](setup.md): references to the forge and model
    credentials, the repositories and the agents.
-2. [Tasks](tasks.md): describe the work, follow the transcript, send messages, stop or cancel.
-3. [Requests](requests.md): answer questions and decide approvals.
-4. [Network access](network-access.md): allow the hosts agents need.
+2. [Model providers](model-providers.md): the model services agents use and their credentials.
+3. [Tasks](tasks.md): describe the work, follow the transcript, send messages, stop or cancel.
+4. [Requests](requests.md): answer questions and decide approvals.
+5. [Network access](network-access.md): allow the hosts agents need.

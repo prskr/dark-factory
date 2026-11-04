@@ -39,9 +39,9 @@ flowchart TD
 
 1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`).
 2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
-3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server, the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET) and Forgejo (Helm chart, SQLite, no persistence).
+3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server, the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET), the fake Anthropic upstream (`deploy/e2e/fake-upstream.yaml`: `fake-acp-agent --serve-fake-anthropic` from the test project image; it answers `401` unless the request carries the key `e2e-model-api-key`, which only the gateway knows) and Forgejo (Helm chart, SQLite, no persistence).
 4. Creates the Forgejo user `factory`, its token, the repository `factory/demo` and issue 1, and the Secret `forgejo-token` for the credential reference.
-5. Installs the chart with `deploy/values-e2e.yaml`.
+5. Creates the Secret `fake-llm-key` for the model provider's credential reference and installs the chart with `deploy/values-e2e.yaml`.
 6. Seeds the database, port-forwards PostgreSQL, Forgejo, the Playwright server and the receiver, and runs the ignored tests of `crates/df-e2e` one at a time.
 7. Deletes the cluster on exit, also after a failure or `Ctrl-C`, unless `E2E_KEEP=1`.
 
@@ -55,7 +55,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `oidc.issuerUrl`, `oidc.publicUrl` | `http://dex.dex.svc:5556/dex`, `http://dark-factory-control-plane.dark-factory.svc:8080` | Plain `http://` is accepted on any host; the control plane logs a startup warning. |
 | `oidc.rolesClaim`, `oidc.extraScopes` | `groups`, `[groups, offline_access]` | Dex returns the role as `groups`, as in local development. |
 | `controlPlane.extraArgs` | `[--unrestricted-project-subscriptions]` | The project subscription of the lifecycle event test targets the plain-http receiver in the cluster. Only the `dev-tools` image has the flag. |
-| `forge.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy and the project form accept `http://` repository URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |
+| `network.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy, the inference endpoint's upstreams and the project form accept `http://` URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |
 | `runs.keepAliveSeconds` | `0` | A run ends with its turn, so the follow-up message starts run 2 (the `loaded` session of the script). |
 | `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
@@ -117,7 +117,9 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 | Record | Value |
 |---|---|
 | Credential reference | `forgejo-bot`: Secret `forgejo-token`, key `token` |
-| Persona | `e2e` (harness `claude-code`, no credential) |
+| Credential reference | `fake-llm`: Secret `fake-llm-key`, key `key` (created by `just e2e-local`) |
+| Model provider | "Fake Anthropic": Anthropic Messages at `http://fake-anthropic.fake-upstream.svc:8080` (plain HTTP like Forgejo, allowed by `network.allowPlainHttp`), scheme `x-api-key`, credential `fake-llm` |
+| Persona | `e2e` (harness `claude-code`, model provider "Fake Anthropic") |
 | Project `DF` | "Demo Factory", repository `http://forgejo-http.forgejo.svc:3000/factory/demo`, test project image, `fake-acp-agent --script /opt/harness/scripts/demo.yaml` |
 | Project `RL` | "Rate Limit", same repository, script `/opt/harness/scripts/rate-limit.yaml` |
 | Project `NA` | "Network Access", same repository, script `/opt/harness/scripts/network-access.yaml` |
@@ -132,7 +134,7 @@ There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git p
 
 `crates/fake-acp-agent/scripts/` is part of the test project image under `/opt/harness/scripts/`:
 
-- `demo.yaml`: run 1 plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, reads the PR feedback, replies in the first review thread, calls `complete_task` and ends. Without a line comment on the PR the reply is a tool error. An `mcp` step can `save` a value of the structured result (variable name to JSON pointer) that later steps of the turn pass as the string argument `${name}`.
+- `demo.yaml`: run 1 first makes a `model` step (a streamed Anthropic Messages request to `$ANTHROPIC_BASE_URL/v1/messages` with `curl`, the key from `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` and the CA from `NODE_EXTRA_CA_CERTS`; it says the received text, or `Model call failed: <status or error>`, then a line `Model key in the sandbox: <key>` and a `Sandbox environment:` dump of every environment variable of the harness (`NAME=value`, sorted); the e2e checks that the key is the placeholder, that the dump is there and that neither the provider key nor the forge token appears in any transcript event), then plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, reads the PR feedback, replies in the first review thread, calls `complete_task` and ends. Without a line comment on the PR the reply is a tool error. An `mcp` step can `save` a value of the structured result (variable name to JSON pointer) that later steps of the turn pass as the string argument `${name}`.
 - `rate-limit.yaml`: run 1 ends with a rate limit (60 s); the next turn continues after a message or, without one, when the task resumes.
 - `network-access.yaml`: run 1 fetches `https://pypi.org/simple/pip/` with a `fetch` step (`curl` through the sandbox's proxy settings, retried once a second for up to 240 s) and says `Fetched <url>.` or `Could not fetch <url>: <error>`; the decision message is the next prompt of the same session, and the agent only answers it.
 - `push-secret.yaml`: run 1 commits `config.py` with a GitHub token assembled by the shell step (the file holds no string a scanner matches); the turn after the `push.rejected` message (same or resumed session) replaces the token by an environment lookup and amends the commit.
@@ -179,7 +181,7 @@ kindnet applies a policy a few seconds after the pod starts; a connection in the
 
 Run on the homelab instance (`bazel run //deploy:dev`) with the Claude project image and a subscription token, the task created and followed up on a phone and on the desktop (2026-10-31).
 
-**Hosts Claude Code needs:** only `api.anthropic.com`. It is the one instance allowlist entry required for runs to work; Claude Code honours `HTTPS_PROXY`, so everything goes through the egress gateway.
+**Hosts Claude Code needs:** only `api.anthropic.com`. With the iteration 1 setup it was the one instance allowlist entry required for runs to work; Claude Code honours `HTTPS_PROXY`, so everything went through the egress gateway. Since the inference endpoint (iteration 3) the model traffic goes to the gateway and the entry is not needed.
 
 ### Token swap via `ANTHROPIC_BASE_URL`
 
@@ -227,7 +229,7 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 | Image volumes with Talos containerd and Kata | works |
 | cert-manager CSI volumes inside Kata sandboxes | works |
 | Pod passes image volumes, CSI volumes, PVCs and the runtime class through (formerly via agent-sandbox, since removed) | works |
-| Claude ACP adapter: headless with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load`, token usage | works; usage is reported by the adapter |
+| Claude ACP adapter: headless with `CLAUDE_CODE_OAUTH_TOKEN`, `session/load`, token usage | works; usage was reported by the adapter (since iteration 3 the gateway measures it) |
 | Claude with `ANTHROPIC_BASE_URL` and a placeholder token | works, see above |
 | Forgejo draft/WIP PRs via API | works |
 | Bazel cross build: `ring` crypto provider, `sqlx` offline mode, migrations and assets as compile data, protoc | works; multi-arch images built daily |
@@ -237,5 +239,6 @@ The spikes of `product/iterations/iteration-1.md` §7, checked on the homelab cl
 
 ### Open follow-ups
 
-- Token swap: long interactive session and the image's Claude Code version (iteration 3, inference endpoint).
+- Token swap: long interactive session and the image's Claude Code version (task 1.1 of `iter3-inference-gateway`; needs a real Claude Code binary and token, not done yet).
+- Manual run with a Claude subscription model provider against `just serve-local` (task 6.3 of `iter3-inference-gateway`, not done yet).
 - agent-sandbox was replaced by plain Pods (`k8s-plain-pod-sandboxes`).

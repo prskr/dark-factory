@@ -1,12 +1,14 @@
 //! Builds the policy snapshot from the database: active sandboxes, their effective
 //! `http-host` allowlists, their Git routes, the forge credentials of those routes, the push
-//! policies of their projects and the push check exceptions of their tasks.
+//! policies of their projects, the push check exceptions of their tasks, their inference routes
+//! and the model provider credentials of those routes.
 
 use std::collections::{HashMap, HashSet};
 
 use df_core::SecretStore;
 use df_core::TaskKey;
-use df_core::config::{AgentConfig, ForgeConfig};
+use df_core::config::{AgentConfig, NetworkConfig};
+use df_db::model_providers::{self, RunModelProvider};
 use df_db::push_checks::{self, CheckMode, PushPolicy};
 use df_db::{ActiveRun, DbError, HostEntry, PgPool};
 use df_proto::gateway::v1 as pb;
@@ -16,6 +18,8 @@ use df_proto::gateway::v1::{
 use secrecy::ExposeSecret;
 use uuid::Uuid;
 
+use super::inference_routes;
+
 /// Instance settings of the Git routes: the same values the run's `Assign` carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSettings {
@@ -23,17 +27,17 @@ pub struct GitSettings {
     pub username: String,
     pub commit_name: String,
     pub commit_email: String,
-    /// Routes for `http://` repositories too (`forge.allowPlainHttp`).
+    /// Routes for `http://` repositories too (`network.allowPlainHttp`).
     pub allow_plain_http: bool,
 }
 
 impl GitSettings {
-    pub fn from_config(agent: &AgentConfig, forge: &ForgeConfig) -> Self {
+    pub fn from_config(agent: &AgentConfig, network: &NetworkConfig) -> Self {
         Self {
             username: agent.git_username.clone(),
             commit_name: agent.commit_identity.name.clone(),
             commit_email: agent.commit_identity.email.clone(),
-            allow_plain_http: forge.allow_plain_http,
+            allow_plain_http: network.allow_plain_http,
         }
     }
 }
@@ -50,10 +54,15 @@ pub async fn build(
     let runs = df_db::active_runs(pool).await?;
     let entries = df_db::http_host_entries(pool).await?;
     let push = PushData::load(pool, &runs).await?;
-    let mut update = assemble(version, &runs, &entries, git, &push);
+    let run_ids: Vec<Uuid> = runs.iter().map(|run| run.run_id).collect();
+    let providers = model_providers::run_model_providers(pool, &run_ids).await?;
+    let mut update = assemble(version, &runs, &entries, git, &push, &providers);
     if let Some(snapshot) = update.snapshot.as_mut() {
         snapshot.forge_credentials =
             forge_credentials(secrets, &runs, &snapshot.sandboxes, &git.username).await;
+        let references = df_db::catalog::list_credential_refs(pool).await?;
+        snapshot.provider_credentials =
+            inference_routes::credentials(secrets, &snapshot.sandboxes, &references).await;
     }
     Ok(update)
 }
@@ -78,13 +87,14 @@ impl PushData {
 
 /// A run's effective allowlist is the union of the instance entries, the entries of its project
 /// and the entries of its task. Every project of a run gets a push policy, the defaults without a
-/// stored one. The forge credentials are left empty.
+/// stored one. The forge and provider credentials are left empty.
 fn assemble(
     version: u64,
     runs: &[ActiveRun],
     entries: &[HostEntry],
     git: &GitSettings,
     push: &PushData,
+    providers: &HashMap<Uuid, RunModelProvider>,
 ) -> PolicyUpdate {
     let sandboxes = runs
         .iter()
@@ -112,6 +122,9 @@ fn assemble(
                 .get(&run.task_id)
                 .cloned()
                 .unwrap_or_default(),
+            inference: providers
+                .get(&run.run_id)
+                .and_then(|found| inference_routes::route(run, found)),
         })
         .collect();
     let push_policies = runs
@@ -130,6 +143,7 @@ fn assemble(
             sandboxes,
             forge_credentials: HashMap::new(),
             push_policies,
+            provider_credentials: HashMap::new(),
         }),
     }
 }
@@ -154,7 +168,7 @@ fn push_policy(policy: PushPolicy) -> pb::PushPolicy {
 
 /// The Git route of `run`: its project's repository, the base branch and the branches the run may
 /// push, as full ref names. `None` (with a warning) unless the URL is `https://`, or `http://`
-/// with `forge.allowPlainHttp`.
+/// with `network.allowPlainHttp`.
 /// `credential_ref` is the id of the project's forge credential reference, empty without one.
 fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
     let plain_http_allowed = git.allow_plain_http && has_scheme(&run.repo_url, "http://");
@@ -262,7 +276,14 @@ mod tests {
     }
 
     fn assemble(version: u64, runs: &[ActiveRun], entries: &[HostEntry]) -> PolicyUpdate {
-        super::assemble(version, runs, entries, &settings(), &PushData::default())
+        super::assemble(
+            version,
+            runs,
+            entries,
+            &settings(),
+            &PushData::default(),
+            &HashMap::new(),
+        )
     }
 
     fn entry(scope: HostScope, host: &str) -> HostEntry {
@@ -359,7 +380,14 @@ mod tests {
             allow_plain_http: true,
             ..settings()
         };
-        let update = super::assemble(1, &runs, &[], &allowing, &PushData::default());
+        let update = super::assemble(
+            1,
+            &runs,
+            &[],
+            &allowing,
+            &PushData::default(),
+            &HashMap::new(),
+        );
         let route = update.snapshot.unwrap().sandboxes[0].git.clone().unwrap();
         assert_eq!(
             route.upstream_url,
@@ -383,7 +411,7 @@ mod tests {
             ..PushData::default()
         };
 
-        let update = super::assemble(1, &runs, &[], &settings(), &push);
+        let update = super::assemble(1, &runs, &[], &settings(), &push, &HashMap::new());
 
         let policies = update.snapshot.unwrap().push_policies;
         assert_eq!(policies.len(), 2);
@@ -424,7 +452,14 @@ mod tests {
             ..PushData::default()
         };
 
-        let update = super::assemble(1, &[first, second], &[], &settings(), &push);
+        let update = super::assemble(
+            1,
+            &[first, second],
+            &[],
+            &settings(),
+            &push,
+            &HashMap::new(),
+        );
 
         let sandboxes = update.snapshot.unwrap().sandboxes;
         assert_eq!(sandboxes[0].exceptions, ["path:CODEOWNERS"]);

@@ -36,9 +36,6 @@ sessions:
           entries:
             - content: "Step 1"
               status: completed
-      - usage:
-          used: 120
-          size: 100000
       - end: end_turn
   loaded:
     - - say: "Resumed session turn"
@@ -47,7 +44,7 @@ sessions:
 
     let script = Script::from_yaml_str(yaml).expect("should parse valid YAML script");
     assert_eq!(script.sessions.new.len(), 1);
-    assert_eq!(script.sessions.new[0].steps.len(), 6);
+    assert_eq!(script.sessions.new[0].steps.len(), 5);
     assert_eq!(script.sessions.loaded.len(), 1);
     assert_eq!(script.sessions.loaded[0].steps.len(), 2);
 }
@@ -97,9 +94,6 @@ sessions:
           entries:
             - content: "Initial task"
               status: completed
-      - usage:
-          used: 350
-          size: 200000
       - end: end_turn
 "#;
 
@@ -172,7 +166,7 @@ sessions:
         .expect("client run failed");
 
     let received = updates.lock().await.clone();
-    assert_eq!(received.len(), 6, "Expected 6 updates emitted during turn");
+    assert_eq!(received.len(), 5, "Expected 5 updates emitted during turn");
 
     // 1. Agent text chunk
     match &received[0] {
@@ -225,15 +219,6 @@ sessions:
             assert_eq!(plan.entries[0].status, PlanEntryStatus::Completed);
         }
         other => panic!("Expected Plan, got: {other:?}"),
-    }
-
-    // 6. Usage update
-    match &received[5] {
-        SessionUpdate::UsageUpdate(usage) => {
-            assert_eq!(usage.used, 350);
-            assert_eq!(usage.size, 200_000);
-        }
-        other => panic!("Expected UsageUpdate, got: {other:?}"),
     }
 }
 

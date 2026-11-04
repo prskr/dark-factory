@@ -27,12 +27,9 @@ This document captures the behavior, constraints, and integration specifics of `
 - Claude Code allows appending project guidelines via `/data/home/.claude/CLAUDE.md` or through `_meta` attributes on prompt requests.
 - Before launching or initiating a prompt turn, `factory-agent` ensures `/data/home/.claude/CLAUDE.md` contains the persona's system prompt from `Assign.persona.system_prompt`.
 
-## 4. Token Usage Reporting & Session Logs
+## 4. Token Usage
 
-- If the ACP adapter reports token usage in `session/update` or `TurnEnded` events (`USAGE_SOURCE_HARNESS`), those metrics are captured directly.
-- **Fallback (`USAGE_SOURCE_SESSION_LOG`)**: When the adapter omits token usage, `factory-agent` scans Claude Code's session log at:
-  `/data/home/.claude/projects/<cwd-slug>/<session-id>.jsonl`
-  summing `message.usage` (input tokens, output tokens, cache read, cache write) across assistant messages recorded during the turn.
+The runtime reports no token usage. Claude Code gets the gateway's inference endpoint as `ANTHROPIC_BASE_URL`, a placeholder key and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (no telemetry or update checks); the gateway reads the usage of every `/v1/messages` response and reports it to the control plane. Usage updates that the adapter sends over ACP are ignored, and the session log is not read.
 
 ## 5. Rate Limiting & Stop Reasons
 
@@ -100,14 +97,7 @@ The following sample transcript illustrates the real-time event stream generated
 {"turn_ended": {
   "turn_id": "turn-1",
   "stop_reason": "STOP_REASON_END_TURN",
-  "ended_at": "2026-10-18T15:30:12.450Z",
-  "usage": {
-    "source": "USAGE_SOURCE_HARNESS",
-    "input_tokens": 1420,
-    "output_tokens": 315,
-    "cache_read_input_tokens": 850,
-    "cache_creation_input_tokens": 570
-  }
+  "ended_at": "2026-10-18T15:30:12.450Z"
 }}
 {"run_report": {
   "run_id": "run-claude-manual",

@@ -117,13 +117,15 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
 - Identity: the client certificate must carry the URI SAN
   `spiffe://dark-factory/ns/<ns>/pod/<name>/<uid>`; `SandboxProvider::resolve_identity` maps SAN and
   peer IP to a run. Terminal runs are rejected with `UNAUTHENTICATED`.
-- Handshake: `Hello` first (else `FAILED_PRECONDITION`), then `HelloAck`, `HarnessCredentials`,
-  `Assign`, then the prompts: undelivered prompts that are already forwarded
+- Handshake: `Hello` first (else `FAILED_PRECONDITION`), then `HelloAck`, `Assign`, then the prompts: undelivered prompts that are already forwarded
   (`task_messages.forwarded_at` set) are sent again, held-back ones are claimed (marked forwarded)
   and sent only while no turn is open (no persisted `TurnStarted` without a later `TurnEnded`).
   After a persisted `TurnEnded` the held-back prompts are sent. See "Queued messages reach the
   runtime between turns" in [`contract/README.md`](https://github.com/prskr/dark-factory/blob/main/contract/README.md).
-  `HarnessCredentials` precede `Assign` because the runtime ignores credentials that arrive later.
+- `Assign` carries the harness environment: the gateway's inference endpoint (`https://<gateway
+  host>:<git port>/inference`) as base URL, the placeholder key `df-placeholder` and the instance
+  CA path in the harness's variables (Claude Code also gets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`), from the first wire API of the harness that the persona's
+  model provider offers. No model credential is sent to a sandbox.
 - Timeouts: `enforce_timeouts` ends every overdue run it can; a run that fails to end (or whose
   row cannot be read) is logged and does not stop the others.
 - Ordering and delivery: messages are persisted in batches of up to 50 per transaction, duplicates

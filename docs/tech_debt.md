@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-102.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-104.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -38,6 +38,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
 - Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
 - Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
+- Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
 
 ## Summary
 
@@ -131,6 +132,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
 | TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
 | TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
+| TD-102 | low   | `factory-agent` runner | Harness inherits the whole factory-agent environment |
+| TD-103 | low   | `df-e2e` | Follow-up test can see the PR still in draft after `in_review` |
 
 ## Entries
 
@@ -729,7 +732,7 @@ Each plugin image repeats the same six targets and a push target with only the n
 
 `crates/df-core/src/routing.rs` (`RoutingTable::from_plugins_allowing_plain_http`)
 
-The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls it only when `forge.allowPlainHttp` is on (`iter1-demo-e2e`); nothing else stops a caller from building a table that sends forge tokens over plain HTTP.
+The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls it only when `network.allowPlainHttp` is on (`iter1-demo-e2e`); nothing else stops a caller from building a table that sends forge tokens over plain HTTP.
 
 **Matters when:** a caller outside the tests uses it, for example a dev or e2e switch in the instance configuration.
 
@@ -936,7 +939,6 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 
 - **No pending-request count on the phone task view:** below 768 px the bottom bar, and the count with it, is hidden while a task's transcript is shown (`web-ui-shell`: the message input takes its place). The task's own requests are on its timeline. Accepted after the 390 px check of `iter2-agent-requests` (2026-10-28).
 - **TurnEnded vs. trailing transcript chunks:** ordering is guaranteed. `agent-client-protocol` 3.4.0 (`concepts::ordering`) waits for each notification handler to finish before it routes the next message. The handler awaits the `outbound_tx` send, so all chunks of a turn are queued before the prompt response arrives. Revisit if the ACP crate changes its dispatch model.
-- **Late `HarnessCredentials`:** the documented order is "credentials before Assign". If credentials arrive after Assign, the runtime sends a notice and does not use them.
 - **Git config denylist instead of an allowlist:** the denylist was extended. Replace it with an allowlist once the set of config keys the control plane sends is known.
 - **Harness exit:** stdin is closed when the ACP transport is dropped. The runtime waits 5 s, then kills the harness.
 - **Fake agent cancel flag:** `fake-acp-agent` resets `cancelled` at the end of a prompt, because a cancel can be handled before the spawned prompt task starts.
@@ -982,3 +984,25 @@ Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activ
 **Matters when:** more lock-order tests are added, or the `runs` test passes on a broken lock order.
 
 **Fix:** one helper in `df-test-postgres` (for example `wait_until_a_backend_waits_for_a_lock(&pool)`) that filters on the current database; replace every copy.
+
+Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). The `TD-n (ID)` headings give the IDs used in that review. Both existed before that change.
+
+### TD-102 (TD-env). Harness inherits the whole factory-agent environment
+
+`crates/factory-agent/src/runner.rs` (`spawn_harness`)
+
+The harness process gets the runtime's full environment plus the harness env; there is no `env_clear`. Today the runtime env holds no secret (the model credential stays in the gateway), and the e2e dumps the env to check that.
+
+**Matters when:** a secret or token is added to the runtime's environment (for example for the agent channel or a future tool).
+
+**Fix:** `env_clear()` plus an allowlist (`PATH`, `HOME`, locale, the harness env from `AcpHarness.env`); a runtime test that an extra variable does not reach the harness. Users may set harness variables with `ENV` in the sandbox image, which relies on the inheritance; decide whether to allowlist a documented prefix or move such settings into the harness constants (as done for `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`).
+
+### TD-103 (TD-e2e). Follow-up e2e test can see the PR still in draft
+
+`crates/df-e2e/tests/flow.rs:229` (`follow_up_resumes_the_session_and_completing_marks_the_pr_ready`)
+
+The test waits for task status `in_review`, then asserts `draft == false`. Marking the PR ready may land after the status change; the test failed once in six runs on the `iter3-inference-gateway` branch.
+
+**Matters when:** CI flakes block merges.
+
+**Fix:** wait on the PR's draft flag (or the event that marks it ready) instead of the task status.

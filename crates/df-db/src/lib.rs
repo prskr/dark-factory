@@ -10,6 +10,8 @@ pub mod event_subscriptions;
 pub mod git_pushes;
 pub mod lifecycle_events;
 pub mod migrate;
+pub mod model_providers;
+pub mod model_usage;
 pub mod network_access;
 pub mod notify;
 pub mod outbox;

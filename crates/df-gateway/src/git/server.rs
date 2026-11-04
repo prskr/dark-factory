@@ -13,9 +13,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use df_core::TaskKey;
 use df_proto::gateway::v1::{ForgeCredential, GitRoute};
-use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue};
+use hyper::header::{CONTENT_ENCODING, HeaderMap};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -31,8 +30,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::push::{Push, Pusher};
 use super::spool::BODY_IDLE_TIMEOUT;
-use super::upstream::{BodyLimit, LimitedBody, MAX_FETCH_REQUEST_BYTES};
+use super::upstream::MAX_FETCH_REQUEST_BYTES;
+use crate::inference::Inference;
+use crate::inference::route::is_inference_path;
 use crate::policy::Policy;
+use crate::upstream::{Body, BodyLimit, BoxError, LimitedBody, text};
 
 /// Time a client has to complete the TLS handshake.
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -50,11 +52,6 @@ const FORWARDED_HEADERS: [&str; 5] = [
     "git-protocol",
     "user-agent",
 ];
-
-/// Error type of request and response bodies.
-pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
-/// Streaming body of requests and responses.
-pub type Body = UnsyncBoxBody<Bytes, BoxError>;
 
 /// The Git service a request belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +122,7 @@ pub struct GitEndpoint {
     policy: watch::Receiver<Option<Arc<Policy>>>,
     upstream: Arc<dyn Upstream>,
     push: Arc<Push>,
+    inference: Option<Arc<Inference>>,
     fetch_max_bytes: u64,
 }
 
@@ -138,8 +136,16 @@ impl GitEndpoint {
             policy,
             upstream,
             push,
+            inference: None,
             fetch_max_bytes: MAX_FETCH_REQUEST_BYTES,
         }
+    }
+
+    /// Serves the inference endpoint (`/inference/…`) on the same port.
+    #[must_use]
+    pub fn with_inference(mut self, inference: Arc<Inference>) -> Self {
+        self.inference = Some(inference);
+        self
     }
 
     /// Overrides the largest forwarded `git-upload-pack` body ([`MAX_FETCH_REQUEST_BYTES`]).
@@ -156,6 +162,15 @@ impl GitEndpoint {
         B::Error: Into<BoxError>,
     {
         let (parts, body) = request.into_parts();
+        if let Some(inference) = self
+            .inference
+            .as_ref()
+            .filter(|_| is_inference_path(parts.uri.path()))
+        {
+            let policy = self.policy.borrow().clone();
+            let request = Request::from_parts(parts, body);
+            return inference.handle(policy.as_deref(), source, request).await;
+        }
         let Some(target) = Target::parse(&parts.method, parts.uri.path(), parts.uri.query()) else {
             return text(StatusCode::NOT_FOUND, "df: not found");
         };
@@ -347,20 +362,6 @@ impl ServerTls {
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
         Ok(TlsAcceptor::from(Arc::new(config)))
     }
-}
-
-/// A plain-text answer; Git shows the body of an error to the user as `remote:` lines.
-pub(crate) fn text(status: StatusCode, message: &str) -> Response<Body> {
-    let body = Full::new(Bytes::from(format!("{message}\n")))
-        .map_err(|never| match never {})
-        .boxed_unsync();
-    let mut response = Response::new(body);
-    *response.status_mut() = status;
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    response
 }
 
 /// Why a request is not forwarded.

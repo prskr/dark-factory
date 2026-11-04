@@ -19,7 +19,7 @@ image:
     digest: ''
 
 # Forgejo of the cluster serves plain http (deploy/e2e/forgejo-values.yaml).
-forge:
+network:
   allowPlainHttp: true
 
 # A run ends with its turn, so a follow-up message starts run 2 (the `loaded` session of the script).

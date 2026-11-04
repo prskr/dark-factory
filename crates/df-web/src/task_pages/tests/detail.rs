@@ -7,7 +7,8 @@ use serde_json::json;
 use super::set_status;
 use crate::task_pages::runs_region;
 use crate::testkit::{
-    TestApp, add_event, chunk, form, header_str, insert_run, new_task, seed, tag_around, text,
+    TestApp, add_event, add_usage, chunk, form, header_str, insert_run, new_task, seed, tag_around,
+    text,
 };
 
 #[tokio::test]
@@ -22,10 +23,10 @@ async fn detail_lists_runs_with_outcome_retry_time_and_token_counts_per_model() 
         .execute(&app.pool)
         .await
         .unwrap();
-    let ended = |model: &str, input: &str| json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN", "usage": [{"modelId": model, "inputTokens": input, "outputTokens": "7", "cacheReadTokens": "3", "cacheWriteTokens": "1"}]}});
-    add_event(&app.pool, task.id, run, 1, "t1", ended("opus", "100")).await;
-    add_event(&app.pool, task.id, run, 2, "t2", ended("opus", "50")).await;
-    add_event(&app.pool, task.id, run, 3, "t2", ended("haiku", "9")).await;
+    // Gateway usage records, summed per model.
+    for (model, input) in [("opus", 100), ("opus", 50), ("haiku", 9)] {
+        add_usage(&app.pool, run, Some(model), [input, 7, 3, 1]).await;
+    }
 
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(html.contains("rate limited"), "{html}");

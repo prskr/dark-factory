@@ -22,7 +22,7 @@
 //   * Every command is keyed (run_id, prompt_id, call_id, request_id) and
 //     derived from database state, so any control plane replica can serve a
 //     reconnect without in-memory session state.
-//   * After HelloAck the control plane (re-)sends Assign, HarnessCredentials,
+//   * After HelloAck the control plane (re-)sends Assign,
 //     every prompt not yet confirmed as delivered, and Cancel if requested.
 //     The runtime ignores duplicates.
 //   * Request/response pairs (tool calls, credentials): after a reconnect the
@@ -76,8 +76,10 @@ message AgentMessage {
 
 message ControlMessage {
   // 16 was CredentialGrant: the gateway's Git proxy injects the forge credential.
-  reserved 16;
-  reserved "credential_grant";
+  // 12 was HarnessCredentials: the gateway's inference endpoint injects the model credential
+  // (iter3-inference-gateway).
+  reserved 12, 16;
+  reserved "credential_grant", "harness_credentials";
 
   // Highest AgentMessage.seq the control plane has persisted (cumulative).
   // A ControlMessage without a body is a pure acknowledgement.
@@ -86,7 +88,6 @@ message ControlMessage {
   oneof body {
     HelloAck hello_ack = 10;
     Assign assign = 11;
-    HarnessCredentials harness_credentials = 12;
     Prompt prompt = 13;
     Cancel cancel = 14;
     ToolCallResult tool_call_result = 15;
@@ -207,7 +208,8 @@ message Harness {
 message AcpHarness {
   // Command line of the ACP agent, e.g. ["/opt/harness/bin/claude-agent-acp"].
   repeated string command = 1;
-  // Non-secret environment only. Secrets arrive via HarnessCredentials.
+  // Non-secret environment only. Includes the gateway's inference base URL, the placeholder API
+  // key and the CA file; model credentials never reach the sandbox.
   map<string, string> env = 2;
   // Model override, if the persona sets one.
   optional string model = 3;
@@ -239,7 +241,9 @@ message ToolAnnotations {
 message Budgets {
   // Hard limit for the whole run; the runtime finalizes when it's reached.
   google.protobuf.Duration max_wall_clock = 1;
-  optional uint64 max_output_tokens = 2;
+  // 2 was `max_output_tokens`: token budgets move to the gateway (backlog).
+  reserved 2;
+  reserved "max_output_tokens";
   optional uint32 max_turns = 3;
 }
 
@@ -249,13 +253,6 @@ message Continuation {
   // Seeded into a new session when resuming isn't possible. Empty on a task's
   // first run.
   string summary = 2;
-}
-
-// Secrets for the harness, e.g. CLAUDE_CODE_OAUTH_TOKEN (D8, D10). Kept in
-// memory and on tmpfs (/run/factory) only; never written to the PVC, never
-// logged. Re-sent after every HelloAck and whenever a credential rotates.
-message HarnessCredentials {
-  map<string, string> env = 1;
 }
 
 // A queued message for the harness (D16). The runtime delivers prompts

@@ -7,8 +7,8 @@ use df_db::push_checks::protected_glob;
 use df_proto::gateway::v1::{CheckMode, MaskedSecret, PushCheck, PushPolicy};
 use globset::{GlobMatcher, GlobSet, GlobSetBuilder};
 
-use super::server::BoxError;
 use super::view::{AddedBlob, PushView};
+use crate::upstream::BoxError;
 
 /// Always protected with mode [`Mode::Reject`], next to the project's globs.
 pub const DARK_FACTORY_GLOB: &str = ".dark-factory/**";

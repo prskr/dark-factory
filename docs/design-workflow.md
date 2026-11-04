@@ -63,7 +63,10 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
-| Config | Projects, personas, credentials, error page; desktop and phone |
+| Config - Projects | Projects: table, edit modal and its tabs (push checks, context); phone |
+| Config - Personas | Personas: cards, edit modal; phone edit sheet |
+| Config - Credentials | Credentials: table, new with validation error; error page (not found) |
+| Config - Model providers | Model providers: table, new provider modal per credential scheme |
 | Empty states | One board per empty state |
 | Network | Egress rules: table, search, new and edit modals, empty state |
 | Network - Graph | Traffic view: graph, table, allow and deny flows |
@@ -166,9 +169,16 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Phone / Phone · rate limited, resumes | `/tasks/<id>` | as Desktop · rate limited, resumes; details sheet open | 390 |
 | Tasks - Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
 | Tasks - Phone / Phone · requests, deny always | `/requests` | as Requests · deny always | 390 |
-| Config / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |
-| Config / Projects · edit modal, push checks, invalid glob | `/projects/<key>/edit` | as above; `deploy/[` added as fifth glob and saved | 1440 |
-| Config / Phone · projects | `/projects` | projects (not built) | 390 |
+| Config - Projects / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |
+| Config - Projects / Projects · edit modal, push checks, invalid glob | `/projects/<key>/edit` | as above; `deploy/[` added as fifth glob and saved | 1440 |
+| Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
+| Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
+| Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |
+| Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |
+| Config - Personas / Personas · cards | `/personas` | manual seed (not built): four personas with model providers | 1440 |
+| Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Personas · cards; edit of Linus clicked | 1440 |
+| Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
+| Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |
 | Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |
 

@@ -37,15 +37,19 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 - **THEN** the project uses the instance's harness image and adapter
 
 ### Requirement: Personas
-Board members SHALL list, create and edit personas with name, system prompt, harness (iteration 1: `claude-code`), optional model and harness credential reference. A persona SHALL NOT have an adapter command.
+Board members SHALL list, create and edit personas with name, system prompt, harness (iteration 1: `claude-code`), optional model and a required model provider compatible with the harness. A persona SHALL NOT have an adapter command.
 
 #### Scenario: Create a persona
-- **WHEN** a board member creates persona "Linus" with a system prompt and a harness credential
+- **WHEN** a board member creates persona "Linus" with a system prompt and model provider "Claude subscription"
 - **THEN** the persona is stored and can be selected when creating a task
 
 #### Scenario: No adapter command on the form
 - **WHEN** a board member opens the persona form
 - **THEN** it has no adapter command field
+
+#### Scenario: Existing persona after the upgrade
+- **WHEN** persona "Linus" referenced harness credential `claude` before the upgrade
+- **THEN** after migrating it references a model provider with scheme `claude-subscription`, Anthropic Messages at `https://api.anthropic.com` and credential reference `claude`
 
 ### Requirement: Credential references never hold values
 Board members SHALL create and edit credential references consisting of a name, a Kubernetes Secret name and a key. The UI and database SHALL never accept, store or display secret values.

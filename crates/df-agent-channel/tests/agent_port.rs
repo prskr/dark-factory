@@ -21,7 +21,7 @@ use df_core::{PeerIdentity, RunId, RunOutcome, RunState};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, PhaseChanged, PushReport, PushStatus, PushTarget, RunPhase, RunReport,
-    RuntimeOperation, RuntimeTiming, ToolCallRequest, agent_message, control_message,
+    RuntimeOperation, RuntimeTiming, ToolCallRequest, agent_message, control_message, harness,
 };
 use df_proto::transcript::v1::{
     AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
@@ -73,7 +73,7 @@ impl Harness {
         let mut runtime = self.connect().await?;
         let ack = runtime.hello().await?;
         let mut bodies = vec![ack.body.expect("HelloAck")];
-        // HelloAck, HarnessCredentials, Assign, then one Prompt for the assignment.
+        // HelloAck, Assign, then one Prompt for the assignment.
         let rest = runtime
             .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
             .await?;
@@ -244,15 +244,13 @@ async fn pod_of_a_finished_run_is_unauthenticated() -> anyhow::Result<()> {
 // --- 2. Protocol session --------------------------------------------------------------------
 
 #[tokio::test]
-async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt()
--> anyhow::Result<()> {
+async fn first_connect_receives_ack_assign_and_the_assignment_prompt() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;
     let (_runtime, bodies) = h.handshake().await?;
 
     let [
         control_message::Body::HelloAck(ack),
-        control_message::Body::HarnessCredentials(creds),
         control_message::Body::Assign(assign),
         control_message::Body::Prompt(prompt),
     ] = bodies.as_slice()
@@ -263,7 +261,17 @@ async fn first_connect_receives_ack_credentials_assign_and_the_assignment_prompt
         (ack.run_id.as_str(), ack.last_persisted_seq),
         (h.run_id.to_string().as_str(), 0)
     );
-    assert_eq!(creds.env["CLAUDE_CODE_OAUTH_TOKEN"], "claude-secret-value");
+    let Some(harness::Kind::Acp(acp)) = assign.harness.as_ref().and_then(|h| h.kind.as_ref())
+    else {
+        anyhow::bail!("no ACP harness");
+    };
+    assert_eq!(acp.env["CLAUDE_CODE_OAUTH_TOKEN"], "df-placeholder");
+    assert!(acp.env["ANTHROPIC_BASE_URL"].ends_with("/inference"));
+    assert_eq!(acp.env["NODE_EXTRA_CA_CERTS"], "/run/factory/tls/ca.crt");
+    assert!(
+        !format!("{bodies:?}").contains("claude-secret-value"),
+        "no model credential reaches the sandbox"
+    );
     assert_eq!(
         assign.workspace.as_ref().expect("workspace").task_branch,
         "factory/task/DF-1"
@@ -415,8 +423,8 @@ async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts() -
     let bodies_b: Vec<_> = rest.into_iter().filter_map(|m| m.body).collect();
 
     // Same Assign and same prompt as replica A sent.
+    assert_eq!(bodies_a[1], bodies_b[0]);
     assert_eq!(bodies_a[2], bodies_b[1]);
-    assert_eq!(bodies_a[3], bodies_b[2]);
     Ok(())
 }
 
@@ -426,7 +434,7 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[3] else {
+    let control_message::Body::Prompt(assignment) = &bodies[2] else {
         anyhow::bail!("no prompt")
     };
 
@@ -823,7 +831,7 @@ async fn message_queued_while_finalizing_requeues_the_task() -> anyhow::Result<(
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[3] else {
+    let control_message::Body::Prompt(assignment) = &bodies[2] else {
         anyhow::bail!("no prompt")
     };
     sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE id = $1")
@@ -881,7 +889,7 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[3] else {
+    let control_message::Body::Prompt(assignment) = &bodies[2] else {
         anyhow::bail!("no prompt")
     };
     // The assignment prompt is confirmed by the transcript, as the runtime does.
@@ -978,34 +986,6 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
     Ok(())
 }
 
-#[tokio::test]
-async fn missing_harness_secret_fails_the_run_naming_the_reference() -> anyhow::Result<()> {
-    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
-    let h = Harness::start(pool.clone()).await?;
-    h.env.secrets.insert_error(
-        "claude",
-        "token",
-        df_core::SecretError::NotFound {
-            secret_name: "claude".into(),
-            secret_key: "token".into(),
-        },
-    );
-    let mut runtime = h.connect().await?;
-    let err = runtime.hello().await.expect_err("run must fail");
-    assert_eq!(err.code(), Code::FailedPrecondition);
-
-    let (state, detail): (String, String) =
-        sqlx::query_as("SELECT state, detail FROM runs WHERE id = $1")
-            .bind(h.run_id.as_uuid())
-            .fetch_one(&pool)
-            .await?;
-    assert_eq!(state, "failed");
-    assert!(detail.contains("`claude`"), "{detail}");
-    assert!(!detail.contains("claude-secret-value"));
-    assert_eq!(task_status(&pool, &h).await, "failed");
-    Ok(())
-}
-
 /// Collects everything the `tracing` macros emit while it is the default subscriber.
 #[derive(Clone, Default)]
 struct LogCapture(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -1035,19 +1015,7 @@ async fn secret_values_never_appear_in_logs() -> anyhow::Result<()> {
     );
 
     let h = Harness::start(pool.clone()).await?;
-    // The handshake reads the harness secret.
     h.handshake().await?;
-    // Failing secret reads log too.
-    h.env.secrets.insert_error(
-        "claude",
-        "token",
-        df_core::SecretError::Backend("secret store unreachable".into()),
-    );
-    let mut second = h.connect().await?;
-    second
-        .hello()
-        .await
-        .expect_err("run must fail without the secret");
 
     let captured = String::from_utf8(logs.0.lock().expect("log buffer").clone())?;
     assert!(!captured.is_empty(), "the test must capture something");

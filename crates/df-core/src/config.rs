@@ -63,7 +63,7 @@ pub struct InstanceConfig {
     #[serde(default)]
     pub web: WebConfig,
     #[serde(default)]
-    pub forge: ForgeConfig,
+    pub network: NetworkConfig,
     /// Integration plugins by name (`forgejo`, ...).
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginConfig>,
@@ -569,13 +569,14 @@ impl Default for VolumesConfig {
     }
 }
 
-/// Instance-wide forge settings.
+/// Instance-wide network settings for upstream servers.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ForgeConfig {
-    /// Allow `http://` repository URLs: plugin calls, the gateway's Git proxy and the project
-    /// form. Off, only `https://` is accepted. The token then travels unencrypted, so use it for
-    /// throwaway clusters only.
+pub struct NetworkConfig {
+    /// Allow `http://` upstream URLs: forge plugin calls, the gateway's Git proxy, the model
+    /// provider upstreams of the inference endpoint and the project form. Off, only `https://`
+    /// is accepted. The credentials then travel unencrypted, so use it for throwaway clusters
+    /// only.
     #[serde(default)]
     pub allow_plain_http: bool,
 }
@@ -1111,22 +1112,22 @@ sandbox:
     }
 
     #[test]
-    fn forge_section_defaults_to_https_only_and_rejects_unknown_keys() {
+    fn network_section_defaults_to_https_only_and_rejects_unknown_keys() {
         let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
         assert!(
             !InstanceConfig::from_yaml_str(minimal)
                 .unwrap()
-                .forge
+                .network
                 .allow_plain_http
         );
-        let on = format!("{minimal}forge:\n  allowPlainHttp: true\n");
+        let on = format!("{minimal}network:\n  allowPlainHttp: true\n");
         assert!(
             InstanceConfig::from_yaml_str(&on)
                 .unwrap()
-                .forge
+                .network
                 .allow_plain_http
         );
-        let unknown = format!("{minimal}forge:\n  plainHttp: true\n");
+        let unknown = format!("{minimal}network:\n  plainHttp: true\n");
         assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
     }
 

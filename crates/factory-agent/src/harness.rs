@@ -13,7 +13,7 @@ use agent_client_protocol::schema::v1::{
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
     TextContent as AcpTextContent,
 };
-use df_proto::agent::v1::{Assign, Budgets, Continuation, HarnessCredentials, Prompt, RunOutcome};
+use df_proto::agent::v1::{Assign, Budgets, Continuation, Prompt, RunOutcome};
 use df_proto::transcript::v1::{
     Event, Notice, NoticeLevel, StopReason, TurnStarted, UserMessage,
     content_block::Kind as ContentBlockKind, event::Kind as EventKind,
@@ -91,11 +91,10 @@ pub fn approve_permission(req: &RequestPermissionRequest) -> RequestPermissionRe
 
 /// Prepares the harness environment and writes `/data/home` settings.
 ///
-/// Secrets from `HarnessCredentials` are injected exclusively into the returned
-/// environment map and are NEVER written to disk under `/data`.
+/// The environment of `Assign` carries the gateway's inference base URL, the placeholder API key
+/// and the CA file; no model credential reaches the sandbox (iter3-inference-gateway).
 pub fn prepare_harness_environment(
     assign: &Assign,
-    credentials: Option<&HarnessCredentials>,
     home_dir: &Path,
 ) -> anyhow::Result<HashMap<String, String>> {
     let mut env = HashMap::new();
@@ -127,13 +126,6 @@ pub fn prepare_harness_environment(
         if !harness.system_prompt.is_empty() {
             crate::fs_util::create_real_dir(&claude_dir)?;
             crate::fs_util::write_fresh(&claude_dir.join("CLAUDE.md"), &harness.system_prompt)?;
-        }
-    }
-
-    // 4. Inject credentials into environment ONLY (never write to disk)
-    if let Some(creds) = credentials {
-        for (k, v) in &creds.env {
-            env.insert(k.clone(), v.clone());
         }
     }
 
@@ -418,37 +410,33 @@ pub fn parse_rate_limit(err: &agent_client_protocol::Error) -> Option<RateLimitI
     None
 }
 
-/// Tracks budget constraints (wall clock, output tokens, turns) for an active run.
+/// Tracks budget constraints (wall clock, turns) for an active run.
 #[derive(Debug, Clone)]
 pub struct BudgetTracker {
     start_time: std::time::Instant,
     max_wall_clock: Option<std::time::Duration>,
-    max_output_tokens: Option<u64>,
     max_turns: Option<u32>,
     turns_completed: u32,
-    total_output_tokens: u64,
 }
 
 impl BudgetTracker {
     pub fn new(budgets: Option<&Budgets>) -> Self {
-        let (max_wall_clock, max_output_tokens, max_turns) = if let Some(b) = budgets {
+        let (max_wall_clock, max_turns) = if let Some(b) = budgets {
             let wall_clock = b.max_wall_clock.as_ref().map(|d| {
                 // A negative budget is invalid; treat it as no time left.
                 std::time::Duration::from_secs(u64::try_from(d.seconds).unwrap_or_default())
                     + std::time::Duration::from_nanos(u64::try_from(d.nanos).unwrap_or_default())
             });
-            (wall_clock, b.max_output_tokens, b.max_turns)
+            (wall_clock, b.max_turns)
         } else {
-            (None, None, None)
+            (None, None)
         };
 
         Self {
             start_time: std::time::Instant::now(),
             max_wall_clock,
-            max_output_tokens,
             max_turns,
             turns_completed: 0,
-            total_output_tokens: 0,
         }
     }
 
@@ -467,27 +455,13 @@ impl BudgetTracker {
             .map(|limit| limit.saturating_sub(self.start_time.elapsed()))
     }
 
-    /// Records completed turn with its consumed output tokens.
-    pub fn record_turn(&mut self, output_tokens: u64) {
+    /// Records a completed turn.
+    pub fn record_turn(&mut self) {
         self.turns_completed += 1;
-        self.total_output_tokens += output_tokens;
     }
 
     pub fn turns_completed(&self) -> u32 {
         self.turns_completed
-    }
-
-    pub fn total_output_tokens(&self) -> u64 {
-        self.total_output_tokens
-    }
-
-    /// True if cumulative output tokens exceed `Assign.budgets.max_output_tokens`.
-    pub fn is_output_tokens_exceeded(&self) -> bool {
-        if let Some(limit) = self.max_output_tokens {
-            self.total_output_tokens >= limit
-        } else {
-            false
-        }
     }
 
     /// True if `turns_completed` reached or exceeded `Assign.budgets.max_turns`.
@@ -520,7 +494,6 @@ pub struct TurnOutcomeInput {
     pub end_run_after_turn: bool,
     pub rate_limited: Option<RateLimitInfo>,
     pub wall_clock_exceeded: bool,
-    pub output_tokens_exceeded: bool,
     pub stop_reason: Option<StopReason>,
     pub harness_crashed: bool,
     pub has_queued_prompts: bool,
@@ -570,19 +543,11 @@ pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
         };
     }
 
-    // 4. Budgets: wall clock or output tokens or StopReason::MaxTokens / MaxTurnRequests
+    // 4. Budgets: wall clock or StopReason::MaxTokens / MaxTurnRequests
     if input.wall_clock_exceeded {
         return RunOutcomeDecision::Finalize {
             outcome: RunOutcome::LimitReached,
             detail: "Wall clock budget exceeded".to_string(),
-            retry_after: None,
-        };
-    }
-
-    if input.output_tokens_exceeded {
-        return RunOutcomeDecision::Finalize {
-            outcome: RunOutcome::LimitReached,
-            detail: "Output token budget exceeded".to_string(),
             retry_after: None,
         };
     }

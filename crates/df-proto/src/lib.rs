@@ -41,6 +41,14 @@ pub mod gateway {
                     .finish()
             }
         }
+
+        impl std::fmt::Debug for ProviderCredential {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("ProviderCredential")
+                    .field("value", &"<redacted>")
+                    .finish()
+            }
+        }
     }
 }
 
@@ -112,6 +120,27 @@ mod tests {
         for debug in [format!("{credential:?}"), format!("{snapshot:#?}")] {
             assert!(!debug.contains("s3cret-token"), "{debug}");
             assert!(debug.contains("factory-bot"), "{debug}");
+        }
+    }
+
+    #[test]
+    fn provider_credential_debug_redacts_the_value() {
+        use super::gateway::v1::{ProviderCredential, Snapshot};
+        let snapshot = Snapshot {
+            provider_credentials: [(
+                "anthropic".to_owned(),
+                ProviderCredential {
+                    value: "sk-ant-secret".into(),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        for debug in [
+            format!("{:?}", snapshot.provider_credentials["anthropic"]),
+            format!("{snapshot:#?}"),
+        ] {
+            assert!(!debug.contains("sk-ant-secret"), "{debug}");
         }
     }
 
@@ -319,26 +348,13 @@ mod tests {
             "PLAN_ENTRY_STATUS_IN_PROGRESS"
         );
 
-        // 8. TurnEnded (checking enum names + 64-bit integer fields as strings)
+        // 8. TurnEnded (checking enum names)
         let v = assert_roundtrip(&base_event(event::Kind::TurnEnded(TurnEnded {
             stop_reason: StopReason::EndTurn as i32,
-            usage: vec![Usage {
-                model_id: "claude-sonnet-4-5".into(),
-                input_tokens: 9_007_199_254_740_993,
-                output_tokens: 2048,
-                cache_read_tokens: 512,
-                cache_write_tokens: 128,
-            }],
-            usage_source: UsageSource::Harness as i32,
-            detail: String::new(),
+            detail: "finished".into(),
         })));
         assert_eq!(v["turnEnded"]["stopReason"], "STOP_REASON_END_TURN");
-        assert_eq!(v["turnEnded"]["usageSource"], "USAGE_SOURCE_HARNESS");
-        assert_eq!(
-            v["turnEnded"]["usage"][0]["inputTokens"],
-            "9007199254740993"
-        );
-        assert_eq!(v["turnEnded"]["usage"][0]["outputTokens"], "2048");
+        assert_eq!(v["turnEnded"]["detail"], "finished");
 
         // 9. Notice
         let v = assert_roundtrip(&base_event(event::Kind::Notice(Notice {

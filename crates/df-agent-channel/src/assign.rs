@@ -5,7 +5,11 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use df_core::config::ClaudeCodeConfig;
-use df_core::{CredentialRef, CredentialRefId, PersonaId, Principal, ProjectId, TaskId};
+use df_core::harness::{
+    INFERENCE_PATH, INSTANCE_CA_PATH, PLACEHOLDER_KEY, choose_wire_api,
+    inference_env as harness_env,
+};
+use df_core::{PersonaId, Principal, ProjectId, TaskId};
 use df_db::{
     TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
 };
@@ -61,7 +65,7 @@ pub struct PersonaInfo {
     pub system_prompt: String,
     pub harness: String,
     pub model: Option<String>,
-    pub harness_credential: Option<CredentialRef>,
+    pub model_provider_id: uuid::Uuid,
 }
 
 /// A run with its task, project and persona, loaded once per stream.
@@ -84,25 +88,6 @@ impl RunContext {
 }
 
 #[derive(sqlx::FromRow)]
-struct CredentialColumns {
-    credential_id: Option<uuid::Uuid>,
-    credential_name: Option<String>,
-    secret_name: Option<String>,
-    secret_key: Option<String>,
-}
-
-impl CredentialColumns {
-    fn into_ref(self) -> Option<CredentialRef> {
-        Some(CredentialRef {
-            id: CredentialRefId::from_uuid(self.credential_id?),
-            name: self.credential_name?,
-            secret_name: self.secret_name?,
-            secret_key: self.secret_key?,
-        })
-    }
-}
-
-#[derive(sqlx::FromRow)]
 struct ProjectRecord {
     key: String,
     repo_url: String,
@@ -117,8 +102,7 @@ struct PersonaRecord {
     system_prompt: String,
     harness: String,
     model: Option<String>,
-    #[sqlx(flatten)]
-    credential: CredentialColumns,
+    model_provider_id: uuid::Uuid,
 }
 
 /// Loads task, project and persona of `run`.
@@ -143,10 +127,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
     };
 
     let persona: PersonaRecord = sqlx::query_as(
-        "SELECT p.name, p.system_prompt, p.harness, p.model,
-                c.id AS credential_id, c.name AS credential_name, c.secret_name, c.secret_key
-         FROM personas p LEFT JOIN credential_refs c ON c.id = p.harness_credential_id
-         WHERE p.id = $1",
+        "SELECT name, system_prompt, harness, model, model_provider_id FROM personas WHERE id = $1",
     )
     .bind(task.persona_id.as_uuid())
     .fetch_one(pool)
@@ -157,7 +138,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         system_prompt: persona.system_prompt,
         harness: persona.harness,
         model: persona.model,
-        harness_credential: persona.credential.into_ref(),
+        model_provider_id: persona.model_provider_id,
     };
 
     Ok(RunContext {
@@ -237,6 +218,9 @@ pub fn tool_descriptors() -> Vec<ToolDescriptor> {
 pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assign, ChannelError> {
     let config = &ctx.config;
     let command = rc.project.adapter_command(&config.harness.claude_code);
+    let mut env: std::collections::HashMap<String, String> =
+        config.harness.claude_code.env.clone().into_iter().collect();
+    env.extend(inference_env(ctx, rc).await?);
     Ok(Assign {
         run_id: rc.run.id.to_string(),
         task: Some(TaskRef {
@@ -261,7 +245,7 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             system_prompt: rc.persona.system_prompt.clone(),
             kind: Some(harness::Kind::Acp(AcpHarness {
                 command,
-                env: config.harness.claude_code.env.clone().into_iter().collect(),
+                env,
                 model: rc.persona.model.clone(),
                 settings_json: config.harness.claude_code.settings_json.clone(),
             })),
@@ -272,11 +256,68 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
                 seconds: i64::try_from(config.runs.max_wall_clock_seconds).unwrap_or(i64::MAX),
                 nanos: 0,
             }),
-            max_output_tokens: None,
             max_turns: None,
         }),
         continuation: continuation(&ctx.pool, rc).await?,
     })
+}
+
+/// The environment that points the persona's harness at the gateway's inference endpoint: the
+/// base URL, the placeholder API key and the instance CA (design D6, D8). The wire API is the
+/// first of the harness's that the persona's model provider offers. No model credential is among
+/// it: the gateway adds it.
+pub async fn inference_env(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+) -> Result<Vec<(String, String)>, ChannelError> {
+    let provider =
+        df_db::model_providers::get_model_provider(&ctx.pool, rc.persona.model_provider_id)
+            .await?
+            .ok_or_else(|| {
+                ChannelError::InvalidData(format!(
+                    "model provider of persona {} is missing",
+                    rc.persona.name
+                ))
+            })?;
+    let harness_name = &rc.persona.harness;
+    let wire_api = choose_wire_api(harness_name, &provider.wire_apis()).ok_or_else(|| {
+        ChannelError::InvalidData(format!(
+            "model provider {} offers no wire API of harness {harness_name}",
+            provider.input.name
+        ))
+    })?;
+    let vars = harness_env(harness_name, wire_api, provider.input.scheme).ok_or_else(|| {
+        ChannelError::InvalidData(format!(
+            "harness {harness_name} has no inference environment"
+        ))
+    })?;
+    let mut env = vec![
+        (
+            vars.base_url_var.to_string(),
+            inference_base_url(&ctx.config.git_proxy),
+        ),
+        (vars.key_var.to_string(), PLACEHOLDER_KEY.to_string()),
+    ];
+    env.extend(
+        vars.ca_vars
+            .iter()
+            .map(|var| ((*var).to_string(), INSTANCE_CA_PATH.to_string())),
+    );
+    env.extend(
+        vars.fixed_vars
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), (*value).to_string())),
+    );
+    Ok(env)
+}
+
+/// `https://<host>:<port>/inference` on the gateway's Git port.
+pub fn inference_base_url(proxy: &GitProxy) -> String {
+    if proxy.port == 443 {
+        format!("https://{}{INFERENCE_PATH}", proxy.host)
+    } else {
+        format!("https://{}:{}{INFERENCE_PATH}", proxy.host, proxy.port)
+    }
 }
 
 /// The task's repository URL on the Git proxy, `https://<host>:<port>/git/<KEY>.git`; the
@@ -377,6 +418,7 @@ fn principal(p: &Principal) -> transcript::Principal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ChannelConfig;
     use crate::runs::get_run;
     use crate::testing::Env;
 
@@ -528,12 +570,12 @@ mod tests {
     async fn assign_carries_the_repository_through_the_proxy() -> anyhow::Result<()> {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let mut env = Env::new(pool.clone()).await;
-        env.ctx.config = std::sync::Arc::new(crate::ChannelConfig {
+        env.ctx.config = std::sync::Arc::new(ChannelConfig {
             git_proxy: GitProxy {
                 host: "df-gateway.df.svc".into(),
                 port: 8443,
             },
-            ..crate::ChannelConfig::default()
+            ..ChannelConfig::default()
         });
         let run_id = env.insert_run(env.task.id, 1, "connecting").await;
         let run = get_run(&pool, run_id).await?.expect("run");
@@ -591,6 +633,82 @@ mod tests {
             .expect("continuation");
         assert_eq!(continuation.harness_session_id, "S");
         assert!(continuation.summary.contains("Fix login"));
+        Ok(())
+    }
+
+    /// The environment of the harness in the `Assign` of a run of `Env`'s persona.
+    async fn harness_env(env: &Env) -> anyhow::Result<std::collections::HashMap<String, String>> {
+        let run = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&env.ctx.pool, run).await?.expect("run");
+        let rc = load_run_context(&env.ctx.pool, run).await?;
+        let assign = build_assign(&env.ctx, &rc).await?;
+        let Some(harness::Kind::Acp(acp)) = assign.harness.and_then(|h| h.kind) else {
+            anyhow::bail!("no ACP harness");
+        };
+        Ok(acp.env)
+    }
+
+    #[tokio::test]
+    async fn claude_code_with_a_subscription_gets_the_gateway_url_a_placeholder_and_the_ca()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+
+        let vars = harness_env(&env).await?;
+
+        assert_eq!(
+            vars["ANTHROPIC_BASE_URL"],
+            inference_base_url(&env.ctx.config.git_proxy)
+        );
+        assert!(vars["ANTHROPIC_BASE_URL"].ends_with("/inference"));
+        assert_eq!(vars["CLAUDE_CODE_OAUTH_TOKEN"], "df-placeholder");
+        assert_eq!(vars["NODE_EXTRA_CA_CERTS"], "/run/factory/tls/ca.crt");
+        assert_eq!(vars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
+        assert!(!vars.contains_key("ANTHROPIC_API_KEY"));
+        assert!(
+            vars.values()
+                .all(|value| !value.contains("claude-secret-value")),
+            "no model credential in the sandbox environment"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claude_code_with_an_api_key_provider_gets_anthropic_api_key_and_no_oauth_token()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        sqlx::query("UPDATE model_providers SET credential_scheme = 'x-api-key'")
+            .execute(&pool)
+            .await?;
+
+        let vars = harness_env(&env).await?;
+
+        assert_eq!(vars["ANTHROPIC_API_KEY"], "df-placeholder");
+        assert_eq!(vars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
+        assert!(!vars.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_inference_environment_wins_over_the_configured_harness_environment()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool).await;
+        let mut config = ChannelConfig::default();
+        config
+            .harness
+            .claude_code
+            .env
+            .insert("ANTHROPIC_BASE_URL".into(), "https://elsewhere.test".into());
+        env.ctx.config = std::sync::Arc::new(config);
+
+        let vars = harness_env(&env).await?;
+
+        assert!(
+            vars["ANTHROPIC_BASE_URL"].ends_with("/inference"),
+            "{vars:?}"
+        );
         Ok(())
     }
 

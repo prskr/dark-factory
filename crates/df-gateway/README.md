@@ -10,7 +10,7 @@ flowchart LR
     P -- allowed --> I[(internet)]
     CP[control plane replica] -- "PolicyWatch (snapshots), mTLS :9444" --> G[gateway pod]
     G -- "Tail (flow events), mTLS :9444" --> CP
-    G -- "ReportDenial, RecordPush, mTLS :9444" --> CP
+    G -- "ReportDenial, RecordPush, Report (usage), mTLS :9444" --> CP
     DB[(PostgreSQL)] -- "NOTIFY egress_policy / run_changed" --> CP
     UI[board member] -- SSE --> CP
 ```
@@ -47,6 +47,46 @@ A `not-allowlisted` denial of a run is reported to the control plane with `Gatew
 
 The control plane handles a report in one transaction under the allowlist lock and the task row lock, the locks entry creation and marking the task done take. It ignores the report if the run ended (`succeeded`, `failed`, `cancelled`), the task is `completed`, or the run's allowlist covers host and port by now; otherwise it raises a non-blocking `network-access` request, raised by the control plane, with reason `The egress proxy denied <host>:<port>`, or keeps the identical pending one. An unknown run is ignored; a malformed run id, an empty host or port 0 get `INVALID_ARGUMENT`.
 
+## Inference endpoint
+
+`/inference/…` on the Git proxy's TLS listener (`gateway.ports.git`, certificate of the instance CA) forwards the model traffic of a run to its model provider (`src/inference/`, ADR-0050, `openspec/changes/iter3-inference-gateway`). The path after `/inference` is the path of the upstream API; the pod IP identifies the run, like for Git.
+
+| Request | Answer |
+|---|---|
+| No snapshot yet | `503` |
+| Source is no active sandbox, or its run has no `InferenceRoute` | `403` |
+| Method or path not in the list below, or a wire API the provider does not offer | `404`, no upstream contacted (logged at `DEBUG`) |
+| Provider credential missing from the snapshot (`Snapshot.provider_credentials`), or not usable as header | `502`, no upstream contacted |
+| Upstream URL unusable (`http://` without `network.allowPlainHttp`) | `502` |
+| Connecting to the upstream fails or takes more than 10 s | `502`, a usage record with unknown usage |
+| No response head within 10 min | `504`, a usage record with unknown usage |
+| The request body from the sandbox stalls for 60 s | `408`, a usage record with unknown usage |
+| Anything else | the upstream's status and headers, hop-by-hop headers removed |
+
+| Wire API | Paths |
+|---|---|
+| Anthropic Messages | `POST /v1/messages`, `POST /v1/messages/count_tokens`, `GET /v1/models` |
+| OpenAI Chat Completions | `POST /v1/chat/completions`, `GET /v1/models` |
+| OpenAI Responses | `POST /v1/responses`, `GET /v1/models` |
+
+`GET /v1/models` goes to the upstream of `InferenceRoute.wire_api`, the API chosen for the run. The query string is kept; a base path of the upstream URL stays in front of the request path.
+
+**Headers** (`headers.rs`): the client's headers pass through except hop-by-hop headers, `Host`, `Content-Length`, `Accept-Encoding` (the upstream is asked for `identity`, so the usage can be read), and `Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key` and the header of a `header` scheme. The route's rendered headers (the control plane does the templating) replace client headers of the same name, but never the credential headers. The credential is injected last by `InferenceRoute.scheme` (`x-api-key`; `Authorization: Bearer` for `bearer` and `claude-subscription`; `<name>: <prefix><value>` for `header`), marked sensitive, never logged or returned.
+
+**Streaming and timeouts**: the request body is passed to the upstream as it arrives and the response is relayed frame by frame; there is no limit on the total duration. A copy of every frame goes to the usage parser. Limits (constants in `inference/mod.rs`, `upstream.rs`): connect 10 s (`502`); response head 10 min after sending the request started, so the upload counts (`504`, record without usage); pause between request body frames 60 s (the upload ends with `408`, record without usage, logged at `info` as a stall of the sandbox); pause between response frames 5 min (the response ends with a stream error, the usage seen so far is recorded). The body wrappers (`LimitedBody`, `Guarded`) and the connector are shared with the Git proxy (`upstream.rs`).
+
+**Usage** (`usage.rs`): per wire API, from `message_start` and the last `message_delta` (Anthropic), the chunk with a non-null `usage` (Chat), `response.completed` (Responses), or the `usage` object of a JSON body. Cached tokens are cache read; OpenAI input counts without them. Lines above 1 MiB and JSON bodies above 8 MiB are not parsed (usage unknown), a compressed body is not parsed. One `UsageRecord` is made per request to `/v1/messages`, `/v1/chat/completions` and `/v1/responses` when the body ends, fails or the harness disconnects; `count_tokens` and `/v1/models` make none.
+
+**Reporting** (`report.rs`): `GatewayUsage.Report` on the internal port. Up to 10,000 records are buffered, sent every 2 s or at 100 records, retried with backoff from 1 s to 30 s; the oldest are dropped when the buffer is full. `request_id` (UUIDv7) makes retries idempotent in `model_usage`; the control plane drops records of unknown runs.
+
+| Metric | Type | Attributes |
+|---|---|---|
+| `df.gateway.inference.requests` | counter | `wire_api`, `status_class` (`2xx`, `4xx`, `5xx`, `error`) |
+| `df.gateway.inference.duration` | histogram (s) | `wire_api` |
+| `df.gateway.inference.usage_dropped` | counter | |
+
+Models, hosts and runs are never attributes. Tests run the endpoint against a fake upstream in process (`inference/testing.rs`); no containers are needed.
+
 ## Policy distribution
 
 The control plane serves `PolicyWatch` on its internal port (`server.internalGrpcPort`, 9444). Every stream sends a full snapshot on connect and a new one, debounced by 100 ms, after each `egress_policy` or `run_changed` notification, and at the latest 60 s after its previous snapshot, so a rotated forge Secret (no notification) reaches the gateways within a minute. All control plane replicas receive the notifications, so an allowlist change reaches a gateway through whichever replica it is connected to, typically within a second. Versions come from the database sequence `egress_policy_version_seq`. A gateway keeps enforcing its last snapshot while it is disconnected and reconnects every 2 s.
@@ -55,7 +95,7 @@ Stored `http-host` entries with an invalid port are skipped with a warning, so a
 
 Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `http-host` entries of the instance, of the run's project and of the run's task, and its Git route:
 
-- upstream: the project's repository URL; a repository that is not `https://` gets no route (warning), unless it is `http://` and `forge.allowPlainHttp` is on,
+- upstream: the project's repository URL; a repository that is not `https://` gets no route (warning), unless it is `http://` and `network.allowPlainHttp` is on,
 - `refs/heads/<base branch>`, `refs/heads/factory/task/<KEY>`, `refs/heads/factory/wip/<KEY>`,
 - commit identity `agent.commitIdentity`,
 - `credential_ref`: the id of the project's forge credential reference (empty without one).
@@ -101,7 +141,7 @@ Settings of the `gateway` section of the instance configuration (the chart rende
 | `gateway.gitHost` | no | `<instanceName>-gateway` | Host name of the Git proxy URL. Sandboxes resolve it to the gateway `ClusterIP` through `hostAliases` and list it in `NO_PROXY`; the gateway certificate must carry the name. |
 | `gateway.mirrorDir` | no | `/var/lib/dark-factory/git-mirrors` | Directory of the bare mirror repositories, one per upstream URL (directory name: hex SHA-256 of the URL). The chart mounts an `emptyDir` there. |
 | `gateway.maxPushSizeBytes` | no | `268435456` | Largest push body the Git proxy accepts. |
-| `forge.allowPlainHttp` | no | `false` | The Git proxy connects to `http://` upstreams without TLS (the control plane then builds routes for them too). Off, such a route gets `502` (`df: invalid forge URL`). The gateway logs a warning at startup when it is on. Sandboxes always use HTTPS to the gateway. |
+| `network.allowPlainHttp` | no | `false` | The Git proxy and the inference endpoint connect to `http://` upstreams without TLS (the control plane then builds Git routes for `http://` repositories too). Off, such a Git route gets `502` (`df: invalid forge URL`) and such a model provider upstream gets `502` (`df: invalid model provider URL`). The gateway logs a warning at startup when it is on. Sandboxes always use HTTPS to the gateway. |
 | `gateway.internalGrpcPort` | no | `9444` | Port of `Tail` (mTLS). The control plane connects to it on every gateway pod. |
 | `gateway.healthPort` | no | `8080` | `/healthz` (always 200) and `/readyz` (200 after the first snapshot, 503 before). |
 | `gateway.controlPlaneHost` | no | `<instanceName>-control-plane` | DNS name of the control plane Service (`PolicyWatch` goes to port `server.internalGrpcPort`); its certificate must carry the name. |
@@ -138,7 +178,7 @@ Smart-HTTP endpoint for the task repository (`openspec/changes/archive/2026-11-0
 | `info/refs` or `git-upload-pack` (fetch, clone) | forwarded with the credential and the client's `Accept`, `Content-Type`, `Content-Encoding`, `Git-Protocol`, `User-Agent` headers; the forge's answer is streamed back. `info/refs` is forwarded without a request body |
 | `git-upload-pack` body larger than 64 MiB | upstream request aborted, `413`, `df:fetch-too-large` |
 | `git-upload-pack` body stalls for 30 s between frames | upstream request aborted, `408` |
-| Forge URL invalid, or `http://` without `forge.allowPlainHttp` | `502` (`df: invalid forge URL`) |
+| Forge URL invalid, or `http://` without `network.allowPlainHttp` | `502` (`df: invalid forge URL`) |
 | Forge unreachable, connect or TLS fails, no answer | `503` (`df: forge unreachable`) |
 | Forge answers `401` or `403` | `502` (`df: the forge rejected the gateway's credential`), without `WWW-Authenticate`, so git does not prompt |
 | Push body (`git-receive-pack`) larger than `gateway.maxPushSizeBytes` | `413`, `df:push-too-large`, recorded as `REJECTED` |
@@ -148,7 +188,7 @@ Smart-HTTP endpoint for the task repository (`openspec/changes/archive/2026-11-0
 | Mirror fetch before the checks: forge unreachable | `503`, recorded as `UPSTREAM_FAILED` |
 | Mirror fetch before the checks: forge answers `401` or `403` | `502`, recorded as `UPSTREAM_FAILED` |
 | Mirror fetch before the checks: forge answers another error status | `502` (`df:forge-unavailable: the forge answered the fetch with HTTP <status>`), recorded as `UPSTREAM_FAILED` |
-| Mirror fetch before the checks: `http://` route without `forge.allowPlainHttp` | `502` (`df: invalid forge URL`), recorded as `UPSTREAM_FAILED` |
+| Mirror fetch before the checks: `http://` route without `network.allowPlainHttp` | `502` (`df: invalid forge URL`), recorded as `UPSTREAM_FAILED` |
 | Mirror fetch before the checks fails on the gateway (repository, negotiation) | `500` (`df:gateway-error`), recorded as `REJECTED` |
 | Pack invalid | `400`, `df: invalid pack` |
 | Spooling, quarantine or ancestry lookup fails | `500` |

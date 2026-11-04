@@ -15,13 +15,11 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header::{AUTHORIZATION, HOST, HeaderValue};
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
 use tokio::runtime::Handle;
 use tokio::time::Instant;
 
-use super::super::upstream::{
-    CONNECT_TIMEOUT, ConnectionTask, ForgeConnector, ForgeUrl, RESPONSE_HEAD_TIMEOUT,
-};
+use super::super::upstream::RESPONSE_HEAD_TIMEOUT;
+use crate::upstream::{ConnectError, ConnectionTask, UpstreamConnector, UpstreamUrl};
 
 /// Longest wait for the next frame of a response body.
 const FRAME_TIMEOUT: Duration = Duration::from_secs(60);
@@ -54,9 +52,9 @@ impl FailureCell {
 
 pub(super) struct HyperHttp {
     rt: Handle,
-    connector: ForgeConnector,
+    connector: UpstreamConnector,
     /// The forge repository; every request goes to its host.
-    url: ForgeUrl,
+    url: UpstreamUrl,
     authorization: HeaderValue,
     failure: FailureCell,
     deadline: Instant,
@@ -66,8 +64,8 @@ impl HyperHttp {
     /// Exchanges that fail once `deadline` passes.
     pub(super) fn new(
         rt: Handle,
-        connector: ForgeConnector,
-        url: ForgeUrl,
+        connector: UpstreamConnector,
+        url: UpstreamUrl,
         authorization: HeaderValue,
         deadline: Instant,
     ) -> Self {
@@ -258,8 +256,8 @@ enum State {
 
 struct Exchange {
     rt: Handle,
-    connector: ForgeConnector,
-    url: ForgeUrl,
+    connector: UpstreamConnector,
+    url: UpstreamUrl,
     failure: FailureCell,
     deadline: Instant,
     state: State,
@@ -359,8 +357,8 @@ fn received(
 }
 
 async fn send(
-    connector: &ForgeConnector,
-    url: &ForgeUrl,
+    connector: &UpstreamConnector,
+    url: &UpstreamUrl,
     request: Request<Full<Bytes>>,
 ) -> io::Result<(Response<Incoming>, ConnectionTask)> {
     let (mut parts, body) = request.into_parts();
@@ -375,18 +373,12 @@ async fn send(
         .map_or("/", |p| p.as_str())
         .parse()
         .map_err(io::Error::other)?;
-    let stream = tokio::time::timeout(CONNECT_TIMEOUT, connector.connect(url))
-        .await
-        .map_err(|_elapsed| io::Error::new(io::ErrorKind::TimedOut, "forge connect timed out"))?
-        .map_err(io::Error::other)?;
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
-        .await
-        .map_err(io::Error::other)?;
-    let task = ConnectionTask(tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            tracing::debug!(%error, "forge connection ended with an error");
+    let (mut sender, task) = connector.open(url).await.map_err(|error| match error {
+        ConnectError::TimedOut => {
+            io::Error::new(io::ErrorKind::TimedOut, "forge connect timed out")
         }
-    }));
+        ConnectError::Failed(error) => io::Error::other(error),
+    })?;
     let response = tokio::time::timeout(
         RESPONSE_HEAD_TIMEOUT,
         sender.send_request(Request::from_parts(parts, body)),

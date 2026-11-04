@@ -31,9 +31,9 @@ flowchart TB
 | Component | Runs as | Does | Holds |
 | --- | --- | --- | --- |
 | Control plane | Deployment `dark-factory serve` | Web UI, task and run scheduling, the agent channel for sandboxes, forge plugins, sandbox provisioning, policy distribution to the gateway | The database connection; resolves credentials from Secret references when it uses them |
-| Gateway | Deployment `dark-factory gateway` (2 or more replicas) | Egress proxy for sandbox HTTP(S), Git smart-HTTP proxy with push checks, live traffic events | No database access and no Kubernetes token; policies and forge credentials arrive from the control plane and stay in memory |
+| Gateway | Deployment `dark-factory gateway` (2 or more replicas) | Egress proxy for sandbox HTTP(S), Git smart-HTTP proxy with push checks, inference endpoint for model traffic, live traffic events | No database access and no Kubernetes token; policies and forge and model provider credentials arrive from the control plane and stay in memory |
 | `migrate` job | Helm pre-install and pre-upgrade hook | Schema migrations, application role and grants | The owner role's password |
-| Sandbox pod | Pod per run in the sandbox namespace, Kata Containers where configured | The project image with the runtime (`factory-agent`) and the harness (for example Claude Code over ACP) mounted as image volumes | The task volume at `/data`; the harness credential in memory |
+| Sandbox pod | Pod per run in the sandbox namespace, Kata Containers where configured | The project image with the runtime (`factory-agent`) and the harness (for example Claude Code over ACP) mounted as image volumes | The task volume at `/data`; no credential |
 | PostgreSQL | External | All state: projects, personas, tasks, runs, transcripts and their binary content, requests, egress rules, audit log | |
 
 The control plane and the gateway are the same binary in two modes. The control plane can run with

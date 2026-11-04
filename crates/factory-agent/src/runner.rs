@@ -15,11 +15,11 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use df_proto::agent::v1::{
-    AgentMessage, Assign, ControlMessage, HarnessCredentials, PhaseChanged, Prompt, PushReport,
-    PushStatus, RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallResult,
-    Workspace, agent_message, control_message,
+    AgentMessage, Assign, ControlMessage, PhaseChanged, Prompt, PushReport, PushStatus, RunOutcome,
+    RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallResult, Workspace, agent_message,
+    control_message,
 };
-use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason, UsageSource};
+use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason};
 use tokio::sync::{Mutex, Notify, broadcast, mpsc, oneshot};
 
 use crate::git::Git;
@@ -35,7 +35,6 @@ use crate::runtime_socket::RuntimeSocketServer;
 use crate::transcript::{
     TranscriptTranslator, acp_to_proto_stop_reason, notice_event, truncate_utf8,
 };
-use crate::usage::SessionLogTracker;
 use crate::workspace::{FinalizeParams, PrepareResult, finalize_workspace, push_after_turn};
 
 /// Maximum bytes of a variable-size field in the log: a tool call's raw input or a chunk's text.
@@ -111,11 +110,9 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
                     tracing::info!(turn_id, entries = p.entries.len(), "plan updated");
                 }
                 Some(Kind::TurnEnded(t)) => {
-                    let output_tokens: u64 = t.usage.iter().map(|u| u.output_tokens).sum();
                     tracing::info!(
                         turn_id,
                         stop_reason = ?t.stop_reason(),
-                        output_tokens,
                         detail = (!t.detail.is_empty()).then_some(t.detail.as_str()),
                         "turn ended"
                     );
@@ -143,7 +140,6 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
 /// Parameters for running an agent run.
 pub struct RunDriverParams {
     pub assign: Assign,
-    pub credentials: Option<HarnessCredentials>,
     pub initial_prompts: Vec<Prompt>,
     /// True if a `Cancel` arrived before `Assign`; the run ends as cancelled without a turn.
     pub cancel_requested: bool,
@@ -192,7 +188,6 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let ctx = Arc::new(RunContext {
         assign: params.assign,
         workspace,
-        credentials: params.credentials,
         repo_dir: params.repo_dir,
         home_dir: params.home_dir,
         runtime_dir: params.runtime_dir,
@@ -213,7 +208,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         }
     };
     let (cancel_tx, cancel_rx) = broadcast::channel::<String>(16);
-    let _inbound_guard = spawn_inbound_loop(inbound_rx, &shared, cancel_tx, &ctx.outbound_tx);
+    let _inbound_guard = spawn_inbound_loop(inbound_rx, &shared, cancel_tx);
 
     // A cancel that arrived before Assign: don't clone, push or start the harness
     if shared.cancelled.load(Ordering::SeqCst) {
@@ -476,7 +471,6 @@ type AcpAgent = agent_client_protocol::role::acp::Agent;
 struct RunContext {
     assign: Assign,
     workspace: Workspace,
-    credentials: Option<HarnessCredentials>,
     repo_dir: PathBuf,
     home_dir: PathBuf,
     runtime_dir: PathBuf,
@@ -566,13 +560,11 @@ fn spawn_inbound_loop(
     mut inbound_rx: mpsc::Receiver<ControlMessage>,
     shared: &RunShared,
     cancel_tx: broadcast::Sender<String>,
-    outbound_tx: &mpsc::Sender<AgentMessage>,
 ) -> AbortOnDrop<()> {
     let shared = shared.clone();
-    let outbound_tx = outbound_tx.clone();
     AbortOnDrop::new(tokio::spawn(async move {
         while let Some(msg) = inbound_rx.recv().await {
-            handle_control_message(msg, &shared, &cancel_tx, &outbound_tx).await;
+            handle_control_message(msg, &shared, &cancel_tx).await;
         }
     }))
 }
@@ -582,7 +574,6 @@ async fn handle_control_message(
     msg: ControlMessage,
     shared: &RunShared,
     cancel_tx: &broadcast::Sender<String>,
-    outbound_tx: &mpsc::Sender<AgentMessage>,
 ) {
     match msg.body {
         Some(control_message::Body::Prompt(p)) => {
@@ -608,18 +599,6 @@ async fn handle_control_message(
             if let Some(tx) = shared.pending_tool_calls.lock().await.remove(&res.call_id) {
                 tx.send(res).ok(); // receiver may be gone
             }
-        }
-        // HarnessCredentials must precede Assign; the harness environment is already built
-        Some(control_message::Body::HarnessCredentials(_)) => {
-            emit_notice(
-                outbound_tx,
-                Notice {
-                    level: NoticeLevel::Warning as i32,
-                    code: "runtime.harness_credentials_late".to_string(),
-                    message: "HarnessCredentials arrived after Assign and were ignored".to_string(),
-                },
-            )
-            .await;
         }
         _ => {}
     }
@@ -680,10 +659,10 @@ fn harness_command(assign: &Assign) -> (String, Vec<String>) {
     }
 }
 
-/// Builds the harness environment (credentials injected in memory only) and spawns the harness.
+/// Builds the harness environment and spawns the harness.
 /// The error is the failure detail of the run.
 async fn spawn_harness(ctx: &RunContext) -> Result<HarnessProcess, String> {
-    let mut env = prepare_harness_environment(&ctx.assign, ctx.credentials.as_ref(), &ctx.home_dir)
+    let mut env = prepare_harness_environment(&ctx.assign, &ctx.home_dir)
         .map_err(|e| format!("Harness environment preparation failed: {e}"))?;
     env.insert(
         "DF_RUNTIME_SOCK".to_string(),
@@ -824,13 +803,13 @@ async fn drive_session(
 }
 
 /// Translates a session update of the harness into a transcript event and sends it.
-async fn forward_session_update(
+pub(crate) async fn forward_session_update(
     outbound_tx: &mpsc::Sender<AgentMessage>,
     translator: &Mutex<TranscriptTranslator>,
     update: SessionUpdate,
 ) {
-    // `UsageUpdate` is context-window occupancy, not per-turn tokens, so it is ignored;
-    // per-turn usage comes from the session log.
+    // `UsageUpdate` is context-window occupancy, not per-turn tokens, so it is ignored; usage
+    // comes from the gateway's inference endpoint.
     let mut translator = translator.lock().await;
     let event = match update {
         SessionUpdate::AgentMessageChunk(chunk) => translator.translate_agent_message_chunk(&chunk),
@@ -923,7 +902,6 @@ struct Turns {
     session_id: String,
     is_resumed: bool,
     budget: BudgetTracker,
-    session_log: SessionLogTracker,
     turn_index: u32,
 }
 
@@ -937,7 +915,6 @@ impl Turns {
         setup: SessionSetupResult,
     ) -> Self {
         let budget = BudgetTracker::new(ctx.assign.budgets.as_ref());
-        let session_log = SessionLogTracker::new(&ctx.home_dir, &ctx.repo_dir, &setup.session_id);
         Self {
             ctx,
             shared,
@@ -947,7 +924,6 @@ impl Turns {
             session_id: setup.session_id,
             is_resumed: setup.is_resumed,
             budget,
-            session_log,
             turn_index: 0,
         }
     }
@@ -965,7 +941,6 @@ impl Turns {
                 end_run_after_turn: self.shared.end_run_requested.load(Ordering::SeqCst),
                 rate_limited: turn.rate_limited,
                 wall_clock_exceeded: turn.wall_clock_exceeded,
-                output_tokens_exceeded: self.budget.is_output_tokens_exceeded(),
                 stop_reason: turn.stop_reason,
                 harness_crashed: turn.harness_crashed,
                 has_queued_prompts: self.shared.prompt_queue.lock().await.has_queued(),
@@ -1057,7 +1032,6 @@ impl Turns {
         } else {
             None
         };
-        self.session_log.mark_turn_start();
         build_acp_prompt_blocks(&prompts, prepend_summary)
     }
 
@@ -1125,7 +1099,7 @@ impl Turns {
         (res, wall_clock_exceeded)
     }
 
-    /// Records usage and the `TurnEnded` event of the turn.
+    /// Records the `TurnEnded` event of the turn.
     async fn record_turn_end(
         &mut self,
         prompt_res: Result<PromptResponse, agent_client_protocol::Error>,
@@ -1136,7 +1110,7 @@ impl Turns {
             stop_reason: None,
             wall_clock_exceeded: false,
         };
-        let (stop_reason, usage, usage_source, detail) = match prompt_res {
+        let (stop_reason, detail) = match prompt_res {
             Ok(resp) => {
                 let proto_stop_reason = acp_to_proto_stop_reason(resp.stop_reason);
                 turn.stop_reason = Some(proto_stop_reason);
@@ -1144,10 +1118,8 @@ impl Turns {
                 // before it routes the next message, so every chunk of this turn was already
                 // queued to `outbound_tx` before `prompt_res` resolved. TurnEnded cannot overtake
                 // them.
-                let (usage, usage_source) = self.session_log.parse_turn_usage();
-                self.budget
-                    .record_turn(usage.iter().map(|u| u.output_tokens).sum());
-                (proto_stop_reason, usage, usage_source, String::new())
+                self.budget.record_turn();
+                (proto_stop_reason, String::new())
             }
             Err(e) => {
                 let (stop_reason, detail) = if let Some(rl) = parse_rate_limit(&e) {
@@ -1158,14 +1130,14 @@ impl Turns {
                     turn.harness_crashed = true;
                     (StopReason::Error, e.message)
                 };
-                (stop_reason, Vec::new(), UsageSource::Unspecified, detail)
+                (stop_reason, detail)
             }
         };
         let event = self
             .translator
             .lock()
             .await
-            .translate_turn_ended_with_stop_reason(stop_reason, usage, usage_source, &detail);
+            .translate_turn_ended_with_stop_reason(stop_reason, &detail);
         send_body(
             &self.ctx.outbound_tx,
             agent_message::Body::TranscriptEvent(event),

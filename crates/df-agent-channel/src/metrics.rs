@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use df_proto::agent::v1::{PushStatus, PushTarget, RunOutcome, RuntimeOperation};
-use df_proto::transcript::v1::{StopReason, ToolCallStatus, ToolKind, ToolOrigin, Usage};
+use df_proto::transcript::v1::{StopReason, ToolCallStatus, ToolKind, ToolOrigin};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
@@ -43,7 +43,6 @@ pub(crate) enum Observation {
     },
     Turn {
         stop_reason: StopReason,
-        usage: Vec<Usage>,
     },
     ToolCall {
         kind: ToolKind,
@@ -145,13 +144,10 @@ impl Metrics {
                     self.runs_ended.add(1, &attrs);
                     self.run_duration.record(duration.as_secs_f64(), &attrs);
                 }
-                Observation::Turn { stop_reason, usage } => {
+                Observation::Turn { stop_reason } => {
                     let reason = label(stop_reason.as_str_name(), "STOP_REASON_");
                     self.turns
                         .add(1, &[project.clone(), KeyValue::new("stop_reason", reason)]);
-                    for u in usage {
-                        self.record_usage(&project, u);
-                    }
                 }
                 Observation::ToolCall {
                     kind,
@@ -183,22 +179,20 @@ impl Metrics {
         }
     }
 
-    fn record_usage(&self, project: &KeyValue, usage: &Usage) {
-        let model = KeyValue::new("model", self.models.map(&usage.model_id));
-        for (token_type, count) in [
-            ("input", usage.input_tokens),
-            ("output", usage.output_tokens),
-            ("cache_read", usage.cache_read_tokens),
-            ("cache_write", usage.cache_write_tokens),
-        ] {
+    /// Records the token counts of one stored gateway usage record (`df.agent.tokens`). The
+    /// model is a bounded label; `counts` pair a token type (`input`, `output`, `cache_read`,
+    /// `cache_write`) with its count.
+    pub fn record_tokens(
+        &self,
+        model: &str,
+        counts: impl IntoIterator<Item = (&'static str, u64)>,
+    ) {
+        let model = KeyValue::new("model", self.models.map(model));
+        for (token_type, count) in counts {
             if count > 0 {
                 self.tokens.add(
                     count,
-                    &[
-                        project.clone(),
-                        model.clone(),
-                        KeyValue::new("token_type", token_type),
-                    ],
+                    &[model.clone(), KeyValue::new("token_type", token_type)],
                 );
             }
         }
@@ -434,15 +428,6 @@ mod tests {
     use super::probe::Probe;
     use super::*;
 
-    fn usage(model: &str, input: u64, output: u64) -> Usage {
-        Usage {
-            model_id: model.into(),
-            input_tokens: input,
-            output_tokens: output,
-            ..Usage::default()
-        }
-    }
-
     #[test]
     fn bounded_label_truncates_and_caps_distinct_values() {
         let label = BoundedLabel::new(2, 4);
@@ -462,14 +447,11 @@ mod tests {
     }
 
     #[test]
-    fn token_usage_is_recorded_per_type() {
+    fn stored_usage_records_count_tokens_per_type_without_a_project() {
         let probe = Probe::new();
-        Metrics::new(&probe.meter()).record(
-            "DF",
-            &[Observation::Turn {
-                stop_reason: StopReason::EndTurn,
-                usage: vec![usage("claude-sonnet-5-5", 100, 20)],
-            }],
+        Metrics::new(&probe.meter()).record_tokens(
+            "claude-sonnet-5-5",
+            [("input", 100), ("output", 20), ("cache_read", 0)],
         );
         let model = ("model", "claude-sonnet-5-5");
         assert_eq!(
@@ -484,28 +466,16 @@ mod tests {
             probe.total("df.agent.tokens", &[("token_type", "cache_read")]),
             0.0
         );
-        assert_eq!(
-            probe.total(
-                "df.agent.turns",
-                &[("stop_reason", "end_turn"), ("project", "DF")]
-            ),
-            1.0
-        );
+        assert!(probe.values("df.agent.tokens", "project").is_empty());
     }
 
     #[test]
     fn model_flood_stays_bounded() {
         let probe = Probe::new();
-        let usages: Vec<_> = (0..100)
-            .map(|i| usage(&format!("model-{i}"), 1, 0))
-            .collect();
-        Metrics::new(&probe.meter()).record(
-            "DF",
-            &[Observation::Turn {
-                stop_reason: StopReason::EndTurn,
-                usage: usages,
-            }],
-        );
+        let metrics = Metrics::new(&probe.meter());
+        for i in 0..100 {
+            metrics.record_tokens(&format!("model-{i}"), [("input", 1)]);
+        }
         assert_eq!(
             probe.values("df.agent.tokens", "model").len(),
             MODEL_MAX_VALUES + 1

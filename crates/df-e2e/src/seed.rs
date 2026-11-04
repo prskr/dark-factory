@@ -6,11 +6,13 @@
 
 use anyhow::{Context, Result};
 use df_core::Principal;
+use df_core::model_provider::{CredentialScheme, ProviderApi, WireApi};
 use df_db::PgPool;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, ProjectInput, get_project_by_key,
     list_credential_refs, list_personas, save_credential_ref, save_persona, save_project,
 };
+use df_db::model_providers::{ModelProviderInput, list_model_providers, save_model_provider};
 use uuid::Uuid;
 
 use crate::data;
@@ -24,7 +26,8 @@ pub async fn run(pool: &PgPool) -> Result<()> {
     };
 
     let credential = ensure_credential(pool, actor).await?;
-    ensure_persona(pool, actor).await?;
+    let provider = ensure_model_provider(pool, actor).await?;
+    ensure_persona(pool, actor, provider).await?;
     ensure_project(
         pool,
         actor,
@@ -96,13 +99,67 @@ async fn ensure_credential(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
     Ok(saved.id.as_uuid())
 }
 
-async fn ensure_persona(pool: &PgPool, actor: Actor<'_>) -> Result<()> {
+/// The fake Anthropic upstream with its credential reference.
+async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
+    let wanted_credential = CredentialRefInput {
+        name: data::MODEL_CREDENTIAL_NAME.into(),
+        secret_name: data::MODEL_CREDENTIAL_SECRET.into(),
+        secret_key: data::MODEL_CREDENTIAL_KEY.into(),
+    };
+    let existing = list_credential_refs(pool)
+        .await?
+        .into_iter()
+        .find(|c| c.name == wanted_credential.name);
+    let credential = match existing {
+        Some(c)
+            if c.secret_name == wanted_credential.secret_name
+                && c.secret_key == wanted_credential.secret_key =>
+        {
+            c
+        }
+        other => save_credential_ref(
+            pool,
+            actor,
+            other.map(|c| c.id.as_uuid()),
+            &wanted_credential,
+        )
+        .await
+        .context("save model credential reference")?,
+    };
+    let wanted = ModelProviderInput {
+        name: data::MODEL_PROVIDER_NAME.into(),
+        credential_ref_id: credential.id.as_uuid(),
+        scheme: CredentialScheme::XApiKey,
+        credential_header: None,
+        credential_prefix: None,
+        headers: Vec::new(),
+        apis: vec![ProviderApi {
+            wire_api: WireApi::AnthropicMessages,
+            upstream_url: data::fake_upstream_url(),
+        }],
+    };
+    let existing = list_model_providers(pool)
+        .await?
+        .into_iter()
+        .find(|p| p.input.name == wanted.name);
+    if let Some(p) = &existing
+        && p.input == wanted
+    {
+        return Ok(p.id);
+    }
+    let saved = save_model_provider(pool, actor, existing.map(|p| p.id), &wanted)
+        .await
+        .context("save model provider")?;
+    Ok(saved.id)
+}
+
+async fn ensure_persona(pool: &PgPool, actor: Actor<'_>, provider: Uuid) -> Result<()> {
     let wanted = PersonaInput {
         name: data::PERSONA_NAME.into(),
         system_prompt: "You are the e2e persona.".into(),
         harness: df_core::config::CLAUDE_CODE_HARNESS.into(),
         model: None,
-        harness_credential_id: None,
+        model_provider_id: provider,
     };
     let existing = list_personas(pool)
         .await?
@@ -112,7 +169,7 @@ async fn ensure_persona(pool: &PgPool, actor: Actor<'_>) -> Result<()> {
         && p.system_prompt == wanted.system_prompt
         && p.harness == wanted.harness
         && p.model == wanted.model
-        && p.harness_credential_id == wanted.harness_credential_id
+        && p.model_provider_id == wanted.model_provider_id
     {
         return Ok(());
     }

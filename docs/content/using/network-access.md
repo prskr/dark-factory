@@ -62,7 +62,9 @@ Deleting the rule makes the host raise requests again. Creating and deleting are
 
 ## Network traffic page
 
-The page shows live connections from all gateway pods: a graph of sandboxes and destinations on the
+The page shows live connections through the egress proxy from all gateway pods (model requests and
+Git traffic use their own endpoints and are not listed; see
+[where the traffic is visible](../security/inference-endpoint.md#where-the-traffic-is-visible)): a graph of sandboxes and destinations on the
 left (blocked edges dashed red), the events on the right, newest first. Filter by domain or IP, by
 verdict (*All*, *Blocked*, *Allowed*) and under *Advanced* by persona, sandbox, project or task.
 **Pause** stops the stream. A row's details show what the gateway records: method, status,

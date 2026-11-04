@@ -51,6 +51,32 @@ pub async fn task_status(pool: &PgPool, key: &str) -> Result<String> {
         .with_context(|| format!("status of task {key}"))
 }
 
+/// Usage records of the runs of task `key`: `(known, unknown)`.
+pub async fn model_usage(pool: &PgPool, key: &str) -> Result<(i64, i64)> {
+    sqlx::query_as::<_, (i64, i64)>(
+        "SELECT count(*) FILTER (WHERE u.usage_known), count(*) FILTER (WHERE NOT u.usage_known) \
+         FROM model_usage u JOIN runs r ON r.id = u.run_id JOIN tasks t ON t.id = r.task_id \
+         WHERE t.key = $1",
+    )
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("model usage of task {key}"))
+}
+
+/// Number of transcript events of task `key` that contain `text`.
+pub async fn transcript_events_containing(pool: &PgPool, key: &str, text: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM transcript_events e JOIN tasks t ON t.id = e.task_id \
+         WHERE t.key = $1 AND strpos(e.payload::text, $2) > 0",
+    )
+    .bind(key)
+    .bind(text)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("transcript of task {key}"))
+}
+
 /// Number of messages of task `key` whose content contains `text`.
 pub async fn messages_containing(pool: &PgPool, key: &str, text: &str) -> Result<i64> {
     sqlx::query_scalar::<_, i64>(

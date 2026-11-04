@@ -42,6 +42,36 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Model providers (inference endpoint)
+
+From this release on, harnesses reach their model through the gateway's
+[inference endpoint](../security/inference-endpoint.md), and every persona uses a
+[model provider](../using/model-providers.md) instead of a harness credential. No model credential
+reaches a sandbox any more.
+
+1. The `migrate` job converts the data: for every credential that personas used as harness
+   credential, it creates one model provider "Claude subscription (<credential name>)" (Anthropic
+   Messages, `https://api.anthropic.com`, scheme `claude-subscription`) and points those personas
+   at it.
+2. A persona without a harness credential stops the migration with a message naming the persona.
+   The `migrate` job fails and the release stays on the old version. Give the persona a harness
+   credential (or delete it), then upgrade again.
+3. After the upgrade, check **Model providers** and the persona list; add providers for other
+   services as needed. A persona created later needs a model provider.
+4. Remove `api.anthropic.com` from the instance egress allowlist: model traffic no longer uses the
+   egress proxy. Leaving the entry is harmless.
+5. Run the gateway and the control plane from the same chart version: the gateway reports usage
+   over a new internal call.
+
+6. The Helm value and instance setting `forge.allowPlainHttp` moved to `network.allowPlainHttp`,
+   because it now also governs the model provider upstreams. There is no alias: rename it in your
+   `values.yaml` (or in the `network` section of a hand-written instance config). The old key is ignored silently, and plain HTTP stays off until you do.
+
+To roll back, restore the database backup taken before the upgrade, then roll back the release
+(see above): the migration cannot be reverted.
+
+### Other releases
+
 Some releases need a step beyond `helm upgrade`, for example removing the forge host from the egress
 rules after the switch to the Git proxy. They are listed in the release notes and in the
 [chart README](https://github.com/prskr/dark-factory/blob/main/deploy/helm/dark-factory/README.md).

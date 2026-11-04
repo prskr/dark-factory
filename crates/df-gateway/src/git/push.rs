@@ -24,10 +24,11 @@ use super::protocol::{
 use super::quarantine::{MirrorAncestry, QuarantineError, quarantine};
 use super::refs::{Ancestry, ObjectId, Reason, RefCommand, RefScope, RefVerdict, check_refs};
 use super::secret_rules::BlobSource;
-use super::server::{Body, BoxError, ForgeTarget, GitRequest, Upstream, text};
+use super::server::{ForgeTarget, GitRequest, Upstream};
 use super::spool::{BODY_IDLE_TIMEOUT, SpoolError, SpoolFailure, Spooled, spool};
 use super::upstream::{INVALID_URL, REJECTED, UNREACHABLE};
 use super::view::{PushView, TaskRefs, ViewError};
+use crate::upstream::{Body, BoxError, text};
 
 /// Content type of a `report-status` answer.
 const RESULT_CONTENT_TYPE: &str = "application/x-git-receive-pack-result";
@@ -902,7 +903,7 @@ mod tests {
         std::fs::write(work.path().join("keep"), b"mirror").unwrap();
         let mirrors = Mirrors::new(
             work.path(),
-            super::super::upstream::ForgeConnector::new().unwrap(),
+            crate::upstream::UpstreamConnector::new().unwrap(),
         );
 
         Push::new(Arc::new(mirrors), work.path(), 1024);

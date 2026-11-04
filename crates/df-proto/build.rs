@@ -29,7 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_well_known_types(true)
         .extern_path(".google.protobuf", "::pbjson_types")
         // Implemented in `lib.rs` without the password.
-        .skip_debug([".darkfactory.gateway.v1.ForgeCredential"])
+        .skip_debug([
+            ".darkfactory.gateway.v1.ForgeCredential",
+            ".darkfactory.gateway.v1.ProviderCredential",
+        ])
         .file_descriptor_set_path(&descriptor_path)
         .compile_with_config(config, &protos, &[proto_root])?;
 
@@ -39,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Forge credentials, and the messages carrying them, never get a JSON form.
         .exclude([
             ".darkfactory.gateway.v1.ForgeCredential",
+            ".darkfactory.gateway.v1.ProviderCredential",
             ".darkfactory.gateway.v1.Snapshot",
             ".darkfactory.gateway.v1.PolicyUpdate",
         ])

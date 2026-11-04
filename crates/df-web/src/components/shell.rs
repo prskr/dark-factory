@@ -9,7 +9,7 @@ use crate::requests::count_badge;
 /// Where the docs of every version live (`docs/` of the repository, published per release).
 const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
 
-const SECTIONS: [(Nav, &str, &str, Icon); 7] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 8] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Requests, "/requests", "Requests", Icon::Inbox),
     (Nav::Projects, "/projects", "Projects", Icon::Projects),
@@ -19,6 +19,12 @@ const SECTIONS: [(Nav, &str, &str, Icon); 7] = [
         "/credentials",
         "Credentials",
         Icon::Credentials,
+    ),
+    (
+        Nav::ModelProviders,
+        "/model-providers",
+        "Model providers",
+        Icon::Server,
     ),
     (
         Nav::Allowlist,

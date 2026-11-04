@@ -62,7 +62,7 @@ pub struct WebState {
     pub services: Option<Arc<dyn egress::ServiceLookup>>,
     /// Show transcript content blocks marked `hidden` (`web.showHiddenBlocks`).
     pub show_hidden_blocks: bool,
-    /// Accept `http://` repository URLs in the project form (`forge.allowPlainHttp`).
+    /// Accept `http://` repository URLs in the project form (`network.allowPlainHttp`).
     pub allow_plain_http: bool,
     /// `runs.maxAutoResumes`, the denominator of the resume count on the task detail.
     pub max_auto_resumes: u32,

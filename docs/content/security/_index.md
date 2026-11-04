@@ -22,8 +22,8 @@ boundary of the sandbox instead of inside it.
   what crosses the boundary: network traffic, Git pushes, messages to the control plane.
 - **No long-lived credentials in the sandbox.** The forge credential never enters it: the
   [Git proxy](git-proxy.md) adds it on the way out, and the control plane calls the forge API itself.
-  The only secret a sandbox holds is the harness credential (for example the Claude subscription
-  token), delivered over the agent channel into memory, never through the pod spec or a file.
+  The model credential stays in the gateway too: the harness gets a placeholder key and the
+  [inference endpoint](inference-endpoint.md) adds the real one. A sandbox holds no secret.
 - **Git is the only durable store for code.** The task volume is a cache; the runtime regenerates
   the files it owns (`.git/config`, hooks path) before using the repository.
 - **Default deny on the network.** A sandbox reaches the control plane, the gateway and nothing else

@@ -40,8 +40,9 @@ async fn project(pool: &PgPool, key: &str) -> ProjectId {
 
 async fn task(pool: &PgPool, project_id: ProjectId) -> TaskRow {
     let persona_id = PersonaId::new();
+    crate::model_providers::tests::seed_provider(pool).await;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, harness) VALUES ($1, $2, 's', 'claude-code')",
+        "INSERT INTO personas (id, name, system_prompt, harness, model_provider_id) VALUES ($1, $2, 's', 'claude-code', (SELECT id FROM model_providers LIMIT 1))",
     )
     .bind(persona_id.as_uuid())
     .bind(persona_id.to_string())

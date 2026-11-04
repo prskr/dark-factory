@@ -62,6 +62,23 @@ pub fn field(
     hint: Option<&str>,
     control: Markup,
 ) -> Markup {
+    field_with_markup_hint(
+        label,
+        name,
+        errors,
+        hint.map(|hint| html! { (hint) }),
+        control,
+    )
+}
+
+/// [`field`] with a hint that is markup, for example one whose text Alpine switches.
+pub fn field_with_markup_hint(
+    label: &str,
+    name: &str,
+    errors: &FormErrors,
+    hint: Option<Markup>,
+    control: Markup,
+) -> Markup {
     html! {
         div class="space-y-1" {
             label for=(name) class="block text-sm font-medium text-muted" { (label) }
@@ -173,14 +190,27 @@ pub fn select_field(
     empty_label: Option<&str>,
     errors: &FormErrors,
 ) -> Markup {
+    select_field_with_hint(label, name, options, selected, empty_label, None, errors)
+}
+
+/// A [`select_field`] with a hint under it.
+pub fn select_field_with_hint(
+    label: &str,
+    name: &str,
+    options: &[(String, String)],
+    selected: &str,
+    empty_label: Option<&str>,
+    hint: Option<&str>,
+    errors: &FormErrors,
+) -> Markup {
     field(
         label,
         name,
         errors,
-        None,
+        hint,
         html! {
             select id=(name) name=(name) class=(INPUT_CLASS)
-                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, false, errors)] {
+                aria-invalid=[invalid(name, errors)] aria-describedby=[described_by(name, hint.is_some(), errors)] {
                 @if let Some(empty) = empty_label { option value="" selected[selected.is_empty()] { (empty) } }
                 @for (value, text) in options {
                     option value=(value) selected[value == selected] { (text) }
@@ -241,12 +271,12 @@ pub fn search_menu(button_label: &str, items: &[MenuItem]) -> Markup {
 }
 
 /// `aria-invalid` of a control: set while the field has an error.
-fn invalid(name: &str, errors: &FormErrors) -> Option<&'static str> {
+pub(crate) fn invalid(name: &str, errors: &FormErrors) -> Option<&'static str> {
     errors.get(name).map(|_| "true")
 }
 
 /// `aria-describedby` of a control: the ids of its hint and error that [`field`] renders.
-fn described_by(name: &str, has_hint: bool, errors: &FormErrors) -> Option<String> {
+pub(crate) fn described_by(name: &str, has_hint: bool, errors: &FormErrors) -> Option<String> {
     let ids: Vec<String> = [
         has_hint.then(|| format!("{name}-hint")),
         errors.get(name).map(|_| format!("{name}-error")),

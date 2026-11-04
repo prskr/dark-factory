@@ -835,6 +835,13 @@ fn turn_ended() -> agent_message::Body {
     turn_event(event::Kind::TurnEnded(wire::TurnEnded::default()))
 }
 
+fn turn_ended_with(stop_reason: wire::StopReason) -> agent_message::Body {
+    turn_event(event::Kind::TurnEnded(wire::TurnEnded {
+        stop_reason: stop_reason as i32,
+        ..wire::TurnEnded::default()
+    }))
+}
+
 /// Queues a board member's message and returns its prompt id.
 async fn queue_human(env: &Env, text: &str) -> String {
     let content = vec![wire::ContentBlock {
@@ -1033,19 +1040,6 @@ fn timing(operation: RuntimeOperation, duration_ms: u64) -> agent_message::Body 
     })
 }
 
-fn turn_ended_with_usage() -> agent_message::Body {
-    turn_event(event::Kind::TurnEnded(wire::TurnEnded {
-        stop_reason: wire::StopReason::EndTurn as i32,
-        usage: vec![wire::Usage {
-            model_id: "claude-sonnet-5-5".into(),
-            input_tokens: 100,
-            output_tokens: 20,
-            ..wire::Usage::default()
-        }],
-        ..wire::TurnEnded::default()
-    }))
-}
-
 fn tool_call(status: ToolCallStatus) -> agent_message::Body {
     turn_event(event::Kind::ToolCall(wire::ToolCall {
         tool_call_id: "call-1".into(),
@@ -1138,7 +1132,7 @@ async fn every_persisted_message_is_recorded_once() {
     let batch = vec![
         msg(1, tool_call(ToolCallStatus::InProgress)),
         msg(2, tool_call_update(ToolCallStatus::Completed)),
-        msg(3, turn_ended_with_usage()),
+        msg(3, turn_ended_with(wire::StopReason::EndTurn)),
         msg(4, push_report()),
         msg(5, timing(RuntimeOperation::Push, 40)),
         msg(6, report(WireOutcome::Completed)),
@@ -1162,12 +1156,9 @@ async fn every_persisted_message_is_recorded_once() {
         1.0
     );
     assert_eq!(
-        probe.total("df.agent.tokens", &[("token_type", "input"), project]),
-        100.0
-    );
-    assert_eq!(
-        probe.total("df.agent.tokens", &[("token_type", "output"), project]),
-        20.0
+        probe.total("df.agent.tokens", &[]),
+        0.0,
+        "tokens come from the gateway's usage records"
     );
     assert_eq!(
         probe.total(

@@ -28,12 +28,37 @@ async fn seed_project_and_persona(
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        r"
-            INSERT INTO personas (id, name, system_prompt, harness)
-            VALUES ($1, $2, $3, 'claude-code')
-            ",
-    )
+    // Tests against an older schema (`message_undelivered_before_the_migration_is_not_editable`)
+    // have no model providers yet; their personas need a harness credential to be migrated.
+    let has_providers: bool =
+        sqlx::query_scalar("SELECT to_regclass('model_providers') IS NOT NULL")
+            .fetch_one(pool)
+            .await?;
+    if has_providers {
+        crate::model_providers::tests::seed_provider(pool).await;
+    }
+    let (provider_column, provider_value) = if has_providers {
+        (
+            ", model_provider_id",
+            ", (SELECT id FROM model_providers LIMIT 1)",
+        )
+    } else {
+        sqlx::query(
+            "INSERT INTO credential_refs (id, name, secret_name, secret_key) \
+             VALUES ($1, 'old', 'claude', 'token') ON CONFLICT (name) DO NOTHING",
+        )
+        .bind(Uuid::now_v7())
+        .execute(pool)
+        .await?;
+        (
+            ", harness_credential_id",
+            ", (SELECT id FROM credential_refs WHERE name = 'old')",
+        )
+    };
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO personas (id, name, system_prompt, harness{provider_column}) \
+         VALUES ($1, $2, $3, 'claude-code'{provider_value})"
+    )))
     .bind(persona_id.as_uuid())
     .bind(persona_name)
     .bind("You are Linus, a careful software engineer.")

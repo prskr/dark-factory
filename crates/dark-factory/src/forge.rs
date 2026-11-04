@@ -48,7 +48,7 @@ struct RouteStatus {
 /// routed to it. Fails on a configuration error, before loading, or if no forge plugin loaded,
 /// listing every load error. Needs no database, so `serve` calls it before connecting.
 ///
-/// With `allow_plain_http` (`forge.allowPlainHttp`) the routing table accepts `http://` repository
+/// With `allow_plain_http` (`network.allowPlainHttp`) the routing table accepts `http://` repository
 /// URLs and `apiUrl`s, and [`ForgeRouter`] lets every plugin client reach `http://` base URLs.
 pub(crate) fn load_forge_plugins(
     engine: &PluginEngine,
@@ -73,7 +73,7 @@ pub(crate) fn load_forge_plugins(
     .context("invalid `plugins` configuration")?;
     if allow_plain_http {
         tracing::warn!(
-            setting = "forge.allowPlainHttp",
+            setting = "network.allowPlainHttp",
             "plain HTTP allowed for forges: traffic and tokens may travel unencrypted; use it for throwaway clusters only"
         );
     }
@@ -113,7 +113,6 @@ pub(crate) fn load_forge_plugins(
     Ok(plugins)
 }
 
-/// The startup warning due when `forge.allowPlainHttp` is on; none when it is off.
 impl ForgePlugins {
     /// The routing table with the loaded plugins, for the web UI (design D7).
     pub(crate) fn forge_routes(&self) -> ForgeRoutes {

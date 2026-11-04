@@ -1,4 +1,5 @@
-//! Read models of the web UI: task list, task detail, runs with token usage and the transcript.
+//! Read models of the web UI: task list, task detail, runs with token usage (from the gateway's
+//! usage records) and the transcript.
 
 use chrono::{DateTime, Utc};
 use df_core::{RunState, StatusSet, TaskId, TaskStatus, TitleSource};
@@ -82,7 +83,7 @@ pub struct TaskDetail {
     pub auto_resumes: i32,
 }
 
-/// Token counts of one model within a run, summed over all turns.
+/// Token counts of one model within a run, summed over its requests with known usage.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ModelUsage {
     pub model_id: String,
@@ -92,7 +93,7 @@ pub struct ModelUsage {
     pub cache_write_tokens: i64,
 }
 
-/// A run with its raw token counts per model.
+/// A run with its raw token counts per model and the number of requests without usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunView {
     pub id: Uuid,
@@ -104,6 +105,8 @@ pub struct RunView {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub usage: Vec<ModelUsage>,
+    /// Model requests whose response carried no usage (unknown, not zero).
+    pub unknown_usage_requests: i64,
 }
 
 #[derive(FromRow)]
@@ -213,7 +216,8 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         .await?)
 }
 
-/// Runs of a task, newest first, with token usage summed per model from the `TurnEnded` events.
+/// Runs of a task, newest first, with token usage summed per model from the gateway's records
+/// and the count of requests with unknown usage.
 pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, DbError> {
     let runs: Vec<RunRow> = sqlx::query_as(
         "SELECT id, number, state, outcome, detail, retry_after, started_at, ended_at
@@ -222,18 +226,23 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
     .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
-    // `payload` is the canonical protobuf JSON: 64-bit counters are strings and zeros are omitted.
     let usage: Vec<RunUsageRow> = sqlx::query_as(
-        "SELECT e.run_id, u->>'modelId' AS model_id,
-                COALESCE(SUM((u->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
-                COALESCE(SUM((u->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
-                COALESCE(SUM((u->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-                COALESCE(SUM((u->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens
-         FROM transcript_events e,
-              jsonb_array_elements(COALESCE(e.payload->'turnEnded'->'usage', '[]'::jsonb)) u
-         WHERE e.task_id = $1 AND e.kind = 'turn_ended'
-         GROUP BY e.run_id, u->>'modelId'
-         ORDER BY e.run_id, model_id",
+        "SELECT u.run_id, COALESCE(u.model, 'unknown') AS model_id,
+                COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+                COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+                COALESCE(SUM(u.cache_read_tokens), 0)::bigint AS cache_read_tokens,
+                COALESCE(SUM(u.cache_write_tokens), 0)::bigint AS cache_write_tokens
+         FROM model_usage u JOIN runs r ON r.id = u.run_id
+         WHERE r.task_id = $1 AND u.usage_known
+         GROUP BY u.run_id, u.model
+         ORDER BY u.run_id, model_id",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_all(pool)
+    .await?;
+    let unknown: Vec<(Uuid, i64)> = sqlx::query_as(
+        "SELECT u.run_id, count(*) FROM model_usage u JOIN runs r ON r.id = u.run_id
+         WHERE r.task_id = $1 AND NOT u.usage_known GROUP BY u.run_id",
     )
     .bind(task_id.as_uuid())
     .fetch_all(pool)
@@ -246,6 +255,10 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
                 .filter(|u| u.run_id == r.id)
                 .map(|u| u.usage.clone())
                 .collect(),
+            unknown_usage_requests: unknown
+                .iter()
+                .find(|(run_id, _)| *run_id == r.id)
+                .map_or(0, |(_, count)| *count),
             id: r.id,
             number: r.number,
             state: r.state,
@@ -265,6 +278,20 @@ struct TranscriptRow {
     occurred_at: DateTime<Utc>,
     number: i64,
     started_at: DateTime<Utc>,
+}
+
+/// Decodes a stored transcript event. Events stored before the gateway measured usage carry
+/// `turnEnded.usage` and `turnEnded.usageSource`, fields that no longer exist: they are dropped
+/// (the decoder rejects unknown fields otherwise).
+fn decode_event(mut payload: serde_json::Value) -> Result<Event, serde_json::Error> {
+    if let Some(ended) = payload
+        .get_mut("turnEnded")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        ended.remove("usage");
+        ended.remove("usageSource");
+    }
+    serde_json::from_value(payload)
 }
 
 /// Transcript rows of a task with `id > after`, in id order, at most `limit`.
@@ -287,7 +314,7 @@ pub async fn transcript_after(
     Ok(rows
         .into_iter()
         .map(|row| {
-            let event = serde_json::from_value(row.payload)
+            let event = decode_event(row.payload)
                 .inspect_err(
                     |error| tracing::warn!(%error, id = row.id, "undecodable transcript event"),
                 )
@@ -342,7 +369,8 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, 'Linus', 'p')")
+        crate::model_providers::tests::seed_provider(pool).await;
+        sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'Linus', 'p', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(pool)
             .await
@@ -392,6 +420,31 @@ mod tests {
         .unwrap()
     }
 
+    /// A gateway usage record; without a model its usage is unknown.
+    async fn insert_usage(
+        pool: &PgPool,
+        run: Uuid,
+        model: Option<&str>,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+    ) {
+        sqlx::query(
+            "INSERT INTO model_usage (request_id, run_id, recorded_at, model, wire_api, input_tokens, output_tokens, cache_read_tokens, usage_known)
+             VALUES ($1, $2, now(), $3, 'anthropic-messages', $4, $5, $6, $7)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(run)
+        .bind(model)
+        .bind(input)
+        .bind(output)
+        .bind(cache_read)
+        .bind(model.is_some())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn lists_tasks_details_runs_usage_and_transcript() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
@@ -423,10 +476,15 @@ mod tests {
                 .is_none()
         );
 
-        let ended = |input: &str, model: &str| serde_json::json!({"turnEnded": {"usage": [{"modelId": model, "inputTokens": input, "outputTokens": "5", "cacheReadTokens": "2"}]}});
-        let first = insert_event(&pool, task, run, 1, "turn_ended", ended("10", "opus")).await;
-        insert_event(&pool, task, run, 2, "turn_ended", ended("20", "opus")).await;
-        insert_event(&pool, task, run, 3, "turn_ended", ended("1", "haiku")).await;
+        let ended = || serde_json::json!({"turnEnded": {}});
+        let first = insert_event(&pool, task, run, 1, "turn_ended", ended()).await;
+        insert_event(&pool, task, run, 2, "turn_ended", ended()).await;
+        insert_event(&pool, task, run, 3, "turn_ended", ended()).await;
+        for (input, model) in [(10, "opus"), (20, "opus"), (1, "haiku")] {
+            insert_usage(&pool, run, Some(model), input, 5, 2).await;
+        }
+        insert_usage(&pool, run, None, 0, 0, 0).await;
+        insert_usage(&pool, run, None, 0, 0, 0).await;
         let last = insert_event(&pool, task, run, 4, "bogus", serde_json::json!({"nope": 1})).await;
 
         let runs = list_runs(&pool, task).await.unwrap();
@@ -442,6 +500,7 @@ mod tests {
             (30, 10, 4, 0)
         );
         assert_eq!(runs[0].usage.len(), 2);
+        assert_eq!(runs[0].unknown_usage_requests, 2);
 
         let all = transcript_after(&pool, task, 0, 100).await.unwrap();
         assert_eq!(all.len(), 4);
@@ -451,6 +510,35 @@ mod tests {
         assert_eq!(tail.first().map(|e| e.id), Some(first + 1));
         assert_eq!(tail.last().map(|e| e.id), Some(last));
         assert_eq!(transcript_after(&pool, task, 0, 2).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn turn_ends_stored_with_the_removed_usage_fields_still_decode() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (task, run) = seed(&pool).await;
+        let old = serde_json::json!({
+            "schemaVersion": 1,
+            "turnEnded": {
+                "stopReason": "STOP_REASON_END_TURN",
+                "usage": [{"modelId": "opus", "inputTokens": "10"}],
+                "usageSource": 1
+            }
+        });
+        insert_event(&pool, task, run, 1, "turn_ended", old).await;
+
+        let rows = transcript_after(&pool, task, 0, 10).await.unwrap();
+
+        let Some(Event {
+            kind: Some(df_proto::transcript::v1::event::Kind::TurnEnded(ended)),
+            ..
+        }) = &rows[0].event
+        else {
+            panic!("the old turn end does not decode: {:?}", rows[0].event);
+        };
+        assert_eq!(
+            ended.stop_reason(),
+            df_proto::transcript::v1::StopReason::EndTurn
+        );
     }
 
     #[tokio::test]

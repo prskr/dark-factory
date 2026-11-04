@@ -7,7 +7,9 @@ use clap::Parser;
 
 pub mod agent;
 pub mod mock_mcp;
+pub mod model;
 pub mod script;
+pub mod upstream;
 
 #[cfg(test)]
 mod tests;
@@ -22,6 +24,20 @@ pub struct Cli {
     /// Run as a mock stdio MCP server for testing tool forwarding.
     #[arg(long)]
     pub mock_mcp_server: bool,
+
+    /// Serve a fake Anthropic upstream on this address (end-to-end cluster); requests need the
+    /// key in `FAKE_UPSTREAM_KEY`.
+    #[arg(long, value_name = "ADDRESS", env = "FAKE_UPSTREAM_ADDRESS")]
+    pub serve_fake_anthropic: Option<String>,
+
+    /// The key the fake upstream expects in `x-api-key`.
+    #[arg(
+        long,
+        env = "FAKE_UPSTREAM_KEY",
+        default_value = "fake-key",
+        hide_env_values = true
+    )]
+    pub fake_upstream_key: String,
 }
 
 #[tokio::main]
@@ -32,6 +48,14 @@ async fn main() -> ExitCode {
     if cli.mock_mcp_server {
         if let Err(err) = mock_mcp::run_stdio().await {
             eprintln!("mock-mcp-server error: {err}");
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if let Some(address) = &cli.serve_fake_anthropic {
+        if let Err(err) = upstream::serve(address, cli.fake_upstream_key.clone()).await {
+            eprintln!("fake-acp-agent: fake upstream: {err:#}");
             return ExitCode::FAILURE;
         }
         return ExitCode::SUCCESS;

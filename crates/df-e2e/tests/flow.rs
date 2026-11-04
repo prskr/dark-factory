@@ -92,6 +92,46 @@ async fn assigned_task_gets_a_draft_pr_with_the_shaped_title_and_an_issue_commen
         .await?;
     world.wait_for_status(&key, "waiting").await?;
 
+    // The `model` step went through the gateway: the fake upstream only answers with the key the
+    // gateway injects (the sandbox has the placeholder), and the gateway reported its usage.
+    world
+        .session
+        .expect_text("Hello from the fake upstream.", RUN_TIMEOUT)
+        .await?;
+    // The sandbox holds the placeholder, never the provider's key: the `model` step put the whole
+    // environment of the harness into the transcript.
+    world
+        .session
+        .expect_text("Model key in the sandbox: df-placeholder", RUN_TIMEOUT)
+        .await?;
+    assert!(
+        db::transcript_events_containing(&world.pool, &key, "Sandbox environment:").await? >= 1,
+        "the environment dump is in the transcript"
+    );
+    assert!(
+        db::transcript_events_containing(&world.pool, &key, "ANTHROPIC_BASE_URL=").await? >= 1,
+        "the dump has the harness variables"
+    );
+    assert_eq!(
+        db::transcript_events_containing(&world.pool, &key, data::MODEL_API_KEY).await?,
+        0,
+        "the provider key reached the sandbox"
+    );
+    assert_eq!(
+        db::transcript_events_containing(&world.pool, &key, &world.env.forgejo_token).await?,
+        0,
+        "the forge token reached the sandbox"
+    );
+    eventually(
+        "the usage record of the model call",
+        RUN_TIMEOUT,
+        || async {
+            let (known, unknown) = db::model_usage(&world.pool, &key).await?;
+            Ok((known >= 1 && unknown == 0).then_some(()))
+        },
+    )
+    .await?;
+
     let branch = branch_of(&key);
     assert!(world.forgejo.branch_exists(&branch).await?, "{branch}");
     let pulls = world.pulls_of(&branch).await?;

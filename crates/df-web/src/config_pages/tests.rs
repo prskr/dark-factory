@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 
-use crate::testkit::{TestApp, form, header_str, new_task, seed, tag_around, text};
+use crate::testkit::{TestApp, form, header_str, new_task, seed, seed_provider, tag_around, text};
 
 async fn audit(app: &TestApp, action: &str) -> Vec<serde_json::Value> {
     sqlx::query_scalar("SELECT details FROM audit_log WHERE action = $1 ORDER BY id")
@@ -398,12 +398,13 @@ async fn changing_the_key_of_a_project_is_rejected_with_or_without_tasks() {
 async fn persona_is_created_selectable_and_edits_are_audited() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
     seed(&app.pool).await;
     let body = form(&[
         ("name", "Torvalds"),
         ("system_prompt", "old prompt"),
         ("model", "opus"),
-        ("harness_credential_id", ""),
+        ("model_provider_id", &provider),
     ]);
     let response = app.post("/personas", &body, &cookie).await;
     assert_saved(&response);
@@ -418,7 +419,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
         ("name", "Torvalds"),
         ("system_prompt", "new prompt"),
         ("model", ""),
-        ("harness_credential_id", ""),
+        ("model_provider_id", &provider),
     ]);
     let response = app.post(&format!("/personas/{id}"), &edited, &cookie).await;
     assert_saved(&response);
@@ -428,19 +429,33 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
 }
 
 #[tokio::test]
-async fn persona_requires_name_and_prompt_and_known_credential() {
+async fn the_persona_form_says_which_model_providers_it_offers() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    seed_provider(&app.pool).await;
+
+    let html = text(app.get_htmx("/personas/new", &cookie).await).await;
+
+    assert!(
+        html.contains("Only providers that offer a wire API of the harness."),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn persona_requires_name_prompt_and_a_known_model_provider() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let body = form(&[
         ("name", ""),
         ("system_prompt", ""),
-        ("harness_credential_id", &uuid::Uuid::now_v7().to_string()),
+        ("model_provider_id", &uuid::Uuid::now_v7().to_string()),
     ]);
     let html = text(app.post("/personas", &body, &cookie).await).await;
     assert!(
         html.contains("Name is required.")
             && html.contains("System prompt is required.")
-            && html.contains("Unknown credential reference.")
+            && html.contains("Choose a model provider.")
     );
 }
 
@@ -1015,19 +1030,10 @@ async fn a_saved_project_updates_the_list_and_closes_the_modal() {
 }
 
 #[tokio::test]
-async fn personas_are_cards_with_harness_model_prompt_excerpt_and_credential() {
+async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
-    app.post(
-        "/credentials",
-        &credential_form_body("anthropic-api", "claude", "key"),
-        &cookie,
-    )
-    .await;
-    let credential: uuid::Uuid = sqlx::query_scalar("SELECT id FROM credential_refs")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
+    let provider = seed_provider(&app.pool).await.to_string();
     let linus = form(&[
         ("name", "Linus"),
         (
@@ -1035,14 +1041,14 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_credential() {
             "Be Linus.\nReview carefully.\nShip small changes.\nNever skip tests.",
         ),
         ("model", "opus"),
-        ("harness_credential_id", &credential.to_string()),
+        ("model_provider_id", &provider),
     ]);
     app.post("/personas", &linus, &cookie).await;
     let plain = form(&[
         ("name", "Ada"),
         ("system_prompt", "Be Ada."),
         ("model", ""),
-        ("harness_credential_id", ""),
+        ("model_provider_id", &provider),
     ]);
     app.post("/personas", &plain, &cookie).await;
 
@@ -1056,11 +1062,11 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_credential() {
     assert!(linus.contains(">L</span>"), "initial: {linus}");
     assert!(linus.contains("Claude Code · opus"), "{linus}");
     assert!(linus.contains("line-clamp-3") && linus.contains("Be Linus."));
-    assert!(linus.contains(">anthropic-api<"));
+    assert!(linus.contains(">Claude subscription<"), "{linus}");
     assert!(linus.contains("aria-label=\"Edit persona Linus\"") && linus.contains("/edit\""));
     let ada = card("Ada");
     assert!(
-        ada.contains("Claude Code · default") && ada.contains(">none<"),
+        ada.contains("Claude Code · default") && ada.contains(">Claude subscription<"),
         "{ada}"
     );
 }
@@ -1117,6 +1123,7 @@ async fn the_projects_page_has_the_profile_menu_for_phones() {
 async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
     let count = |html: &str, title: &str| {
         let marker = format!("{title} <span class=\"font-normal text-faint\">");
         let head = html
@@ -1140,7 +1147,7 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
         ("name", "Ada"),
         ("system_prompt", "x"),
         ("model", ""),
-        ("harness_credential_id", ""),
+        ("model_provider_id", &provider),
     ]);
     let response = app.post("/personas", &persona, &cookie).await;
     assert_eq!(count(&text(response).await, "Personas"), "1");
@@ -1151,7 +1158,8 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
             &cookie,
         )
         .await;
-    assert_eq!(count(&text(response).await, "Credentials"), "1");
+    // The seeded model provider owns a credential reference as well.
+    assert_eq!(count(&text(response).await, "Credentials"), "2");
     // The page and the answer render the same header.
     let page = text(app.get("/projects", &cookie).await).await;
     assert_eq!(count(&page, "Projects"), "2");
@@ -1261,7 +1269,7 @@ async fn the_persona_form_pairs_harness_and_model() {
     let cookie = app.login().await;
     let html = text(app.get_htmx("/personas/new", &cookie).await).await;
     assert!(html.contains("md:grid-cols-2"));
-    for full in ["name", "system_prompt", "harness_credential_id"] {
+    for full in ["name", "system_prompt", "model_provider_id"] {
         assert!(
             html.contains(&format!(
                 "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{full}\""
@@ -1284,12 +1292,13 @@ async fn the_persona_form_pairs_harness_and_model() {
 async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
     seed(&app.pool).await;
     let persona = form(&[
         ("name", "Ada"),
         ("system_prompt", "x"),
         ("model", ""),
-        ("harness_credential_id", ""),
+        ("model_provider_id", &provider),
     ]);
     app.post("/personas", &persona, &cookie).await;
     app.post(

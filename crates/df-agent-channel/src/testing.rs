@@ -360,7 +360,8 @@ pub struct Env {
 }
 
 impl Env {
-    /// Seeds project `DF`, persona "Linus" with Secret `claude/token`, and task `DF-1`.
+    /// Seeds project `DF`, persona "Linus" with the model provider "Claude subscription"
+    /// (Secret `claude/token`), and task `DF-1`.
     pub async fn new(pool: PgPool) -> Self {
         let provider = FakeSandboxProvider::new();
         let forge = FakeForgeClient::new();
@@ -394,13 +395,31 @@ impl Env {
         .execute(&pool)
         .await
         .expect("seed project");
+        let model_provider = uuid::Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO model_providers (id, name, credential_ref_id, credential_scheme)
+             VALUES ($1, 'Claude subscription', $2, 'claude-subscription')",
+        )
+        .bind(model_provider)
+        .bind(claude_ref)
+        .execute(&pool)
+        .await
+        .expect("seed model provider");
+        sqlx::query(
+            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+             VALUES ($1, 'anthropic-messages', 'https://api.anthropic.com')",
+        )
+        .bind(model_provider)
+        .execute(&pool)
+        .await
+        .expect("seed model provider API");
         let persona_id = PersonaId::new();
         sqlx::query(
-            "INSERT INTO personas (id, name, system_prompt, harness_credential_id)
+            "INSERT INTO personas (id, name, system_prompt, model_provider_id)
              VALUES ($1, 'Linus', 'You are Linus.', $2)",
         )
         .bind(persona_id.as_uuid())
-        .bind(claude_ref)
+        .bind(model_provider)
         .execute(&pool)
         .await
         .expect("seed persona");

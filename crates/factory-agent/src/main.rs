@@ -21,7 +21,6 @@ pub mod runner;
 pub mod runtime_handler;
 pub mod runtime_socket;
 pub mod transcript;
-pub mod usage;
 pub mod workspace;
 
 #[cfg(test)]
@@ -73,7 +72,6 @@ struct RunDirs {
 /// What the control plane sent before and with `Assign`.
 struct Startup {
     assign: df_proto::agent::v1::Assign,
-    credentials: Option<df_proto::agent::v1::HarnessCredentials>,
     initial_prompts: Vec<df_proto::agent::v1::Prompt>,
     /// True if a `Cancel` arrived before `Assign`.
     cancel_requested: bool,
@@ -115,7 +113,6 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     let conn_task = conn_handle.task.take();
     let driver_params = runner::RunDriverParams {
         assign: startup.assign,
-        credentials: startup.credentials,
         initial_prompts: startup.initial_prompts,
         cancel_requested: startup.cancel_requested,
         git: git::Git::new(&dirs.repo).with_ssl_ca_info(&instance_ca),
@@ -201,7 +198,6 @@ async fn receive_assignment(conn_handle: &mut connection::ConnectionHandle) -> O
     use df_proto::agent::v1::control_message::Body;
 
     let mut assign = None;
-    let mut credentials = None;
     let mut initial_prompts = Vec::new();
     let mut cancel_requested = false;
 
@@ -213,7 +209,6 @@ async fn receive_assignment(conn_handle: &mut connection::ConnectionHandle) -> O
                     break;
                 }
                 Some(Body::Cancel(_)) => cancel_requested = true,
-                Some(Body::HarnessCredentials(c)) => credentials = Some(c),
                 Some(Body::Prompt(p)) => initial_prompts.push(p),
                 _ => {}
             }
@@ -232,7 +227,6 @@ async fn receive_assignment(conn_handle: &mut connection::ConnectionHandle) -> O
     };
     Some(Startup {
         assign,
-        credentials,
         initial_prompts,
         cancel_requested,
     })

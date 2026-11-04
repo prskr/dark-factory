@@ -35,7 +35,8 @@ async fn project_and_task(pool: &PgPool) -> (Uuid, Uuid) {
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO personas (id, name, system_prompt) VALUES ($1, 'p', 'x')")
+    crate::model_providers::tests::seed_provider(pool).await;
+    sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', (SELECT id FROM model_providers LIMIT 1))")
         .bind(persona)
         .execute(pool)
         .await

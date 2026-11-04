@@ -12,6 +12,7 @@ use df_db::DbError;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, PersonaRecord, ProjectInput, ProjectRecord,
 };
+use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::PushPolicy;
 use df_db::task_views::ProjectStatusCount;
 use maud::{Markup, html};
@@ -21,7 +22,7 @@ use uuid::Uuid;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::forms::{INPUT_CLASS, field};
+use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, avatar, data_table, dialog_with, empty_panel, forge_icon, form_error,
@@ -32,6 +33,7 @@ use crate::layout::{Nav, Shell, layout};
 use crate::project_subscriptions::settings_link as subscriptions_link;
 use crate::responses::{internal_error, invalid, not_found};
 
+mod providers;
 mod push_policy;
 
 use push_policy::PushPolicyForm;
@@ -43,6 +45,7 @@ const HARNESS: &str = df_core::CLAUDE_CODE_HARNESS;
 /// (no `HX-Request` header) goes to the list instead.
 pub(crate) fn routes() -> Router<WebState> {
     Router::new()
+        .merge(providers::routes())
         .route(
             "/credentials",
             get(credentials_list).post(credential_create),
@@ -95,7 +98,7 @@ pub(crate) struct PersonaForm {
     name: String,
     system_prompt: String,
     model: String,
-    harness_credential_id: String,
+    model_provider_id: String,
 }
 
 fn required(errors: &mut FormErrors, field: &'static str, value: &str, label: &str) -> String {
@@ -107,7 +110,7 @@ fn required(errors: &mut FormErrors, field: &'static str, value: &str, label: &s
 }
 
 /// Checks that `value` is a URL with a host and the scheme `https`, or `http` when
-/// `forge.allowPlainHttp` is on.
+/// `network.allowPlainHttp` is on.
 fn forge_url(errors: &mut FormErrors, field: &'static str, value: &str, allow_plain_http: bool) {
     match Url::parse(value) {
         Ok(url)
@@ -230,7 +233,10 @@ fn validate_project(
     })
 }
 
-fn validate_persona(form: &PersonaForm, credentials: &[Uuid]) -> Result<PersonaInput, FormErrors> {
+fn validate_persona(
+    form: &PersonaForm,
+    providers: &[ModelProviderRecord],
+) -> Result<PersonaInput, FormErrors> {
     let mut errors = FormErrors::default();
     let name = required(&mut errors, "name", &form.name, "Name");
     let system_prompt = required(
@@ -239,18 +245,31 @@ fn validate_persona(form: &PersonaForm, credentials: &[Uuid]) -> Result<PersonaI
         &form.system_prompt,
         "System prompt",
     );
-    let harness_credential_id = optional_uuid(
-        &mut errors,
-        "harness_credential_id",
-        &form.harness_credential_id,
-        credentials,
-    );
+    let provider = Uuid::parse_str(&form.model_provider_id)
+        .ok()
+        .and_then(|id| providers.iter().find(|provider| provider.id == id));
+    let model_provider_id = match provider {
+        None => {
+            errors.add("model_provider_id", "Choose a model provider.");
+            Uuid::nil()
+        }
+        Some(provider) => {
+            if let Err(error) = df_core::harness::check_compatible(
+                HARNESS,
+                &provider.wire_apis(),
+                provider.input.scheme,
+            ) {
+                errors.add("model_provider_id", error.to_string());
+            }
+            provider.id
+        }
+    };
     errors.into_result(PersonaInput {
         name,
         system_prompt,
         harness: HARNESS.to_string(),
         model: Some(form.model.trim().to_string()).filter(|m| !m.is_empty()),
-        harness_credential_id,
+        model_provider_id,
     })
 }
 
@@ -1175,10 +1194,7 @@ fn persona_values(p: &PersonaRecord) -> PersonaForm {
         name: p.name.clone(),
         system_prompt: p.system_prompt.clone(),
         model: p.model.clone().unwrap_or_default(),
-        harness_credential_id: p
-            .harness_credential_id
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        model_provider_id: p.model_provider_id.to_string(),
     }
 }
 
@@ -1186,7 +1202,7 @@ fn persona_form(
     action: &str,
     values: &PersonaForm,
     errors: &FormErrors,
-    credentials: &[CredentialRef],
+    providers: &[ModelProviderRecord],
     submit: &str,
 ) -> Markup {
     html! {
@@ -1202,15 +1218,15 @@ fn persona_form(
                     }
                 }
                 (text_field("Model", "model", &values.model, errors, Some("Optional.")))
-                (full_row(select_field("Harness credential", "harness_credential_id", &credential_options(credentials),
-                    &values.harness_credential_id, Some("None"), errors)))
+                (full_row(select_field_with_hint("Model provider", "model_provider_id", &providers::compatible_options(providers, HARNESS),
+                    &values.model_provider_id, Some("Choose…"), Some("Only providers that offer a wire API of the harness."), errors)))
             }))
             (form_footer(submit))
         }
     }
 }
 
-fn personas_region(personas: &[PersonaRecord], credentials: &[CredentialRef]) -> Markup {
+fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]) -> Markup {
     html! {
         div id="config-list" {
             (list_header("Personas", personas.len(), create_button("/personas/new", "New persona"), None))
@@ -1223,9 +1239,8 @@ fn personas_region(personas: &[PersonaRecord], credentials: &[CredentialRef]) ->
             } @else {
                 ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" {
                     @for p in personas {
-                        @let credential = p.harness_credential_id
-                            .and_then(|id| credentials.iter().find(|c| c.id.as_uuid() == id))
-                            .map(|c| c.name.as_str());
+                        @let provider = providers.iter().find(|provider| provider.id == p.model_provider_id)
+                            .map(|provider| provider.input.name.as_str());
                         li class="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4" {
                             div class="flex items-start gap-3" {
                                 (avatar(&initials(&p.name)))
@@ -1237,7 +1252,7 @@ fn personas_region(personas: &[PersonaRecord], credentials: &[CredentialRef]) ->
                             }
                             p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" { (p.system_prompt) }
                             p class="mt-auto text-xs text-faint" {
-                                "Credential: " span class="font-mono" { (credential.unwrap_or("none")) }
+                                "Model provider: " span class="font-mono" { (provider.unwrap_or("none")) }
                             }
                         }
                     }
@@ -1248,12 +1263,12 @@ fn personas_region(personas: &[PersonaRecord], credentials: &[CredentialRef]) ->
 }
 
 async fn personas_markup(state: &WebState) -> Result<Markup, Box<Response>> {
-    let (personas, credentials) = tokio::try_join!(
+    let (personas, providers) = tokio::try_join!(
         df_db::catalog::list_personas(&state.pool),
-        df_db::catalog::list_credential_refs(&state.pool)
+        df_db::model_providers::list_model_providers(&state.pool)
     )
     .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(personas_region(&personas, &credentials))
+    Ok(personas_region(&personas, &providers))
 }
 
 async fn personas_list(State(state): State<WebState>, shell: Shell) -> Response {
@@ -1267,8 +1282,8 @@ async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
     if !crate::auth::is_htmx(&headers) {
         return Redirect::to("/personas").into_response();
     }
-    let credentials = match df_db::catalog::list_credential_refs(&state.pool).await {
-        Ok(c) => c,
+    let providers = match df_db::model_providers::list_model_providers(&state.pool).await {
+        Ok(providers) => providers,
         Err(e) => return internal_error(&e),
     };
     modal(
@@ -1277,7 +1292,7 @@ async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             "/personas",
             &PersonaForm::default(),
             &FormErrors::default(),
-            &credentials,
+            &providers,
             "Create persona",
         ),
     )
@@ -1291,11 +1306,11 @@ async fn persona_edit(
     if !crate::auth::is_htmx(&headers) {
         return Redirect::to("/personas").into_response();
     }
-    let (persona, credentials) = match tokio::try_join!(
+    let (persona, providers) = match tokio::try_join!(
         df_db::catalog::get_persona(&state.pool, id),
-        df_db::catalog::list_credential_refs(&state.pool)
+        df_db::model_providers::list_model_providers(&state.pool)
     ) {
-        Ok((Some(persona), credentials)) => (persona, credentials),
+        Ok((Some(persona), providers)) => (persona, providers),
         Ok((None, _)) => return not_found("The persona"),
         Err(e) => return internal_error(&e),
     };
@@ -1305,7 +1320,7 @@ async fn persona_edit(
             &format!("/personas/{id}"),
             &persona_values(&persona),
             &FormErrors::default(),
-            &credentials,
+            &providers,
             "Save persona",
         ),
     )
@@ -1334,12 +1349,11 @@ async fn save_persona(
     id: Option<Uuid>,
     form: PersonaForm,
 ) -> Response {
-    let credentials = match df_db::catalog::list_credential_refs(&state.pool).await {
-        Ok(c) => c,
+    let providers = match df_db::model_providers::list_model_providers(&state.pool).await {
+        Ok(providers) => providers,
         Err(e) => return internal_error(&e),
     };
-    let known: Vec<Uuid> = credentials.iter().map(|c| c.id.as_uuid()).collect();
-    let errors = match validate_persona(&form, &known) {
+    let errors = match validate_persona(&form, &providers) {
         Ok(input) => {
             let principal = user.principal();
             let actor = Actor {
@@ -1370,7 +1384,7 @@ async fn save_persona(
         &action,
         &form,
         &errors,
-        &credentials,
+        &providers,
         if id.is_some() {
             "Save persona"
         } else {

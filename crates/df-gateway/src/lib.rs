@@ -5,12 +5,14 @@
 //! control plane serves [`control::PolicyService`] and relays logs with [`control::Relay`].
 
 pub mod control;
+pub(crate) mod convert;
 mod count;
 pub mod denials;
 pub mod flow;
 pub mod gateway;
 pub mod git;
 pub mod health;
+pub mod inference;
 pub mod link;
 pub mod metrics;
 pub mod peer;
@@ -19,4 +21,5 @@ pub mod proxy;
 pub mod resolve;
 mod sni;
 pub mod tail;
+pub mod upstream;
 pub mod watch;

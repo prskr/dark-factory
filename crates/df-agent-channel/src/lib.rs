@@ -1,5 +1,5 @@
 //! Control plane end of the agent protocol v1: the mTLS agent port, run scheduling and state
-//! machine, transcript persistence, factory tools, pull request lifecycle and credentials.
+//! machine, transcript persistence, factory tools, pull request lifecycle.
 //!
 //! Every decision is derived from the database, so any replica can serve any reconnect.
 
@@ -12,7 +12,6 @@ use df_db::lifecycle_events::EventSinks;
 use sqlx::PgPool;
 
 pub mod assign;
-pub mod credentials;
 pub mod error;
 pub mod identity;
 pub mod metrics;

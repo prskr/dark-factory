@@ -263,7 +263,7 @@ fn agent_volumes(
     };
     let mut volume_mounts = vec![
         mount("factory-runtime", "/opt/factory", Some(true)),
-        mount("tls", "/run/factory/tls", Some(true)),
+        mount("tls", df_core::harness::SANDBOX_TLS_DIR, Some(true)),
         mount("task-data", "/data", None),
         mount("tmpfs", "/run/factory", None),
     ];

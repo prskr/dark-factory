@@ -1,0 +1,56 @@
+# Fake Anthropic upstream of the e2e cluster: the model provider of the e2e persona points at it.
+# It answers `POST /v1/messages` with a canned stream (including usage) and 401 unless the request
+# carries the key the gateway injects, so a sandbox with only the placeholder gets no answer. It
+# runs `fake-acp-agent --serve-fake-anthropic` from the test project image.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fake-upstream
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fake-upstream-key
+  namespace: fake-upstream
+stringData:
+  key: e2e-model-api-key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-anthropic
+  namespace: fake-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fake-anthropic}
+  template:
+    metadata:
+      labels: {app: fake-anthropic}
+    spec:
+      containers:
+        - name: fake-anthropic
+          image: ghcr.io/prskr/dark-factory/test-project:e2e
+          imagePullPolicy: IfNotPresent
+          command: [/opt/harness/bin/fake-acp-agent, --serve-fake-anthropic, "0.0.0.0:8080"]
+          env:
+            - name: FAKE_UPSTREAM_KEY
+              valueFrom:
+                secretKeyRef: {name: fake-upstream-key, key: key}
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            tcpSocket: {port: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-anthropic
+  namespace: fake-upstream
+spec:
+  selector: {app: fake-anthropic}
+  ports:
+    - {port: 8080, targetPort: 8080}
