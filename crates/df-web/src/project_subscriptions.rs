@@ -1,11 +1,13 @@
-//! Lifecycle event subscriptions of a project (`event-subscriptions` spec): a settings page for
-//! users with the `admin` role (design D8), linked from the project list.
+//! The "Lifecycle events" tab of the project edit form (`event-subscriptions` spec): lists and
+//! changes the subscriptions of a project, for users with the `admin` role only.
 //!
-//! The forms open as a modal over the page like the other settings; a plain browser request for
-//! one goes to the page instead.
+//! The tab loads its content when it is first shown ([`tab_panel`]). The editor sits in the tab
+//! and posts to its own `<form id="subscription-form">` ([`form_anchor`]) because the project form
+//! around the tab cannot be nested. Every change takes effect at once, independent of saving the
+//! project.
 
 use axum::extract::{Path, RawForm, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router, middleware};
@@ -21,22 +23,20 @@ use uuid::Uuid;
 use crate::WebState;
 use crate::auth::{CurrentUser, is_htmx, require_admin};
 use crate::components::{
-    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, data_table, empty_panel, field_error, form_error,
-    icon, td, text_field, th, tr,
+    ButtonKind, FormErrors, ICON_BUTTON_CLASS, Icon, action_class, empty_panel, field_error,
+    form_error, icon, mono_text_field_of_form,
 };
-use crate::config_pages::{
-    create_button, edit_button, form_footer, list_header, list_page, modal, saved,
-};
-use crate::layout::{Nav, Shell};
 use crate::responses::{internal_error, invalid, not_found};
 
 /// The endpoint receivers fetch the instance public key from.
 const PUBLIC_KEY_PATH: &str = "/lifecycle-events/public-key";
 const INVALID_URL: &str = "Enter a valid URL, for example https://hooks.example.org/events.";
+/// The empty form the editor's inputs belong to (`form` attribute).
+const FORM_ID: &str = "subscription-form";
 
 pub(crate) fn routes() -> Router<WebState> {
     Router::new()
-        .route("/projects/{key}/subscriptions", get(page).post(create))
+        .route("/projects/{key}/subscriptions", get(tab).post(create))
         .route("/projects/{key}/subscriptions/new", get(new_form))
         .route(
             "/projects/{key}/subscriptions/{id}",
@@ -46,13 +46,19 @@ pub(crate) fn routes() -> Router<WebState> {
         .route_layer(middleware::from_fn(require_admin))
 }
 
-/// Link of a project row to its subscriptions; the project list shows it to admins only.
-pub(crate) fn settings_link(key: &str, class: &str) -> Markup {
+/// Panel of the tab in the project form: a placeholder that fetches the tab on first display.
+pub(crate) fn tab_panel(key: &str) -> Markup {
     html! {
-        a href=(base_path(key)) aria-label={"Lifecycle events of " (key)} title="Lifecycle events" class=(class) {
-            (icon(Icon::Send))
+        div hx-get=(base_path(key)) hx-trigger="intersect once" hx-swap="outerHTML" class="text-sm text-muted" {
+            "Loading lifecycle events…"
         }
     }
+}
+
+/// The empty form the editor's inputs are associated with. It sits next to the project form,
+/// because forms cannot be nested.
+pub(crate) fn form_anchor() -> Markup {
+    html! { form id=(FORM_ID) {} }
 }
 
 /// The submitted form: the URL and the checked event types, as typed.
@@ -90,7 +96,8 @@ impl SubscriptionForm {
 
 /// Checks the form: an `https` URL whose host is not a literal internal address, and known event
 /// types. The delivery checks the resolved addresses again before each attempt. With
-/// [`ProjectTargets::Unrestricted`] any valid URL is accepted.
+/// [`ProjectTargets::Unrestricted`] any valid URL is accepted. A URL with a username or password
+/// is always refused: the URL is written to the append-only audit log.
 fn validate(
     form: &SubscriptionForm,
     targets: ProjectTargets,
@@ -100,6 +107,9 @@ fn validate(
     let restricted = targets == ProjectTargets::PublicHttps;
     match Url::parse(url) {
         Ok(parsed) if parsed.host().is_none() => errors.add("url", INVALID_URL),
+        Ok(parsed) if !parsed.username().is_empty() || parsed.password().is_some() => {
+            errors.add("url", "The URL must not contain a username or password.");
+        }
         Ok(parsed) if restricted && parsed.scheme() != "https" => {
             errors.add("url", "Project subscriptions need https.");
         }
@@ -131,19 +141,59 @@ fn base_path(key: &str) -> String {
     format!("/projects/{key}/subscriptions")
 }
 
-fn subscription_form(
-    action: &str,
+/// Where the editor posts and what it is called.
+struct EditorTarget {
+    /// The tab fragment, which Cancel fetches again.
+    base: String,
+    action: String,
+    submit: &'static str,
+}
+
+impl EditorTarget {
+    fn new(key: &str) -> Self {
+        let base = base_path(key);
+        Self {
+            action: base.clone(),
+            base,
+            submit: "Create subscription",
+        }
+    }
+
+    fn existing(key: &str, id: Uuid) -> Self {
+        let base = base_path(key);
+        Self {
+            action: format!("{base}/{id}"),
+            base,
+            submit: "Save subscription",
+        }
+    }
+}
+
+/// The inline editor of a new or an existing subscription. Its inputs and the submit button
+/// belong to [`form_anchor`] (`form` attribute), so Enter in the URL field submits the
+/// subscription and "Save project" never sends these fields.
+fn editor(
+    target: &EditorTarget,
     values: &SubscriptionForm,
     errors: &FormErrors,
-    submit: &str,
+    targets: ProjectTargets,
 ) -> Markup {
+    let hint = match targets {
+        ProjectTargets::PublicHttps => "HTTPS only. The host must resolve to public addresses.",
+        ProjectTargets::Unrestricted => "Any http or https URL (development build).",
+    };
     html! {
-        form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
+        div id="subscription-editor" class="space-y-4 rounded-xl border border-line-strong bg-panel p-4" {
             (form_error(errors))
-            (text_field("Receiver URL", "url", &values.url, errors,
-                Some("HTTPS only. The host must resolve to public addresses.")))
+            (mono_text_field_of_form("Receiver URL", "url", &values.url, errors, Some(hint), FORM_ID))
             (events_field(&values.events, errors))
-            (form_footer(submit))
+            div class="flex justify-end gap-2" {
+                button type="button" hx-get=(target.base) hx-target="#lifecycle-events" hx-swap="outerHTML"
+                    class=(action_class(ButtonKind::Secondary)) { "Cancel" }
+                button type="submit" form=(FORM_ID) hx-post=(target.action) hx-include={"#" (FORM_ID)}
+                    hx-target="#subscription-editor" hx-swap="outerHTML"
+                    class=(action_class(ButtonKind::Primary)) { (target.submit) }
+            }
         }
     }
 }
@@ -155,7 +205,7 @@ fn events_field(selected: &[String], errors: &FormErrors) -> Markup {
             div class="grid grid-cols-1 md:grid-cols-2" {
                 @for event in EventType::ALL {
                     label class="flex min-h-11 items-center gap-2 lg:min-h-9" {
-                        input type="checkbox" name="events" value=(event.as_str())
+                        input type="checkbox" name="events" value=(event.as_str()) form=(FORM_ID)
                             checked[selected.iter().any(|s| s == event.as_str())];
                         span class="font-mono text-[13px]" { (event.as_str()) }
                     }
@@ -227,51 +277,110 @@ fn events_label(events: &[EventType]) -> String {
     }
 }
 
+/// Which subscription editor the tab shows. The region renders at most one, so a second open
+/// replaces the first and the editor ID and the `form`-bound inputs stay unique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Open {
+    Closed,
+    New,
+    Edit(Uuid),
+}
+
+/// The tab content: intro, key panel, the subscriptions with their editor slot. Replaced as a
+/// whole after every change, which also refreshes the count.
 fn region(
     project: &ProjectRecord,
     subscriptions: &[Subscription],
     public_key: Option<&str>,
     targets: ProjectTargets,
+    open: Open,
 ) -> Markup {
     let base = base_path(&project.key);
-    let new = create_button(&format!("{base}/new"), "New subscription");
+    let new = new_button(&base);
+    let new_editor = html! {
+        @if open == Open::New {
+            (editor(&EditorTarget::new(&project.key), &SubscriptionForm::default(), &FormErrors::default(), targets))
+        }
+    };
     html! {
-        div id="config-list" class="space-y-4" {
-            (list_header(&format!("Lifecycle events of {}", project.name), subscriptions.len(), new.clone(), None))
+        div id="lifecycle-events" class="space-y-4" {
+            p class="text-sm text-muted" {
+                "Signed events about the volumes and sandboxes of this project, sent to each receiver. "
+                "Subscriptions save on their own; Save project does not apply to them."
+            }
             (key_panel(public_key, targets))
             @if subscriptions.is_empty() {
+                (new_editor)
                 (empty_panel(
                     "No subscriptions yet",
                     "A subscription sends signed events about the volumes and sandboxes of this project to a receiver URL.",
                     new,
                 ))
             } @else {
-                (data_table(
-                    html! {
-                        (th(Cell::First, html! { "Receiver URL" })) (th(Cell::Text, html! { "Events" }))
-                        (th(Cell::Text, html! { "Last delivery" }))
-                        (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
-                    },
-                    html! {
-                        @for s in subscriptions {
-                            (tr(html! {
-                                (td(Cell::First, html! { span class="font-mono text-[13px] break-all" { (s.url) } }))
-                                (td(Cell::Text, html! { (events_label(&s.events)) }))
-                                (td(Cell::Text, last_delivery(s)))
-                                (td(Cell::Actions, html! {
-                                    span class="flex justify-end" {
-                                        (edit_button(&format!("{base}/{}/edit", s.id), &format!("Edit subscription {}", s.url)))
-                                        button type="button" hx-delete={(base) "/" (s.id)}
-                                            hx-target="#config-list" hx-swap="outerHTML"
-                                            aria-label={"Delete subscription " (s.url)} title="Delete" class=(ICON_BUTTON_CLASS) {
-                                            (icon(Icon::Trash))
-                                        }
-                                    }
-                                }))
-                            }))
+                div class="flex items-center justify-between gap-2" {
+                    h3 class="text-sm font-medium" {
+                        "Subscriptions " span class="font-normal text-faint" { (subscriptions.len()) }
+                    }
+                    (new)
+                }
+                (new_editor)
+                ul class="divide-y divide-line rounded-xl border border-line bg-panel" {
+                    @for s in subscriptions {
+                        @if open == Open::Edit(s.id) {
+                            li {
+                                (editor(&EditorTarget::existing(&project.key, s.id), &SubscriptionForm::of(s), &FormErrors::default(), targets))
+                            }
+                        } @else {
+                            (row(&base, s))
                         }
-                    },
-                ))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn new_button(base: &str) -> Markup {
+    html! {
+        button type="button" hx-get={(base) "/new"} hx-target="#lifecycle-events" hx-swap="outerHTML"
+            class=(action_class(ButtonKind::Secondary)) {
+            (icon(Icon::Plus)) "New subscription"
+        }
+    }
+}
+
+/// A subscription: URL, event types and last delivery with edit and delete actions. Delete asks
+/// first (client state only); only the confirmation sends the request.
+fn row(base: &str, s: &Subscription) -> Markup {
+    html! {
+        li x-data="{ confirming: false }" {
+            div x-show="!confirming" class="flex items-center justify-between gap-3 px-4 py-3" {
+                div class="min-w-0 space-y-0.5" {
+                    p class="font-mono text-[13px] break-all" { (s.url) }
+                    p class="text-xs text-muted" { (events_label(&s.events)) }
+                    p class="text-xs text-muted" { (last_delivery(s)) }
+                }
+                span class="flex shrink-0" {
+                    button type="button" hx-get={(base) "/" (s.id) "/edit"} hx-target="#lifecycle-events" hx-swap="outerHTML"
+                        aria-label={"Edit subscription " (s.url)} title="Edit" class=(ICON_BUTTON_CLASS) {
+                        (icon(Icon::Pencil))
+                    }
+                    button type="button" x-ref="trash" "x-on:click"="confirming = true; $nextTick(() => $refs.cancel.focus())"
+                        aria-label={"Delete subscription " (s.url)} title="Delete" class=(ICON_BUTTON_CLASS) {
+                        (icon(Icon::Trash))
+                    }
+                }
+            }
+            div x-show="confirming" x-cloak class="flex flex-wrap items-center justify-between gap-3 rounded-b-xl bg-danger-soft px-4 py-3" {
+                div class="min-w-0 space-y-0.5" {
+                    p class="font-mono text-[13px] break-all" { (s.url) }
+                    p class="text-xs" { "Delete this subscription? Deliveries to it stop at once." }
+                }
+                span class="flex shrink-0 gap-2" {
+                    button type="button" x-ref="cancel" "x-on:click"="confirming = false; $nextTick(() => $refs.trash.focus())" class=(action_class(ButtonKind::Secondary)) { "Cancel" }
+                    button type="button" hx-delete={(base) "/" (s.id)} hx-target="#lifecycle-events" hx-swap="outerHTML"
+                        class=(action_class(ButtonKind::Danger)) { "Delete" }
+                }
             }
         }
     }
@@ -285,32 +394,35 @@ async fn project(state: &WebState, key: &str) -> Result<ProjectRecord, Box<Respo
     }
 }
 
-async fn region_markup(state: &WebState, project: &ProjectRecord) -> Result<Markup, Box<Response>> {
-    let subscriptions = event_subscriptions::list(&state.pool, project.id)
-        .await
-        .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(region(
-        project,
-        &subscriptions,
-        state.lifecycle_public_key.as_deref(),
-        state.project_targets,
-    ))
+/// The whole tab with `open` editor, or the error response when the list cannot be read.
+async fn region_response(state: &WebState, project: &ProjectRecord, open: Open) -> Response {
+    match event_subscriptions::list(&state.pool, project.id).await {
+        Ok(subscriptions) => region(
+            project,
+            &subscriptions,
+            state.lifecycle_public_key.as_deref(),
+            state.project_targets,
+            open,
+        )
+        .into_response(),
+        Err(e) => internal_error(&e),
+    }
 }
 
-async fn page(State(state): State<WebState>, shell: Shell, Path(key): Path<String>) -> Response {
+/// Fragment of the tab. A plain browser request (the old page URL) goes to the project list.
+async fn tab(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Response {
+    if !is_htmx(&headers) {
+        return Redirect::to("/projects").into_response();
+    }
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,
     };
-    match region_markup(&state, &project).await {
-        Ok(region) => list_page(
-            &format!("Lifecycle events · {}", project.key),
-            Nav::Projects,
-            &shell,
-            region,
-        ),
-        Err(response) => *response,
-    }
+    region_response(&state, &project, Open::Closed).await
 }
 
 async fn new_form(
@@ -319,21 +431,13 @@ async fn new_form(
     Path(key): Path<String>,
 ) -> Response {
     if !is_htmx(&headers) {
-        return Redirect::to(&base_path(&key)).into_response();
+        return Redirect::to("/projects").into_response();
     }
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,
     };
-    modal(
-        "New subscription",
-        subscription_form(
-            &base_path(&project.key),
-            &SubscriptionForm::default(),
-            &FormErrors::default(),
-            "Create subscription",
-        ),
-    )
+    region_response(&state, &project, Open::New).await
 }
 
 async fn edit_form(
@@ -342,22 +446,14 @@ async fn edit_form(
     Path((key, id)): Path<(String, Uuid)>,
 ) -> Response {
     if !is_htmx(&headers) {
-        return Redirect::to(&base_path(&key)).into_response();
+        return Redirect::to("/projects").into_response();
     }
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,
     };
     match event_subscriptions::get(&state.pool, project.id, id).await {
-        Ok(Some(subscription)) => modal(
-            "Edit subscription",
-            subscription_form(
-                &format!("{}/{id}", base_path(&project.key)),
-                &SubscriptionForm::of(&subscription),
-                &FormErrors::default(),
-                "Save subscription",
-            ),
-        ),
+        Ok(Some(_)) => region_response(&state, &project, Open::Edit(id)).await,
         Ok(None) => not_found("The subscription"),
         Err(e) => internal_error(&e),
     }
@@ -396,12 +492,11 @@ async fn save(
     let input = match validate(&form, state.project_targets) {
         Ok(input) => input,
         Err(errors) => {
-            let base = base_path(&project.key);
-            let (action, submit) = match id {
-                Some(id) => (format!("{base}/{id}"), "Save subscription"),
-                None => (base, "Create subscription"),
+            let target = match id {
+                Some(id) => EditorTarget::existing(&project.key, id),
+                None => EditorTarget::new(&project.key),
             };
-            return invalid(subscription_form(&action, &form, &errors, submit));
+            return invalid(editor(&target, &form, &errors, state.project_targets));
         }
     };
     let principal = user.principal();
@@ -410,10 +505,7 @@ async fn save(
         roles: &user.roles,
     };
     match event_subscriptions::save(&state.pool, actor, project.id, id, &input).await {
-        Ok(_) => match region_markup(state, &project).await {
-            Ok(region) => saved(region),
-            Err(response) => *response,
-        },
+        Ok(_) => retargeted(region_response(state, &project, Open::Closed).await),
         Err(DbError::NotFound(_)) => not_found("The subscription"),
         Err(e) => internal_error(&e),
     }
@@ -434,13 +526,22 @@ async fn remove(
         roles: &user.roles,
     };
     match event_subscriptions::delete(&state.pool, actor, project.id, id).await {
-        Ok(()) => match region_markup(&state, &project).await {
-            Ok(region) => region.into_response(),
-            Err(response) => *response,
-        },
+        Ok(()) => region_response(&state, &project, Open::Closed).await,
         Err(DbError::NotFound(_)) => not_found("The subscription"),
         Err(e) => internal_error(&e),
     }
+}
+
+/// A saved subscription: the whole region replaces the tab content, not just the editor the
+/// request targeted.
+fn retargeted(mut response: Response) -> Response {
+    if !response.status().is_success() {
+        return response;
+    }
+    let headers = response.headers_mut();
+    headers.insert("HX-Retarget", HeaderValue::from_static("#lifecycle-events"));
+    headers.insert("HX-Reswap", HeaderValue::from_static("outerHTML"));
+    response
 }
 
 #[cfg(test)]

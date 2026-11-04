@@ -1462,3 +1462,5 @@ async fn the_rail_menu_shows_the_version_of_the_instance() {
     let html = text(app.get("/tasks", &cookie).await).await;
     assert!(html.contains("Dark Factory 2026.11.0"), "{html}");
 }
+
+mod lifecycle_tab;

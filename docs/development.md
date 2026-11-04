@@ -152,7 +152,7 @@ Open <http://127.0.0.1:8080> and log in at Dex:
 
 The flags `--no-cluster`, `--demo-flows` and `--unrestricted-project-subscriptions` exist only in a build with the Cargo feature `dev-tools` (`cargo run -p dark-factory --features dev-tools -- serve --no-cluster`). A default or release build and the Bazel release images have none of them; `cargo clippy --all-targets --all-features` keeps the gated code linted.
 
-`--unrestricted-project-subscriptions` lets project lifecycle event subscriptions use plain `http://` and internal addresses (loopback, private ranges, cluster DNS names), for a test receiver in the same cluster or on the developer machine. The subscription page shows a warning, and the control plane logs one at startup. Without it, project receiver URLs must be `https://` with a public address.
+`--unrestricted-project-subscriptions` lets project lifecycle event subscriptions use plain `http://` and internal addresses (loopback, private ranges, cluster DNS names), for a test receiver in the same cluster or on the developer machine. The tab "Lifecycle events" of a project shows a warning, and the control plane logs one at startup. Without it, project receiver URLs must be `https://` with a public address.
 
 Limits of `serve --no-cluster` (local development only):
 

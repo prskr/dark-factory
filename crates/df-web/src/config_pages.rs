@@ -30,7 +30,7 @@ use crate::components::{
     readonly_field, role_icon, select_field, submit_button, td, text_field, textarea_field, th, tr,
 };
 use crate::layout::{Nav, Shell, layout};
-use crate::project_subscriptions::settings_link as subscriptions_link;
+use crate::project_subscriptions;
 use crate::responses::{internal_error, invalid, not_found};
 
 mod providers;
@@ -395,14 +395,14 @@ pub(crate) fn tabbed_form(
         form id="form" hx-post=(action) hx-target="#form" hx-swap="outerHTML" x-data={"tabs(" (serde_json::Value::from(open).to_string()) ")"} {
             div class="flex flex-col md:flex-row" {
                 div role="tablist" aria-label="Sections" "x-on:keydown"="move($event)"
-                    class="flex shrink-0 gap-1 border-b border-line px-3 py-2 md:w-42 md:flex-col md:border-r md:border-b-0 md:py-4" {
+                    class="flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line px-3 py-2 md:w-42 md:flex-col md:overflow-visible md:border-r md:border-b-0 md:py-4" {
                     @for tab in tabs {
                         @let selected = tab.id == open;
                         button type="button" role="tab" id={"tab-" (tab.id)} data-tab=(tab.id) aria-controls={"panel-" (tab.id)}
                             aria-selected=(selected) tabindex=(if selected { "0" } else { "-1" })
                             ":aria-selected"={"tab === '" (tab.id) "'"} ":tabindex"={"tab === '" (tab.id) "' ? 0 : -1"}
                             "x-on:click"={"tab = '" (tab.id) "'"}
-                            class="group relative flex min-h-11 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9" {
+                            class="group relative flex min-h-11 shrink-0 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9" {
                             span aria-hidden="true" class="absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block" {}
                             (tab.label)
                         }
@@ -704,8 +704,28 @@ fn url_field(
     )
 }
 
-/// The project form: one page for a new project, the tabs "General" and "Push checks" when
-/// `editing`. A re-rendered edit form opens "Push checks" if all its errors are there.
+/// Who the project form is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Editing {
+    /// A new project: one page without tabs.
+    No,
+    /// An existing project: the tabs "General" and "Push checks".
+    AsMember,
+    /// An existing project, edited by an admin: also the tab "Lifecycle events".
+    AsAdmin,
+}
+
+impl Editing {
+    fn of(existing: bool, user: &CurrentUser) -> Self {
+        match (existing, user.has_role(crate::auth::ADMIN_ROLE)) {
+            (false, _) => Self::No,
+            (true, false) => Self::AsMember,
+            (true, true) => Self::AsAdmin,
+        }
+    }
+}
+
+/// The project form. A re-rendered edit form opens "Push checks" if all its errors are there.
 fn project_form(
     action: &str,
     values: &ProjectForm,
@@ -713,12 +733,13 @@ fn project_form(
     credentials: &[CredentialRef],
     state: &WebState,
     submit: &str,
-    editing: bool,
+    editing: Editing,
 ) -> Markup {
+    let editing_project = editing != Editing::No;
     let feedback = forge_feedback(&state.forges, &values.repo_url, &values.issue_tracker_url);
     let repo_hint = (!state.allow_plain_http).then_some("HTTPS only.");
     let general = form_grid(html! {
-        (key_field(&values.key, errors, editing))
+        (key_field(&values.key, errors, editing_project))
         (text_field("Name", "name", &values.name, errors, None))
         (full_row(html! {
             (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
@@ -732,7 +753,7 @@ fn project_form(
         (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
             Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
     });
-    if !editing {
+    if !editing_project {
         return html! {
             form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
                 (form_error(errors))
@@ -743,7 +764,7 @@ fn project_form(
     }
     let push_errors_only =
         !errors.is_empty() && errors.fields().all(|f| push_policy::FIELDS.contains(&f));
-    let tabs = [
+    let mut tabs = vec![
         Tab {
             id: "general",
             label: "General",
@@ -755,6 +776,13 @@ fn project_form(
             panel: push_policy::panel(&values.push, errors),
         },
     ];
+    if editing == Editing::AsAdmin {
+        tabs.push(Tab {
+            id: "lifecycle-events",
+            label: "Lifecycle events",
+            panel: project_subscriptions::tab_panel(&values.key),
+        });
+    }
     let open = if push_errors_only {
         "push-checks"
     } else {
@@ -885,7 +913,6 @@ fn projects_region(
     counts: &[ProjectStatusCount],
     forges: &ForgeRoutes,
     shell: &Shell,
-    admin: bool,
 ) -> Markup {
     html! {
         div id="config-list" {
@@ -937,7 +964,6 @@ fn projects_region(
                                     @for (label, status, n) in c.columns() { (td(Cell::Number, count_link(&p.key, status, label, n, None))) }
                                     (td(Cell::Actions, html! {
                                         span class="flex justify-end" {
-                                            @if admin { (subscriptions_link(&p.key, ICON_BUTTON_CLASS)) }
                                             (edit_button(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key)))
                                         }
                                     }))
@@ -965,9 +991,6 @@ fn projects_region(
                                     @for ((label, status, n), (_, tone)) in c.columns().into_iter().zip(COLUMN_TONES) { (count_link(&p.key, status, label, n, Some(tone))) }
                                 }
                             }
-                            @if admin {
-                                (subscriptions_link(&p.key, "flex w-12 shrink-0 items-center justify-center self-stretch text-muted"))
-                            }
                             (open_modal(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key),
                                 "flex w-12 shrink-0 items-center justify-center self-stretch text-muted", icon(Icon::Pencil)))
                         }
@@ -989,7 +1012,6 @@ async fn projects_markup(state: &WebState, user: &CurrentUser) -> Result<Markup,
         &counts,
         &state.forges,
         &Shell::new(user, state),
-        user.has_role(crate::auth::ADMIN_ROLE),
     ))
 }
 
@@ -1025,13 +1047,14 @@ async fn project_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             &credentials,
             &state,
             "Create project",
-            false,
+            Editing::No,
         ),
     )
 }
 
 async fn project_edit(
     State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Response {
@@ -1050,6 +1073,7 @@ async fn project_edit(
         Ok(policy) => policy,
         Err(e) => return internal_error(&e),
     };
+    let editing = Editing::of(true, &user);
     let form = project_form(
         &format!("/projects/{key}"),
         &project_values(&project, &push_policy),
@@ -1057,9 +1081,14 @@ async fn project_edit(
         &credentials,
         &state,
         "Save project",
-        true,
+        editing,
     );
-    dialog_with("modal", "Edit project", DialogStyle::Wide, form).into_response()
+    // The subscription editor's form cannot sit inside the project form (design D2).
+    let body = html! {
+        (form)
+        @if editing == Editing::AsAdmin { (project_subscriptions::form_anchor()) }
+    };
+    dialog_with("modal", "Edit project", DialogStyle::Wide, body).into_response()
 }
 
 async fn project_create(
@@ -1181,7 +1210,7 @@ async fn save_project(
         &credentials,
         &state,
         submit,
-        existing.is_some(),
+        Editing::of(existing.is_some(), &user),
     ))
 }
 

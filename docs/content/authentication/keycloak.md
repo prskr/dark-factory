@@ -36,7 +36,9 @@ kubectl -n dark-factory create secret generic dark-factory-oidc \
 1. **Clients > dark-factory > Roles > Create role**: name `board-member`. Assign it to the users (or
    a group) who may operate the factory.
 2. **Create role** again: name `admin`. Assign it to the users who manage the lifecycle event
-   subscriptions of projects. They need `board-member` as well; `admin` alone opens no page.
+   subscriptions of projects. They find them in the tab "Lifecycle events" of a project's edit
+   dialog, which other users do not see. They need `board-member` as well; `admin` alone opens no
+   page.
 3. **Clients > dark-factory > Client scopes > dark-factory-dedicated > Configure a new mapper >
    User Client Role** (one mapper; it puts every client role of the user into the claim):
 

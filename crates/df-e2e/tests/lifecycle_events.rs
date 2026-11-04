@@ -1,5 +1,5 @@
 //! Lifecycle events of a project through the web UI (`just e2e-local`): a subscription created on
-//! the project's subscription page receives a signed `sandbox.provisioned` event when a task of
+//! the "Lifecycle events" tab of the project dialog receives a signed `sandbox.provisioned` event when a task of
 //! the project starts its first run. The receiver is deploy/e2e/receiver.yaml, reachable over
 //! plain http because the e2e control plane is a `dev-tools` build that runs with
 //! `--unrestricted-project-subscriptions`. Needs the environment of `E2eEnv` and
@@ -24,6 +24,9 @@ const RECEIVER_IN_CLUSTER: &str = "http://receiver.receiver.svc:8080/hook";
 
 const EVENT: &str = "sandbox.provisioned";
 
+/// The content of the project dialog's "Lifecycle events" tab.
+const REGION: &str = "#lifecycle-events";
+
 const UI_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One POST the receiver stored.
@@ -42,6 +45,7 @@ async fn project_subscription_receives_a_signed_sandbox_provisioned_event() -> R
     session.login(&env).await?;
 
     let public_key = subscribe(&session, &env).await?;
+    edit_with_the_submit_button(&session).await?;
     let key = session
         .create_task(&env, data::PROJECT_KEY, "Add a greeting file", None)
         .await?;
@@ -68,25 +72,29 @@ async fn project_subscription_receives_a_signed_sandbox_provisioned_event() -> R
     );
     verify_signature(&delivery, &public_key)?;
 
-    // The page shows the outcome of the last attempt.
+    // The tab shows the outcome of the last attempt.
     open_subscriptions(&session, &env).await?;
     session
-        .expect_region_text("#config-list", "HTTP 204", UI_TIMEOUT)
+        .expect_region_text(REGION, "HTTP 204", UI_TIMEOUT)
         .await
 }
 
-/// Creates a subscription to [`EVENT`] at the receiver; returns the public key the page shows.
+/// Creates a subscription to [`EVENT`] at the receiver by pressing Enter in the URL field, cancels
+/// the project dialog and checks the subscription is still there; returns the public key the tab
+/// shows.
 async fn subscribe(session: &Session, env: &E2eEnv) -> Result<String> {
     open_subscriptions(session, env).await?;
-    let text = session.region_text("#config-list").await?;
+    let text = session.region_text(REGION).await?;
     let public_key = Regex::new(r"whpk_[A-Za-z0-9+/=]+")?
         .find(&text)
-        .with_context(|| format!("public key on the subscription page: {text}"))?
+        .with_context(|| format!("public key in the Lifecycle events tab: {text}"))?
         .as_str()
         .to_owned();
     session
         .page
-        .locator("button[hx-get$='/subscriptions/new']:visible")
+        .locator(format!(
+            "{REGION} button:has-text('New subscription'):visible"
+        ))
         .first()
         .click(None)
         .await
@@ -105,30 +113,105 @@ async fn subscribe(session: &Session, env: &E2eEnv) -> Result<String> {
         .with_context(|| format!("check {EVENT}"))?;
     session
         .page
-        .locator("dialog[open] button:has-text('Create subscription')")
+        .locator("input[name=url]")
+        .press("Enter", None)
+        .await
+        .context("submit the subscription with Enter")?;
+    session
+        .expect_region_text(REGION, RECEIVER_IN_CLUSTER, UI_TIMEOUT)
+        .await?;
+    // Subscriptions save on their own: cancelling the project dialog keeps it.
+    session
+        .page
+        .locator("dialog[open] button:text-is('Cancel'):visible")
+        .last()
         .click(None)
         .await
-        .context("create the subscription")?;
+        .context("cancel the project dialog")?;
+    open_subscriptions(session, env).await?;
     session
-        .expect_region_text("#config-list", RECEIVER_IN_CLUSTER, UI_TIMEOUT)
+        .expect_region_text(REGION, RECEIVER_IN_CLUSTER, UI_TIMEOUT)
         .await?;
     Ok(public_key)
 }
 
+/// Opens "New subscription", then the edit action of the row: only one editor stays open. Saving
+/// the edit with the "Save subscription" button keeps the subscription and closes the editor.
+async fn edit_with_the_submit_button(session: &Session) -> Result<()> {
+    let editors = session.page.locator("#subscription-editor");
+    session
+        .page
+        .locator(format!(
+            "{REGION} button:has-text('New subscription'):visible"
+        ))
+        .first()
+        .click(None)
+        .await
+        .context("open the new-subscription form")?;
+    editors
+        .wait_for(None)
+        .await
+        .context("new-subscription form")?;
+    session
+        .page
+        .locator(format!("{REGION} button[aria-label^='Edit subscription']"))
+        .first()
+        .click(None)
+        .await
+        .context("open the edit form of the row")?;
+    session
+        .page
+        .locator("button:has-text('Save subscription')")
+        .wait_for(None)
+        .await
+        .context("edit form")?;
+    assert_eq!(editors.count().await?, 1, "one subscription editor open");
+    assert_eq!(
+        session.page.locator("input[name=url]").count().await?,
+        1,
+        "one URL field"
+    );
+    session
+        .page
+        .locator("button:has-text('Save subscription')")
+        .click(None)
+        .await
+        .context("save the subscription with the button")?;
+    wait::eventually("the editor closes after saving", UI_TIMEOUT, || async {
+        Ok((editors.count().await? == 0).then_some(()))
+    })
+    .await?;
+    session
+        .expect_region_text(REGION, RECEIVER_IN_CLUSTER, UI_TIMEOUT)
+        .await
+}
+
+/// Opens the project dialog of the project list and its "Lifecycle events" tab.
 async fn open_subscriptions(session: &Session, env: &E2eEnv) -> Result<()> {
     session
         .page
-        .goto(
-            &format!(
-                "{}/projects/{}/subscriptions",
-                env.base_url,
-                data::PROJECT_KEY
-            ),
-            None,
-        )
+        .goto(&format!("{}/projects", env.base_url), None)
         .await
-        .context("open the subscription page")?;
-    Ok(())
+        .context("open the project list")?;
+    session
+        .page
+        .locator(format!(
+            "button[aria-label='Edit project {}']:visible",
+            data::PROJECT_KEY
+        ))
+        .first()
+        .click(None)
+        .await
+        .context("open the project dialog")?;
+    session
+        .page
+        .locator("dialog[open] [role=tab]:has-text('Lifecycle events')")
+        .click(None)
+        .await
+        .context("choose the Lifecycle events tab")?;
+    session
+        .expect_region_text(REGION, "Public key endpoint", UI_TIMEOUT)
+        .await
 }
 
 /// The [`EVENT`] delivery of task `key`, once the receiver has it.

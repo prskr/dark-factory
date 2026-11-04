@@ -356,3 +356,24 @@ async fn an_invalid_glob_reopens_the_push_checks_tab_with_the_error_on_the_field
         PushPolicy::default()
     );
 }
+
+#[tokio::test]
+async fn the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view() {
+    let app = TestApp::new().await;
+    seed(&app.pool).await;
+
+    let html = text(app.get_htmx("/projects/DF/edit", &app.login().await).await).await;
+
+    let tablist = tag_around(&html, "role=\"tablist\"");
+    assert!(
+        tablist.contains("overflow-x-auto") && tablist.contains("md:overflow-visible"),
+        "{tablist}"
+    );
+    assert!(tag_around(&html, "role=\"tab\"").contains("shrink-0"));
+    let script = crate::assets::script_source("tabs.js");
+    assert!(
+        script.contains("scrollIntoView({ block: 'nearest', inline: 'nearest' })"),
+        "{script}"
+    );
+    assert!(script.contains("init()") && script.contains("$watch('tab'"));
+}

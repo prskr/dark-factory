@@ -6,8 +6,8 @@ weight: 3
 The web UI logs users in through an OIDC provider. The control plane is a confidential OIDC client
 (authorization code flow with PKCE, performed server-side). Browsers only get an HTTP-only session
 cookie; tokens stay on the server. Every UI page requires the role `board-member`, read from a flat
-claim of the ID token. The lifecycle event subscriptions of a project
-(`/projects/<KEY>/subscriptions`) also require the role `admin`.
+claim of the ID token. The lifecycle event subscriptions of a project (tab "Lifecycle events" of the
+project's edit dialog) also require the role `admin`.
 
 ```mermaid
 sequenceDiagram
@@ -57,6 +57,7 @@ views (task list, task detail) reconnect at that point, so they stop as well.
 1. Open `https://<public host>/`. You are redirected to the provider and, after login, to `/tasks`.
 2. A user without `board-member` sees `403` with the message *Your account lacks the role
    `board-member`.*
-3. A user with `board-member` but without `admin` sees no lifecycle events link in the project list,
-   and `/projects/<KEY>/subscriptions` answers `403` with *Your account lacks the role `admin`.*
+3. A user with `board-member` but without `admin` sees no tab "Lifecycle events" in the project's edit dialog,
+   and requests for the project's subscriptions (`/projects/<KEY>/subscriptions`) answer `403` with
+   *Your account lacks the role `admin`.*
 4. **Log out** deletes the server-side session and ends the provider session (RP-initiated logout).

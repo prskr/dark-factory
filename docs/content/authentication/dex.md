@@ -46,7 +46,8 @@ strings. The GitHub connector names every team group `<org>:<team>` (for example
 `acme:board-member`), so it cannot provide the group; use Keycloak or another connector instead.
 
 Users who manage the lifecycle event subscriptions of projects also need a group named exactly
-`admin`, provided the same way.
+`admin`, provided the same way. They find the subscriptions in the tab "Lifecycle events" of a
+project's edit dialog.
 
 ## 3. Configure the control plane
 

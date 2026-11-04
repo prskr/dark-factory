@@ -41,6 +41,10 @@ The **Push checks** tab sets what the [Git proxy](../security/git-proxy.md#push-
 this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and
 whether merge commits are allowed.
 
+Users with the role `admin` also see the tab **Lifecycle events**: the instance public key and the
+project's [lifecycle event subscriptions](../integrations/lifecycle-events.md#subscriptions).
+Subscriptions save on their own; **Save project** does not apply to them.
+
 The project list shows the number of queued, running, waiting and done tasks per project.
 
 ## Personas
