@@ -72,7 +72,7 @@ pre-commit:
     # Same command and version as .github/workflows/openspec.yaml; Renovate updates both in one PR.
     openspec-validate:
       glob: 'openspec/**'
-      run: npx --yes @fission-ai/openspec@1.14.3 validate --all --strict --no-interactive
+      run: npx --yes @fission-ai/openspec@1.16.0 validate --all --strict --no-interactive
 
 pre-push:
   # Sequential execution prevents Cargo target/ lock contention
