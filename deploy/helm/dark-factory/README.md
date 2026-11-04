@@ -54,7 +54,7 @@ Every key in `values.yaml` is documented below:
 | `oidc.clientId` | `string` | `"dark-factory"` | OIDC relying-party client ID. |
 | `oidc.existingSecret` | `string` | `"dark-factory-oidc"` | Name of the Secret in the instance namespace containing the OIDC client secret. |
 | `oidc.clientSecretKey` | `string` | `"client-secret"` | Key within `oidc.existingSecret` holding the OIDC client secret. |
-| `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/keycloak.md`. |
+| `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/content/authentication/_index.md`. |
 | `oidc.rolesClaim` | `string` | `"roles"` | Token claim with the flat role list; the UI requires the role `board-member`. |
 | `oidc.extraScopes` | `list` | `[]` | Scopes requested besides `openid` and `profile`, e.g. `[groups, offline_access]` for Dex (`auth.extraScopes` of the instance config). |
 | `logging.format` | `text`/`json` | `text` | `DF_LOG_FORMAT` of the control plane, gateway and migrate job (`json`: one JSON object per line). The control plane sets the same format in every sandbox. Other values fail schema validation. |
@@ -167,7 +167,7 @@ Every key in `values.yaml` is documented below:
 
 ## Telemetry
 
-The control plane and gateway export OpenTelemetry metrics (and optionally traces); the sandbox runtime does not. Instruments and attributes are listed in [`docs/telemetry.md`](../../../docs/telemetry.md).
+The control plane and gateway export OpenTelemetry metrics (and optionally traces); the sandbox runtime does not. Instruments and attributes are listed in [`docs/content/observability/telemetry.md`](../../../docs/content/observability/telemetry.md).
 
 ### Scrape with kube-prometheus-stack
 

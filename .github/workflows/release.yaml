@@ -208,3 +208,39 @@ jobs:
           SHA: ${{ needs.version.outputs.sha }}
         run: |
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$SHA" --title "$VERSION" --generate-notes
+
+  # The tag exists: build the docs from the released commit and publish them. Re-run this job alone
+  # when it fails; publishing the same version again replaces its directory.
+  docs:
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push to gh-pages
+    # Not shared with the main publish: GitHub cancels a pending run when a newer one queues in the
+    # same group, which would drop the docs of a release. Both publishers push with a retry
+    # (.github/actions/publish-docs), so they cannot overwrite each other's paths.
+    concurrency:
+      group: gh-pages-release
+      cancel-in-progress: false
+    env:
+      # BuildBuddy remote cache, as in ci.yaml (docs/development.md); no platform flag, bazel_env builds for the host.
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+          lfs: true # landing page screenshots (docs/landing/images)
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - uses: ./.github/actions/publish-docs
+        with:
+          mode: release
+          version: ${{ needs.version.outputs.version }}
+          token: ${{ github.token }}

@@ -171,7 +171,7 @@ impl Default for ServerConfig {
     }
 }
 
-/// OIDC client settings of the web UI (`docs/keycloak.md`).
+/// OIDC client settings of the web UI (`docs/content/authentication/_index.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AuthConfig {

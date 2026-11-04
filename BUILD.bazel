@@ -31,6 +31,7 @@ bazel_env(
         "hadolint": TOOLS["hadolint"],
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],
+        "hugo": TOOLS["hugo"],
         "jq": TOOLS["jq"],
         "kind": TOOLS["kind"],
         "kingfisher": TOOLS["kingfisher"],

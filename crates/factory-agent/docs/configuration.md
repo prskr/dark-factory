@@ -1,5 +1,8 @@
-# factory-agent configuration reference
-
+---
+title: Sandbox runtime configuration
+linkTitle: Sandbox runtime
+weight: 1
+---
 `factory-agent run` reads its configuration from environment variables. The values are read once at
 startup (`config.rs`).
 

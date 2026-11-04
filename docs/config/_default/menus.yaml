@@ -1,0 +1,49 @@
+# Home and Features lead to the landing page, another build. Hugo prefixes a path like `/` with
+# this build's /docs/<slot>/, so they are absolute URLs; Hextra opens those in a new tab, and
+# assets/js/versions.js turns them into same-tab links to the site root. Documentation opens Getting
+# started of this version. versions.js also fills the Versions dropdown from /versions.json,
+# replacing its placeholder child.
+main:
+  - identifier: home
+    name: Home
+    url: https://www.dark-factory.eu/
+    weight: 1
+    params:
+      type: link
+  - identifier: features
+    name: Features
+    url: https://www.dark-factory.eu/#features
+    weight: 2
+    params:
+      type: link
+  - identifier: documentation
+    name: Documentation
+    pageRef: /getting-started
+    weight: 3
+    params:
+      type: link
+  - identifier: versions
+    name: Versions
+    weight: 4
+    params:
+      type: link
+  - identifier: version-placeholder
+    name: dev
+    url: "#df-version"
+    parent: versions
+  - identifier: search
+    name: Search
+    weight: 5
+    params:
+      type: search
+  - identifier: theme
+    name: Theme
+    weight: 6
+    params:
+      type: theme-toggle
+  - identifier: github
+    name: GitHub
+    url: https://github.com/prskr/dark-factory
+    weight: 7
+    params:
+      icon: github

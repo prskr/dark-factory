@@ -1,5 +1,7 @@
-# df-plugins configuration reference
-
+---
+title: Plugin configuration
+weight: 2
+---
 Section `plugins` of the instance configuration (`/etc/dark-factory/config.yaml`) is a map from plugin
 name to its settings. The host does not know plugin-specific keys; `settings` is passed through to
 the plugin as `wasi:config/store`. `hosts` and `authScheme` are host-side keys: the host enforces
@@ -178,7 +180,7 @@ Projects store no plugin name, so moving a host needs no data change.
 ## GitHub
 
 The `github` plugin serves github.com and GitHub Enterprise Server. Its settings, draft modes and
-error mapping: [plugins/github/README.md](../../../plugins/github/README.md). The Helm chart's default
+error mapping: [plugins/github/README.md](https://github.com/prskr/dark-factory/blob/main/plugins/github/README.md). The Helm chart's default
 values route `github.com` to it.
 
 ### Connect a GitHub repository

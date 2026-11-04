@@ -10,7 +10,7 @@ pre-commit:
       run: bazel build --config=fmt //crates/... //plugins/...
 
     kingfisher:
-      run: build/with_tools.sh kingfisher scan . --staged --no-update-check --no-validate
+      run: build/with_tools.sh kingfisher scan . --staged --no-update-check --no-validate --exclude 'docs/_vendor/**'
 
     buildifier:
       glob: ['*.bazel', '*.bzl']

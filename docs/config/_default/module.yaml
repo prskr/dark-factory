@@ -1,0 +1,30 @@
+# Docs build. Declaring `mounts` replaces Hugo's default mounts, so `content` is listed explicitly.
+# The crate references stay in the crates: they are the files that the crates' documentation tests read.
+mounts:
+  - source: content
+    target: content
+  - source: static
+    target: static
+  - source: layouts
+    target: layouts
+  - source: assets
+    target: assets
+  - source: ../crates/factory-agent/docs
+    target: content/reference/sandbox-runtime
+    files: [configuration.md]
+  - source: ../crates/df-agent-channel/docs
+    target: content/reference/agent-channel
+    files: [configuration.md]
+  # Next to content/integrations/forges/_index.md; Hugo merges both mounts into one section.
+  - source: ../crates/df-plugins/docs
+    target: content/integrations/forges
+    files: [configuration.md]
+  # Web UI fonts, served from the site itself (not copied; see assets/css/custom.css).
+  - source: ../crates/df-web/assets/fonts
+    target: static/fonts
+    files: ["*.woff2"]
+  # The web UI's mark as favicon (layouts/_partials/favicons.html) and the licence of its icons.
+  - source: ../crates/df-web/assets/logo.svg
+    target: static/favicon.svg
+  - source: ../crates/df-web/src/components/LICENSE-Lucide.txt
+    target: static/licenses/lucide.txt

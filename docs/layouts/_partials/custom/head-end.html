@@ -1,0 +1,7 @@
+{{- /* Version switcher and banner (assets/js/versions.js). The landing build has neither. */ -}}
+{{- if not site.Params.landing -}}
+  <meta name="df-docs-version" content="{{ site.Params.docsversion | default "dev" }}" />
+  <meta name="df-docs-slot" content="{{ site.Params.docsslot | default "dev" }}" />
+  {{- $js := resources.Get "js/versions.js" | minify | fingerprint -}}
+  <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+{{- end -}}

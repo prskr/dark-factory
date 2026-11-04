@@ -49,7 +49,7 @@ Harness image (not part of the `sandbox` table; `dark-factory` passes it on as `
 |-----|----------|---------|--------|
 | `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.95.0` | Image of the `claude-code` harness (adapter, Node.js, Claude Code CLI), mounted read-only at `/opt/harness/claude-code` (volume `harness-claude-code`) unless the run's project sets an adapter command. A blank value counts as not configured: a run that needs the image then fails provisioning with a message naming the harness. |
 
-The sandbox also gets `DF_LOG_FORMAT`, set to the control plane's own log format (`text` or `json`), next to `RUST_LOG` from `sandbox.logLevel`. See `docs/logging.md`.
+The sandbox also gets `DF_LOG_FORMAT`, set to the control plane's own log format (`text` or `json`), next to `RUST_LOG` from `sandbox.logLevel`. See `docs/content/observability/logging.md`.
 
 The chart always sets the three name keys from the release's `fullname`; the fallbacks only matter for hand-written configs.
 

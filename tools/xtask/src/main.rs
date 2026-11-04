@@ -94,7 +94,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 14] = [
+const TOOLS: [GithubTool; 15] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -240,6 +240,25 @@ const TOOLS: [GithubTool; 14] = [
             (format!("tailwindcss-{}-{cpu}", p.os), String::new())
         },
     },
+    GithubTool {
+        name: "hugo",
+        repo: "gohugoio/hugo",
+        // Extended build (SCSS, needed by Hextra). macOS ships only a universal installer package
+        // (kind `pkg`, expanded by `pkgutil`); the binary is `Payload/hugo` inside it.
+        asset: |v, p| match (p.os, p.cpu) {
+            ("macos", _) => (
+                format!("hugo_extended_{v}_darwin-universal.pkg"),
+                "Payload/hugo".into(),
+            ),
+            (_, cpu) => {
+                let arch = if cpu == "arm64" { "arm64" } else { "amd64" };
+                (
+                    format!("hugo_extended_{v}_linux-{arch}.tar.gz"),
+                    "hugo".into(),
+                )
+            }
+        },
+    },
 ];
 
 fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> {
@@ -259,7 +278,13 @@ fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> 
                 .and_then(|d| d.strip_prefix("sha256:"))
                 .ok_or_else(|| anyhow!("{}: missing digest for {name}", tool.name))?;
             Ok(Binary {
-                kind: if file.is_empty() { "file" } else { "archive" },
+                kind: if file.is_empty() {
+                    "file"
+                } else if Path::new(&name).extension().is_some_and(|e| e == "pkg") {
+                    "pkg"
+                } else {
+                    "archive"
+                },
                 file: Some(file).filter(|f| !f.is_empty()),
                 url: asset.browser_download_url.clone(),
                 sha256: sha256.into(),
@@ -585,6 +610,40 @@ mod tests {
             (name.as_str(), file.as_str()),
             ("tailwindcss-macos-arm64", "")
         );
+    }
+
+    #[test]
+    fn hugo_asset_names_use_the_extended_build() {
+        let names: Vec<_> = PLATFORMS
+            .iter()
+            .map(|&p| (tool("hugo").asset)("0.169.0", p))
+            .collect();
+        let linux_x86 = ("hugo_extended_0.169.0_linux-amd64.tar.gz", "hugo");
+        let linux_arm = ("hugo_extended_0.169.0_linux-arm64.tar.gz", "hugo");
+        let macos = ("hugo_extended_0.169.0_darwin-universal.pkg", "Payload/hugo");
+        let expected = [linux_x86, linux_arm, macos, macos];
+        for (got, want) in names.iter().zip(expected) {
+            assert_eq!((got.0.as_str(), got.1.as_str()), want);
+        }
+    }
+
+    #[test]
+    fn hugo_macos_is_a_pkg_and_linux_an_archive() {
+        let names = [
+            "hugo_extended_0.169.0_linux-amd64.tar.gz",
+            "hugo_extended_0.169.0_linux-arm64.tar.gz",
+            "hugo_extended_0.169.0_darwin-universal.pkg",
+        ];
+        let r = release("v0.169.0", &names, Some("sha256:abc"));
+        let bins = github_binaries(tool("hugo"), &r).unwrap();
+        assert_eq!(bins.len(), 4);
+        assert!(
+            bins.iter()
+                .all(|b| b.kind == if b.os == "macos" { "pkg" } else { "archive" })
+        );
+        assert!(bins.iter().any(|b| b.os == "macos"
+            && b.cpu == "arm64"
+            && b.file.as_deref() == Some("Payload/hugo")));
     }
 
     #[test]

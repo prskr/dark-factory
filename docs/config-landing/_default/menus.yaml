@@ -1,0 +1,30 @@
+main:
+  - identifier: home
+    name: Home
+    url: /
+    weight: 1
+    params:
+      type: link
+  - identifier: features
+    name: Features
+    url: /#features
+    weight: 2
+    params:
+      type: link
+  - identifier: documentation
+    name: Documentation
+    url: /docs/
+    weight: 3
+    params:
+      type: link
+  - identifier: theme
+    name: Theme
+    weight: 4
+    params:
+      type: theme-toggle
+  - identifier: github
+    name: GitHub
+    url: https://github.com/prskr/dark-factory
+    weight: 5
+    params:
+      icon: github

@@ -32,10 +32,9 @@ Current state:
 
 ```
 docs/
-  config/
-    _default/hugo.yaml     shared config (theme, params, markup)
-    _default/module.yaml   docs mounts (content, crate references, fonts)
-    landing/module.yaml    landing mounts (landing/ as content, fonts)
+  hugo.yaml            shared config (theme import, params, markup)
+  config/_default/     docs build: module.yaml (mounts: content, crate references, fonts), menus.yaml
+  config-landing/_default/   landing build: module.yaml (landing/ as content, fonts), menus.yaml, params.yaml
   go.mod, go.sum       Hugo module requirement on github.com/imfing/hextra
   _vendor/             output of `hugo mod vendor` (committed)
   content/             docs; the home page of this build is the docs start page
@@ -48,7 +47,7 @@ docs/
   development.md, adr/, …   contributor docs, not under content/, so Hugo ignores them
 ```
 
-The docs build runs `hugo --baseURL https://www.dark-factory.eu/docs/<slot>/` with the `_default` configuration. The landing build runs `hugo --environment landing --baseURL https://www.dark-factory.eu/`. Its `config/landing/module.yaml` declares its own `module.mounts`, which replaces the docs mount list (Hugo merges maps but replaces lists), so `landing/` is mounted as `content` and the docs tree is not. `--contentDir` is not used: once `module.mounts` declares a `content` mount, the flag no longer selects the content. Each docs version is a self-contained site with its own search index, which gives per-version search without extra work.
+The docs build runs `hugo --baseURL https://www.dark-factory.eu/docs/<slot>/` with the `_default` configuration. The landing build runs `hugo --configDir config-landing --baseURL https://www.dark-factory.eu/`. Its `config-landing/_default/module.yaml` declares its own `module.mounts`, so `landing/` is mounted as `content` and the docs tree is not. (Implementation note: the first idea, `--environment landing` with `config/landing/`, made Hextra treat the build as non-production: `noindex` robots meta and no fingerprinted CSS. A second config directory keeps the environment `production`.) `--contentDir` is not used: once `module.mounts` declares a `content` mount, the flag no longer selects the content. Each docs version is a self-contained site with its own search index, which gives per-version search without extra work.
 
 - Alternative: one build with `content/_index.md` (landing) and `content/docs/`. Rejected: every versioned build would also contain a frozen landing page, and the docs `baseURL` would have to drop the `/docs` segment that the content path already adds.
 - Alternative: the site in a new top-level `website/` directory. Rejected: the user docs already live in `docs/`.
@@ -62,9 +61,9 @@ The docs build runs `hugo --baseURL https://www.dark-factory.eu/docs/<slot>/` wi
 
 ### D3: Configuration references through mounts
 
-`config/_default/module.yaml` mounts the three crate `docs/` directories into `content/reference/<name>/`, with `includeFiles: configuration.md`. A mount of `content` replaces the default content mount, so `content` itself is mounted explicitly. This mount list applies to the docs build only (D1). Each `configuration.md` gets YAML front matter (`title`, `weight`); the `include_str!` tests search the text and tolerate it.
+`config/_default/module.yaml` mounts the three crate `docs/` directories into `content/reference/<name>/`, with `files: [configuration.md]` (`includeFiles` was removed in Hugo 0.153). A mount of `content` replaces the default content mount, so `content` itself is mounted explicitly. This mount list applies to the docs build only (D1). Each `configuration.md` gets YAML front matter (`title`, `weight`); the `include_str!` tests search the text and tolerate it.
 
-- Risk: if Hugo rejects a mount source outside the project directory, the fallback is a copy step in `publish.sh` and in the `just` recipe before the build. Task 1.3 checks this first.
+- Checked in task 1.3: Hugo 0.169 accepts mount sources outside the project directory, so the copy fallback is not needed.
 
 ### D4: Publishing with `docs/publish.sh` on the `gh-pages` branch
 
@@ -79,9 +78,9 @@ GitHub Pages serves the `gh-pages` branch, root directory. `publish.sh <site che
 
 - `release <version>` stops before any write when `<version>` is older than the newest version in `versions.json` (numeric `YYYY.M.N` comparison). The same version is accepted again, so a re-run of a failed docs job replaces its own directory. An old workflow run that is re-run therefore cannot move `latest` back.
 - `/docs/index.html` is a meta refresh (plus a link) to `latest/` when `versions.json` lists a release, otherwise to `dev/`. Both modes regenerate it, so the first release switches it.
-- `versions.json` is `{"versions": [{"version": "2026.11.1", "latest": true}, {"version": "2026.11.0"}]}`; `dev` is implicit. It is updated with `jq` from multitool.
-- The script uses `rsync --delete` per owned directory, never on the site root. `publish_test.sh` runs both modes against a temporary directory and asserts ownership: a `main` run leaves `/docs/2026.11.0/` and `versions.json` untouched, a second release keeps the first, and `release 2026.11.0` after `2026.11.1` fails without changing anything.
-- The workflows check out `gh-pages` into a worktree, run the script, and commit and push. Both workflows share `concurrency: gh-pages` without cancellation.
+- `versions.json` is `{"versions": [{"version": "dev"}, {"version": "2026.11.1", "latest": true}, {"version": "2026.11.0"}]}`: `dev` first, then the releases newest first. A `release` run writes it; `main` does not, so before the first release the file does not exist and `versions.js` falls back to `dev` only. The version order is one comparison in `jq` (numeric `YYYY.M.N`); versions with leading zeros (`2026.08.1`) are rejected. `dev` is ignored for the newest release, the refusal and the `/docs/` forward. It is updated with `jq` from multitool.
+- The script replaces each owned directory as a whole (`rm -rf` and `mv` of the freshly built one; no `rsync`, which dev machines may lack), never the site root. Everything is built into a temporary directory first. `publish_test.sh` runs both modes against a temporary directory and asserts ownership: a `main` run leaves `/docs/2026.11.0/` and `versions.json` untouched, a second release keeps the first, and `release 2026.11.0` after `2026.11.1` fails without changing anything.
+- The workflows call `docs/push.sh` (through the composite action `publish-docs`, which also sets up the pinned tools and builds the auth header). `push.sh` initialises the site directory, fetches `gh-pages`, runs `publish.sh`, commits and pushes; a rejected push means the other publisher was faster, so it fetches again, resets to the new branch and publishes again, up to three attempts. The write token reaches only the git calls that talk to the remote (ls-remote, fetch and push, scoped to the remote URL), not `publish.sh`, Hugo or `jq`; `push_test.sh` tests the script against a bare repository. GitHub cancels a pending run when a newer one queues in the same concurrency group, even with `cancel-in-progress: false`, so a shared group could drop the docs of a release behind two pushes to `main`. The `main` publish and the release `docs` job therefore use separate groups (`gh-pages-main`, `gh-pages-release`); a superseded pending `main` run is harmless. Since the two can push at the same time, the retry keeps neither from overwriting the other's paths.
 - Alternative: `actions/deploy-pages` with an uploaded artifact. Rejected: each deploy replaces the whole site, so every deploy would have to rebuild or download all versions.
 
 ### D5: Switcher and banner in one script
@@ -107,7 +106,7 @@ Values are copied from `input.css`, and a comment names the source. A shared tok
 
 ### D7: Internal link check in a render hook
 
-`layouts/_markup/render-link.html` checks links to pages: a relative link without a file extension or ending in `.md` (fragment and query removed) is resolved with `.Page.GetPage`, and the build stops with `errorf` naming the page and the link when the target is missing. Relative links with another extension (images, files from `static/`) pass through. Same-site links must be relative: an absolute link to `www.dark-factory.eu` or `dark-factory.eu` stops the build, so no site link escapes the check. Other external links pass through unchecked. Links from published pages to unpublished repository files become absolute `https://github.com/prskr/dark-factory/blob/main/…` URLs in the sources.
+`layouts/_markup/render-link.html` (mounts Hextra's own hook as a partial through the module import, validates, then delegates to it, so no theme code is copied) checks links to pages: a relative link without a file extension or ending in `.md` (fragment and query removed) is resolved with `.Page.GetPage`, and the build stops with `errorf` naming the page and the link when the target is missing. Relative links with another extension (images, files from `static/`) pass through. A root-relative page link (`/operations/telemetry/`) is checked like a relative one in the docs build; only the landing build (`params.landing`) skips them, because it links to `/docs/`, which the other build produces. Same-site links must be relative: an absolute link to `www.dark-factory.eu` or `dark-factory.eu` stops the build, so no site link escapes the check. Other external links pass through unchecked. Links from published pages to unpublished repository files become absolute `https://github.com/prskr/dark-factory/blob/main/…` URLs in the sources.
 
 ### D8: Docs entry in df-web
 

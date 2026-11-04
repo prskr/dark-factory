@@ -11,6 +11,8 @@
 //! "path/to/file.rs" = "reason"
 //! ```
 //!
+//! Files under `docs/_vendor/` (vendored Hugo theme) are never checked.
+//!
 //! An entry for a missing file, a file within the limit, or without a reason fails the check.
 
 use std::path::Path;
@@ -22,6 +24,9 @@ use crate::common;
 const SOURCE_EXTENSIONS: [&str; 13] = [
     "rs", "proto", "wit", "bzl", "bazel", "sh", "js", "ts", "css", "html", "toml", "yaml", "yml",
 ];
+
+/// Third-party code that is committed as is (Hugo's vendored theme).
+const VENDORED_PREFIXES: [&str; 1] = ["docs/_vendor/"];
 
 pub(crate) fn run(root: &Path, files: &[String]) -> Result<()> {
     let files = common::files_or_tracked(root, files)?;
@@ -45,7 +50,7 @@ fn check(root: &Path, files: &[String]) -> Result<Vec<String>> {
     };
 
     let mut out = Vec::new();
-    for file in files.iter().filter(|f| is_source(f)) {
+    for file in files.iter().filter(|f| is_source(f) && !is_vendored(f)) {
         let Some(lines) = count_lines(root, file) else {
             continue;
         };
@@ -70,6 +75,10 @@ fn check(root: &Path, files: &[String]) -> Result<Vec<String>> {
         }
     }
     Ok(out)
+}
+
+fn is_vendored(file: &str) -> bool {
+    VENDORED_PREFIXES.iter().any(|p| file.starts_with(p))
 }
 
 fn is_source(file: &str) -> bool {
@@ -170,6 +179,14 @@ mod tests {
         file(&dir, "small.rs", 1);
         assert_eq!(violations(&dir, &["small.rs"]), "");
         assert!(violations(&dir, &["big.rs"]).contains("big.rs"));
+    }
+
+    #[test]
+    fn vendored_third_party_code_is_not_checked() {
+        let dir = repo("");
+        fs::create_dir_all(dir.path().join("docs/_vendor")).unwrap();
+        file(&dir, "docs/_vendor/theme.js", 99);
+        assert_eq!(violations(&dir, &["docs/_vendor/theme.js"]), "");
     }
 
     #[test]

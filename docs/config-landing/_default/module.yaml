@@ -1,0 +1,19 @@
+# Landing build: `landing/` is the content, the docs tree is not mounted.
+mounts:
+  - source: landing
+    target: content
+  - source: static
+    target: static
+  - source: layouts
+    target: layouts
+  - source: assets
+    target: assets
+  # Web UI fonts, served from the site itself (not copied; see assets/css/custom.css).
+  - source: ../crates/df-web/assets/fonts
+    target: static/fonts
+    files: ["*.woff2"]
+  # The web UI's mark as favicon (layouts/_partials/favicons.html) and the licence of its icons.
+  - source: ../crates/df-web/assets/logo.svg
+    target: static/favicon.svg
+  - source: ../crates/df-web/src/components/LICENSE-Lucide.txt
+    target: static/licenses/lucide.txt
