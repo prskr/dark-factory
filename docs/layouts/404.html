@@ -1,0 +1,13 @@
+{{- /* Served by GitHub Pages for every missing path; only the landing build's copy is at the site root. */ -}}
+{{ define "main" }}
+  <main id="content" class="df-not-found">
+    <h1>Page not found</h1>
+    <p>This page does not exist, or not in this version of the docs.</p>
+    <p>
+      <a id="df-not-found-docs" href="/docs/">Documentation</a>
+      · <a href="/">Home</a>
+    </p>
+    {{- $js := resources.Get "js/not-found.js" | minify | fingerprint }}
+    <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+  </main>
+{{ end }}

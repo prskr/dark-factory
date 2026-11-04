@@ -1,0 +1,45 @@
+# Shared by the docs and the landing build (the mounts differ: config/ and config-landing/).
+title: Dark Factory
+baseURL: https://www.dark-factory.eu/
+enableRobotsTXT: true
+disableKinds: [taxonomy, term, RSS]
+
+# Hextra is a Hugo module, vendored in _vendor (see `just docs-theme-update`). Its link render
+# hook is also mounted as a partial, so ours can validate a link and then delegate the rendering
+# to it (layouts/_markup/render-link.html).
+module:
+  imports:
+    - path: github.com/imfing/hextra
+      mounts:
+        - {source: archetypes, target: archetypes}
+        - {source: assets, target: assets}
+        - {source: data, target: data}
+        - {source: i18n, target: i18n}
+        - {source: layouts, target: layouts}
+        - {source: static, target: static}
+        - {source: layouts/_markup/render-link.html, target: layouts/_partials/hextra-render-link.html}
+
+markup:
+  highlight:
+    noClasses: false
+
+params:
+  theme:
+    default: system
+    # No second switcher in the sidebar and footer: the navbar has one (menu entry `theme`).
+    displayToggle: false
+  navbar:
+    displayTitle: true
+    displayLogo: true
+    # The web UI's mark in its two theme colors (static/images); the favicon is the UI's own file.
+    logo:
+      path: images/logo.svg
+      dark: images/logo-dark.svg
+      width: 22
+      height: 22
+  footer:
+    displayCopyright: false
+    displayPoweredBy: false
+  search:
+    enable: true
+    type: flexsearch

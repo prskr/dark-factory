@@ -1,0 +1,24 @@
+{{- /*
+  Fails the build for a link that cannot work on the published site, then renders it like Hextra.
+  - A relative link to a page (no file extension, or `.md`) must resolve to a page of the site.
+  - A link to the site's own domain must be relative, so that it is checked and works in every version.
+  - A root-relative page link (`/operations/telemetry/`) is checked the same way in the docs build. The
+    landing build (`params.landing`) skips them: it links to `/docs/`, which the docs build produces.
+  Other links pass through: external ones, `mailto:`, fragments and files from `static/`.
+*/ -}}
+{{- $url := urls.Parse .Destination -}}
+{{- if and $url.IsAbs (in (slice "www.dark-factory.eu" "dark-factory.eu") $url.Hostname) -}}
+  {{- errorf "%s: link %q points to the site itself; use a relative link" .Page.File.Path .Destination -}}
+{{- end -}}
+{{- $ext := path.Ext $url.Path -}}
+{{- $rooted := hasPrefix $url.Path "/" -}}
+{{- if and (not $url.IsAbs) $url.Path (or (eq $ext "") (eq $ext ".md")) (not (and $rooted site.Params.landing)) -}}
+  {{- $target := strings.TrimSuffix ".md" $url.Path -}}
+  {{- if not $rooted -}}
+    {{- $target = path.Join .PageInner.File.Dir $target -}}
+  {{- end -}}
+  {{- if not (.PageInner.GetPage $target) -}}
+    {{- errorf "%s: broken link %q: no page %q" .Page.File.Path .Destination $target -}}
+  {{- end -}}
+{{- end -}}
+{{- partial "hextra-render-link.html" . -}}

@@ -119,6 +119,8 @@ async fn pages_use_tokens_only_and_load_nothing_from_third_parties() {
             "{uri}: {:?}",
             palette_classes(&html)
         );
+        // The Docs entry of the profile menu is a link the user follows, not a loaded resource.
+        let html = html.replace("href=\"https://www.dark-factory.eu/docs/", "href=\"/docs/");
         for attr in ["src=\"http", "href=\"http", "url(http", "@import"] {
             assert!(
                 !html.contains(attr),

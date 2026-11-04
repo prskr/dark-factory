@@ -73,7 +73,7 @@ Prerequisites: `lifecycle-events` (outbox), `iter2-task-volume-lifecycle` (reten
   - `500` when storing fails;
   - no session and no CSRF token is needed;
   - the counter per outcome.
-  Add the metric to `docs/telemetry.md`.
+  Add the metric to `docs/content/observability/telemetry.md`.
 - [ ] 5.4 Add the "Wake tasks on reviews and mentions" select to the project form modal (spec `configuration-management`), audited with the other fields. Draw the field in PenPot first (`docs/design-workflow.md`). Verify with `df-web` form tests: store, audit, and show on the next edit
 
 ## 6. Helm

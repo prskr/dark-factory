@@ -1,0 +1,39 @@
+name: Publish the docs site
+description: Runs docs/publish.sh into a checkout of the gh-pages branch, commits and pushes the result (openspec change docs-site, design D4). The caller checks out the repository without credentials, sets up Bazel and sets BAZEL_ARGS (remote cache).
+inputs:
+  mode:
+    description: "`main` or `release`"
+    required: true
+  version:
+    description: Release version (`YYYY.M.N`), required for mode `release`
+    required: false
+    default: ""
+  token:
+    description: "Token with contents write permission; only the ls-remote, fetch and push of gh-pages use it, scoped to the remote URL"
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Pinned tools
+      shell: bash
+      # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
+      run: bazel run $BAZEL_ARGS //:bazel_env || test -x .bazel_env/bin/hugo
+
+    # docs/push.sh: fetch, publish, commit, push; a rejected push (the other publisher, main or
+    # release, pushed first) is retried on top of the new gh-pages, at most 3 attempts.
+    - name: Publish
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        # the token goes into the requests of ls-remote, fetch and push only (scoped to the remote URL), never into .git/config
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+        echo "::add-mask::${header#AUTHORIZATION: basic }"
+        export PUSH_AUTH_HEADER="$header"
+        args=("$MODE")
+        if [[ "$MODE" == release ]]; then args+=("$VERSION"); fi
+        # push.sh hands the header to git only; TOKEN is not needed past this point
+        env -u TOKEN build/with_tools.sh docs/push.sh "$RUNNER_TEMP/site" "https://github.com/$GITHUB_REPOSITORY" "${args[@]}"

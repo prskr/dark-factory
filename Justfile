@@ -129,6 +129,23 @@ buf-format:
 update-tools:
     cargo xtask update-tools
 
+# --- Docs site (Hugo + Hextra, see docs/releasing.md) ----------------------------------------------
+
+# Serve the docs on http://localhost:1313 with live reload
+docs-serve:
+    build/with_tools.sh hugo server --source docs
+
+# Build the site as `publish.sh main` would publish it into target/docs-site (landing page at /, docs at /docs/dev/)
+docs-build:
+    rm -rf target/docs-site
+    mkdir -p target/docs-site
+    build/with_tools.sh docs/publish.sh target/docs-site main
+
+# Update the vendored Hextra theme to a release tag, e.g. `just docs-theme-update v0.13.0` (needs Go; check light and dark afterwards)
+docs-theme-update TAG:
+    cd docs && ../build/with_tools.sh hugo mod get github.com/imfing/hextra@{{TAG}}
+    cd docs && ../build/with_tools.sh hugo mod vendor
+
 # --- Deployment ----------------------------------------------------------------------------------
 
 # Push the images and deploy the Helm chart to the dev cluster (DARK_FACTORY_REGISTRY/_RELEASE/_NAMESPACE override the defaults)

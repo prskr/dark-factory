@@ -21,7 +21,7 @@ No container-backed tests are needed. The release workflow itself can only be ve
   - `bazel --bazelrc=.bazelrc.agents build //crates/dark-factory --//build:version=2026.11.0` produces a binary whose OTel resource reports `2026.11.0`, checked by a Bazel test that sets the flag through a transition or `env`;
   - the build without the flag reports `dev`.
 - [x] 2.4 Set the workspace `version` in `Cargo.toml` to `0.0.0`. Verify that `cargo build --workspace` and `cargo xtask check-crates` pass.
-- [x] 2.5 Document `DF_VERSION` (build-time variable, optional, default `dev`) in the `telemetry` reference (`docs/telemetry.md`, `service.version` row). Verify that the doc names the flag and the cargo variant.
+- [x] 2.5 Document `DF_VERSION` (build-time variable, optional, default `dev`) in the `telemetry` reference (`docs/content/operations/telemetry.md`, `service.version` row). Verify that the doc names the flag and the cargo variant.
 
 ## 3. Helm chart
 

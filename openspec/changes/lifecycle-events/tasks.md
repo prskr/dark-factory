@@ -61,7 +61,7 @@
   - a deleted subscription gives up its jobs;
   - one dead receiver does not block another.
 - [ ] 4.5 Start the dispatcher on leadership gain and stop it on loss, next to the existing leader tasks in `crates/dark-factory/src/sandbox.rs`, keeping the `JoinHandle`. Add the hourly cleanup (7 days, plus unreferenced `lifecycle_events`). Verify with a test that a non-leader sends nothing and that the cleanup removes old rows
-- [ ] 4.6 Add the metric `df_outbox_jobs_total{kind,result}` and `df_lifecycle_event_deliveries_total{result}` (`delivered`, `failed`, `gave_up`, `refused`) and document both in `docs/telemetry.md`; verify with the metrics test helper
+- [ ] 4.6 Add the metric `df_outbox_jobs_total{kind,result}` and `df_lifecycle_event_deliveries_total{result}` (`delivered`, `failed`, `gave_up`, `refused`) and document both in `docs/content/observability/telemetry.md`; verify with the metrics test helper
 
 ## 5. Admin role and project subscription UI
 
@@ -69,7 +69,7 @@
   - `board-member` alone gets 403 naming `admin` on the subscription routes;
   - `board-member` plus `admin` gets 200.
 - [ ] 5.2 Add the `admin` group to `admin@example.com` in `dev/dex.yaml` and `deploy/e2e/dex.yaml` and update the comments there; verify `just serve-local` login shows the subscription settings
-- [ ] 5.3 Manual (df-dev Keycloak, realm `apps`): create the client role `admin` on the Dark Factory client next to `board-member`; verify the existing client-role mapper emits it in the `roles` claim (see `docs/keycloak.md`); document the steps in `docs/keycloak.md`
+- [ ] 5.3 Manual (df-dev Keycloak, realm `apps`): create the client role `admin` on the Dark Factory client next to `board-member`; verify the existing client-role mapper emits it in the `roles` claim (see `docs/content/authentication/keycloak.md`); document the steps in `docs/content/authentication/keycloak.md`
 - [ ] 5.4 Manual (df-dev Keycloak): assign `admin` to the operators who manage project subscriptions; verify a fresh login on `df-dev` shows the subscription settings and a user without the role gets 403
 - [ ] 5.5 Write failing tests, then build the subscription section in project settings. Verify with `cargo test -p df-web subscriptions` (container-backed). The tests cover:
   - list, create, edit and delete;

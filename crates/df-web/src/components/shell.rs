@@ -6,6 +6,9 @@ use super::icons::{Icon, icon, logo};
 use crate::layout::{Nav, Shell};
 use crate::requests::count_badge;
 
+/// Where the docs of every version live (`docs/` of the repository, published per release).
+const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
+
 const SECTIONS: [(Nav, &str, &str, Icon); 7] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Requests, "/requests", "Requests", Icon::Inbox),
@@ -121,7 +124,8 @@ fn bar_link(active: Nav, target: Nav, href: &str, label: &str, glyph: Icon) -> M
     }
 }
 
-/// The avatar of the signed-in board member with a menu: name, role, log out and the version.
+/// The avatar of the signed-in board member with a menu: name, role, a link to the docs of the
+/// running version, log out and the version.
 /// The caller decides where it shows (phone header: `md:hidden`; rail). The menu opens below the
 /// avatar on phones and above it, left-aligned, from 768 px.
 pub fn profile_menu(shell: &Shell) -> Markup {
@@ -142,6 +146,11 @@ pub fn profile_menu(shell: &Shell) -> Markup {
                     div class="text-xs text-faint" { "board member" }
                 }
                 div class="my-1 border-t border-line" {}
+                a href=(format!("{DOCS_URL}/{version}/")) target="_blank" rel="noopener"
+                    aria-label="Docs (opens in a new tab)"
+                    class="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm text-ink hover:bg-sunk" {
+                    (icon(Icon::ExternalLink)) "Docs"
+                }
                 button type="button" hx-post="/logout"
                     class="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm text-ink hover:bg-sunk" {
                     (icon(Icon::LogOut)) "Log out"
@@ -320,6 +329,32 @@ mod tests {
         assert!(html.contains("hx-post=\"/logout\""));
         assert!(html.contains("Dark Factory 2026.11.0"), "{html}");
         assert!(html.contains("size-11") && html.contains("min-h-11"));
+    }
+
+    #[test]
+    fn profile_menu_opens_the_docs_of_the_running_version_in_a_new_tab() {
+        let html = profile_menu(&shell("Ada", "2026.11.0")).into_string();
+        assert!(
+            html.contains("href=\"https://www.dark-factory.eu/docs/2026.11.0/\""),
+            "{html}"
+        );
+        assert!(html.contains("target=\"_blank\"") && html.contains("rel=\"noopener\""));
+        assert!(html.contains("aria-label=\"Docs (opens in a new tab)\""));
+        assert!(html.contains("min-h-11"), "touch target");
+        let docs = html.find("Docs</a>").expect("Docs entry");
+        assert!(
+            docs < html.find("Log out").expect("Log out"),
+            "Docs above Log out"
+        );
+    }
+
+    #[test]
+    fn profile_menu_docs_link_of_an_unstamped_build_points_to_the_dev_docs() {
+        let html = profile_menu(&shell("Ada", "dev")).into_string();
+        assert!(
+            html.contains("href=\"https://www.dark-factory.eu/docs/dev/\""),
+            "{html}"
+        );
     }
 
     #[test]

@@ -1,0 +1,5 @@
+# Landing build only: the page lays out its sections with HTML wrappers, as Hextra's own home page
+# does. The docs build keeps Goldmark's default (raw HTML is not rendered).
+goldmark:
+  renderer:
+    unsafe: true

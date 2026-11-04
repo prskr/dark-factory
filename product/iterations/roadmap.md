@@ -129,6 +129,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |
 | Push-check exceptions for a whole project instead of one task | idea | `openspec/changes/archive/2026-11-02-iter2-push-checks` (non-goal) |
 | Declarative configuration import | idea | F4 |
+| Docs site: preview of the docs for every pull request (today the PR job only builds) | idea | `openspec/changes/docs-site` (non-goal) |
+| Docs site: check external links (dead URLs) in CI | idea | `openspec/changes/docs-site` (D7: only links within the site are checked) |
+| Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/docs-site` (Risks) |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |

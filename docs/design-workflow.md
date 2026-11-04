@@ -16,7 +16,7 @@ Draft. PenPot is the master of the UI design. Agents compare the running web UI 
 Run these before the first comparison of a session:
 
 1. `/mcp` lists `penpot` and one of `playwright` (local) or `playwright-container` as connected. A server missing here is not configured in any scope.
-2. PenPot: open the file in the browser, open the MCP plugin and connect it. Then run `penpot.currentFile.name` through `execute_code`; it must return `App Design` and `penpotUtils.getPages()` must list the nine pages. "Plugin tab appears to be suspended" means the tab is in the background: focus it and run `/mcp`.
+2. PenPot: open the file in the browser, open the MCP plugin and connect it. Then run `penpot.currentFile.name` through `execute_code`; it must return `App Design` and `penpotUtils.getPages()` must list the pages of [The design file](#the-design-file). "Plugin tab appears to be suspended" means the tab is in the background: focus it and run `/mcp`.
 3. Playwright: `browser_resize` to 1440 x 1000, open `http://127.0.0.1:8080/` and check with `browser_evaluate` that `innerWidth` is 1440. An error about a missing browser means step 2 or 3 of the Fedora setup below is open.
 4. App: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/` returns `303` while `just serve-local` runs.
 
@@ -54,13 +54,19 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Page | Content |
 |---|---|
 | Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance) |
-| Desktop | Main workspace and its variants |
-| Phone | Phone boards |
+| Chat | Chats, new chat with persona picker, chat artifacts, archive; desktop and phone |
+| Tasks | Main task workspace and its variants (status menu, stop, cancel, reset, rename, blocked question, rate limited), profile menu, Requests · deny always |
+| Tasks - Queue | Queued messages: many, editing one |
+| Tasks - Status | Task status `in_review` |
+| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed |
+| Tasks - Phone | Phone boards of tasks and requests, profile menu (main component `Profile menu`) |
+| Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
-| Config | Projects, personas, credentials, error page |
+| Request Inbox | Request inbox |
+| Config | Projects, personas, credentials, error page; desktop and phone |
 | Empty states | One board per empty state |
-| Later | Boards for features that are not built yet |
-| Network | Traffic view, egress rules, their modals |
+| Network | Egress rules: table, search, new and edit modals, empty state |
+| Network - Graph | Traffic view: graph, table, allow and deny flows |
 | Rejected | Boards that are not built and not planned |
 
 Colours are tokens in the sets `light` and `dark` (theme `Mode`). Light boards bound to tokens preview in dark by switching the theme; there are no separate dark boards. Tokens are not shared with other files, so the components and tokens stay in this one file.
@@ -120,13 +126,13 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 
 | Board (page / name) | Route | Data | Viewport |
 |---|---|---|---|
-| Network / Network · live traffic | `/egress/log` | `--demo-flows` | 1440 |
-| Network / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
-| Network / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
-| Network / Network · allow from a row, with scope | `/egress/log` | `--demo-flows`; a `not-allowlisted` event of a run, "Allow" clicked | 1440 |
-| Network / Network · narrow table, blocked row menu | `/egress/log` | `--demo-flows`; menu of a `not-allowlisted` row open | 1280 |
-| Network / Network · allow from a graph node (hover) | `/egress/log` | `--demo-flows`; pointer on a blocked node | 1440 |
-| Network / Network · allow from a graph node, across tasks | `/egress/log` | `--demo-flows`; blocked node with denied edges from two tasks of one project, "Allow" clicked | 1440 |
+| Network - Graph / Network · live traffic (interactive) | `/egress/log` | `--demo-flows` | 1440 |
+| Network - Graph / Network · scrolled | `/egress/log` | `--demo-flows` | 1440 |
+| Network - Graph / Network · narrow table, actions menu | `/egress/log` | `--demo-flows` | 1280 |
+| Network - Graph / Network · allow from a row, with scope | `/egress/log` | `--demo-flows`; a `not-allowlisted` event of a run, "Allow" clicked | 1440 |
+| Network - Graph / Network · narrow table, blocked row menu | `/egress/log` | `--demo-flows`; menu of a `not-allowlisted` row open | 1280 |
+| Network - Graph / Network · allow from a graph node (hover) | `/egress/log` | `--demo-flows`; pointer on a blocked node | 1440 |
+| Network - Graph / Network · allow from a graph node, across tasks | `/egress/log` | `--demo-flows`; blocked node with denied edges from two tasks of one project, "Allow" clicked | 1440 |
 | Network / Egress rules · table with task entries | `/egress/allowlist` | manual seed (not built): instance, project and task `http-host` entries | 1440 |
 | Network / Egress rules · deny rule listed | `/egress/allowlist` | manual seed (not built): `http-host` entries and deny rule `*.datadoghq.com` | 1440 |
 | Network / Egress rules · new rule, allow | `/egress/allowlist` | "New egress rule" clicked | 1440 |
@@ -134,30 +140,30 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Network / Egress rules · search and pages | `/egress/allowlist?page=2` | manual seed (not built): 33 rules, the last of them deny rule `*.datadoghq.com` | 1440 |
 | Network / Egress rules · search results | `/egress/allowlist?q=github` | as Egress rules · search and pages | 1440 |
 | Network - Graph / Network · deny rule and deny always | `/egress/log` | `--demo-flows` and deny rule `*.datadoghq.com`; a denied event of a matching host | 1440 |
-| Desktop / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
-| Desktop / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
-| Desktop / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
-| Desktop / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
-| Desktop / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
-| Desktop / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
-| Desktop / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
-| Desktop / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
+| Tasks / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
+| Tasks - Status / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
+| Tasks - Details Sidebar / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
+| Tasks - Queue / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
+| Tasks - Details Sidebar / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
+| Tasks / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
+| Tasks / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
+| Tasks / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
 | Tasks / Desktop · reset workspace | `/tasks/<id>` | manual seed (not built): task `waiting` with ended runs; Status menu open | 1440 |
 | Tasks / Desktop · reset workspace confirmation | `/tasks/<id>` | as Desktop · reset workspace; "Reset workspace…" chosen | 1440 |
 | Tasks / Desktop · reset workspace while running | `/tasks/<id>` | as Desktop · stop and cancel; Status menu open | 1440 |
-| Tasks / Desktop · profile menu | `/tasks/<id>` | as Desktop · light; avatar on the rail clicked (component `Profile menu`, main in Tasks - Phone / Phone · profile menu) | 1440 |
+| Tasks / Desktop · profile menu | `/tasks/<id>` | as Desktop · light; avatar on the rail clicked (component `Profile menu`, main in Tasks - Phone / Phone · profile menu; entries name and role, Docs, Log out, version) | 1440 |
 | Tasks - Phone / Phone · profile menu | `/tasks` | avatar clicked | 390 |
-| Desktop / Desktop · rate limited, resumes | `/tasks/<id>` | manual seed (not built): task `rate_limited` with resume time 04:30, resume count 2 of `runs.maxAutoResumes` 3, run #2 `rate_limited` | 1440 |
+| Tasks / Desktop · rate limited, resumes | `/tasks/<id>` | manual seed (not built): task `rate_limited` with resume time 04:30, resume count 2 of `runs.maxAutoResumes` 3, run #2 `rate_limited` | 1440 |
 | Request Inbox / Requests · inbox | `/requests` | manual seed (not built): pending `push-check-exception` request (DF-17, two findings), pending `network-access` approval, blocking question with suggested answers | 1440 |
 | Tasks / Requests · deny always | `/requests` | manual seed (not built): pending `network-access` request of DF-7 for `http-intake.logs.us5.datadoghq.com:443` | 1440 |
-| Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
-| Phone / Phone · stop and cancel | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |
-| Phone / Phone · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 390 |
+| Tasks - Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
+| Tasks - Phone / Phone · stop and cancel | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |
+| Tasks - Phone / Phone · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 390 |
 | Tasks - Phone / Phone · reset workspace | `/tasks/<id>` | as Desktop · reset workspace; details sheet and Status menu open | 390 |
 | Tasks - Phone / Phone · reset workspace confirmation | `/tasks/<id>` | as Desktop · reset workspace; "Reset workspace…" chosen | 390 |
 | Tasks - Phone / Phone · reset workspace while running | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |
-| Phone / Phone · stop from composer | `/tasks/<id>` | task `running`, message box empty | 390 |
-| Phone / Phone · rate limited, resumes | `/tasks/<id>` | as Desktop · rate limited, resumes; details sheet open | 390 |
+| Tasks - Phone / Phone · stop from composer | `/tasks/<id>` | task `running`, message box empty | 390 |
+| Tasks - Phone / Phone · rate limited, resumes | `/tasks/<id>` | as Desktop · rate limited, resumes; details sheet open | 390 |
 | Tasks - Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
 | Tasks - Phone / Phone · requests, deny always | `/requests` | as Requests · deny always | 390 |
 | Config / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |

@@ -58,6 +58,8 @@ pub enum Icon {
     BotMessage,
     /// Generic Git (branch).
     Git,
+    /// A link that opens in a new tab (Lucide `external-link`).
+    ExternalLink,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -104,6 +106,7 @@ impl Icon {
         Self::Wrench,
         Self::BotMessage,
         Self::Git,
+        Self::ExternalLink,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
@@ -187,6 +190,9 @@ impl Icon {
             Self::Play => {
                 "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>"
             }
+            Self::ExternalLink => {
+                "<path d=\"M15 3h6v6\"/><path d=\"M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>"
+            }
             Self::Link => {
                 "<path d=\"M9 17H7A5 5 0 0 1 7 7h2\"/><path d=\"M15 7h2a5 5 0 1 1 0 10h-2\"/><line x1=\"8\" x2=\"16\" y1=\"12\" y2=\"12\"/>"
             }
@@ -259,6 +265,11 @@ mod tests {
                 .body()
                 .contains("cx=\"7.5\" cy=\"15.5\" r=\"5.5\"")
         );
+    }
+
+    #[test]
+    fn the_external_link_icon_is_the_lucide_one() {
+        assert!(Icon::ExternalLink.body().contains("M15 3h6v6"));
     }
 
     #[test]

@@ -1,0 +1,94 @@
+name: Docs
+
+# Builds the site (openspec change docs-site, docs/releasing.md "Docs site"): on every pull request
+# that touches it, and on `main` also publishes the landing page and /docs/dev/ to gh-pages.
+# Releases publish their own docs from release.yaml.
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "crates/*/docs/**"
+      - "crates/df-web/assets/fonts/**"
+      - "multitool.lock.json"
+      - ".github/workflows/docs.yaml"
+      - ".github/actions/publish-docs/**"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "crates/*/docs/**"
+      - "crates/df-web/assets/fonts/**"
+      - "multitool.lock.json"
+      - ".github/workflows/docs.yaml"
+      - ".github/actions/publish-docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # BuildBuddy remote cache, as in ci.yaml (docs/development.md); no platform flag, bazel_env builds for the host.
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          lfs: true # landing page screenshots (docs/landing/images)
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
+      - name: Pinned tools
+        run: bazel run $BAZEL_ARGS //:bazel_env || test -x .bazel_env/bin/hugo
+
+      - name: Script tests
+        run: |
+          build/with_tools.sh docs/publish_test.sh
+          build/with_tools.sh docs/links_test.sh
+          build/with_tools.sh docs/push_test.sh
+
+      # The same build as `just docs-build`: landing page at /, docs at /docs/dev/. Fails on broken links.
+      - name: Build
+        run: |
+          mkdir -p target/docs-site
+          build/with_tools.sh docs/publish.sh target/docs-site main
+
+  # Only after a merge, and one publish at a time (releases publish in their own group, `gh-pages-release`)
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push to gh-pages
+    # Own group: a newer pending main publish may replace an older pending one. Releases publish in
+    # the group `gh-pages-release`, which main pushes never cancel.
+    concurrency:
+      group: gh-pages-main
+      cancel-in-progress: false
+    env:
+      # BuildBuddy remote cache, as in ci.yaml (docs/development.md); no platform flag, bazel_env builds for the host.
+      BAZEL_ARGS: >-
+        --config=cache --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          lfs: true # landing page screenshots (docs/landing/images)
+
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - uses: ./.github/actions/publish-docs
+        with:
+          mode: main
+          token: ${{ github.token }}

@@ -1,5 +1,8 @@
-# df-agent-channel configuration and behavior reference
-
+---
+title: Agent channel configuration
+linkTitle: Agent channel
+weight: 2
+---
 `dark-factory serve` starts the agent port and the run scheduler. Settings come from the instance
 configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 
@@ -116,7 +119,7 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
   (`task_messages.forwarded_at` set) are sent again, held-back ones are claimed (marked forwarded)
   and sent only while no turn is open (no persisted `TurnStarted` without a later `TurnEnded`).
   After a persisted `TurnEnded` the held-back prompts are sent. See "Queued messages reach the
-  runtime between turns" in [`contract/README.md`](../../../contract/README.md).
+  runtime between turns" in [`contract/README.md`](https://github.com/prskr/dark-factory/blob/main/contract/README.md).
   `HarnessCredentials` precede `Assign` because the runtime ignores credentials that arrive later.
 - Timeouts: `enforce_timeouts` ends every overdue run it can; a run that fails to end (or whose
   row cannot be read) is logged and does not stop the others.

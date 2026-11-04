@@ -1,0 +1,109 @@
+/* Dark Factory theme for Hextra: the web UI's accent, neutral and text colors and its fonts.
+   Values come from crates/df-web/styles/input.css (tokens `app`, `ink`, `line`, `accent-text`);
+   Hextra's own utility classes are not copied or redefined, only its CSS variables. */
+
+/* Hextra derives its primary scale (links use 600, i.e. 90 % of the lightness) from these
+   three values. Light: link text #006100 on #fafaf9; dark: #3cff6c on #0c0a09. */
+:root {
+  --primary-hue: 135deg;
+  --primary-saturation: 100%;
+  --primary-lightness: 21%;
+  --df-line: #e7e5e4; /* line; the landing page screenshot frame */
+}
+
+.dark {
+  --primary-hue: 135deg;
+  --primary-saturation: 100%;
+  --primary-lightness: 68%;
+  --df-line: #2e2a27; /* line */
+}
+
+/* Neutrals: page background, text and borders. */
+body {
+  background-color: #fafaf9; /* app */
+  color: #1c1917; /* ink */
+}
+
+.dark body {
+  background-color: #0c0a09; /* app */
+  color: #f5f5f4; /* ink */
+}
+
+.hx\:border-gray-200,
+.hx\:border-neutral-200\/70 {
+  border-color: #e7e5e4; /* line */
+}
+
+.dark .hx\:dark\:border-neutral-800,
+.dark .hx\:dark\:border-primary-100\/10 {
+  border-color: #2e2a27; /* line */
+}
+
+/* Fonts: the files are the web UI's (mounted into static/fonts); the path is relative to this
+   stylesheet (css/compiled/main.css), so it works under every /docs/<slot>/ prefix. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../../fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("../../fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+html {
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+}
+
+/* Current entry of the Versions menu (assets/js/versions.js). */
+.df-version-current {
+  font-weight: 600;
+}
+
+/* Banner above the navbar: outdated release or unreleased dev docs. */
+.df-docs-banner {
+  padding: 0.5rem 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  background-color: #dcfce7; /* accent-soft */
+  color: #1c1917; /* ink */
+}
+
+.dark .df-docs-banner {
+  background-color: #052e16; /* accent-soft */
+  color: #f5f5f4; /* ink */
+}
+
+.df-docs-banner a {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.df-not-found {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.df-not-found h1 {
+  font-size: 1.875rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.df-not-found a {
+  text-decoration: underline;
+}

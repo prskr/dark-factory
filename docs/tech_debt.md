@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-100.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-101.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -129,6 +129,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
+| TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
 
 ## Entries
 
@@ -956,3 +957,15 @@ The chart defaults carry `image.testProject` (`ghcr.io/prskr/dark-factory/test-p
 **Matters when:** a user reads the defaults as a list of what an installation needs, or someone relies on the helper without an owner.
 
 **Fix:** decide whether the test project is a chart value at all. Either move it to `values-dev.yaml`/`values-e2e.yaml` and drop the helper and schema entry, or keep it and use it in a template.
+
+Origin of TD-100: implementation of `docs-site` (2026-11-04).
+
+### TD-100 (docs-site). Old doc versions are never pruned
+
+`docs/publish.sh`, branch `gh-pages` (`/docs/<version>/`)
+
+Every release adds a directory of about 5 MB to `gh-pages` and keeps it forever. The branch also keeps every earlier version of those files in its Git history.
+
+**Matters when:** `gh-pages` approaches the GitHub Pages size limit (1 GB) or clones of the branch get slow.
+
+**Fix:** a `publish.sh prune <keep>` mode that removes old release directories, drops them from `versions.json` and squashes the branch history; decide which versions the docs keep supporting first.
