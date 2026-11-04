@@ -95,10 +95,11 @@ tests:
           value: ["dark-factory-sandboxes"]
         documentIndex: 10
 
-  - it: renders release-prefixed ClusterRole when clusterTargets.anyNamespace is true
+  - it: renders a namespace- and release-prefixed ClusterRole when clusterTargets.anyNamespace is true
     template: rbac.yaml
     release:
       name: inst-a
+      namespace: prod
     set:
       clusterTargets.anyNamespace: true
     asserts:
@@ -109,14 +110,90 @@ tests:
         documentIndex: 6
       - equal:
           path: metadata.name
-          value: inst-a-dark-factory-cluster-targets-reader
+          value: prod-inst-a-dark-factory-cluster-targets-reader
         documentIndex: 6
+      - equal:
+          path: metadata.name
+          value: prod-inst-a-dark-factory-cluster-targets-reader
+        documentIndex: 7
+      - equal:
+          path: roleRef.name
+          value: prod-inst-a-dark-factory-cluster-targets-reader
+        documentIndex: 7
       - contains:
           path: rules
           content:
             apiGroups: [""]
             resources: ["services"]
             verbs: ["get", "list", "watch"]
+        documentIndex: 6
+
+  - it: names cluster-scoped RBAC and target-namespace Roles after the release namespace so same-named releases do not collide
+    template: rbac.yaml
+    release:
+      name: dark-factory
+      namespace: dark-factory-dev
+    set:
+      clusterTargets.namespaces:
+        - forgejo
+    asserts:
+      - hasDocuments:
+          count: 10
+      - equal:
+          path: metadata.name
+          value: dark-factory-dev-dark-factory-cluster-target-reader
+        documentIndex: 6
+      - equal:
+          path: roleRef.name
+          value: dark-factory-dev-dark-factory-cluster-target-reader
+        documentIndex: 7
+      - isKind:
+          of: ClusterRole
+        documentIndex: 8
+      - equal:
+          path: metadata.name
+          value: dark-factory-dev-dark-factory-sandbox-ns-reader
+        documentIndex: 8
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 9
+      - equal:
+          path: metadata.name
+          value: dark-factory-dev-dark-factory-sandbox-ns-reader
+        documentIndex: 9
+      - equal:
+          path: roleRef.name
+          value: dark-factory-dev-dark-factory-sandbox-ns-reader
+        documentIndex: 9
+
+  - it: shortens long cluster-scoped names to 63 characters with a hash that keeps them unique
+    template: rbac.yaml
+    release:
+      name: dark-factory
+      namespace: team-platform-engineering-production
+    set:
+      clusterTargets.anyNamespace: true
+    asserts:
+      - equal:
+          path: metadata.name
+          value: team-platform-engineering-produ-38b26355-cluster-targets-reader
+        documentIndex: 6
+      - equal:
+          path: metadata.name
+          value: team-platform-engineering-produ-38b26355-sandbox-ns-reader
+        documentIndex: 8
+
+  - it: gives a namespace with the same long prefix a different hash
+    template: rbac.yaml
+    release:
+      name: dark-factory
+      namespace: team-platform-engineering-production-us
+    set:
+      clusterTargets.anyNamespace: true
+    asserts:
+      - equal:
+          path: metadata.name
+          value: team-platform-engineering-produ-b57c13e5-cluster-targets-reader
         documentIndex: 6
 
   - it: creates sandbox namespace objects when sandboxNamespace.create is true
