@@ -36,8 +36,14 @@ rules:
     - Every out-of-scope item that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); an item that is not wanted says "rejected".
   design:
     - Every non-goal that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); a non-goal that is not wanted says "rejected".
+  tasks:
+    - Every change that alters what a user or operator sees or configures (UI behavior, configuration keys, Helm values, environment variables, metrics, logs, install or upgrade steps, architecture, security properties) has a task that updates the published docs (docs/content/, and the crate references mounted from crates/*/docs/), names the pages to change or create, and is verified with `just docs-build`. A change without such effects says so in one line instead.
 
 operations:
+  apply:
+    guidance:
+      - Update the published docs (docs/content/ and the mounted crate references) in the same change as the behavior they describe, and run `just docs-build`, which also checks links. Describe only what is built; never document planned behavior as existing.
   archive:
     guidance:
+      - Before archiving, check that the published docs (docs/content/ and the mounted crate references) describe what the change built. If a page is missing or outdated, list the gaps to the user and fix them (or have them fixed) before archiving; never archive with known documentation gaps.
       - Before archiving, check the change's out-of-scope items and non-goals against product/iterations/roadmap.md. Add a backlog row (item, status, reference to the archived change) for every real follow-up that is neither in an iteration nor in the backlog, and show the rows to the user before writing them.

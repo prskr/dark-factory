@@ -191,6 +191,7 @@ This project runs untrusted agent code. Treat everything the agent can influence
 
 ## Documentation
 
+- User and operator documentation is the published site in `docs/content/` (plus the crate references mounted from `crates/*/docs/`, see `docs/config/_default/module.yaml`). Every change that alters what users or operators see or configure updates it in the same change; `just docs-build` checks the links. Contributor docs (`docs/*.md`, ADRs, `design/`) are not published.
 - New or changed configuration options, environment variables and system behavior get a reference entry (variable, required or optional, default, effect).
 - Prefer scenario-based how-to guides for common operations and diagrams (Mermaid) for state machines and interactions.
 - Keep prose short and technical.

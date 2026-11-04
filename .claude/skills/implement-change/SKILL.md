@@ -34,7 +34,7 @@ The implementer cannot ask questions and has no judgement about the look, so the
 
 ## 2. Implement
 
-Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Before every fix round, probe the socket again and pass the current status: a socket can stop answering, or come back, during a run. Remember its agent ID so later rounds can reach it with `SendMessage`.
+Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Before every fix round, probe the socket again and pass the current status: a socket can stop answering, or come back, during a run. Remember its agent ID so later rounds can reach it with `SendMessage`. Tell it in every case to update the published docs (`docs/content/` and the crate references mounted from `crates/*/docs/`) for everything the change builds, even if `tasks.md` has no docs task, to describe only what is built, and to run `just docs-build`.
 
 When it reports:
 - `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/opsx:update` and stop.
@@ -49,7 +49,7 @@ When it reports:
    - Round 2 and later: `HEAD_prev...HEAD`, only what the last fix round changed, plus the ledger check.
 3. Spawn all three reviewers **in parallel** in one message:
    - `subagent_type: standards-reviewer`: diff command, commit list, standards files, the smell baseline pasted in full, the ledger rows.
-   - `subagent_type: spec-reviewer`: diff command, commit list, the change's context files (`openspec instructions apply --change <name> --json`, with `--store`, → `contextFiles`), the ledger rows.
+   - `subagent_type: spec-reviewer`: diff command, commit list, the change's context files (`openspec instructions apply --change <name> --json`, with `--store`, → `contextFiles`), the ledger rows, and the instruction to check that the published docs (`docs/content/`, mounted crate references) describe what the diff builds, no more and no less.
    - `subagent_type: security-reviewer`: `mode: find`, diff command, commit list, the ledger rows.
 4. Filter the Security findings as in step 4b of the code-review skill (one parallel `mode: verify` agent per finding, drop below confidence 8). Record dropped findings in the ledger as `rejected (verifier: <reason>)`.
 
@@ -65,6 +65,7 @@ For every finding, decide each of the following and record it in the ledger.
 - A security issue: untrusted input not validated, an agent-controlled path or symlink followed, a secret logged or written under `/data`.
 - A breach of a MUST rule in AGENTS.md: a panic, `unwrap` or `expect` on input or I/O in a production path; a lock held across `.await`; a network wait without a timeout; a spawned task without an owner; a fixed bug without a regression test.
 - A plain `cargo` build or test breaks without Bazel, or the `.sqlx/` metadata is stale.
+- The published docs do not cover what the change built: a new or changed setting, Helm value, UI behavior, metric, install or upgrade step, architecture or security property without its page in `docs/content/` (or the crate reference mounted from `crates/*/docs/`), docs that still describe the old behavior, or docs that describe planned behavior as built.
 
 **Non-blocking**, with a priority:
 - **P1, fix now**: cheap to fix and in code this change touches (a missing doc entry for a new setting, a misleading error message, a simple duplication).
@@ -102,16 +103,17 @@ When no blocking finding is open, or the user chose "Stop here" (or the fix-roun
 
 1. **Container tests.** Reviewers only read code, so a container-backed test that never ran leaves the paths it covers unverified. If any implementer report lists skipped container-backed tests, probe the socket again. If one answers, send the implementer a fix round that runs them (cargo crate by crate and `bazel --bazelrc=.bazelrc.agents test //crates/... //plugins/...`, which runs test binaries in parallel); a failure is a blocking finding. If none answers, ask with `AskUserQuestion`: "Start the socket and retry (Recommended)" / "Finish untested". Never record `done` on "Finish untested": the status is `untested`, with the skipped tests listed.
 2. **Bazel build.** Reviewers only read code. If the change touched any `Cargo.toml` or `Cargo.lock`, run `bazel --bazelrc=.bazelrc.agents build --lockfile_mode=error //crates/... //plugins/...` (see the `rust` skill). A failure goes back to the implementer as a blocking fix round.
-3. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
+3. **Docs.** Run `just docs-build` (it fails on broken links between pages) and list the docs pages the change added or changed in the report. A failed build, or a change that alters what users or operators see without a docs page, goes back to the implementer as a blocking fix round.
+4. **Tech debt.** Append every P2 entry to `docs/tech_debt.md` in its existing format:
    - the next free ID from the header, and update the "next free ID" line
    - an "Origin of TD-x to TD-y: code review of `<change>` (<date>)" line
    - a summary table row and a `### TD-n (<finding IDs>). <title>` entry: what is wrong, when it matters, how to fix it
    
    Show the user the entries before you write them.
    - **Deferred work.** Follow-ups that are not defects (out-of-scope items and non-goals of the change, features cut during the rounds) go to `product/iterations/roadmap.md`, not to `docs/tech_debt.md`: a backlog row (item, status, reference to the change) unless an iteration or the backlog already lists them. Show the rows to the user before you write them.
-4. **Ledger.** Set the status to `done` only if no blocking finding is open and the container-backed tests ran (step 1). If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
-5. **Commit** the ledger, the tech-debt and the roadmap changes: `wip(<change>): review log and tech debt` (the ledger status is `done`, `untested` or `stopped` as above).
-6. **Report**:
+5. **Ledger.** Set the status to `done` only if no blocking finding is open and the container-backed tests ran (step 1). If the user stopped with blocking findings open, set `stopped` and list them; never record `done` in that case. List the TD IDs created.
+6. **Commit** the ledger, the tech-debt and the roadmap changes: `wip(<change>): review log and tech debt` (the ledger status is `done`, `untested` or `stopped` as above).
+7. **Report**:
    - status (`done`, `untested` with the skipped container tests, or `stopped` with the open blocking findings), tasks `n/m`, rounds run
    - findings fixed, deferred (with TD IDs), cosmetic, rejected
    - container tests skipped (from the implementer reports): lead the report with them if the status is `untested`
