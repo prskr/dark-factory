@@ -1,0 +1,1 @@
+(()=>{const e=/^\/docs\/([A-Za-z0-9.]+)\//.exec(location.pathname)?.[1],t=document.getElementById("df-not-found-docs");if(!e||!t)return;t.href=`/docs/${e}/`,t.textContent=`Start page of the ${e} docs`})()
