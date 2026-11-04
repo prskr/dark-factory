@@ -7,7 +7,7 @@ Notifies external systems, after the fact and at least once, when a task's volum
 ## ADDED Requirements
 
 ### Requirement: Volume provisioned event
-The control plane SHALL emit `volume.provisioned` exactly once per task, when the task's volume is created for the first time. The event SHALL carry the run whose scheduling created the volume.
+The control plane SHALL emit `volume.provisioned` exactly once per volume creation, when a run is scheduled and the task's volume does not exist. A volume created again after `volume.destroyed` SHALL emit it again. The event SHALL carry the run whose scheduling created the volume.
 
 #### Scenario: First run creates the volume
 - **WHEN** the first run of task `DF-42` is scheduled and the volume `task-df-42` does not exist yet
@@ -16,6 +16,10 @@ The control plane SHALL emit `volume.provisioned` exactly once per task, when th
 #### Scenario: Continuation run
 - **WHEN** a later run of `DF-42` is scheduled and the volume already exists
 - **THEN** no `volume.provisioned` event is emitted
+
+#### Scenario: Volume created again after a reset
+- **WHEN** the workspace of `DF-42` was reset (`volume.destroyed` with reason `reset`) and the next run of `DF-42` is scheduled
+- **THEN** one `volume.provisioned` event for `DF-42` with that run is emitted
 
 ### Requirement: Volume destroyed event
 The control plane SHALL emit `volume.destroyed` when a task's volume is deleted, with a `reason` of `retention` or `reset` and without a run.

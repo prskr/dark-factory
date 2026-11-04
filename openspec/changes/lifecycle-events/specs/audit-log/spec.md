@@ -15,4 +15,4 @@ The control plane SHALL write an audit entry for every state-changing action by 
 
 #### Scenario: Subscription change is audited
 - **WHEN** admin Peter adds a subscription to project `DF`
-- **THEN** an audit entry with action `event_subscription.create`, roles `[board-member, admin]`, the project as resource and the URL and event types in the details exists
+- **THEN** an audit entry with action `event_subscription.create`, roles `[board-member, admin]`, resource type `event_subscription` with the subscription ID as resource, and the project key, URL and event types in the details exists

@@ -23,3 +23,14 @@ The chart SHALL expose `lifecycleEvents.subscriptions`, a list of objects with `
 #### Scenario: Unknown event type
 - **WHEN** a subscription lists `sandbox.started`
 - **THEN** rendering fails schema validation
+
+### Requirement: Extra control plane arguments
+The chart SHALL expose `controlPlane.extraArgs`, a list of strings (default empty), and append each value quoted to the control plane's `serve` arguments.
+
+#### Scenario: Extra argument rendered
+- **WHEN** the chart is rendered with `controlPlane.extraArgs: [--unrestricted-project-subscriptions]`
+- **THEN** the control plane container's arguments end with `serve` followed by `--unrestricted-project-subscriptions`
+
+#### Scenario: Default
+- **WHEN** the chart is rendered with default values
+- **THEN** the control plane container's arguments end with `serve`
