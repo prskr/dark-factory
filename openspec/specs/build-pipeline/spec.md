@@ -80,15 +80,15 @@ The repository SHALL provide a reference project image with git, bash, curl, CA 
 - **THEN** `node` and `claude-agent-acp` are absent
 
 ### Requirement: Reference images are checked and published
-CI SHALL build the harness image and the reference project image and run their structure checks for every pull request that changes either; a release SHALL push both for `linux/amd64` and `linux/arm64` to `ghcr.io/prskr/dark-factory/claude-harness` (tagged with the adapter version) and `ghcr.io/prskr/dark-factory/claude-project`.
+CI SHALL build the harness image and the reference project image and run their structure checks for every pull request that changes either; a release SHALL push both for `linux/amd64` and `linux/arm64` to `ghcr.io/prskr/dark-factory/claude-harness` (tagged with the adapter version) and `ghcr.io/prskr/dark-factory/claude-project` (tagged with the release version). A release SHALL NOT push a `latest` tag of either image.
 
 #### Scenario: Broken harness image in a pull request
 - **WHEN** a pull request changes the Dockerfile so that `bin/claude-agent-acp` is missing or not executable
 - **THEN** the CI job fails
 
 #### Scenario: Release
-- **WHEN** a release tag is pushed
-- **THEN** `claude-harness:<adapter version>` and `claude-project:<release tag>` exist for amd64 and arm64
+- **WHEN** release `2026.11.0` has finished
+- **THEN** `claude-harness:<adapter version>` and `claude-project:2026.11.0` exist for amd64 and arm64, and neither image has a tag `latest` written by the release
 
 ### Requirement: Lint rules have one source
 Lint levels SHALL be declared only in the Cargo manifests (`[workspace.lints]` and the crates' `[lints]`) and in `clippy.toml`. The Bazel lint run SHALL apply the same lints as `cargo clippy --all-targets --all-features` to every Rust library, binary and test of the workspace, including integration tests under `tests/`. Code outside the Cargo workspace (`tools/xtask`) SHALL be linted by the pre-push hook.

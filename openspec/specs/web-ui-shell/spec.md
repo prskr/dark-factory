@@ -6,11 +6,11 @@ The frame every page of the web UI shares: navigation per form factor, responsiv
 ## Requirements
 
 ### Requirement: Desktop navigation rail
-At widths of 768 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Tasks, Projects, Personas and Credentials, and a log-out action. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
+At widths of 768 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Tasks, Projects, Personas and Credentials, and at its bottom the signed-in board member's avatar that opens the profile menu. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
 
 #### Scenario: Rail on the task page
 - **WHEN** a board member opens `/tasks` at 1440 px width
-- **THEN** the rail shows the new-task action, Tasks marked as current, Projects, Personas, Credentials and log out
+- **THEN** the rail shows the new-task action, Tasks marked as current, Projects, Personas, Credentials and the avatar, and no separate log-out button
 
 #### Scenario: Section names as tooltips
 - **WHEN** the rail is rendered
@@ -19,6 +19,10 @@ At widths of 768 px and more, every authenticated page SHALL show a navigation r
 #### Scenario: Rail in a split-screen window
 - **WHEN** a board member opens `/tasks` at 900 px width
 - **THEN** the rail is shown and no bottom bar
+
+#### Scenario: Log out from the rail
+- **WHEN** a board member at 1440 px width activates the avatar on the rail and chooses Log out
+- **THEN** the session ends and the browser leaves the UI
 
 ### Requirement: Phone bottom bar
 Below 768 px, every authenticated page SHALL show a bottom bar instead of the rail. The bar SHALL hold only navigation entries, evenly distributed across its width: Tasks, Requests (with the pending count) and Projects. Neither the bottom bar nor the floating create button SHALL appear while a task's transcript is shown; its message input takes the place.
@@ -114,3 +118,25 @@ Text buttons SHALL be 40 px high from 1024 px (at least 44 px below) with a 10 p
 #### Scenario: Scope radio
 - **WHEN** a pending approval with scopes is rendered
 - **THEN** the preselected scope radio is drawn in the accent text color, not the browser's default blue
+
+### Requirement: Version in the profile menu
+The profile menu SHALL show `Dark Factory <version>` below its actions in the muted text style, with the version the control plane reports (`dev` for unstamped builds). The menu SHALL be the same on the rail and on the phone.
+
+#### Scenario: Released instance
+- **WHEN** a board member opens the profile menu on an instance running release `2026.11.0`
+- **THEN** the menu shows `Dark Factory 2026.11.0`
+
+#### Scenario: Dev build
+- **WHEN** a board member opens the profile menu on an instance built without a version
+- **THEN** the menu shows `Dark Factory dev`
+
+### Requirement: Docs link in the profile menu
+The profile menu SHALL contain a Docs entry above Log out that opens `https://www.dark-factory.eu/docs/<version>/` in a new tab, with `<version>` the version the control plane reports, or `https://www.dark-factory.eu/docs/dev/` for an unstamped build. The entry SHALL show an external-link icon and its accessible name SHALL say that it opens in a new tab.
+
+#### Scenario: Released instance
+- **WHEN** a board member on an instance running `2026.11.0` chooses Docs in the profile menu
+- **THEN** `https://www.dark-factory.eu/docs/2026.11.0/` opens in a new tab and the UI tab stays open
+
+#### Scenario: Dev build
+- **WHEN** the instance was built without a version
+- **THEN** the Docs entry links to `https://www.dark-factory.eu/docs/dev/`

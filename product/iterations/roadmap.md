@@ -129,9 +129,10 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |
 | Push-check exceptions for a whole project instead of one task | idea | `openspec/changes/archive/2026-11-02-iter2-push-checks` (non-goal) |
 | Declarative configuration import | idea | F4 |
-| Docs site: preview of the docs for every pull request (today the PR job only builds) | idea | `openspec/changes/docs-site` (non-goal) |
-| Docs site: check external links (dead URLs) in CI | idea | `openspec/changes/docs-site` (D7: only links within the site are checked) |
-| Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/docs-site` (Risks) |
+| Docs site: preview of the docs for every pull request (today the PR job only builds) | idea | `openspec/changes/archive/2026-11-04-docs-site` (non-goal) |
+| Docs site: check external links (dead URLs) in CI | idea | `openspec/changes/archive/2026-11-04-docs-site` (D7: only links within the site are checked) |
+| Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/archive/2026-11-04-docs-site` (Risks) |
+| Showcase seed: tasks with runs, transcripts, queued messages and requests in `just seed` (design-workflow build order step 2); then real screenshots of the task views for the landing page cards | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
@@ -176,5 +177,5 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Waking a task on CI success or recovery | idea | `openspec/changes/iter3-ci-tools` |
 | Re-running or cancelling CI jobs from a factory tool | idea | `openspec/changes/iter3-ci-tools` |
 | CI and PR read tools (`list_pull_requests`, `read_ci_status`, `read_ci_log`) in chats | idea | `openspec/changes/iter3-ci-tools` |
-| Signing of images and the Helm chart (cosign) and SBOMs for releases | idea | `openspec/changes/release-versioning` |
-| Pruning old images and chart versions from GHCR | idea | `openspec/changes/release-versioning` |
+| Signing of images and the Helm chart (cosign), SBOMs and provenance attestations for releases | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
+| Pruning old images and chart versions from GHCR | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
