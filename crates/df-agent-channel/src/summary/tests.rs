@@ -512,6 +512,41 @@ async fn hidden_blocks_of_a_user_message_stay_out_of_the_assign_summary() -> any
 }
 
 #[tokio::test]
+async fn forge_activity_stays_out_of_the_assign_summary() -> anyhow::Result<()> {
+    use df_proto::transcript::v1::{PullRequestOpened, forge_activity};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run1 = env.insert_run(env.task.id, 1, "running").await;
+    insert_event(
+        &pool,
+        env.task.id,
+        run1,
+        1,
+        "user_message",
+        json!({"userMessage": {"content": [{"text": {"text": "please fix"}}]}}),
+    )
+    .await;
+    let opened = df_db::transcript::forge_event(df_proto::transcript::v1::ForgeActivity {
+        kind: Some(forge_activity::Kind::PullRequestOpened(PullRequestOpened {
+            number: 12,
+            url: "https://forge.example.test/pulls/12".into(),
+            draft: true,
+        })),
+    });
+    let mut tx = pool.begin().await?;
+    let lock = df_db::transcript::lock_run_and_task(&mut tx, run1, env.task.id).await?;
+    df_db::transcript::append_control_event(&mut tx, &lock, "pr-opened:12", &opened).await?;
+    tx.commit().await?;
+
+    let summary = run_two_summary(&env, &pool, run1).await?;
+
+    assert!(summary.contains("User: please fix"), "{summary}");
+    assert!(!summary.contains("pulls/12"), "{summary}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn stored_events_of_a_previous_run_become_summary_entries() -> anyhow::Result<()> {
     use df_proto::transcript::v1 as wire;
     use wire::event::Kind;

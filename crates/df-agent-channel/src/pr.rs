@@ -6,8 +6,12 @@
 //! completed run there is no next trigger, so each step there runs even if the one before failed.
 
 use df_core::{IntegrationError, NewPullRequest, PullRequest, RepoRef, TaskId, TaskStatus};
+use df_db::transcript::{append_control_event, forge_event, lock_run_and_task};
 use df_db::{Notification, publish};
 use df_proto::agent::v1::{PushReport, PushStatus, PushTarget, WorkspaceState};
+use df_proto::transcript::v1::{
+    ForgeActivity, PullRequestOpened, PullRequestReady, forge_activity,
+};
 use sqlx::PgPool;
 
 use crate::ChannelContext;
@@ -46,9 +50,15 @@ pub async fn on_run_end(
             return;
         }
     };
-    let mut pr_number = current.task.pr_number;
-    if pr_number.is_none() && (pushed || completed) {
-        pr_number = try_ensure_draft(ctx, &current).await.unwrap_or_else(|e| {
+    let mut pr = match RecordedPr::of_task(&current.task) {
+        Ok(pr) => pr,
+        Err(e) => {
+            tracing::warn!(error = %e, task_id = %rc.task.id, "task has an invalid pull request number");
+            return;
+        }
+    };
+    if pr.is_none() && (pushed || completed) {
+        pr = try_ensure_draft(ctx, &current).await.unwrap_or_else(|e| {
             tracing::warn!(error = %e, task_id = %rc.task.id, "pull request creation failed; retrying on next trigger");
             None
         });
@@ -57,16 +67,23 @@ pub async fn on_run_end(
     if !completed || current.task.status == TaskStatus::Cancelled {
         return;
     }
-    let Some(number) = pr_number.and_then(|n| u64::try_from(n).ok()) else {
+    let Some(RecordedPr { number, url }) = pr else {
         return;
     };
-    if let Err(e) = ctx
+    match ctx
         .forge
         .mark_pull_request_ready(&rc.project.id, number)
         .await
     {
+        Ok(_) => {
+            if let Err(e) = record_ready(&ctx.pool, rc, number, url).await {
+                tracing::warn!(error = %e, task_id = %rc.task.id, "failed to record the ready pull request");
+            }
+        }
         // A completed run has no later trigger: still post the summary.
-        tracing::warn!(error = %e, task_id = %rc.task.id, "failed to mark the pull request ready");
+        Err(e) => {
+            tracing::warn!(error = %e, task_id = %rc.task.id, "failed to mark the pull request ready");
+        }
     }
     match completion_summary(&ctx.pool, rc.task.id).await {
         Ok(summary) if !summary.is_empty() => {
@@ -96,14 +113,40 @@ pub async fn ensure_draft(ctx: &ChannelContext, rc: &RunContext) {
     }
 }
 
-/// Returns the number of the task's PR, opening or finding and recording it if `current` (a
-/// freshly loaded context) has none.
+/// The pull request recorded on a task.
+struct RecordedPr {
+    number: u64,
+    /// Empty if the task row has none.
+    url: String,
+}
+
+impl RecordedPr {
+    /// The PR of the task row, if it has one. A negative stored number is `InvalidData`.
+    fn of_task(task: &df_db::TaskRow) -> Result<Option<Self>, ChannelError> {
+        task.pr_number
+            .map(|number| Self::from_row(number, task.pr_url.clone()))
+            .transpose()
+    }
+
+    fn from_row(number: i64, url: Option<String>) -> Result<Self, ChannelError> {
+        let number = u64::try_from(number).map_err(|_negative| {
+            ChannelError::InvalidData("stored pull request number out of range".into())
+        })?;
+        Ok(Self {
+            number,
+            url: url.unwrap_or_default(),
+        })
+    }
+}
+
+/// Returns the task's PR, opening or finding and recording it if `current` (a freshly loaded
+/// context) has none.
 async fn try_ensure_draft(
     ctx: &ChannelContext,
     current: &RunContext,
-) -> Result<Option<i64>, ChannelError> {
-    if current.task.pr_number.is_some() {
-        return Ok(current.task.pr_number);
+) -> Result<Option<RecordedPr>, ChannelError> {
+    if let Some(recorded) = RecordedPr::of_task(&current.task)? {
+        return Ok(Some(recorded));
     }
     // Serialize per task, also across control-plane replicas: the lock is held until the PR is
     // recorded, so a second caller sees the PR the first one opened. It is released when `tx`
@@ -114,13 +157,13 @@ async fn try_ensure_draft(
         .bind(format!("task-pr:{}", current.task.id))
         .execute(&mut *tx)
         .await?;
-    let (recorded, status): (Option<i64>, String) =
-        sqlx::query_as("SELECT pr_number, status FROM tasks WHERE id = $1")
+    let (recorded, url, status): (Option<i64>, Option<String>, String) =
+        sqlx::query_as("SELECT pr_number, pr_url, status FROM tasks WHERE id = $1")
             .bind(current.task.id.as_uuid())
             .fetch_one(&mut *tx)
             .await?;
-    if recorded.is_some() {
-        return Ok(recorded);
+    if let Some(number) = recorded {
+        return RecordedPr::from_row(number, url).map(Some);
     }
     let (head, base) = (current.task_branch(), current.project.base_branch.clone());
     let project = current.project.id;
@@ -153,9 +196,12 @@ async fn try_ensure_draft(
             Err(e) => return Err(e.into()),
         }
     };
-    record_pr(&mut tx, current.task.id, &pr).await?;
+    record_pr(&mut tx, current, &pr).await?;
     tx.commit().await?;
-    Ok(i64::try_from(pr.id.number).ok())
+    Ok(Some(RecordedPr {
+        number: pr.id.number,
+        url: pr.url,
+    }))
 }
 
 fn new_pull_request(
@@ -200,14 +246,19 @@ pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
     }
 }
 
+/// Records `pr` on the task and, if it was not recorded yet, writes the forge activity to the
+/// transcript of the run that triggered it. Takes the run and task locks before the task update
+/// (design D3), the order of the runtime's batch writer.
 async fn record_pr(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    task_id: TaskId,
+    rc: &RunContext,
     pr: &PullRequest,
 ) -> Result<(), ChannelError> {
+    let task_id = rc.task.id;
     let number = i64::try_from(pr.id.number).map_err(|_out_of_range| {
         ChannelError::InvalidData("pull request number out of range".into())
     })?;
+    let lock = lock_run_and_task(tx, rc.run.id, task_id).await?;
     let updated = sqlx::query(
         "UPDATE tasks SET pr_number = $2, pr_url = $3, updated_at = now()
          WHERE id = $1 AND pr_number IS NULL",
@@ -219,7 +270,36 @@ async fn record_pr(
     .await?;
     if updated.rows_affected() > 0 {
         publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+        let opened = forge_event(ForgeActivity {
+            kind: Some(forge_activity::Kind::PullRequestOpened(PullRequestOpened {
+                number: pr.id.number,
+                url: pr.url.clone(),
+                draft: pr.draft,
+            })),
+        });
+        let key = format!("pr-opened:{}", pr.id.number);
+        append_control_event(tx, &lock, &key, &opened).await?;
     }
+    Ok(())
+}
+
+/// Writes the "ready for review" forge activity of `number` to the run's transcript, once.
+async fn record_ready(
+    pool: &PgPool,
+    rc: &RunContext,
+    number: u64,
+    url: String,
+) -> Result<(), ChannelError> {
+    let ready = forge_event(ForgeActivity {
+        kind: Some(forge_activity::Kind::PullRequestReady(PullRequestReady {
+            number,
+            url,
+        })),
+    });
+    let mut tx = pool.begin().await?;
+    let lock = lock_run_and_task(&mut tx, rc.run.id, rc.task.id).await?;
+    append_control_event(&mut tx, &lock, &format!("pr-ready:{number}"), &ready).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -296,6 +376,13 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_negative_stored_pull_request_number_is_invalid_data() {
+        let error = RecordedPr::from_row(-1, None).err().unwrap();
+        assert!(matches!(error, ChannelError::InvalidData(_)));
+        assert_eq!(RecordedPr::from_row(7, None).unwrap().number, 7);
     }
 
     #[test]
@@ -603,6 +690,146 @@ mod tests {
             .await
             .unwrap();
         assert!(diverged);
+    }
+
+    /// `(run, source_key, forgeActivity payload)` of every forge activity row, oldest first.
+    async fn forge_events(pool: &PgPool) -> Vec<(uuid::Uuid, String, serde_json::Value)> {
+        sqlx::query_as(
+            "SELECT run_id, source_key, payload -> 'forgeActivity'
+             FROM transcript_events WHERE kind = 'forge_activity' ORDER BY id",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn first_push_ahead_writes_one_pull_request_opened_event_in_its_run() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
+        on_push_report(&env.ctx, &rc, &push(2, PushStatus::Ok)).await;
+
+        let events = forge_events(&pool).await;
+        assert_eq!(events.len(), 1);
+        let (run, key, payload) = &events[0];
+        assert_eq!(*run, rc.run.id.as_uuid());
+        assert_eq!(key, "pr-opened:1");
+        let opened = &payload["pullRequestOpened"];
+        assert_eq!(opened["number"], "1");
+        assert_eq!(opened["draft"], true);
+        assert!(opened["url"].as_str().unwrap().ends_with("/1"));
+    }
+
+    #[tokio::test]
+    async fn an_existing_open_pr_that_is_recorded_writes_one_event() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        env.forge
+            .push_find_open_pull_request_result(Ok(Some(pull_request(7))));
+
+        on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
+
+        let events = forge_events(&pool).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "pr-opened:7");
+    }
+
+    #[tokio::test]
+    async fn concurrent_push_report_and_run_end_write_one_opened_event() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        let workspace = WorkspaceState {
+            task_branch_pushed: true,
+            ..WorkspaceState::default()
+        };
+
+        let report = push(1, PushStatus::Ok);
+        tokio::join!(
+            on_push_report(&env.ctx, &rc, &report),
+            on_run_end(&env.ctx, &rc, false, Some(&workspace)),
+        );
+
+        assert_eq!(forge_events(&pool).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn completed_run_writes_a_ready_event_with_the_url_of_a_pr_opened_at_run_end() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+
+        // No push report: the PR is opened at run end and then marked ready.
+        on_run_end(&env.ctx, &rc, true, Some(&pushed_workspace())).await;
+
+        let events = forge_events(&pool).await;
+        let keys: Vec<&str> = events.iter().map(|e| e.1.as_str()).collect();
+        assert_eq!(keys, ["pr-opened:1", "pr-ready:1"]);
+        let ready = &events[1].2["pullRequestReady"];
+        assert_eq!(ready["number"], "1");
+        assert!(ready["url"].as_str().unwrap().ends_with("/1"));
+    }
+
+    #[tokio::test]
+    async fn marking_the_pr_ready_twice_in_one_run_writes_one_event() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
+        on_run_end(&env.ctx, &rc, true, None).await;
+        on_run_end(&env.ctx, &rc, true, None).await;
+
+        let ready = forge_events(&pool)
+            .await
+            .into_iter()
+            .filter(|e| e.1 == "pr-ready:1")
+            .count();
+        assert_eq!(ready, 1, "once per run and PR");
+    }
+
+    #[tokio::test]
+    async fn each_completed_run_that_marks_the_pr_ready_gets_its_own_ready_event() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc1) = setup(pool.clone()).await;
+        on_push_report(&env.ctx, &rc1, &push(1, PushStatus::Ok)).await;
+        let mut runs = vec![rc1.run.id];
+        let mut contexts = Vec::new();
+        for number in [2, 4] {
+            sqlx::query("UPDATE runs SET state = 'succeeded' WHERE task_id = $1")
+                .bind(rc1.task.id.as_uuid())
+                .execute(&pool)
+                .await
+                .unwrap();
+            let run = env.insert_run(env.task.id, number, "running").await;
+            let row = get_run(&pool, run).await.unwrap().unwrap();
+            contexts.push(load_run_context(&pool, row).await.unwrap());
+            runs.push(run);
+            on_run_end(&env.ctx, contexts.last().unwrap(), true, None).await;
+        }
+
+        let ready: Vec<uuid::Uuid> = forge_events(&pool)
+            .await
+            .into_iter()
+            .filter(|e| e.1 == "pr-ready:1")
+            .map(|e| e.0)
+            .collect();
+        assert_eq!(ready, [runs[1].as_uuid(), runs[2].as_uuid()]);
+    }
+
+    #[tokio::test]
+    async fn failed_ready_update_writes_no_ready_event() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        on_push_report(&env.ctx, &rc, &push(1, PushStatus::Ok)).await;
+        env.forge
+            .push_update_pull_request_result(Err(IntegrationError::Upstream(UpstreamError {
+                status: 502,
+                message: "bad gateway".into(),
+            })));
+
+        on_run_end(&env.ctx, &rc, true, None).await;
+
+        let events = forge_events(&pool).await;
+        assert!(events.iter().all(|e| e.2.get("pullRequestReady").is_none()));
     }
 
     fn pull_request(number: u64) -> PullRequest {

@@ -278,6 +278,181 @@ async fn git_push_stale_forwarding_is_marked_unknown_and_a_late_verdict_still_la
     assert_eq!(stored(&pool, old).await, (1, "accepted".into()));
 }
 
+/// The `forge_activity` payloads of the transcript, oldest first.
+async fn forge_events(pool: &PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM transcript_events WHERE kind = 'forge_activity' ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn accepted_task_branch_push_writes_one_branch_pushed_event_with_its_ref() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let push = new_id();
+
+    record_push(&pool, &record(run, push, PushVerdict::Forwarding))
+        .await
+        .unwrap();
+    assert!(
+        forge_events(&pool).await.is_empty(),
+        "forwarding writes nothing"
+    );
+    record_push(&pool, &record(run, push, PushVerdict::Accepted))
+        .await
+        .unwrap();
+    record_push(&pool, &record(run, push, PushVerdict::Accepted))
+        .await
+        .unwrap();
+
+    let events = forge_events(&pool).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "the same final verdict twice writes one event"
+    );
+    let pushed = &events[0]["forgeActivity"]["branchPushed"];
+    assert_eq!(pushed["ref"], "refs/heads/factory/task/DF-1");
+    assert_eq!(pushed["oldSha"], "0".repeat(40).as_str());
+    assert_eq!(pushed["newSha"], "a".repeat(40).as_str());
+    assert_eq!(pushed["verdict"], "PUSH_VERDICT_ACCEPTED");
+    let key: String = sqlx::query_scalar("SELECT source_key FROM transcript_events")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(key, format!("push:{push}"));
+}
+
+#[tokio::test]
+async fn rejected_task_branch_push_carries_the_reason_of_the_ref() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let mut rejected = record(run, new_id(), PushVerdict::Rejected);
+    rejected.refs[0].reason = "df:non-fast-forward".into();
+
+    record_push(&pool, &rejected).await.unwrap();
+
+    let events = forge_events(&pool).await;
+    let pushed = &events[0]["forgeActivity"]["branchPushed"];
+    assert_eq!(pushed["verdict"], "PUSH_VERDICT_REJECTED");
+    assert_eq!(pushed["reason"], "df:non-fast-forward");
+}
+
+#[tokio::test]
+async fn the_event_carries_the_verdict_of_the_task_branch_not_of_the_push() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let mut mixed = record(run, new_id(), PushVerdict::UpstreamFailed);
+    mixed.refs[0].verdict = PushVerdict::Accepted;
+    mixed.refs.push(RefUpdate {
+        name: "refs/heads/factory/wip/DF-1".into(),
+        verdict: PushVerdict::UpstreamFailed,
+        reason: "df:forge-refused".into(),
+        ..mixed.refs[0].clone()
+    });
+
+    record_push(&pool, &mixed).await.unwrap();
+
+    let events = forge_events(&pool).await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0]["forgeActivity"]["branchPushed"]["verdict"],
+        "PUSH_VERDICT_ACCEPTED"
+    );
+}
+
+#[tokio::test]
+async fn push_that_only_updates_the_wip_branch_writes_no_event() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let mut wip = record(run, new_id(), PushVerdict::Accepted);
+    wip.refs[0].name = "refs/heads/factory/wip/DF-1".into();
+
+    record_push(&pool, &wip).await.unwrap();
+
+    assert!(forge_events(&pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn an_upstream_failed_task_branch_push_writes_an_event_with_that_verdict() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let mut failed = record(run, new_id(), PushVerdict::UpstreamFailed);
+    failed.refs[0].reason = "df: forge unreachable".into();
+
+    record_push(&pool, &failed).await.unwrap();
+
+    let events = forge_events(&pool).await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0]["forgeActivity"]["branchPushed"]["verdict"],
+        "PUSH_VERDICT_UPSTREAM_FAILED"
+    );
+}
+
+#[tokio::test]
+async fn a_final_verdict_waits_for_the_run_lock_before_it_touches_the_task_row() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let push = new_id();
+    // The forwarding record exists, so the final one inserts nothing that references the run.
+    record_push(&pool, &record(run, push, PushVerdict::Forwarding))
+        .await
+        .unwrap();
+    let task_id: Uuid = sqlx::query_scalar("SELECT task_id FROM runs WHERE id = $1")
+        .bind(run.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM runs WHERE id = $1 FOR UPDATE")
+        .bind(run.as_uuid())
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let writer = {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            record_push(&pool, &record(run, push, PushVerdict::Accepted))
+                .await
+                .unwrap()
+        })
+    };
+    // Wait on the condition: the writer waits for a lock.
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if waiting > 0 {
+            break;
+        }
+        assert!(
+            !writer.is_finished(),
+            "the writer did not wait for the run lock"
+        );
+        tokio::task::yield_now().await;
+    }
+    // The task row is still free: the writer has not touched it while it waits for the run.
+    let mut probe = pool.begin().await.unwrap();
+    let free = sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE NOWAIT")
+        .bind(task_id)
+        .execute(&mut *probe)
+        .await;
+    probe.rollback().await.unwrap();
+    blocker.commit().await.unwrap();
+
+    assert!(free.is_ok(), "the task row was locked before the run row");
+    assert_eq!(writer.await.unwrap(), RecordOutcome::Advanced);
+}
+
 fn new_id() -> Uuid {
     RunId::new().as_uuid()
 }

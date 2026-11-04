@@ -625,6 +625,21 @@ impl Recorded {
             .collect()
     }
 
+    /// Verdict and `(ref, verdict of the ref)` pairs of every stored record.
+    fn ref_verdicts(&self) -> Vec<(PushVerdict, Vec<(String, PushVerdict)>)> {
+        let full = self.full.lock().expect("records lock");
+        full.iter()
+            .map(|record| {
+                let refs = record
+                    .refs
+                    .iter()
+                    .map(|update| (update.name.clone(), update.verdict()))
+                    .collect();
+                (record.verdict, refs)
+            })
+            .collect()
+    }
+
     fn bytes(&self) -> Vec<u64> {
         let full = self.full.lock().expect("records lock");
         full.iter().map(|record| record.bytes).collect()
@@ -946,6 +961,55 @@ async fn a_push_the_forge_refuses_is_recorded_as_upstream_failed() -> Result<()>
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_ref_the_forge_accepts_is_recorded_as_accepted_next_to_one_it_refuses() -> Result<()> {
+    let fixture = Fixture::new().await?;
+    let task = "refs/heads/factory/task/DF-7";
+    let wip = "refs/heads/factory/wip/DF-7";
+    let hook = fixture.forge_repo().join("hooks/update");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\n[ \"$1\" = {wip} ] && {{ echo 'no wip here' >&2; exit 1; }}\nexit 0\n"),
+    )?;
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+    let recorder = Recorded::new(&fixture, task, false);
+    let upstream = Arc::new(ForgeUpstream::with_roots(fixture.forge_roots.clone())?);
+    let (port, gateway) = fixture
+        .gateway_with(
+            "DF-7",
+            fixture.mirrors()?,
+            DEFAULT_MAX,
+            upstream,
+            recorder.clone(),
+        )
+        .await?;
+    let work = fixture.client("client")?;
+    commit(&work, "ONE")?;
+
+    push(
+        &work,
+        &fixture.ca,
+        port,
+        "DF-7",
+        &[&format!("HEAD:{task}"), &format!("HEAD:{wip}")],
+    )
+    .await?;
+    gateway.abort();
+    fixture.forge_task.abort();
+
+    assert_eq!(
+        recorder.ref_verdicts().last(),
+        Some(&(
+            PushVerdict::UpstreamFailed,
+            vec![
+                (task.to_owned(), PushVerdict::Accepted),
+                (wip.to_owned(), PushVerdict::UpstreamFailed),
+            ]
+        ))
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_push_is_rejected_when_its_record_cannot_be_stored() -> Result<()> {
     let fixture = Fixture::new().await?;
     let branch = "refs/heads/factory/task/DF-7";
@@ -1020,6 +1084,14 @@ async fn a_push_to_a_forge_that_is_down_fails_with_503_and_is_recorded() -> Resu
     assert_eq!(
         recorder.verdicts(),
         vec![PushVerdict::Forwarding, PushVerdict::UpstreamFailed]
+    );
+    assert_eq!(
+        recorder.ref_verdicts().last(),
+        Some(&(
+            PushVerdict::UpstreamFailed,
+            vec![(branch.to_owned(), PushVerdict::UpstreamFailed)]
+        )),
+        "an unreachable forge fails every ref"
     );
     Ok(())
 }

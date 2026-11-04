@@ -254,6 +254,40 @@ pub fn notice(id: &str, level: &str, code: &str, message: &str) -> Markup {
     }
 }
 
+/// A forge activity row (push, pull request): the notice layout in one line, tinted with the
+/// accent (`danger` for a failed push). `link` is the label and URL of a pull request; the label
+/// is only a link for an `http(s)` URL.
+pub fn forge_row(
+    id: &str,
+    glyph: Icon,
+    danger: bool,
+    lead: &str,
+    link: Option<(&str, &str)>,
+    tail: &str,
+) -> Markup {
+    let tint = if danger {
+        "text-danger"
+    } else {
+        "text-accent-text"
+    };
+    html! {
+        div id=(id) data-author="agent" data-system class={"ml-11 flex min-h-11 items-center gap-2 text-sm lg:min-h-8 " (tint)} {
+            (icon(glyph))
+            span class="min-w-0 flex-1 truncate" {
+                (lead)
+                @if let Some((label, url)) = link {
+                    @if url.starts_with("https://") || url.starts_with("http://") {
+                        a href=(url) class="underline" rel="noopener noreferrer" target="_blank" { (label) }
+                    } @else {
+                        (label)
+                    }
+                }
+                (tail)
+            }
+        }
+    }
+}
+
 /// An event that could not be decoded.
 pub fn unreadable(id: &str) -> Markup {
     html! { div id=(id) class="text-sm text-faint" { "Unreadable transcript event" } }

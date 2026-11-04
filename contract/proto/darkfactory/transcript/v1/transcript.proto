@@ -38,6 +38,7 @@ message Event {
     Plan plan = 16;
     TurnEnded turn_ended = 17;
     Notice notice = 18;
+    ForgeActivity forge_activity = 19;
   }
 }
 
@@ -260,6 +261,53 @@ enum NoticeLevel {
   NOTICE_LEVEL_INFO = 1;
   NOTICE_LEVEL_WARNING = 2;
   NOTICE_LEVEL_ERROR = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Forge activity
+// ---------------------------------------------------------------------------
+
+// Written by the control plane, never by the runtime (the control plane drops
+// it from the runtime's channel). Display-only: never sent to the agent. Has no
+// turn_id.
+message ForgeActivity {
+  oneof kind {
+    BranchPushed branch_pushed = 1;
+    PullRequestOpened pull_request_opened = 2;
+    PullRequestReady pull_request_ready = 3;
+  }
+}
+
+// A push to the run's task branch, as the gateway recorded it.
+message BranchPushed {
+  // Full ref name.
+  string ref = 1;
+  // All zeros for a created branch.
+  string old_sha = 2;
+  string new_sha = 3;
+  PushVerdict verdict = 4;
+  // Reason code of the ref, e.g. "df:non-fast-forward"; empty if accepted.
+  string reason = 5;
+}
+
+enum PushVerdict {
+  PUSH_VERDICT_UNSPECIFIED = 0;
+  PUSH_VERDICT_ACCEPTED = 1;
+  PUSH_VERDICT_REJECTED = 2;
+  PUSH_VERDICT_UPSTREAM_FAILED = 3;
+}
+
+// The control plane recorded a pull request for the task, opened or found.
+message PullRequestOpened {
+  uint64 number = 1;
+  string url = 2;
+  bool draft = 3;
+}
+
+// The pull request was marked ready for review after a completed run.
+message PullRequestReady {
+  uint64 number = 1;
+  string url = 2;
 }
 
 // ---------------------------------------------------------------------------

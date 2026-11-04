@@ -50,6 +50,7 @@ Recorded as ADR-0027 (*Accepted*). ADR-0007 mentioned `McpFrame`s. The draft use
 - Own schema modelled on ACP `session/update` (ADR-0017). The runtime assigns `turn_id` and `message_id`; `message_id` is the stable DOM id the UI morphs while chunks stream in (ADR-0004).
 - Usage is per model per turn (`TurnEnded.usage`), with `usage_source` recording whether the harness reported it or the runtime parsed it from session files. This is the input for "what if" costs (ADR-0021).
 - Binary content is inline on the wire; the control plane moves it to the blob store and replaces it with the SHA-256 before storing (ADR-0012).
+- `ForgeActivity` (kind `forge_activity`, field 19) is written by the control plane only: a task-branch push (`BranchPushed`, with the ref's own verdict), a recorded PR (`PullRequestOpened`) and a PR marked ready (`PullRequestReady`). It is display-only and never sent to the agent; the control plane drops it if the runtime sends one (ADR-0046).
 - In iteration 1 the runtime doesn't advertise ACP's client file-system or terminal capabilities, so Claude Code uses its own tools in the sandbox. That's why there is no terminal content type.
 
 ### Integration plugins (WIT)

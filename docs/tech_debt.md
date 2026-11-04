@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-101.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-102.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -130,6 +130,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
 | TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
+| TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
 
 ## Entries
 
@@ -969,3 +970,15 @@ Every release adds a directory of about 5 MB to `gh-pages` and keeps it forever.
 **Matters when:** `gh-pages` approaches the GitHub Pages size limit (1 GB) or clones of the branch get slow.
 
 **Fix:** a `publish.sh prune <keep>` mode that removes old release directories, drops them from `versions.json` and squashes the branch history; decide which versions the docs keep supporting first.
+
+Origin of TD-101: code review of `forge-activity-transcript` (`df-db`, `df-agent-channel`, 2026-11-04). The `TD-n (ID)` heading gives the ID used in that review.
+
+### TD-101 (S17). Lock-wait polling loop copied across tests
+
+`crates/df-db/src/{git_pushes,transcript,tasks}/tests.rs`, `crates/df-agent-channel/src/{session,runs}/tests.rs`, `crates/df-web/src/task_pages/tests/reset_workspace.rs`
+
+Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activity`, each with its own copy of the query. The copy in `crates/df-agent-channel/src/runs/tests.rs:645` does not filter on `datname = current_database()`: `migrated_pool` databases share one server, so a lock wait in another test's database can end the loop early and the test can pass without exercising the lock order.
+
+**Matters when:** more lock-order tests are added, or the `runs` test passes on a broken lock order.
+
+**Fix:** one helper in `df-test-postgres` (for example `wait_until_a_backend_waits_for_a_lock(&pool)`) that filters on the current database; replace every copy.

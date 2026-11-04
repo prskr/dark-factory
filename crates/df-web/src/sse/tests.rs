@@ -162,6 +162,49 @@ async fn replay_after_an_id_has_no_gaps_and_no_duplicates() {
 }
 
 #[tokio::test]
+async fn forge_activity_written_by_the_control_plane_reaches_the_stream_in_order() {
+    use df_proto::transcript::v1::{ForgeActivity, PullRequestOpened, forge_activity};
+
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events").await;
+    f.add(1, "t1", chunk("m1", "A")).await;
+    sse.next().await;
+
+    let opened = df_db::transcript::forge_event(ForgeActivity {
+        kind: Some(forge_activity::Kind::PullRequestOpened(PullRequestOpened {
+            number: 12,
+            url: "https://forge.example.test/o/r/pulls/12".into(),
+            draft: true,
+        })),
+    });
+    let mut tx = f.app.pool.begin().await.unwrap();
+    let lock =
+        df_db::transcript::lock_run_and_task(&mut tx, df_core::RunId::from_uuid(f.run), f.task)
+            .await
+            .unwrap();
+    let id = df_db::transcript::append_control_event(&mut tx, &lock, "pr-opened:12", &opened)
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    let frame = tokio::time::timeout(LIVE, sse.next())
+        .await
+        .expect("the forge activity reaches the stream without waiting for the poll");
+    assert_eq!(frame.id.as_deref(), Some(id.to_string().as_str()));
+    assert!(
+        frame.data.contains(&format!("id=\"ev-{id}\"")),
+        "{}",
+        frame.data
+    );
+    assert!(frame.data.contains("Opened draft PR "), "{}", frame.data);
+
+    let after = f.add(2, "t1", chunk("m2", "B")).await;
+    let next = sse.next().await;
+    assert!(after > id);
+    assert_eq!(next.id.as_deref(), Some(after.to_string().as_str()));
+}
+
+#[tokio::test]
 async fn last_event_id_header_takes_precedence_over_the_query() {
     let f = fixture().await;
     let e1 = f.add(1, "t1", chunk("m1", "one")).await;

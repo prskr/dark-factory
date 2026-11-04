@@ -13,6 +13,7 @@
 use std::time::Duration;
 
 use df_core::{PersonaId, Principal, RunId, TaskId, TaskKey};
+use df_proto::transcript::v1 as pb;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -20,6 +21,7 @@ use uuid::Uuid;
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::pool::DbError;
 use crate::push_checks::{PushFinding, PushingTask, react_to_push};
+use crate::transcript::{RunTaskLock, append_control_event, forge_event, lock_run_and_task};
 
 /// Verdict of a push as stored in `git_pushes.verdict`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +186,8 @@ pub async fn record_push(pool: &PgPool, record: &PushRecord) -> Result<RecordOut
     };
 
     if record.verdict.is_final() {
+        // Before anything touches the task row (`react_to_push`): run, then task.
+        let lock = lock_run_and_task(&mut tx, record.run_id, task.id).await?;
         let entry = NewAuditEntry::new(
             actor,
             Vec::new(),
@@ -200,9 +204,41 @@ pub async fn record_push(pool: &PgPool, record: &PushRecord) -> Result<RecordOut
         })?;
         write_audit_entry(&mut *tx, &entry).await?;
         react_to_push(&mut tx, &task, record).await?;
+        append_branch_pushed(&mut tx, &lock, &task, record).await?;
     }
     tx.commit().await?;
     Ok(outcome)
+}
+
+/// Appends the forge activity of the run's task branch, if the push updated it: the ref's own
+/// SHAs, verdict and reason, once per push.
+async fn append_branch_pushed(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lock: &RunTaskLock,
+    task: &PushingTask,
+    record: &PushRecord,
+) -> Result<(), DbError> {
+    let Some(update) = record.refs.iter().find(|r| r.name == task.task_branch) else {
+        return Ok(());
+    };
+    let verdict = match update.verdict {
+        PushVerdict::Accepted => pb::PushVerdict::Accepted,
+        PushVerdict::Rejected => pb::PushVerdict::Rejected,
+        PushVerdict::UpstreamFailed => pb::PushVerdict::UpstreamFailed,
+        PushVerdict::Forwarding | PushVerdict::Unknown => return Ok(()),
+    };
+    let event = forge_event(pb::ForgeActivity {
+        kind: Some(pb::forge_activity::Kind::BranchPushed(pb::BranchPushed {
+            r#ref: update.name.clone(),
+            old_sha: update.old_sha.clone(),
+            new_sha: update.new_sha.clone(),
+            verdict: verdict.into(),
+            reason: update.reason.clone(),
+        })),
+    });
+    let source_key = format!("push:{}", record.push_id);
+    append_control_event(tx, lock, &source_key, &event).await?;
+    Ok(())
 }
 
 /// Marks `forwarding` records older than `older_than` as `unknown`; returns how many.

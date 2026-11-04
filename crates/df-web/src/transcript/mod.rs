@@ -9,12 +9,13 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
-    ContentBlock, NoticeLevel, Plan, PlanEntryStatus, ToolCall, ToolCallContent, ToolCallStatus,
-    ToolCallUpdate, ToolKind, UserMessage, content_block, event, tool_call_content,
+    ContentBlock, ForgeActivity, NoticeLevel, Plan, PlanEntryStatus, PushVerdict, ToolCall,
+    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, UserMessage, content_block, event,
+    tool_call_content,
 };
 use maud::{Markup, PreEscaped, html};
 
-use crate::components::transcript as c;
+use crate::components::{Icon, transcript as c};
 
 /// A rendered element of the transcript.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,12 +53,40 @@ pub enum ItemKind {
         code: String,
         message: String,
     },
+    /// Something the control plane did on the forge (push, pull request).
+    Forge(ForgeItem),
     Unreadable,
     /// The start of a run; precedes the run's first item.
     RunStart {
         number: i64,
         started_at: DateTime<Utc>,
     },
+}
+
+/// A forge activity row (design D8).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForgeItem {
+    /// A push to the task branch.
+    Pushed {
+        branch: String,
+        /// Abbreviated; empty if the push created the branch.
+        old_sha: String,
+        new_sha: String,
+        /// `Some(reason code)` for a rejected or failed push (the code may be empty), `None` if accepted.
+        failure: Option<String>,
+    },
+    PullRequest {
+        number: u64,
+        url: String,
+        change: PullRequestChange,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestChange {
+    OpenedDraft,
+    Opened,
+    Ready,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -194,6 +223,10 @@ impl Folder {
             event::Kind::ToolCallUpdate(u) => vec![self.apply_tool_call_update(id, &turn, u)],
             event::Kind::Plan(p) => self.apply_plan(id, turn, p),
             event::Kind::TurnEnded(_) => self.complete_agent_messages(&turn),
+            event::Kind::ForgeActivity(activity) => forge_item(activity)
+                .map(|item| self.push(format!("ev-{id}"), turn, ItemKind::Forge(item)))
+                .into_iter()
+                .collect(),
             event::Kind::Notice(n) => vec![self.push(
                 format!("ev-{id}"),
                 turn,
@@ -500,6 +533,47 @@ fn plan_status(status: PlanEntryStatus) -> &'static str {
     }
 }
 
+fn forge_item(activity: &ForgeActivity) -> Option<ForgeItem> {
+    use df_proto::transcript::v1::forge_activity::Kind;
+    Some(match activity.kind.as_ref()? {
+        Kind::BranchPushed(p) => {
+            let created = p.old_sha.chars().all(|c| c == '0');
+            ForgeItem::Pushed {
+                branch: p
+                    .r#ref
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(&p.r#ref)
+                    .to_owned(),
+                old_sha: if created {
+                    String::new()
+                } else {
+                    short_sha(&p.old_sha)
+                },
+                new_sha: short_sha(&p.new_sha),
+                failure: (p.verdict() != PushVerdict::Accepted).then(|| p.reason.clone()),
+            }
+        }
+        Kind::PullRequestOpened(p) => ForgeItem::PullRequest {
+            number: p.number,
+            url: p.url.clone(),
+            change: if p.draft {
+                PullRequestChange::OpenedDraft
+            } else {
+                PullRequestChange::Opened
+            },
+        },
+        Kind::PullRequestReady(p) => ForgeItem::PullRequest {
+            number: p.number,
+            url: p.url.clone(),
+            change: PullRequestChange::Ready,
+        },
+    })
+}
+
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(7).collect()
+}
+
 fn notice_level(level: i32) -> String {
     NoticeLevel::try_from(level).map_or_else(
         |_| "info".into(),
@@ -589,7 +663,45 @@ pub fn render_item(item: &Item) -> Markup {
             code,
             message,
         } => c::notice(id, level, code, message),
+        ItemKind::Forge(forge) => render_forge(id, forge),
         ItemKind::Unreadable => c::unreadable(id),
+    }
+}
+
+fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
+    match forge {
+        ForgeItem::Pushed {
+            branch,
+            old_sha,
+            new_sha,
+            failure,
+        } => {
+            let (text, danger) = match failure {
+                Some(reason) => (format!("Push to {branch} rejected {reason}"), true),
+                None if old_sha.is_empty() => (format!("Pushed {branch} {new_sha}"), false),
+                None => (format!("Pushed {branch} {old_sha}..{new_sha}"), false),
+            };
+            c::forge_row(id, Icon::GitCommit, danger, &text, None, "")
+        }
+        ForgeItem::PullRequest {
+            number,
+            url,
+            change,
+        } => {
+            let (glyph, lead, tail) = match change {
+                PullRequestChange::OpenedDraft => (Icon::PullRequestDraft, "Opened draft PR ", ""),
+                PullRequestChange::Opened => (Icon::PullRequest, "Opened PR ", ""),
+                PullRequestChange::Ready => (Icon::PullRequest, "PR ", " ready for review"),
+            };
+            c::forge_row(
+                id,
+                glyph,
+                false,
+                lead,
+                Some((&format!("#{number}"), url)),
+                tail,
+            )
+        }
     }
 }
 
