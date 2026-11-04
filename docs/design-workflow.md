@@ -64,7 +64,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
 | Config - Projects | Projects: table, edit modal and its tabs (push checks, context); phone |
-| Config - Personas | Personas: cards, edit modal; phone edit sheet |
+| Config - Personas | Personas: cards, edit modal; phone edit sheet; settings area; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
 | Config - Credentials | Credentials: table, new with validation error; error page (not found) |
 | Config - Model providers | Model providers: table, new provider modal per credential scheme |
 | Empty states | One board per empty state |
@@ -187,6 +187,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |
 | Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |
 | Config - Personas / Personas · cards | `/personas` | manual seed (not built): four personas with model providers | 1440 |
+| Config - Personas / Settings · personas | `/personas` | as Personas · cards | 1440 |
 | Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Personas · cards; edit of Linus clicked | 1440 |
 | Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |

@@ -8,7 +8,8 @@ use maud::{DOCTYPE, Markup, html};
 use crate::WebState;
 use crate::assets::asset_url;
 use crate::auth::CurrentUser;
-use crate::components::{CreateAction, bottom_bar, floating_create, rail};
+use crate::components::shell::is_settings;
+use crate::components::{CreateAction, bottom_bar, floating_create, rail, settings_sidebar};
 
 /// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
 /// Alpine starts.
@@ -140,6 +141,7 @@ fn document(
                 "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
                     @if nav != Nav::None { (rail(nav, compose_href, shell)) }
+                    @if is_settings(nav) { (settings_sidebar(nav)) }
                     main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "w-full px-4 py-4 pb-38 md:px-10 md:py-8 md:pb-8" })} {
                         (body)
                     }
@@ -206,15 +208,72 @@ mod tests {
             assert!(!mobile.contains(hidden), "{hidden} in mobile menu");
         }
         let desktop = nav_html(&page, "desktop-menu");
-        for shown in [
-            "/tasks",
-            "/projects",
-            "/personas",
-            "/credentials",
-            "/egress/allowlist",
-            "/egress/log",
-        ] {
+        for shown in ["/tasks", "/requests", "/projects", "/egress/log"] {
             assert!(desktop.contains(shown), "{shown} missing on desktop");
+        }
+        for moved in ["/credentials", "/model-providers", "/egress/allowlist"] {
+            assert!(!desktop.contains(moved), "{moved} left in the rail");
+        }
+        assert!(page.contains("aria-label=\"Settings\""), "{page}");
+    }
+
+    fn sidebar_html(nav: Nav) -> Option<String> {
+        let page = layout("T", nav, &Shell::default(), html! {}).into_string();
+        let start = page.find("id=\"settings-menu\"")?;
+        let end = page[start..].find("</nav>").expect("sidebar end");
+        Some(page[start..start + end].to_string())
+    }
+
+    #[test]
+    fn settings_pages_show_the_sidebar_with_the_open_section_marked() {
+        let cases = [
+            (Nav::Personas, "/personas"),
+            (Nav::Credentials, "/credentials"),
+            (Nav::ModelProviders, "/model-providers"),
+            (Nav::Allowlist, "/egress/allowlist"),
+        ];
+        for (nav, current) in cases {
+            let sidebar = sidebar_html(nav).expect("sidebar");
+            assert!(sidebar.contains("Settings"), "{sidebar}");
+            for (_, href) in cases {
+                assert!(sidebar.contains(&format!("href=\"{href}\"")), "{href}");
+            }
+            for label in ["Personas", "Credentials", "Model providers", "Egress rules"] {
+                assert!(
+                    sidebar.contains(&format!(">{label}</a>"))
+                        || sidebar.contains(&format!("</svg>{label}")),
+                    "{label}"
+                );
+            }
+            assert_eq!(sidebar.matches("<svg").count(), 4, "an icon per entry");
+            assert_eq!(sidebar.matches("aria-current=\"page\"").count(), 1);
+            let marked = &sidebar[sidebar.find("aria-current").unwrap()..];
+            assert!(marked.contains("before:bg-accent"), "{sidebar}");
+            let link = &sidebar[..sidebar.find("aria-current").unwrap()];
+            assert!(
+                link.ends_with(&format!("<a href=\"{current}\" ")),
+                "{current}: {sidebar}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sidebar_is_desktop_only_and_other_pages_have_none() {
+        let page = layout("T", Nav::Personas, &Shell::default(), html! {}).into_string();
+        let aside = &page[..page.find("id=\"settings-menu\"").unwrap()];
+        let aside = &aside[aside.rfind("<aside").unwrap()..];
+        assert!(
+            aside.contains("hidden") && aside.contains("md:flex"),
+            "{aside}"
+        );
+        for nav in [
+            Nav::Tasks,
+            Nav::Requests,
+            Nav::Projects,
+            Nav::EgressLog,
+            Nav::None,
+        ] {
+            assert!(sidebar_html(nav).is_none(), "{nav:?}");
         }
     }
 
@@ -241,14 +300,12 @@ mod tests {
     fn egress_entries_are_named_after_what_they_show() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         let desktop = nav_html(&page, "desktop-menu");
-        for (href, label) in [
-            ("/egress/allowlist", "Egress rules"),
-            ("/egress/log", "Network traffic"),
-        ] {
-            let link = format!("<a href=\"{href}\" aria-label=\"{label}\" title=\"{label}\"");
-            assert!(desktop.contains(&link), "{link} in {desktop}");
-        }
-        assert!(!desktop.contains("Egress allowlist") && !desktop.contains("Egress log"));
+        let link =
+            "<a href=\"/egress/log\" aria-label=\"Network traffic\" title=\"Network traffic\"";
+        assert!(desktop.contains(link), "{link} in {desktop}");
+        let sidebar = sidebar_html(Nav::Allowlist).expect("sidebar");
+        assert!(sidebar.contains("Egress rules"), "{sidebar}");
+        assert!(!page.contains("Egress allowlist") && !page.contains("Egress log"));
     }
 
     #[test]
@@ -378,7 +435,10 @@ mod tests {
         }
         assert!(!bar.contains("aria-label=\"New task\""));
         // The rail is hidden below 768 px.
-        assert!(page.contains("class=\"sticky top-0 hidden h-dvh"), "{page}");
+        assert!(
+            page.contains("class=\"sticky top-0 z-30 hidden h-dvh"),
+            "{page}"
+        );
     }
 
     #[test]

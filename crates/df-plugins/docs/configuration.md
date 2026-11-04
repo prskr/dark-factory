@@ -205,7 +205,7 @@ values route `github.com` to it.
    (`GET .../collaborators/{username}/permission`), which needs the account's write access.
 3. Store it in a Secret in the instance namespace (`sandbox.instanceNamespace`), for example
    `kubectl -n dark-factory create secret generic github-token --from-file=token=<file with the token>`.
-4. Credentials → "New credential reference": a name, Secret name `github-token`, key `token`.
+4. Settings → Credentials → "New credential reference": a name, Secret name `github-token`, key `token`.
 5. Projects → "New project": repository URL `https://github.com/<owner>/<repo>.git` and that
    credential as forge credential. The hint below the repository URL reads "Served by the GitHub
    integration; pull requests and issues use it."

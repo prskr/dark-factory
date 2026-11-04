@@ -24,7 +24,7 @@ In the realm of your instance, **Clients > Create client**:
 Under **Advanced > Advanced settings** set *Proof Key for Code Exchange Code Challenge Method* to
 `S256`.
 
-Copy the secret from **Credentials** into a Kubernetes Secret in the instance namespace:
+Copy the client secret from the client's **Credentials** tab into a Kubernetes Secret in the instance namespace:
 
 ```bash
 kubectl -n dark-factory create secret generic dark-factory-oidc \

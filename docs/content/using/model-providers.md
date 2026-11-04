@@ -24,7 +24,7 @@ a model provider.
 
 ## Create a provider
 
-**Model providers → New model provider**. A preset prefills the form; it is not stored, the provider
+**Settings → Model providers → New model provider**. A preset prefills the form; it is not stored, the provider
 keeps the values you save. Every change is audited.
 
 | Field | Required | Meaning |
@@ -88,11 +88,12 @@ refused.
 
 1. `kubectl -n dark-factory create secret generic claude-token --from-file=token=<file>` with a
    token from `claude setup-token`.
-2. **Credentials → New credential reference**: name `claude`, the Secret `claude-token`, key `token`.
-3. **Model providers → New model provider**, preset *Claude subscription* (header, value and extra
+2. **Settings → Credentials → New credential reference**: name `claude`, the Secret `claude-token`,
+   key `token`.
+3. **Settings → Model providers → New model provider**, preset *Claude subscription* (header, value and extra
    headers are disabled: the scheme fixes them), name it, choose the
    credential reference, save.
-4. **Personas → New persona**: harness `claude-code`, model provider the one you created.
+4. **Settings → Personas → New persona**: harness `claude-code`, model provider the one you created.
 
 `api.anthropic.com` does not have to be on the egress allowlist: model traffic goes to the gateway,
 which connects to the provider itself. That traffic is not shown in the network graph; see

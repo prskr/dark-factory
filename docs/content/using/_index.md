@@ -19,6 +19,11 @@ flowchart LR
   T --> PR[Draft pull request]
 ```
 
+On a desktop screen (768 px and wider), the navigation rail on the left holds Tasks, Requests,
+Projects and Network traffic. The **Settings** link (gear) at its bottom opens the settings area
+with a sidebar for **Personas**, **Credentials**, **Model providers** and **Egress rules**. On a
+phone the settings area is not available.
+
 Set up in this order:
 
 1. [Credentials, projects and personas](setup.md): references to the forge and model

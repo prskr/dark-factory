@@ -14,7 +14,7 @@ instance namespace and a key in it; the control plane reads the value when it us
 
 1. Create the Secret, for example
    `kubectl -n dark-factory create secret generic claude-token --from-file=token=<file>`.
-2. **Credentials → New credential reference**: a name, the Secret name and the key.
+2. **Settings → Credentials → New credential reference**: a name, the Secret name and the key.
 
 Two kinds of credentials are referenced:
 
@@ -49,7 +49,7 @@ The project list shows the number of queued, running, waiting and done tasks per
 
 ## Personas
 
-A **persona** is an agent with a role. **Personas → New persona**:
+A **persona** is an agent with a role. **Settings → Personas → New persona**:
 
 | Field | Meaning |
 | --- | --- |
