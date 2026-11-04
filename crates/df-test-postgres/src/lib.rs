@@ -25,9 +25,17 @@
 //! When several test binaries start at the same time on a machine without the container, one
 //! creates it and the others fail with a name conflict until it is running. They retry for up to
 //! [`CONNECT_TIMEOUT`] and then find the container of the winner.
+//!
+//! # Unreachable container runtime
+//! A start that fails is remembered for the process: every later [`server`], [`empty_pool`] and
+//! [`migrated_pool`] call panics at once with the same message. A runtime that cannot be reached
+//! at all (no socket, connection refused) is not retried; the message names `DOCKER_HOST`.
+//! `DOCKER_HOST` need not be set: the default socket of Docker Engine works without it.
 
 use std::{
+    error::Error,
     hash::{DefaultHasher, Hash, Hasher},
+    io::{self, ErrorKind},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -37,8 +45,8 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use testcontainers::{
-    GenericImage, ImageExt, ReuseDirective,
-    core::{ContainerPort, WaitFor},
+    GenericImage, ImageExt, ReuseDirective, TestcontainersError,
+    core::{ContainerPort, WaitFor, error::ClientError},
     runners::AsyncRunner,
 };
 use tokio::sync::OnceCell;
@@ -62,7 +70,11 @@ const STALE_AFTER: Duration = Duration::from_mins(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const START_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
-static SERVER: OnceCell<TestServer> = OnceCell::const_new();
+/// The outcome of the first start, success or failure: a failed start is not retried by the
+/// next test, every caller reports the same message.
+static SERVER: OnceCell<Result<TestServer, String>> = OnceCell::const_new();
+
+type StartError = Box<dyn Error + Send + Sync>;
 
 /// Address of the shared PostgreSQL server; the `postgres` role is a superuser.
 #[derive(Debug)]
@@ -74,15 +86,14 @@ pub struct TestServer {
 /// The shared server, started on first use.
 ///
 /// # Panics
-/// When Docker is unavailable or PostgreSQL does not accept connections in time.
+/// When the container runtime is unreachable (at once, naming `DOCKER_HOST`) or PostgreSQL does
+/// not accept connections in time. The failure is remembered: every later call in the process
+/// panics with the same message instead of starting again.
 pub async fn server() -> &'static TestServer {
-    SERVER
-        .get_or_init(|| async {
-            TestServer::start()
-                .await
-                .expect("start PostgreSQL container")
-        })
+    get_or_start(&SERVER, TestServer::start())
         .await
+        .as_ref()
+        .expect("start PostgreSQL container")
 }
 
 /// A pool on a new, empty database.
@@ -97,6 +108,47 @@ pub async fn migrated_pool(migrator: &Migrator) -> PgPool {
     server.database_from(Some(&template)).await
 }
 
+/// Runs `start` on the first call and stores its outcome, a failure included.
+async fn get_or_start<T>(
+    cell: &OnceCell<Result<T, String>>,
+    start: impl Future<Output = Result<T, String>>,
+) -> &Result<T, String> {
+    cell.get_or_init(|| start).await
+}
+
+/// Whether the container runtime cannot be reached at all (no socket, connection refused), as
+/// opposed to a failure that goes away on retry such as the name conflict of the start race.
+fn is_unreachable(error: &(dyn Error + 'static)) -> bool {
+    if matches!(
+        error.downcast_ref::<TestcontainersError>(),
+        Some(TestcontainersError::Client(ClientError::Init(_)))
+    ) {
+        return true;
+    }
+    let mut current = Some(error);
+    while let Some(e) = current {
+        let refused = e.downcast_ref::<io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                ErrorKind::NotFound | ErrorKind::ConnectionRefused
+            )
+        });
+        if refused {
+            return true;
+        }
+        current = e.source();
+    }
+    false
+}
+
+fn unreachable_message(docker_host: Option<&str>, error: &str) -> String {
+    format!(
+        "container runtime not reachable (DOCKER_HOST={}): {error}; set DOCKER_HOST, e.g. \
+         unix://$XDG_RUNTIME_DIR/podman/podman.sock",
+        docker_host.unwrap_or("<unset>")
+    )
+}
+
 /// Name of the template database for this migration set.
 fn template_name(migrator: &Migrator) -> String {
     // The hash only has to be stable within one toolchain: a new toolchain builds a new template.
@@ -109,7 +161,8 @@ fn template_name(migrator: &Migrator) -> String {
 }
 
 /// Calls `attempt` until it succeeds or `timeout` has passed, pausing `pause` in between. Returns
-/// the first error if it never succeeds (a later one is usually a consequence of it).
+/// the first error if it never succeeds (a later one is usually a consequence of it), and an
+/// error that `is_fatal` at once.
 #[expect(
     clippy::print_stderr,
     reason = "test utility: tests have no tracing subscriber"
@@ -117,6 +170,7 @@ fn template_name(migrator: &Migrator) -> String {
 async fn retry_for<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
     timeout: Duration,
     pause: Duration,
+    is_fatal: impl Fn(&E) -> bool,
     mut attempt: impl FnMut() -> F,
 ) -> Result<T, E> {
     let deadline = tokio::time::Instant::now() + timeout;
@@ -124,6 +178,7 @@ async fn retry_for<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
     loop {
         match attempt().await {
             Ok(value) => return Ok(value),
+            Err(e) if is_fatal(&e) => return Err(e),
             Err(e) => {
                 // No tracing subscriber in tests.
                 eprintln!("starting the PostgreSQL container failed, retrying: {e}");
@@ -141,14 +196,32 @@ async fn retry_for<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
 
 impl TestServer {
     /// Starts (or finds) the container; retries because of the start race described in the module docs.
-    async fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let server = retry_for(CONNECT_TIMEOUT, START_RETRY_PAUSE, Self::start_container).await?;
-        server.wait_until_ready().await?;
-        drop_stale_databases(&server.admin_pool(1).await).await;
+    /// An unreachable container runtime fails at once instead of after [`CONNECT_TIMEOUT`].
+    async fn start() -> Result<Self, String> {
+        let server = retry_for(
+            CONNECT_TIMEOUT,
+            START_RETRY_PAUSE,
+            |e: &StartError| is_unreachable(&**e),
+            Self::start_container,
+        )
+        .await
+        .map_err(|e| {
+            if is_unreachable(&*e) {
+                unreachable_message(std::env::var("DOCKER_HOST").ok().as_deref(), &e.to_string())
+            } else {
+                e.to_string()
+            }
+        })?;
+        server.wait_until_ready().await.map_err(|e| e.to_string())?;
+        let admin = server
+            .pool("postgres", 1)
+            .await
+            .map_err(|e| e.to_string())?;
+        drop_stale_databases(&admin).await;
         Ok(server)
     }
 
-    async fn start_container() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    async fn start_container() -> Result<Self, StartError> {
         let container = GenericImage::new("postgres", IMAGE_TAG)
             .with_exposed_port(ContainerPort::Tcp(5432))
             .with_wait_for(WaitFor::message_on_stderr(
@@ -379,27 +452,96 @@ mod tests {
     async fn retry_for_succeeds_after_failures_and_keeps_the_first_error_when_giving_up()
     -> Result<(), String> {
         let mut calls = 0;
-        let value = retry_for(Duration::from_secs(5), Duration::from_millis(1), || {
-            calls += 1;
-            let n = calls;
-            std::future::ready(if n < 3 {
-                Err(format!("error {n}"))
-            } else {
-                Ok(n)
-            })
-        })
+        let value = retry_for(
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            |_: &String| false,
+            || {
+                calls += 1;
+                let n = calls;
+                std::future::ready(if n < 3 {
+                    Err(format!("error {n}"))
+                } else {
+                    Ok(n)
+                })
+            },
+        )
         .await?;
         assert_eq!(value, 3);
 
-        let err = retry_for(Duration::from_millis(20), Duration::from_millis(5), || {
-            calls += 1;
-            let n = calls;
-            async move { Err::<(), _>(format!("error {n}")) }
-        })
+        let err = retry_for(
+            Duration::from_millis(20),
+            Duration::from_millis(5),
+            |_: &String| false,
+            || {
+                calls += 1;
+                let n = calls;
+                async move { Err::<(), _>(format!("error {n}")) }
+            },
+        )
         .await
         .unwrap_err();
         assert_eq!(err, "error 4");
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_is_remembered_and_reported_to_every_caller() {
+        let cell: OnceCell<Result<u8, String>> = OnceCell::const_new();
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let start = || async {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<u8, _>("no runtime".to_owned())
+        };
+
+        let first = get_or_start(&cell, start()).await;
+        let second = get_or_start(&cell, start()).await;
+
+        assert_eq!(first.as_ref().unwrap_err(), "no runtime");
+        assert_eq!(second.as_ref().unwrap_err(), "no runtime");
+        // `start()` is evaluated twice here, but only the first future is ever polled.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_for_gives_up_at_once_on_a_fatal_error() {
+        let mut calls = 0;
+        let err = retry_for(
+            Duration::from_secs(60),
+            Duration::from_millis(1),
+            |e: &String| e == "fatal",
+            || {
+                calls += 1;
+                std::future::ready(Err::<(), _>("fatal".to_owned()))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!((err.as_str(), calls), ("fatal", 1));
+    }
+
+    #[test]
+    fn a_missing_socket_or_refused_connection_means_the_runtime_is_unreachable() {
+        for kind in [ErrorKind::NotFound, ErrorKind::ConnectionRefused] {
+            let error = TestcontainersError::Io(io::Error::from(kind));
+            assert!(is_unreachable(&error), "{kind:?}");
+        }
+        let conflict = TestcontainersError::Io(io::Error::other("name conflict"));
+        assert!(!is_unreachable(&conflict));
+    }
+
+    #[test]
+    fn the_unreachable_message_names_docker_host_and_the_fix() {
+        let message = unreachable_message(None, "Socket not found: /var/run/docker.sock");
+        assert!(
+            message.contains("DOCKER_HOST=<unset>")
+                && message.contains("Socket not found: /var/run/docker.sock")
+                && message.contains("set DOCKER_HOST"),
+            "{message}"
+        );
+        assert!(
+            unreachable_message(Some("unix:///x.sock"), "e").contains("DOCKER_HOST=unix:///x.sock")
+        );
     }
 
     #[tokio::test]
