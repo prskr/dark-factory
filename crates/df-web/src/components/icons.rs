@@ -60,6 +60,10 @@ pub enum Icon {
     Git,
     /// A link that opens in a new tab (Lucide `external-link`).
     ExternalLink,
+    /// A push in the transcript (Lucide `git-commit-horizontal`).
+    GitCommit,
+    /// An opened draft pull request in the transcript (Lucide `git-pull-request-draft`).
+    PullRequestDraft,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -107,6 +111,8 @@ impl Icon {
         Self::BotMessage,
         Self::Git,
         Self::ExternalLink,
+        Self::GitCommit,
+        Self::PullRequestDraft,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
@@ -170,6 +176,12 @@ impl Icon {
             Self::ArrowUp => "<path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/>",
             Self::Logo => LOGO_BODY,
             Self::Git => GIT_BODY,
+            Self::GitCommit => {
+                "<circle cx=\"12\" cy=\"12\" r=\"3\"/><line x1=\"3\" x2=\"9\" y1=\"12\" y2=\"12\"/><line x1=\"15\" x2=\"21\" y1=\"12\" y2=\"12\"/>"
+            }
+            Self::PullRequestDraft => {
+                "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M18 6V5\"/><path d=\"M18 11v-1\"/><line x1=\"6\" x2=\"6\" y1=\"9\" y2=\"21\"/>"
+            }
             Self::Trash => {
                 "<path d=\"M3 6h18\"/><path d=\"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6\"/><path d=\"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2\"/>"
             }

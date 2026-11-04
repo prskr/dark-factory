@@ -305,10 +305,10 @@ impl Push {
             return report(&parsed, &reject_all(&verdicts, &Reason::AuditUnavailable));
         }
         let response = forward(upstream, forge, request, spooled).await;
-        let (response, verdict, verdicts) =
-            forge_verdict(response, &parsed.capabilities, verdicts).await;
-        self.store(entry.record(&verdicts, verdict)).await.ok();
-        response
+        let forwarded = forge_verdict(response, &parsed.capabilities, verdicts).await;
+        let record = entry.record_refs(&forwarded.verdicts, forwarded.verdict, &forwarded.refs);
+        self.store(record).await.ok();
+        forwarded.response
     }
 
     /// The answer to a body that could not be spooled; the push is recorded as rejected with
@@ -627,16 +627,29 @@ impl Entry<'_> {
             .collect()
     }
 
+    /// The record of a push whose refs all share its `verdict`.
     fn record(&self, verdicts: &[RefVerdict], verdict: PushVerdict) -> PushRecord {
+        self.record_refs(verdicts, verdict, &vec![verdict; verdicts.len()])
+    }
+
+    /// The record of a push; `refs` holds the verdict of each ref (the forwarded push is
+    /// `upstream-failed` as a whole when the forge refused one ref only).
+    fn record_refs(
+        &self,
+        verdicts: &[RefVerdict],
+        verdict: PushVerdict,
+        refs: &[PushVerdict],
+    ) -> PushRecord {
         let refs = self
             .commands
             .iter()
             .zip(verdicts)
-            .map(|(command, ref_verdict)| RefUpdate {
+            .zip(refs)
+            .map(|((command, ref_verdict), &ref_outcome)| RefUpdate {
                 name: command.name.clone(),
                 old_sha: command.old.to_string(),
                 new_sha: command.new.to_string(),
-                verdict: i32::from(verdict),
+                verdict: i32::from(ref_outcome),
                 reason: ref_verdict
                     .reason
                     .as_ref()
@@ -693,12 +706,12 @@ async fn forge_verdict(
     response: Response<Body>,
     capabilities: &[String],
     verdicts: Vec<RefVerdict>,
-) -> (Response<Body>, PushVerdict, Vec<RefVerdict>) {
+) -> Forwarded {
     if !response.status().is_success() {
-        return (response, PushVerdict::UpstreamFailed, verdicts);
+        return Forwarded::whole(response, PushVerdict::UpstreamFailed, verdicts);
     }
     if !report_status_requested(capabilities) {
-        return (response, PushVerdict::Accepted, verdicts);
+        return Forwarded::whole(response, PushVerdict::Accepted, verdicts);
     }
     let side_band = side_band_requested(capabilities);
     let (parts, body) = response.into_parts();
@@ -724,6 +737,18 @@ async fn forge_verdict(
         tracing::info!(failure = ?report.failure, refused = ?report.refused, "the forge refused the push");
         PushVerdict::UpstreamFailed
     };
+    // A report-status names the refs the forge refused; the others were accepted, unless the
+    // forge failed the push as a whole.
+    let refs = verdicts
+        .iter()
+        .map(|verdict| {
+            if report.failure.is_some() || report.refused.contains(&verdict.name) {
+                PushVerdict::UpstreamFailed
+            } else {
+                PushVerdict::Accepted
+            }
+        })
+        .collect();
     let verdicts = verdicts
         .into_iter()
         .map(|verdict| {
@@ -740,14 +765,40 @@ async fn forge_verdict(
     let body = Full::new(answer)
         .map_err(|never| match never {})
         .boxed_unsync();
-    (Response::from_parts(parts, body), verdict, verdicts)
+    Forwarded {
+        response: Response::from_parts(parts, body),
+        verdict,
+        verdicts,
+        refs,
+    }
 }
 
-fn forge_answer_failed(
+/// What the forge answered to a forwarded push.
+struct Forwarded {
+    response: Response<Body>,
+    /// Verdict of the push as a whole.
+    verdict: PushVerdict,
     verdicts: Vec<RefVerdict>,
-) -> (Response<Body>, PushVerdict, Vec<RefVerdict>) {
+    /// Verdict of each ref, in the order of `verdicts`.
+    refs: Vec<PushVerdict>,
+}
+
+impl Forwarded {
+    /// Every ref has the verdict of the push.
+    fn whole(response: Response<Body>, verdict: PushVerdict, verdicts: Vec<RefVerdict>) -> Self {
+        let refs = vec![verdict; verdicts.len()];
+        Self {
+            response,
+            verdict,
+            verdicts,
+            refs,
+        }
+    }
+}
+
+fn forge_answer_failed(verdicts: Vec<RefVerdict>) -> Forwarded {
     let message = format!("{FORGE_UNAVAILABLE}: reading the forge's answer failed");
-    (
+    Forwarded::whole(
         text(StatusCode::BAD_GATEWAY, &message),
         PushVerdict::UpstreamFailed,
         verdicts,

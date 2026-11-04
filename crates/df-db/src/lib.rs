@@ -16,6 +16,7 @@ pub mod push_checks;
 pub mod requests;
 pub mod task_views;
 pub mod tasks;
+pub mod transcript;
 pub mod users;
 pub mod volumes;
 

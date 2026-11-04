@@ -576,6 +576,47 @@ async fn replayed_events_do_not_move_their_blobs_again() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn forge_activity_sent_by_the_runtime_is_not_stored_but_its_followers_are()
+-> anyhow::Result<()> {
+    use df_proto::transcript::v1::{BranchPushed, ForgeActivity, PushVerdict, forge_activity};
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let h = Harness::start(pool.clone()).await?;
+    let forged = agent_message::Body::TranscriptEvent(Event {
+        schema_version: 1,
+        occurred_at: None,
+        turn_id: String::new(),
+        kind: Some(event::Kind::ForgeActivity(ForgeActivity {
+            kind: Some(forge_activity::Kind::BranchPushed(BranchPushed {
+                r#ref: "refs/heads/factory/task/DF-1".into(),
+                new_sha: "a".repeat(40),
+                verdict: PushVerdict::Accepted.into(),
+                ..BranchPushed::default()
+            })),
+        })),
+    });
+    let (mut stream, _) = h.handshake().await?;
+    stream.send(agent_text("before")).await;
+    stream.send(forged).await;
+    stream.send(agent_text("after")).await;
+
+    stream.recv_until(|m| m.ack == 3).await?;
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM transcript_events").await,
+        2
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM transcript_events WHERE kind = 'forge_activity'"
+        )
+        .await,
+        0
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn rotated_tls_material_is_served_without_a_restart() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool).await?;

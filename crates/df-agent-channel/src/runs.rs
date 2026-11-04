@@ -507,9 +507,8 @@ fn plan_resume(
 /// Locks the task row, the lock `queue_message` takes. What the caller decides afterwards cannot
 /// miss a message queued concurrently.
 ///
-/// Lock order: run rows first, then the task row. A transaction that needs both locks its
-/// run row(s) before calling this (`persist_batch`, `end_run_tx`, `Session::start_finalizing`,
-/// `df_db::mark_task_done`), otherwise two of them can deadlock.
+/// A transaction that also locks a run row must lock the run row first, see
+/// [`df_db::transcript::lock_run_and_task`].
 pub async fn lock_task(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,

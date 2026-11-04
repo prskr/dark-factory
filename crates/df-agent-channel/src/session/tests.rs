@@ -433,7 +433,7 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
     .expect("start_finalizing did not wait for the run lock");
 
     // Without the run lock first, `start_finalizing` now holds the task row: deadlock.
-    lock_task(&mut other, task_id).await.unwrap();
+    crate::runs::lock_task(&mut other, task_id).await.unwrap();
     other.commit().await.unwrap();
     assert!(finalizing.await.unwrap().unwrap());
 }
@@ -1068,6 +1068,31 @@ fn push_report() -> agent_message::Body {
         status: PushStatus::Ok as i32,
         ..PushReport::default()
     })
+}
+
+#[tokio::test]
+async fn a_push_report_without_a_push_record_writes_no_push_activity() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.running_run().await;
+    let report = agent_message::Body::PushReport(PushReport {
+        target: PushTarget::TaskBranch as i32,
+        status: PushStatus::Ok as i32,
+        commits_ahead_of_base: 1,
+        ..PushReport::default()
+    });
+
+    run_session(&env, run_id, vec![hello(), msg(1, report)])
+        .await
+        .unwrap();
+
+    let pushes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM transcript_events WHERE payload #> '{forgeActivity,branchPushed}' IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pushes, 0);
 }
 
 #[tokio::test]

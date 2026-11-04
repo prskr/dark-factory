@@ -2,6 +2,7 @@ use chrono::TimeZone;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::components::Icon;
 
 fn stored(id: i64, turn: &str, kind: Value) -> StoredEvent {
     let mut event = json!({"schemaVersion": 1, "turnId": turn});
@@ -464,4 +465,133 @@ fn a_card_goes_before_an_item_recorded_at_the_same_time() {
     assert!(card_goes_before(at(5), at(5)));
     assert!(card_goes_before(at(5), at(6)));
     assert!(!card_goes_before(at(6), at(5)));
+}
+
+/// A forge activity event as the control plane stores it (no turn).
+fn forge(id: i64, activity: Value) -> StoredEvent {
+    stored(id, "", json!({"forgeActivity": activity}))
+}
+
+fn pushed(verdict: &str, old: &str, reason: &str) -> Value {
+    json!({"branchPushed": {"ref": "refs/heads/factory/task/DF-1", "oldSha": old,
+        "newSha": "def5678901234567890123456789012345678901", "verdict": verdict, "reason": reason}})
+}
+
+const OLD: &str = "abc1234567890123456789012345678901234567";
+
+fn forge_row(event: &StoredEvent) -> String {
+    let folder = fold(std::slice::from_ref(event));
+    // The run divider comes first.
+    render_item(folder.items().last().unwrap()).into_string()
+}
+
+#[test]
+fn accepted_push_row_shows_the_branch_and_the_short_shas_with_the_commit_icon() {
+    let html = forge_row(&forge(1, pushed("PUSH_VERDICT_ACCEPTED", OLD, "")));
+
+    assert!(html.contains("id=\"ev-1\""), "{html}");
+    assert!(html.contains(&c_icon(Icon::GitCommit)), "{html}");
+    assert!(
+        html.contains("Pushed factory/task/DF-1 abc1234..def5678"),
+        "{html}"
+    );
+    assert!(
+        html.contains("text-accent-text") && !html.contains("text-danger"),
+        "{html}"
+    );
+}
+
+#[test]
+fn push_that_created_the_branch_shows_the_new_sha_alone() {
+    let html = forge_row(&forge(
+        1,
+        pushed("PUSH_VERDICT_ACCEPTED", &"0".repeat(40), ""),
+    ));
+
+    assert!(html.contains("Pushed factory/task/DF-1 def5678"), "{html}");
+    assert!(!html.contains(".."), "{html}");
+}
+
+#[test]
+fn rejected_and_failed_pushes_are_tinted_as_errors_and_name_the_reason() {
+    for verdict in ["PUSH_VERDICT_REJECTED", "PUSH_VERDICT_UPSTREAM_FAILED"] {
+        let html = forge_row(&forge(1, pushed(verdict, OLD, "df:non-fast-forward")));
+
+        assert!(html.contains(&c_icon(Icon::GitCommit)), "{html}");
+        assert!(
+            html.contains("Push to factory/task/DF-1 rejected df:non-fast-forward"),
+            "{html}"
+        );
+        assert!(
+            html.contains("text-danger") && !html.contains("text-accent-text"),
+            "{html}"
+        );
+    }
+}
+
+#[test]
+fn pull_request_rows_have_their_own_icon_text_and_link() {
+    let url = "https://git.example.org/o/r/pulls/12";
+    let draft = forge_row(&forge(
+        1,
+        json!({"pullRequestOpened": {"number": "12", "url": url, "draft": true}}),
+    ));
+    assert!(draft.contains(&c_icon(Icon::PullRequestDraft)), "{draft}");
+    assert!(draft.contains("Opened draft PR "), "{draft}");
+    assert!(
+        draft.contains(&format!("<a href=\"{url}\"")) && draft.contains(">#12</a>"),
+        "{draft}"
+    );
+
+    let open = forge_row(&forge(
+        1,
+        json!({"pullRequestOpened": {"number": "12", "url": url}}),
+    ));
+    assert!(open.contains(&c_icon(Icon::PullRequest)), "{open}");
+    assert!(open.contains("Opened PR "), "{open}");
+
+    let ready = forge_row(&forge(
+        1,
+        json!({"pullRequestReady": {"number": "12", "url": url}}),
+    ));
+    assert!(ready.contains(&c_icon(Icon::PullRequest)), "{ready}");
+    assert!(ready.contains(">#12</a> ready for review"), "{ready}");
+    assert!(ready.contains("text-accent-text"), "{ready}");
+}
+
+#[test]
+fn a_pull_request_url_that_is_not_http_is_shown_without_a_link() {
+    let html = forge_row(&forge(
+        1,
+        json!({"pullRequestReady": {"number": "12", "url": "javascript:alert(1)"}}),
+    ));
+
+    assert!(html.contains("#12 ready for review"), "{html}");
+    assert!(
+        !html.contains("<a ") && !html.contains("javascript"),
+        "{html}"
+    );
+}
+
+#[test]
+fn forge_rows_share_divider_lines_with_tool_and_notice_rows() {
+    let html = forge_row(&forge(1, pushed("PUSH_VERDICT_ACCEPTED", OLD, "")));
+
+    assert!(html.contains("data-system"), "{html}");
+}
+
+#[test]
+fn forge_rows_sit_in_order_between_the_agent_messages() {
+    let folder = fold(&[
+        chunk(1, "t1", "m1", "before"),
+        forge(2, pushed("PUSH_VERDICT_ACCEPTED", OLD, "")),
+        chunk(3, "t2", "m2", "after"),
+    ]);
+
+    let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
+    assert_eq!(ids, ["run-1", "msg-r1-m1", "ev-2", "msg-r1-m2"]);
+}
+
+fn c_icon(glyph: Icon) -> String {
+    crate::components::icon(glyph).into_string()
 }

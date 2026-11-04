@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use df_core::{RunOutcome, RunState, TaskStatus};
+use df_db::transcript::lock_run_and_task;
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
@@ -29,7 +30,7 @@ use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts}
 use crate::error::ChannelError;
 use crate::metrics::Observation;
 use crate::runs::{
-    EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, has_undelivered_message, lock_task,
+    EndedRun, RunEnd, RunRow, end_run_tx, finish_run, get_run, has_undelivered_message,
     mark_connected, set_idle_tx, set_run_state_tx,
 };
 use crate::scheduler::cancel_deadline;
@@ -320,12 +321,7 @@ impl Session {
     /// run was moved.
     async fn start_finalizing(&self, only_idle: bool) -> Result<bool, ChannelError> {
         let mut tx = self.ctx.pool.begin().await?;
-        // Lock order: run row, then task row (see `lock_task`).
-        sqlx::query("SELECT 1 FROM runs WHERE id = $1 FOR UPDATE")
-            .bind(self.rc.run.id.as_uuid())
-            .execute(&mut *tx)
-            .await?;
-        lock_task(&mut tx, self.rc.task.id).await?;
+        lock_run_and_task(&mut tx, self.rc.run.id, self.rc.task.id).await?;
         let moved = if only_idle {
             !has_undelivered_message(&mut tx, self.rc.task.id, None).await?
                 && sqlx::query(
@@ -624,7 +620,7 @@ async fn persist_batch(
     let prepared = prepare_transcript_events(ctx, rc, &batch).await?;
 
     let mut tx = ctx.pool.begin().await?;
-    let start = lock_run_and_task(&mut tx, rc).await?;
+    let start = lock_run_and_read_seq(&mut tx, rc).await?;
     let mut applied = BatchApply {
         last: start,
         max_auto_resumes: ctx.config.runs.max_auto_resumes,
@@ -704,6 +700,11 @@ async fn prepare_transcript_events(
         if let Some(agent_message::Body::TranscriptEvent(event)) = &msg.body
             && msg.seq > already_persisted
         {
+            if !transcript::allowed_from_runtime(event) {
+                // The sequence number is still acknowledged; the event is not stored.
+                tracing::warn!(run_id = %rc.run.id, seq = msg.seq, "dropping forge activity sent by the runtime");
+                continue;
+            }
             prepared.insert(
                 msg.seq,
                 transcript::prepare(&blobs, msg.seq, event.clone()).await?,
@@ -713,20 +714,18 @@ async fn prepare_transcript_events(
     Ok(prepared)
 }
 
-/// Locks the run row and then the task row, and returns the run's `last_persisted_seq`.
-async fn lock_run_and_task(
+/// Locks the run row and then the task row (`df_db::transcript::lock_run_and_task`: event ids
+/// must become visible in order, also next to events of another run of the task) and returns the
+/// run's `last_persisted_seq`.
+async fn lock_run_and_read_seq(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     rc: &RunContext,
 ) -> Result<u64, ChannelError> {
-    let stored: i64 =
-        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1 FOR UPDATE")
-            .bind(rc.run.id.as_uuid())
-            .fetch_one(&mut **tx)
-            .await?;
-    // Event ids are the task-wide cursor of the web UI's live transcript, so they must become
-    // visible in id order. The run lock alone allows another run of the same task (a lost run's
-    // late batch) to commit a lower id after this one. Same lock order as `end_run`: run, task (see `lock_task`).
-    lock_task(tx, rc.task.id).await?;
+    lock_run_and_task(tx, rc.run.id, rc.task.id).await?;
+    let stored: i64 = sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1")
+        .bind(rc.run.id.as_uuid())
+        .fetch_one(&mut **tx)
+        .await?;
     u64::try_from(stored)
         .map_err(|_negative| ChannelError::InvalidData("negative last_persisted_seq".into()))
 }
