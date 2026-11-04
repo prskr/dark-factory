@@ -56,7 +56,7 @@ reaches a sandbox any more.
 2. A persona without a harness credential stops the migration with a message naming the persona.
    The `migrate` job fails and the release stays on the old version. Give the persona a harness
    credential (or delete it), then upgrade again.
-3. After the upgrade, check **Model providers** and the persona list; add providers for other
+3. After the upgrade, check **Settings → Model providers** and the persona list; add providers for other
    services as needed. A persona created later needs a model provider.
 4. Remove `api.anthropic.com` from the instance egress allowlist: model traffic no longer uses the
    egress proxy. Leaving the entry is harmless.

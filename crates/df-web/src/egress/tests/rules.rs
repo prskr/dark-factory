@@ -337,7 +337,14 @@ async fn the_rules_page_shows_title_count_and_header_actions() {
         page.contains("hx-get=\"/egress/allowlist/service/new\"")
             && page.contains("Add cluster service")
     );
-    assert!(page.contains("aria-label=\"Egress rules\""), "rail entry");
+    assert!(
+        page.contains("<a href=\"/egress/allowlist\" aria-current=\"page\""),
+        "sidebar entry"
+    );
+    assert!(
+        page.contains("aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""),
+        "rail entry"
+    );
 }
 
 #[tokio::test]

@@ -28,7 +28,7 @@ how-tos: [Plugin configuration](configuration.md).
    kubectl -n dark-factory create secret generic forge-token --from-file=token=<file with the token>
    ```
 
-3. In the web UI, **Credentials → New credential reference**: a name, Secret `forge-token`, key
+3. In the web UI, **Settings → Credentials → New credential reference**: a name, Secret `forge-token`, key
    `token`. The control plane stores only the reference, never the token.
 4. **Projects → New project**: the repository URL (`https://git.example.org/<owner>/<repo>.git`) and
    that credential as forge credential. The hint below the URL names the plugin that serves it.

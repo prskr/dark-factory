@@ -18,6 +18,8 @@ pub enum Icon {
     Activity,
     /// The requests inbox (Lucide `inbox`).
     Inbox,
+    /// The settings area (Lucide `settings`).
+    Settings,
     LogOut,
     PanelRight,
     Close,
@@ -83,6 +85,7 @@ impl Icon {
         Self::Shield,
         Self::Activity,
         Self::Inbox,
+        Self::Settings,
         Self::LogOut,
         Self::PanelRight,
         Self::Close,
@@ -145,6 +148,9 @@ impl Icon {
             }
             Self::Inbox => {
                 "<polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\"/><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/>"
+            }
+            Self::Settings => {
+                "<path d=\"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>"
             }
             Self::LogOut => {
                 "<path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><polyline points=\"16 17 21 12 16 7\"/><line x1=\"21\" x2=\"9\" y1=\"12\" y2=\"12\"/>"

@@ -27,7 +27,7 @@ the **Requests** inbox, with the host and port. Three ways to allow it:
 1. **From the request**: approve it and pick the scope (task, project or everywhere). The agent gets
    the decision as a message; its retry succeeds.
 2. **From the traffic view**: on a blocked row or graph node choose **Allow**, then the scope.
-3. **On the Egress rules page**: **New egress rule**, host, port and scope.
+3. **On the Egress rules page** (**Settings → Egress rules**): **New egress rule**, host, port and scope.
 
 Any new host rule settles the pending requests it covers.
 
@@ -37,7 +37,7 @@ Some harnesses send telemetry to hosts you will never allow (for example Claude 
 `http-intake.logs.us5.datadoghq.com:443`). Every run raises the same request for it. A **deny rule**
 ends that:
 
-1. Open **Egress rules** and choose **New egress rule**.
+1. Open **Settings → Egress rules** and choose **New egress rule**.
 2. Select **Deny**. "Applies to" and Port are disabled: a deny rule covers every project and every
    port.
 3. Enter the host (`http-intake.logs.us5.datadoghq.com`, or `*.datadoghq.com` for all subdomains)

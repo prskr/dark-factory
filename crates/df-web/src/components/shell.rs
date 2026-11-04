@@ -9,11 +9,25 @@ use crate::requests::count_badge;
 /// Where the docs of every version live (`docs/` of the repository, published per release).
 const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
 
-const SECTIONS: [(Nav, &str, &str, Icon); 8] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Requests, "/requests", "Requests", Icon::Inbox),
     (Nav::Projects, "/projects", "Projects", Icon::Projects),
-    (Nav::Personas, "/personas", "Personas", Icon::Personas),
+    (
+        Nav::EgressLog,
+        "/egress/log",
+        "Network traffic",
+        Icon::Activity,
+    ),
+];
+
+/// Where the rail's Settings link goes: the first section of [`SETTINGS_SECTIONS`].
+const SETTINGS_HOME: &str = "/personas";
+
+/// The sections of the settings area, in the order of the settings sidebar. The rail's Settings
+/// link is current on each of them and opens the first ([`SETTINGS_HOME`]).
+pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 4] = [
+    (Nav::Personas, SETTINGS_HOME, "Personas", Icon::Personas),
     (
         Nav::Credentials,
         "/credentials",
@@ -32,13 +46,12 @@ const SECTIONS: [(Nav, &str, &str, Icon); 8] = [
         "Egress rules",
         Icon::Shield,
     ),
-    (
-        Nav::EgressLog,
-        "/egress/log",
-        "Network traffic",
-        Icon::Activity,
-    ),
 ];
+
+/// Whether `nav` is a page of the settings area.
+pub(crate) fn is_settings(nav: Nav) -> bool {
+    SETTINGS_SECTIONS.iter().any(|(target, ..)| *target == nav)
+}
 
 /// A round badge with initials.
 pub fn avatar(initials: &str) -> Markup {
@@ -73,7 +86,7 @@ pub struct CreateAction<'a> {
 /// `shell`. Links show icons only; the section name is their accessible name and tooltip.
 pub fn rail(active: Nav, compose_href: &str, shell: &Shell) -> Markup {
     html! {
-        aside class="sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col items-center gap-1 bg-rail py-3 md:flex" {
+        aside class="sticky top-0 z-30 hidden h-dvh w-[4.5rem] shrink-0 flex-col items-center gap-1 bg-rail py-3 md:flex" {
             a href="/tasks" aria-label="Dark Factory" title="Dark Factory"
                 class="mb-2 flex size-11 items-center justify-center rounded-xl text-accent hover:bg-rail-hover" {
                 (logo("size-7 shrink-0"))
@@ -81,15 +94,41 @@ pub fn rail(active: Nav, compose_href: &str, shell: &Shell) -> Markup {
             (create_button(&CreateAction { label: "New task", href: compose_href }, "mb-3 inline-flex size-11 items-center justify-center rounded-xl bg-accent text-on-accent hover:brightness-95"))
             nav id="desktop-menu" aria-label="Main" class="flex flex-1 flex-col gap-1" {
                 @for (target, href, label, glyph) in SECTIONS {
+                    (rail_link(target == active, href, label, glyph, target == Nav::Requests))
+                }
+            }
+            (rail_link(is_settings(active), SETTINGS_HOME, "Settings", Icon::Settings, false))
+            (profile_menu(shell))
+        }
+    }
+}
+
+/// The settings sidebar from 768 px: the sections of the settings area with the open one marked.
+pub fn settings_sidebar(active: Nav) -> Markup {
+    html! {
+        aside class="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col gap-1 border-r border-line bg-panel px-3 py-8 md:flex" {
+            h2 class="mb-3.5 px-3 text-lg font-semibold" { "Settings" }
+            nav id="settings-menu" aria-label="Settings" class="flex flex-col gap-1" {
+                @for (target, href, label, glyph) in SETTINGS_SECTIONS {
                     @let current = target == active;
-                    a href=(href) aria-label=(label) title=(label) aria-current=[current.then_some("page")]
-                        class={"relative flex size-11 items-center justify-center rounded-lg hover:bg-rail-hover " (if current { "bg-rail-hover text-accent before:absolute before:inset-y-2 before:-left-3.5 before:w-1 before:rounded-r-full before:bg-accent" } else { "text-rail-ink" })} {
-                        (icon(glyph))
-                        @if target == Nav::Requests { (count_badge("request-count-rail", 0)) }
+                    a href=(href) aria-current=[current.then_some("page")]
+                        class={"relative flex h-11 items-center gap-2.5 rounded-lg px-3 text-sm lg:h-9 [&_svg]:size-4 hover:bg-sunk " (if current { "bg-sunk font-medium text-ink before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent" } else { "text-muted" })} {
+                        (icon(glyph)) (label)
                     }
                 }
             }
-            (profile_menu(shell))
+        }
+    }
+}
+
+/// An icon-only link of the rail; the label is its accessible name and tooltip. `requests`
+/// adds the pending count.
+fn rail_link(current: bool, href: &str, label: &str, glyph: Icon, requests: bool) -> Markup {
+    html! {
+        a href=(href) aria-label=(label) title=(label) aria-current=[current.then_some("page")]
+            class={"relative flex size-11 items-center justify-center rounded-lg hover:bg-rail-hover " (if current { "bg-rail-hover text-accent before:absolute before:inset-y-2 before:-left-3.5 before:w-1 before:rounded-r-full before:bg-accent" } else { "text-rail-ink" })} {
+            (icon(glyph))
+            @if requests { (count_badge("request-count-rail", 0)) }
         }
     }
 }
@@ -224,7 +263,7 @@ mod tests {
         );
         assert!(html.contains("hx-get=\"/tasks/compose\""), "{html}");
         assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
-        for label in ["Tasks", "Projects", "Personas", "Credentials"] {
+        for label in ["Tasks", "Projects", "Settings"] {
             assert!(
                 html.contains(&format!("aria-label=\"{label}\" title=\"{label}\"")),
                 "{label}"
@@ -238,6 +277,63 @@ mod tests {
             html.contains("hidden") && html.contains("md:flex"),
             "desktop only"
         );
+    }
+
+    #[test]
+    fn rail_has_settings_above_the_avatar_and_no_settings_section_links() {
+        let html = rail(Nav::Tasks, "/tasks/compose", &shell("Ada", "dev")).into_string();
+        let settings = html
+            .find("href=\"/personas\" aria-label=\"Settings\" title=\"Settings\"")
+            .expect("Settings link");
+        assert!(settings > html.find("Network traffic").unwrap());
+        assert!(settings < html.find("Account menu of").unwrap());
+        for hidden in [
+            "/credentials",
+            "/model-providers",
+            "/egress/allowlist",
+            "\"Personas\"",
+            "\"Credentials\"",
+            "\"Model providers\"",
+            "\"Egress rules\"",
+        ] {
+            assert!(!html.contains(hidden), "{hidden}");
+        }
+    }
+
+    #[test]
+    fn rail_stacks_above_the_settings_sidebar_so_the_account_menu_stays_visible() {
+        let html = rail(Nav::Personas, "/tasks/compose", &shell("Ada", "dev")).into_string();
+        let aside = &html[html.find("<aside").unwrap()..];
+        let aside = &aside[..aside.find('>').unwrap()];
+        assert!(
+            aside.contains("sticky") && aside.contains("z-30"),
+            "{aside}"
+        );
+        let sidebar = settings_sidebar(Nav::Personas).into_string();
+        assert!(!sidebar.contains("z-"), "{sidebar}");
+    }
+
+    #[test]
+    fn settings_sidebar_links_are_touch_sized_below_1024_px() {
+        let html = settings_sidebar(Nav::Personas).into_string();
+        let links = html.matches("<a ").count();
+        assert_eq!(links, 4);
+        assert_eq!(html.matches("h-11 ").count(), links, "{html}");
+        assert_eq!(html.matches("lg:h-9 ").count(), links, "{html}");
+    }
+
+    #[test]
+    fn settings_is_current_on_every_settings_section() {
+        for nav in [
+            Nav::Personas,
+            Nav::Credentials,
+            Nav::ModelProviders,
+            Nav::Allowlist,
+        ] {
+            let html = rail(nav, "/tasks/compose", &shell("Ada", "dev")).into_string();
+            assert_eq!(html.matches("aria-current=\"page\"").count(), 1, "{nav:?}");
+            assert!(html.contains("href=\"/personas\" aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""), "{nav:?}: {html}");
+        }
     }
 
     #[test]
