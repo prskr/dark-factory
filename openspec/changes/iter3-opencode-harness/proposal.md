@@ -1,40 +1,43 @@
 # Proposal
 
-> **Partial (2026-11-02):** proposal and design only. Specs and tasks follow once `iter3-inference-gateway` is implemented and the spike in design.md (Open Questions) is done. Until then `.openspec.yaml` sets `skip_specs: true`; remove it together with writing the specs.
-
 ## Why
 
 Claude Code is the only harness, so every Dark Factory run depends on one vendor's client and subscription terms. OpenCode speaks ACP natively (`opencode acp`) and works with any model provider of the inference endpoint, which makes it the cheapest way to prove that Dark Factory is harness-agnostic (cheaper than `df-native`) before the harness registry and Generic ACP (F12, iteration 4).
 
 ## What Changes
 
-- New harness `opencode`: `personas.harness` accepts `opencode`; harness constant with wire APIs `openai-responses`, `openai-chat`, `anthropic-messages` (preference order to be confirmed by the spike) and CA variables `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`.
-- Harness image `deploy/images/opencode-harness` with a pinned OpenCode binary, mounted at `/opt/harness/opencode`, default adapter command `opencode acp`; configurable in `harness.opencode` of the instance config and Helm values.
-- Generated OpenCode configuration per run through `OPENCODE_CONFIG_CONTENT`: one provider pointing at the gateway's inference URL with the placeholder key, the persona's model as `model`, `share: "disabled"`, `autoupdate: false`; permission requests go over ACP (auto-approved like Claude Code).
-- Sandbox hardening for OpenCode: `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_MODELS_FETCH`, `OPENCODE_DISABLE_LSP_DOWNLOAD`, `OPENCODE_PURE`, `OPENCODE_DISABLE_DEFAULT_PLUGINS`; the repository's own `opencode.json` / `.opencode/` stays loaded unless the spike shows it can override the generated provider (then `OPENCODE_DISABLE_PROJECT_CONFIG`).
-- Session state (`$XDG_DATA_HOME/opencode`) on the task volume so `session/load` resumes across runs, like Claude Code's session directory.
-- Persona form offers `opencode`; the model field takes the upstream model ID.
-- Docs: harness reference entry, "Run a persona with OpenCode" guide.
+- New harness `opencode` (OpenCode 2.2.5, `opencode acp`): `personas.harness` accepts `opencode`; the harness uses OpenAI Chat Completions, OpenAI Responses and Anthropic Messages; CA variable `NODE_EXTRA_CA_CERTS`.
+- **BREAKING** Models on the model provider: a provider holds a list of models, each with model ID, wire API (one the provider offers) and optional context window and max output tokens (both or neither). A persona selects one model of its provider; the model is required for every persona. The run's wire API is the model's. The persona's free-text `model` and the harness preference order are removed. Presets prefill models (Anthropic, Claude subscription, OpenAI, OpenCode Go); models can always be added and edited by hand. The migration turns each persona's current `model` into a model of its provider and fails for a persona without one.
+- **BREAKING** Generic harness files: `AcpHarness.settings_json` is replaced by `files` (path below `HOME`, content). The runtime writes them before every start and keeps no harness-specific paths. The control plane renders them per harness: Claude Code gets `.claude/settings.json` (from `harness.claudeCode.settingsJson`) and the system prompt as `.claude/CLAUDE.md`; OpenCode gets the system prompt as `.config/opencode/AGENTS.md`. The same mechanism fits file-configured harnesses such as Pi (`models.json`, `SYSTEM.md`).
+- Harness constants gain an optional config document: where the rendered harness configuration goes (env variable or file under `HOME`) and whether base URL and key are env variables. OpenCode's document goes to `OPENCODE_CONFIG_CONTENT`: provider `df` (`npm` by the model's wire API, `baseURL` `<inference>/v1`, placeholder key, the persona's model with its limits), `model` and `small_model` `df/<model>`, `enabled_providers: ["df"]`, `autoupdate: false`, a policy denying `plugin.use` and permissions denying the `question` and `websearch` tools (questions go through the factory tool `ask_question`).
+- Fixed OpenCode environment: `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1`. Project configuration stays enabled: it carries the repository's `AGENTS.md`.
+- Harness image `deploy/images/opencode-harness` (pinned release musl binary, checksum verified, bundled musl loader, static launcher like `claude-harness`), mounted at `/opt/harness/opencode`, default adapter command `/opt/harness/opencode/bin/opencode acp`; configurable in `harness.opencode` of the instance configuration and in the Helm values.
+- Session state needs no change: OpenCode keeps it in `$HOME/.local/share/opencode`, already on the task volume.
+- Persona form: harness `opencode`, model select listing the selected provider's models compatible with the harness. Provider form: model list.
+- Docs: harness reference entry, provider models, "Run a persona with OpenCode" guide.
 
 Out of scope:
 - Harness registry and Generic ACP: iteration 4 (F12).
-- OpenCode plugins, MCP servers from OpenCode config, LSP downloads: rejected for sandboxes (no egress for them).
+- A Pi harness: only the generic files prepare for it.
+- Importing a provider's model list from its `/v1/models`: added when typing lists becomes tedious.
+- OpenCode plugins and MCP servers from OpenCode configuration: plugins are denied, remote MCP servers are blocked by the egress policy.
 - Usage from OpenCode's ACP `usage`: rejected; usage comes from the gateway (ADR-0050).
 
 ## Capabilities
 
 ### New Capabilities
-- `opencode-harness`: starting OpenCode as an ACP harness with generated configuration, disabled network features and persisted session state.
+- `opencode-harness`: starting OpenCode as an ACP harness with a generated configuration, disabled network features and tools, and persisted session state.
 
 ### Modified Capabilities
-- `configuration-management`: personas accept harness `opencode`.
-- `model-providers` (from `iter3-inference-gateway`): harness compatibility includes `opencode`.
-- `sandbox-provisioning`: the OpenCode harness image is mounted for `opencode` personas.
-- `helm-deployment`: `harness.opencode` image values.
+- `model-providers`: models per provider (wire API, limits), presets with models, harness compatibility by the persona's model.
+- `configuration-management`: personas accept harness `opencode` and reference a provider model.
+- `acp-harness`: the runtime writes the harness files of `Assign`; the system prompt is one of them.
+- `sandbox-provisioning`: the harness image of `opencode` comes from `harness.opencode.image`.
+- `build-pipeline`: OpenCode harness image.
+- `helm-deployment`: `image.harness.opencode` values.
 
 ## Impact
 
-- Depends on `iter3-inference-gateway` (model providers, inference endpoint, harness constants).
-- Code: `df-core` (harness constant, config), `df-db` (CHECK constraint migration), `df-agent-channel/assign.rs` (OpenCode env and config), `factory-agent/harness.rs` (per-harness session directory), `df-k8s` (image mount), `df-web` (persona form).
-- Images: new `deploy/images/opencode-harness` (Bazel, `check_versions.sh`), Helm values and README.
-- Docs: `crates/factory-agent/docs/configuration.md`, user docs.
+- Code: `df-core` (harness profiles, OpenCode config rendering, `harness.opencode` config, provider models), `df-db` (migration: `model_provider_models`, persona model reference, harness CHECK; `.sqlx` metadata), `df-proto` (`AcpHarness.files`, breaking), `df-agent-channel/assign.rs` (files and env per harness), `factory-agent/harness.rs` (writes `files`, no Claude paths), `df-k8s` (image map), `df-web` (provider model list, persona model select, presets).
+- Images: new `deploy/images/opencode-harness` (Bazel, `test.sh`, `check_versions.sh`, Renovate), Helm values and README.
+- Docs: `crates/factory-agent/docs/configuration.md`, `crates/df-agent-channel/docs/configuration.md`, user docs (model providers, personas, OpenCode guide).
