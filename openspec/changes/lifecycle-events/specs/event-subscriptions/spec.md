@@ -53,6 +53,17 @@ A project subscription URL SHALL use `https`. Before each delivery attempt, the 
 - **WHEN** a host resolved to a public address when saved and resolves to `127.0.0.1` at delivery time
 - **THEN** the delivery attempt is refused
 
+### Requirement: Unrestricted project subscriptions in development builds
+A control plane built with the Cargo feature `dev-tools` and started with `serve --unrestricted-project-subscriptions` SHALL accept `http` and any target address for project subscriptions, on save and on delivery. Release builds SHALL NOT have the flag.
+
+#### Scenario: Development build with the flag
+- **WHEN** a `dev-tools` build started with `--unrestricted-project-subscriptions` saves a project subscription with `http://receiver.e2e.svc:8080/events`
+- **THEN** it is saved and events are delivered to it
+
+#### Scenario: Release build
+- **WHEN** a release build is started with `--unrestricted-project-subscriptions`
+- **THEN** it exits with an unknown-argument error
+
 ### Requirement: Delivery status per project subscription
 The project settings SHALL show for each project subscription the time, HTTP status or error of its last delivery attempt.
 
