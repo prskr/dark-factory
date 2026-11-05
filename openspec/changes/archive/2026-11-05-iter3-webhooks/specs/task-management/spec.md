@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Task status vocabulary
-A task SHALL have exactly one status: `queued` (pending work, no active run), `running` (a turn is in progress or about to start), `waiting` (the last turn ended; waits for a human, the run may still be alive in its keep-alive window), `blocked` (the last run waited for an answer or approval not given within the idle deadline), `in_review` (the agent called `complete_task`; the PR waits for review), `completed` (a human marked the task done, or its PR was merged), `cancelled` (a human cancelled the task), `rate_limited`, `limit_reached` or `failed`.
+A task SHALL have exactly one status: `queued` (work pending, no active run), `running` (a turn is in progress or starting), `waiting` (waits for a human; the run may still be in its keep-alive window), `blocked` (an answer or approval was not given within the idle deadline), `in_review` (the agent called `complete_task`), `completed` (marked done by a human, or its PR was merged), `cancelled` (cancelled by a human), `rate_limited`, `limit_reached` or `failed`.
 
 #### Scenario: Status is always one of the defined values
 - **WHEN** any component writes a task status outside this set

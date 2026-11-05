@@ -35,14 +35,12 @@ Prerequisites: `lifecycle-events` (outbox), `iter2-task-volume-lifecycle` (reten
 
 ## 4. Storage
 
-- [x] 4.1 Write failing `df-db` tests, then add the migration for `webhook_events`, `projects.webhook_wake` (default `members`, CHECK) and `tasks.pr_merged_at` (design D3, D4, D6). Regenerate `.sqlx/`. Verify with `cargo test -p df-db webhook` (container-backed). The tests cover:
+- [x] 4.1 Write failing `df-db` tests, then add the migration for `projects.webhook_wake` (default `members`, CHECK) and `tasks.pr_merged_at` (design D4, D6). Regenerate `.sqlx/`. Verify with `cargo test -p df-db webhook` (container-backed). The tests cover:
   - existing projects get `members`;
-  - an invalid value is rejected;
-  - deleting a task removes its webhook events.
-- [x] 4.2 Write failing tests, then implement the `webhook.flush` outbox handler (design D3, D8). Verify with `cargo test -p df-db webhook_flush` (container-backed). The tests cover:
-  - two events in one window give one message with reason `webhook` and both lines;
-  - a second job of the same window is a no-op;
-  - a task that is `completed`, `cancelled` or `failed` gets no message and its rows are deleted;
+  - an invalid value is rejected.
+- [x] 4.2 Write failing tests, then queue one message per accepted event (design D3, D8; replaced the 30 s debounce after review). Verify with `cargo test -p df-db webhook` (container-backed). The tests cover:
+  - each event gives one message with reason `webhook`;
+  - a task that is `completed`, `cancelled` or `failed` gets no message;
   - a `waiting` task becomes `queued`;
   - the message contains no payload text.
 - [x] 4.3 Write failing tests, then enqueue `pr.mark_draft` in `queue_message_tx` and implement its handler (design D5). Verify with the `df-db` / `df-agent-channel` tests (container-backed). The tests cover:
@@ -59,8 +57,7 @@ Prerequisites: `lifecycle-events` (outbox), `iter2-task-volume-lifecycle` (reten
   - task key from the head branch;
   - routing targets per event kind;
   - the bot filter;
-  - the `webhook_wake` filter, with `author-role` called only for reviews and bot mentions;
-  - which events are debounced and which are applied directly.
+  - the `webhook_wake` filter, with `author-role` called only for reviews and bot mentions.
 - [x] 5.2 Write failing tests, then implement completing on merge (design D4, spec "Merged PR completes the task"). Verify with `cargo test -p df-agent-channel merged` (container-backed). The tests cover:
   - `in_review` becomes `completed` with audit reason `pr.merged` and the login;
   - an active run is stopped and the task ends `completed`;

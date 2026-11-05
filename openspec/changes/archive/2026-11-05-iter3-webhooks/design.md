@@ -23,7 +23,7 @@ See proposal.md (Why). The current state:
 ## Goals / Non-Goals
 
 **Goals:**
-- Forge specifics (headers, payloads, mention syntax, permission APIs) stay in the plugins. Filtering, routing and debouncing are forge-neutral, in the control plane.
+- Forge specifics (headers, payloads, mention syntax, permission APIs) stay in the plugins. Filtering and routing are forge-neutral, in the control plane.
 - The webhook secret and the forge credential never enter a plugin. A plugin bug cannot open the endpoint.
 - No forge call and no long work in the request path beyond the plugin calls. The forge's retry covers transient failures.
 
@@ -94,42 +94,31 @@ Alternative: the host verifies before calling the plugin, with header name and s
 3. For each event, find the projects whose normalized `repo_url` equals `repo-url` (host, owner, name). If none match, log at debug level and skip.
 4. Route the event to tasks (spec "Routing").
 5. Apply the filters (spec "Bot authored events dropped", "Wake policy per project").
-   - The project-bound plugin instance answers `whoami` (cached per project credential for the process lifetime) and `author-role` (not cached, as in `iter3-review-tools`).
+   - The project-bound plugin instance answers `whoami` and `author-role` (neither cached, as in `iter3-review-tools`). Webhooks are processed off the user's path; one extra call per review or comment does not matter.
    - `author-role` is only called for reviews and for comments that mention the bot.
 6. Apply the event (D3, D4) in one transaction per event.
-7. Answer `202`. Any error in steps 3–6 answers `500`, and the forge redelivers.
+7. Answer `202`. Any error in steps 3–6 answers `500`.
 
-Answering only after processing keeps the code simple and gives the forge's retry a meaning. The work is a few DB writes and at most two plugin calls per event.
+Answering only after processing keeps the code simple and makes a failure visible in the forge's delivery log. Neither forge redelivers a failed delivery on its own (GitHub documents this; Forgejo has no retry either), so an operator redelivers it by hand; a reconcile of open PRs is on the backlog (`docs/tech_debt.md`). The work is a few DB writes and at most two plugin calls per event.
 
-### D3: Debounce through the outbox
+### D3: One message per event
 
-```sql
-CREATE TABLE webhook_events (
-    id          BIGSERIAL PRIMARY KEY,
-    task_id     UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    event       JSONB NOT NULL,      -- normalized event, no payload text
-    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+Every accepted event other than a merge calls `queue_message_tx` with `render_message(&[event])` (system principal, reason `webhook`) in the event's transaction, unless the task is `completed`, `cancelled` or `failed`.
 
-- Accepting an event inserts one row and enqueues one outbox job `webhook.flush {task_id}` with `next_attempt_at = now() + 30 s`, in the same transaction.
-- The handler, in one transaction:
-  1. Locks the task row.
-  2. Deletes and returns all `webhook_events` of the task.
-  3. If it got rows and the task is not `completed`, `cancelled` or `failed`, renders one message and calls `queue_message_tx` with the system principal, reason `webhook`.
-- A job that finds no rows (its events were taken by an earlier job of the same window) is a no-op.
-- The result is a fixed 30 s window from the first event, with no dedupe key in the generic outbox. The outbox retries a failed flush; a crash after commit is harmless, because the rows are gone.
+- The first message queues the task or wakes its run. Later events land as undelivered messages, are held back during a turn and forwarded after it, like human messages.
+- They never start a second run, and the mark-draft job (D5) is enqueued only once, because the task is `queued` or `running` by then.
+- The cost is one turn per event instead of one per burst.
 
-Alternative: a `deliver_after` column on `task_messages`, with later events appended to the pending message. Rejected: it mixes debouncing into the message queue and its editing rules. The outbox already provides delayed jobs and retries.
+Alternative: collect events per task in a `webhook_events` table and flush them as one message 30 s after the first one through a delayed outbox job. Rejected in review: the message queue already absorbs bursts, and the window added a table, an outbox handler, delayed jobs and a window that was not fixed (each event enqueued its own flush, and any flush took all stored events).
 
 ### D4: Merged and closed
 
-- **Merged**: applied directly in the request transaction, not debounced.
+- **Merged**: applied directly in the request transaction.
   - Set `tasks.pr_merged_at` if it is null.
   - If the task is not `completed` or `cancelled`, run the existing mark-done path (`completed`, audit `task.done` with the system principal, reason `pr.merged` and the actor's login) and stop an active run through the `iter2-cancel` stop path, with end status `completed`.
   - The mark-ready call of mark-done is skipped, since the PR is merged.
   - A redelivery finds `pr_merged_at` set and does nothing.
-- **Closed without merge**: debounced like a review (D3). The message says who closed it.
+- **Closed without merge**: a message like a review (D3). The message says who closed it.
 - **Retention**: the scan of `iter2-task-volume-lifecycle` also selects tasks with `pr_merged_at` set and no non-terminal run, whatever `volumes.retainAfterClose` is.
   - This uses the existing hourly scan, row lock and marker. There is no new job kind and no race with the stopping run.
   - `pr_merged_at` is also what `iter3-task-dependencies` can use for "PR merged".
@@ -139,6 +128,7 @@ Alternative: a `deliver_after` column on `task_messages`, with later events appe
 `queue_message_tx` enqueues an outbox job `pr.mark_draft {task_id}` when it moves a task out of `in_review` or `completed`, the task has a PR, and `pr_merged_at` is null.
 
 - The handler calls `update(draft: true)` and retries with the outbox backoff, giving up after 1 h with a warning.
+- Before the call it re-reads the task and asks the forge for the open PR of the task branch. It does nothing when the task is `in_review`, `completed` or `cancelled` again, or when the PR is closed, merged, replaced or a draft already. A late retry therefore never undoes a newer state, and a closed PR needs no column of its own.
 - Further messages find the task already `queued` or `running` and enqueue nothing.
 - The next completion marks the PR ready as today.
 - The outbox puts the forge call out of the message transaction. Doing it at run start would need the previous status, which `queue_message` has already overwritten.
@@ -154,18 +144,15 @@ Alternative: a `deliver_after` column on `task_messages`, with later events appe
 
 ### D8: Message format
 
-One line per event, in arrival order, for example:
+One message per event (D3), for example:
 
 ```
-Forge events on your task:
-- alice submitted a review on PR #12: changes requested.
-- CI check "test" failed on factory/task/DF-1: <url>
-- bob closed PR #12 without merging.
+Forge event on your task: alice submitted a review on PR #12: changes requested.
 Read reviews and comments with read_pull_request_feedback.
 ```
 
-- Only logins, verdicts, check names, numbers and URLs from the normalized events.
-- The last line is present only when a review or comment is among the events.
+- Only logins, verdicts, check names, numbers and URLs from the normalized event.
+- The second line is present only for a review or comment.
 
 ### D9: Verification
 
@@ -193,12 +180,12 @@ Read reviews and comments with read_pull_request_feedback.
 - **One secret per plugin means every repository the plugin serves shares it.** The repository check (spec "Repository match") keeps a valid signature from waking another project's task, and a per-project override is on the backlog.
 - **Mentions parsed by the plugin can miss forge-specific syntax.** Plugin fixtures cover the common forms. A missed mention means no wake-up, never a wrong one.
 - **The forge's delivery timeout is about 10 s on both forges**, and plugin calls run inside it. At most two calls per event, under the plugin timeout. A redelivery after a slow request is harmless (no deduplication, see proposal).
-- **Events in the 30 s window after a task went final are dropped.** That is intended (spec "Only non-final tasks wake").
-- **`whoami` is cached for the process lifetime**, so renaming the bot account needs a restart. That is rare, and it is documented in the how-to.
+- **Events for a task that went final are dropped.** That is intended (spec "Only non-final tasks wake").
+- **A burst of events costs one turn per event.** Accepted for the simpler design (D3).
 
 ## Migration Plan
 
-- One migration adds `webhook_events`, `projects.webhook_wake` (default `members`) and `tasks.pr_merged_at`.
+- One migration adds `projects.webhook_wake` (default `members`) and `tasks.pr_merged_at`.
 - The WIT, both plugins and the host are released together.
 - Existing installations receive no webhooks until an operator sets a secret and registers the webhook in the forge.
 - Rollback: revert. The previous version ignores the new columns and the table.

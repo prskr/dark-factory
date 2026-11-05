@@ -70,6 +70,14 @@ When a message reopens a task in status `in_review` or `completed` whose PR is n
 - **WHEN** a board member queues a message on `DF-3`, whose PR was merged
 - **THEN** the forge is not called
 
+#### Scenario: Closed PR stays closed
+- **WHEN** a message reopens `DF-4` in status `in_review`, whose PR was closed without merge
+- **THEN** the PR of `DF-4` is not changed
+
+#### Scenario: Task finished again before the draft update
+- **WHEN** the forge is unavailable after a message reopened `DF-5`, and `DF-5` reaches `in_review` with a ready PR before the forge is back
+- **THEN** the PR of `DF-5` stays ready
+
 #### Scenario: Attached PR stays as it is
 - **WHEN** a member's review wakes `DF-13` in status `in_review`, attached to Renovate's PR #40
 - **THEN** the forge is not called to change PR #40
