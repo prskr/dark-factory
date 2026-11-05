@@ -38,8 +38,12 @@ Agents can't hand work to each other: only a human creates tasks, a task can't w
 - **Task page**:
   - The details show the creator and the parent (link).
   - While the task is `awaiting_dependencies`, the details list each dependency with its kind and current state.
+- **Task transitions** (internal, [ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)):
+  - Every task status change goes through one pure function of task snapshot and event.
+  - The existing status writes (creation, messages, run start, turns, run end, mark done, cancel) move to it first, with no behavior change.
+  - Releasing dependents and waking the parent are effects of that function.
 - **Docs**:
-  - ADR-0052, ADR amendments, glossary terms, `iteration-3.md` and `roadmap.md` (written);
+  - ADR-0052, ADR-0055, ADR amendments, glossary terms, `iteration-3.md` and `roadmap.md` (written);
   - the agent playbook's review loop (written);
   - a how-to "Delegate work between agents".
 
@@ -74,16 +78,16 @@ Out of scope:
   - migration:
     - `tasks.parent_id`;
     - `tasks.created_by` as a principal;
-    - `tasks.first_completed_at`;
+    - `tasks.first_completed_at`, `tasks.first_done_at`;
     - a `task_dependencies` table;
     - status `awaiting_dependencies`;
     - `personas.description`;
+  - `apply_task_event`. Creation, `queue_message_tx`, withdrawing a message, mark done and cancel go through it. `update_task_status` is removed;
   - `create_task` with dependencies;
-  - `queue_message_tx`;
-  - releasing dependents and the child-ended message on Completion, Done, failure and cancel;
+  - releasing dependents and the child-ended message on Completion, Done, failure and cancel, as effects;
   - `.sqlx/`.
-- `crates/df-core`: dependency kinds, the status, and validation of `create_task` input.
-- `crates/df-agent-channel`: run end (Completion, failure), the three tools, and scope checks for child tasks.
+- `crates/df-core`: the task transition function (`task_transition`), dependency kinds, the status, and validation of `create_task` input.
+- `crates/df-agent-channel`: run start, turn start and end, and run end raise task events (`plan_resume` moves to `df-core`); the three tools and scope checks for child tasks.
 - `contract/mcp/factory-tools.v2.json`: three tools.
 - `crates/df-web`: task details, the status chip and filters, and the persona form and card.
 - `crates/df-e2e`: the demo flow implement → review → relay, without webhooks.
