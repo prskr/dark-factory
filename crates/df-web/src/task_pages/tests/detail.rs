@@ -643,11 +643,19 @@ async fn a_run_without_usage_says_which_model_was_meant_and_that_nothing_was_rec
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     let runs = &html[html.find("id=\"runs\"").unwrap()..];
     assert!(
-        runs.contains("default model · no token usage recorded"),
+        runs.contains("claude-sonnet-5-5 · no token usage recorded"),
         "{runs}"
     );
     assert!(!runs.contains("<table"));
 
+    sqlx::query(
+        "INSERT INTO model_provider_models (provider_id, model_id, wire_api) \
+         VALUES ($1, 'opus', 'anthropic-messages')",
+    )
+    .bind(seed.provider)
+    .execute(&app.pool)
+    .await
+    .unwrap();
     sqlx::query("UPDATE personas SET model = 'opus'")
         .execute(&app.pool)
         .await
@@ -693,7 +701,7 @@ async fn a_running_run_without_usage_also_says_nothing_was_recorded() {
     insert_run(&app.pool, task.id, 1, "running").await;
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(
-        html.contains("default model · no token usage recorded"),
+        html.contains("claude-sonnet-5-5 · no token usage recorded"),
         "{html}"
     );
 }

@@ -25,8 +25,10 @@ sandbox's `NO_PROXY`, so the request does not use the egress proxy.
 
 The harness gets the endpoint and a fixed placeholder key in its environment (Claude Code:
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set to `df-placeholder`,
-`NODE_EXTRA_CA_CERTS`) and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so Claude Code sends no
-telemetry or update checks past the endpoint. The placeholder is not a secret.
+`ANTHROPIC_MODEL` with the persona's model, `NODE_EXTRA_CA_CERTS`) and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so Claude Code sends no
+telemetry or update checks past the endpoint. For `opencode` the base URL and the placeholder key are
+passed inside `OPENCODE_CONFIG_CONTENT` (see the
+[agent channel reference](../reference/agent-channel/configuration.md)). The placeholder is not a secret.
 
 ## Paths and status codes
 

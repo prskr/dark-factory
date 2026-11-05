@@ -14,9 +14,11 @@ PLUGIN_FORGEJO_DIGEST_FILE="$5"
 PLUGIN_GITHUB_DIGEST_FILE="$6"
 HARNESS_PUSH="$7"
 HARNESS_DIGEST_FILE="$8"
-CHART_FILE="$9"
-VALUES_DEV_FILE="${10}"
-shift 10
+OPENCODE_PUSH="$9"
+OPENCODE_DIGEST_FILE="${10}"
+CHART_FILE="${11}"
+VALUES_DEV_FILE="${12}"
+shift 12
 
 CHART_DIR="$(dirname "$CHART_FILE")"
 
@@ -37,12 +39,16 @@ PLUGIN_FORGEJO_DIGEST="$(tr -d '[:space:]' < "$PLUGIN_FORGEJO_DIGEST_FILE")"
 PLUGIN_GITHUB_DIGEST="$(tr -d '[:space:]' < "$PLUGIN_GITHUB_DIGEST_FILE")"
 HARNESS_REPO="${REGISTRY}/claude-harness"
 HARNESS_DIGEST="$(tr -d '[:space:]' < "$HARNESS_DIGEST_FILE")"
+OPENCODE_REPO="${REGISTRY}/opencode-harness"
+OPENCODE_DIGEST="$(tr -d '[:space:]' < "$OPENCODE_DIGEST_FILE")"
 
 echo "=== Pushing multi-arch OCI images to ${REGISTRY} ==="
 # shellcheck disable=SC2086
 "$PUSH_IMAGES" ${DARK_FACTORY_PUSH_ARGS:-}
 # shellcheck disable=SC2086
 "$HARNESS_PUSH" ${DARK_FACTORY_PUSH_ARGS:-}
+# shellcheck disable=SC2086
+"$OPENCODE_PUSH" ${DARK_FACTORY_PUSH_ARGS:-}
 
 # Builds deploy/images/<name> (Dockerfile) for amd64 and arm64, pushes ${REGISTRY}/<name>:dev and prints the digest.
 push_dockerfile_image() {
@@ -111,5 +117,7 @@ helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --set "plugins.github.image.digest=${PLUGIN_GITHUB_DIGEST}" \
   --set "image.harness.claudeCode.repository=${HARNESS_REPO}" \
   --set "image.harness.claudeCode.digest=${HARNESS_DIGEST}" \
+  --set "image.harness.opencode.repository=${OPENCODE_REPO}" \
+  --set "image.harness.opencode.digest=${OPENCODE_DIGEST}" \
   --wait \
   --timeout 3m "$@"

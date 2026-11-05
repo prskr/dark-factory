@@ -48,6 +48,21 @@ fn input(name: &str, credential: Uuid) -> ModelProviderInput {
                 upstream_url: "https://api.example.org/v1".into(),
             },
         ],
+        models: vec![
+            ProviderModel {
+                model_id: "claude-sonnet-5-5".into(),
+                wire_api: WireApi::AnthropicMessages,
+                limits: None,
+            },
+            ProviderModel {
+                model_id: "glm-5.3".into(),
+                wire_api: WireApi::OpenAiChat,
+                limits: Some(ModelLimits {
+                    context_window_tokens: 1_000_000,
+                    max_output_tokens: 131_072,
+                }),
+            },
+        ],
     }
 }
 
@@ -56,7 +71,7 @@ fn persona(provider: Uuid) -> PersonaInput {
         name: "Linus".into(),
         system_prompt: "p".into(),
         harness: "claude-code".into(),
-        model: None,
+        model: "claude-sonnet-5-5".into(),
         model_provider_id: provider,
     }
 }
@@ -79,6 +94,7 @@ async fn provider_is_stored_with_its_apis_and_audited() {
 
     let mut changed = input("Work", credential);
     changed.apis.truncate(1);
+    changed.models.truncate(1);
     changed.scheme = CredentialScheme::Bearer;
     save_model_provider(&pool, actor, Some(saved.id), &changed)
         .await
@@ -96,6 +112,162 @@ async fn provider_is_stored_with_its_apis_and_audited() {
     assert_eq!(details.len(), 2);
     assert_eq!(details[1]["before"]["scheme"], "x-api-key");
     assert_eq!(details[1]["after"]["scheme"], "bearer");
+}
+
+async fn saved_provider(pool: &PgPool, actor: Actor<'_>) -> ModelProviderRecord {
+    let credential = credential(pool, actor, "k").await;
+    save_model_provider(pool, actor, None, &input("Work", credential))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn models_are_stored_with_their_limits_and_edited_with_the_provider() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let provider = saved_provider(&pool, actor).await;
+    let loaded = get_model_provider(&pool, provider.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded
+            .model("glm-5.3")
+            .unwrap()
+            .limits
+            .unwrap()
+            .max_output_tokens,
+        131_072
+    );
+
+    let mut changed = loaded.input.clone();
+    changed.models[0].limits = Some(ModelLimits {
+        context_window_tokens: 200_000,
+        max_output_tokens: 64_000,
+    });
+    changed.models.retain(|m| m.model_id != "glm-5.3");
+    changed.models.push(ProviderModel {
+        model_id: "gpt-6-luna".into(),
+        wire_api: WireApi::OpenAiChat,
+        limits: None,
+    });
+    save_model_provider(&pool, actor, Some(provider.id), &changed)
+        .await
+        .unwrap();
+
+    let reloaded = get_model_provider(&pool, provider.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reloaded
+            .input
+            .models
+            .iter()
+            .map(|m| m.model_id.as_str())
+            .collect::<Vec<_>>(),
+        ["claude-sonnet-5-5", "gpt-6-luna"]
+    );
+    assert_eq!(
+        reloaded
+            .model("claude-sonnet-5-5")
+            .unwrap()
+            .limits
+            .unwrap()
+            .context_window_tokens,
+        200_000
+    );
+    let details: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'model_provider.update'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(details[0]["before"]["models"][1]["model_id"], "glm-5.3");
+    assert_eq!(details[0]["after"]["models"][1]["model_id"], "gpt-6-luna");
+}
+
+#[tokio::test]
+async fn a_model_a_persona_uses_cannot_be_removed_and_the_error_names_the_persona() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let provider = saved_provider(&pool, actor).await;
+    save_persona(&pool, actor, None, &persona(provider.id))
+        .await
+        .unwrap();
+    let mut changed = provider.input.clone();
+    changed.models.retain(|m| m.model_id != "claude-sonnet-5-5");
+
+    let Err(DbError::ModelConflict(message)) =
+        save_model_provider(&pool, actor, Some(provider.id), &changed).await
+    else {
+        panic!("expected a conflict");
+    };
+    assert_eq!(
+        message,
+        "claude-sonnet-5-5 cannot be removed: persona Linus uses it."
+    );
+    let stored = get_model_provider(&pool, provider.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.input.models.len(), 2, "nothing changed");
+}
+
+#[tokio::test]
+async fn an_api_a_model_uses_cannot_be_removed_and_the_error_names_the_model() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let provider = saved_provider(&pool, actor).await;
+    let mut changed = provider.input.clone();
+    changed
+        .apis
+        .retain(|api| api.wire_api != WireApi::AnthropicMessages);
+
+    let Err(DbError::ModelConflict(message)) =
+        save_model_provider(&pool, actor, Some(provider.id), &changed).await
+    else {
+        panic!("expected a conflict");
+    };
+    assert!(message.contains("claude-sonnet-5-5"), "{message}");
+}
+
+#[tokio::test]
+async fn a_persona_needs_a_model_of_its_provider_that_its_harness_can_use() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let provider = saved_provider(&pool, actor).await;
+    let with = |harness: &str, model: &str| PersonaInput {
+        harness: harness.into(),
+        model: model.into(),
+        ..persona(provider.id)
+    };
+
+    for (harness, model) in [("claude-code", "nope"), ("claude-code", "glm-5.3")] {
+        let result = save_persona(&pool, actor, None, &with(harness, model)).await;
+        assert!(
+            matches!(result, Err(DbError::ModelConflict(_))),
+            "{harness} {model}"
+        );
+    }
+    save_persona(&pool, actor, None, &with("opencode", "glm-5.3"))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -200,7 +372,8 @@ async fn old_credential(pool: &PgPool, name: &str) -> Uuid {
 
 async fn old_persona(pool: &PgPool, name: &str, credential: Option<Uuid>) {
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, harness_credential_id) VALUES ($1, $2, 'p', $3)",
+        "INSERT INTO personas (id, name, system_prompt, model, harness_credential_id) \
+         VALUES ($1, $2, 'p', 'claude-sonnet-5-5', $3)",
     )
     .bind(Uuid::now_v7())
     .bind(name)
@@ -320,6 +493,7 @@ async fn run_providers_pair_each_active_run_with_its_harness_and_provider() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[&run].harness, "claude-code");
     assert_eq!(found[&run].provider.id, provider.id);
+    assert_eq!(found[&run].model.model_id, "claude-sonnet-5-5");
 }
 
 /// Makes sure the database has a model provider for tests that insert personas with plain SQL
@@ -345,6 +519,14 @@ pub(crate) async fn seed_provider(pool: &PgPool) -> Uuid {
     sqlx::query(
         "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url) \
          SELECT id, 'anthropic-messages', 'https://api.anthropic.com' FROM model_providers \
+         WHERE name = 'test-provider' ON CONFLICT DO NOTHING",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO model_provider_models (provider_id, model_id, wire_api) \
+         SELECT id, 'test-model', 'anthropic-messages' FROM model_providers \
          WHERE name = 'test-provider' ON CONFLICT DO NOTHING",
     )
     .execute(pool)

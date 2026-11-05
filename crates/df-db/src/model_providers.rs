@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use df_core::model_provider::{CredentialScheme, HeaderTemplate, ProviderApi, WireApi};
+use df_core::model_provider::{
+    CredentialScheme, HeaderTemplate, ModelLimits, ProviderApi, ProviderModel, WireApi,
+};
 use serde::Serialize;
 use sqlx::types::Json;
 use sqlx::{FromRow, PgPool};
@@ -28,6 +30,8 @@ pub struct ModelProviderInput {
     pub credential_prefix: Option<String>,
     pub headers: Vec<HeaderTemplate>,
     pub apis: Vec<ProviderApi>,
+    /// Sorted by model ID.
+    pub models: Vec<ProviderModel>,
 }
 
 /// A stored model provider.
@@ -42,13 +46,22 @@ impl ModelProviderRecord {
     pub fn wire_apis(&self) -> Vec<WireApi> {
         self.input.apis.iter().map(|api| api.wire_api).collect()
     }
+
+    /// The model with `model_id`.
+    pub fn model(&self, model_id: &str) -> Option<&ProviderModel> {
+        self.input
+            .models
+            .iter()
+            .find(|model| model.model_id == model_id)
+    }
 }
 
-/// The provider of an active run and the harness that uses it.
+/// The provider and model of an active run and the harness that uses them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunModelProvider {
     pub harness: String,
     pub provider: ModelProviderRecord,
+    pub model: ProviderModel,
 }
 
 #[derive(FromRow)]
@@ -60,6 +73,15 @@ struct ProviderRow {
     credential_header: Option<String>,
     credential_prefix: Option<String>,
     headers: Json<Vec<HeaderTemplate>>,
+}
+
+#[derive(FromRow)]
+struct ModelRow {
+    provider_id: Uuid,
+    model_id: String,
+    wire_api: String,
+    context_window_tokens: Option<i64>,
+    max_output_tokens: Option<i64>,
 }
 
 #[derive(FromRow)]
@@ -124,7 +146,8 @@ pub async fn save_model_provider(
                 .await?
                 .ok_or_else(|| DbError::NotFound(format!("model provider `{id}`")))?;
             let apis = load_apis(&mut *tx, &[id]).await?;
-            Some(record(row, &apis)?.input)
+            let models = load_models(&mut *tx, &[id]).await?;
+            Some(record(row, &apis, &models)?.input)
         }
         None => None,
     };
@@ -154,21 +177,7 @@ pub async fn save_model_provider(
             }
             _ => DbError::Sqlx(e),
         })?;
-    sqlx::query("DELETE FROM model_provider_apis WHERE provider_id = $1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    for api in &input.apis {
-        sqlx::query(
-            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url) \
-             VALUES ($1, $2, $3)",
-        )
-        .bind(id)
-        .bind(api.wire_api.as_str())
-        .bind(&api.upstream_url)
-        .execute(&mut *tx)
-        .await?;
-    }
+    replace_apis_and_models(&mut tx, id, input).await?;
     audit(
         &mut tx,
         actor,
@@ -184,6 +193,102 @@ pub async fn save_model_provider(
         id,
         input: input.clone(),
     })
+}
+
+/// Writes the APIs and models of the input and removes the rest. A model that a persona uses
+/// cannot be removed, and neither can an API that a model uses ([`DbError::ModelConflict`] naming the
+/// personas or models).
+async fn replace_apis_and_models(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    input: &ModelProviderInput,
+) -> Result<(), DbError> {
+    let kept_models: Vec<&str> = input.models.iter().map(|m| m.model_id.as_str()).collect();
+    let removed: Vec<String> = sqlx::query_scalar(
+        "SELECT model_id FROM model_provider_models \
+         WHERE provider_id = $1 AND model_id <> ALL($2) ORDER BY model_id",
+    )
+    .bind(id)
+    .bind(&kept_models)
+    .fetch_all(&mut **tx)
+    .await?;
+    for model_id in &removed {
+        let users = personas_of_model(&mut **tx, id, model_id).await?;
+        if !users.is_empty() {
+            return Err(DbError::ModelConflict(format!(
+                "{model_id} cannot be removed: persona {} uses it.",
+                users.join(", ")
+            )));
+        }
+    }
+    sqlx::query("DELETE FROM model_provider_models WHERE provider_id = $1 AND model_id <> ALL($2)")
+        .bind(id)
+        .bind(&kept_models)
+        .execute(&mut **tx)
+        .await?;
+
+    for api in &input.apis {
+        sqlx::query(
+            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (provider_id, wire_api) DO UPDATE SET upstream_url = EXCLUDED.upstream_url",
+        )
+        .bind(id)
+        .bind(api.wire_api.as_str())
+        .bind(&api.upstream_url)
+        .execute(&mut **tx)
+        .await?;
+    }
+    let kept_apis: Vec<&str> = input.apis.iter().map(|api| api.wire_api.as_str()).collect();
+    let blocking: Vec<&str> = input
+        .models
+        .iter()
+        .filter(|m| !kept_apis.contains(&m.wire_api.as_str()))
+        .map(|m| m.model_id.as_str())
+        .collect();
+    if !blocking.is_empty() {
+        return Err(DbError::ModelConflict(format!(
+            "an API cannot be removed: model {} uses it.",
+            blocking.join(", ")
+        )));
+    }
+    for model in &input.models {
+        sqlx::query(
+            "INSERT INTO model_provider_models \
+             (provider_id, model_id, wire_api, context_window_tokens, max_output_tokens) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (provider_id, model_id) DO UPDATE SET wire_api = EXCLUDED.wire_api, \
+             context_window_tokens = EXCLUDED.context_window_tokens, \
+             max_output_tokens = EXCLUDED.max_output_tokens",
+        )
+        .bind(id)
+        .bind(&model.model_id)
+        .bind(model.wire_api.as_str())
+        .bind(model.limits.map(|l| l.context_window_tokens))
+        .bind(model.limits.map(|l| l.max_output_tokens))
+        .execute(&mut **tx)
+        .await?;
+    }
+    sqlx::query("DELETE FROM model_provider_apis WHERE provider_id = $1 AND wire_api <> ALL($2)")
+        .bind(id)
+        .bind(&kept_apis)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn personas_of_model<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    id: Uuid,
+    model_id: &str,
+) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT name FROM personas WHERE model_provider_id = $1 AND model = $2 ORDER BY name",
+    )
+    .bind(id)
+    .bind(model_id)
+    .fetch_all(executor)
+    .await?)
 }
 
 /// Deletes a provider no persona uses and audits it. A provider in use is a
@@ -228,14 +333,14 @@ pub async fn delete_model_provider(
     Ok(())
 }
 
-/// The harness and model provider of each of the runs `run_ids`; runs that don't exist are left
-/// out.
+/// The harness, model provider and model of each of the runs `run_ids`; runs that don't exist
+/// are left out.
 pub async fn run_model_providers(
     pool: &PgPool,
     run_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, RunModelProvider>, DbError> {
-    let rows: Vec<(Uuid, String, Uuid)> = sqlx::query_as(
-        "SELECT r.id, pe.harness, pe.model_provider_id FROM runs r \
+    let rows: Vec<(Uuid, String, Uuid, String)> = sqlx::query_as(
+        "SELECT r.id, pe.harness, pe.model_provider_id, pe.model FROM runs r \
          JOIN tasks t ON t.id = r.task_id JOIN personas pe ON pe.id = t.persona_id \
          WHERE r.id = ANY($1)",
     )
@@ -249,9 +354,17 @@ pub async fn run_model_providers(
         .collect();
     Ok(rows
         .into_iter()
-        .filter_map(|(run_id, harness, provider_id)| {
+        .filter_map(|(run_id, harness, provider_id, model_id)| {
             let provider = providers.get(&provider_id)?.clone();
-            Some((run_id, RunModelProvider { harness, provider }))
+            let model = provider.model(&model_id)?.clone();
+            Some((
+                run_id,
+                RunModelProvider {
+                    harness,
+                    provider,
+                    model,
+                },
+            ))
         })
         .collect())
 }
@@ -262,7 +375,10 @@ async fn assemble(
 ) -> Result<Vec<ModelProviderRecord>, DbError> {
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
     let apis = load_apis(pool, &ids).await?;
-    rows.into_iter().map(|row| record(row, &apis)).collect()
+    let models = load_models(pool, &ids).await?;
+    rows.into_iter()
+        .map(|row| record(row, &apis, &models))
+        .collect()
 }
 
 async fn load_apis<'e>(
@@ -278,7 +394,24 @@ async fn load_apis<'e>(
     .await?)
 }
 
-fn record(row: ProviderRow, apis: &[ApiRow]) -> Result<ModelProviderRecord, DbError> {
+async fn load_models<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    ids: &[Uuid],
+) -> Result<Vec<ModelRow>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT provider_id, model_id, wire_api, context_window_tokens, max_output_tokens \
+         FROM model_provider_models WHERE provider_id = ANY($1) ORDER BY model_id",
+    )
+    .bind(ids)
+    .fetch_all(executor)
+    .await?)
+}
+
+fn record(
+    row: ProviderRow,
+    apis: &[ApiRow],
+    models: &[ModelRow],
+) -> Result<ModelProviderRecord, DbError> {
     let apis = apis
         .iter()
         .filter(|api| api.provider_id == row.id)
@@ -286,6 +419,23 @@ fn record(row: ProviderRow, apis: &[ApiRow]) -> Result<ModelProviderRecord, DbEr
             Ok(ProviderApi {
                 wire_api: api.wire_api.parse()?,
                 upstream_url: api.upstream_url.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, DbError>>()?;
+    let models = models
+        .iter()
+        .filter(|model| model.provider_id == row.id)
+        .map(|model| {
+            Ok(ProviderModel {
+                model_id: model.model_id.clone(),
+                wire_api: model.wire_api.parse()?,
+                limits: model
+                    .context_window_tokens
+                    .zip(model.max_output_tokens)
+                    .map(|(context_window_tokens, max_output_tokens)| ModelLimits {
+                        context_window_tokens,
+                        max_output_tokens,
+                    }),
             })
         })
         .collect::<Result<Vec<_>, DbError>>()?;
@@ -299,9 +449,12 @@ fn record(row: ProviderRow, apis: &[ApiRow]) -> Result<ModelProviderRecord, DbEr
             credential_prefix: row.credential_prefix,
             headers: row.headers.0,
             apis,
+            models,
         },
     })
 }
 
+#[cfg(test)]
+mod migration_tests;
 #[cfg(test)]
 pub(crate) mod tests;

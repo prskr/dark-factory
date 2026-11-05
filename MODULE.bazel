@@ -301,6 +301,26 @@ http_archive(
     url = "https://unofficial-builds.nodejs.org/download/release/{0}/node-{0}-linux-arm64-musl.tar.xz".format(NODE_VERSION),
 )
 
+# The OpenCode release the opencode-harness image ships; `deploy/images/check_versions.sh` compares
+# it with the other copies of the version.
+OPENCODE_VERSION = "2.2.5"
+
+OPENCODE_BUILD = 'exports_files(["opencode"], visibility = ["//visibility:public"])'
+
+http_archive(
+    name = "opencode_linux_amd64_musl",
+    build_file_content = OPENCODE_BUILD,
+    sha256 = "889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827",
+    url = "https://github.com/anomalyco/opencode/releases/download/v{0}/opencode-linux-x64-musl.tar.gz".format(OPENCODE_VERSION),
+)
+
+http_archive(
+    name = "opencode_linux_arm64_musl",
+    build_file_content = OPENCODE_BUILD,
+    sha256 = "bbf927e3f7a92040f25fd78436c251f41deb25cefac1c906e79c01aa572bf73b",
+    url = "https://github.com/anomalyco/opencode/releases/download/v{0}/opencode-linux-arm64-musl.tar.gz".format(OPENCODE_VERSION),
+)
+
 BOOTLIN_RELEASE = "stable-2026.08-1"
 
 MUSL_RUNTIME_BUILD = 'exports_files(["lib/libc.so", "lib/libgcc_s.so.1", "usr/lib/libstdc++.so.6"], visibility = ["//visibility:public"])'

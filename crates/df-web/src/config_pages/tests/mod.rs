@@ -1,5 +1,7 @@
 use axum::http::StatusCode;
 
+mod personas;
+
 use crate::testkit::{TestApp, form, header_str, new_task, seed, seed_provider, tag_around, text};
 
 async fn audit(app: &TestApp, action: &str) -> Vec<serde_json::Value> {
@@ -403,7 +405,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
     let body = form(&[
         ("name", "Torvalds"),
         ("system_prompt", "old prompt"),
-        ("model", "opus"),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     let response = app.post("/personas", &body, &cookie).await;
@@ -418,7 +420,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
     let edited = form(&[
         ("name", "Torvalds"),
         ("system_prompt", "new prompt"),
-        ("model", ""),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     let response = app.post(&format!("/personas/{id}"), &edited, &cookie).await;
@@ -1040,14 +1042,14 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider
             "system_prompt",
             "Be Linus.\nReview carefully.\nShip small changes.\nNever skip tests.",
         ),
-        ("model", "opus"),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     app.post("/personas", &linus, &cookie).await;
     let plain = form(&[
         ("name", "Ada"),
         ("system_prompt", "Be Ada."),
-        ("model", ""),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     app.post("/personas", &plain, &cookie).await;
@@ -1060,13 +1062,13 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider
     };
     let linus = card("Linus");
     assert!(linus.contains(">L</span>"), "initial: {linus}");
-    assert!(linus.contains("Claude Code · opus"), "{linus}");
+    assert!(linus.contains("Claude Code · claude-sonnet-5-5"), "{linus}");
     assert!(linus.contains("line-clamp-3") && linus.contains("Be Linus."));
     assert!(linus.contains(">Claude subscription<"), "{linus}");
     assert!(linus.contains("aria-label=\"Edit persona Linus\"") && linus.contains("/edit\""));
     let ada = card("Ada");
     assert!(
-        ada.contains("Claude Code · default") && ada.contains(">Claude subscription<"),
+        ada.contains("Claude Code · claude-sonnet-5-5") && ada.contains(">Claude subscription<"),
         "{ada}"
     );
 }
@@ -1146,7 +1148,7 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
     let persona = form(&[
         ("name", "Ada"),
         ("system_prompt", "x"),
-        ("model", ""),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     let response = app.post("/personas", &persona, &cookie).await;
@@ -1269,7 +1271,7 @@ async fn the_persona_form_pairs_harness_and_model() {
     let cookie = app.login().await;
     let html = text(app.get_htmx("/personas/new", &cookie).await).await;
     assert!(html.contains("md:grid-cols-2"));
-    for full in ["name", "system_prompt", "model_provider_id"] {
+    for full in ["name", "system_prompt", "model"] {
         assert!(
             html.contains(&format!(
                 "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{full}\""
@@ -1277,11 +1279,14 @@ async fn the_persona_form_pairs_harness_and_model() {
             "{full}"
         );
     }
-    for half in ["harness", "model"] {
+    for half in ["harness", "model_provider_id"] {
         assert!(!html.contains(&format!("<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label class=\"block text-sm font-medium text-muted\" for=\"{half}\"")), "{half}");
         assert!(html.contains(&format!("for=\"{half}\"")));
     }
-    assert!(html.find("for=\"harness\"").unwrap() < html.find("for=\"model\"").unwrap());
+    assert!(
+        html.find("for=\"harness\"").unwrap() < html.find("for=\"model_provider_id\"").unwrap()
+    );
+    assert!(html.find("for=\"model_provider_id\"").unwrap() < html.find("for=\"model\"").unwrap());
     assert!(
         !html.contains("adapter_command"),
         "persona form has no adapter command"
@@ -1297,7 +1302,7 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
     let persona = form(&[
         ("name", "Ada"),
         ("system_prompt", "x"),
-        ("model", ""),
+        ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
     app.post("/personas", &persona, &cookie).await;

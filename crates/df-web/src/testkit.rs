@@ -535,7 +535,7 @@ pub(crate) struct Seed {
 /// The model provider "Claude subscription" (Anthropic Messages, scheme `claude-subscription`)
 /// with its credential reference; created once.
 pub(crate) async fn seed_provider(pool: &PgPool) -> uuid::Uuid {
-    use df_core::model_provider::{CredentialScheme, ProviderApi, WireApi};
+    use df_core::model_provider::{CredentialScheme, ProviderApi, ProviderModel, WireApi};
     use df_db::catalog::{Actor, CredentialRefInput, save_credential_ref};
     use df_db::model_providers::{ModelProviderInput, list_model_providers, save_model_provider};
     if let Some(existing) = list_model_providers(pool).await.unwrap().first() {
@@ -572,6 +572,11 @@ pub(crate) async fn seed_provider(pool: &PgPool) -> uuid::Uuid {
             apis: vec![ProviderApi {
                 wire_api: WireApi::AnthropicMessages,
                 upstream_url: "https://api.anthropic.com".into(),
+            }],
+            models: vec![ProviderModel {
+                model_id: "claude-sonnet-5-5".into(),
+                wire_api: WireApi::AnthropicMessages,
+                limits: None,
             }],
         },
     )
@@ -620,7 +625,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             name: "Linus".into(),
             system_prompt: "Be Linus.".into(),
             harness: "claude-code".into(),
-            model: None,
+            model: "claude-sonnet-5-5".into(),
             model_provider_id: provider,
         },
     )

@@ -3,6 +3,7 @@
 
 use df_e2e::browser::Session;
 use df_e2e::{E2eEnv, data};
+use playwright_rs::protocol::SelectOption;
 use playwright_rs::{Viewport, expect};
 
 #[tokio::test]
@@ -78,5 +79,62 @@ async fn settings_sidebar_shows_on_desktop_and_a_phone_has_none_and_no_horizonta
         )
         .await?;
     assert_eq!(overflows, "false", "the page scrolls horizontally");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_persona_is_created_with_a_model_of_its_provider() -> anyhow::Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session
+        .page
+        .goto(&format!("{}/personas", env.base_url), None)
+        .await?;
+
+    session
+        .page
+        .locator("button[hx-get='/personas/new']:visible")
+        .first()
+        .click(None)
+        .await?;
+    session
+        .page
+        .locator("#name")
+        .fill("e2e-models", None)
+        .await?;
+    session
+        .page
+        .locator("#system_prompt")
+        .fill("Check the model select.", None)
+        .await?;
+    // The provider and the model select are filled from the seeded provider and its model; the
+    // model is required.
+    session
+        .page
+        .locator("#model_provider_id")
+        .select_option(
+            SelectOption::Label(data::MODEL_PROVIDER_NAME.to_string()),
+            None,
+        )
+        .await?;
+    session
+        .page
+        .locator("#model")
+        .select_option(
+            SelectOption::Label(format!("{} (Anthropic Messages)", data::PERSONA_MODEL)),
+            None,
+        )
+        .await?;
+    session
+        .page
+        .locator("button:has-text('Create persona')")
+        .click(None)
+        .await?;
+
+    expect(session.page.get_by_text("e2e-models", false))
+        .to_be_visible()
+        .await?;
     Ok(())
 }

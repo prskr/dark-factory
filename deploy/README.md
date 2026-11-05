@@ -63,19 +63,20 @@ Sandbox pods have no image pull secret (`image.pullSecrets` reaches only the con
 
 | Image | Content | Tags |
 |---|---|---|
-| `claude-harness` | `scratch` image: static launcher `bin/claude-agent-acp` (and `bin/claude`), Node.js, `@agentclientprotocol/claude-agent-acp`, the Claude Code CLI and a bundled musl runtime | adapter version (from `package.json`), `latest` |
+| `claude-harness` | `scratch` image: `bin/node` (Node.js) and `bin/claude` (the Claude Code CLI), both with their interpreter and library path set to `/opt/harness/claude-code/lib`, `@agentclientprotocol/claude-agent-acp` under `node_modules/` and a bundled musl runtime (`lib/`) | adapter version (from `package.json`), `latest` |
+| `opencode-harness` | `scratch` image: `bin/opencode` (the OpenCode release binary, with its interpreter and library path set to `/opt/harness/opencode/lib`) and a bundled musl runtime (`lib/`) | OpenCode version (`OPENCODE_VERSION` in `MODULE.bazel`) |
 | `claude-project` | Debian Trixie, git, bash, curl, CA certificates, OpenSSH client, UID 1000, `/workspace` | release tag, `latest` |
 
-Prefer version tags: `latest` moves. The chart default `image.harness.claudeCode.tag` and the `df-core` default of `harness.claudeCode.image` are the adapter version; bump them together with `package.json` (`deploy/images/check_versions.sh` checks it).
+Prefer version tags: `latest` moves. The chart default `image.harness.claudeCode.tag` and the `df-core` default of `harness.claudeCode.image` are the adapter version; bump them together with `package.json` (`deploy/images/check_versions.sh` checks it). The same holds for OpenCode: `image.harness.opencode.tag` and the default of `harness.opencode.image` are `OPENCODE_VERSION`.
 
 ### What the harness image is built from
 
 | Part | Source | Pinned in |
 |---|---|---|
-| ACP adapter and its npm dependencies, incl. the musl Claude Code CLI of each architecture | npm registry, through `rules_js` | `deploy/images/claude-harness/package.json`, `pnpm-lock.yaml` |
+| ACP adapter and its npm dependencies; the musl Claude Code CLI of each architecture becomes `bin/claude`; the unpatched copy among the dependencies is left out of the image | npm registry, through `rules_js` | `deploy/images/claude-harness/package.json`, `pnpm-lock.yaml` |
 | Node.js | unofficial musl builds (`unofficial-builds.nodejs.org`) | `NODE_VERSION` and hashes in `MODULE.bazel` |
 | musl loader, `libstdc++`, `libgcc_s` | Bootlin musl toolchains (`toolchains.bootlin.com`); Node needs `libstdc++` of GCC 13 or newer | `BOOTLIN_RELEASE` and hashes in `MODULE.bazel` |
-| launcher (`launcher.c`) | static musl `cc_binary` | source |
+| patchelf (interpreter and library path of `bin/node`, `bin/claude`) | `multitool` | `multitool.lock.json` |
 
 `pnpm-workspace.yaml` keeps both musl CLI builds in the lockfile (`supportedArchitectures`) and drops the glibc, macOS and Windows builds (`ignoredOptionalDependencies`): `rules_js` selects optional dependencies by os and cpu only, so a glibc CLI (~270 MB) would otherwise land in the image.
 
@@ -89,19 +90,29 @@ pnpm install --lockfile-only
 
 Then update the copies `deploy/images/check_versions.sh` lists. Renovate does not bump Node or the Bootlin release, since it cannot compute their hashes. Bump them by hand: change the version and both `sha256` values in `MODULE.bazel` (`SHASUMS256.txt` of the Node release, `<name>.sha256` next to the Bootlin tarball).
 
+#### The OpenCode harness image
+
+`//deploy/images/opencode-harness` takes the release archives `opencode-linux-{x64,arm64}-musl.tar.gz` of `OPENCODE_VERSION` (checksums in `MODULE.bazel`; Renovate bumps the version in one PR "OpenCode harness", the two `sha256` values are updated by hand), the musl loader and the libraries of the same Bootlin runtime, and sets the interpreter and library path of the binary with `patchelf` (pinned in `multitool.lock.json`). `opencode acp` starts its server by running its own executable again, so the binary has to be started by the kernel and cannot go through the musl loader (the Claude Code image patches Node.js and the CLI the same way). Checks:
+
+```bash
+bazel test //deploy/images/opencode-harness:structure_test
+# ACP initialize and session/new through bin/opencode in a glibc project image (container runtime needed)
+bazel test //deploy/images/opencode-harness:test --test_env=CONTAINER_CLI=podman
+```
+
 ### How a project uses the harness
 
-- **Injected harness (default).** The project's adapter command is empty. The control plane mounts the harness image and starts `harness.claudeCode.adapterCommand` (`/opt/harness/claude-code/bin/claude-agent-acp`). The bundled musl runtime lets it run in glibc (Debian, Ubuntu), Alpine and distroless project images; the launcher needs no shell and no libc of the project image. The CLI starts through `bin/claude` of the same mount (`CLAUDE_CODE_EXECUTABLE`).
+- **Injected harness (default).** The project's adapter command is empty. The control plane mounts the harness image of the persona's harness and starts `harness.claudeCode.adapterCommand` (`/opt/harness/claude-code/bin/node` with the adapter's `dist/index.js`) or `harness.opencode.adapterCommand` (`/opt/harness/opencode/bin/opencode acp`). The bundled musl runtime lets it run in glibc (Debian, Ubuntu), Alpine and distroless project images; the binaries need no shell and no libc of the project image. The CLI starts through `bin/claude` of the same mount (`CLAUDE_CODE_EXECUTABLE`).
 - **Own adapter.** Set "Adapter command" on the project when its image already contains an adapter (for example `/usr/local/bin/my-acp-adapter`). No harness image is mounted and the command is started as is. The `fake-acp-agent` test project (`image.testProject`) is created this way with `/opt/harness/bin/fake-acp-agent`.
 
 ### Build and check locally
 
 ```bash
-# harness image: structure of both architectures (Linux hosts), then the ACP handshake of the host
-# architecture in a glibc and a musl project image (container runtime and network access needed)
+# harness image: structure of both architectures (Linux hosts), then `bin/claude --version` and the ACP
+# handshake of the host architecture in a glibc and a musl project image (container runtime and
+# network access needed)
 bazel test //deploy/images/claude-harness:structure_test
-bazel run //deploy/images/claude-harness:handshake
-CONTAINER_CLI=podman bazel run //deploy/images/claude-harness:handshake
+bazel test //deploy/images/claude-harness:test --test_env=CONTAINER_CLI=docker
 
 docker build -t claude-project:dev deploy/images/claude-project
 deploy/images/claude-project/test.sh claude-project:dev
@@ -116,7 +127,7 @@ CONTAINER_CLI=podman deploy/images/claude-project/test.sh localhost/claude-proje
 
 To check the project image of the other architecture, build it with `--platform linux/amd64` (or `linux/arm64`); this needs emulation (binfmt/QEMU, or Rosetta on macOS hosts). The harness image needs none: Bazel builds both architectures on any host.
 
-`CONTAINER_CLI` selects another CLI (default `docker`). The harness structure test checks the layout, the static launcher, Node, the bundled runtime, that Node and the CLI need no other library, that no other CLI build is in the image and the adapter version. The handshake pulls `debian:trixie-slim` and `alpine` once and runs an ACP `initialize` in both. Neither starts the Claude CLI or needs credentials.
+The container CLI of the `test` targets of both harness images is `CONTAINER_CLI` if set (it may hold arguments), else `docker`, else `podman` against the socket of `DOCKER_HOST` (`deploy/images/lib.sh`). The harness structure test checks the layout, the interpreter and library path of `bin/node` and `bin/claude`, the bundled runtime, that they need no other library, that no unpatched CLI build is in the image and the adapter version. The `test` target pulls `debian:trixie-slim` and `alpine` once and, in both, runs `bin/claude --version` and an ACP `initialize` from the mounted image. It needs no credentials.
 
 ### Publish
 

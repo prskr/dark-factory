@@ -4,10 +4,13 @@ This document captures the behavior, constraints, and integration specifics of `
 
 ## 1. Execution & Process Model
 
+- **Default command**: With the harness image mounted at `/opt/harness/claude-code`, the control plane starts `/opt/harness/claude-code/bin/node` with `/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js` (`harness.claudeCode.adapterCommand`). A project with its own adapter command mounts no harness image and starts that command instead.
 - **Invocation**: The adapter is invoked as a headless child process communicating over standard input and standard output using JSON-RPC according to the Agent Client Protocol (ACP).
 - **Process Working Directory**: `/data/repo`
 - **Environment**:
   - `HOME=/data/home`
+  - `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude`: the Claude Code CLI the adapter starts. Set only when the run mounts the harness image; with a project's own adapter command it is absent.
+  - `ANTHROPIC_MODEL`: the persona's model ID, set for every run (`ANTHROPIC_SMALL_FAST_MODEL` is not set).
   - `CLAUDE_CODE_OAUTH_TOKEN`: Injected into the subprocess environment; never persisted to files under `/data`.
   - `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`: Inherited from pod environment to route all external network requests through the sandbox egress gateway.
 - **Client Capabilities**: `factory-agent` advertises no client filesystem or terminal capabilities to ensure all actions route through designated tools or monitored sandbox operations.
@@ -15,7 +18,7 @@ This document captures the behavior, constraints, and integration specifics of `
 ## 2. Session Lifecycle & Continuity
 
 ### `session/new`
-- Settings are configured by writing `/data/home/.claude/settings.json`.
+- Settings are configured by the harness file `.claude/settings.json` of `Assign.harness.acp.files`, written below `/data/home` before the adapter starts.
 - The factory stdio MCP server (`/opt/factory/factory-agent mcp`) is passed in `session/new` options as the `factory` server.
 
 ### `session/load` & Resumption
@@ -25,11 +28,11 @@ This document captures the behavior, constraints, and integration specifics of `
 ## 3. Persona System Prompt Injection
 
 - Claude Code allows appending project guidelines via `/data/home/.claude/CLAUDE.md` or through `_meta` attributes on prompt requests.
-- Before launching or initiating a prompt turn, `factory-agent` ensures `/data/home/.claude/CLAUDE.md` contains the persona's system prompt from `Assign.persona.system_prompt`.
+- The control plane passes the persona's system prompt as the harness file `.claude/CLAUDE.md` in `Assign.harness.acp.files`. `factory-agent` writes the files of `Assign` below `/data/home` before launching the adapter and knows no Claude Code path itself.
 
 ## 4. Token Usage
 
-The runtime reports no token usage. Claude Code gets the gateway's inference endpoint as `ANTHROPIC_BASE_URL`, a placeholder key and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (no telemetry or update checks); the gateway reads the usage of every `/v1/messages` response and reports it to the control plane. Usage updates that the adapter sends over ACP are ignored, and the session log is not read.
+The runtime reports no token usage. Claude Code gets the gateway's inference endpoint as `ANTHROPIC_BASE_URL`, the persona's model as `ANTHROPIC_MODEL`, a placeholder key, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (no telemetry or update checks) and, with the harness image mounted, `CLAUDE_CODE_EXECUTABLE`; the gateway reads the usage of every `/v1/messages` response and reports it to the control plane. Usage updates that the adapter sends over ACP are ignored, and the session log is not read.
 
 ## 5. Rate Limiting & Stop Reasons
 

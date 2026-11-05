@@ -740,7 +740,7 @@ fn scan_dir_for_secret(dir: &std::path::Path, secret: &str) {
 #[tokio::test]
 async fn test_scenario_assign_environment_stays_off_the_volume() {
     use crate::harness::prepare_harness_environment;
-    use df_proto::agent::v1::{AcpHarness, Assign, Harness, harness::Kind};
+    use df_proto::agent::v1::{AcpHarness, Assign, Harness, HarnessFile, harness::Kind};
     use std::collections::HashMap;
 
     let temp = tempfile::tempdir().unwrap();
@@ -768,12 +768,20 @@ async fn test_scenario_assign_environment_stays_off_the_volume() {
         task: None,
         workspace: None,
         harness: Some(Harness {
-            system_prompt: "You are Dark Factory Bot".to_string(),
             kind: Some(Kind::Acp(AcpHarness {
                 command: vec!["fake-acp-agent".to_string()],
                 env: acp_env,
                 model: None,
-                settings_json: r#"{"theme": "dark"}"#.to_string(),
+                files: vec![
+                    HarnessFile {
+                        path: ".claude/settings.json".to_string(),
+                        content: r#"{"theme": "dark"}"#.to_string(),
+                    },
+                    HarnessFile {
+                        path: ".claude/CLAUDE.md".to_string(),
+                        content: "You are Dark Factory Bot".to_string(),
+                    },
+                ],
             })),
         }),
         tools: vec![],

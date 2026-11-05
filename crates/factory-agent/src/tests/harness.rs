@@ -524,3 +524,108 @@ fn test_empty_prompt_ids_are_not_duplicates() {
     assert!(filter.filter_control_message(&msg));
     assert!(filter.filter_control_message(&msg));
 }
+
+mod harness_files {
+    use crate::harness::prepare_harness_environment;
+    use df_proto::agent::v1::{AcpHarness, Assign, Harness, HarnessFile, harness::Kind};
+
+    fn assign(files: &[(&str, &str)]) -> Assign {
+        Assign {
+            run_id: "run".into(),
+            task: None,
+            workspace: None,
+            harness: Some(Harness {
+                kind: Some(Kind::Acp(AcpHarness {
+                    command: vec!["adapter".into()],
+                    env: std::collections::HashMap::new(),
+                    model: None,
+                    files: files
+                        .iter()
+                        .map(|(path, content)| HarnessFile {
+                            path: (*path).into(),
+                            content: (*content).into(),
+                        })
+                        .collect(),
+                })),
+            }),
+            tools: vec![],
+            budgets: None,
+            continuation: None,
+        }
+    }
+
+    #[test]
+    fn files_are_written_below_home_replacing_what_is_there() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+        std::fs::write(home.join(".config/opencode/AGENTS.md"), "old").unwrap();
+
+        prepare_harness_environment(
+            &assign(&[
+                (".claude/settings.json", "{}"),
+                (".config/opencode/AGENTS.md", "new"),
+            ]),
+            &home,
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(home.join(".claude/settings.json")).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".config/opencode/AGENTS.md")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn a_path_that_escapes_home_fails_and_writes_nothing_outside() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let repo = temp.path().join("repo/.git");
+        std::fs::create_dir_all(&repo).unwrap();
+        let absolute = temp.path().join("outside").to_string_lossy().to_string();
+
+        for path in ["../repo/.git/config", absolute.as_str(), "", "a/../../b"] {
+            let result = prepare_harness_environment(&assign(&[(path, "x")]), &home);
+            assert!(result.is_err(), "{path}");
+        }
+
+        assert!(!repo.join("config").exists());
+        assert!(!temp.path().join("outside").exists());
+        assert!(!temp.path().join("b").exists());
+    }
+
+    #[test]
+    fn a_symlink_planted_in_a_directory_on_the_way_is_not_followed() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::os::unix::fs::symlink(&repo, home.join(".config")).unwrap();
+
+        prepare_harness_environment(&assign(&[(".config/opencode/AGENTS.md", "x")]), &home)
+            .unwrap();
+
+        assert_eq!(std::fs::read_dir(&repo).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_to_string(home.join(".config/opencode/AGENTS.md")).unwrap(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn the_runtime_writes_no_harness_file_of_its_own() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        prepare_harness_environment(&assign(&[]), &home).unwrap();
+
+        assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0);
+    }
+}

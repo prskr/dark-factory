@@ -55,9 +55,12 @@ A **persona** is an agent with a role. **Settings → Personas → New persona**
 | --- | --- |
 | Name | Shown in the task list and transcript, for example "Linus". |
 | System prompt | The role and the working rules of this agent. |
-| Harness | The coding agent that runs in the sandbox (`claude-code`). |
-| Model | Optional; empty uses the harness default. |
+| Harness | The coding agent that runs in the sandbox: `claude-code` or `opencode` ([guide](opencode.md)). |
 | Model provider | The [model provider](model-providers.md) the harness talks to. Only providers that offer a wire API of the harness are listed. |
+| Model | Required. One of the models of the provider whose wire API the harness can use. |
+
+Changing the harness or the model provider updates the other selects. A persona has no adapter
+command; a project can set one ([Projects](#projects)).
 
 Every task is assigned to one persona; the persona's harness, model and prompt apply to all runs of
 the task.

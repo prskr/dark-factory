@@ -82,14 +82,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify images
-        run: bazel test $BAZEL_ARGS //deploy:images_structure_test //deploy/images/claude-harness:structure_test
+        run: bazel test $BAZEL_ARGS //deploy:images_structure_test //deploy/images/claude-harness:structure_test //deploy/images/opencode-harness:structure_test
 
       - name: Push images
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: bazel run $BAZEL_ARGS --//build:version="$VERSION" //deploy:push_images
 
-  # claude-project (Dockerfile) and claude-harness (Bazel); the harness digest goes into the chart
+  # claude-project (Dockerfile), claude-harness and opencode-harness (Bazel); the harness digests go into the chart
   reference-images:
     needs: version
     runs-on: ubuntu-latest
@@ -98,6 +98,7 @@ jobs:
       packages: write # push to ghcr.io/prskr/dark-factory/*
     outputs:
       harness-digest: ${{ steps.harness.outputs.digest }}
+      opencode-digest: ${{ steps.opencode.outputs.digest }}
     env:
       BAZEL_ARGS: >-
         --config=cache --config=ci
@@ -149,6 +150,18 @@ jobs:
           [[ "$digest" == sha256:* ]] || { echo "::error::no digest for claude-harness:$version"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
+      # Tagged with the OpenCode version of OPENCODE_VERSION in MODULE.bazel; the chart pins the digest.
+      - name: Push opencode-harness
+        id: opencode
+        run: |
+          version="$(sed -n 's/^OPENCODE_VERSION = "\(.*\)"/\1/p' MODULE.bazel)"
+          [[ -n "$version" ]] || { echo "::error::no OPENCODE_VERSION in MODULE.bazel"; exit 1; }
+          bazel run $BAZEL_ARGS --//deploy/images/opencode-harness:image_tag="$version" //deploy/images/opencode-harness:push
+          bazel build $BAZEL_ARGS //deploy/images/opencode-harness:digest
+          digest="$(cat "$(bazel cquery $BAZEL_ARGS --output=files //deploy/images/opencode-harness:digest)")"
+          [[ "$digest" == sha256:* ]] || { echo "::error::no digest for opencode-harness:$version"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
   # After all images: the chart references them by the release version, and it is installable
   # from the registry even without a GitHub Release.
   chart:
@@ -177,12 +190,13 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           HARNESS_DIGEST: ${{ needs.reference-images.outputs.harness-digest }}
+          OPENCODE_DIGEST: ${{ needs.reference-images.outputs.opencode-digest }}
         run: |
           # bazel_env exits 1 when direnv is missing (runners), after it has written .bazel_env/bin
           bazel run $BAZEL_ARGS //:bazel_env || test -x .bazel_env/bin/helm
           # the repository's values.yaml keeps an empty digest; the packaged one pins the harness
           cp -r deploy/helm/dark-factory "$RUNNER_TEMP/dark-factory"
-          build/with_tools.sh yq -i '.image.harness.claudeCode.digest = strenv(HARNESS_DIGEST)' "$RUNNER_TEMP/dark-factory/values.yaml"
+          build/with_tools.sh yq -i '.image.harness.claudeCode.digest = strenv(HARNESS_DIGEST) | .image.harness.opencode.digest = strenv(OPENCODE_DIGEST)' "$RUNNER_TEMP/dark-factory/values.yaml"
           build/with_tools.sh helm package "$RUNNER_TEMP/dark-factory" --version "$VERSION" --app-version "$VERSION" --destination "$RUNNER_TEMP/out"
 
       - name: Push the chart

@@ -108,8 +108,15 @@ pub(crate) async fn seed(pool: &PgPool) -> Result<Seed> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model_provider_id)
-         VALUES ($1, 'Linus', 'x', $2)",
+        "INSERT INTO model_provider_models (provider_id, model_id, wire_api)
+         VALUES ($1, 'test-model', 'anthropic-messages')",
+    )
+    .bind(provider)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
+         VALUES ($1, 'Linus', 'x', 'test-model', $2)",
     )
     .bind(persona)
     .bind(provider)
@@ -452,8 +459,15 @@ async fn seed_second_provider(pool: &PgPool, project: Uuid) -> Result<(Uuid, Uui
     .execute(pool)
     .await?;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model_provider_id)
-         VALUES ($1, 'Ada', 'x', $2)",
+        "INSERT INTO model_provider_models (provider_id, model_id, wire_api)
+         VALUES ($1, 'test-model', 'anthropic-messages')",
+    )
+    .bind(provider)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
+         VALUES ($1, 'Ada', 'x', 'test-model', $2)",
     )
     .bind(persona)
     .bind(provider)

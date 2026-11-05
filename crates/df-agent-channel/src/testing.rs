@@ -406,17 +406,21 @@ impl Env {
         .await
         .expect("seed model provider");
         sqlx::query(
-            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
-             VALUES ($1, 'anthropic-messages', 'https://api.anthropic.com')",
+            "WITH api AS (
+                 INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+                 VALUES ($1, 'anthropic-messages', 'https://api.anthropic.com')
+                 RETURNING provider_id)
+             INSERT INTO model_provider_models (provider_id, model_id, wire_api)
+             SELECT provider_id, 'claude-sonnet-5-5', 'anthropic-messages' FROM api",
         )
         .bind(model_provider)
         .execute(&pool)
         .await
-        .expect("seed model provider API");
+        .expect("seed model provider API and model");
         let persona_id = PersonaId::new();
         sqlx::query(
-            "INSERT INTO personas (id, name, system_prompt, model_provider_id)
-             VALUES ($1, 'Linus', 'You are Linus.', $2)",
+            "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
+             VALUES ($1, 'Linus', 'You are Linus.', 'claude-sonnet-5-5', $2)",
         )
         .bind(persona_id.as_uuid())
         .bind(model_provider)

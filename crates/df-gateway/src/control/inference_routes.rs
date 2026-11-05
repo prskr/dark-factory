@@ -13,16 +13,17 @@ use secrecy::ExposeSecret;
 
 use crate::convert::{scheme_to_proto, wire_api_to_proto};
 
-/// The route of `run`: the wire API its harness uses with the provider, the upstream of every
-/// API the provider offers and the headers rendered for the run. `None` (with a warning) if the
-/// harness and the provider have no wire API in common or a header does not render; the run then
-/// gets no model access.
+/// The route of `run`: the wire API of its persona's model, the upstream of every API the
+/// provider offers and the headers rendered for the run. `None` (with a warning) if the
+/// harness cannot use the model's wire API or a header does not render; the run then gets no
+/// model access.
 pub(super) fn route(run: &ActiveRun, found: &RunModelProvider) -> Option<pb::InferenceRoute> {
     let input = &found.provider.input;
-    let Some(chosen) = harness::choose_wire_api(&found.harness, &found.provider.wire_apis()) else {
-        tracing::warn!(run = %run.run_id, harness = %found.harness, provider = %input.name, "no inference route: no shared wire API");
+    let chosen = found.model.wire_api;
+    if let Err(error) = harness::check_compatible(&found.harness, chosen, input.scheme) {
+        tracing::warn!(run = %run.run_id, harness = %found.harness, provider = %input.name, %error, "no inference route: incompatible model");
         return None;
-    };
+    }
     let task_id = run.task_id.to_string();
     let run_id = run.run_id.to_string();
     let persona_id = run.persona_id.to_string();
@@ -102,7 +103,9 @@ pub(super) async fn credentials(
 
 #[cfg(test)]
 mod tests {
-    use df_core::model_provider::{CredentialScheme, HeaderTemplate, ProviderApi, WireApi};
+    use df_core::model_provider::{
+        CredentialScheme, HeaderTemplate, ProviderApi, ProviderModel, WireApi,
+    };
     use df_db::model_providers::{ModelProviderInput, ModelProviderRecord};
     use uuid::Uuid;
 
@@ -124,9 +127,14 @@ mod tests {
         }
     }
 
-    fn found(apis: &[WireApi], template: &str) -> RunModelProvider {
+    fn found(model_api: WireApi, apis: &[WireApi], template: &str) -> RunModelProvider {
         RunModelProvider {
             harness: "claude-code".into(),
+            model: ProviderModel {
+                model_id: "m".into(),
+                wire_api: model_api,
+                limits: None,
+            },
             provider: ModelProviderRecord {
                 id: Uuid::now_v7(),
                 input: ModelProviderInput {
@@ -146,6 +154,7 @@ mod tests {
                             upstream_url: "https://llm.example.test".into(),
                         })
                         .collect(),
+                    models: Vec::new(),
                 },
             },
         }
@@ -154,7 +163,11 @@ mod tests {
     #[test]
     fn two_runs_of_a_task_get_the_same_rendered_header() {
         let task = Uuid::now_v7();
-        let provider = found(&[WireApi::AnthropicMessages], "{{ task_id | sha256 }}");
+        let provider = found(
+            WireApi::AnthropicMessages,
+            &[WireApi::AnthropicMessages],
+            "{{ task_id | sha256 }}",
+        );
 
         let first = route(&run(task), &provider).unwrap();
         let second = route(&run(task), &provider).unwrap();
@@ -165,12 +178,17 @@ mod tests {
     }
 
     #[test]
-    fn the_harness_preference_decides_the_wire_api() {
-        let provider = found(&[WireApi::OpenAiChat, WireApi::AnthropicMessages], "x");
+    fn the_wire_api_of_the_model_decides_the_route() {
+        let mut provider = found(
+            WireApi::OpenAiChat,
+            &[WireApi::OpenAiChat, WireApi::AnthropicMessages],
+            "x",
+        );
+        provider.harness = "opencode".into();
 
         let route = route(&run(Uuid::now_v7()), &provider).unwrap();
 
-        assert_eq!(route.wire_api(), pb::WireApi::AnthropicMessages);
+        assert_eq!(route.wire_api(), pb::WireApi::OpenaiChat);
         assert_eq!(
             route.upstreams.len(),
             2,
@@ -180,7 +198,11 @@ mod tests {
 
     #[test]
     fn a_saved_provider_with_the_api_key_header_makes_the_upstream_get_that_header() {
-        let mut provider = found(&[WireApi::AnthropicMessages], "x");
+        let mut provider = found(
+            WireApi::AnthropicMessages,
+            &[WireApi::AnthropicMessages],
+            "x",
+        );
         provider.provider.input.scheme = CredentialScheme::Header;
         provider.provider.input.credential_header = Some("api-key".into());
 
@@ -205,14 +227,18 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_without_a_shared_wire_api_gives_no_route() {
-        let provider = found(&[WireApi::OpenAiChat], "x");
+    fn a_model_the_harness_cannot_use_gives_no_route() {
+        let provider = found(WireApi::OpenAiChat, &[WireApi::OpenAiChat], "x");
         assert!(route(&run(Uuid::now_v7()), &provider).is_none());
     }
 
     #[test]
     fn a_header_that_does_not_render_gives_no_route() {
-        let provider = found(&[WireApi::AnthropicMessages], "{{ nope }}");
+        let provider = found(
+            WireApi::AnthropicMessages,
+            &[WireApi::AnthropicMessages],
+            "{{ nope }}",
+        );
         assert!(route(&run(Uuid::now_v7()), &provider).is_none());
     }
 }

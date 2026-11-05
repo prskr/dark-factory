@@ -6,11 +6,15 @@ use super::icons::{Icon, icon};
 
 /// Validation errors by field name; the empty name is a message for the whole form.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct FormErrors(Vec<(&'static str, String)>);
+pub struct FormErrors(Vec<(std::borrow::Cow<'static, str>, String)>);
 
 impl FormErrors {
-    pub fn add(&mut self, field: &'static str, message: impl Into<String>) {
-        self.0.push((field, message.into()));
+    pub fn add(
+        &mut self,
+        field: impl Into<std::borrow::Cow<'static, str>>,
+        message: impl Into<String>,
+    ) {
+        self.0.push((field.into(), message.into()));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -20,7 +24,7 @@ impl FormErrors {
     pub fn get(&self, field: &str) -> Option<&str> {
         self.0
             .iter()
-            .find(|(f, _)| *f == field)
+            .find(|(f, _)| f == field)
             .map(|(_, m)| m.as_str())
     }
 
@@ -40,7 +44,7 @@ impl FormErrors {
 
     /// The fields with an error.
     pub fn fields(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().map(|(field, _)| *field)
+        self.0.iter().map(|(field, _)| field.as_ref())
     }
 }
 

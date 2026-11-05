@@ -72,7 +72,8 @@ async fn insert_persona(pool: &PgPool, id: Uuid, name: &str) {
     }
     let provider = crate::model_providers::tests::seed_provider(pool).await;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, $2, '', $3)",
+        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id) \
+         VALUES ($1, $2, '', 'test-model', $3)",
     )
     .bind(id)
     .bind(name)

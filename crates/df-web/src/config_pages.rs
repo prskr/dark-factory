@@ -9,10 +9,7 @@ use axum::{Extension, Router};
 use df_core::routing::{ForgeRoutes, ForgeServing};
 use df_core::{CredentialRef, StatusSet};
 use df_db::DbError;
-use df_db::catalog::{
-    Actor, CredentialRefInput, PersonaInput, PersonaRecord, ProjectInput, ProjectRecord,
-};
-use df_db::model_providers::ModelProviderRecord;
+use df_db::catalog::{Actor, CredentialRefInput, ProjectInput, ProjectRecord};
 use df_db::push_checks::PushPolicy;
 use df_db::task_views::ProjectStatusCount;
 use maud::{Markup, html};
@@ -22,24 +19,22 @@ use uuid::Uuid;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
+use crate::components::forms::{INPUT_CLASS, field};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
-    action_class, avatar, data_table, dialog_with, empty_panel, forge_icon, form_error,
-    harness_label, icon, initials, issue_role, page_header, phone_profile_menu, project_forge_kind,
-    readonly_field, role_icon, select_field, submit_button, td, text_field, textarea_field, th, tr,
+    action_class, data_table, dialog_with, empty_panel, forge_icon, form_error, icon, issue_role,
+    page_header, phone_profile_menu, project_forge_kind, readonly_field, role_icon, select_field,
+    submit_button, td, text_field, th, tr,
 };
 use crate::layout::{Nav, Shell, layout};
 use crate::project_subscriptions;
 use crate::responses::{internal_error, invalid, not_found};
 
+mod personas;
 mod providers;
 mod push_policy;
 
 use push_policy::PushPolicyForm;
-
-/// Harness every persona uses in iteration 1.
-const HARNESS: &str = df_core::CLAUDE_CODE_HARNESS;
 
 /// The forms are fragments that open as a modal over their list; a plain browser request for one
 /// (no `HX-Request` header) goes to the list instead.
@@ -58,10 +53,7 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/projects/forge", get(project_forge))
         .route("/projects/{key}", axum::routing::post(project_update))
         .route("/projects/{key}/edit", get(project_edit))
-        .route("/personas", get(personas_list).post(persona_create))
-        .route("/personas/new", get(persona_new))
-        .route("/personas/{id}", axum::routing::post(persona_update))
-        .route("/personas/{id}/edit", get(persona_edit))
+        .merge(personas::routes())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -90,15 +82,6 @@ pub(crate) struct ProjectForm {
     /// The "Push checks" tab of the edit form.
     #[serde(flatten)]
     push: PushPolicyForm,
-}
-
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default)]
-pub(crate) struct PersonaForm {
-    name: String,
-    system_prompt: String,
-    model: String,
-    model_provider_id: String,
 }
 
 fn required(errors: &mut FormErrors, field: &'static str, value: &str, label: &str) -> String {
@@ -233,44 +216,38 @@ fn validate_project(
     })
 }
 
-fn validate_persona(
-    form: &PersonaForm,
-    providers: &[ModelProviderRecord],
-) -> Result<PersonaInput, FormErrors> {
-    let mut errors = FormErrors::default();
-    let name = required(&mut errors, "name", &form.name, "Name");
-    let system_prompt = required(
-        &mut errors,
-        "system_prompt",
-        &form.system_prompt,
-        "System prompt",
-    );
-    let provider = Uuid::parse_str(&form.model_provider_id)
-        .ok()
-        .and_then(|id| providers.iter().find(|provider| provider.id == id));
-    let model_provider_id = match provider {
-        None => {
-            errors.add("model_provider_id", "Choose a model provider.");
-            Uuid::nil()
-        }
-        Some(provider) => {
-            if let Err(error) = df_core::harness::check_compatible(
-                HARNESS,
-                &provider.wire_apis(),
-                provider.input.scheme,
-            ) {
-                errors.add("model_provider_id", error.to_string());
-            }
-            provider.id
-        }
-    };
-    errors.into_result(PersonaInput {
-        name,
-        system_prompt,
-        harness: HARNESS.to_string(),
-        model: Some(form.model.trim().to_string()).filter(|m| !m.is_empty()),
-        model_provider_id,
-    })
+/// Where a create or edit form posts: the collection and, when editing, the entity. The form
+/// carries the id in a hidden field so that a refresh can render it again in the same mode.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FormTarget {
+    collection: &'static str,
+    id: Option<Uuid>,
+}
+
+impl FormTarget {
+    fn new(collection: &'static str, id: Option<Uuid>) -> Self {
+        Self { collection, id }
+    }
+
+    /// From the hidden `entity_id` of a posted form: empty (or not an id) means create.
+    fn posted(collection: &'static str, entity_id: &str) -> Self {
+        Self::new(collection, entity_id.parse().ok())
+    }
+
+    fn is_create(self) -> bool {
+        self.id.is_none()
+    }
+
+    fn action(self) -> String {
+        self.id.map_or_else(
+            || self.collection.to_string(),
+            |id| format!("{}/{id}", self.collection),
+        )
+    }
+
+    fn id_field(self) -> Markup {
+        html! { input type="hidden" name="entity_id" value=(self.id.map(|id| id.to_string()).unwrap_or_default()); }
+    }
 }
 
 /// Puts a database conflict on the field it belongs to; any other error is an error page.
@@ -291,6 +268,11 @@ fn conflict(errors: &mut FormErrors, field: &'static str, error: DbError) -> Opt
 /// A form as modal over its list. `form` carries the `#form` the submit swaps.
 pub(crate) fn modal(title: &str, form: Markup) -> Response {
     dialog_with("modal", title, DialogStyle::Form, form).into_response()
+}
+
+/// Like [`modal`], 896 px wide, for the model provider form (a form with tabs, [`tabbed_form`]).
+pub(crate) fn wider_modal(title: &str, form: Markup) -> Response {
+    dialog_with("modal", title, DialogStyle::Wider, form).into_response()
 }
 
 /// Answer of a successful save: the updated list replaces the old one and the modal closes.
@@ -381,9 +363,9 @@ pub(crate) struct Tab {
     pub(crate) panel: Markup,
 }
 
-/// A modal form ([`DialogStyle::Wide`]) with its tabs on the left (on top below 768 px), one panel
-/// per tab and the footer across the full width. `open` is the id of the tab shown first; the
-/// Alpine component `tabs` (`assets/tabs.js`) switches them.
+/// A modal form (a wide [`DialogStyle`], chosen by the caller) with its tabs on the left (on top
+/// below 768 px), one panel per tab and the footer across the full width. `open` is the id of the
+/// tab shown first; the Alpine component `tabs` (`assets/tabs.js`) switches them.
 pub(crate) fn tabbed_form(
     action: &str,
     errors: &FormErrors,
@@ -1211,214 +1193,6 @@ async fn save_project(
         &state,
         submit,
         Editing::of(existing.is_some(), &user),
-    ))
-}
-
-// ---------------------------------------------------------------------------------------------
-// Personas
-// ---------------------------------------------------------------------------------------------
-
-fn persona_values(p: &PersonaRecord) -> PersonaForm {
-    PersonaForm {
-        name: p.name.clone(),
-        system_prompt: p.system_prompt.clone(),
-        model: p.model.clone().unwrap_or_default(),
-        model_provider_id: p.model_provider_id.to_string(),
-    }
-}
-
-fn persona_form(
-    action: &str,
-    values: &PersonaForm,
-    errors: &FormErrors,
-    providers: &[ModelProviderRecord],
-    submit: &str,
-) -> Markup {
-    html! {
-        form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
-            (form_error(errors))
-            (form_grid(html! {
-                (full_row(text_field("Name", "name", &values.name, errors, None)))
-                (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
-                div class="space-y-1" {
-                    label class="block text-sm font-medium text-muted" for="harness" { "Harness" }
-                    select id="harness" name="harness" class=(INPUT_CLASS) {
-                        option value=(HARNESS) selected { (HARNESS) }
-                    }
-                }
-                (text_field("Model", "model", &values.model, errors, Some("Optional.")))
-                (full_row(select_field_with_hint("Model provider", "model_provider_id", &providers::compatible_options(providers, HARNESS),
-                    &values.model_provider_id, Some("Choose…"), Some("Only providers that offer a wire API of the harness."), errors)))
-            }))
-            (form_footer(submit))
-        }
-    }
-}
-
-fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]) -> Markup {
-    html! {
-        div id="config-list" {
-            (list_header("Personas", personas.len(), create_button("/personas/new", "New persona"), None))
-            @if personas.is_empty() {
-                (empty_panel(
-                    "No personas yet",
-                    "A persona is the agent a task is assigned to: a system prompt, a harness and a model.",
-                    create_button("/personas/new", "New persona"),
-                ))
-            } @else {
-                ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" {
-                    @for p in personas {
-                        @let provider = providers.iter().find(|provider| provider.id == p.model_provider_id)
-                            .map(|provider| provider.input.name.as_str());
-                        li class="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4" {
-                            div class="flex items-start gap-3" {
-                                (avatar(&initials(&p.name)))
-                                div class="min-w-0 flex-1" {
-                                    h2 class="truncate font-semibold" { (p.name) }
-                                    p class="text-xs text-muted" { (harness_label(&p.harness)) " · " (p.model.as_deref().unwrap_or("default")) }
-                                }
-                                (edit_button(&format!("/personas/{}/edit", p.id), &format!("Edit persona {}", p.name)))
-                            }
-                            p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" { (p.system_prompt) }
-                            p class="mt-auto text-xs text-faint" {
-                                "Model provider: " span class="font-mono" { (provider.unwrap_or("none")) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-async fn personas_markup(state: &WebState) -> Result<Markup, Box<Response>> {
-    let (personas, providers) = tokio::try_join!(
-        df_db::catalog::list_personas(&state.pool),
-        df_db::model_providers::list_model_providers(&state.pool)
-    )
-    .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(personas_region(&personas, &providers))
-}
-
-async fn personas_list(State(state): State<WebState>, shell: Shell) -> Response {
-    match personas_markup(&state).await {
-        Ok(region) => list_page("Personas", Nav::Personas, &shell, region),
-        Err(response) => *response,
-    }
-}
-
-async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to("/personas").into_response();
-    }
-    let providers = match df_db::model_providers::list_model_providers(&state.pool).await {
-        Ok(providers) => providers,
-        Err(e) => return internal_error(&e),
-    };
-    modal(
-        "New persona",
-        persona_form(
-            "/personas",
-            &PersonaForm::default(),
-            &FormErrors::default(),
-            &providers,
-            "Create persona",
-        ),
-    )
-}
-
-async fn persona_edit(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to("/personas").into_response();
-    }
-    let (persona, providers) = match tokio::try_join!(
-        df_db::catalog::get_persona(&state.pool, id),
-        df_db::model_providers::list_model_providers(&state.pool)
-    ) {
-        Ok((Some(persona), providers)) => (persona, providers),
-        Ok((None, _)) => return not_found("The persona"),
-        Err(e) => return internal_error(&e),
-    };
-    modal(
-        "Edit persona",
-        persona_form(
-            &format!("/personas/{id}"),
-            &persona_values(&persona),
-            &FormErrors::default(),
-            &providers,
-            "Save persona",
-        ),
-    )
-}
-
-async fn persona_create(
-    state: State<WebState>,
-    user: Extension<CurrentUser>,
-    form: Form<PersonaForm>,
-) -> Response {
-    save_persona(state, user, None, form.0).await
-}
-
-async fn persona_update(
-    state: State<WebState>,
-    user: Extension<CurrentUser>,
-    Path(id): Path<Uuid>,
-    form: Form<PersonaForm>,
-) -> Response {
-    save_persona(state, user, Some(id), form.0).await
-}
-
-async fn save_persona(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    id: Option<Uuid>,
-    form: PersonaForm,
-) -> Response {
-    let providers = match df_db::model_providers::list_model_providers(&state.pool).await {
-        Ok(providers) => providers,
-        Err(e) => return internal_error(&e),
-    };
-    let errors = match validate_persona(&form, &providers) {
-        Ok(input) => {
-            let principal = user.principal();
-            let actor = Actor {
-                principal: &principal,
-                roles: &user.roles,
-            };
-            match df_db::catalog::save_persona(&state.pool, actor, id, &input).await {
-                Ok(_) => {
-                    return match personas_markup(&state).await {
-                        Ok(region) => saved(region),
-                        Err(response) => *response,
-                    };
-                }
-                Err(DbError::NotFound(_)) => return not_found("The persona"),
-                Err(e) => {
-                    let mut errors = FormErrors::default();
-                    if let Some(response) = conflict(&mut errors, "name", e) {
-                        return response;
-                    }
-                    errors
-                }
-            }
-        }
-        Err(errors) => errors,
-    };
-    let action = id.map_or_else(|| "/personas".to_string(), |id| format!("/personas/{id}"));
-    invalid(persona_form(
-        &action,
-        &form,
-        &errors,
-        &providers,
-        if id.is_some() {
-            "Save persona"
-        } else {
-            "Create persona"
-        },
     ))
 }
 

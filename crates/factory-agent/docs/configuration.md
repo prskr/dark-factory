@@ -49,10 +49,18 @@ These are compiled in and not configurable.
   `HelloAck` or `Assign` decides whether that state is kept or discarded.
 - **Message order.** A `Cancel` that arrives before `Assign` ends the run as `CANCELLED` without
   preparing the workspace.
+- **Harness files.** Before the adapter starts, the runtime writes every file of
+  `Assign.harness.acp.files` below `/data/home`, replacing what is there and creating missing
+  directories as real directories (a symlink in their place is replaced, never followed). A path
+  that is absolute or has a `..` component fails the run before the adapter starts. The runtime
+  writes no other harness file: the system prompt (`.claude/CLAUDE.md` for `claude-code`,
+  `.config/opencode/AGENTS.md` for `opencode`) and Claude Code's `.claude/settings.json` are
+  files of the list.
 - **Harness environment.** The harness starts with the environment of `Assign` (`AcpHarness.env`):
   the gateway's inference endpoint as base URL, the placeholder API key `df-placeholder` and the
-  instance CA file; for `claude-code` that is `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN` (provider
-  scheme `claude-subscription`) or `ANTHROPIC_API_KEY` (other schemes), and `NODE_EXTRA_CA_CERTS`
+  instance CA file, or, for `opencode`, a configuration document in `OPENCODE_CONFIG_CONTENT` and
+  the CA in `NODE_EXTRA_CA_CERTS`; for `claude-code` that is `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN` (provider
+  scheme `claude-subscription`) or `ANTHROPIC_API_KEY` (other schemes), `ANTHROPIC_MODEL` (the persona's model ID), and `NODE_EXTRA_CA_CERTS`
   (`/run/factory/tls/ca.crt`), plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so Claude Code sends
   no telemetry or update checks past the endpoint. The runtime holds no model credential and reports no token usage: the
   gateway measures it, and usage the harness reports over ACP is not forwarded.

@@ -13,7 +13,7 @@ async fn run(pool: &PgPool) -> Uuid {
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', $2)")
+    sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', $2)")
         .bind(persona)
         .bind(provider)
         .execute(pool)

@@ -49,6 +49,8 @@ data:
     harness:
       claudeCode:
         image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}
+      opencode:
+        image: {{ include "dark-factory.harness.opencode.image" . | quote }}
     {{- if .Values.oidc.publicUrl }}
     auth:
       issuerUrl: {{ .Values.oidc.issuerUrl | quote }}

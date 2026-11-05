@@ -46,9 +46,10 @@
         "runtime": { "$ref": "#/$defs/imageRef" },
         "harness": {
           "type": "object",
-          "required": ["claudeCode"],
+          "required": ["claudeCode", "opencode"],
           "properties": {
-            "claudeCode": { "$ref": "#/$defs/imageRef" }
+            "claudeCode": { "$ref": "#/$defs/imageRef" },
+            "opencode": { "$ref": "#/$defs/imageRef" }
           }
         },
         "testProject": { "$ref": "#/$defs/imageRef" }

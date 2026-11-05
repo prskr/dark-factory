@@ -39,8 +39,8 @@ async fn seed_project_and_persona(
     }
     let (provider_column, provider_value) = if has_providers {
         (
-            ", model_provider_id",
-            ", (SELECT id FROM model_providers LIMIT 1)",
+            ", model, model_provider_id",
+            ", 'test-model', (SELECT id FROM model_providers LIMIT 1)",
         )
     } else {
         sqlx::query(
@@ -51,8 +51,8 @@ async fn seed_project_and_persona(
         .execute(pool)
         .await?;
         (
-            ", harness_credential_id",
-            ", (SELECT id FROM credential_refs WHERE name = 'old')",
+            ", model, harness_credential_id",
+            ", 'test-model', (SELECT id FROM credential_refs WHERE name = 'old')",
         )
     };
     sqlx::query(sqlx::AssertSqlSafe(format!(

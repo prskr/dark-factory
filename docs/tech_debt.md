@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-105.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-106.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -1019,3 +1019,4 @@ The test checks only the overflow classes and that `tabs.js` calls `scrollIntoVi
 **Matters when:** the "Context" tab (`iter3-project-context`) lands and four tabs overflow at 390 px.
 
 **Fix:** an e2e step at 390 px that chooses the last tab and asserts that its bounding box lies inside the tab list and `document.documentElement.scrollWidth <= innerWidth`.
+

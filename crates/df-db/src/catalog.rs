@@ -65,7 +65,7 @@ pub struct PersonaInput {
     pub name: String,
     pub system_prompt: String,
     pub harness: String,
-    pub model: Option<String>,
+    pub model: String,
     pub model_provider_id: Uuid,
 }
 
@@ -76,7 +76,7 @@ pub struct PersonaRecord {
     pub name: String,
     pub system_prompt: String,
     pub harness: String,
-    pub model: Option<String>,
+    pub model: String,
     pub model_provider_id: Uuid,
 }
 
@@ -341,6 +341,7 @@ pub async fn save_persona(
     id: Option<Uuid>,
     input: &PersonaInput,
 ) -> Result<PersonaRecord, DbError> {
+    check_persona_model(pool, input).await?;
     let mut tx = pool.begin().await?;
     let before: Option<PersonaRecord> = match id {
         Some(id) => Some(
@@ -394,6 +395,23 @@ pub async fn save_persona(
     .await?;
     tx.commit().await?;
     Ok(record)
+}
+
+/// The persona's model must be a model of its provider that the harness can use.
+async fn check_persona_model(pool: &PgPool, input: &PersonaInput) -> Result<(), DbError> {
+    let provider = crate::model_providers::get_model_provider(pool, input.model_provider_id)
+        .await?
+        .ok_or_else(|| {
+            DbError::NotFound(format!("model provider `{}`", input.model_provider_id))
+        })?;
+    let model = provider.model(&input.model).ok_or_else(|| {
+        DbError::ModelConflict(format!(
+            "{} is not a model of provider {}.",
+            input.model, provider.input.name
+        ))
+    })?;
+    df_core::harness::check_compatible(&input.harness, model.wire_api, provider.input.scheme)
+        .map_err(|e| DbError::ModelConflict(e.to_string()))
 }
 
 fn project_input(p: &ProjectRecord) -> ProjectInput {
@@ -473,7 +491,7 @@ mod tests {
             name: "Linus".into(),
             system_prompt: prompt.into(),
             harness: "claude-code".into(),
-            model: None,
+            model: "test-model".into(),
             model_provider_id: provider,
         }
     }
@@ -533,6 +551,23 @@ mod tests {
 
         let duplicate = save_persona(&pool, actor, None, &persona("x", provider)).await;
         assert!(matches!(duplicate, Err(DbError::Conflict(_))));
+    }
+
+    #[tokio::test]
+    async fn a_persona_model_the_provider_lacks_is_a_model_conflict() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let provider = crate::model_providers::tests::seed_provider(&pool).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let mut input = persona("x", provider);
+        input.model = "no-such-model".into();
+
+        let saved = save_persona(&pool, actor, None, &input).await;
+
+        assert!(matches!(saved, Err(DbError::ModelConflict(_))), "{saved:?}");
     }
 
     #[tokio::test]

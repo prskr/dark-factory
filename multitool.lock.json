@@ -376,6 +376,26 @@
       }
     ]
   },
+  "patchelf": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "bin/patchelf",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "38861b171079e440b25ac86483284f690d0ee7921dba98b0c8fe04a9b0a11667",
+        "url": "https://github.com/NixOS/patchelf/releases/download/0.19.3/patchelf-0.19.3-x86_64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "bin/patchelf",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "2281dd071995b449b9ce7c53c71d6d56ec3a280ae1cc66b779442abf624f7c10",
+        "url": "https://github.com/NixOS/patchelf/releases/download/0.19.3/patchelf-0.19.3-aarch64.tar.gz"
+      }
+    ]
+  },
   "shellcheck": {
     "binaries": [
       {

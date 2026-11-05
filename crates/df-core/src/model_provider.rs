@@ -170,6 +170,21 @@ pub struct HeaderTemplate {
     pub template: String,
 }
 
+/// Token limits of a model; `OpenCode` needs both to track the context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModelLimits {
+    pub context_window_tokens: i64,
+    pub max_output_tokens: i64,
+}
+
+/// A model of a provider: served over one of the provider's wire APIs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ProviderModel {
+    pub model_id: String,
+    pub wire_api: WireApi,
+    pub limits: Option<ModelLimits>,
+}
+
 /// The configuration of a model provider that is checked as a whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfig {
@@ -178,6 +193,7 @@ pub struct ProviderConfig {
     /// Header name of [`CredentialScheme::Header`].
     pub credential_header: Option<String>,
     pub headers: Vec<HeaderTemplate>,
+    pub models: Vec<ProviderModel>,
 }
 
 /// Why a provider configuration is invalid. The `field` names the form field it belongs to.
@@ -201,6 +217,14 @@ pub enum ProviderError {
     Header { name: String, error: HeaderError },
     #[error("Header `{0}` is set twice.")]
     DuplicateHeader(String),
+    #[error("A model needs an ID.")]
+    EmptyModelId,
+    #[error("Model {0} is listed twice.")]
+    DuplicateModel(String),
+    #[error("{} is not offered by this provider.", .wire_api.label())]
+    ModelApiNotOffered { model: String, wire_api: WireApi },
+    #[error("The limits of model {0} must be positive.")]
+    ModelLimitNotPositive(String),
 }
 
 impl ProviderConfig {
@@ -243,6 +267,32 @@ impl ProviderConfig {
                 return Err(ProviderError::DuplicateHeader(header.name.clone()));
             }
             seen.push(lower);
+        }
+        self.validate_models()
+    }
+
+    fn validate_models(&self) -> Result<(), ProviderError> {
+        let mut seen: Vec<&str> = Vec::new();
+        for model in &self.models {
+            if model.model_id.trim().is_empty() {
+                return Err(ProviderError::EmptyModelId);
+            }
+            if seen.contains(&model.model_id.as_str()) {
+                return Err(ProviderError::DuplicateModel(model.model_id.clone()));
+            }
+            seen.push(&model.model_id);
+            if !self.apis.iter().any(|api| api.wire_api == model.wire_api) {
+                return Err(ProviderError::ModelApiNotOffered {
+                    model: model.model_id.clone(),
+                    wire_api: model.wire_api,
+                });
+            }
+            if model
+                .limits
+                .is_some_and(|l| l.context_window_tokens <= 0 || l.max_output_tokens <= 0)
+            {
+                return Err(ProviderError::ModelLimitNotPositive(model.model_id.clone()));
+            }
         }
         Ok(())
     }
@@ -291,6 +341,78 @@ mod tests {
             scheme: CredentialScheme::XApiKey,
             credential_header: None,
             headers: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+
+    fn model(id: &str, wire_api: WireApi, limits: Option<(i64, i64)>) -> ProviderModel {
+        ProviderModel {
+            model_id: id.into(),
+            wire_api,
+            limits: limits.map(|(context_window_tokens, max_output_tokens)| ModelLimits {
+                context_window_tokens,
+                max_output_tokens,
+            }),
+        }
+    }
+
+    #[test]
+    fn model_of_an_offered_api_with_limits_passes() {
+        let mut config = config();
+        config.models = vec![
+            model(
+                "claude-sonnet-5-5",
+                WireApi::AnthropicMessages,
+                Some((1_000_000, 128_000)),
+            ),
+            model("claude-haiku-5-5", WireApi::AnthropicMessages, None),
+        ];
+        assert_eq!(config.validate(), Ok(()));
+    }
+
+    #[test]
+    fn model_on_an_api_the_provider_does_not_offer_is_rejected() {
+        let mut config = config();
+        config.models = vec![model("gpt-6-luna", WireApi::OpenAiResponses, None)];
+        assert_eq!(
+            config.validate(),
+            Err(ProviderError::ModelApiNotOffered {
+                model: "gpt-6-luna".into(),
+                wire_api: WireApi::OpenAiResponses
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_model_id_is_rejected() {
+        let mut config = config();
+        config.models = vec![
+            model("glm-5.3", WireApi::AnthropicMessages, None),
+            model("glm-5.3", WireApi::AnthropicMessages, None),
+        ];
+        assert_eq!(
+            config.validate(),
+            Err(ProviderError::DuplicateModel("glm-5.3".into()))
+        );
+    }
+
+    #[test]
+    fn empty_model_id_is_rejected() {
+        let mut config = config();
+        config.models = vec![model(" ", WireApi::AnthropicMessages, None)];
+        assert_eq!(config.validate(), Err(ProviderError::EmptyModelId));
+    }
+
+    #[test]
+    fn model_limits_must_be_positive() {
+        for limits in [(0, 10), (10, 0), (-1, 10)] {
+            let mut config = config();
+            config.models = vec![model("m", WireApi::AnthropicMessages, Some(limits))];
+            assert_eq!(
+                config.validate(),
+                Err(ProviderError::ModelLimitNotPositive("m".into())),
+                "{limits:?}"
+            );
         }
     }
 
