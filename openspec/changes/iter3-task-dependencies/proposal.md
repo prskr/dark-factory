@@ -87,7 +87,7 @@ Out of scope:
   - releasing dependents and the child-ended message on Completion, Done, failure and cancel, as effects;
   - `.sqlx/`.
 - `crates/df-core`: the task transition function (`task_transition`), dependency kinds, the status, and validation of `create_task` input.
-- `crates/df-agent-channel`: run start, turn start and end, and run end raise task events (`plan_resume` moves to `df-core`); the three tools and scope checks for child tasks.
+- `crates/df-agent-channel`: run start, turn start and end, and run end raise task events (`plan_resume` moves to `df-core`, `pr::enqueue_run_end` becomes an `EnqueuePrSync` effect); the three tools and scope checks for child tasks.
 - `contract/mcp/factory-tools.v2.json`: three tools.
 - `crates/df-web`: task details, the status chip and filters, and the persona form and card.
 - `crates/df-e2e`: the demo flow implement → review → relay, without webhooks.

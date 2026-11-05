@@ -21,6 +21,12 @@ See proposal.md (Why). The current state:
   - in `df-agent-channel/src/runs.rs`: `start_queued_runs` (`running`), turn start and end (`running` ⇄ `waiting`) and `end_run_tx` (four overrides, then `plan_resume`).
 
   `update_task_status` is only called by tests.
+- **Forge outbox jobs** (`iter3-webhooks`, `pr-forge-outbox`): three of these writers queue a job in the same transaction, with rules that depend on the status:
+  - `end_run_tx` queues `pr.sync { run_id, open, ready }` when the branch was pushed (`RunEnd.task_branch_pushed`) or the run completed, not for a `cancelled` task (`pr::enqueue_run_end`);
+  - `mark_task_done` queues `pr.sync { ready }` when the task has a PR;
+  - `queue_message_tx` queues `pr.mark_draft` when it moves a task out of `in_review` or `completed` that has an unmerged PR.
+
+  `ready` is `clock_timestamp()` read under the task lock (`clock_under_task_lock`, `pr-forge-outbox` D3). The job on a push report (`pr::enqueue_open_after_push` in `session.rs`) changes no status.
 - **Factory tools**: executed in `crates/df-agent-channel/src/tools.rs` (1,244 lines), declared in `contract/mcp/factory-tools.v2.json`. Every call is stored by `call_id` for exactly-once execution.
 - **Fake agent**: `crates/fake-acp-agent` already scripts arbitrary tool calls (`tool_call` steps).
 
@@ -73,7 +79,8 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
   - `undelivered_messages` (for a stopped run: only those queued after the stop);
   - `ever_ran`;
   - `unsatisfied_dependencies`;
-  - `auto_resumes`.
+  - `auto_resumes`;
+  - `pr` (none, unmerged, merged).
 - **`TaskEvent`**, one variant per thing that happens:
 
   | Event | Raised by | Today |
@@ -83,7 +90,7 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
   | `MessageWithdrawn` | withdrawing a message | back to `waiting` |
   | `RunStarted` | `start_queued_runs` | `running` |
   | `TurnStarted`, `TurnEnded` | run state `running` ⇄ `awaiting_input` | `running` ⇄ `waiting` |
-  | `RunEnded { outcome, detail, retry_after, max_auto_resumes, now }` | `end_run_tx` | overrides + `plan_resume` |
+  | `RunEnded { run_id, outcome, detail, retry_after, task_branch_pushed, max_auto_resumes, now }` | `end_run_tx` | overrides + `plan_resume` + `pr.sync` |
   | `MarkedDone` | `mark_task_done`, merged PR (`iter3-webhooks`) | `completed` |
   | `Cancelled` | cancel path | `cancelled` |
   | `DependencySatisfied` | effect of a target's Completion or Done | new |
@@ -96,8 +103,16 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
   - `NotifyParent(how)`: raises `ChildEnded` on the parent;
   - `QueueMessage(author, content)`, for example the child-ended message (D4);
   - `CloseRequests(reason)`, `FinalizeIdleRun`, `StopRun`;
+  - `EnqueuePrSync { run_id, open, ready }` with `ready: bool`, and `EnqueueMarkDraft`;
   - `Audit(action, details)`, `Publish(notification)`.
 - **`Rejected`**: a command the status doesn't allow (`can_mark_done`, `can_cancel` move here), mapped to `DbError::Conflict`. An event that changes nothing returns an empty transition.
+
+**Existing forge job rules as match arms** (no behavior change):
+- `RunEnded`: unless the status before the event is `cancelled`, `EnqueuePrSync { run_id, open: task_branch_pushed, ready: outcome == completed }` when either is true.
+- `MarkedDone`: `EnqueuePrSync { run_id: None, open: false, ready: true }` when `pr` isn't none.
+- `MessageQueued`: `EnqueueMarkDraft` when the status before the event is `in_review` or `completed` and `pr` is unmerged.
+
+The applier fills `ready` with `clock_timestamp()` when it executes `EnqueuePrSync`, still under the task lock. So `transition` stays pure and a reopening message is still ordered against the ready time (`pr-forge-outbox` D3). The push-report job changes no status and stays in `session.rs`.
 
 **New rules as match arms:**
 - `RunEnded` with outcome `completed`: `RecordFirst(Completion)`, `NotifyDependents`, `NotifyParent(completed)`. When the resulting status is `failed` (outcome `failed`, or infrastructure failures with no resume left): `NotifyParent(failed)`. The run-end mapping and its overrides are unchanged.
@@ -111,6 +126,8 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
 - Effects that raise events on other tasks go into a work queue in the same transaction. They are applied after the current task's writes, in order: dependents, then the parent.
 - A cross-task event (`DependencySatisfied`, `ChildEnded`) locks only the target's task row, as `queue_message_tx` does today. It never locks run rows of another task. So a transaction holds at most its own task's run rows, and any task row lock it takes after them can't close a cycle with a transaction that locks run rows first (the subtree cancel of `iter3-task-tree`).
 - The eight status writes in Context become calls to `apply_task_event`. `update_task_status` is removed and its tests set the status with SQL.
+- `pr::enqueue_run_end` and the inline jobs of `mark_task_done` and `queue_message_tx` become the effects above.
+- `end_run_tx` keeps writing the run data it carries (`harness_session_id`, `diverged`) itself. Those are no status rules.
 
 Alternatives:
 - An event hook after the existing transitions (`record_task_event`, the previous version of this decision). It leaves the rules spread across eight statements (ADR-0055).
