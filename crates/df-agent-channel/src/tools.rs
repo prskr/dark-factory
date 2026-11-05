@@ -396,8 +396,8 @@ async fn complete_task(
 ) -> Result<Outcome, ChannelError> {
     let task_id = rc.task.id;
     let mut tx = ctx.pool.begin().await?;
-    sqlx::query("UPDATE tasks SET completion_summary = $2, updated_at = now() WHERE id = $1")
-        .bind(task_id.as_uuid())
+    sqlx::query("UPDATE runs SET completion_summary = $2 WHERE id = $1")
+        .bind(rc.run.id.as_uuid())
         .bind(text_arg(args, "summary").unwrap_or_default())
         .execute(&mut *tx)
         .await?;
@@ -1044,12 +1044,19 @@ mod tests {
         .await;
         assert!(res.end_run_after_turn);
         let stored: String =
+            sqlx::query_scalar("SELECT completion_summary FROM runs WHERE id = $1")
+                .bind(rc.run.id.as_uuid())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, "Done.");
+        let on_task: String =
             sqlx::query_scalar("SELECT completion_summary FROM tasks WHERE id = $1")
                 .bind(rc.task.id.as_uuid())
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(stored, "Done.");
+        assert_eq!(on_task, "", "the task column is unused");
     }
 
     #[tokio::test]

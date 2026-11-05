@@ -1,7 +1,6 @@
 //! Stopping a run, cancelling a task, and marking done with a PR (`specs/task-ui/spec.md`).
 
 use axum::http::StatusCode;
-use df_core::testing::ForgeCall;
 
 use super::set_status;
 use crate::testkit::{TestApp, insert_run, new_task, seed, text};
@@ -215,7 +214,7 @@ async fn cancelling_a_completed_task_is_refused_and_changes_nothing() {
 }
 
 #[tokio::test]
-async fn marking_a_task_with_a_draft_pr_done_marks_the_pr_ready() {
+async fn marking_a_task_with_a_pr_done_enqueues_a_ready_job_without_calling_the_forge() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -229,61 +228,33 @@ async fn marking_a_task_with_a_draft_pr_done_marks_the_pr_ready() {
     let response = app.post("/tasks/DF-1/done", "", &cookie).await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    let calls = app.forge.calls();
-    assert!(
-        matches!(calls.as_slice(), [ForgeCall::UpdatePullRequest { number: 41, changes, .. }] if changes.draft == Some(false)),
-        "{calls:?}"
-    );
-}
-
-#[tokio::test]
-async fn marking_done_without_a_pr_does_not_call_the_forge_and_a_forge_error_keeps_the_status() {
-    let app = TestApp::new().await;
-    let cookie = app.login().await;
-    let seed = seed(&app.pool).await;
-    new_task(&app.pool, &seed, "t").await;
-    set_status(&app, "waiting").await;
-    assert_eq!(
-        app.post("/tasks/DF-1/done", "", &cookie).await.status(),
-        StatusCode::OK
-    );
     assert!(app.forge.calls().is_empty());
-
-    set_status(&app, "waiting").await;
-    sqlx::query("UPDATE tasks SET pr_number = 41, pr_url = 'https://git.example.org/o/r/pulls/41'")
-        .execute(&app.pool)
-        .await
-        .unwrap();
-    app.forge
-        .push_update_pull_request_result(Err(df_core::IntegrationError::Config(
-            "forge down".into(),
-        )));
-    assert_eq!(
-        app.post("/tasks/DF-1/done", "", &cookie).await.status(),
-        StatusCode::OK
-    );
     assert_eq!(
         count(
             &app,
-            "SELECT count(*) FROM tasks WHERE status = 'completed'"
+            "SELECT count(*) FROM outbox WHERE kind = 'pr.sync' AND payload ->> 'open' = 'false'"
         )
         .await,
         1
     );
 }
 
-#[tokio::test(start_paused = true)]
-async fn marking_the_pr_ready_gives_up_when_the_forge_does_not_answer() {
-    let forge = df_core::testing::FakeForgeClient::new();
-    forge.hang_update_pull_request();
-    let deadline = std::time::Duration::from_secs(10);
+#[tokio::test]
+async fn marking_done_without_a_pr_enqueues_no_job() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "t").await;
+    set_status(&app, "waiting").await;
 
-    let started = tokio::time::Instant::now();
-    crate::task_pages::mark_ready_bounded(&forge, &df_core::ProjectId::new(), 41, deadline).await;
+    assert_eq!(
+        app.post("/tasks/DF-1/done", "", &cookie).await.status(),
+        StatusCode::OK
+    );
 
-    assert_eq!(started.elapsed(), deadline);
-    assert!(matches!(
-        forge.calls().as_slice(),
-        [ForgeCall::UpdatePullRequest { number: 41, .. }]
-    ));
+    assert!(app.forge.calls().is_empty());
+    assert_eq!(
+        count(&app, "SELECT count(*) FROM outbox WHERE kind = 'pr.sync'").await,
+        0
+    );
 }

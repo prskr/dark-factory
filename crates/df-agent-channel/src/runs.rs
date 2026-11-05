@@ -353,6 +353,8 @@ pub struct RunEnd {
     pub task_branch_sha: String,
     pub wip_sha: String,
     pub diverged: bool,
+    /// The runtime pushed the task branch (`WorkspaceState`).
+    pub task_branch_pushed: bool,
 }
 
 impl RunEnd {
@@ -367,6 +369,7 @@ impl RunEnd {
             task_branch_sha: String::new(),
             wip_sha: String::new(),
             diverged: false,
+            task_branch_pushed: false,
         }
     }
 }
@@ -626,6 +629,10 @@ pub async fn end_run_tx(
         Utc::now(),
     );
     let task_status = plan.status;
+    // A cancelled task keeps its PR as it is.
+    if current != TaskStatus::Cancelled {
+        crate::pr::enqueue_run_end(tx, task_id, end).await?;
+    }
 
     sqlx::query(
         "UPDATE tasks SET status = $2,

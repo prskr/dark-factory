@@ -682,23 +682,7 @@ async fn mark_done_takes_the_run_lock_before_the_task_lock() {
         let id = task.id;
         tokio::spawn(async move { mark_task_done(&pool, id, human()).await })
     };
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let waiting: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM pg_stat_activity
-                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            if waiting > 0 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("mark_task_done did not wait for the run lock");
+    wait_for_lock_waiter(&pool).await;
 
     // Without the run lock first, `mark_task_done` now holds the task row and this deadlocks.
     sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
@@ -1034,23 +1018,7 @@ async fn removing_a_message_while_another_is_queued_keeps_the_task_queued() {
         async move { remove_queued_message(&pool, task.id, msg.id, human()).await }
     });
     // Wait until the removal waits for the row lock, then let the queueing commit.
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let waiting: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM pg_stat_activity
-                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            if waiting > 0 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
+    wait_for_lock_waiter(&pool).await;
     queueing.commit().await.unwrap();
     remove.await.unwrap().unwrap();
 
@@ -1319,4 +1287,170 @@ async fn a_message_enqueues_no_mark_draft_without_an_open_pr() {
 
         assert!(mark_draft_jobs(&pool).await.is_empty(), "{status} {pr:?}");
     }
+}
+
+#[test]
+fn a_pr_sync_job_survives_a_serde_round_trip() {
+    let job = PrSyncJob {
+        task_id: TaskId::new(),
+        run_id: Some(RunId::new()),
+        open: true,
+        ready: Some(Utc::now()),
+    };
+    let back: PrSyncJob = serde_json::from_value(serde_json::to_value(job).unwrap()).unwrap();
+    assert_eq!(back, job);
+
+    let minimal: PrSyncJob = serde_json::from_value(
+        serde_json::json!({ "task_id": job.task_id, "run_id": null, "open": false, "ready": null }),
+    )
+    .unwrap();
+    assert_eq!(
+        (minimal.run_id, minimal.open, minimal.ready),
+        (None, false, None)
+    );
+}
+
+async fn pr_sync_jobs(pool: &PgPool) -> Vec<PrSyncJob> {
+    let payloads: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM outbox WHERE kind = $1 ORDER BY id")
+            .bind(PR_SYNC_KIND)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    payloads
+        .into_iter()
+        .map(|p| serde_json::from_value(p).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn mark_done_enqueues_a_ready_only_pr_sync_job_when_the_task_has_a_pr() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_pr(&pool, TaskStatus::InReview, Some(12), false).await;
+
+    mark_task_done(&pool, task.id, human()).await.unwrap();
+
+    let jobs = pr_sync_jobs(&pool).await;
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].task_id, task.id);
+    assert_eq!((jobs[0].run_id, jobs[0].open), (None, false));
+    assert!(jobs[0].ready.is_some());
+}
+
+#[tokio::test]
+async fn mark_done_enqueues_no_pr_sync_job_without_a_pr() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_pr(&pool, TaskStatus::InReview, None, false).await;
+
+    mark_task_done(&pool, task.id, human()).await.unwrap();
+
+    assert!(pr_sync_jobs(&pool).await.is_empty());
+}
+
+/// Holds the task lock in an open transaction, starts `op` (its transaction starts now) and waits
+/// until it blocks on that lock. Only then the message is queued and committed, so the message
+/// is inserted after `op`'s transaction start but first in lock order.
+async fn commit_a_message_while_blocked<F, Fut>(pool: &PgPool, task: TaskId, op: F)
+where
+    F: FnOnce(PgPool) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let mut message_tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
+        .bind(task.as_uuid())
+        .execute(&mut *message_tx)
+        .await
+        .unwrap();
+    let blocked = tokio::spawn(op(pool.clone()));
+    wait_for_lock_waiter(pool).await;
+    queue_message_tx(&mut message_tx, task, human(), text("waiting"))
+        .await
+        .unwrap();
+    message_tx.commit().await.unwrap();
+    blocked.await.unwrap();
+}
+
+/// Waits until some session of the test database waits for a lock; fails after five seconds.
+async fn wait_for_lock_waiter(pool: &PgPool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if waiting > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("no session waited for a lock");
+}
+
+async fn last_message_queued_at(pool: &PgPool, task: TaskId) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT max(queued_at) FROM task_messages WHERE task_id = $1")
+        .bind(task.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn stop_requested_at(pool: &PgPool, task: TaskId) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT stop_requested_at FROM runs WHERE task_id = $1")
+        .bind(task.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_message_committed_before_the_stop_is_queued_before_the_stop_time() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "running").await;
+
+    commit_a_message_while_blocked(&pool, task.id, |pool| async move {
+        stop_run(&pool, task.id, human()).await.unwrap();
+    })
+    .await;
+
+    assert!(last_message_queued_at(&pool, task.id).await < stop_requested_at(&pool, task.id).await);
+}
+
+#[tokio::test]
+// Pins the ordinary direction; it also holds with `now()`, so it is no regression test.
+async fn a_message_queued_after_the_stop_is_queued_after_the_stop_time() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_run(&pool, TaskStatus::Running, "running").await;
+    stop_run(&pool, task.id, human()).await.unwrap();
+
+    queue_message(&pool, task.id, human(), text("again"))
+        .await
+        .unwrap();
+
+    assert!(last_message_queued_at(&pool, task.id).await > stop_requested_at(&pool, task.id).await);
+}
+
+#[tokio::test]
+async fn a_message_after_mark_done_is_queued_after_the_ready_time() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = task_with_pr(&pool, TaskStatus::InReview, Some(12), false).await;
+    // The message transaction starts before the completion and inserts after it. `ready` comes
+    // from the DB clock; `Utc::now()` would differ only by clock skew, not testable here.
+    let mut message_tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1")
+        .execute(&mut *message_tx)
+        .await
+        .unwrap();
+    mark_task_done(&pool, task.id, human()).await.unwrap();
+    queue_message_tx(&mut message_tx, task.id, human(), text("later"))
+        .await
+        .unwrap();
+    message_tx.commit().await.unwrap();
+
+    let ready = pr_sync_jobs(&pool).await[0].ready.unwrap();
+    assert!(ready < last_message_queued_at(&pool, task.id).await);
 }

@@ -1103,16 +1103,25 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     runtime.recv_until(|m| m.ack == end).await?;
 
     eventually(|| async { env_task_status(&pool, &env).await == "waiting" }).await;
-    // The pull request is opened beside the stream, not before the run ends.
-    eventually(|| async {
+    // The push enqueued the pull request creation; the outbox dispatcher opens it.
+    let dispatcher = df_db::outbox::Dispatcher::new(
+        pool.clone(),
+        env.ctx.notifier.clone(),
+        vec![Arc::new(df_agent_channel::pr::sync::PrSyncHandler::new(
+            pool.clone(),
+            Arc::new(env.forge.clone()),
+        ))],
+        &opentelemetry::global::meter("test"),
+    );
+    dispatcher.run_due().await?;
+    assert_eq!(
         count(
             &pool,
             "SELECT count(*) FROM tasks WHERE pr_number IS NOT NULL",
         )
-        .await
-            == 1
-    })
-    .await;
+        .await,
+        1
+    );
 
     // Follow-up message: the scheduler starts run 2 with a continuation.
     df_db::queue_message(

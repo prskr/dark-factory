@@ -64,7 +64,7 @@ never for replayed messages, so a crash between commit and recording loses the s
 | `df.agent.runtime.rejected` | counter | | `project`, `operation` | `RuntimeTiming` with a duration of zero or more than 7 days |
 | `df.agent.connections` | up-down counter | | `project` | open agent channel streams |
 | `df.agent.reconnects` | counter | | `project` | streams of runs that had one before |
-| `df.outbox.jobs` | counter | | `kind` (for example `lifecycle_event.deliver`), `result` (`done`, `retry`, `gave_up`) | every outbox job attempt, on the leader |
+| `df.outbox.jobs` | counter | | `kind` (`pr.mark_draft`, `pr.sync`, `lifecycle_event.deliver`), `result` (`done`, `retry`, `gave_up`) | every outbox job attempt, on the leader |
 | `df.lifecycle_event.deliveries` | counter | | `result` (`delivered`, `failed`, `refused`) | every lifecycle event delivery attempt; given-up deliveries are counted by `df.outbox.jobs{kind="lifecycle_event.deliver",result="gave_up"}` |
 | `df.webhook.requests` | counter | | `plugin`, `outcome` (`accepted`, `unauthorized`, `not_found`, `too_large`, `invalid`, `error`) | every request to `POST /webhooks/{plugin}`; Prometheus: `df_webhook_requests_total` |
 

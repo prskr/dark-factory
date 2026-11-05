@@ -56,7 +56,7 @@ From the status menu in the details:
 | Action | Effect |
 | --- | --- |
 | **Stop** (also the stop button in the message box) | Ends the current run; the agent finalizes (pushes, snapshots) and the task waits for your next message. |
-| **Mark done** | The task becomes `completed` and its pull request is marked ready for review. |
+| **Mark done** | The task becomes `completed` and its pull request is marked ready for review (a background job, retried if the forge is down). |
 | **Cancel task** | Stops the run, discards queued messages and closes pending requests. The pull request stays as it is. A new message reopens the task. |
 | **Reset workspace** | Deletes the task's volume (not possible while a run is active). Committed work and the WIP snapshot stay in Git; the next run clones again. |
 
@@ -68,5 +68,5 @@ All of them are audited with your name.
 | --- | --- |
 | `factory/task/<KEY>` | Commits of the agent, pushed after every turn |
 | `factory/wip/<KEY>` | Snapshot of uncommitted files at the end of each run (secrets such as `.env` and keys excluded) |
-| Draft pull request | Opened on the first commit ahead of the base branch; marked ready when the task completes |
+| Draft pull request | Opened on the first commit ahead of the base branch; marked ready when the task completes. Forge failures are retried for an hour |
 | Task volume | Cache of the checkout between runs; deleted 7 days after the task closed or after 30 days without a run |

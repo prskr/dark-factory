@@ -5,7 +5,6 @@
 //! produces the same commands.
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,8 +14,8 @@ use df_db::transcript::lock_run_and_task;
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, PushReport, Release, RunPhase,
-    RunReport, ToolCallRequest, agent_message, control_message,
+    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, PushReport, PushStatus, PushTarget,
+    Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
@@ -45,8 +44,6 @@ const MAX_BATCH: usize = 50;
 const CAPABILITIES: &[&str] = &["transcript.images"];
 /// Time granted to in-flight tool calls and credential requests when the stream has ended.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
-/// Time granted to the forge work after a push report or the end of a run.
-const FORGE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Longest timer armed for a deadline; `tokio::time::sleep` panics on durations it cannot add.
 const MAX_TIMER: Duration = Duration::from_hours(8760);
 
@@ -147,8 +144,7 @@ struct Session {
 #[derive(Default)]
 struct Effects {
     tool_calls: Vec<ToolCallRequest>,
-    pushes: Vec<PushReport>,
-    run_end: Option<(RunReport, EndedRun)>,
+    run_end: Option<EndedRun>,
 }
 
 struct Persisted {
@@ -451,17 +447,6 @@ impl Session {
             .filter(|state| !state.is_terminal()))
     }
 
-    /// Runs forge work beside the stream loop, so a slow forge neither stops acks nor delays
-    /// `Cancel` and prompts. Bounded by [`FORGE_TIMEOUT`]; the work is best effort anyway.
-    fn spawn_forge_work(&mut self, work: impl Future<Output = ()> + Send + 'static) {
-        let run_id = self.rc.run.id;
-        self.tasks.spawn(async move {
-            if tokio::time::timeout(FORGE_TIMEOUT, work).await.is_err() {
-                tracing::warn!(run_id = %run_id, "forge work timed out");
-            }
-        });
-    }
-
     /// Returns `false` once the peer is gone.
     async fn send(&self, msg: ControlMessage) -> bool {
         self.out.send(Ok(msg)).await.is_ok()
@@ -547,18 +532,9 @@ impl Session {
                     .ok();
             });
         }
-        for push in effects.pushes {
-            let (ctx, rc) = (self.ctx.clone(), self.rc.clone());
-            self.spawn_forge_work(async move { pr::on_push_report(&ctx, &rc, &push).await });
-        }
-        if let Some((report, ended)) = effects.run_end {
+        if let Some(ended) = effects.run_end {
             self.ended = true;
             crate::runs::teardown(&self.ctx, self.rc.run.id).await;
-            let completed = report.outcome() == WireOutcome::Completed;
-            let (ctx, rc) = (self.ctx.clone(), self.rc.clone());
-            self.spawn_forge_work(async move {
-                pr::on_run_end(&ctx, &rc, completed, report.workspace.as_ref()).await;
-            });
             tracing::info!(
                 run_id = %self.rc.run.id,
                 task_id = %ended.task_id,
@@ -772,7 +748,7 @@ impl BatchApply {
                     target: push.target(),
                     status: push.status(),
                 });
-                self.effects.pushes.push(push);
+                apply_push(tx, rc, &push).await?;
             }
             agent_message::Body::RuntimeTiming(timing) => {
                 // Not stored: it only takes its place in the sequence.
@@ -790,12 +766,44 @@ impl BatchApply {
                             .to_std()
                             .unwrap_or_default(),
                     });
-                    self.effects.run_end = Some((report, ended));
+                    self.effects.run_end = Some(ended);
                 }
             }
         }
         Ok(())
     }
+}
+
+/// Applies a task-branch push report: a rejected non-fast-forward push flags the task as
+/// diverged, a push ahead of base enqueues the PR creation (`pr-forge-outbox` design D2).
+async fn apply_push(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rc: &RunContext,
+    push: &PushReport,
+) -> Result<(), ChannelError> {
+    if push.target() != PushTarget::TaskBranch {
+        return Ok(());
+    }
+    match push.status() {
+        PushStatus::RejectedNonFastForward => {
+            sqlx::query("UPDATE tasks SET diverged = TRUE, updated_at = now() WHERE id = $1")
+                .bind(rc.task.id.as_uuid())
+                .execute(&mut **tx)
+                .await?;
+            publish(
+                &mut **tx,
+                &Notification::TaskChanged {
+                    task_id: rc.task.id,
+                },
+            )
+            .await?;
+        }
+        PushStatus::Ok if push.commits_ahead_of_base > 0 => {
+            pr::enqueue_open_after_push(tx, rc.task.id, rc.run.id).await?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Applies a phase change of the run. True if it changed whether the run is idle.
@@ -968,6 +976,7 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
         task_branch_sha: workspace.task_branch_sha,
         wip_sha: workspace.wip_sha,
         diverged: workspace.diverged,
+        task_branch_pushed: workspace.task_branch_pushed,
     }
 }
 

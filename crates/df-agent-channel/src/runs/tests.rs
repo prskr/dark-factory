@@ -585,6 +585,7 @@ async fn message_queued_while_the_run_ends_is_not_stranded() {
                 task_branch_sha: String::new(),
                 wip_sha: String::new(),
                 diverged: false,
+                task_branch_pushed: false,
             };
             end_run(&pool, &end, &config()).await
         }
@@ -611,4 +612,87 @@ async fn message_queued_while_the_run_ends_is_not_stranded() {
         .await
         .unwrap();
     assert_eq!(status, "queued");
+}
+
+/// The `pr.sync` jobs of the database as `(open, ready set, run set)`.
+async fn pr_sync_jobs(pool: &PgPool) -> Vec<(bool, bool, bool)> {
+    let payloads: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM outbox WHERE kind = 'pr.sync' ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    payloads
+        .iter()
+        .map(|p| {
+            (
+                p["open"].as_bool().unwrap(),
+                !p["ready"].is_null(),
+                !p["run_id"].is_null(),
+            )
+        })
+        .collect()
+}
+
+/// Ends a fresh run of a new env with `outcome`, `pushed` and the task status set before.
+async fn end_run_of(
+    outcome: RunOutcome,
+    pushed: bool,
+    task_status: Option<&str>,
+) -> Vec<(bool, bool, bool)> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    deliver_all(&pool, env.task.id).await;
+    let run_id = env.insert_run(env.task.id, 1, "running").await;
+    if let Some(status) = task_status {
+        sqlx::query("UPDATE tasks SET status = $2 WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .bind(status)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let end = RunEnd {
+        task_branch_pushed: pushed,
+        ..end_with(run_id, outcome)
+    };
+    end_run(&pool, &end, &config()).await.unwrap();
+    pr_sync_jobs(&pool).await
+}
+
+#[tokio::test]
+async fn a_completed_run_that_pushed_enqueues_open_and_ready() {
+    assert_eq!(
+        end_run_of(RunOutcome::Completed, true, None).await,
+        [(true, true, true)]
+    );
+}
+
+#[tokio::test]
+async fn a_completed_run_without_a_push_enqueues_ready_only() {
+    assert_eq!(
+        end_run_of(RunOutcome::Completed, false, None).await,
+        [(false, true, true)]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_run_that_pushed_enqueues_open_only() {
+    assert_eq!(
+        end_run_of(RunOutcome::Failed, true, None).await,
+        [(true, false, true)]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_run_without_a_push_enqueues_no_pr_job() {
+    assert!(end_run_of(RunOutcome::Failed, false, None).await.is_empty());
+}
+
+#[tokio::test]
+async fn the_end_of_a_run_of_a_cancelled_task_enqueues_no_pr_job() {
+    assert!(
+        end_run_of(RunOutcome::Completed, true, Some("cancelled"))
+            .await
+            .is_empty()
+    );
 }

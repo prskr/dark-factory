@@ -26,7 +26,8 @@ The task's details show the outcome of each run; the control plane log has the r
 | `git push` prints `df:…` | A push check rejected it; in approval mode a `push-check-exception` request appears in the inbox ([Git proxy](../security/git-proxy.md)). |
 | The harness gets `404` from the gateway | The path is not one of the [inference endpoint's](../security/inference-endpoint.md#paths-and-status-codes), or the provider does not offer that wire API. |
 | The task becomes `rate_limited` | The model provider's usage limit; the task resumes at the shown time. |
-| No pull request appears | The task branch has no commit ahead of the base branch yet, or the forge plugin failed (retried at every push and at run end; see the control plane log). |
+| No pull request appears | The task branch has no commit ahead of the base branch yet, or the forge plugin failed. Pull request actions are outbox jobs, retried with backoff (30 s doubling to 10 min) for an hour, also across control plane restarts; see `df.outbox.jobs{kind="pr.sync"}` and the control plane log. After the hour the next push ahead of the base branch or run end that pushed opens it. A run that never pushed the task branch opens none. |
+| Pull request stays a draft after completion | Same cause: marking it ready failed and is retried for an hour (`df.outbox.jobs{kind="pr.sync"}`, control plane log). A new message after the completion keeps the pull request a draft on purpose. After the hour, the next completed run or **Mark done** marks it ready. |
 
 ## Login problems
 

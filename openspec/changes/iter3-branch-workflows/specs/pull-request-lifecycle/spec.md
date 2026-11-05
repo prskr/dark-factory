@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Draft PR on first push ahead of base
-On a successful task-branch `PushReport` with at least one commit ahead of base, if the task has no PR, the control plane SHALL open a draft PR from the task's stored branch into the task's base branch, using stored title/body or defaults (`<KEY>: <task title>`, task description plus a `Task: <KEY>` line). The control plane SHALL NOT open a PR for a task in status `completed` or `cancelled`, neither on a push report nor in the retry at run end.
+On a successful task-branch `PushReport` with at least one commit ahead of base, if the task has no PR, the control plane SHALL open a draft PR from the task's stored branch into the task's base branch, using stored title/body or defaults (`<KEY>: <task title>`, task description plus a `Task: <KEY>` line). The control plane SHALL NOT open a PR for a task in status `completed` or `cancelled`, nor for a task whose branch was never pushed.
 
 #### Scenario: First push
 - **WHEN** the runtime reports pushing `factory/task/DF-1` 2 commits ahead of `main`
@@ -25,8 +25,12 @@ On a successful task-branch `PushReport` with at least one commit ahead of base,
 - **WHEN** a board member marks `DF-1` without a PR done and its cancelled run reports a push 2 commits ahead of `main`
 - **THEN** no PR is opened and `DF-1` stays `completed`
 
+#### Scenario: Completed without a push
+- **WHEN** run 1 of `DF-1` ends `completed` and the task branch was never pushed
+- **THEN** the forge is not asked to open a PR and `DF-1` is `in_review` without a PR
+
 ### Requirement: Idempotent creation
-If an open PR for the same head and base already exists (creation conflict, or a crash between creating and recording), the control plane SHALL record that PR instead of opening a second one. For a task on an existing branch, the recorded PR SHALL be attached.
+If an open PR for the same head and base already exists (creation conflict, or a crash between creating and recording), the control plane SHALL record that PR instead of opening a second one. For a task on an existing branch, the recorded PR SHALL be attached. Marking ready and posting the summary SHALL use the PR recorded on the task.
 
 #### Scenario: Crash after creation
 - **WHEN** the PR was created but not recorded and the next push report arrives
@@ -36,8 +40,12 @@ If an open PR for the same head and base already exists (creation conflict, or a
 - **WHEN** `DF-14` on `fix/login` had no PR at creation, a human opened PR #44 `fix/login → main`, and `DF-14` reports its first push ahead of `main`
 - **THEN** PR #44 is recorded as attached and no second PR is opened
 
+#### Scenario: Concurrent creation on a forge without conflict detection
+- **WHEN** two attempts to open the PR of `DF-1` each create a PR, #7 is recorded first, and run 1 of `DF-1` ends `completed`
+- **THEN** PR #7 is marked ready and gets the summary, and the other PR is not changed
+
 ### Requirement: Ready for review on completion
-When a run ends with outcome `completed` and the task has a PR, the control plane SHALL post the completion summary as a PR comment and, unless the PR is attached, mark it ready for review. The task becomes `in_review`, or `queued` if undelivered messages exist (see "Run end maps to task status"); the PR actions are the same in both cases. Marking a task done by hand SHALL mark a PR that isn't attached ready as well, without a summary.
+When a run ends with outcome `completed` and the task has a PR, the control plane SHALL post that run's completion summary as a PR comment and, unless the PR is attached, mark it ready for review; a run without its own summary posts none. The task becomes `in_review`, or `queued` if undelivered messages exist (see "Run end maps to task status"); the PR actions are the same in both cases. Marking a task done by hand SHALL mark a PR that isn't attached ready as well, without a summary.
 
 #### Scenario: Task completed
 - **WHEN** run 2 of `DF-1` ends with `completed`
@@ -50,6 +58,10 @@ When a run ends with outcome `completed` and the task has a PR, the control plan
 #### Scenario: Marked done by hand
 - **WHEN** a board member marks `DF-1` with a draft PR done
 - **THEN** the PR is no longer a draft and gets no summary comment
+
+#### Scenario: Earlier summary is not posted again
+- **WHEN** run 1 of `DF-1` called `complete_task` with summary "Fixed login", and run 2 ends `completed` without calling `complete_task`
+- **THEN** the PR is marked ready and gets no comment for run 2
 
 #### Scenario: Attached draft PR
 - **WHEN** run 1 of `DF-15`, attached to a human's draft PR #45, ends with `completed`

@@ -32,6 +32,7 @@ use tracing::{error, info, warn};
 mod demo_flows;
 mod forge;
 mod lifecycle_events;
+mod outbox;
 mod sandbox;
 #[cfg(any(test, feature = "dev-tools"))]
 mod unconfigured;
@@ -432,7 +433,7 @@ fn spawn_leader_tasks(
     delivery: lifecycle_events::Delivery,
 ) -> anyhow::Result<()> {
     let meter = opentelemetry::global::meter("dark-factory");
-    let dispatcher = lifecycle_events::dispatcher(
+    let dispatcher = outbox::dispatcher(
         &ctx.pool,
         &ctx.notifier,
         delivery,

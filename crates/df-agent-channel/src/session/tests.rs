@@ -665,27 +665,96 @@ async fn session_for(
     (session, rx)
 }
 
-#[tokio::test]
-async fn a_hanging_forge_does_not_block_the_stream() {
-    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
-    let env = Env::new(pool).await;
-    let run_id = env.running_run().await;
-    env.forge.hang_find_open_pull_request();
-    let (mut session, _rx) = session_for(&env, run_id).await;
-    let push = agent_message::Body::PushReport(PushReport {
+fn task_branch_push(status: PushStatus, ahead: u32) -> agent_message::Body {
+    agent_message::Body::PushReport(PushReport {
         target: PushTarget::TaskBranch as i32,
+        status: status as i32,
+        commits_ahead_of_base: ahead,
+        ..PushReport::default()
+    })
+}
+
+/// Persists `pushes` as one batch of a running run and returns the `open` flags of the `pr.sync`
+/// jobs enqueued; `has_pr` records a PR on the task first.
+async fn pr_jobs_after(pushes: Vec<agent_message::Body>, has_pr: bool) -> (Env, Vec<bool>) {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.running_run().await;
+    if has_pr {
+        sqlx::query("UPDATE tasks SET pr_number = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let (mut session, _rx) = session_for(&env, run_id).await;
+    let batch = pushes
+        .into_iter()
+        .zip(1..)
+        .map(|(push, seq)| msg(seq, push))
+        .collect();
+    session.handle_batch(batch).await.unwrap();
+    let jobs: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM outbox WHERE kind = 'pr.sync' ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for job in &jobs {
+        assert_eq!(job["run_id"], run_id.to_string());
+        assert!(job["ready"].is_null());
+    }
+    let open = jobs.iter().map(|j| j["open"].as_bool().unwrap()).collect();
+    (env, open)
+}
+
+#[tokio::test]
+async fn a_task_branch_push_ahead_of_base_enqueues_one_open_job_per_push() {
+    let ok = || task_branch_push(PushStatus::Ok, 2);
+    let (env, open) = pr_jobs_after(vec![ok(), ok()], false).await;
+    assert_eq!(open, [true, true]);
+    assert!(
+        env.forge.calls().is_empty(),
+        "the session does not call the forge"
+    );
+}
+
+#[tokio::test]
+async fn a_push_without_commits_ahead_enqueues_no_job() {
+    let (_env, open) = pr_jobs_after(vec![task_branch_push(PushStatus::Ok, 0)], false).await;
+    assert!(open.is_empty());
+}
+
+#[tokio::test]
+async fn a_push_enqueues_no_job_when_the_task_has_a_pr() {
+    let (_env, open) = pr_jobs_after(vec![task_branch_push(PushStatus::Ok, 2)], true).await;
+    assert!(open.is_empty());
+}
+
+#[tokio::test]
+async fn a_push_of_another_target_enqueues_no_job() {
+    let push = agent_message::Body::PushReport(PushReport {
+        target: PushTarget::WipBranch as i32,
         status: PushStatus::Ok as i32,
-        commits_ahead_of_base: 1,
+        commits_ahead_of_base: 2,
         ..PushReport::default()
     });
+    let (_env, open) = pr_jobs_after(vec![push], false).await;
+    assert!(open.is_empty());
+}
 
-    let handled = tokio::time::timeout(
-        Duration::from_secs(10),
-        session.handle_batch(vec![msg(1, push)]),
+#[tokio::test]
+async fn a_rejected_non_fast_forward_push_sets_diverged_in_the_batch() {
+    let (env, open) = pr_jobs_after(
+        vec![task_branch_push(PushStatus::RejectedNonFastForward, 0)],
+        false,
     )
     .await;
-
-    assert!(handled.is_ok(), "the stream loop waited for the forge");
+    assert!(open.is_empty());
+    let diverged: bool = sqlx::query_scalar("SELECT diverged FROM tasks WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .fetch_one(&env.ctx.pool)
+        .await
+        .unwrap();
+    assert!(diverged);
 }
 
 #[tokio::test]
