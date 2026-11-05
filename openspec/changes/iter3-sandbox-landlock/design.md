@@ -83,7 +83,7 @@ Alternatives:
 
 ### D4: Probe before spawn, notice on failure
 
-Before writing harness settings, the runtime probes the current ABI (`landlock` crate). Below 6, it:
+Before writing the harness files, the runtime probes the current ABI (`landlock` crate). Below 6, it:
 - emits a `sandbox.landlock_unavailable` notice ("Landlock ABI 5 found, 6 required. Set `sandbox.landlock: disabled` to run without it." or "Landlock is not available in this kernel. …");
 - finalizes the run as `FAILED` with that text as detail, without starting the harness.
 
