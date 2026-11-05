@@ -72,6 +72,10 @@ Dependency: approval-gated push checks need the `push-check-exception` approval,
 - **Monitors:** a task-scoped wake-up set by the agent (factory tool) or a human, for example to poll a third-party system without webhooks. A due monitor queues a system prompt (reason `monitor.wake`) through the same path as messages and routines. A wake-up due within `runs.keepAliveSeconds` extends the control plane's idle deadline (`iter1-keep-alive-and-review`), so the sandbox stays up; a later one lets the run end and starts a new run when due.
 - **Inference endpoint in the gateway (`iter3-inference-gateway`, F5, [`design/egress.md`](../../design/egress.md) §9):** provider kinds `anthropic` (subscription token or API key) and `openai-compatible`; removes model credentials from sandboxes (ADR-0010 accepted risk) and measures usage per request (ADR-0021). Same shape as the Git proxy: pod-IP identity, credential swap, streaming. The iteration-1 spike passed (placeholder token, bearer swapped by a proxy, [`docs/demo.md`](../../docs/demo.md)); still to check with the gateway: a long interactive session (OAuth refresh, account and update calls bypassing the base URL) and the Claude Code version of the project image.
 
+- **Filesystem isolation in the sandbox (ADR-0054):**
+  - `iter3-hidden-paths`: per-project hidden paths, left out of the workspace by sparse checkout and rejected in every push.
+  - `iter3-sandbox-landlock`: the harness runs under Landlock. It has no access to the runtime's mTLS key or the outbox, and the system directories are read-only for it.
+
 Dependency: "PR merged" dependencies and review routing need the webhooks of ADR-0015.
 
 ## 4 — Harnesses, tools and skills
@@ -158,6 +162,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Forge activity outside runs: PR merged or closed, review submitted, CI failed after the run ended; needs transcript rows without a run | idea | ADR-0046, `openspec/changes/archive/2026-11-04-forge-activity-transcript` |
 | Commit links in forge activity: commit or compare URL from the forge integration (WIT) for push rows | idea | ADR-0046, `openspec/changes/archive/2026-11-04-forge-activity-transcript` |
 | WASI 0.3 guests for plugins | idea | ADR-0002 |
+| Hide hidden-path content from the repository history: the Git proxy refuses blob fetches for hidden paths (blobless clones fetch them lazily today) | idea | ADR-0054, `openspec/changes/iter3-hidden-paths` (out of scope) |
+| Seccomp profile for the harness beyond `RuntimeDefault` | idea | ADR-0054 |
+| Claude Code managed settings (`/etc/claude-code/`, mounted by `df-k8s`, read-only under Landlock) so repository `.claude/settings.json` can't override hooks or permissions; verify the mechanism in the current Claude Code docs first | idea | ADR-0054, issue #61 |
 | Separate UIDs for runtime and harness | idea | [`design/agent-run.md`](../../design/agent-run.md) §17 |
 | LSP support | idea | context §4.2 |
 | Cloud VM sandboxes (conflicts with current non-goals) | idea | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |

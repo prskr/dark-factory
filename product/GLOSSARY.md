@@ -76,6 +76,14 @@ _Avoid_: Closed chat, completed chat, deleted chat
 Human-approved planning knowledge for one project that every chat in it receives; tasks don't. Agents can only propose changes to it, and a human approves each one.
 _Avoid_: Project document, project memory, project instructions, AGENTS.md
 
+**Protected path**:
+A repository path whose content agents can read but may not change in what they push.
+_Avoid_: Read-only path, locked path
+
+**Hidden path**:
+A repository path of a project whose content agents do not get in their workspace. Every hidden path is also a protected path. Its content can still reach the agent through the repository history.
+_Avoid_: Protected path, secret path, excluded path, private file
+
 ### Transcript
 
 **Transcript**:
