@@ -223,6 +223,14 @@ install_driver() {
   )
 }
 
+suite_tests=(--test demo --test flow --test lifecycle_events --test webhooks)
+
+# Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
+build_suite() {
+  cargo build -q -p df-e2e --bin seed
+  cargo test -q -p df-e2e "${suite_tests[@]}" --no-run
+}
+
 run_suite() {
   log "Seeding and running the suite"
   forward postgres postgres "$pg_port" 5432
@@ -239,10 +247,13 @@ run_suite() {
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=1}"
-  cargo test -p df-e2e --test demo --test flow --test lifecycle_events --test webhooks -- "${test_args[@]}"
+  cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
 }
 
 prepare_tools
+build_suite &
+build_pid=$!
+pids+=("$build_pid")
 create_cluster
 load_images &
 images_pid=$!
@@ -254,4 +265,5 @@ wait "$images_pid"
 wait_for_fake_upstream
 helm_install_release
 install_driver
+wait "$build_pid"
 run_suite
