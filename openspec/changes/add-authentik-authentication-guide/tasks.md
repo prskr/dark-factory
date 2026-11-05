@@ -7,4 +7,4 @@
 
 ## 2. Deliver the documentation change
 
-- [ ] 2.1 Review the rendered documentation change, commit it on a dedicated branch, push it, and open the authorized GitHub pull request; verify the PR contains only the Authentik-guide change and its required OpenSpec artifacts.
+- [x] 2.1 Review the rendered documentation change, commit it on a dedicated branch, push it, and open the authorized GitHub pull request; verify the PR contains only the Authentik-guide change and its required OpenSpec artifacts.
