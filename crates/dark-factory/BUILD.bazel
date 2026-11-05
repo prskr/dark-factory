@@ -64,6 +64,7 @@ rust_test(
     name = "dark_factory_test",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
+    compile_data = ["//plugins/forgejo:tests/fixtures/webhooks/pull_request_closed.json"],
     crate_root = "src/main.rs",
     data = ["//plugins/forgejo"],
     edition = "2024",

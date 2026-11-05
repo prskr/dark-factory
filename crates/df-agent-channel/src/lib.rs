@@ -24,6 +24,7 @@ pub mod session;
 pub mod summary;
 pub mod tools;
 pub mod transcript;
+pub mod webhooks;
 
 #[cfg(feature = "test-util")]
 pub mod testing;

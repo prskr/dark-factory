@@ -612,6 +612,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             base_branch: "main".into(),
             adapter_command: vec![],
             forge_credential_id: None,
+            webhook_wake: df_core::webhooks::WebhookWake::Members,
         },
     )
     .await

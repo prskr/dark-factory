@@ -11,12 +11,16 @@ wit_bindgen::generate!({
 });
 
 use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RateLimit, RepoRef};
+use darkfactory::integrations::webhook_signature;
 use exports::darkfactory::integrations::issues::{
     Comment, Guest as IssuesGuest, Issue, IssueState,
 };
 use exports::darkfactory::integrations::pull_requests::{
     Author, AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, PostedComment,
     PrComment, PullRequest, PullRequestUpdate, Review, ReviewComment, ReviewThread, ReviewVerdict,
+};
+use exports::darkfactory::integrations::webhooks::{
+    CiFailed, Guest as WebhooksGuest, ParsedEvent, WebhookEvent,
 };
 
 pub struct Probe;
@@ -36,6 +40,8 @@ pub const OWN_AUTHORIZATION: u64 = 5;
 pub const OTHER_HOST: u64 = 6;
 /// The configured `base-url` as body.
 pub const BASE_URL: u64 = 7;
+/// The result of `webhook-signature.verify` outside a webhook call as body.
+pub const VERIFY_OUTSIDE_WEBHOOK: u64 = 8;
 
 /// Minimal blocking `GET` over `wasi:http`; returns the status code.
 fn get(base_url: &str, path: &str, authorization: Option<&str>) -> Result<u16, Error> {
@@ -108,6 +114,7 @@ impl IssuesGuest for Probe {
                 .ok()
                 .flatten()
                 .unwrap_or_default(),
+            VERIFY_OUTSIDE_WEBHOOK => webhook_signature::verify(&[0; 32]).to_string(),
             _ => String::new(),
         };
         Ok(Issue {
@@ -207,6 +214,68 @@ fn rate_limited_on_429(path: &str) -> Result<(), Error> {
             message: "slow down".to_string(),
         })),
         _ => Ok(()),
+    }
+}
+
+/// `handle-webhook` selects its behaviour by the header `x-probe-mode`:
+/// `verify` checks the hex signature in `x-probe-signature`, `skip` returns an event without
+/// checking, `http` verifies and then requests `https://forge.test/`, `invalid` rejects the
+/// payload. Events are one `ci-failed` on `https://forge.test/o/r`, branch `main`.
+impl WebhooksGuest for Probe {
+    fn handle_webhook(
+        headers: Vec<(String, String)>,
+        _body: Vec<u8>,
+    ) -> Result<Vec<ParsedEvent>, Error> {
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        let verify = || {
+            let signature = hex::decode(header("x-probe-signature")).unwrap_or_default();
+            if webhook_signature::verify(&signature) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized("signature mismatch".to_string()))
+            }
+        };
+        match header("x-probe-mode").as_str() {
+            "verify" => verify()?,
+            "skip" => {}
+            "http" => {
+                verify()?;
+                get("https://forge.test", "/", None)?;
+            }
+            "invalid" => return Err(Error::InvalidInput("not a probe payload".to_string())),
+            other => return Err(Error::Internal(format!("unknown mode `{other}`"))),
+        }
+        Ok(vec![ParsedEvent {
+            repo_url: "https://forge.test/o/r".to_string(),
+            event: WebhookEvent::CiFailed(CiFailed {
+                repo: RepoRef {
+                    owner: "o".to_string(),
+                    name: "r".to_string(),
+                },
+                head: "main".to_string(),
+                check: "ci".to_string(),
+                url: String::new(),
+            }),
+        }])
+    }
+
+    fn whoami() -> Result<String, Error> {
+        Ok("probe-bot".to_string())
+    }
+
+    /// `alice` is a member, everyone else outside.
+    fn author_role(_repo: RepoRef, login: String) -> Result<AuthorRole, Error> {
+        Ok(if login == "alice" {
+            AuthorRole::Member
+        } else {
+            AuthorRole::Outside
+        })
     }
 }
 

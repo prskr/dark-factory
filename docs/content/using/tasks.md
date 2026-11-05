@@ -42,7 +42,7 @@ The task view has three columns: the task list, the transcript and the details.
 | `in_review` | The agent called `complete_task`; the pull request is ready for review |
 | `rate_limited` | The model provider's usage limit was hit; the task resumes automatically at the shown time |
 | `limit_reached` | A budget of the run, or the harness's token or turn limit, was reached; a message continues it |
-| `completed` | Marked done by a human |
+| `completed` | Marked done by a human, or its pull request was merged |
 | `cancelled` | Cancelled by a human |
 | `failed` | The run failed and automatic retries are exhausted |
 

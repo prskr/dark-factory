@@ -51,6 +51,8 @@ const THREAD_QUERY: &str = r"query($id: ID!) {
   }
 }";
 
+const VIEWER_QUERY: &str = "query { viewer { login } }";
+
 const REPLY_MUTATION: &str = r"mutation($thread: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) {
     comment { id url }
@@ -138,6 +140,23 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
         })
     }
 
+    /// Login of the account owning the token.
+    pub fn whoami(&self) -> Result<String, Error> {
+        let data: ViewerData = self.query(VIEWER_QUERY, json!({}))?;
+        Ok(data.viewer.login)
+    }
+
+    /// `login`'s role in `repo`; without an author association, write access is always looked up.
+    pub fn author_role(&self, repo: &RepoRef, login: &str) -> Result<AuthorRole, Error> {
+        Roles {
+            github: self,
+            repo,
+            bot: self.whoami()?,
+            known: HashMap::new(),
+        }
+        .role(login, None)
+    }
+
     /// Replies in `thread` after checking that it belongs to the pull request `id`.
     pub fn reply(
         &self,
@@ -189,11 +208,11 @@ struct Roles<'a, T, C, L> {
 impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
     fn author(&mut self, author: Option<ApiAuthor>, association: &str) -> Result<Author, Error> {
         let login = author.map(|a| a.login).unwrap_or_default();
-        let role = self.role(&login, association)?;
+        let role = self.role(&login, Some(association))?;
         Ok(Author { login, role })
     }
 
-    fn role(&mut self, login: &str, association: &str) -> Result<AuthorRole, Error> {
+    fn role(&mut self, login: &str, association: Option<&str>) -> Result<AuthorRole, Error> {
         if login.is_empty() {
             return Ok(AuthorRole::Outside);
         }
@@ -201,7 +220,7 @@ impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
             return Ok(AuthorRole::Bot);
         }
         // Other associations never have write access; they need no lookup.
-        if !matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR") {
+        if association.is_some_and(|a| !matches!(a, "OWNER" | "MEMBER" | "COLLABORATOR")) {
             return Ok(AuthorRole::Outside);
         }
         let key = login.to_ascii_lowercase();
@@ -284,6 +303,11 @@ fn verdict(state: &str) -> Option<ReviewVerdict> {
         "COMMENTED" | "DISMISSED" => Some(ReviewVerdict::Commented),
         _ => None,
     }
+}
+
+#[derive(Deserialize)]
+struct ViewerData {
+    viewer: ApiAuthor,
 }
 
 #[derive(Deserialize)]

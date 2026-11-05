@@ -6,8 +6,8 @@ mod github_openapi;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use df_core::{
-    ForgeClient, IntegrationError, IssueState, NewPullRequest, ProjectId, PullRequestUpdate,
-    RateLimit,
+    AuthorRole, ForgeClient, IntegrationError, IssueState, NewPullRequest, ProjectId,
+    PullRequestUpdate, RateLimit,
 };
 use df_plugins::ForgeRouter;
 use serde_json::json;
@@ -323,6 +323,52 @@ async fn every_request_carries_the_github_headers_and_the_host_injected_token() 
         assert_eq!(get("x-github-api-version"), "2026-03-10");
         assert_eq!(get("authorization"), token);
     }
+    assert_requests_match_the_extract(&server).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn whoami_is_the_viewer_and_author_roles_follow_the_permission() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("viewer"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data": {"viewer": {"login": "df-bot"}}})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/r/collaborators/alice/permission"))
+        .respond_with(github_response(
+            "repos/get-collaborator-permission-level",
+            200,
+            json!({"permission": "write", "role_name": "write", "user": null}),
+        )?)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/r/collaborators/mallory/permission"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"message": "Not Found"})))
+        .mount(&server)
+        .await;
+
+    let router = client(&server, &[])?;
+    let project = ProjectId::new();
+    assert_eq!(router.whoami(&project).await?, "df-bot");
+    assert_eq!(
+        router.author_role(&project, "DF-Bot").await?,
+        AuthorRole::Bot
+    );
+    assert_eq!(
+        router.author_role(&project, "alice").await?,
+        AuthorRole::Member
+    );
+    assert_eq!(
+        router.author_role(&project, "mallory").await?,
+        AuthorRole::Outside
+    );
     assert_requests_match_the_extract(&server).await;
     Ok(())
 }

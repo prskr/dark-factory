@@ -6,6 +6,7 @@
 ///
 ///   * `pull-requests` — code forges (Forgejo, GitHub, ...)
 ///   * `issues`        — issue trackers (Forgejo, GitHub, Jira, ...)
+///   * `webhooks`      — inbound forge webhooks (world `forge`)
 ///
 /// A forge like Forgejo exports both (world `forge`); an issue-only tracker
 /// exports just `issues` (world `issue-provider`).
@@ -18,6 +19,8 @@
 ///     instance and injects the `Authorization` header itself. Plugins never
 ///     see credentials; an `Authorization` header set by a plugin is replaced.
 ///   * Non-secret settings come from `wasi:config/store`.
+///   * Webhook secrets stay in the host; plugins check signatures through
+///     `webhook-signature.verify`.
 ///   * Plugins may log to stderr; the host forwards it to its tracing output.
 ///
 /// Configuration keys every integration plugin reads:
@@ -269,6 +272,79 @@ interface issues {
     add-comment: func(id: issue-ref, body: string) -> result<comment, error>;
 }
 
+/// Imported by plugins: checks a webhook signature; the secret stays in the host.
+interface webhook-signature {
+    /// True if `signature` equals HMAC-SHA256(secret, raw body) of the webhook being handled,
+    /// compared in constant time. False outside `webhooks.handle-webhook`.
+    verify: func(signature: list<u8>) -> bool;
+}
+
+/// Inbound forge webhooks, normalized to the few events the control plane acts on.
+interface webhooks {
+    use types.{repo-ref, pull-request-ref, issue-ref, error};
+    // Renamed: the function `author-role` below takes the name.
+    use pull-requests.{author-role as role, review-verdict};
+
+    /// A submitted review; a single review comment the forge publishes at once counts as one.
+    record review-submitted {
+        pr: pull-request-ref,
+        /// Head branch of the pull request.
+        head: string,
+        actor: string,
+        verdict: review-verdict,
+    }
+
+    record pull-request-closed {
+        pr: pull-request-ref,
+        head: string,
+        actor: string,
+        merged: bool,
+    }
+
+    record ci-failed {
+        repo: repo-ref,
+        /// Branch the failed run or check belongs to.
+        head: string,
+        /// Check, workflow or status context name.
+        check: string,
+        /// Web URL of the failed run, may be empty.
+        url: string,
+    }
+
+    /// A new comment on an issue or pull request. No comment text crosses the boundary.
+    record comment-created {
+        issue: issue-ref,
+        is-pull-request: bool,
+        actor: string,
+        /// Logins mentioned with the forge's mention syntax.
+        mentions: list<string>,
+    }
+
+    variant webhook-event {
+        review-submitted(review-submitted),
+        pull-request-closed(pull-request-closed),
+        ci-failed(ci-failed),
+        comment-created(comment-created),
+    }
+
+    record parsed-event {
+        /// Web URL of the repository the payload names.
+        repo-url: string,
+        event: webhook-event,
+    }
+
+    /// Parses one delivery after checking its signature with `webhook-signature.verify`.
+    /// Unknown events yield an empty list; a malformed payload yields `invalid-input`.
+    /// Runs without network access.
+    handle-webhook: func(headers: list<tuple<string, string>>, body: list<u8>) -> result<list<parsed-event>, error>;
+
+    /// Login of the account owning the credential.
+    whoami: func() -> result<string, error>;
+
+    /// `login`'s relationship to `repo`.
+    author-role: func(repo: repo-ref, login: string) -> result<role, error>;
+}
+
 /// What every integration plugin may import.
 world plugin-base {
     import wasi:http/outgoing-handler@0.2.12;
@@ -288,6 +364,7 @@ world plugin-base {
     import wasi:cli/terminal-stdin@0.2.12;
     import wasi:cli/terminal-stdout@0.2.12;
     import wasi:cli/terminal-stderr@0.2.12;
+    import webhook-signature;
 }
 
 world pull-request-provider {
@@ -300,8 +377,9 @@ world issue-provider {
     export issues;
 }
 
-/// A code forge that also hosts issues, e.g. Forgejo.
+/// A code forge that also hosts issues and receives webhooks, e.g. Forgejo.
 world forge {
     include pull-request-provider;
     include issue-provider;
+    export webhooks;
 }

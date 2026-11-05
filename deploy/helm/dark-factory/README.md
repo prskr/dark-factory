@@ -109,6 +109,7 @@ Every key in `values.yaml` is documented below:
 | `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
 | `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
+| `plugins.forgejo.webhookSecret` | `object` | `null` | Optional. `{name, key}` of a `Secret` in the release namespace holding the shared secret the forge signs webhooks with. The key is mounted read-only at `/var/run/dark-factory/webhooks/<name>/secret` and the instance config sets `plugins.<name>.webhookSecretFile` to it. Unset: `POST /webhooks/<name>` answers `404`. See [Forge webhooks](#forge-webhooks). |
 | `plugins.github.image.repository` | `string` | `"ghcr.io/prskr/dark-factory/plugin-github"` | GitHub plugin image, mounted at `/plugins/github`. Remove the whole entry with `plugins.github: null`, see [GitHub](#github). |
 | `plugins.github.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `plugins.github.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
@@ -118,10 +119,11 @@ Every key in `values.yaml` is documented below:
 | `plugins.github.authScheme` | `string` | `"bearer"` | GitHub expects `Authorization: Bearer …`. |
 | `plugins.github.hosts` | `list` | `[{host: github.com, apiUrl: https://api.github.com}]` | Routes of the GitHub plugin; add GitHub Enterprise Server hosts here. |
 | `plugins.github.settings` | `map` | `{}` | String map handed to the plugin unchanged: `draft-mode` (`native` default, `title-prefix`, `auto`), `api-version`, `wip-prefixes` (see `plugins/github/README.md`). |
+| `plugins.github.webhookSecret` | `object` | `null` | As `plugins.forgejo.webhookSecret`, for `POST /webhooks/github`. |
 | `plugins.<name>.hosts` | `list` | unset | Forge hosts the plugin serves: a host (`ghe.example.org`) or `{host, apiUrl}` with an `https://` API URL. Written to the instance config only when set; an entry without `hosts` is the default plugin and serves every other project. See [Plugins](#plugins) for rollback. |
 | `plugins.<name>.authScheme` | `string` | unset (`token`) | `token` or `bearer`: how the control plane sends the forge credential (`Authorization: token …` / `Bearer …`). Written to the instance config only when set. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
-| `volumes.retainAfterCloseSeconds` | `int` | `604800` | Seconds after the last run of a `completed` or `cancelled` task until its volume is deleted (`volumes.retainAfterCloseSeconds` of the instance config). At most `9007199254740991`, which means never. |
+| `volumes.retainAfterCloseSeconds` | `int` | `604800` | Seconds after the last run of a `completed` or `cancelled` task until its volume is deleted (`volumes.retainAfterCloseSeconds` of the instance config); the volume of a task with a merged pull request is deleted at the next hourly check. At most `9007199254740991`, which means never. |
 | `volumes.idleTtlSeconds` | `int` | `2592000` | Seconds after the last run of any task without an active run until its volume is deleted (`volumes.idleTtlSeconds` of the instance config). At most `9007199254740991`, which means never. |
 | `runs.maxConcurrent` | `int` | `4` | Runs that may be active at the same time across all replicas (`runs.maxConcurrent` of the instance config). Further due tasks wait. |
 | `runs.maxAutoResumes` | `int` | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` before the task fails (`runs.maxAutoResumes` of the instance config). |
@@ -287,6 +289,24 @@ Remove the entry when the instance does not use GitHub; projects on `github.com`
 plugins:
   github: null
 ```
+
+### Forge webhooks
+
+Forge webhooks wake waiting tasks on reviews, mentions, merged or closed pull requests and failed checks. Store one secret per plugin and reference it:
+
+```sh
+kubectl create secret generic forge-webhooks --from-literal=forgejo="$(openssl rand -hex 32)"
+```
+
+```yaml
+plugins:
+  forgejo:
+    webhookSecret:
+      name: forge-webhooks
+      key: forgejo
+```
+
+The control plane reads the secret once at startup; after rotating it, restart the control plane (`kubectl rollout restart`). Register the webhook on the forge with the payload URL `https://<host>/webhooks/<name>` and the same secret; events to select and troubleshooting: [Forge webhooks](../../../docs/content/integrations/forges/webhooks.md).
 
 ### Troubleshooting
 

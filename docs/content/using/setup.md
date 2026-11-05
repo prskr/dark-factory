@@ -36,6 +36,7 @@ Two kinds of credentials are referenced:
 | Sandbox image | The image the agent works in. It needs `git` and a shell; the runtime and the harness are mounted into it. |
 | Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). |
 | Forge credential | The credential reference for the forge. |
+| Wake tasks on reviews and mentions | Whose PR reviews and `@mentions` of the bot account wake a task when [forge webhooks](../integrations/forges/webhooks.md) are set up: *Nobody*, *Members with write access* (default) or *Anyone*. Merged or closed pull requests and failed checks apply regardless. |
 
 The **Push checks** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
 this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and

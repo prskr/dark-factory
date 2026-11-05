@@ -250,16 +250,22 @@ pub async fn pushes(pool: &PgPool, key: &str) -> Result<Vec<PushRow>> {
 
 /// The text of the `push.rejected` messages queued on task `key`, oldest first.
 pub async fn push_rejected_messages(pool: &PgPool, key: &str) -> Result<Vec<String>> {
+    system_messages(pool, key, PUSH_REJECTED).await
+}
+
+/// The text of the messages the control plane queued on task `key` for `reason` (`push.rejected`,
+/// `webhook`, ...), oldest first.
+pub async fn system_messages(pool: &PgPool, key: &str, reason: &str) -> Result<Vec<String>> {
     sqlx::query_scalar::<_, String>(
         "SELECT m.content::text FROM task_messages m JOIN tasks t ON t.id = m.task_id \
          WHERE t.key = $1 AND m.author ->> 'kind' = 'system' AND m.author ->> 'reason' = $2 \
          ORDER BY m.queued_at",
     )
     .bind(key)
-    .bind(PUSH_REJECTED)
+    .bind(reason)
     .fetch_all(pool)
     .await
-    .with_context(|| format!("push.rejected messages of task {key}"))
+    .with_context(|| format!("{reason} messages of task {key}"))
 }
 
 /// The scopes of the `http-host` allowlist entries for exactly `host:port` that cover task `key`

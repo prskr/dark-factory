@@ -1,6 +1,8 @@
 //! Mapping between the `df-core` seam types and the generated WIT types.
 
-use crate::host::{issues, pull_requests as prs, wit};
+use df_core::webhooks::{ParsedEvent, WebhookEvent};
+
+use crate::host::{issues, pull_requests as prs, webhooks, wit};
 
 pub(crate) fn repo(r: &df_core::RepoRef) -> wit::RepoRef {
     wit::RepoRef {
@@ -121,13 +123,7 @@ pub(crate) fn from_feedback(f: prs::Feedback) -> df_core::Feedback {
             .map(|r| df_core::Review {
                 id: r.id,
                 author: from_author(r.author),
-                verdict: match r.verdict {
-                    prs::ReviewVerdict::Approved => df_core::ReviewVerdict::Approved,
-                    prs::ReviewVerdict::ChangesRequested => {
-                        df_core::ReviewVerdict::ChangesRequested
-                    }
-                    prs::ReviewVerdict::Commented => df_core::ReviewVerdict::Commented,
-                },
+                verdict: from_verdict(r.verdict),
                 body: r.body,
                 url: r.url,
                 submitted_at: r.submitted_at,
@@ -162,11 +158,56 @@ pub(crate) fn from_feedback(f: prs::Feedback) -> df_core::Feedback {
 fn from_author(a: prs::Author) -> df_core::Author {
     df_core::Author {
         login: a.login,
-        role: match a.role {
-            prs::AuthorRole::Bot => df_core::AuthorRole::Bot,
-            prs::AuthorRole::Member => df_core::AuthorRole::Member,
-            prs::AuthorRole::Outside => df_core::AuthorRole::Outside,
+        role: from_role(a.role),
+    }
+}
+
+pub(crate) fn from_role(role: prs::AuthorRole) -> df_core::AuthorRole {
+    match role {
+        prs::AuthorRole::Bot => df_core::AuthorRole::Bot,
+        prs::AuthorRole::Member => df_core::AuthorRole::Member,
+        prs::AuthorRole::Outside => df_core::AuthorRole::Outside,
+    }
+}
+
+fn from_verdict(verdict: prs::ReviewVerdict) -> df_core::ReviewVerdict {
+    match verdict {
+        prs::ReviewVerdict::Approved => df_core::ReviewVerdict::Approved,
+        prs::ReviewVerdict::ChangesRequested => df_core::ReviewVerdict::ChangesRequested,
+        prs::ReviewVerdict::Commented => df_core::ReviewVerdict::Commented,
+    }
+}
+
+pub(crate) fn from_parsed_event(p: webhooks::ParsedEvent) -> ParsedEvent {
+    use webhooks::WebhookEvent as W;
+    let event = match p.event {
+        W::ReviewSubmitted(r) => WebhookEvent::ReviewSubmitted {
+            number: r.pr.number,
+            head: r.head,
+            actor: r.actor,
+            verdict: from_verdict(r.verdict),
         },
+        W::PullRequestClosed(c) => WebhookEvent::PullRequestClosed {
+            number: c.pr.number,
+            head: c.head,
+            actor: c.actor,
+            merged: c.merged,
+        },
+        W::CiFailed(f) => WebhookEvent::CiFailed {
+            head: f.head,
+            check: f.check,
+            url: f.url,
+        },
+        W::CommentCreated(c) => WebhookEvent::CommentCreated {
+            number: c.issue.number,
+            is_pull_request: c.is_pull_request,
+            actor: c.actor,
+            mentions: c.mentions,
+        },
+    };
+    ParsedEvent {
+        repo_url: p.repo_url,
+        event,
     }
 }
 

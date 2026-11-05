@@ -10,7 +10,8 @@ use crate::data;
 /// Bounds each API call, so a stalled port-forward fails the test instead of hanging it.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Forgejo API client for the repository `factory/demo`, authenticated with the bot token.
+/// Forgejo API client for the repository `factory/demo`, authenticated with the token it is built
+/// with (the bot's or the reviewer's).
 #[derive(Debug, Clone)]
 pub struct Forgejo {
     http: reqwest::Client,
@@ -85,6 +86,17 @@ impl Forgejo {
     pub async fn review_comments(&self, number: u64, review: u64) -> Result<Vec<Value>> {
         self.json(&format!("pulls/{number}/reviews/{review}/comments"))
             .await
+    }
+
+    /// Submits a review of pull request `number` with verdict `event` (`APPROVED`,
+    /// `REQUEST_CHANGES` or `COMMENT`) and `body`.
+    pub async fn submit_review(&self, number: u64, event: &str, body: &str) -> Result<()> {
+        self.post(
+            &format!("pulls/{number}/reviews"),
+            &serde_json::json!({ "event": event, "body": body }),
+        )
+        .await?;
+        Ok(())
     }
 
     /// Content of `path` on `branch`.

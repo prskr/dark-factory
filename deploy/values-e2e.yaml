@@ -32,6 +32,10 @@ plugins:
       repository: ghcr.io/prskr/dark-factory/plugin-forgejo
       tag: 'e2e'
       digest: ''
+    # Secret created by deploy/e2e/e2e-local.sh; the same value signs the repository webhook.
+    webhookSecret:
+      name: forge-webhooks
+      key: forgejo
   github:
     image:
       repository: ghcr.io/prskr/dark-factory/plugin-github

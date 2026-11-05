@@ -28,6 +28,10 @@
 - **WHEN** a `ping` event arrives
 - **THEN** the result is an empty list
 
+#### Scenario: Pull request from a fork
+- **WHEN** a `pull_request_review` or `pull_request` `closed` event arrives whose `pull_request.head.repo.id` differs from `repository.id` or is null, or a `check_suite` event without `head_branch` (GitHub's value for a fork)
+- **THEN** the result is an empty list
+
 ### Requirement: GitHub bot login and author role
 `whoami` SHALL return the login of the account owning the plugin's credential. `author-role` SHALL return `bot` for that account, `member` for write, maintain or admin permission on the repository, and `outside` otherwise.
 

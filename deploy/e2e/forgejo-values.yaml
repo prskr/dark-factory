@@ -28,3 +28,7 @@ gitea:
       ADAPTER: memory
     queue:
       TYPE: level
+    # The repository webhook of `just e2e-local` targets the control plane Service, a private
+    # address Forgejo refuses by default (docs/content/integrations/forges/webhooks.md).
+    webhook:
+      ALLOWED_HOST_LIST: dark-factory-control-plane.dark-factory.svc

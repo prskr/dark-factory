@@ -35,6 +35,7 @@ plugins:
 | `plugins.<name>.hosts[].apiUrl` | no | `https://<host>` | API base URL for this host. Must start with `https://` and have no userinfo, query or fragment; host lowercased, port `443` and a trailing `/` dropped, the path is kept (`https://ghe.example.org/api/v3`). Becomes the plugin's `base-url` and the only authority its requests may reach. Only valid in the `{host, apiUrl}` form, which rejects unknown keys. |
 | `plugins.<name>.authScheme` | no | `token` | How the project's forge credential is sent: `token` → `Authorization: token <credential>`, `bearer` → `Authorization: Bearer <credential>`. The host sets the header on every request and replaces one set by the plugin. Applies to all hosts of the entry, the default plugin included. |
 | `plugins.<name>.settings` | no | `{}` | String map handed to the plugin unchanged. The host adds `base-url` (the route's `apiUrl`; for the default plugin scheme and authority of the project's `repo_url`) and it wins over a configured one. Keys are documented by the plugin (Forgejo: `wip-prefixes`, see `plugins/forgejo/README.md`; GitHub: `draft-mode`, `wip-prefixes`, `api-version`, see `plugins/github/README.md`). |
+| `plugins.<name>.webhookSecretFile` | no | unset | File with the shared secret the forge signs webhooks with (HMAC-SHA256), read once at startup; trailing line breaks are dropped. Set, it enables `POST /webhooks/<name>`; unset, that endpoint answers `404`. The secret stays in the host: plugins check signatures through `webhook-signature.verify`. The Helm chart sets it from `plugins.<name>.webhookSecret`. |
 
 Unknown keys fail parsing the configuration. An unknown `authScheme` value fails startup naming the
 plugin and the value (see "Startup").
@@ -85,6 +86,10 @@ Without a default such projects get a clear `config` error.
      is not echoed)
    - ``plugin `<name>`: invalid host in `hosts[<index>]` `` (index from 0; the value is not echoed)
    - ``plugin `<name>`: unknown authScheme `<value>` (use `token` or `bearer`)``
+
+   A `webhookSecretFile` that is missing, unreadable or empty stops startup the same way:
+   ``cannot read `plugins.<name>.webhookSecretFile` `<path>` `` or
+   `` `plugins.<name>.webhookSecretFile` `<path>` is empty``.
 3. It loads every entry. An entry that fails (component missing or invalid, `memoryMib` too large,
    or no `pull-requests` export: "is not a forge plugin") is logged at `error` ("forge plugin not
    loaded", fields `plugin`, `path`, `error`) and stays in the table as unavailable.

@@ -15,6 +15,15 @@ use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 
+/// Outbox kind that marks a task's open pull request as draft again; payload [`MarkDraftJob`].
+pub const MARK_DRAFT_KIND: &str = "pr.mark_draft";
+
+/// Payload of a [`MARK_DRAFT_KIND`] job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkDraftJob {
+    pub task_id: TaskId,
+}
+
 /// Parameters for creating a new task.
 #[derive(Debug, Clone)]
 pub struct NewTask {
@@ -94,7 +103,7 @@ pub fn format_assignment_prompt(title: Option<&str>, description: &str) -> Vec<C
     blocks
 }
 
-fn text_block(text: String, hidden: bool) -> ContentBlock {
+pub(crate) fn text_block(text: String, hidden: bool) -> ContentBlock {
     ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text })),
         hidden,
@@ -303,6 +312,10 @@ pub async fn queue_message(
 }
 
 /// [`queue_message`] inside the caller's transaction; the notifications go out on commit.
+///
+/// A message that moves the task out of `in_review` or `completed` while it has an unmerged pull
+/// request enqueues a [`MARK_DRAFT_KIND`] job, so the forge shows the task is working on it again
+/// (`iter3-webhooks` design D5). The job leaves a closed pull request alone.
 pub async fn queue_message_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
@@ -315,6 +328,10 @@ pub async fn queue_message_tx(
 
     let updated = sqlx::query!(
         r#"
+        WITH old AS (
+            SELECT id, status, pr_number, pr_merged_at IS NULL AS pr_unmerged
+            FROM tasks WHERE id = $1 FOR UPDATE
+        )
         UPDATE tasks
         SET status = CASE
                 WHEN EXISTS (
@@ -328,16 +345,25 @@ pub async fn queue_message_tx(
             resume_at = NULL,
             auto_resumes = 0,
             updated_at = now()
-        WHERE id = $1
-        RETURNING id
+        FROM old
+        WHERE tasks.id = old.id
+        RETURNING old.status AS "old_status!", old.pr_number, old.pr_unmerged AS "pr_unmerged!"
         "#,
         task_id.as_uuid()
     )
     .fetch_optional(&mut **tx)
     .await?;
 
-    if updated.is_none() {
+    let Some(updated) = updated else {
         return Err(DbError::NotFound(format!("task `{task_id}` not found")));
+    };
+    let old_status: TaskStatus = updated.old_status.parse()?;
+    let reopens_pr = matches!(old_status, TaskStatus::InReview | TaskStatus::Completed)
+        && updated.pr_number.is_some()
+        && updated.pr_unmerged;
+    if reopens_pr {
+        let job = serde_json::to_value(MarkDraftJob { task_id })?;
+        crate::outbox::enqueue(tx, MARK_DRAFT_KIND, &job).await?;
     }
 
     let msg_row = sqlx::query!(
@@ -902,7 +928,7 @@ pub async fn cancel_task(pool: &PgPool, task_id: TaskId, actor: Principal) -> Re
 }
 
 /// Lock order everywhere: run rows, then the task row (see `lock_task` in df-agent-channel).
-async fn lock_runs_then_task(
+pub(crate) async fn lock_runs_then_task(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
 ) -> Result<(), DbError> {
@@ -919,7 +945,7 @@ async fn lock_runs_then_task(
 
 /// Which runs [`request_stop_tx`] marks.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum StopScope {
+pub(crate) enum StopScope {
     /// A human stop of a run: a `finalizing` run is left alone.
     ActiveOnly,
     /// Cancelling the task: a `finalizing` run is marked as well.
@@ -931,7 +957,7 @@ enum StopScope {
 /// `scope` is [`StopScope::IncludingFinalizing`] (cancelling the task), because the marker also
 /// stops messages queued before the stop from requeuing the task. Returns the run when this call
 /// stopped it.
-async fn request_stop_tx(
+pub(crate) async fn request_stop_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
     scope: StopScope,

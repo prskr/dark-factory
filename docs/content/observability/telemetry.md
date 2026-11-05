@@ -66,11 +66,14 @@ never for replayed messages, so a crash between commit and recording loses the s
 | `df.agent.reconnects` | counter | | `project` | streams of runs that had one before |
 | `df.outbox.jobs` | counter | | `kind` (for example `lifecycle_event.deliver`), `result` (`done`, `retry`, `gave_up`) | every outbox job attempt, on the leader |
 | `df.lifecycle_event.deliveries` | counter | | `result` (`delivered`, `failed`, `refused`) | every lifecycle event delivery attempt; given-up deliveries are counted by `df.outbox.jobs{kind="lifecycle_event.deliver",result="gave_up"}` |
+| `df.webhook.requests` | counter | | `plugin`, `outcome` (`accepted`, `unauthorized`, `not_found`, `too_large`, `invalid`, `error`) | every request to `POST /webhooks/{plugin}`; Prometheus: `df_webhook_requests_total` |
 
 `operation` is one of `workspace_prepare`, `harness_start`, `turn`, `push`, `finalize`. `outcome`,
 `stop_reason`, `kind`, `origin`, `target` and `status` are the lower-case protobuf enum names without
 prefix (`end_turn`, `task_branch`); unknown numbers are `unspecified`. The `kind` of `df.outbox.jobs` is the
 outbox job kind instead. `refused` means the project subscription's host is not a public address.
+`plugin` of `df.webhook.requests` is the plugin name under `plugins` for a loaded plugin, or `unknown`
+for any other name.
 
 Attributes that originate from the sandbox are bounded: `model` is cut to 64 bytes and after 32 distinct
 values per process further ones are `other`. Run ids, task keys, tool titles, repository URLs and hosts are

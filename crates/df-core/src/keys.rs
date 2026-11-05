@@ -8,6 +8,9 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+/// Prefix of a task branch; the task key follows it.
+pub const TASK_BRANCH_PREFIX: &str = "factory/task/";
+
 static PROJECT_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9]{1,9}$").expect("valid project key regex"));
 
@@ -102,7 +105,14 @@ impl TaskKey {
 
     /// Returns the task branch name (`factory/task/<KEY>`).
     pub fn task_branch(&self) -> String {
-        format!("factory/task/{self}")
+        format!("{TASK_BRANCH_PREFIX}{self}")
+    }
+
+    /// The key a task branch names, inverse of [`Self::task_branch`]; a `refs/heads/` prefix is
+    /// accepted. `None` for any other branch.
+    pub fn from_task_branch(branch: &str) -> Option<Self> {
+        let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+        branch.strip_prefix(TASK_BRANCH_PREFIX)?.parse().ok()
     }
 
     /// Returns the WIP snapshot branch name (`factory/wip/<KEY>`).
@@ -208,6 +218,27 @@ mod tests {
         assert_eq!(json, "\"DF-1\"");
         let roundtrip: TaskKey = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip, key);
+    }
+
+    #[test]
+    fn task_key_comes_back_from_its_task_branch_only() {
+        let key: TaskKey = "DF-12".parse().unwrap();
+        assert_eq!(
+            TaskKey::from_task_branch(&key.task_branch()),
+            Some(key.clone())
+        );
+        assert_eq!(
+            TaskKey::from_task_branch("refs/heads/factory/task/DF-12"),
+            Some(key)
+        );
+        for other in [
+            "feature/login",
+            "factory/wip/DF-1",
+            "factory/task/df-1",
+            "factory/task/DF-1/x",
+        ] {
+            assert_eq!(TaskKey::from_task_branch(other), None, "{other}");
+        }
     }
 
     #[test]

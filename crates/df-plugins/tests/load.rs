@@ -63,7 +63,7 @@ fn load_logs_name_path_size_and_compile_time() -> anyhow::Result<()> {
 }
 
 #[test]
-fn github_component_reports_pull_requests_and_issues() -> anyhow::Result<()> {
+fn github_component_reports_pull_requests_issues_and_webhooks() -> anyhow::Result<()> {
     let host = PluginHost::from_bytes(
         &PluginEngine::new()?,
         "github",
@@ -76,6 +76,7 @@ fn github_component_reports_pull_requests_and_issues() -> anyhow::Result<()> {
         Capabilities {
             pull_requests: true,
             issues: true,
+            webhooks: true,
         }
     );
     Ok(())

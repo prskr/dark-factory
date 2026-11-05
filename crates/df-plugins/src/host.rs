@@ -10,7 +10,7 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder};
 
 use crate::policy::HttpPolicy;
-use crate::state::State;
+use crate::state::{State, WebhookCall};
 
 wasmtime::component::bindgen!({
     path: "../../contract/wit/integrations",
@@ -19,7 +19,8 @@ wasmtime::component::bindgen!({
 });
 
 pub(crate) use darkfactory::integrations::types as wit;
-pub(crate) use exports::darkfactory::integrations::{issues, pull_requests};
+pub(crate) use darkfactory::integrations::webhook_signature;
+pub(crate) use exports::darkfactory::integrations::{issues, pull_requests, webhooks};
 
 /// Interval of the epoch clock; call timeouts have this granularity.
 const EPOCH_TICK: Duration = Duration::from_millis(50);
@@ -50,6 +51,7 @@ const ALLOWED_IMPORTS: &[&str] = &[
     "wasi:cli/terminal-stdout",
     "wasi:cli/terminal-stderr",
     "darkfactory:integrations/types",
+    "darkfactory:integrations/webhook-signature",
 ];
 
 /// Why a component cannot be used as a plugin.
@@ -82,6 +84,8 @@ pub struct Capabilities {
     pub pull_requests: bool,
     /// Exports `darkfactory:integrations/issues`.
     pub issues: bool,
+    /// Exports `darkfactory:integrations/webhooks`.
+    pub webhooks: bool,
 }
 
 /// The Wasmtime engine shared by all plugins, with the epoch clock that enforces call timeouts.
@@ -133,12 +137,14 @@ impl Drop for EngineClock {
     }
 }
 
-/// One project's plugin instance: where it may connect, who it acts as, what it is configured with.
+/// One plugin instance: where it may connect, who it acts as, what it is configured with.
 pub(crate) struct InstanceSpec {
-    /// Where the instance may connect and the credential it carries.
-    pub policy: HttpPolicy,
+    /// Where the instance may connect and the credential it carries; `None` allows nothing.
+    pub policy: Option<HttpPolicy>,
     /// Non-secret settings handed over through `wasi:config/store`.
     pub settings: HashMap<String, String>,
+    /// The webhook `handle-webhook` parses.
+    pub webhook: Option<WebhookCall>,
 }
 
 /// A loaded, validated plugin component that creates a fresh instance per call.
@@ -206,6 +212,7 @@ impl PluginHost {
         let capabilities = Capabilities {
             pull_requests: exports_interface("pull-requests"),
             issues: exports_interface("issues"),
+            webhooks: exports_interface("webhooks"),
         };
         if !capabilities.pull_requests && !capabilities.issues {
             return Err(LoadError::NoCapability);
@@ -215,6 +222,11 @@ impl PluginHost {
         wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(invalid)?;
         wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker).map_err(invalid)?;
         wasmtime_wasi_config::add_to_linker(&mut linker, State::config).map_err(invalid)?;
+        webhook_signature::add_to_linker::<State, wasmtime::component::HasSelf<State>>(
+            &mut linker,
+            |state| state,
+        )
+        .map_err(invalid)?;
         let pre =
             ForgePre::new(linker.instantiate_pre(&component).map_err(invalid)?).map_err(invalid)?;
 
@@ -250,7 +262,7 @@ impl PluginHost {
             .build();
         let mut store = Store::new(
             self.engine.engine(),
-            State::new(&self.name, spec.policy, spec.settings, limits),
+            State::new(&self.name, spec.policy, spec.settings, spec.webhook, limits),
         );
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(epoch_deadline(self.call_timeout));

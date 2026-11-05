@@ -12,6 +12,6 @@ mod retry;
 mod router;
 mod state;
 
-pub use forge::PluginForgeClient;
+pub use forge::{PluginForgeClient, WebhookError};
 pub use host::{Capabilities, LoadError, PluginEngine, PluginHost};
 pub use router::{ForgeRouter, ForgeTarget, ProjectDirectory};

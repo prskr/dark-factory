@@ -86,11 +86,11 @@ pub enum TaskStatus {
     Queued,
     Running,
     Waiting,
-    /// The agent called `complete_task`; the PR waits for review.
     /// The last run waited for an answer or approval that did not arrive in time.
     Blocked,
+    /// The agent called `complete_task`; the PR waits for review.
     InReview,
-    /// A human marked the task done.
+    /// A human marked the task done, or its pull request was merged.
     Completed,
     /// A human cancelled the task; a new message reopens it.
     Cancelled,

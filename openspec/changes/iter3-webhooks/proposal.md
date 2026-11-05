@@ -15,7 +15,7 @@ Nothing the forge does reaches a task on its own. A human has to tell the agent 
   - a new interface `webhooks` in world `forge`, with `handle-webhook`, `whoami` and `author-role`;
   - a host import `webhook-signature.verify` (HMAC-SHA256 over the raw body, constant-time compare), so the secret never enters the plugin. A request is accepted only if the plugin called `verify` and it returned true.
 - **The Forgejo and GitHub plugins** both implement `webhooks`. They normalize four events and drop everything else:
-  - review submitted (not single review comments);
+  - review submitted (a single review comment counts as a review with verdict comment; comments in a pending review do not);
   - PR closed, merged or not;
   - CI failed;
   - a comment on an issue or PR that mentions logins.

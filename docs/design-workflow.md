@@ -181,6 +181,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Projects / Projects · edit modal, lifecycle events, empty | `/projects/<key>/edit` | as the first board without subscriptions | 1440 |
 | Config - Projects / Projects · edit modal, lifecycle events, feature off | `/projects/<key>/edit` | control plane without `lifecycleEvents.signingKeyFile` (no key panel), with subscriptions | 1440 |
 | Config - Projects / Projects · edit modal, lifecycle events, unrestricted URLs | `/projects/<key>/edit` | control plane started with `--unrestricted-project-subscriptions` (`dev-tools` build) | 1440 |
+| Config - Projects / Projects · edit modal, webhook wake | `/projects/<key>/edit` | `just serve-local`, login as `admin@example.com`; tab "General", wake setting `members` (default); the board shows the planned tab "Context" (not built) | 1440 |
 | Config - Projects / Phone · edit project sheet, lifecycle events | `/projects/<key>/edit` | as the first board; tab "Lifecycle events" chosen | 390 |
 | Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
 | Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |

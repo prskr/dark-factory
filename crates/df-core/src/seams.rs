@@ -379,6 +379,13 @@ pub trait ForgeClient: Send + Sync {
         number: u64,
         body: &str,
     ) -> Result<Comment, IntegrationError>;
+
+    /// Login of the account that owns the project's forge credential.
+    async fn whoami(&self, p: &ProjectId) -> Result<String, IntegrationError>;
+
+    /// `login`'s relationship to the project's repository.
+    async fn author_role(&self, p: &ProjectId, login: &str)
+    -> Result<AuthorRole, IntegrationError>;
 }
 
 // ---------------------------------------------------------------------------

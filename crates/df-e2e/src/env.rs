@@ -15,6 +15,9 @@ pub struct E2eEnv {
     pub forgejo_url: String,
     /// Forgejo token of the bot user (`E2E_FORGEJO_TOKEN`).
     pub forgejo_token: String,
+    /// Forgejo token of a second user with write access to the repository
+    /// (`E2E_FORGEJO_REVIEWER_TOKEN`).
+    pub forgejo_reviewer_token: String,
     /// Login at the identity provider (`E2E_USER`, `E2E_PASSWORD`).
     pub user: String,
     pub password: String,
@@ -28,6 +31,7 @@ impl E2eEnv {
             database_url: required("E2E_DATABASE_URL")?,
             forgejo_url: required("E2E_FORGEJO_URL")?,
             forgejo_token: required("E2E_FORGEJO_TOKEN")?,
+            forgejo_reviewer_token: required("E2E_FORGEJO_REVIEWER_TOKEN")?,
             user: required("E2E_USER")?,
             password: required("E2E_PASSWORD")?,
         })

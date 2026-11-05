@@ -4,18 +4,20 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use df_core::webhooks::ParsedEvent;
 use df_core::{
-    AuthScheme, Comment, CredentialRef, Feedback, IntegrationError, Issue, NewPullRequest,
-    PullRequest, PullRequestUpdate, RepoRef, SecretStore,
+    AuthScheme, AuthorRole, Comment, CredentialRef, Feedback, IntegrationError, Issue,
+    NewPullRequest, PullRequest, PullRequestUpdate, RepoRef, SecretStore,
 };
 use futures::future::BoxFuture;
+use secrecy::SecretString;
 use wasmtime::Store;
 
 use crate::convert;
 use crate::host::{Forge, InstanceSpec, PluginHost, wit};
 use crate::policy::HttpPolicy;
 use crate::retry::with_retries;
-use crate::state::State;
+use crate::state::{State, WebhookCall};
 
 /// A forge call's resolved target: API base URL, how the credential is sent, repository and the
 /// credential acting on it.
@@ -32,7 +34,25 @@ pub struct PluginForgeClient {
     host: PluginHost,
     secrets: Arc<dyn SecretStore>,
     settings: BTreeMap<String, String>,
+    webhook_secret: Option<SecretString>,
     allow_plain_http: bool,
+}
+
+/// Why a webhook delivery was not turned into events.
+#[derive(Debug, thiserror::Error)]
+pub enum WebhookError {
+    /// The plugin is unknown, did not load, exports no `webhooks` or has no webhook secret.
+    #[error("no webhook endpoint for this plugin")]
+    NotFound,
+    /// The signature check failed or the plugin skipped it.
+    #[error("webhook signature not verified")]
+    Unverified,
+    /// The plugin rejected the payload.
+    #[error("invalid webhook payload: {0}")]
+    InvalidInput(String),
+    /// The plugin call failed.
+    #[error("webhook handling failed: {0}")]
+    Failed(IntegrationError),
 }
 
 impl PluginForgeClient {
@@ -45,8 +65,95 @@ impl PluginForgeClient {
             host,
             secrets,
             settings,
+            webhook_secret: None,
             allow_plain_http: false,
         }
+    }
+
+    /// Accepts webhooks signed with `secret`.
+    #[must_use]
+    pub fn with_webhook_secret(mut self, secret: SecretString) -> Self {
+        self.webhook_secret = Some(secret);
+        self
+    }
+
+    /// Whether the plugin exports `webhooks` and has a webhook secret, so it has a webhook
+    /// endpoint.
+    pub fn accepts_webhooks(&self) -> bool {
+        self.webhook_secret.is_some() && self.host.capabilities().webhooks
+    }
+
+    /// Parses one webhook delivery on an instance without project, credential or allowed hosts.
+    /// Events count only if the plugin verified the signature through the host.
+    pub async fn handle_webhook(
+        &self,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Vec<ParsedEvent>, WebhookError> {
+        let secret = self
+            .webhook_secret
+            .as_ref()
+            .filter(|_| self.host.capabilities().webhooks)
+            .ok_or(WebhookError::NotFound)?;
+        let spec = InstanceSpec {
+            policy: None,
+            settings: self.settings.clone().into_iter().collect(),
+            webhook: Some(WebhookCall::new(secret, body)),
+        };
+        let (headers, body) = (headers.to_vec(), body.to_vec());
+        let (events, verified) = self
+            .host
+            .run(spec, |plugin, store| {
+                Box::pin(async move {
+                    let parsed = plugin
+                        .darkfactory_integrations_webhooks()
+                        .call_handle_webhook(&mut *store, &headers, &body)
+                        .await?;
+                    let verified = store.data().webhook_verified();
+                    Ok(parsed.map(|events| (events, verified)))
+                })
+            })
+            .await
+            .map_err(|e| match e {
+                wit::Error::Unauthorized(_) => WebhookError::Unverified,
+                wit::Error::InvalidInput(m) => WebhookError::InvalidInput(m),
+                other => WebhookError::Failed(convert::from_error(other)),
+            })?;
+        if !verified {
+            return Err(WebhookError::Unverified);
+        }
+        Ok(events.into_iter().map(convert::from_parsed_event).collect())
+    }
+
+    /// Login of the account owning the target's credential.
+    pub(crate) async fn whoami(&self, target: &RepoTarget) -> Result<String, IntegrationError> {
+        self.call(target, |plugin, store| {
+            Box::pin(async move {
+                plugin
+                    .darkfactory_integrations_webhooks()
+                    .call_whoami(store)
+                    .await
+            })
+        })
+        .await
+    }
+
+    /// `login`'s relationship to the target repository.
+    pub(crate) async fn author_role(
+        &self,
+        target: &RepoTarget,
+        login: &str,
+    ) -> Result<AuthorRole, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        self.call(target, |plugin, store| {
+            let (repo, login) = (repo.clone(), login.to_string());
+            Box::pin(async move {
+                let webhooks = plugin.darkfactory_integrations_webhooks();
+                webhooks.call_author_role(store, &repo, &login).await
+            })
+        })
+        .await
+        .map(convert::from_role)
     }
 
     /// Lets plugins reach `http://` base URLs; for tests against a local mock server.
@@ -212,9 +319,14 @@ impl PluginForgeClient {
                 .chain([("base-url".to_string(), target.base_url.clone())])
                 .collect::<HashMap<_, _>>();
             self.host
-                .run(InstanceSpec { policy, settings }, |plugin, store| {
-                    op(plugin, store)
-                })
+                .run(
+                    InstanceSpec {
+                        policy: Some(policy),
+                        settings,
+                        webhook: None,
+                    },
+                    |plugin, store| op(plugin, store),
+                )
                 .await
                 .map_err(convert::from_error)
         })

@@ -1106,6 +1106,7 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
         base_branch: project.base_branch,
         adapter_command: project.adapter_command,
         forge_credential_id: project.forge_credential_id,
+        webhook_wake: project.webhook_wake,
     };
     let mut policy = PushPolicy::default();
     policy.protected_globs.push("deploy/**".into());

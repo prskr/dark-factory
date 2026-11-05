@@ -68,6 +68,7 @@ rust_test(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
     ],
 )

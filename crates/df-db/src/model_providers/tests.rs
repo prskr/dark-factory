@@ -461,6 +461,7 @@ async fn run_providers_pair_each_active_run_with_its_harness_and_provider() {
             base_branch: "main".into(),
             adapter_command: Vec::new(),
             forge_credential_id: None,
+            webhook_wake: df_core::webhooks::WebhookWake::Members,
         },
     )
     .await

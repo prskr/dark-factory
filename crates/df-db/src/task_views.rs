@@ -330,7 +330,7 @@ pub async fn transcript_after(
         .collect())
 }
 
-fn statuses_of(set: StatusSet) -> Vec<String> {
+pub(crate) fn statuses_of(set: StatusSet) -> Vec<String> {
     set.statuses()
         .iter()
         .map(|s| s.as_str().to_string())

@@ -27,7 +27,7 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `runs.connectTimeoutSeconds` | no | `600` | Time from run creation until the runtime opens its stream; then the run fails with `connect_timeout`. |
 | `runs.cancelGraceSeconds` | no | `300` | Grace after the wall-clock budget. |
 | `runs.keepAliveSeconds` | no | `600` | How long a run waits for a follow-up after a normal turn end (`awaiting_input`) before the control plane sends `Release` and the run ends `end_turn`. `0` releases right after the turn. Idle time counts toward `maxWallClockSeconds`. |
-| `volumes.retainAfterCloseSeconds` | no | `604800` (7 days) | The volume of a `completed` or `cancelled` task without an active run is deleted this long after its last run ended. The check runs once per hour on the replica holding the instance Lease (not without a cluster). `0` deletes at the next check; a value too large to represent as a date means never. |
+| `volumes.retainAfterCloseSeconds` | no | `604800` (7 days) | The volume of a `completed` or `cancelled` task without an active run is deleted this long after its last run ended. The volume of a task whose pull request was merged is deleted at the next check, whatever this value. The check runs once per hour on the replica holding the instance Lease (not without a cluster). `0` deletes at the next check; a value too large to represent as a date means never. |
 | `volumes.idleTtlSeconds` | no | `2592000` (30 days) | The volume of any task without an active run is deleted this long after its last run ended; same check and value rules as `retainAfterCloseSeconds`. The next run creates a fresh volume, clones again and restores the WIP snapshot. A board member can delete a volume at once with "Reset workspace" (`crates/df-web/README.md`). |
 | `runs.maxConcurrent` | no | `4` | At least 1 (0 is rejected at startup). Runs that may be non-terminal at the same time, counted across all replicas. Further due tasks keep their status until a slot frees and then start oldest resume time first. |
 | `runs.maxAutoResumes` | no | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` (backoff 2 min x (resumes + 1)); then the task becomes `failed`. A message or a run that ends with a `RunReport` resets the count; a capacity rejection does not count. |
@@ -126,7 +126,8 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 
 If prompts are still undelivered when a run ends with an outcome other than `failed`-class or
 `rate_limited`, the task becomes `queued` and the next run starts with them. A task a board member
-marked done (`completed`) keeps its status when its run ends, unless prompts are undelivered.
+marked done, or whose pull request was merged (`completed`), keeps its status when its run ends,
+unless prompts are undelivered.
 
 ### Human stop and cancel
 

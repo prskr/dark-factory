@@ -241,14 +241,31 @@ mod tests {
 
     #[tokio::test]
     async fn unrestricted_project_targets_deliver_to_loopback() {
-        let addr = receiver().await;
-        let port = addr.port();
+        let port = dual_stack_receiver().await;
         for url in [
             format!("http://127.0.0.1:{port}/hook"),
             format!("http://localhost:{port}/hook"),
         ] {
             let status = post_with(ProjectTargets::Unrestricted, Trust::Project, &url).await;
             assert_eq!(status.unwrap(), StatusCode::NO_CONTENT, "{url}");
+        }
+    }
+
+    /// A receiver on `127.0.0.1` and, where IPv6 exists, `[::1]` with the same port, so
+    /// `localhost` reaches it whichever address resolves first.
+    async fn dual_stack_receiver() -> u16 {
+        loop {
+            let addr = receiver().await;
+            match TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, addr.port())).await {
+                Ok(v6) => {
+                    let app =
+                        Router::new().route("/hook", post(|| async { StatusCode::NO_CONTENT }));
+                    tokio::spawn(async move { axum::serve(v6, app).await.unwrap() });
+                    return addr.port();
+                }
+                Err(e) if e.kind() == io::ErrorKind::AddrInUse => {}
+                Err(_no_ipv6) => return addr.port(),
+            }
         }
     }
 

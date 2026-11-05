@@ -35,6 +35,9 @@ app_password=e2e-app-password
 oidc_secret=e2e-oidc-secret
 forgejo_user=factory
 forgejo_password=e2e-factory-password
+forgejo_reviewer=reviewer
+forgejo_reviewer_password=e2e-reviewer-password
+webhook_secret=e2e-webhook-secret
 
 kc() { kubectl --context "$ctx" "$@"; }
 hc() { helm --kube-context "$ctx" "$@"; }
@@ -147,18 +150,33 @@ forgejo_api() { # method path [json-body]
     "http://127.0.0.1:$forgejo_port/api/v1/$2" ${3:+-d "$3"} >/dev/null
 }
 
-# The bot user with its token, the repository factory/demo and the issue the demo tasks link to.
+# Creates Forgejo user `$1` with password `$2` and prints its access token (all scopes).
+create_forgejo_user() {
+  local created token
+  created="$(kc -n forgejo exec deploy/forgejo -c forgejo -- forgejo admin user create \
+    --username "$1" --password "$2" --email "$1@example.com" \
+    --must-change-password=false --access-token --access-token-name e2e --access-token-scopes all)"
+  token="$(sed -n 's/.*Access token was successfully created\.\.\. //p' <<<"$created")"
+  [[ -n "$token" ]] || { echo "no access token in: $created" >&2; exit 1; }
+  printf '%s' "$token"
+}
+
+# The bot user with its token, the repository factory/demo with the issue the demo tasks link to and
+# the webhook to the control plane, and a second user with write access who reviews.
 setup_forgejo() {
   log "Setting up Forgejo"
-  local created
-  created="$(kc -n forgejo exec deploy/forgejo -c forgejo -- forgejo admin user create \
-    --username "$forgejo_user" --password "$forgejo_password" --email "$forgejo_user@example.com" \
-    --must-change-password=false --access-token --access-token-name e2e --access-token-scopes all)"
-  forgejo_token="$(sed -n 's/.*Access token was successfully created\.\.\. //p' <<<"$created")"
-  [[ -n "$forgejo_token" ]] || { echo "no access token in: $created" >&2; exit 1; }
+  forgejo_token="$(create_forgejo_user "$forgejo_user" "$forgejo_password")"
+  forgejo_reviewer_token="$(create_forgejo_user "$forgejo_reviewer" "$forgejo_reviewer_password")"
   forward forgejo forgejo-http "$forgejo_port" 3000
   forgejo_api POST user/repos '{"name":"demo","auto_init":true,"default_branch":"main"}'
   forgejo_api POST "repos/$forgejo_user/demo/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
+  forgejo_api PUT "repos/$forgejo_user/demo/collaborators/$forgejo_reviewer" '{"permission":"write"}'
+  # The events of docs/content/integrations/forges/webhooks.md; `pull_request_only` is the
+  # "Modification" checkbox of the form.
+  local hook_url="http://$release-control-plane.$namespace.svc:8080/webhooks/forgejo"
+  local events='["issue_comment","pull_request_only","pull_request_comment","pull_request_review","action_run_failure"]'
+  forgejo_api POST "repos/$forgejo_user/demo/hooks" \
+    "{\"type\":\"forgejo\",\"active\":true,\"events\":$events,\"config\":{\"url\":\"$hook_url\",\"content_type\":\"json\",\"secret\":\"$webhook_secret\"}}"
   check_forgejo_push
   # The sandboxes read the token through a credential reference (Secret in the release namespace).
   kc -n "$namespace" create secret generic forgejo-token --from-literal=token="$forgejo_token"
@@ -180,6 +198,8 @@ install_release() {
   kc -n "$namespace" create secret generic dark-factory-db-owner --from-literal=password="$owner_password"
   kc -n "$namespace" create secret generic dark-factory-db-app --from-literal=password="$app_password"
   kc -n "$namespace" create secret generic dark-factory-oidc --from-literal=client-secret="$oidc_secret"
+  # `plugins.forgejo.webhookSecret` of values-e2e.yaml; the repository webhook signs with it.
+  kc -n "$namespace" create secret generic forge-webhooks --from-literal=forgejo="$webhook_secret"
   create_model_secret
 }
 
@@ -214,11 +234,12 @@ run_suite() {
   export E2E_PLAYWRIGHT_WS="ws://127.0.0.1:$playwright_port/?browser=chromium"
   export E2E_FORGEJO_URL="http://127.0.0.1:$forgejo_port"
   export E2E_FORGEJO_TOKEN="$forgejo_token"
+  export E2E_FORGEJO_REVIEWER_TOKEN="$forgejo_reviewer_token"
   export E2E_RECEIVER_URL="http://127.0.0.1:$receiver_port"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=1}"
-  cargo test -p df-e2e --test demo --test flow --test lifecycle_events -- "${test_args[@]}"
+  cargo test -p df-e2e --test demo --test flow --test lifecycle_events --test webhooks -- "${test_args[@]}"
 }
 
 prepare_tools

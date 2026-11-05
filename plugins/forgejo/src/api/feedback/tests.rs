@@ -335,6 +335,31 @@ fn write_admin_and_owner_permissions_are_members() -> anyhow::Result<()> {
 }
 
 #[test]
+fn whoami_is_the_token_owner() -> anyhow::Result<()> {
+    let routes = scenario();
+    assert_eq!(plugin(&routes).whoami()?, "factory");
+    Ok(())
+}
+
+#[test]
+fn author_role_maps_permissions_and_the_token_owner() -> anyhow::Result<()> {
+    let routes = scenario();
+    routes.get(&permission_path("dave"), &json!({ "permission": "admin" }));
+    let repo = pr().repo;
+    for (login, role) in [
+        ("Factory", AuthorRole::Bot),
+        ("alice", AuthorRole::Member),
+        ("dave", AuthorRole::Member),
+        ("bob", AuthorRole::Outside),
+        ("nobody", AuthorRole::Outside),
+    ] {
+        assert_eq!(plugin(&routes).author_role(&repo, login)?, role, "{login}");
+    }
+    assert_eq!(routes.count(Method::Get, &permission_path("Factory")), 0);
+    Ok(())
+}
+
+#[test]
 fn an_unknown_author_is_outside() -> anyhow::Result<()> {
     let routes = scenario();
     routes.on(

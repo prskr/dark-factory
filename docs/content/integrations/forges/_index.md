@@ -13,7 +13,8 @@ forge credential. Git clone and push go through the gateway's [Git proxy](../../
 | GitHub, GitHub Enterprise Server | `github` | `github.com` |
 
 How a project's repository host selects a plugin, the instance configuration keys and the GitHub
-how-tos: [Plugin configuration](configuration.md).
+how-tos: [Plugin configuration](configuration.md). Waking tasks on reviews, mentions, merges and CI
+failures: [Forge webhooks](webhooks.md).
 
 ## Connect a repository
 

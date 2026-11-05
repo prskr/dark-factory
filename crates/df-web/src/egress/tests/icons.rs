@@ -50,6 +50,7 @@ async fn add_project(
         ("image", "ghcr.io/example/sandbox:1"),
         ("base_branch", "main"),
         ("forge_credential_id", credential),
+        ("webhook_wake", "members"),
     ]);
     let response = app.post("/projects", &body, cookie).await;
     assert_eq!(response.status(), StatusCode::OK, "{key}");

@@ -90,6 +90,7 @@ rust_test(
     ),
     deps = all_crate_deps(normal_dev = True) + [
         ":build_script",
+        "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",

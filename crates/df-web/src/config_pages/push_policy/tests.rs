@@ -30,6 +30,7 @@ fn edit_body(push: &[(&str, &str)]) -> String {
         ("base_branch", "main"),
         ("adapter_command", ""),
         ("forge_credential_id", ""),
+        ("webhook_wake", "members"),
     ];
     pairs.extend_from_slice(push);
     form(&pairs)

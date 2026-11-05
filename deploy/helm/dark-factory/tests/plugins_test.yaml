@@ -203,3 +203,74 @@ tests:
             image:
               reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.2.0
               pullPolicy: IfNotPresent
+
+  - it: mounts no webhook secret by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-forgejo
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-github
+          any: true
+
+  - it: writes no webhook secret file into the config by default
+    template: configmap.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: webhookSecretFile
+
+  - it: mounts the referenced webhook secret key read-only
+    template: control-plane-deployment.yaml
+    set:
+      plugins.forgejo.webhookSecret:
+        name: forge-webhooks
+        key: forgejo
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-forgejo
+            secret:
+              secretName: forge-webhooks
+              items:
+                - key: forgejo
+                  path: secret
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: webhook-forgejo
+            mountPath: /var/run/dark-factory/webhooks/forgejo
+            readOnly: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-github
+          any: true
+
+  - it: writes the mounted webhook secret path into the config
+    template: configmap.yaml
+    documentIndex: 0
+    set:
+      plugins.forgejo.webhookSecret:
+        name: forge-webhooks
+        key: forgejo
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    webhookSecretFile: "/var/run/dark-factory/webhooks/forgejo/secret"\n'
+
+  - it: rejects a webhook secret reference without a key
+    template: configmap.yaml
+    set:
+      plugins.forgejo.webhookSecret:
+        name: forge-webhooks
+    asserts:
+      - failedTemplate:
+          errorPattern: "webhookSecret"

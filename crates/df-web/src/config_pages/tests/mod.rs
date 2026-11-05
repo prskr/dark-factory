@@ -34,6 +34,7 @@ fn project_form_with_tracker(key: &str, repo: &str, tracker: &str) -> String {
         ("base_branch", "main"),
         ("adapter_command", ""),
         ("forge_credential_id", ""),
+        ("webhook_wake", "members"),
     ])
 }
 
@@ -59,6 +60,7 @@ async fn project_adapter_command_is_stored_shown_again_and_clearable() {
             ("base_branch", "main"),
             ("adapter_command", command),
             ("forge_credential_id", ""),
+            ("webhook_wake", "members"),
         ])
     };
 
@@ -631,6 +633,7 @@ async fn project_forge_follows_the_configured_integration_and_the_credential() {
             ("image", "img"),
             ("base_branch", "main"),
             ("forge_credential_id", credential),
+            ("webhook_wake", "members"),
         ])
     };
     app.post(
@@ -712,6 +715,7 @@ async fn project_list(
             ("image", "img"),
             ("base_branch", "main"),
             ("forge_credential_id", &credential),
+            ("webhook_wake", "members"),
         ]);
         app.post("/projects", &body, &cookie).await;
     }
@@ -1238,7 +1242,7 @@ async fn the_project_form_groups_key_and_name_and_branch_and_credential_in_rows(
             "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{name}\""
         ))
     };
-    for full in ["repo_url", "issue_tracker_url", "image"] {
+    for full in ["repo_url", "issue_tracker_url", "image", "webhook_wake"] {
         assert!(spans_two(full), "{full} is full width");
     }
     for half in ["key", "name", "base_branch", "forge_credential_id"] {
@@ -1257,6 +1261,8 @@ async fn the_project_form_groups_key_and_name_and_branch_and_credential_in_rows(
         "image",
         "base_branch",
         "forge_credential_id",
+        "webhook_wake",
+        "adapter_command",
     ];
     let at: Vec<usize> = order
         .iter()
@@ -1469,3 +1475,4 @@ async fn the_rail_menu_shows_the_version_of_the_instance() {
 }
 
 mod lifecycle_tab;
+mod webhook_wake;

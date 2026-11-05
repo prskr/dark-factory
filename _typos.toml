@@ -8,6 +8,8 @@ extend-exclude = [
     "crates/df-web/assets/app.css",
     # Generated extract of GitHub's REST API description (upstream words such as `repo.nwo`).
     "plugins/github/tests/fixtures/github-openapi.json",
+    # GitHub's example webhook payloads from `octokit/webhooks`, verbatim (typos and node ids).
+    "plugins/github/tests/fixtures/webhooks/**",
     # Vendored Hextra theme (Hugo module).
     "docs/_vendor/**",
 ]
