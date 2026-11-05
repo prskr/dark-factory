@@ -9,6 +9,11 @@ ignore = [
     # keys are used only by df-web's test OIDC provider. Revisit when `openidconnect` moves to a
     # fixed `rsa` (0.10).
     { id = "RUSTSEC-2023-0071", reason = "rsa: only public-key verification in production" },
+    # `astral-tokio-tar` is unmaintained since 2026-11-03 (no fixed release). Reached only through
+    # testcontainers, a dev dependency of df-test-postgres; it packs the files testcontainers copies
+    # into test containers and never runs in production. Revisit when testcontainers (0.28.0)
+    # moves to another tar crate.
+    { id = "RUSTSEC-2026-0440", reason = "astral-tokio-tar unmaintained: dev-only (testcontainers)" },
     # Non-constant-time operations in crypto-bigint 0.5 (fixed in 0.7.6). Reached only through
     # openidconnect -> p256/p384 -> elliptic-curve 0.13, which verifies ES256/ES384 ID-token
     # signatures with the provider's public keys: no secret integers. Revisit when `openidconnect`
