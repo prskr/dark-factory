@@ -19,11 +19,15 @@ For an `opencode` run the control plane SHALL pass one configuration document in
 - **THEN** the model entry has no `limit`
 
 #### Scenario: Repository configuration cannot redirect the model
-- **WHEN** the repository's `opencode.json` sets another base URL for `df`, another provider and another `model`
-- **THEN** model requests still go only to the inference endpoint with the persona's model
+- **WHEN** the repository's `opencode.json` defines another provider, sets `model` and `small_model` to it, allows it and allows `question` and `websearch`
+- **THEN** the resolved configuration lists the generated document last, its `model` and title model are the persona's model, its `provider.use` and `plugin.use` policies and its `question` and `websearch` denies come after the repository's and override them, and model requests go only to the inference endpoint
+
+#### Scenario: Provider defined in the repository
+- **WHEN** the repository's `opencode.json` defines a provider whose host the egress policy does not allow
+- **THEN** OpenCode contacts that host at start, the egress log shows it denied, and the run fails at harness start; repository customization otherwise stays enabled
 
 ### Requirement: No network access beside the inference endpoint
-An `opencode` run SHALL get `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` and `NODE_EXTRA_CA_CERTS` set to the instance CA. With an empty prompt history and no tool calls, OpenCode SHALL contact no host other than the inference endpoint.
+An `opencode` run SHALL get `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` and `NODE_EXTRA_CA_CERTS` set to the instance CA. With an empty prompt history and no tool calls, OpenCode SHALL contact no host other than the inference endpoint, unless the repository's configuration defines providers (scenario "Provider defined in the repository").
 
 #### Scenario: Start without egress
 - **WHEN** an `opencode` run starts and answers a prompt without tool calls

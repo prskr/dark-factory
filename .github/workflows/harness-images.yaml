@@ -1,6 +1,6 @@
 name: Harness images
 
-# Checks the harness image (Bazel: structure of both architectures, ACP handshake) and builds the
+# Checks the harness image (Bazel: structure of both architectures, CLI and ACP handshake) and builds the
 # reference project image for amd64 and runs its checks (openspec change harness-images, design
 # D9/D10). Only checks run here; the release workflow (release.yaml) publishes the images.
 on:
@@ -52,8 +52,14 @@ jobs:
       - name: Structure (amd64, arm64)
         run: bazel test $BAZEL_ARGS //deploy/images/claude-harness:structure_test
 
-      - name: ACP handshake (amd64)
-        run: bazel run $BAZEL_ARGS //deploy/images/claude-harness:handshake
+      - name: Claude harness CLI and ACP handshake in glibc and musl project images (amd64)
+        run: bazel test $BAZEL_ARGS //deploy/images/claude-harness:test --test_env=CONTAINER_CLI=docker
+
+      - name: OpenCode harness structure (amd64, arm64)
+        run: bazel test $BAZEL_ARGS //deploy/images/opencode-harness:structure_test
+
+      - name: OpenCode harness ACP session in a glibc project image (amd64)
+        run: bazel test $BAZEL_ARGS //deploy/images/opencode-harness:test --test_env=CONTAINER_CLI=docker
 
   project:
     runs-on: ubuntu-latest

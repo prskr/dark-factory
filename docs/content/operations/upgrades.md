@@ -82,6 +82,34 @@ reaches a sandbox any more.
 To roll back, restore the database backup taken before the upgrade, then roll back the release
 (see above): the migration cannot be reverted.
 
+### Provider models and the OpenCode harness
+
+Personas now select a model of their [model provider](../using/model-providers.md#models), and the
+harness `opencode` is available ([guide](../using/opencode.md)).
+
+1. The `migrate` job turns the model of every persona into a model of its provider on Anthropic
+   Messages, without limits, and the persona references it. The Anthropic Messages API must be
+   one of the provider's (the providers the previous migration created are).
+2. A persona without a model stops the migration with a message naming the persona. The `migrate`
+   job fails and the release stays on the old version. Set a model on the persona (or delete it),
+   then upgrade again. The model is required from now on.
+3. After the upgrade, add the models you use on the provider's **Models** tab (the presets
+   prefill them) before you create personas on a new provider; a persona can only select a model
+   the provider lists.
+4. The agent protocol changed: the runtime writes the files of `Assign.harness.acp.files`
+   instead of fixed Claude Code paths. Run the sandbox runtime and the control plane from the same chart
+   version; let active runs finish before the upgrade.
+5. A new image `opencode-harness` and the values `image.harness.opencode.*` (instance setting
+   `harness.opencode.image`) hold OpenCode. The chart default tag is the OpenCode version; released
+   charts pin the image digest.
+6. The `claude-harness` image has no launcher any more: the default `harness.claudeCode.adapterCommand` is
+   `["/opt/harness/claude-code/bin/node", "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"]`
+   (it was `["/opt/harness/claude-code/bin/claude-agent-acp"]`). If you override the setting, change it
+   to the new command, otherwise `claude-code` runs fail to start. Use the chart version for the control
+   plane and the harness image together.
+
+To roll back, restore the database backup taken before the upgrade, then roll back the release.
+
 ### Other releases
 
 Some releases need a step beyond `helm upgrade`, for example removing the forge host from the egress

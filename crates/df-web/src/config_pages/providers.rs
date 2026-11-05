@@ -16,28 +16,33 @@ use df_db::catalog::Actor;
 use df_db::model_providers::{ModelProviderInput, ModelProviderRecord};
 use maud::{Markup, html};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
+use self::models::{ModelRow, PresetModel};
 use super::{
-    conflict, create_button, edit_button, form_footer, form_grid, full_row, list_header, list_page,
-    modal, saved,
+    FormTarget, Tab, conflict, create_button, edit_button, form_grid, full_row, list_header,
+    list_page, saved, tabbed_form, wider_modal,
 };
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::invalid as invalid_attr;
 use crate::components::forms::{INPUT_CLASS, described_by, field, field_with_markup_hint};
 use crate::components::{
-    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, data_table, empty_panel, form_error, icon,
-    select_field, td, text_field, th, tr,
+    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, data_table, empty_panel, icon, select_field, td,
+    text_field, th, tr,
 };
 use crate::layout::{Nav, Shell};
 use crate::responses::{internal_error, invalid, not_found};
+
+mod models;
 
 pub(super) fn routes() -> Router<WebState> {
     Router::new()
         .route("/model-providers", get(list).post(create))
         .route("/model-providers/new", get(new))
         .route("/model-providers/preset", get(preset_form))
+        .route("/model-providers/refresh", post(refresh))
         .route("/model-providers/{id}", post(update).merge(delete(remove)))
         .route("/model-providers/{id}/edit", get(edit))
 }
@@ -50,8 +55,12 @@ pub(super) fn compatible_options(
     providers
         .iter()
         .filter(|provider| {
-            harness::check_compatible(harness_name, &provider.wire_apis(), provider.input.scheme)
-                .is_ok()
+            harness::check_provider_compatible(
+                harness_name,
+                &provider.wire_apis(),
+                provider.input.scheme,
+            )
+            .is_ok()
         })
         .map(|provider| (provider.id.to_string(), provider.input.name.clone()))
         .collect()
@@ -73,6 +82,13 @@ pub(super) struct ProviderForm {
     url_openai_chat: String,
     api_openai_responses: String,
     url_openai_responses: String,
+    /// The provider being edited; empty when creating.
+    entity_id: String,
+    /// The model rows (`model_id_<n>` and so on), see [`ProviderForm::with_models`].
+    #[serde(flatten)]
+    fields: BTreeMap<String, String>,
+    #[serde(skip)]
+    models: Vec<ModelRow>,
 }
 
 /// A provider configuration the form can be prefilled with. Presets are not stored.
@@ -82,6 +98,7 @@ struct Preset {
     apis: &'static [(WireApi, &'static str)],
     scheme: CredentialScheme,
     headers: &'static [(&'static str, &'static str)],
+    models: &'static [PresetModel],
 }
 
 /// The text an example token shows next to the prefix. A fixed text, never derived from the
@@ -91,6 +108,69 @@ const EXAMPLE_TOKEN: &str = "sk-…example…4f7a";
 /// The hint of the extra headers while the scheme allows them.
 const HEADERS_HINT: &str = "One “Name: value” per line. Values are templates over task_id, task_key, run_id, project_key and persona_id with the sha256 filter, for example {{ task_id | sha256 }}.";
 
+const fn model(id: &'static str, wire_api: WireApi, context: i64, output: i64) -> PresetModel {
+    PresetModel {
+        id,
+        wire_api,
+        context,
+        output,
+    }
+}
+
+/// Limits from `OpenCode`'s catalog snapshot (2.2.5).
+const CLAUDE_MODELS: &[PresetModel] = &[
+    model(
+        "claude-opus-5-5",
+        WireApi::AnthropicMessages,
+        1_000_000,
+        128_000,
+    ),
+    model(
+        "claude-sonnet-5-5",
+        WireApi::AnthropicMessages,
+        1_000_000,
+        128_000,
+    ),
+    model(
+        "claude-haiku-5-5",
+        WireApi::AnthropicMessages,
+        1_000_000,
+        128_000,
+    ),
+];
+
+const OPENAI_MODELS: &[PresetModel] = &[
+    model("gpt-6-luna", WireApi::OpenAiResponses, 1_050_000, 128_000),
+    model(
+        "gpt-6.1-terra",
+        WireApi::OpenAiResponses,
+        1_050_000,
+        128_000,
+    ),
+    model("gpt-6.1-sol", WireApi::OpenAiResponses, 1_050_000, 128_000),
+    model("gpt-6-astra", WireApi::OpenAiResponses, 1_050_000, 128_000),
+];
+
+const OPENCODE_GO_MODELS: &[PresetModel] = &[
+    model("glm-5.3", WireApi::OpenAiChat, 1_000_000, 131_072),
+    model("kimi-k3", WireApi::OpenAiChat, 1_048_576, 131_072),
+    model("deepseek-v4-pro", WireApi::OpenAiChat, 1_000_000, 384_000),
+    model("minimax-m3", WireApi::AnthropicMessages, 1_000_000, 131_072),
+    model(
+        "qwen3.8-max",
+        WireApi::AnthropicMessages,
+        1_000_000,
+        131_072,
+    ),
+    model(
+        "claude-haiku-5-5",
+        WireApi::AnthropicMessages,
+        1_000_000,
+        128_000,
+    ),
+    model("gpt-6-luna", WireApi::OpenAiResponses, 1_050_000, 128_000),
+];
+
 const PRESETS: [Preset; 4] = [
     Preset {
         id: "anthropic",
@@ -98,6 +178,7 @@ const PRESETS: [Preset; 4] = [
         apis: &[(WireApi::AnthropicMessages, "https://api.anthropic.com")],
         scheme: CredentialScheme::XApiKey,
         headers: &[],
+        models: CLAUDE_MODELS,
     },
     Preset {
         id: "claude-subscription",
@@ -105,6 +186,7 @@ const PRESETS: [Preset; 4] = [
         apis: &[(WireApi::AnthropicMessages, "https://api.anthropic.com")],
         scheme: CredentialScheme::ClaudeSubscription,
         headers: &[],
+        models: CLAUDE_MODELS,
     },
     Preset {
         id: "openai",
@@ -115,6 +197,7 @@ const PRESETS: [Preset; 4] = [
         ],
         scheme: CredentialScheme::Bearer,
         headers: &[],
+        models: OPENAI_MODELS,
     },
     Preset {
         id: "opencode-go",
@@ -135,6 +218,7 @@ const PRESETS: [Preset; 4] = [
         ],
         scheme: CredentialScheme::Bearer,
         headers: &[("x-opencode-session", "{{ task_id | sha256 }}")],
+        models: OPENCODE_GO_MODELS,
     },
 ];
 
@@ -198,6 +282,7 @@ impl ProviderForm {
         for (api, url) in preset.apis {
             form.set_api(*api, url);
         }
+        form.models = preset.models.iter().map(ModelRow::from_preset).collect();
         form
     }
 
@@ -220,7 +305,22 @@ impl ProviderForm {
         for api in &input.apis {
             form.set_api(api.wire_api, &api.upstream_url);
         }
+        form.models = input.models.iter().map(ModelRow::from_model).collect();
         form
+    }
+
+    /// Reads the model rows among the submitted fields.
+    fn with_models(mut self) -> Self {
+        self.models = models::rows_from_fields(&self.fields);
+        self
+    }
+
+    /// The wire API a new model row starts with: the first the form offers.
+    fn first_api(&self) -> WireApi {
+        WireApi::ALL
+            .into_iter()
+            .find(|api| self.api_values(*api).0)
+            .unwrap_or(WireApi::ALL[0])
     }
 }
 
@@ -253,6 +353,10 @@ fn error_field(error: &ProviderError) -> &'static str {
         ProviderError::Header { .. }
         | ProviderError::DuplicateHeader(_)
         | ProviderError::SubscriptionNoHeaders => "headers",
+        ProviderError::EmptyModelId
+        | ProviderError::DuplicateModel(_)
+        | ProviderError::ModelApiNotOffered { .. }
+        | ProviderError::ModelLimitNotPositive(_) => "models",
     }
 }
 
@@ -291,16 +395,20 @@ fn validate(form: &ProviderForm, credentials: &[Uuid]) -> Result<ModelProviderIn
     let optional = |value: &str, keep: bool| {
         Some(value.trim().to_string()).filter(|value| keep && !value.is_empty())
     };
+    let model_list = models::parse(&form.models, &mut errors);
     let config = ProviderConfig {
         apis,
         scheme,
         credential_header: optional(&form.credential_header, uses_header),
         headers,
+        models: model_list,
     };
     if errors.is_empty()
         && let Err(error) = config.validate()
     {
-        errors.add(error_field(&error), error.to_string());
+        let (field, message) = models::core_error(&error, &form.models)
+            .unwrap_or_else(|| (error_field(&error).to_string(), error.to_string()));
+        errors.add(field, message);
     }
     errors.into_result(ModelProviderInput {
         name,
@@ -312,6 +420,7 @@ fn validate(form: &ProviderForm, credentials: &[Uuid]) -> Result<ModelProviderIn
             .filter(|prefix| uses_header && !prefix.is_empty()),
         headers: config.headers,
         apis: config.apis,
+        models: config.models,
     })
 }
 
@@ -347,20 +456,21 @@ fn api_row(api: WireApi, values: &ProviderForm, errors: &FormErrors) -> Markup {
 }
 
 fn provider_form(
-    action: &str,
+    target: FormTarget,
     values: &ProviderForm,
     errors: &FormErrors,
     credentials: &[CredentialRef],
-    create: bool,
+    open_models: bool,
 ) -> Markup {
+    let create = target.is_create();
     let submit = if create {
         "Create model provider"
     } else {
         "Save model provider"
     };
-    html! {
-        form id="form" class="space-y-4" x-data=(scheme_state(values)) hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
-            (form_error(errors))
+    let general = html! {
+        div class="space-y-4" x-data=(scheme_state(values)) {
+            (target.id_field())
             (form_grid(html! {
                 (text_field("Name", "name", &values.name, errors, None))
                 @if create {
@@ -379,9 +489,34 @@ fn provider_form(
                 (scheme_select(values, errors))
                 (scheme_fields(values, errors))
             }))
-            (form_footer(submit))
         }
-    }
+    };
+    let tabs = [
+        Tab {
+            id: "general",
+            label: "General",
+            panel: general,
+        },
+        Tab {
+            id: "models",
+            label: "Models",
+            panel: models::panel(&values.models, errors),
+        },
+    ];
+    let open = if open_models || models_only(errors) {
+        "models"
+    } else {
+        "general"
+    };
+    tabbed_form(&target.action(), errors, &tabs, open, submit)
+}
+
+/// Whether the form has errors and all of them are in the model list.
+fn models_only(errors: &FormErrors) -> bool {
+    !errors.is_empty()
+        && errors
+            .fields()
+            .all(|field| field == "models" || field.starts_with("model_"))
 }
 
 /// The scheme select. A change is handled in the browser, see [`scheme_state`].
@@ -631,14 +766,14 @@ async fn new(State(state): State<WebState>, headers: HeaderMap) -> Response {
         return Redirect::to("/model-providers").into_response();
     }
     match df_db::catalog::list_credential_refs(&state.pool).await {
-        Ok(credentials) => modal(
+        Ok(credentials) => wider_modal(
             "New model provider",
             provider_form(
-                "/model-providers",
+                FormTarget::new("/model-providers", None),
                 &ProviderForm::default(),
                 &FormErrors::default(),
                 &credentials,
-                true,
+                false,
             ),
         ),
         Err(e) => internal_error(&e),
@@ -669,11 +804,11 @@ async fn preset_form(State(state): State<WebState>, Query(query): Query<PresetQu
             |preset| ProviderForm::from_preset(preset, &query.name),
         );
     provider_form(
-        "/model-providers",
+        FormTarget::new("/model-providers", None),
         &values,
         &FormErrors::default(),
         &credentials,
-        true,
+        false,
     )
     .into_response()
 }
@@ -690,10 +825,10 @@ async fn edit(State(state): State<WebState>, headers: HeaderMap, Path(id): Path<
         Ok((None, _)) => return not_found("The model provider"),
         Err(e) => return internal_error(&e),
     };
-    modal(
+    wider_modal(
         "Edit model provider",
         provider_form(
-            &format!("/model-providers/{id}"),
+            FormTarget::new("/model-providers", Some(id)),
             &ProviderForm::from_record(&record),
             &FormErrors::default(),
             &credentials,
@@ -707,7 +842,7 @@ async fn create(
     user: Extension<CurrentUser>,
     form: Form<ProviderForm>,
 ) -> Response {
-    save(state, user, None, form.0).await
+    save(state, user, None, form.0.with_models()).await
 }
 
 async fn update(
@@ -716,7 +851,44 @@ async fn update(
     Path(id): Path<Uuid>,
     form: Form<ProviderForm>,
 ) -> Response {
-    save(state, user, Some(id), form.0).await
+    save(state, user, Some(id), form.0.with_models()).await
+}
+
+/// "+ Add model" and the trash buttons: the form as typed, rendered again with the row added or
+/// removed, on the tab "Models".
+async fn refresh(State(state): State<WebState>, Form(form): Form<RefreshForm>) -> Response {
+    let credentials = match df_db::catalog::list_credential_refs(&state.pool).await {
+        Ok(credentials) => credentials,
+        Err(e) => return internal_error(&e),
+    };
+    let mut values = form.provider.with_models();
+    match form.op.strip_prefix("remove:").map(str::parse::<usize>) {
+        Some(Ok(index)) if index < values.models.len() => {
+            values.models.remove(index);
+        }
+        Some(_) => {}
+        None => {
+            let api = values.first_api();
+            values.models.push(ModelRow::blank(api));
+        }
+    }
+    provider_form(
+        FormTarget::posted("/model-providers", &values.entity_id),
+        &values,
+        &FormErrors::default(),
+        &credentials,
+        true,
+    )
+    .into_response()
+}
+
+/// The form of [`refresh`]: the provider form and the operation.
+#[derive(Deserialize)]
+struct RefreshForm {
+    #[serde(default)]
+    op: String,
+    #[serde(flatten)]
+    provider: ProviderForm,
 }
 
 /// Errors for personas that could no longer use the provider with `input`.
@@ -725,14 +897,19 @@ async fn persona_conflicts(
     id: Uuid,
     input: &ModelProviderInput,
 ) -> Result<Vec<String>, DbError> {
-    let wire_apis: Vec<WireApi> = input.apis.iter().map(|api| api.wire_api).collect();
     let mut problems = Vec::new();
     for persona in df_db::catalog::list_personas(&state.pool)
         .await?
         .into_iter()
         .filter(|persona| persona.model_provider_id == id)
     {
-        if let Err(error) = harness::check_compatible(&persona.harness, &wire_apis, input.scheme) {
+        let Some(model) = input.models.iter().find(|m| m.model_id == persona.model) else {
+            // Removing it is refused by the database, naming the persona.
+            continue;
+        };
+        if let Err(error) =
+            harness::check_compatible(&persona.harness, model.wire_api, input.scheme)
+        {
             problems.push(format!("Persona {}: {error}", persona.name));
         }
     }
@@ -763,16 +940,12 @@ async fn save(
         },
         Err(errors) => errors,
     };
-    let action = id.map_or_else(
-        || "/model-providers".to_string(),
-        |id| format!("/model-providers/{id}"),
-    );
     invalid(provider_form(
-        &action,
+        FormTarget::new("/model-providers", id),
         &form,
         &errors,
         &credentials,
-        id.is_none(),
+        false,
     ))
 }
 
@@ -802,6 +975,10 @@ async fn store(
     match df_db::model_providers::save_model_provider(&state.pool, actor, id, input).await {
         Ok(_) => Ok(None),
         Err(DbError::NotFound(_)) => Err(Box::new(not_found("The model provider"))),
+        Err(DbError::ModelConflict(message)) => {
+            errors.add("models", message);
+            Ok(Some(errors))
+        }
         Err(e) => match conflict(&mut errors, "name", e) {
             Some(response) => Err(Box::new(response)),
             None => Ok(Some(errors)),

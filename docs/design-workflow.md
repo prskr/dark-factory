@@ -186,9 +186,15 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
 | Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |
 | Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |
+| Config - Model providers / Model providers · new, OpenCode Go preset | `/model-providers/new` | "New model provider" clicked, preset OpenCode Go chosen; tab General | 1440 |
+| Config - Model providers / Model providers · new, OpenCode Go preset, models | `/model-providers/new` | as above; tab Models with the seven preset models | 1440 |
+| Config - Model providers / Model providers · edit, many models, scrolled | `/model-providers/<id>/edit` | manual seed (not built): provider with 15 models; tab Models, list scrolls below fixed column labels | 1440 |
+| Config - Model providers / Model providers · edit, model errors | `/model-providers/<id>/edit` | as above; OpenAI Responses unchecked, one model with one limit, a duplicate ID, `minimax-m3` (used by Ada) removed, saved | 1440 |
 | Config - Personas / Personas · cards | `/personas` | manual seed (not built): four personas with model providers | 1440 |
 | Config - Personas / Settings · personas | `/personas` | as Personas · cards | 1440 |
 | Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Personas · cards; edit of Linus clicked | 1440 |
+| Config - Personas / Personas · edit modal, OpenCode, model select open | `/personas/<id>/edit` | persona Ada with harness `opencode` and provider OpenCode Go (preset models); model select open | 1440 |
+| Config - Personas / Personas · edit modal, claude-code, models filtered | `/personas/<id>/edit` | as above with harness `claude-code`; the select lists only the Anthropic Messages models | 1440 |
 | Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |

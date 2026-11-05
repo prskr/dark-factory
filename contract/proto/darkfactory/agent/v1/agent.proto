@@ -196,8 +196,9 @@ message CommitIdentity {
 }
 
 message Harness {
-  // The persona's system prompt, added to the harness's own defaults.
-  string system_prompt = 1;
+  // 1 was system_prompt: the prompt is a file of AcpHarness.files now.
+  reserved 1;
+  reserved "system_prompt";
 
   oneof kind {
     AcpHarness acp = 10;
@@ -206,16 +207,25 @@ message Harness {
 }
 
 message AcpHarness {
-  // Command line of the ACP agent, e.g. ["/opt/harness/bin/claude-agent-acp"].
+  // Command line of the ACP agent, e.g. ["/opt/harness/claude-code/bin/node", ".../dist/index.js"].
   repeated string command = 1;
   // Non-secret environment only. Includes the gateway's inference base URL, the placeholder API
   // key and the CA file; model credentials never reach the sandbox.
   map<string, string> env = 2;
-  // Model override, if the persona sets one.
+  // The persona's model ID (always set).
   optional string model = 3;
-  // Harness-specific settings as JSON (e.g. Claude Code settings), written by
-  // the runtime before every start, overwriting what is on the PVC.
-  string settings_json = 4;
+  // 4 was settings_json: harness files are generic now.
+  reserved 4;
+  reserved "settings_json";
+  // Files the runtime writes below HOME before every start, overwriting what is on the PVC
+  // (Claude Code settings and CLAUDE.md, OpenCode AGENTS.md). The system prompt is one of them.
+  repeated HarnessFile files = 5;
+}
+
+message HarnessFile {
+  // Relative to HOME, no `..` components. The runtime fails the run for anything else.
+  string path = 1;
+  string content = 2;
 }
 
 message ToolDescriptor {

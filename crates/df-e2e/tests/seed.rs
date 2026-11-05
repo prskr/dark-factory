@@ -34,6 +34,8 @@ async fn seed_writes_the_demo_data() -> Result<()> {
     let personas = list_personas(&pool).await?;
     assert_eq!(personas[0].name, data::PERSONA_NAME);
     assert_eq!(personas[0].model_provider_id, providers[0].id);
+    assert_eq!(personas[0].model, data::PERSONA_MODEL);
+    assert_eq!(providers[0].input.models.len(), 1);
     let project = get_project_by_key(&pool, data::PROJECT_KEY)
         .await?
         .context("project DF")?;

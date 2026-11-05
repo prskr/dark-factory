@@ -1,0 +1,24 @@
+{
+  "provider": {
+    "df": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Dark Factory",
+      "options": {
+        "baseURL": "https://gateway.example:8443/inference/v1",
+        "apiKey": "df-placeholder"
+      },
+      "models": {
+        "glm-5.3": {
+          "name": "glm-5.3",
+          "limit": { "context": 1000000, "output": 131072 }
+        }
+      }
+    }
+  },
+  "model": "df/glm-5.3",
+  "small_model": "df/glm-5.3",
+  "enabled_providers": ["df"],
+  "autoupdate": false,
+  "policies": [{ "action": "plugin.use", "resource": "*", "effect": "deny" }],
+  "permission": { "question": "deny", "websearch": "deny" }
+}

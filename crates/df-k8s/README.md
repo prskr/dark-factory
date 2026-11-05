@@ -48,6 +48,7 @@ Harness image (not part of the `sandbox` table; `dark-factory` passes it on as `
 | Key | Required | Default | Effect |
 |-----|----------|---------|--------|
 | `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.95.0` | Image of the `claude-code` harness (adapter, Node.js, Claude Code CLI), mounted read-only at `/opt/harness/claude-code` (volume `harness-claude-code`) unless the run's project sets an adapter command. A blank value counts as not configured: a run that needs the image then fails provisioning with a message naming the harness. |
+| `harness.opencode.image` | no | `ghcr.io/prskr/dark-factory/opencode-harness:2.2.5` | Image of the `opencode` harness (patched OpenCode release binary and the musl runtime it needs), mounted read-only at `/opt/harness/opencode` (volume `harness-opencode`) in `opencode` runs unless the run's project sets an adapter command. The pod of an `opencode` run has no `claude-code` volume. Blank counts as not configured, as above. |
 
 The sandbox also gets `DF_LOG_FORMAT`, set to the control plane's own log format (`text` or `json`), next to `RUST_LOG` from `sandbox.logLevel`. See `docs/content/observability/logging.md`.
 

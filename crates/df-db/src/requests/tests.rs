@@ -64,7 +64,7 @@ async fn task(pool: &PgPool) -> TaskRow {
         .await
         .unwrap();
     crate::model_providers::tests::seed_provider(pool).await;
-    sqlx::query("INSERT INTO personas (id, name, system_prompt, harness, model_provider_id) VALUES ($1, 'Linus', 's', 'claude-code', (SELECT id FROM model_providers LIMIT 1))")
+    sqlx::query("INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id) VALUES ($1, 'Linus', 's', 'claude-code', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
         .bind(persona_id.as_uuid())
         .execute(pool)
         .await

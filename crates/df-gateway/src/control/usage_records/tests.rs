@@ -38,7 +38,17 @@ async fn run(pool: &PgPool) -> Uuid {
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', $2)")
+    sqlx::query("INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url) VALUES ($1, 'openai-chat', 'https://llm.example.test')")
+        .bind(provider)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO model_provider_models (provider_id, model_id, wire_api) VALUES ($1, 'test-model', 'openai-chat')")
+        .bind(provider)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', $2)")
         .bind(persona)
         .bind(provider)
         .execute(pool)

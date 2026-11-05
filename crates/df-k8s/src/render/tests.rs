@@ -38,10 +38,16 @@ fn test_config() -> ProvisioningConfig {
         gateway_proxy_port: 3128,
         gateway_git_host: "dark-factory-gateway.dark-factory-dev.svc".to_string(),
         gateway_git_port: 8443,
-        harness_images: BTreeMap::from([(
-            df_core::CLAUDE_CODE_HARNESS.to_string(),
-            "registry.example.org/claude-harness:0.95.0".to_string(),
-        )]),
+        harness_images: BTreeMap::from([
+            (
+                df_core::CLAUDE_CODE_HARNESS.to_string(),
+                "registry.example.org/claude-harness:0.95.0".to_string(),
+            ),
+            (
+                df_core::config::OPENCODE_HARNESS.to_string(),
+                "registry.example.org/opencode-harness:2.2.5".to_string(),
+            ),
+        ]),
         log_format: df_telemetry::logging::LogFormat::Text,
     }
 }
@@ -499,6 +505,55 @@ fn missing_harness_image_names_the_harness() {
         }
     );
     assert!(err.to_string().contains("claude-code"));
+}
+
+#[test]
+fn opencode_run_mounts_the_opencode_image_and_no_claude_code_volume() {
+    let spec = RunSandboxSpec {
+        harness: Some(df_core::config::OPENCODE_HARNESS.to_string()),
+        ..test_spec()
+    };
+    let pod_spec = render_pod(&spec, &[], &test_config())
+        .unwrap()
+        .spec
+        .unwrap();
+
+    let volumes = pod_spec.volumes.unwrap();
+    let volume = volumes
+        .iter()
+        .find(|v| v.name == "harness-opencode")
+        .unwrap();
+    assert_eq!(
+        volume.image.as_ref().unwrap().reference.as_deref(),
+        Some("registry.example.org/opencode-harness:2.2.5")
+    );
+    assert!(!volumes.iter().any(|v| v.name == "harness-claude-code"));
+    let mounts = pod_spec.containers[0].volume_mounts.as_ref().unwrap();
+    let mount = mounts
+        .iter()
+        .find(|m| m.name == "harness-opencode")
+        .unwrap();
+    assert_eq!(mount.mount_path, "/opt/harness/opencode");
+    assert_eq!(mount.read_only, Some(true));
+}
+
+#[test]
+fn opencode_run_without_a_configured_image_names_the_harness() {
+    let config = ProvisioningConfig {
+        harness_images: BTreeMap::from([(
+            df_core::CLAUDE_CODE_HARNESS.to_string(),
+            "registry.example.org/claude-harness:0.95.0".to_string(),
+        )]),
+        ..test_config()
+    };
+    let spec = RunSandboxSpec {
+        harness: Some(df_core::config::OPENCODE_HARNESS.to_string()),
+        ..test_spec()
+    };
+
+    let err = render_pod(&spec, &[], &config).unwrap_err();
+
+    assert!(err.to_string().contains("opencode"), "{err}");
 }
 
 #[test]

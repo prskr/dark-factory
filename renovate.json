@@ -57,6 +57,60 @@
     },
     {
       "customType": "regex",
+      "description": "OpenCode release the opencode-harness image ships; the checksums of the two archives in MODULE.bazel are updated by hand (deploy/images/check_versions.sh lists the copies of the version)",
+      "managerFilePatterns": [
+        "/^MODULE\\.bazel$/"
+      ],
+      "matchStrings": [
+        "OPENCODE_VERSION = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Default OpenCode harness image tag (the OpenCode version) in code and reference docs",
+      "managerFilePatterns": [
+        "/^crates/df-core/src/config\\.rs$/",
+        "/^crates/df-k8s/README\\.md$/",
+        "/^crates/df-agent-channel/docs/configuration\\.md$/"
+      ],
+      "matchStrings": [
+        "ghcr\\.io/prskr/dark-factory/opencode-harness:(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Default OpenCode harness image tag of the Helm chart",
+      "managerFilePatterns": [
+        "/^deploy/helm/dark-factory/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "opencode:\\n\\s+repository: \\S+\\n\\s+tag: '(?<currentValue>\\d+\\.\\d+\\.\\d+)'"
+      ],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Default OpenCode harness image tag in the chart reference",
+      "managerFilePatterns": [
+        "/^deploy/helm/dark-factory/README\\.md$/"
+      ],
+      "matchStrings": [
+        "`image\\.harness\\.opencode\\.tag` \\| `string` \\| `\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"`"
+      ],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
       "description": "Rust version of the Bazel toolchains; must equal `channel` in rust-toolchain.toml (rust-toolchain manager)",
       "managerFilePatterns": [
         "/^MODULE\\.bazel$/"
@@ -88,6 +142,13 @@
         "@agentclientprotocol/claude-agent-acp"
       ],
       "groupName": "Claude harness adapter"
+    },
+    {
+      "description": "One PR per OpenCode release: MODULE.bazel and every copy of the image tag; the release is checked with the image test and one manual run (openspec change iter3-opencode-harness)",
+      "matchPackageNames": [
+        "anomalyco/opencode"
+      ],
+      "groupName": "OpenCode harness"
     },
     {
       "description": "Our own images are tagged by the release (and the harness by the adapter version above), not looked up in the registry",

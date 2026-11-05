@@ -16,6 +16,9 @@ pub enum DialogStyle {
     /// Like `Form`, 768 px wide, with a line under the title. The body brings its own padding
     /// (a form with tabs).
     Wide,
+    /// Like `Wide`, 896 px wide (the model provider form, whose model rows need the room). It is
+    /// `Wide` with a wider desktop max-width and must stay in step with it.
+    Wider,
     /// No frame: the body is the card (the new-task composer). The body brings its own close
     /// button ([`dialog_close`]).
     Bare,
@@ -40,6 +43,9 @@ pub fn dialog_with(id: &str, title: &str, style: DialogStyle, body: Markup) -> M
         DialogStyle::Wide => {
             "fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto border border-line bg-panel p-0 text-ink backdrop:bg-black/50 md:m-auto md:h-fit md:max-h-[90dvh] md:max-w-3xl md:rounded-2xl"
         }
+        DialogStyle::Wider => {
+            "fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto border border-line bg-panel p-0 text-ink backdrop:bg-black/50 md:m-auto md:h-fit md:max-h-[90dvh] md:max-w-4xl md:rounded-2xl"
+        }
         DialogStyle::Bare => {
             "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-xl md:p-0"
         }
@@ -50,7 +56,7 @@ pub fn dialog_with(id: &str, title: &str, style: DialogStyle, body: Markup) -> M
             @if style == DialogStyle::Bare {
                 h2 id=(title_id) class="sr-only" { (title) }
                 (body)
-            } @else if style == DialogStyle::Wide {
+            } @else if matches!(style, DialogStyle::Wide | DialogStyle::Wider) {
                 div class="flex items-center justify-between gap-2 border-b border-line pt-4 pr-3 pb-3 pl-4 md:pl-6" {
                     h2 id=(title_id) class="text-lg font-semibold" { (title) }
                     (dialog_close())

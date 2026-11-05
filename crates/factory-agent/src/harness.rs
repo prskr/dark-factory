@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context as _;
+
 use agent_client_protocol::ConnectionTo;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -13,7 +15,7 @@ use agent_client_protocol::schema::v1::{
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
     TextContent as AcpTextContent,
 };
-use df_proto::agent::v1::{Assign, Budgets, Continuation, Prompt, RunOutcome};
+use df_proto::agent::v1::{Assign, Budgets, Continuation, HarnessFile, Prompt, RunOutcome};
 use df_proto::transcript::v1::{
     Event, Notice, NoticeLevel, StopReason, TurnStarted, UserMessage,
     content_block::Kind as ContentBlockKind, event::Kind as EventKind,
@@ -89,7 +91,7 @@ pub fn approve_permission(req: &RequestPermissionRequest) -> RequestPermissionRe
     }
 }
 
-/// Prepares the harness environment and writes `/data/home` settings.
+/// Prepares the harness environment and writes the harness files below `/data/home`.
 ///
 /// The environment of `Assign` carries the gateway's inference base URL, the placeholder API key
 /// and the CA file; no model credential reaches the sandbox (iter3-inference-gateway).
@@ -109,27 +111,50 @@ pub fn prepare_harness_environment(
     // 2. Set HOME
     env.insert("HOME".to_string(), home_dir.to_string_lossy().to_string());
 
-    // 3. Harness settings & system prompt
-    if let Some(harness) = &assign.harness {
-        let claude_dir = home_dir.join(".claude");
-
-        if let Some(df_proto::agent::v1::harness::Kind::Acp(acp)) = &harness.kind {
-            if !acp.settings_json.is_empty() {
-                crate::fs_util::create_real_dir(&claude_dir)?;
-                crate::fs_util::write_fresh(&claude_dir.join("settings.json"), &acp.settings_json)?;
-            }
-            for (k, v) in &acp.env {
-                env.insert(k.clone(), v.clone());
-            }
-        }
-
-        if !harness.system_prompt.is_empty() {
-            crate::fs_util::create_real_dir(&claude_dir)?;
-            crate::fs_util::write_fresh(&claude_dir.join("CLAUDE.md"), &harness.system_prompt)?;
+    // 3. Harness files and environment
+    if let Some(df_proto::agent::v1::harness::Kind::Acp(acp)) = assign
+        .harness
+        .as_ref()
+        .and_then(|harness| harness.kind.as_ref())
+    {
+        write_harness_files(home_dir, &acp.files)?;
+        for (k, v) in &acp.env {
+            env.insert(k.clone(), v.clone());
         }
     }
 
     Ok(env)
+}
+
+/// Writes `files` below `home_dir`, replacing what is there. A path that is absolute or has a
+/// `..` component is an error and nothing is written for it. Directories on the way are real
+/// directories: a symlink the agent planted in their place is replaced, never followed.
+fn write_harness_files(home_dir: &Path, files: &[HarnessFile]) -> anyhow::Result<()> {
+    for file in files {
+        let relative = Path::new(&file.path);
+        let plain = !file.path.is_empty()
+            && relative
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        anyhow::ensure!(
+            plain,
+            "harness file path `{}` must be relative to HOME without `..`",
+            file.path
+        );
+        let mut current = home_dir.to_path_buf();
+        let components: Vec<_> = relative.components().collect();
+        let (name, directories) = components
+            .split_last()
+            .context("harness file path is empty")?;
+        for directory in directories {
+            current.push(directory);
+            crate::fs_util::create_real_dir(&current)?;
+        }
+        current.push(name);
+        crate::fs_util::write_fresh(&current, &file.content)
+            .with_context(|| format!("write harness file `{}`", file.path))?;
+    }
+    Ok(())
 }
 
 /// Result of setting up an ACP session.

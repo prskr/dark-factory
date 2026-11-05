@@ -34,6 +34,9 @@ pub const PROTECTED_PATH: &str = ".forgejo/workflows/ci.yml";
 /// Persona that works on all projects.
 pub const PERSONA_NAME: &str = "e2e";
 
+/// The model of the fake provider that the persona selects.
+pub const PERSONA_MODEL: &str = "claude-sonnet-5-5";
+
 /// Forgejo owner and repository the projects are linked to.
 pub const FORGE_OWNER: &str = "factory";
 pub const FORGE_REPO: &str = "demo";

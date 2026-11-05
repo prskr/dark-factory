@@ -17,9 +17,12 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `agent.commitIdentity.name` / `.email` | no | `Dark Factory` / `dark-factory@localhost` | Commit identity in `Assign.workspace.commit_identity`. |
 | `agent.gitUsername` | no | `dark-factory` | User name the gateway's Git proxy sends with the project's forge token. |
 | `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.95.0` | Harness image, mounted read-only at `/opt/harness/claude-code` in the sandbox of every run whose project has no adapter command. The tag is the adapter version. The chart renders it from `image.harness.claudeCode.*`. |
-| `harness.claudeCode.adapterCommand` | no | `["/opt/harness/claude-code/bin/claude-agent-acp"]` | ACP adapter command from the harness image; a project's own adapter command replaces it (and the harness image mount). Personas have no adapter command. |
+| `harness.claudeCode.adapterCommand` | no | `["/opt/harness/claude-code/bin/node", "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"]` | ACP adapter command from the harness image; a project's own adapter command replaces it (and the harness image mount). Personas have no adapter command. |
 | `harness.claudeCode.env` | no | `{}` | Non-secret environment for the harness (`Assign.harness.acp.env`). |
-| `harness.claudeCode.settingsJson` | no | `""` | Claude Code `settings.json` content, written by the runtime before every start. |
+| `harness.claudeCode.settingsJson` | no | `""` | Claude Code `settings.json` content. A non-empty value is passed as the harness file `.claude/settings.json` (`Assign.harness.acp.files`), which the runtime writes before every start. |
+| `harness.opencode.image` | no | `ghcr.io/prskr/dark-factory/opencode-harness:2.2.5` | Image of the `opencode` harness (patched OpenCode release binary and the musl runtime it needs), mounted read-only at `/opt/harness/opencode` in the sandbox of every `opencode` run whose project has no adapter command. The tag is the OpenCode version. The chart renders it from `image.harness.opencode.*`. A blank value counts as not configured: such a run fails provisioning with a message naming the harness. |
+| `harness.opencode.adapterCommand` | no | `["/opt/harness/opencode/bin/opencode", "acp"]` | ACP adapter command from the harness image; a project's own adapter command replaces it (and the harness image mount). |
+| `harness.opencode.env` | no | `{}` | Non-secret environment for the harness (`Assign.harness.acp.env`). The environment below wins over it. |
 | `runs.maxWallClockSeconds` | no | `7200` | `Assign.budgets.max_wall_clock`. Counts from the runtime's first `Hello`, not from run creation. A value too large to represent as a date means no limit. |
 | `runs.connectTimeoutSeconds` | no | `600` | Time from run creation until the runtime opens its stream; then the run fails with `connect_timeout`. |
 | `runs.cancelGraceSeconds` | no | `300` | Grace after the wall-clock budget. |
@@ -34,6 +37,41 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `lifecycleEvents.subscriptions[].events` | no | `[]` (all) | Event types sent to this subscription (`volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`). Empty means all, including types added later. An unknown type refuses the start. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
+
+### Harness environment and files
+
+The control plane builds `Assign.harness.acp` per run from the persona's harness and the persona's
+model. The wire API is the one of the model; the harness has no order of preference. Configured
+`harness.<name>.env` entries are added first, so the values below win.
+
+| | `claude-code` | `opencode` |
+|---|---|---|
+| Wire APIs the harness can use | Anthropic Messages | OpenAI Chat Completions, OpenAI Responses, Anthropic Messages |
+| Base URL | `ANTHROPIC_BASE_URL` = `<gateway>/inference` | none; in the configuration document |
+| Persona's model | `ANTHROPIC_MODEL` = the model ID (`ANTHROPIC_SMALL_FAST_MODEL` stays unset) | none; `model` and `small_model` in the configuration document |
+| Placeholder key `df-placeholder` | `CLAUDE_CODE_OAUTH_TOKEN` (provider scheme `claude-subscription`), otherwise `ANTHROPIC_API_KEY` | none; in the configuration document |
+| CA file `/run/factory/tls/ca.crt` | `NODE_EXTRA_CA_CERTS` | `NODE_EXTRA_CA_CERTS` |
+| Fixed variables | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`; `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude` only when the run mounts the harness image | `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` |
+| Configuration document | none | `OPENCODE_CONFIG_CONTENT` (below) |
+| System prompt file (below `HOME`) | `.claude/CLAUDE.md` | `.config/opencode/AGENTS.md` |
+| Other files | `.claude/settings.json` when `harness.claudeCode.settingsJson` is not empty | none |
+
+The file list of `Assign.harness.acp.files` holds the system prompt (when the persona has one) and
+the other files of the table. The runtime writes them below `/data/home` and knows no harness
+specific path.
+
+`OPENCODE_CONFIG_CONTENT` is one JSON document per run. It ranks above OpenCode's global and
+project configuration, so a repository's `opencode.json` cannot redirect the model:
+
+| Part | Value |
+|---|---|
+| `provider.df` | package by the wire API of the model (`@ai-sdk/openai-compatible` for Chat Completions, `@ai-sdk/openai` for Responses, `@ai-sdk/anthropic` for Messages), `options.baseURL` `<gateway>/inference/v1`, `options.apiKey` `df-placeholder` |
+| `provider.df.models` | the persona's model; `limit.context` and `limit.output` only when the model has limits |
+| `model`, `small_model` | `df/<model>` |
+| `enabled_providers` | `["df"]` |
+| `autoupdate` | `false` |
+| `policies` | denies `plugin.use`: plugins are neither installed nor loaded |
+| `permission` | `question` and `websearch` denied: they are not offered to the model (questions go through the factory tool `ask_question`) |
 
 The three files are checked for changes by the first connection that arrives at least 10 s after
 the last check; changed material applies to new connections without a restart, and material that

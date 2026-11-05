@@ -4,18 +4,18 @@
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
-use df_core::config::ClaudeCodeConfig;
 use df_core::harness::{
-    INFERENCE_PATH, INSTANCE_CA_PATH, PLACEHOLDER_KEY, choose_wire_api,
-    inference_env as harness_env,
+    self, ConfigInput, HarnessProfile, INFERENCE_PATH, INSTANCE_CA_PATH, PLACEHOLDER_KEY,
 };
+use df_core::model_provider::ProviderModel;
 use df_core::{PersonaId, Principal, ProjectId, TaskId};
+use df_db::model_providers::ModelProviderRecord;
 use df_db::{
     TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
 };
 use df_proto::agent::v1::{
-    AcpHarness, Assign, Budgets, CommitIdentity, Continuation, Harness, Prompt, TaskRef,
-    ToolAnnotations, ToolDescriptor, Workspace, harness,
+    AcpHarness, Assign, Budgets, CommitIdentity, Continuation, Harness, HarnessFile, Prompt,
+    TaskRef, ToolAnnotations, ToolDescriptor, Workspace, harness as harness_kind,
 };
 use df_proto::pbjson_types::{Duration, Timestamp};
 use df_proto::transcript::v1 as transcript;
@@ -42,9 +42,9 @@ pub struct ProjectInfo {
 
 impl ProjectInfo {
     /// The command that starts the adapter: the project's own, otherwise the harness default.
-    pub fn adapter_command(&self, harness: &ClaudeCodeConfig) -> Vec<String> {
+    pub fn adapter_command(&self, harness_default: &[String]) -> Vec<String> {
         if self.adapter_command.is_empty() {
-            harness.adapter_command.clone()
+            harness_default.to_vec()
         } else {
             self.adapter_command.clone()
         }
@@ -64,7 +64,7 @@ pub struct PersonaInfo {
     pub name: String,
     pub system_prompt: String,
     pub harness: String,
-    pub model: Option<String>,
+    pub model: String,
     pub model_provider_id: uuid::Uuid,
 }
 
@@ -101,7 +101,7 @@ struct PersonaRecord {
     name: String,
     system_prompt: String,
     harness: String,
-    model: Option<String>,
+    model: String,
     model_provider_id: uuid::Uuid,
 }
 
@@ -217,10 +217,32 @@ pub fn tool_descriptors() -> Vec<ToolDescriptor> {
 /// Builds `Assign` for the run; identical for every call for the same run.
 pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assign, ChannelError> {
     let config = &ctx.config;
-    let command = rc.project.adapter_command(&config.harness.claude_code);
-    let mut env: std::collections::HashMap<String, String> =
-        config.harness.claude_code.env.clone().into_iter().collect();
-    env.extend(inference_env(ctx, rc).await?);
+    let harness_name = rc.persona.harness.as_str();
+    let (profile, defaults) = harness::profile(harness_name)
+        .zip(config.harness.adapter_command(harness_name))
+        .ok_or_else(|| ChannelError::InvalidData(format!("unknown harness {harness_name}")))?;
+    let (provider, model) = persona_model(ctx, rc).await?;
+    harness::check_compatible(harness_name, model.wire_api, provider.input.scheme).map_err(
+        |error| ChannelError::InvalidData(format!("persona {}: {error}", rc.persona.name)),
+    )?;
+    let command = rc.project.adapter_command(defaults);
+    let mut env: std::collections::HashMap<String, String> = config
+        .harness
+        .env(harness_name)
+        .into_iter()
+        .flatten()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    env.extend(inference_env(ctx, profile, &provider, &model));
+    if rc.project.mounts_harness() {
+        // Paths into the harness image: absent with the project's own adapter.
+        env.extend(
+            profile
+                .mounted_vars
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string())),
+        );
+    }
     Ok(Assign {
         run_id: rc.run.id.to_string(),
         task: Some(TaskRef {
@@ -242,12 +264,11 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             git_config: Vec::new(),
         }),
         harness: Some(Harness {
-            system_prompt: rc.persona.system_prompt.clone(),
-            kind: Some(harness::Kind::Acp(AcpHarness {
+            kind: Some(harness_kind::Kind::Acp(AcpHarness {
                 command,
                 env,
-                model: rc.persona.model.clone(),
-                settings_json: config.harness.claude_code.settings_json.clone(),
+                model: Some(rc.persona.model.clone()),
+                files: harness_files(ctx, rc, profile),
             })),
         }),
         tools: tool_descriptors(),
@@ -262,14 +283,37 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
     })
 }
 
-/// The environment that points the persona's harness at the gateway's inference endpoint: the
-/// base URL, the placeholder API key and the instance CA (design D6, D8). The wire API is the
-/// first of the harness's that the persona's model provider offers. No model credential is among
-/// it: the gateway adds it.
-pub async fn inference_env(
+/// The files below `HOME` of the harness: the persona's system prompt at the profile's path and,
+/// for Claude Code, the configured `settings.json`.
+fn harness_files(
     ctx: &ChannelContext,
     rc: &RunContext,
-) -> Result<Vec<(String, String)>, ChannelError> {
+    profile: &HarnessProfile,
+) -> Vec<HarnessFile> {
+    let mut files = Vec::new();
+    if !rc.persona.system_prompt.is_empty() {
+        files.push(HarnessFile {
+            path: profile.system_prompt_path.to_string(),
+            content: rc.persona.system_prompt.clone(),
+        });
+    }
+    let settings = ctx.config.harness.settings_json(profile.name);
+    if let (Some(path), Some(content)) = (profile.settings_path, settings)
+        && !content.is_empty()
+    {
+        files.push(HarnessFile {
+            path: path.to_string(),
+            content: content.to_string(),
+        });
+    }
+    files
+}
+
+/// The persona's model provider and the model it selects.
+async fn persona_model(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+) -> Result<(ModelProviderRecord, ProviderModel), ChannelError> {
     let provider =
         df_db::model_providers::get_model_provider(&ctx.pool, rc.persona.model_provider_id)
             .await?
@@ -279,36 +323,58 @@ pub async fn inference_env(
                     rc.persona.name
                 ))
             })?;
-    let harness_name = &rc.persona.harness;
-    let wire_api = choose_wire_api(harness_name, &provider.wire_apis()).ok_or_else(|| {
+    let model = provider.model(&rc.persona.model).cloned().ok_or_else(|| {
         ChannelError::InvalidData(format!(
-            "model provider {} offers no wire API of harness {harness_name}",
-            provider.input.name
+            "model {} of persona {} is not a model of provider {}",
+            rc.persona.model, rc.persona.name, provider.input.name
         ))
     })?;
-    let vars = harness_env(harness_name, wire_api, provider.input.scheme).ok_or_else(|| {
-        ChannelError::InvalidData(format!(
-            "harness {harness_name} has no inference environment"
-        ))
-    })?;
-    let mut env = vec![
-        (
-            vars.base_url_var.to_string(),
-            inference_base_url(&ctx.config.git_proxy),
-        ),
-        (vars.key_var.to_string(), PLACEHOLDER_KEY.to_string()),
-    ];
+    Ok((provider, model))
+}
+
+/// The environment that points the persona's harness at the gateway's inference endpoint: the
+/// base URL, the model and the placeholder API key when the harness reads them from variables,
+/// the instance CA, the harness's fixed variables and its configuration document (design D1, D3).
+/// The wire API is the model's. No model credential is among it: the gateway adds it.
+fn inference_env(
+    ctx: &ChannelContext,
+    profile: &HarnessProfile,
+    provider: &ModelProviderRecord,
+    model: &ProviderModel,
+) -> Vec<(String, String)> {
+    let base_url = inference_base_url(&ctx.config.git_proxy);
+    let mut env = Vec::new();
+    if let Some(var) = profile.base_url_var {
+        env.push((var.to_string(), base_url.clone()));
+    }
+    if let Some(var) = profile.model_var {
+        env.push((var.to_string(), model.model_id.clone()));
+    }
+    if let Some(var) = profile.key_var_for(provider.input.scheme) {
+        env.push((var.to_string(), PLACEHOLDER_KEY.to_string()));
+    }
     env.extend(
-        vars.ca_vars
+        profile
+            .ca_vars
             .iter()
             .map(|var| ((*var).to_string(), INSTANCE_CA_PATH.to_string())),
     );
     env.extend(
-        vars.fixed_vars
+        profile
+            .fixed_vars
             .iter()
             .map(|(name, value)| ((*name).to_string(), (*value).to_string())),
     );
-    Ok(env)
+    if let Some(document) = &profile.config {
+        let rendered = (document.render)(&ConfigInput {
+            base_url: &base_url,
+            model_id: &model.model_id,
+            wire_api: model.wire_api,
+            limits: model.limits,
+        });
+        env.push((document.env_var.to_string(), rendered));
+    }
+    env
 }
 
 /// `https://<host>:<port>/inference` on the gateway's Git port.
@@ -422,6 +488,12 @@ mod tests {
     use crate::runs::get_run;
     use crate::testing::Env;
 
+    /// The default adapter command of `claude-code`: Node.js running the adapter, no shell.
+    const CLAUDE_ADAPTER: [&str; 2] = [
+        "/opt/harness/claude-code/bin/node",
+        "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js",
+    ];
+
     fn project(command: &[&str]) -> ProjectInfo {
         ProjectInfo {
             id: ProjectId::new(),
@@ -436,8 +508,11 @@ mod tests {
     #[test]
     fn default_adapter_command_comes_from_the_harness_and_the_image_is_mounted() {
         let project = project(&[]);
-        let harness = ClaudeCodeConfig::default();
-        assert_eq!(project.adapter_command(&harness), harness.adapter_command);
+        let harness = df_core::config::ClaudeCodeConfig::default();
+        assert_eq!(
+            project.adapter_command(&harness.adapter_command),
+            harness.adapter_command
+        );
         assert!(project.mounts_harness());
     }
 
@@ -445,7 +520,7 @@ mod tests {
     fn project_adapter_command_replaces_the_default_and_skips_the_mount() {
         let project = project(&["/opt/harness/bin/fake-acp-agent"]);
         assert_eq!(
-            project.adapter_command(&ClaudeCodeConfig::default()),
+            project.adapter_command(&CLAUDE_ADAPTER.map(String::from)),
             ["/opt/harness/bin/fake-acp-agent"]
         );
         assert!(!project.mounts_harness());
@@ -527,13 +602,10 @@ mod tests {
         assert_eq!(assign.tools.len(), 9);
         assert_eq!(assign.task.expect("task").task_key, "DF-1");
         assert!(assign.continuation.is_none());
-        let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
             anyhow::bail!("expected ACP harness");
         };
-        assert_eq!(
-            acp.command,
-            ["/opt/harness/claude-code/bin/claude-agent-acp"]
-        );
+        assert_eq!(acp.command, CLAUDE_ADAPTER);
         assert_eq!(
             acp.command,
             env.ctx.config.harness.claude_code.adapter_command
@@ -607,7 +679,7 @@ mod tests {
 
         let assign = build_assign(&env.ctx, &rc).await?;
 
-        let Some(harness::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
             anyhow::bail!("expected ACP harness");
         };
         assert_eq!(acp.command, ["/opt/harness/bin/fake-acp-agent"]);
@@ -638,11 +710,24 @@ mod tests {
 
     /// The environment of the harness in the `Assign` of a run of `Env`'s persona.
     async fn harness_env(env: &Env) -> anyhow::Result<std::collections::HashMap<String, String>> {
-        let run = env.insert_run(env.task.id, 1, "connecting").await;
+        harness_env_of_run(env, 1).await
+    }
+
+    /// The environment of the harness in the `Assign` of run `number` of `Env`'s task. Marks the
+    /// earlier runs `failed` first, since only one run of a task may be active.
+    async fn harness_env_of_run(
+        env: &Env,
+        number: i64,
+    ) -> anyhow::Result<std::collections::HashMap<String, String>> {
+        sqlx::query("UPDATE runs SET state = 'failed' WHERE number < $1")
+            .bind(number)
+            .execute(&env.ctx.pool)
+            .await?;
+        let run = env.insert_run(env.task.id, number, "connecting").await;
         let run = get_run(&env.ctx.pool, run).await?.expect("run");
         let rc = load_run_context(&env.ctx.pool, run).await?;
         let assign = build_assign(&env.ctx, &rc).await?;
-        let Some(harness::Kind::Acp(acp)) = assign.harness.and_then(|h| h.kind) else {
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.and_then(|h| h.kind) else {
             anyhow::bail!("no ACP harness");
         };
         Ok(acp.env)
@@ -664,12 +749,59 @@ mod tests {
         assert_eq!(vars["CLAUDE_CODE_OAUTH_TOKEN"], "df-placeholder");
         assert_eq!(vars["NODE_EXTRA_CA_CERTS"], "/run/factory/tls/ca.crt");
         assert_eq!(vars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
+        assert_eq!(
+            vars["CLAUDE_CODE_EXECUTABLE"],
+            "/opt/harness/claude-code/bin/claude"
+        );
         assert!(!vars.contains_key("ANTHROPIC_API_KEY"));
         assert!(
             vars.values()
                 .all(|value| !value.contains("claude-secret-value")),
             "no model credential in the sandbox environment"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claude_code_gets_the_model_of_the_persona_in_every_setup() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+
+        let subscription = harness_env(&env).await?;
+        sqlx::query("UPDATE model_providers SET credential_scheme = 'x-api-key'")
+            .execute(&pool)
+            .await?;
+        let api_key = harness_env_of_run(&env, 2).await?;
+        sqlx::query("UPDATE projects SET adapter_command = ARRAY['/usr/local/bin/my-adapter']")
+            .execute(&pool)
+            .await?;
+        let own_adapter = harness_env_of_run(&env, 3).await?;
+
+        // each setup took effect
+        assert!(subscription.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(api_key.contains_key("ANTHROPIC_API_KEY"));
+        assert!(api_key.contains_key("CLAUDE_CODE_EXECUTABLE"));
+        assert!(!own_adapter.contains_key("CLAUDE_CODE_EXECUTABLE"));
+        for vars in [subscription, api_key, own_adapter] {
+            assert_eq!(vars["ANTHROPIC_MODEL"], "claude-sonnet-5-5");
+            assert!(!vars.contains_key("ANTHROPIC_SMALL_FAST_MODEL"));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claude_code_with_the_adapter_of_the_project_gets_no_path_into_the_harness_image()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        sqlx::query("UPDATE projects SET adapter_command = ARRAY['/usr/local/bin/my-adapter']")
+            .execute(&pool)
+            .await?;
+
+        let vars = harness_env(&env).await?;
+
+        assert!(!vars.contains_key("CLAUDE_CODE_EXECUTABLE"));
+        assert_eq!(vars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
         Ok(())
     }
 
@@ -709,6 +841,171 @@ mod tests {
             vars["ANTHROPIC_BASE_URL"].ends_with("/inference"),
             "{vars:?}"
         );
+        Ok(())
+    }
+
+    /// Turns the persona of `Env` into an `OpenCode` persona on a Chat Completions model with
+    /// limits, next to the Anthropic model, at a provider that offers both APIs.
+    async fn use_opencode(pool: &PgPool) -> anyhow::Result<()> {
+        sqlx::query("UPDATE model_providers SET credential_scheme = 'bearer'")
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+             SELECT id, 'openai-chat', 'https://llm.example.test' FROM model_providers",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO model_provider_models
+             (provider_id, model_id, wire_api, context_window_tokens, max_output_tokens)
+             SELECT id, 'glm-5.3', 'openai-chat', 1000000, 131072 FROM model_providers",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("UPDATE personas SET harness = 'opencode', model = 'glm-5.3'")
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn assign_of(env: &Env) -> anyhow::Result<(AcpHarness, Vec<(String, String)>)> {
+        let run = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&env.ctx.pool, run).await?.expect("run");
+        let rc = load_run_context(&env.ctx.pool, run).await?;
+        let assign = build_assign(&env.ctx, &rc).await?;
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.and_then(|h| h.kind) else {
+            anyhow::bail!("no ACP harness");
+        };
+        let files = acp
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.content.clone()))
+            .collect();
+        Ok((acp, files))
+    }
+
+    #[tokio::test]
+    async fn opencode_gets_its_prompt_file_the_configuration_document_and_no_claude_file()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        use_opencode(&pool).await?;
+
+        let (acp, files) = assign_of(&env).await?;
+
+        assert_eq!(
+            files,
+            [(
+                ".config/opencode/AGENTS.md".to_string(),
+                "You are Linus.".to_string()
+            )]
+        );
+        assert_eq!(acp.command, ["/opt/harness/opencode/bin/opencode", "acp"]);
+        assert_eq!(acp.env["OPENCODE_DISABLE_MODELS_FETCH"], "1");
+        assert_eq!(acp.env["OPENCODE_DISABLE_AUTOUPDATE"], "1");
+        assert_eq!(acp.env["NODE_EXTRA_CA_CERTS"], "/run/factory/tls/ca.crt");
+        assert!(!acp.env.contains_key("ANTHROPIC_BASE_URL"));
+        assert!(!acp.env.contains_key("ANTHROPIC_API_KEY"));
+        assert!(!acp.env.contains_key("ANTHROPIC_MODEL"));
+        let document: serde_json::Value =
+            serde_json::from_str(&acp.env["OPENCODE_CONFIG_CONTENT"])?;
+        let provider = &document["provider"]["df"];
+        assert_eq!(provider["npm"], "@ai-sdk/openai-compatible");
+        assert_eq!(
+            provider["options"]["baseURL"],
+            format!("{}/v1", inference_base_url(&env.ctx.config.git_proxy))
+        );
+        assert_eq!(provider["options"]["apiKey"], "df-placeholder");
+        assert_eq!(
+            provider["models"]["glm-5.3"]["limit"],
+            serde_json::json!({ "context": 1_000_000, "output": 131_072 })
+        );
+        assert_eq!(document["model"], "df/glm-5.3");
+        assert_eq!(document["enabled_providers"], serde_json::json!(["df"]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_run_uses_the_wire_api_of_the_model_not_a_harness_preference() -> anyhow::Result<()>
+    {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        use_opencode(&pool).await?;
+        sqlx::query(
+            "INSERT INTO model_provider_apis (provider_id, wire_api, upstream_url)
+             SELECT id, 'openai-responses', 'https://llm.example.test' FROM model_providers",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO model_provider_models (provider_id, model_id, wire_api)
+             SELECT id, 'gpt-6-luna', 'openai-responses' FROM model_providers",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("UPDATE personas SET model = 'gpt-6-luna'")
+            .execute(&pool)
+            .await?;
+
+        let (acp, _) = assign_of(&env).await?;
+
+        let document: serde_json::Value =
+            serde_json::from_str(&acp.env["OPENCODE_CONFIG_CONTENT"])?;
+        assert_eq!(document["provider"]["df"]["npm"], "@ai-sdk/openai");
+        assert!(document["provider"]["df"]["models"]["gpt-6-luna"]["limit"].is_null());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claude_code_gets_claude_files_and_the_configured_settings() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut env = Env::new(pool).await;
+        let mut config = ChannelConfig::default();
+        config.harness.claude_code.settings_json = r#"{"theme":"dark"}"#.into();
+        env.ctx.config = std::sync::Arc::new(config);
+
+        let (acp, files) = assign_of(&env).await?;
+
+        assert_eq!(
+            files,
+            [
+                (
+                    ".claude/CLAUDE.md".to_string(),
+                    "You are Linus.".to_string()
+                ),
+                (
+                    ".claude/settings.json".to_string(),
+                    r#"{"theme":"dark"}"#.to_string()
+                )
+            ]
+        );
+        assert!(!acp.env.contains_key("OPENCODE_CONFIG_CONTENT"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claude_code_without_settings_gets_only_the_prompt_file() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool).await;
+
+        let (_, files) = assign_of(&env).await?;
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, ".claude/CLAUDE.md");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_model_the_harness_cannot_use_fails_the_assignment() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        use_opencode(&pool).await?;
+        sqlx::query("UPDATE personas SET harness = 'claude-code'")
+            .execute(&pool)
+            .await?;
+
+        assert!(assign_of(&env).await.is_err());
         Ok(())
     }
 

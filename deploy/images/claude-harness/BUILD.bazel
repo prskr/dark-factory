@@ -1,37 +1,48 @@
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@npm_claude_harness//:defs.bzl", "npm_link_all_packages")
-load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_img//img:image.bzl", "image_index", "image_manifest")
 load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
 load("@rules_img//img:push.bzl", "image_push")
-load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//build:optimized.bzl", "optimized")
+load("//deploy/images:musl.bzl", "musl_runtime_files", "patched_binary")
+load(":npm_files.bzl", "npm_files_without_packages")
 
 package(default_visibility = ["//visibility:public"])
 
 npm_link_all_packages(name = "node_modules")
 
-cc_binary(
-    name = "launcher_bin",
-    srcs = ["launcher.c"],
-    linkopts = ["-static"],
-    target_compatible_with = ["@platforms//os:linux"],
+# Node.js and the Claude Code CLI with the interpreter and the library path of this image, so the
+# kernel starts them directly in any project image, glibc or musl (design D6 of
+# iter3-opencode-harness). No launcher: `process.execPath` is the real binary. patchelf has to keep
+# the CLI, a Bun single-file executable, working: the ACP test runs `bin/claude --version`.
+patched_binary(
+    name = "node_patched",
+    srcs = select({
+        "@platforms//cpu:aarch64": ["@node_linux_arm64_musl//:bin/node"],
+        "@platforms//cpu:x86_64": ["@node_linux_amd64_musl//:bin/node"],
+    }),
+    out = "node",
+    prefix = "/opt/harness/claude-code",
 )
 
-optimized(
-    name = "launcher",
-    src = ":launcher_bin",
-)
-
-# The adapter with its dependencies, and the Claude Code CLI of the architecture at the version-free
-# path the launcher uses (hoisted in MODULE.bazel).
-filegroup(
-    name = "npm_packages",
-    srcs = [":node_modules/@agentclientprotocol/claude-agent-acp"] + select({
+patched_binary(
+    name = "claude_patched",
+    srcs = select({
         "@platforms//cpu:aarch64": [":node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl"],
         "@platforms//cpu:x86_64": [":node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl"],
     }),
+    out = "claude",
+    member = "claude",
+    prefix = "/opt/harness/claude-code",
+)
+
+# The adapter with its dependencies, without the unpatched Claude Code CLI that the SDK package
+# brings along (~200 MB): `bin/claude` is built from that package above, and the adapter finds it
+# through CLAUDE_CODE_EXECUTABLE.
+npm_files_without_packages(
+    name = "npm_packages",
+    src = ":node_modules/@agentclientprotocol/claude-agent-acp",
+    package_prefixes = ["@anthropic-ai/claude-agent-sdk-linux-"],
 )
 
 image_layer(
@@ -39,28 +50,14 @@ image_layer(
     srcs = {
         # package_relative: node_modules/... below the image root
         "/": ":npm_packages",
-        "/bin/claude-agent-acp": ":launcher",
-    } | select({
-        "@platforms//cpu:aarch64": {
-            "/lib/ld-musl-aarch64.so.1": "@musl_runtime_linux_arm64//:lib/libc.so",
-            "/lib/libgcc_s.so.1": "@musl_runtime_linux_arm64//:lib/libgcc_s.so.1",
-            "/lib/libstdc++.so.6": "@musl_runtime_linux_arm64//:usr/lib/libstdc++.so.6",
-            "/node": "@node_linux_arm64_musl//:bin/node",
-        },
-        "@platforms//cpu:x86_64": {
-            "/lib/ld-musl-x86_64.so.1": "@musl_runtime_linux_amd64//:lib/libc.so",
-            "/lib/libgcc_s.so.1": "@musl_runtime_linux_amd64//:lib/libgcc_s.so.1",
-            "/lib/libstdc++.so.6": "@musl_runtime_linux_amd64//:usr/lib/libstdc++.so.6",
-            "/node": "@node_linux_amd64_musl//:bin/node",
-        },
-    }),
+        "/bin/node": ":node_patched",
+        "/bin/claude": ":claude_patched",
+    } | musl_runtime_files(),
     file_metadata = {
-        "/bin/claude-agent-acp": file_metadata(mode = "0755"),
+        "/bin/node": file_metadata(mode = "0755"),
+        "/bin/claude": file_metadata(mode = "0755"),
     },
     include_runfiles = False,
-    symlinks = {
-        "/bin/claude": "claude-agent-acp",
-    },
 )
 
 image_manifest(
@@ -107,12 +104,14 @@ image_push(
 )
 
 TEST_ARGS = [
+    "$(rootpath //deploy/images:lib.sh)",
     "$(rootpath @multitool//tools/jq)",
     "$(rootpath :oci_layout)",
     "$(rootpath package.json)",
 ]
 
 TEST_DATA = [
+    "//deploy/images:lib.sh",
     "package.json",
     ":oci_layout",
     "@multitool//tools/jq",
@@ -127,10 +126,20 @@ sh_test(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
-# ACP handshake in a glibc and a musl project image: `CONTAINER_CLI=podman bazel run :handshake`
-sh_binary(
-    name = "handshake",
+# ACP `initialize` and `bin/claude --version` from the mounted volume in a glibc and a musl project
+# image. It needs a container runtime, which the Bazel sandbox hides, so the test runs without the
+# sandbox (`no-sandbox`) and takes the CLI and the socket from the environment:
+#   bazel --bazelrc=.bazelrc.agents test //deploy/images/claude-harness:test \\
+#     --test_env=CONTAINER_CLI --test_env=DOCKER_HOST=unix://<socket>
+# `external` marks a test that needs more than the repository.
+sh_test(
+    name = "test",
     srcs = ["test.sh"],
-    args = TEST_ARGS + ["--handshake"],
+    args = TEST_ARGS + ["--acp"],
     data = TEST_DATA,
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
 )

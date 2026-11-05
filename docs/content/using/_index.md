@@ -28,7 +28,8 @@ Set up in this order:
 
 1. [Credentials, projects and personas](setup.md): references to the forge and model
    credentials, the repositories and the agents.
-2. [Model providers](model-providers.md): the model services agents use and their credentials.
+2. [Model providers](model-providers.md): the model services agents use, their models and credentials.
+   [OpenCode](opencode.md) shows a persona with the second harness.
 3. [Tasks](tasks.md): describe the work, follow the transcript, send messages, stop or cancel.
 4. [Requests](requests.md): answer questions and decide approvals.
 5. [Network access](network-access.md): allow the hosts agents need.

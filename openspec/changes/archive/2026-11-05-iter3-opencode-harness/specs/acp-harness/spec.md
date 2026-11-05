@@ -29,11 +29,11 @@ The control plane SHALL pass the persona's system prompt as a harness file at th
 ## MODIFIED Requirements
 
 ### Requirement: Harness start
-The runtime SHALL write the harness files from `Assign` under `/data/home` and start the adapter command of `Assign` (the project's, otherwise the harness image's default) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment and the `Assign` env: the inference configuration of the harness (base URL and placeholder key variables, or a configuration document), CA variables and the harness's fixed variables, for `claude-code` `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. It SHALL NOT advertise ACP file-system or terminal client capabilities.
+The runtime SHALL write the harness files from `Assign` under `/data/home` and start the adapter command of `Assign` (the project's, otherwise the harness image's default) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment and the `Assign` env: the inference configuration of the harness (base URL and placeholder key variables, or a configuration document), CA variables and the harness's fixed variables, for `claude-code` `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `ANTHROPIC_MODEL` set to the persona's model ID and, when the harness image is mounted, `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude`. It SHALL NOT advertise ACP file-system or terminal client capabilities.
 
 #### Scenario: Adapter from the harness image
 - **WHEN** a run of a project without an adapter command starts
-- **THEN** the runtime starts `/opt/harness/claude-code/bin/claude-agent-acp`
+- **THEN** the runtime starts `/opt/harness/claude-code/bin/node /opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js`
 
 #### Scenario: OpenCode adapter from the harness image
 - **WHEN** a run of an `opencode` persona in a project without an adapter command starts
@@ -41,7 +41,7 @@ The runtime SHALL write the harness files from `Assign` under `/data/home` and s
 
 #### Scenario: Adapter from the project image
 - **WHEN** a run of a project with adapter command `/opt/harness/bin/fake-acp-agent` starts
-- **THEN** the runtime starts that command
+- **THEN** the runtime starts that command, and for `claude-code` the env has no `CLAUDE_CODE_EXECUTABLE`
 
 #### Scenario: Claude Code sends no non-essential traffic
 - **WHEN** a run of the `claude-code` harness starts, with a subscription or an API key provider
@@ -50,3 +50,7 @@ The runtime SHALL write the harness files from `Assign` under `/data/home` and s
 #### Scenario: Model traffic bypasses the egress proxy
 - **WHEN** the harness calls its base URL
 - **THEN** the request goes directly to the gateway's inference endpoint, not through the CONNECT proxy
+
+#### Scenario: Claude Code uses the persona's model
+- **WHEN** a run of a `claude-code` persona with model `claude-sonnet-5-5` starts
+- **THEN** the harness environment contains `ANTHROPIC_MODEL=claude-sonnet-5-5`, so Claude Code sends that model to the inference endpoint instead of its default

@@ -127,6 +127,11 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/iter3-task-dependencies` |
 | Dependencies set by humans also covers `base_task` in the new-task composer | idea | `openspec/changes/iter3-task-tree` |
 | Base-branch notices: tell open tasks with own commits that their base branch moved (subtask merged, rebase), without waking them | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Pi harness: a profile plus its files (`AcpHarness.files` prepared in iter3) | idea | `openspec/changes/iter3-opencode-harness` (out of scope) |
+| Import a provider's model list from its `/v1/models` | idea | `openspec/changes/iter3-opencode-harness` (out of scope) |
+| OpenCode Go preset check with a real key: Chat Completions and Anthropic Messages models with scheme `bearer`, reasoning output without the catalog's `reasoning_field` | idea | `openspec/changes/iter3-opencode-harness` (task 9.3, postponed) |
+| Real Claude Code run with a project's own adapter command (no harness mount, no `CLAUDE_CODE_EXECUTABLE`) | idea | `openspec/changes/iter3-opencode-harness` (manual check postponed) |
+| Check whether a repository's `.claude/settings.json` (`env`, for example `ANTHROPIC_BASE_URL`) can redirect Claude Code away from the inference endpoint, as checked for OpenCode | idea | `openspec/changes/iter3-opencode-harness` (task 9.2 results) |
 | Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
 | `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |

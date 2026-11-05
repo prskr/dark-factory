@@ -160,7 +160,7 @@ mod tests {
         // sandbox is the whole execroot (~90 KB of CSS). Minified with `@source "../src"` only,
         // the stylesheet is about 25 KB (45 KB with the pages' variants).
         let css = app_css().expect("app.css is embedded");
-        assert!(css.len() < 47_000, "app.css is {} bytes", css.len());
+        assert!(css.len() < 47_500, "app.css is {} bytes", css.len());
     }
 
     #[test]

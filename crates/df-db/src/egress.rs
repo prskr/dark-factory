@@ -757,7 +757,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
@@ -922,7 +922,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
@@ -991,7 +991,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model_provider_id) VALUES ($1, 'p', 'x', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await

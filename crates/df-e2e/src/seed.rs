@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use df_core::Principal;
-use df_core::model_provider::{CredentialScheme, ProviderApi, WireApi};
+use df_core::model_provider::{CredentialScheme, ProviderApi, ProviderModel, WireApi};
 use df_db::PgPool;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, ProjectInput, get_project_by_key,
@@ -137,6 +137,11 @@ async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> 
             wire_api: WireApi::AnthropicMessages,
             upstream_url: data::fake_upstream_url(),
         }],
+        models: vec![ProviderModel {
+            model_id: data::PERSONA_MODEL.into(),
+            wire_api: WireApi::AnthropicMessages,
+            limits: None,
+        }],
     };
     let existing = list_model_providers(pool)
         .await?
@@ -158,7 +163,7 @@ async fn ensure_persona(pool: &PgPool, actor: Actor<'_>, provider: Uuid) -> Resu
         name: data::PERSONA_NAME.into(),
         system_prompt: "You are the e2e persona.".into(),
         harness: df_core::config::CLAUDE_CODE_HARNESS.into(),
-        model: None,
+        model: data::PERSONA_MODEL.into(),
         model_provider_id: provider,
     };
     let existing = list_personas(pool)

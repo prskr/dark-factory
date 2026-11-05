@@ -364,6 +364,8 @@ sh_binary(
         "$(location :plugin_github_digest)",
         "$(location //deploy/images/claude-harness:push)",
         "$(location //deploy/images/claude-harness:digest)",
+        "$(location //deploy/images/opencode-harness:push)",
+        "$(location //deploy/images/opencode-harness:digest)",
         "$(location helm/dark-factory/Chart.yaml)",
         "$(location values-dev.yaml)",
     ],
@@ -379,6 +381,8 @@ sh_binary(
         ":test_project_digest",
         "//deploy/images/claude-harness:digest",
         "//deploy/images/claude-harness:push",
+        "//deploy/images/opencode-harness:digest",
+        "//deploy/images/opencode-harness:push",
     ],
 )
 

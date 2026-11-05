@@ -1,0 +1,4 @@
+exports_files(
+    ["lib.sh"],
+    visibility = ["//deploy/images:__subpackages__"],
+)

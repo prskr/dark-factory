@@ -457,24 +457,75 @@ impl Default for CommitIdentityConfig {
 /// Name of the Claude Code harness (persona `harness` value, key of the harness image map).
 pub const CLAUDE_CODE_HARNESS: &str = "claude-code";
 
+/// Name of the `OpenCode` harness (persona `harness` value, key of the harness image map).
+pub const OPENCODE_HARNESS: &str = "opencode";
+
 /// Instance-wide harness defaults; persona fields override them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnessConfig {
     #[serde(default)]
     pub claude_code: ClaudeCodeConfig,
+    #[serde(default)]
+    pub opencode: OpenCodeConfig,
 }
 
 impl HarnessConfig {
+    /// The one place that maps a harness name to its config section; a new harness adds a
+    /// profile (`harness::PROFILES`) and an arm here.
+    fn entry(&self, harness: &str) -> Option<HarnessEntry<'_>> {
+        match harness {
+            CLAUDE_CODE_HARNESS => Some(HarnessEntry {
+                image: &self.claude_code.image,
+                adapter_command: &self.claude_code.adapter_command,
+                env: &self.claude_code.env,
+                settings_json: Some(&self.claude_code.settings_json),
+            }),
+            OPENCODE_HARNESS => Some(HarnessEntry {
+                image: &self.opencode.image,
+                adapter_command: &self.opencode.adapter_command,
+                env: &self.opencode.env,
+                settings_json: None,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Command that starts the adapter of `harness` unless the project sets its own; `None` for
+    /// an unknown harness.
+    pub fn adapter_command(&self, harness: &str) -> Option<&[String]> {
+        self.entry(harness).map(|e| e.adapter_command)
+    }
+
+    /// Non-secret environment configured for `harness`; `None` for an unknown harness.
+    pub fn env(&self, harness: &str) -> Option<&BTreeMap<String, String>> {
+        self.entry(harness).map(|e| e.env)
+    }
+
+    /// The configured settings file content of `harness`; `None` when it has none or is
+    /// unknown.
+    pub fn settings_json(&self, harness: &str) -> Option<&str> {
+        self.entry(harness)?.settings_json
+    }
+
     /// Harness name to image, handed to the sandbox provider. A blank image counts as not
     /// configured and is left out.
     pub fn images(&self) -> BTreeMap<String, String> {
-        [(CLAUDE_CODE_HARNESS, &self.claude_code.image)]
-            .into_iter()
-            .filter(|(_, image)| !image.trim().is_empty())
-            .map(|(name, image)| (name.to_string(), image.trim().to_string()))
+        crate::harness::PROFILES
+            .iter()
+            .filter_map(|profile| Some((profile.name, self.entry(profile.name)?.image.trim())))
+            .filter(|(_, image)| !image.is_empty())
+            .map(|(name, image)| (name.to_string(), image.to_string()))
             .collect()
     }
+}
+
+/// The configured defaults of one harness, borrowed from [`HarnessConfig`].
+struct HarnessEntry<'a> {
+    image: &'a str,
+    adapter_command: &'a [String],
+    env: &'a BTreeMap<String, String>,
+    settings_json: Option<&'a str>,
 }
 
 /// Defaults for the `claude-code` harness.
@@ -504,6 +555,33 @@ impl Default for ClaudeCodeConfig {
             adapter_command: default_adapter_command(),
             env: BTreeMap::new(),
             settings_json: String::new(),
+        }
+    }
+}
+
+/// Defaults for the `opencode` harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenCodeConfig {
+    /// Image holding the harness (patched release binary and the musl runtime it needs); the control plane mounts it
+    /// read-only at `/opt/harness/opencode` in the sandbox of every run whose project has no
+    /// adapter command of its own.
+    #[serde(default = "default_opencode_image")]
+    pub image: String,
+    /// Command that starts the adapter, unless the project sets its own.
+    #[serde(default = "default_opencode_adapter_command")]
+    pub adapter_command: Vec<String>,
+    /// Non-secret environment.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+impl Default for OpenCodeConfig {
+    fn default() -> Self {
+        Self {
+            image: default_opencode_image(),
+            adapter_command: default_opencode_adapter_command(),
+            env: BTreeMap::new(),
         }
     }
 }
@@ -711,7 +789,23 @@ fn default_claude_code_image() -> String {
 }
 
 fn default_adapter_command() -> Vec<String> {
-    vec!["/opt/harness/claude-code/bin/claude-agent-acp".to_string()]
+    vec![
+        "/opt/harness/claude-code/bin/node".to_string(),
+        "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
+            .to_string(),
+    ]
+}
+
+/// The `OpenCode` version is the tag of the harness image (`deploy/images/opencode-harness`).
+fn default_opencode_image() -> String {
+    "ghcr.io/prskr/dark-factory/opencode-harness:2.2.5".to_string()
+}
+
+fn default_opencode_adapter_command() -> Vec<String> {
+    vec![
+        "/opt/harness/opencode/bin/opencode".to_string(),
+        "acp".to_string(),
+    ]
 }
 
 fn default_plugin_call_timeout() -> u64 {
@@ -990,21 +1084,69 @@ sandbox:
     #[test]
     fn harness_images_come_from_the_parsed_instance_config() {
         let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
-                    harness:\n  claudeCode:\n    image: registry.example/harness:1\n";
+                    harness:\n  claudeCode:\n    image: registry.example/harness:1\n\
+                    \x20 opencode:\n    image: registry.example/opencode:2\n";
         let cfg = InstanceConfig::from_yaml_str(yaml).unwrap();
         assert_eq!(
             cfg.harness.images(),
-            BTreeMap::from([(
-                CLAUDE_CODE_HARNESS.to_string(),
-                "registry.example/harness:1".to_string()
-            )])
+            BTreeMap::from([
+                (
+                    CLAUDE_CODE_HARNESS.to_string(),
+                    "registry.example/harness:1".to_string()
+                ),
+                (
+                    OPENCODE_HARNESS.to_string(),
+                    "registry.example/opencode:2".to_string()
+                )
+            ])
         );
+    }
+
+    #[test]
+    fn opencode_defaults_and_overrides_come_from_the_instance_config() {
+        let base = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let cfg = InstanceConfig::from_yaml_str(base).unwrap();
+        assert_eq!(
+            cfg.harness.opencode.adapter_command,
+            ["/opt/harness/opencode/bin/opencode", "acp"]
+        );
+        assert_eq!(
+            cfg.harness.opencode.image,
+            "ghcr.io/prskr/dark-factory/opencode-harness:2.2.5"
+        );
+        assert!(cfg.harness.opencode.env.is_empty());
+        assert_eq!(cfg.harness.images().len(), 2);
+
+        let yaml = format!(
+            "{base}harness:\n  opencode:\n    image: registry.example/oc:1\n    adapterCommand: [/bin/oc]\n    env:\n      A: b\n"
+        );
+        let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+        assert_eq!(
+            cfg.harness.images()[OPENCODE_HARNESS],
+            "registry.example/oc:1"
+        );
+        assert_eq!(
+            cfg.harness.adapter_command(OPENCODE_HARNESS),
+            Some(&["/bin/oc".to_string()][..])
+        );
+        assert_eq!(cfg.harness.env(OPENCODE_HARNESS).unwrap()["A"], "b");
+        assert!(cfg.harness.adapter_command("nope").is_none());
+    }
+
+    #[test]
+    fn opencode_rejects_unknown_keys() {
+        let base = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let err = InstanceConfig::from_yaml_str(&format!(
+            "{base}harness:\n  opencode:\n    settingsJson: x\n"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("unknown field"), "{err}");
     }
 
     #[test]
     fn blank_harness_image_counts_as_not_configured() {
         let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
-                    harness:\n  claudeCode:\n    image: \"  \"\n";
+                    harness:\n  claudeCode:\n    image: \"  \"\n  opencode:\n    image: \"\"\n";
         let cfg = InstanceConfig::from_yaml_str(yaml).unwrap();
         assert!(cfg.harness.images().is_empty());
     }
@@ -1183,7 +1325,10 @@ database:
         assert_eq!(cfg.runs.max_auto_resumes, 3);
         assert_eq!(
             cfg.harness.claude_code.adapter_command,
-            ["/opt/harness/claude-code/bin/claude-agent-acp"]
+            [
+                "/opt/harness/claude-code/bin/node",
+                "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
+            ]
         );
         assert_eq!(
             cfg.harness.claude_code.image,

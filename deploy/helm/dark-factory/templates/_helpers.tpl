@@ -107,6 +107,18 @@ Claude Code harness image reference (supports digest or tag)
 {{- end }}
 
 {{/*
+OpenCode harness image reference (supports digest or tag)
+*/}}
+{{- define "dark-factory.harness.opencode.image" -}}
+{{- $img := .Values.image.harness.opencode -}}
+{{- if $img.digest }}
+{{- printf "%s@%s" $img.repository $img.digest }}
+{{- else }}
+{{- printf "%s:%s" $img.repository (required "image.harness.opencode.tag or .digest is required (the harness is tagged with its OpenCode version, not the chart appVersion)" $img.tag) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Test project image reference (supports digest or tag)
 */}}
 {{- define "dark-factory.testProject.image" -}}

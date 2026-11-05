@@ -23,7 +23,7 @@ Format `YYYY.M.N`: year and month (UTC, no leading zero) of the release date, an
 ```mermaid
 flowchart LR
   A[version: guard main, cargo xtask next-version] --> B[images: bazel run //deploy:push_images]
-  A --> C[reference-images: claude-project, claude-harness, harness digest]
+  A --> C[reference-images: claude-project, claude-harness, opencode-harness, harness digests]
   B --> D[chart: pin harness digest, helm package, helm push]
   C --> D
   D --> E[publish: gh release create]
@@ -34,8 +34,8 @@ flowchart LR
 |---|---|
 | `version` | Fails unless the run is on `main`. Outputs the version and the commit SHA that all later jobs check out. |
 | `images` | Verifies the images and pushes control plane, runtime, both plugins and test project with `--//build:version=<version>`. |
-| `reference-images` | Pushes `claude-project:<version>` and `claude-harness:<adapter version>`; outputs the digest of the harness image. |
-| `chart` | Runs after both image jobs, so a published chart never references a missing image. Copies the chart, writes the harness digest into `image.harness.claudeCode.digest`, packages it with `--version` and `--app-version` set to the release version and pushes it to `oci://ghcr.io/prskr/dark-factory/charts/dark-factory`. |
+| `reference-images` | Pushes `claude-project:<version>`, `claude-harness:<adapter version>` and `opencode-harness:<OpenCode version>`; outputs the digests of the harness images. |
+| `chart` | Runs after both image jobs, so a published chart never references a missing image. Copies the chart, writes the harness digests into `image.harness.claudeCode.digest` and `image.harness.opencode.digest`, packages it with `--version` and `--app-version` set to the release version and pushes it to `oci://ghcr.io/prskr/dark-factory/charts/dark-factory`. |
 | `publish` | Creates tag `v<version>` on the built commit and the GitHub Release with generated notes. Only job with `contents: write`. |
 | `docs` | Runs after `publish`, so no docs exist for a version without a tag. Builds the docs from the released commit and publishes `/docs/<version>/`, `/docs/latest/` and `/versions.json` to `gh-pages` (see "Docs site"). Re-run this job alone when it fails. |
 
