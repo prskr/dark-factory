@@ -84,3 +84,6 @@ jobs:
 
       - name: E2E suite
         run: deploy/e2e/e2e-local.sh
+        env:
+          # The runner has the memory for two sandboxes and browser contexts at a time (docs/demo.md)
+          E2E_TEST_THREADS: "2"
