@@ -1,6 +1,6 @@
 # Tasks
 
-Prerequisites: `iter3-task-dependencies` (`parent_id`, `create_task`, `record_task_event`, `tasks/delegation.rs`) and `iter3-webhooks` (`tasks.pr_merged_at`, merged-PR path) are merged.
+Prerequisites: `iter3-task-dependencies` (`parent_id`, `create_task`, the task transitions `transition` / `apply_task_event` of ADR-0055, `tasks/delegation.rs`) and `iter3-webhooks` (`tasks.pr_merged_at`, merged-PR path) are merged.
 
 Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS.md`.
 
@@ -40,7 +40,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - `df-core` config tests for the defaults;
   - tool tests for every scenario of "Delegation limits";
   - `helm unittest` for the rendered values.
-- [ ] 4.4 Write failing `df-db` tests, then extend `cancel_task` to the subtree (design D6). Verify with `cargo test -p df-db cancel` covering:
+- [ ] 4.4 Write failing tests, then add `Cancelled { via }` and the parent `TaskChanged` rule to `transition` (unit tests in `df-core`), and extend `cancel_task` to the subtree (design D6). Verify with `cargo test -p df-core task_transition` and `cargo test -p df-db cancel` covering:
   - every scenario of "Cancelling a subtree";
   - a concurrent run end of a descendant (two transactions, both orders) without deadlock.
 

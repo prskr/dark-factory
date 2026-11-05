@@ -11,9 +11,9 @@
 - **Web** (`crates/df-web/src/requests.rs`): the inbox, the navigation badge and the task cards (`task_cards`). Every route requires the `board-member` role.
 - **From `iter3-task-dependencies`**:
   - `tasks.parent_id`;
-  - `record_task_event(tx, task_id, TaskEvent)`, which runs on Completed, Done, Failed and Cancelled and wakes the parent;
+  - the task transitions ([ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)): the pure `df_core::task_transition::transition(&TaskSnapshot, TaskEvent) -> Transition { status, effects }` and the applier `df_db::apply_task_event`, which locks the task and executes the effects in the caller's transaction. A Completion, Done, failure or cancellation wakes the parent through the `NotifyParent` effect;
   - the child-ended message, which quotes agent output under a line naming its source.
-- **From `iter3-chats`**: `CHAT_TOOLS` and the dispatch check for chat runs; `df_db::chats` archive and unarchive.
+- **From `iter3-chats`**: `CHAT_TOOLS` and the dispatch check for chat runs; archive and unarchive as the `Archived` and `Unarchived` task events.
 - **Final task statuses**: `completed` (Done), `cancelled` and `failed`. `in_review` is a Completion and isn't final.
 
 ## Goals / Non-Goals
@@ -57,7 +57,7 @@ Merging is unchanged. The unique index and the fingerprint ignore the addressee,
 2. **Insert or merge** with `raise_in`, as today.
 3. **Queue the message:** only for a new row addressed to a parent, queue the `question.asked` message on the parent with `queue_message_tx`.
 
-The `FOR SHARE` lock conflicts with the row lock that `record_task_event` and archiving take, as in the release race of `iter3-task-dependencies` (D3). Either the question commits first and is readdressed by the event, or the event commits first and the question sees the final status. No question is left addressed to an ended parent.
+The `FOR SHARE` lock conflicts with the row lock that `apply_task_event` takes on the parent for its own Done, failure, cancellation or archiving, as in the release race of `iter3-task-dependencies` (D3). Either the question commits first and is readdressed by the event, or the event commits first and the question sees the final status. No question is left addressed to an ended parent.
 
 The tool default for `to` is resolved in the handler: `parent` when the run's task has a `parent_id`, otherwise `human`.
 
@@ -73,11 +73,14 @@ RETURNING id, task_id
 
 It writes the audit entry `request.readdress` with the system principal for each row.
 
-Callers:
-- `record_task_event` for `Done`, `Failed` and `Cancelled` on the task itself, as the task that ended. Not for `Completed`.
-- `df_db::chats::archive`, after its checks. A pending question addressed to the chat doesn't block archiving.
+It is the executor of a new effect `ReaddressQuestions`. `transition` emits it in two cases:
 
-Unarchive doesn't touch requests.
+- **The task becomes final**: any transition whose resulting status is `completed`, `cancelled` or `failed`, and whose previous status wasn't. This covers mark done, a merged PR, cancel (each task of a subtree too), a failed run and exhausted resumes. Not a Completion (`in_review`).
+- **`Archived`**, after its checks. A pending question addressed to the chat doesn't block archiving; the `Archived` arm only checks the chat's own requests.
+
+`Unarchived` emits no `ReaddressQuestions`.
+
+Because the effect hangs on the resulting status and not on the caller, a new path that ends a task readdresses questions without another call site.
 
 ### D4: The `question.asked` message
 
