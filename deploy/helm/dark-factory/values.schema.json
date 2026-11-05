@@ -257,7 +257,14 @@
     "web": {
       "type": "object",
       "properties": {
-        "showHiddenBlocks": { "type": "boolean" }
+        "showHiddenBlocks": { "type": "boolean" },
+        "codeTheme": {
+          "type": "object",
+          "properties": {
+            "light": { "$ref": "#/$defs/codeTheme" },
+            "dark": { "$ref": "#/$defs/codeTheme" }
+          }
+        }
       }
     },
     "controlPlane": {
@@ -423,6 +430,17 @@
     }
   ],
   "$defs": {
+    "codeTheme": {
+      "enum": [
+        "InspiredGitHub",
+        "Solarized (light)",
+        "Solarized (dark)",
+        "base16-ocean.light",
+        "base16-ocean.dark",
+        "base16-eighties.dark",
+        "base16-mocha.dark"
+      ]
+    },
     "plugin": {
       "type": "object",
       "properties": {

@@ -32,8 +32,8 @@ use crate::components::forms::INPUT_CLASS;
 use crate::components::{ButtonKind, EmptyPanel, EmptySize, action_class, page_header, tone_badge};
 use crate::components::{Tone, chip};
 use crate::layout::{Nav, Shell, layout};
+use crate::markdown;
 use crate::responses::{internal_error, not_found};
-use crate::transcript::markdown;
 
 /// Safety net against lost notifications.
 const POLL: Duration = Duration::from_secs(5);
@@ -161,12 +161,12 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
                 a href={"/tasks/" (card.task_key)} class="font-medium text-accent-text hover:underline" { (card.task_key) }
                 span class="min-w-0 truncate" { (card.task_title) }
             }
-            div class="min-w-0 break-words text-sm [&_p]:my-1" {
+            div class="md-body min-w-0 break-words text-sm [&_p]:my-1" {
                 @match row.kind {
-                    RequestKind::Question => (markdown(row.question_text())),
+                    RequestKind::Question => (markdown::render(row.question_text())),
                     RequestKind::Approval => {
                         @if !card.summary.is_empty() { p class="font-medium" { (card.summary) } }
-                        @if !row.reason.is_empty() { (markdown(&row.reason)) }
+                        @if !row.reason.is_empty() { (markdown::render(&row.reason)) }
                     }
                 }
             }

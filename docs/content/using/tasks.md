@@ -31,6 +31,24 @@ The task view has three columns: the task list, the transcript and the details.
   [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
   no usage are counted separately ("2 requests without usage") instead of as zero.
 
+## Agent messages: Markdown, code and diagrams
+
+An agent message is plain text while it streams and is rendered as Markdown when its turn ends.
+
+- **Safety**: the text is untrusted. HTML in it is shown as text, images appear as links (the
+  browser loads nothing an agent names), links with unsafe schemes are dropped and every link opens
+  with `rel="noopener noreferrer nofollow"`.
+- **Code**: a fenced block is highlighted when its info string names a language or file extension
+  (` ```rust `, ` ```rs `). Blocks without a language, with an unknown one or over 64 KiB stay
+  plain; the language is never guessed from the content. The theme follows the browser's light or
+  dark color scheme; the operator picks the themes with `web.codeTheme.light` and
+  `web.codeTheme.dark` ([instance configuration](../reference/agent-channel/configuration.md)).
+- **Diagrams**: a ` ```mermaid ` fence is drawn as a diagram in the browser, in a light or dark
+  theme following the color scheme. The diagram runs isolated from the page (sandboxed iframe), so
+  its source cannot run script in the page. A diagram that cannot be parsed stays a code block
+  with a one-line error. The diagram renderer (about 3 MB) is loaded only on pages that contain a
+  diagram. Without JavaScript the diagram source is shown as a code block.
+
 ## Status
 
 | Status | Meaning |

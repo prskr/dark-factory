@@ -16,7 +16,7 @@ use rust_embed::{EmbeddedFile, RustEmbed};
 #[folder = "$OUT_DIR/assets/"]
 pub struct Assets;
 
-const CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+pub(crate) const CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
 /// Returns a bundled static asset by relative path.
 pub fn get_asset(path: &str) -> Option<EmbeddedFile> {
@@ -123,6 +123,7 @@ mod tests {
             "vendor/hx-sse.min.js",
             "vendor/alpine.min.js",
             "egress-log.js",
+            "vendor/mermaid.min.js",
         ] {
             assert!(get_asset(path).is_some(), "{path}");
         }
@@ -258,6 +259,53 @@ mod tests {
         assert_eq!(
             get_path("/assets/nope.js").await.status(),
             StatusCode::NOT_FOUND
+        );
+    }
+
+    #[test]
+    fn markdown_component_keeps_diagrams_isolated() {
+        let js = script_source("markdown.js");
+        assert!(js.contains("Alpine.data('mermaidDiagram'"));
+        assert!(js.contains("securityLevel: 'sandbox'"));
+        // `%%{init}%%` in the diagram source must not be able to lower the level.
+        assert!(js.contains("secure: SECURE"), "{js}");
+        assert!(js.contains("'securityLevel',"), "{js}");
+        // The source reaches the page as text only; innerHTML takes Mermaid's output.
+        assert!(js.contains("textContent"));
+        for line in js
+            .lines()
+            .filter(|l| l.contains("innerHTML") && !l.trim_start().starts_with("//"))
+        {
+            assert!(
+                line.contains("svg") && !line.contains("source"),
+                "innerHTML from something else than the render result: {line}"
+            );
+        }
+        assert!(
+            js.contains("removeEventListener"),
+            "listener removed in destroy"
+        );
+    }
+
+    #[test]
+    fn markdown_component_restores_its_diagram_after_a_morph() {
+        let js = script_source("markdown.js");
+        // A morph resets `hidden` on the `<pre>` and removes the sibling diagram: the component
+        // watches both and puts the current view back, without creating a second diagram.
+        assert!(js.contains("new MutationObserver"), "{js}");
+        assert!(js.contains("attributeFilter: ['hidden']"), "{js}");
+        assert!(js.contains("{ childList: true }"), "{js}");
+        assert!(
+            js.contains("isConnected"),
+            "creates a sibling only when it is gone"
+        );
+        assert!(
+            js.contains("this.resizer.unobserve(this[name])"),
+            "replaced diagrams are unobserved"
+        );
+        assert!(
+            js.contains("this.observer.disconnect()"),
+            "observer ends with the component"
         );
     }
 

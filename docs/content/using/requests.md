@@ -29,5 +29,7 @@ with a fallback.
 - Completing or cancelling a task closes its pending requests.
 - Raising, deciding and closing are audited.
 
-Request texts come from the agent and are shown as plain text: links are not followed and no HTML is
-rendered.
+Request texts (questions and approval reasons) come from the agent and are rendered as Markdown with
+the same rules as [agent messages](tasks.md#agent-messages-markdown-code-and-diagrams): HTML in the
+text is shown as text, images appear as links, unsafe links are dropped, fenced code is highlighted
+and `mermaid` fences are drawn as diagrams in an isolated frame.

@@ -46,6 +46,9 @@ data:
       allowPlainHttp: {{ .Values.network.allowPlainHttp }}
     web:
       showHiddenBlocks: {{ .Values.web.showHiddenBlocks }}
+      codeTheme:
+        light: {{ .Values.web.codeTheme.light | quote }}
+        dark: {{ .Values.web.codeTheme.dark | quote }}
     harness:
       claudeCode:
         image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}

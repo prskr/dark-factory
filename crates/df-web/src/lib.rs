@@ -11,6 +11,7 @@ mod config_pages;
 pub mod egress;
 pub mod layout;
 mod lifecycle_events;
+pub mod markdown;
 mod project_subscriptions;
 mod requests;
 mod responses;
@@ -63,6 +64,8 @@ pub struct WebState {
     pub services: Option<Arc<dyn egress::ServiceLookup>>,
     /// Show transcript content blocks marked `hidden` (`web.showHiddenBlocks`).
     pub show_hidden_blocks: bool,
+    /// The stylesheet of highlighted code (`web.codeTheme`), generated at startup.
+    pub code_theme: markdown::CodeTheme,
     /// Accept `http://` repository URLs in the project form (`network.allowPlainHttp`).
     pub allow_plain_http: bool,
     /// `runs.maxAutoResumes`, the denominator of the resume count on the task detail.
@@ -136,6 +139,7 @@ pub fn router(state: WebState) -> Router {
         .layer(sessions)
         .with_state(state.clone());
     base_routes(state.pool, state.lifecycle_public_key)
+        .merge(state.code_theme.routes())
         .merge(ui)
         .layer(CompressionLayer::new())
 }
@@ -164,6 +168,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(header_str(&css, "content-encoding"), "br");
+    }
+
+    // Needs a PostgreSQL container (testcontainers).
+    #[tokio::test]
+    async fn pages_link_the_hashed_code_theme_stylesheet() {
+        let app = TestApp::new().await;
+        let cookie = app.login().await;
+        let plain = Request::get("/tasks")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let page = app.send(plain).await;
+        let page = String::from_utf8(
+            axum::body::to_bytes(page.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        let url = crate::markdown::CodeTheme::default().url().to_owned();
+        assert!(page.contains(&format!("href=\"{url}\"")), "{page}");
     }
 
     // Needs a PostgreSQL container (testcontainers).

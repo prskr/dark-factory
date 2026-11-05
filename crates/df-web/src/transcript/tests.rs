@@ -278,7 +278,7 @@ fn a_long_code_line_stays_inside_a_block_that_scrolls_horizontally() {
     let html = render_all(&folder);
     // The code is in a `pre` inside the Markdown body, not in the page flow ...
     let body = &html[html.find("md-body").expect("markdown body")..];
-    let pre = &body[body.find("<pre>").expect("pre block")..];
+    let pre = &body[body.find("<pre class=\"hl-code\">").expect("pre block")..];
     assert!(pre[..pre.find("</pre>").unwrap()].contains(&long));
     // ... and the stylesheet makes exactly that block scroll.
     let css = crate::assets::app_css().expect("app.css is embedded");
@@ -593,4 +593,18 @@ fn forge_rows_sit_in_order_between_the_agent_messages() {
 
 fn c_icon(glyph: Icon) -> String {
     crate::components::icon(glyph).into_string()
+}
+
+#[test]
+fn code_is_highlighted_only_after_the_turn_ends() {
+    let mut folder = fold(&[chunk(1, "t", "m1", "```rust\nlet x = 1;\n```")]);
+    let streaming = render_item(&folder.items()[1]).into_string();
+    assert!(!streaming.contains("hl-"), "{streaming}");
+    folder.apply(&stored(
+        2,
+        "t",
+        json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
+    ));
+    let complete = render_item(&folder.items()[1]).into_string();
+    assert!(complete.contains("hl-keyword"), "{complete}");
 }

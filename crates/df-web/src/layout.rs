@@ -13,8 +13,13 @@ use crate::components::{CreateAction, bottom_bar, floating_create, rail, setting
 
 /// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
 /// Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 4] =
-    ["egress-log.js", "egress-rule.js", "tabs.js", "workspace.js"];
+pub(crate) const COMPONENT_SCRIPTS: [&str; 5] = [
+    "egress-log.js",
+    "egress-rule.js",
+    "markdown.js",
+    "tabs.js",
+    "workspace.js",
+];
 
 /// htmx keeps the `open` state of `<details>` (tool calls, the runs list) when it morphs an
 /// updated element.
@@ -60,6 +65,8 @@ impl View {
 pub struct Shell {
     pub display_name: String,
     pub version: String,
+    /// URL of the code theme stylesheet; none, no link.
+    pub code_theme_url: Option<String>,
 }
 
 impl Shell {
@@ -67,6 +74,7 @@ impl Shell {
         Self {
             display_name: user.display_name.clone(),
             version: state.version.clone(),
+            code_theme_url: Some(state.code_theme.url().to_owned()),
         }
     }
 }
@@ -124,6 +132,9 @@ fn document(
                 title { (title) " - Dark Factory" }
                 link rel="icon" type="image/svg+xml" href=(asset_url("logo.svg"));
                 link rel="stylesheet" href=(asset_url("app.css"));
+                @if let Some(url) = &shell.code_theme_url {
+                    link rel="stylesheet" href=(url);
+                }
                 link rel="preload" as="font" type="font/woff2" crossorigin
                     href=(asset_url("fonts/inter-latin-wght-normal.woff2"));
                 script src=(asset_url("vendor/htmx.min.js")) defer {}
@@ -137,6 +148,7 @@ fn document(
             // On a phone, browser Back must show the screen of the URL again: the row click set
             // `data-view` to `task`, and history navigation does not undo that.
             body class="bg-app font-sans text-ink antialiased" data-view=[view.map(View::as_str)]
+                data-mermaid-src=(asset_url("vendor/mermaid.min.js"))
                 x-data=[view.map(|_| "")]
                 "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
@@ -386,6 +398,20 @@ mod tests {
     }
 
     #[test]
+    fn body_names_the_diagram_renderer_for_the_mermaid_component() {
+        let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
+        assert!(
+            page.contains("data-mermaid-src=\"/assets/vendor/mermaid.min.js?v="),
+            "{page}"
+        );
+        // The renderer itself is loaded by the component, not by every page.
+        assert!(
+            !page.contains("<script src=\"/assets/vendor/mermaid"),
+            "{page}"
+        );
+    }
+
+    #[test]
     fn component_scripts_load_before_alpine_starts() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         let alpine = page.find("/assets/vendor/alpine.min.js?v=").unwrap();
@@ -393,6 +419,18 @@ mod tests {
             let component = page.find(&format!("/assets/{script}?v=")).expect(script);
             assert!(component < alpine, "{script}");
         }
+    }
+
+    #[test]
+    fn code_theme_stylesheet_is_linked_after_app_css_with_its_hash() {
+        let shell = Shell {
+            code_theme_url: Some(crate::markdown::CodeTheme::default().url().to_owned()),
+            ..Shell::default()
+        };
+        let page = layout("T", Nav::Tasks, &shell, html! {}).into_string();
+        let app = page.find("/assets/app.css?v=").expect("app.css");
+        let theme = page.find("/assets/code-theme.css?v=").expect("code theme");
+        assert!(app < theme, "{page}");
     }
 
     #[test]
@@ -421,7 +459,9 @@ mod tests {
         assert!(
             layout("T", Nav::Tasks, &Shell::default(), html! {})
                 .into_string()
-                .contains("<body class=\"bg-app font-sans text-ink antialiased\">")
+                .contains(
+                    "<body class=\"bg-app font-sans text-ink antialiased\" data-mermaid-src="
+                )
         );
     }
 
@@ -468,6 +508,7 @@ mod tests {
         let shell = Shell {
             display_name: "Ada Byron".into(),
             version: "2026.11.0".into(),
+            ..Shell::default()
         };
         let page = layout("Tasks", Nav::Tasks, &shell, html! {}).into_string();
         assert!(page.contains("Account menu of Ada Byron"), "{page}");

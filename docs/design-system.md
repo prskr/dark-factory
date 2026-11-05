@@ -176,7 +176,7 @@ Do: render the list page and the save answer from the same region function. Don'
 
 ### Transcript
 
-`components::transcript`: `user_message`, `agent_message(id, author, at, body, markdown)`, `thought`, `run_divider`, `queued_message`, `tool_row(&ToolRow)`, `code_block`, `plan`, `turn_end`, `notice`, `forge_row`, `unreadable`. Each takes the DOM id that live updates target. All text is escaped; Markdown is rendered without raw HTML (`crate::transcript::markdown`).
+`components::transcript`: `user_message`, `agent_message(id, author, at, body, markdown)`, `thought`, `run_divider`, `queued_message`, `tool_row(&ToolRow)`, `code_block`, `plan`, `turn_end`, `notice`, `forge_row`, `unreadable`. Each takes the DOM id that live updates target. All text is escaped; Markdown is rendered without raw HTML (`crate::markdown::render`).
 
 The transcript reads as a conversation:
 

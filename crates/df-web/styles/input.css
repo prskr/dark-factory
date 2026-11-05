@@ -322,14 +322,32 @@
   .md-body a {
     @apply underline;
   }
+  /* Fenced blocks (`pre.hl-code`) take color and background from the code theme stylesheet
+     (`/assets/code-theme.css`, `web.codeTheme`); only inline code uses `code-on-agent`. */
   .md-body pre {
-    @apply overflow-x-auto rounded bg-code-on-agent p-2 font-mono text-xs;
+    @apply overflow-x-auto rounded p-2 font-mono text-xs;
   }
   .md-body code {
     @apply font-mono text-[0.9em];
   }
   .md-body :not(pre) > code {
     @apply rounded bg-code-on-agent px-1 py-0.5;
+  }
+  /* Mermaid fences: the drawn diagram is an iframe; the error line shows under the source. It keeps
+     the bubble's text color: the danger color has no contrast on the inverted bubble. */
+  .md-body .diagram-error {
+    @apply mt-1 text-xs italic;
+  }
+  /* Wide, so that a message with a diagram takes the bubble's full width; the bubble's own
+     max-width clamps it. The panel color matches the diagram theme (light diagrams in the light UI
+     theme, dark ones in the dark theme) and not the inverted bubble. The iframe is transparent:
+     its document is light, so the element says light as well. */
+  .md-body .diagram {
+    @apply w-screen max-w-full rounded bg-panel p-2;
+  }
+  .md-body iframe {
+    @apply block w-full border-0;
+    color-scheme: light;
   }
   .md-body pre code {
     @apply p-0;

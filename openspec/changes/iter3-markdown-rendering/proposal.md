@@ -36,6 +36,6 @@ Out of scope:
 - `crates/df-web`: new `markdown` module (renderer, theme stylesheet route), `transcript` uses it, new `assets/markdown.js` Alpine component (Mermaid loader), vendored `assets/vendor/mermaid.min.js`, CSS for code blocks and diagrams in `styles/input.css`.
 - `crates/df-core`: `WebConfig` gets `code_theme` (`light`, `dark`), validated at startup.
 - `crates/dark-factory`: passes the themes into the web state.
-- Dependencies: `comrak` gains its `syntect` feature; `syntect` with `default-fancy` (pure-Rust regex) enters `[workspace.dependencies]`. `Cargo.lock` and Bazel lock files change. The binary grows by syntect's bundled syntaxes and themes.
+- Dependencies: `syntect` (features `default-syntaxes`, `default-themes`, `html`, `regex-fancy`: pure-Rust regex, no oniguruma) enters `[workspace.dependencies]`; `comrak` keeps its features. `deny.toml` ignores RUSTSEC-2025-0141 (bincode 1, used by syntect for its bundled data). `Cargo.lock` and Bazel lock files change. The binary grows by syntect's bundled syntaxes and themes.
 - `deploy/helm/dark-factory`: values, schema, configmap, README, unit tests.
 - Docs: instance config reference (`crates/df-agent-channel/docs/configuration.md`), `crates/df-web/README.md`.

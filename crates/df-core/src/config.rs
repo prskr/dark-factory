@@ -667,6 +667,38 @@ pub struct WebConfig {
     /// debugging prompts. Read at startup.
     #[serde(default)]
     pub show_hidden_blocks: bool,
+    /// Themes of highlighted code blocks per color scheme. Read at startup.
+    #[serde(default)]
+    pub code_theme: CodeThemes,
+}
+
+/// Names of bundled syntect themes (`web.codeTheme`). The control plane checks them at startup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodeThemes {
+    /// Theme in the light UI theme.
+    #[serde(default = "default_light_code_theme")]
+    pub light: String,
+    /// Theme in the dark UI theme.
+    #[serde(default = "default_dark_code_theme")]
+    pub dark: String,
+}
+
+impl Default for CodeThemes {
+    fn default() -> Self {
+        Self {
+            light: default_light_code_theme(),
+            dark: default_dark_code_theme(),
+        }
+    }
+}
+
+fn default_light_code_theme() -> String {
+    "InspiredGitHub".into()
+}
+
+fn default_dark_code_theme() -> String {
+    "base16-ocean.dark".into()
 }
 
 /// One integration plugin: its component, per-call limits and free-form settings.
@@ -1316,6 +1348,25 @@ sandbox:
         );
 
         let unknown = format!("{minimal}web:\n  showHidden: true\n");
+        assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
+    }
+
+    #[test]
+    fn code_themes_default_and_can_be_set_individually() {
+        let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let themes = InstanceConfig::from_yaml_str(minimal)
+            .unwrap()
+            .web
+            .code_theme;
+        assert_eq!(themes.light, "InspiredGitHub");
+        assert_eq!(themes.dark, "base16-ocean.dark");
+
+        let yaml = format!("{minimal}web:\n  codeTheme:\n    dark: Solarized (dark)\n");
+        let themes = InstanceConfig::from_yaml_str(&yaml).unwrap().web.code_theme;
+        assert_eq!(themes.light, "InspiredGitHub");
+        assert_eq!(themes.dark, "Solarized (dark)");
+
+        let unknown = format!("{minimal}web:\n  codeTheme:\n    mid: x\n");
         assert!(InstanceConfig::from_yaml_str(&unknown).is_err());
     }
 

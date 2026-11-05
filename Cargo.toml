@@ -55,6 +55,7 @@ excessive_nesting = "warn"
 max-lines = 1500
 
 [workspace.metadata.file-length.allow]
+"crates/df-web/assets/vendor/mermaid.min.js" = "vendored third-party build (Mermaid 11.17.2), not edited here"
 
 [workspace.dependencies]
 agent-client-protocol = { version = "3.4.0", features = ["stdio"] }
@@ -137,6 +138,7 @@ sqlx = { version = "0.9", default-features = false, features = [
     "migrate",
 ] }
 static_assertions = "1"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "html", "regex-fancy"] }
 tempfile = "3"
 testcontainers = { version = "0.28", default-features = false, features = ["reusable-containers"] }
 thiserror = "2"
