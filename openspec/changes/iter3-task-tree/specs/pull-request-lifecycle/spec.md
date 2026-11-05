@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Draft PR on first push ahead of base
-On a successful task-branch `PushReport` with at least one commit ahead of base, if the task has no PR, the control plane SHALL open a draft PR from the task branch into the task's base branch (see `task-tree`, "Effective base branch"), using stored title/body or defaults (`<KEY>: <task title>`, task description plus a `Task: <KEY>` line). The control plane SHALL NOT open a PR for a task in status `completed` or `cancelled`, neither on a push report nor in the retry at run end.
+On a successful task-branch `PushReport` with at least one commit ahead of base, if the task has no PR, the control plane SHALL open a draft PR from the task branch into the task's base branch (see `task-tree`, "Effective base branch"), using stored title/body or defaults (`<KEY>: <task title>`, task description plus a `Task: <KEY>` line). The control plane SHALL NOT open a PR for a task in status `completed` or `cancelled`, nor for a task whose branch was never pushed.
 
 #### Scenario: First push
 - **WHEN** the runtime reports pushing `factory/task/DF-1` 2 commits ahead of `main`
@@ -24,6 +24,10 @@ On a successful task-branch `PushReport` with at least one commit ahead of base,
 #### Scenario: Marked done before the first PR
 - **WHEN** a board member marks `DF-1` without a PR done and its cancelled run reports a push 2 commits ahead of `main`
 - **THEN** no PR is opened and `DF-1` stays `completed`
+
+#### Scenario: Completed without a push
+- **WHEN** run 1 of `DF-1` ends `completed` and the task branch was never pushed
+- **THEN** the forge is not asked to open a PR and `DF-1` is `in_review` without a PR
 
 ## ADDED Requirements
 

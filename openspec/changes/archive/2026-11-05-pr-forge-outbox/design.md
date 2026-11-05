@@ -47,8 +47,8 @@ Alternative: three kinds `pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary` (
 | --- | --- | --- |
 | Task-branch push `Ok`, commits ahead > 0, task has no PR | the session's batch transaction (`apply` on `PushReport`) | `open`, `run_id` |
 | Task-branch push `RejectedNonFastForward` | same; sets `diverged` there instead of `mark_diverged` afterwards | — |
-| Run end with `task_branch_pushed` or outcome `completed`, task not `cancelled` | `end_run_tx` | `open = task_branch_pushed`, `ready = completed ? now()`, `run_id` |
-| Mark done, task has a PR | `mark_task_done` | `ready = now()`, no `run_id` |
+| Run end with `task_branch_pushed` or outcome `completed`, task not `cancelled` | `end_run_tx` | `open = task_branch_pushed`, `ready = completed ? clock_timestamp()` (under the task lock), `run_id` |
+| Mark done, task has a PR | `mark_task_done` | `ready = clock_timestamp()` (under the task lock), no `run_id` |
 
 `RunEnd` gets `task_branch_pushed` from the report's `WorkspaceState`; `RunEnd::failure` sets it `false`. A completed run that never pushed gets `open = false`, so no PR is opened (TD-12); a PR an earlier run opened is still marked ready.
 
@@ -57,6 +57,8 @@ Alternative: three kinds `pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary` (
 ### D3: A reopened task is not marked ready
 
 A ready job may run after a message reopened the task (forge down at completion, review arrives, `pr.mark_draft` runs first). The handler skips "mark ready" when a message of the task was queued after the job's `ready` time; it still posts the summary. A message pending at completion was queued before that time, so "Message waiting at completion" still marks ready.
+
+The `ready` time, `task_messages.queued_at` (migration `20261105000003` sets its default to `clock_timestamp()`) and the stop time (`runs.stop_requested_at`) all come from the database clock under the task row lock, so their order matches the lock order. `now()` would be the transaction start and could place a message that waited for the lock before a time read after it.
 
 Both handlers take the per-task advisory lock (`task-pr:<id>`, the one of step 2) around their check and forge update: `pr.sync` for "mark ready", `pr.mark_draft` for its status check and draft update. Without it, a message committed after the ready check lets `pr.mark_draft` see the PR still a draft and skip, and the late ready update leaves a reopened task's PR ready. With the lock, whichever handler runs second sees the other's result: a later `pr.mark_draft` finds the PR ready and drafts it, a later ready step finds the reopening message and skips. `pr.mark_draft` already skips tasks that finished again.
 

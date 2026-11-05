@@ -20,6 +20,8 @@ sequenceDiagram
     participant R as Runtime (sandbox)
     participant H as Harness
     participant G as Gateway
+    participant DB as Database
+    participant O as Outbox dispatcher
     participant F as Forge
 
     UI->>CP: task queued (new task or message)
@@ -39,7 +41,7 @@ sequenceDiagram
         R->>G: push factory/task/<KEY> (push checks)
         R->>CP: push report
         opt first commit ahead of base
-            CP->>F: open draft pull request (plugin)
+            CP->>DB: enqueue pr.sync (same transaction as the push report)
         end
     end
     Note over CP,R: waits for messages until the idle deadline
@@ -47,9 +49,8 @@ sequenceDiagram
     R->>G: push task branch, WIP snapshot
     R->>CP: run report (outcome, workspace state)
     CP->>K: delete pod (volume stays)
-    opt outcome completed
-        CP->>F: mark pull request ready, post the completion summary
-    end
+    CP->>DB: enqueue pr.sync (open if pushed, ready if completed) with the run end
+    O->>F: open draft pull request, mark it ready, post the completion summary (retried)
 ```
 
 1. **Scheduling.** A task is due when it is `queued` (or `rate_limited`) and its resume time has
@@ -68,7 +69,8 @@ sequenceDiagram
    own `.git/config`; anything left on the volume is treated as untrusted.
 5. **Turns.** The harness works on the prompt. Every message and tool call is streamed to the
    control plane and stored as the task's transcript. After a turn with new commits the runtime
-   pushes the task branch. The first push ahead of the base branch opens a draft pull request.
+   pushes the task branch. The first push ahead of the base branch enqueues the draft pull request;
+   an outbox job opens it (see [Pull request actions](#pull-request-actions)).
 6. **Waiting.** Between turns the run waits for messages. A message queued in the UI reaches the
    agent at the next turn boundary without a new run. After `runs.keepAliveSeconds` (default 600)
    without a message, the control plane releases the run.
@@ -80,7 +82,7 @@ sequenceDiagram
 
 | Outcome | Task status afterwards |
 | --- | --- |
-| `completed` (the agent called `complete_task`) | `in_review`; the pull request is marked ready and gets the completion summary |
+| `completed` (the agent called `complete_task`) | `in_review`; the pull request is marked ready and gets the completion summary of this run (see [Pull request actions](#pull-request-actions)) |
 | `end_turn` (idle deadline passed) | `waiting` |
 | `blocked` (a blocking question was not answered in time) | `blocked` |
 | `rate_limited` (the model provider's usage limit) | `rate_limited`, with a resume time; the next run starts automatically and continues |
@@ -91,6 +93,33 @@ sequenceDiagram
 
 If messages are still undelivered at the end of a run, the task becomes `queued` instead, so the next
 run picks them up.
+
+## Pull request actions
+
+The control plane never calls the forge from the agent stream. Opening the draft pull request,
+marking it ready and posting the completion summary are `pr.sync` jobs of the outbox, enqueued in
+the transaction that records their trigger and run by the dispatcher on the leader replica:
+
+| Trigger | Job |
+| --- | --- |
+| Push of the task branch ahead of the base branch, task without a pull request | open the draft pull request |
+| End of a run that pushed the task branch | open the draft pull request if it is still missing |
+| End of a run with outcome `completed` | mark the pull request ready and post the summary of that run |
+| **Mark done** in the UI, task with a pull request | mark the pull request ready, no summary |
+
+Failed forge calls are retried with backoff (30 s doubling to 10 min) for one hour, also after a
+control plane restart; then the job is given up with a warning (`df.outbox.jobs{kind="pr.sync",result="gave_up"}`).
+Behavior to know:
+
+- A completed run that never pushed the task branch opens no pull request. A pull request an
+  earlier run opened is still marked ready.
+- The summary comes from the run's own `complete_task` call (`runs.completion_summary`); a run
+  without one posts none. A retry after a failed comment call may post it twice.
+- Ready and summary go to the pull request recorded on the task.
+- A message queued after the completion or after **Mark done** keeps the pull request a draft.
+  The summary is still posted. Both times come from the database clock under the task lock, so
+  they are ordered like the lock.
+- A cancelled task gets no pull request action.
 
 ## Continuation across runs
 

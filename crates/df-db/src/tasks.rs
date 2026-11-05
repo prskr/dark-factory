@@ -24,6 +24,40 @@ pub struct MarkDraftJob {
     pub task_id: TaskId,
 }
 
+/// Outbox kind for the forge actions of a task's pull request; payload [`PrSyncJob`].
+pub const PR_SYNC_KIND: &str = "pr.sync";
+
+/// Payload of a [`PR_SYNC_KIND`] job (`pr-forge-outbox` design D1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrSyncJob {
+    pub task_id: TaskId,
+    /// The run whose transcript gets the forge events and whose summary is posted; mark done has
+    /// none.
+    pub run_id: Option<RunId>,
+    /// Open the draft PR if the task has none.
+    pub open: bool,
+    /// Mark the PR ready for review. The value is the time of the completion; a message queued
+    /// after it keeps the PR a draft.
+    pub ready: Option<DateTime<Utc>>,
+}
+
+/// The database clock, for times that are ordered against `task_messages.queued_at` (a column
+/// defaulting to `clock_timestamp()`, set by the insert after the task row lock): the `ready`
+/// time of a [`PrSyncJob`]. `runs.stop_requested_at` uses the same clock (`clock_timestamp()` in
+/// `request_stop_tx`).
+///
+/// The caller holds the task row lock. A message whose transaction waited for that lock inserts
+/// after it, so its `queued_at` is later than the value read here; one committed before is
+/// earlier. `now()` would be the transaction start and break this order (`pr-forge-outbox`
+/// design D3).
+pub async fn clock_under_task_lock(
+    conn: &mut sqlx::PgConnection,
+) -> Result<DateTime<Utc>, sqlx::Error> {
+    sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(conn)
+        .await
+}
+
 /// Parameters for creating a new task.
 #[derive(Debug, Clone)]
 pub struct NewTask {
@@ -810,16 +844,26 @@ pub async fn mark_task_done(
         .bind(task_id.as_uuid())
         .execute(&mut *tx)
         .await?;
-    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1 FOR UPDATE")
-        .bind(task_id.as_uuid())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
+    let (status, pr_number): (String, Option<i64>) =
+        sqlx::query_as("SELECT status, pr_number FROM tasks WHERE id = $1 FOR UPDATE")
+            .bind(task_id.as_uuid())
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
     let parsed: TaskStatus = status.parse()?;
     if !parsed.can_mark_done() {
         return Err(DbError::Conflict(format!(
             "a {status} task cannot be marked done"
         )));
+    }
+    if pr_number.is_some() {
+        let job = PrSyncJob {
+            task_id,
+            run_id: None,
+            open: false,
+            ready: Some(clock_under_task_lock(&mut tx).await?),
+        };
+        crate::outbox::enqueue(&mut tx, PR_SYNC_KIND, &serde_json::to_value(job)?).await?;
     }
     sqlx::query(
         "UPDATE tasks SET status = 'completed', resume_at = NULL, updated_at = now() WHERE id = $1",
@@ -955,15 +999,16 @@ pub(crate) enum StopScope {
 /// Sets the stop marker on the task's active run if it has none and publishes `run_changed`.
 /// A `finalizing` run is ending already (`complete_task`, release): it is marked only when
 /// `scope` is [`StopScope::IncludingFinalizing`] (cancelling the task), because the marker also
-/// stops messages queued before the stop from requeuing the task. Returns the run when this call
-/// stopped it.
+/// stops messages queued before the stop from requeuing the task. The caller holds the task row
+/// lock; the stop time is the database clock ([`clock_under_task_lock`]), like `queued_at`.
+/// Returns the run when this call stopped it.
 pub(crate) async fn request_stop_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
     scope: StopScope,
 ) -> Result<Option<RunId>, DbError> {
     let run: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE runs SET stop_requested_at = now(),
+        "UPDATE runs SET stop_requested_at = clock_timestamp(),
              state = CASE WHEN state IN ('preparing', 'running', 'awaiting_input')
                           THEN 'finalizing' ELSE state END
          WHERE task_id = $1 AND stop_requested_at IS NULL

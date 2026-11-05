@@ -122,6 +122,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Provider adapters as WASI plugins (protocol translation, custom auth) | idea | F5, `openspec/changes/archive/2026-11-04-iter3-inference-gateway` (out of scope) |
 | Allowed models per model provider, enforced in the gateway | idea | `openspec/changes/archive/2026-11-04-iter3-inference-gateway` (out of scope) |
 | Subscription pools and fallback | idea | F6 |
+| Drop `tasks.completion_summary` (contract step of the per-run summary; unused since `pr-forge-outbox`) | decided | `openspec/changes/pr-forge-outbox` (design D4) |
 | Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/archive/2026-11-02-iter2-run-resilience` (Non-Goals, D6) |
 | Dependencies set by humans: `depends_on` in the new-task composer | idea | `openspec/changes/iter3-task-dependencies` |
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/iter3-task-dependencies` |

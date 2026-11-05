@@ -32,11 +32,10 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
 - Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-81 to TD-82: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-81: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
-- Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
 - Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
 - Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
@@ -56,9 +55,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-8 | medium | `df-agent-channel` scheduler | Timeout and Gone handling await provider teardown inline in the scheduler loop ([#121]) |
 | TD-9 | low    | `df-agent-channel` session | Sandbox teardown after a RunReport is awaited inline in the session loop ([#121]) |
 | TD-10 | low   | `df-agent-channel` server | Streams opened during shutdown start new sessions ([#121]) |
-| TD-11 | low   | `df-agent-channel` PR | `completion_summary` is never cleared and can be posted again ([pr-forge-outbox]) |
-| TD-12 | low   | `df-agent-channel` PR | A completed run without a push still tries to open a PR ([pr-forge-outbox]) |
-| TD-13 | low   | `df-agent-channel` PR | Concurrent PR creation can mark an unrecorded PR ready ([pr-forge-outbox]) |
 | TD-14 | low   | `df-agent-channel` session | Two extra database round trips per batch ([#123]) |
 | TD-15 | low   | `df-agent-channel` runs | Guarded run update + `RunChanged` publish exists in three copies |
 | TD-16 | low   | `df-agent-channel` tests | `eventually` test helper polls with `sleep` and ends in `panic!` |
@@ -109,7 +105,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
 | TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers ([#125]) |
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked ([#123]) |
-| TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls ([pr-forge-outbox]) |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
@@ -117,7 +112,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-88 | low   | `fake-acp-agent` scripts | An unknown or malformed step loads as an empty script without an error |
 | TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
-| TD-91 | medium | `df-agent-channel` PR | Forge calls in `pr.rs` run inline and are retried only by the next push report or run end ([pr-forge-outbox]) |
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
 | TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
 | TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
@@ -132,7 +126,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-104 | low   | `df-web` tab row | Phone tab-row visibility is only checked by hand ([#124]) |
 | TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
 | TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
-| TD-108 | low   | `dark-factory` lifecycle events | Outbox handler wiring lives in `lifecycle_events.rs` ([pr-forge-outbox]) |
 | TD-109 | low   | `df-web` tests | Dev-dependency on `df-agent-channel` only for the metric probe |
 | TD-110 | low   | `deploy/e2e` | Forgejo `ALLOWED_HOST_LIST` hardcodes the release and namespace |
 | TD-111 | low   | `df-e2e` | `submit_review` takes the review event as a string |
@@ -236,36 +229,6 @@ Tracked in [#121].
 `stop_sessions` clears the sessions before tonic stops accepting streams and sends GOAWAY, and the TLS acceptor is only aborted after the server returns. A runtime that reconnects in that window starts a session that keeps graceful shutdown waiting until `SHUTDOWN_GRACE` (30 s) ends and `abort_all` runs.
 
 **Fix:** Refuse new `Connect` calls once shutdown started (a flag checked in `connect`, returning `UNAVAILABLE`), and stop the acceptor first.
-
-### TD-11. Stale completion summary
-
-Tracked in [pr-forge-outbox].
-
-`crates/df-agent-channel/src/pr.rs` (`on_run_end`, `completion_summary`), `crates/df-agent-channel/src/tools.rs` (`complete_task`)
-
-`tasks.completion_summary` is set by `complete_task` and never cleared. A later run that ends `completed` without its own `complete_task` call posts the earlier summary again. Today a run normally ends `completed` only through `complete_task`, which overwrites the value, so this is unlikely.
-
-**Fix:** Clear the summary after posting it, or store it per run (`runs.completion_summary`) and read the ended run's value.
-
-### TD-12. PR opened for a completed run without a push
-
-Tracked in [pr-forge-outbox].
-
-`crates/df-agent-channel/src/pr.rs` (`on_run_end`, condition `pushed || completed`)
-
-When a run ends `completed` and the task has no PR, `try_ensure_draft` runs even if the task branch was never pushed. The forge rejects the request (branch missing or no diff) and a warning is logged on every such completion, or it opens an empty PR.
-
-**Fix:** Require `task_branch_pushed` (from this or an earlier run) before creating a PR; decide whether a completed run with no changes needs a PR at all and record that in `specs/pull-request-lifecycle/spec.md`.
-
-### TD-13. Concurrent PR creation
-
-Tracked in [pr-forge-outbox].
-
-`crates/df-agent-channel/src/pr.rs` (`try_ensure_draft`, `record_pr`)
-
-`on_push_report` and `on_run_end` run as separate forge tasks. If both see `pr_number` as `NULL` and the forge does not return `Conflict` for the second create, two PRs exist. `record_pr` keeps the first, but `on_run_end` marks its own, unrecorded PR ready and posts the summary there. Forgejo rejects a second PR for the same head and base, so this needs a forge that does not.
-
-**Fix:** After `record_pr`, return the PR number stored in the database (`RETURNING pr_number`) and use that; optionally close the duplicate.
 
 ### TD-14. Extra round trips per batch
 
@@ -777,18 +740,6 @@ The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of 
 
 **Fix:** use the checked macros (offline metadata for `df-e2e`), or read through existing `df-db` functions.
 
-### TD-82 (S23). First-PR creation holds a pooled connection across forge calls
-
-Tracked in [pr-forge-outbox].
-
-`crates/df-agent-channel/src/pr.rs:111-150`
-
-`try_ensure_draft` holds a transaction with the per-task advisory lock across up to three forge calls (bounded by `FORGE_TIMEOUT`); callers waiting for the same task each hold a connection too.
-
-**Matters when:** many runs reach their first push together against a slow forge, and the default pool of 16 connections runs dry for UI and session queries.
-
-**Fix:** state the ceiling in the code comment and set `idle_in_transaction_session_timeout` on this transaction (`statement_timeout` does not cover the idle wait for the forge); if the pool does run dry, serialize per task in-process before taking the DB lock.
-
 ### TD-84 (S4). `request_approval` copies the raise logic of `ask_question`
 
 `crates/df-agent-channel/src/tools.rs` (`request_approval`, `ask_question`)
@@ -862,18 +813,6 @@ Blobs the mirror already has (WIP content, other tasks' branches) are scanned to
 **Matters when:** repositories with large files, or long branches rebased or merged from other tasks; one push can then scan far more than its pack size.
 
 **Fix:** a total byte limit per push that rejects with `df:push-too-large`, and streaming blob reads for the secret scan.
-### TD-91. Forge calls in `pr.rs` run inline and are retried only by the next trigger
-
-Tracked in [pr-forge-outbox].
-
-`crates/df-agent-channel/src/pr.rs` (`on_push_report`, `on_run_end`, `try_ensure_draft`)
-
-Opening the draft PR, marking it ready and posting the completion summary call the forge inline and are best effort. A failure is logged. Opening the PR is retried only by the next push report or run end. At the end of a completed run there is no next trigger, so a failed "mark ready" or summary post is lost. A control plane restart between the state change and the forge call loses the call as well. TD-11 to TD-13 come from the same inline design.
-
-**Matters when:** the forge is briefly unavailable or rate limits at the end of a run. The PR then stays a draft, or misses its summary, until a human acts.
-
-**Fix:** after `lifecycle-events`, enqueue the forge actions as outbox jobs (`pr.ensure_draft`, `pr.mark_ready`, `pr.post_summary`) in the transaction that records the push report or run end, with an `OutboxHandler` per kind (`openspec/changes/archive/2026-11-04-lifecycle-events/design.md` D1, D3). Handlers must be idempotent: they find an existing PR before opening one and check the ready state before updating. Tests: a forge failure on "mark ready" is retried until it succeeds; a restart between the run end and the forge call still marks the PR ready. Check TD-11 to TD-13 against the new flow and close what it fixes.
-
 Origin of TD-92: CodeRabbit review of PR #87 (`iter2-continuation-summary`, 2026-11-03).
 
 ### TD-92 (CR1). The continuation summary reads every earlier transcript event of the task
@@ -1053,18 +992,6 @@ The function locks runs, requests a stop and writes a message block. For that, `
 
 **Fix:** move `complete_on_merge_tx` into `tasks.rs`, call it from the webhooks module and make the helpers private again.
 
-### TD-108 (S7). Outbox handler wiring lives in `lifecycle_events.rs`
-
-Tracked in [pr-forge-outbox].
-
-`crates/dark-factory/src/lifecycle_events.rs` (`handlers`)
-
-The module started as the lifecycle-event dispatcher and now also registers `MarkDraftHandler`.
-
-**Matters when:** the next outbox job kind is added.
-
-**Fix:** move the outbox dispatcher wiring into its own module (for example `outbox.rs`) and keep `lifecycle_events.rs` for lifecycle events.
-
 ### TD-109 (S9). Dev-dependency on `df-agent-channel` only for the metric probe
 
 `crates/df-web/Cargo.toml` (`df-agent-channel` with `test-util`)
@@ -1129,4 +1056,3 @@ The endpoint answers `500` when storing or applying an event fails. Neither GitH
 [#124]: https://github.com/prskr/dark-factory/issues/124
 [#125]: https://github.com/prskr/dark-factory/issues/125
 [sandbox-lifecycle-resilience]: ../openspec/changes/sandbox-lifecycle-resilience/proposal.md
-[pr-forge-outbox]: ../openspec/changes/pr-forge-outbox/proposal.md

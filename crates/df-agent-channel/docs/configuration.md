@@ -176,9 +176,21 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
   ignored.
 - Tool calls and credential requests that arrive after the run ended (for example after a hard
   stop) are refused: an error result and `DeniedReason`, nothing is executed or granted.
-- Pull request work after a `PushReport` or `RunReport` runs beside the stream (60 s limit each), so
-  a slow forge delays neither acks, `Cancel` nor prompts. If marking the pull request ready fails,
-  the completion summary is still posted.
+- The session does not call the forge. A task-branch `PushReport` ahead of base (task without a
+  pull request) and a `RunReport` enqueue a `pr.sync` outbox job in the batch transaction (payload:
+  `task_id`, `run_id`, `open`, `ready`); a rejected non-fast-forward push sets `diverged` in the same
+  transaction. A run end enqueues `open` if `WorkspaceState.task_branch_pushed`, and `ready` (the
+  completion time) if the outcome is `completed`; a run that did neither, or a `cancelled` task,
+  enqueues nothing. **Mark done** enqueues `ready` without `run_id`.
+- The `pr.sync` handler, on every attempt: skips a missing or `cancelled` task; opens (or finds) the
+  draft pull request under the per-task advisory lock `task-pr:<id>` and continues with the one
+  recorded on the task; marks it ready unless a message was queued after the `ready` time (checked
+  under the same lock, which `pr.mark_draft` takes too); writes `pr-ready:<n>` to the run's
+  transcript once; posts `runs.completion_summary` of the job's run if non-empty. A ready-only job
+  without a recorded pull request waits (retry) while an unfinished `open` job of the task exists.
+  Forge and database errors retry with backoff (30 s base, 10 min cap, given up after 1 h; lease
+  3 min); an invalid payload is given up. At most 8 jobs run at once, so at most 8 pooled connections
+  wait for or hold the advisory lock.
 - Shutdown (SIGTERM): the scheduler lets provisioning in flight finish (10 s); sessions stop reading,
   finish their in-flight tool calls and credential requests (up to 20 s, then they are aborted) and
   end their streams; the listeners get 30 s before they are aborted.
@@ -195,6 +207,13 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
 
 ## Database changes
 
-`20261019000001_task_completion_summary.sql` adds `tasks.completion_summary` (summary passed to
-`complete_task`, posted on the pull request when the run completes) and `runs.connected_at` (first
-`Hello`; start of the wall-clock budget).
+`20261019000001_task_completion_summary.sql` adds `tasks.completion_summary` (unused since
+`20261105000002_run_completion_summary.sql`) and `runs.connected_at` (first `Hello`; start of the
+wall-clock budget). `20261105000002_run_completion_summary.sql` adds `runs.completion_summary`
+(summary passed to `complete_task` by that run, posted on the pull request when the run completes;
+values of `tasks.completion_summary` are not copied).
+`20261105000003_task_message_queued_at_clock.sql` makes `task_messages.queued_at` default to
+`clock_timestamp()` instead of the transaction start. The insert runs after the task row lock.
+The `ready` time of a run end or **Mark done** and `runs.stop_requested_at` are read from the same
+clock under that lock. Their order therefore matches the lock order, and "queued after the stop"
+or "queued after the completion" is exact.

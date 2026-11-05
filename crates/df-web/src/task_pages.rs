@@ -4,8 +4,6 @@
 mod resume;
 mod view;
 
-use std::time::Duration;
-
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -40,10 +38,6 @@ use view::{composer_dialog, composer_form, details_column, message_area};
 
 /// How many transcript rows the detail page renders at once.
 const PAGE_BATCH: i64 = 1000;
-/// How long marking a task done waits for the forge to mark its PR ready. The status is already
-/// committed; a forge that does not answer must not keep the page waiting through the plugin's
-/// retries.
-const MARK_READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Shown in the details when the provider could not delete the volume.
 const RESET_FAILED: &str = "The workspace could not be reset. Try again later.";
 
@@ -457,8 +451,8 @@ async fn task_rename(
     response
 }
 
-/// `POST /tasks/{key}/done`: a board member marks the task done and its PR, if any, becomes
-/// ready for review. The answer is the details region as the task is now, also when the task
+/// `POST /tasks/{key}/done`: a board member marks the task done; the PR, if any, is marked ready
+/// for review by an outbox job. The answer is the details region as the task is now, also when the task
 /// could not be marked done (409).
 async fn task_done(
     State(state): State<WebState>,
@@ -471,56 +465,11 @@ async fn task_done(
     };
     let id = TaskId::from_uuid(task.id);
     let status = match df_db::mark_task_done(&state.pool, id, user.principal()).await {
-        Ok(()) => {
-            mark_pr_ready(&state, id).await;
-            StatusCode::OK
-        }
+        Ok(()) => StatusCode::OK,
         Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT,
         Err(e) => return internal_error(&e),
     };
     details_answer(&state, id, status, None).await
-}
-
-/// Marks the PR of a task ready for review, without a summary. Best effort: a forge failure is
-/// logged and does not undo the status (design D5).
-async fn mark_pr_ready(state: &WebState, id: TaskId) {
-    let task = match df_db::get_task(&state.pool, id).await {
-        Ok(Some(task)) => task,
-        Ok(None) => return,
-        Err(error) => {
-            tracing::warn!(%error, task_id = %id, "failed to load the task to mark its pull request ready");
-            return;
-        }
-    };
-    let Some(number) = task.pr_number.and_then(|n| u64::try_from(n).ok()) else {
-        return;
-    };
-    mark_ready_bounded(
-        state.forge.as_ref(),
-        &task.project_id,
-        number,
-        MARK_READY_TIMEOUT,
-    )
-    .await;
-}
-
-/// Marks PR `number` ready for review, waiting at most `deadline`. Failures and an expired
-/// deadline are logged; the forge may still apply the change later.
-pub(crate) async fn mark_ready_bounded(
-    forge: &dyn df_core::ForgeClient,
-    project_id: &ProjectId,
-    number: u64,
-    deadline: Duration,
-) {
-    match tokio::time::timeout(deadline, forge.mark_pull_request_ready(project_id, number)).await {
-        Ok(Ok(_)) => {}
-        Ok(Err(error)) => {
-            tracing::warn!(%error, %project_id, number, "failed to mark the pull request ready");
-        }
-        Err(_elapsed) => {
-            tracing::warn!(%project_id, number, "marking the pull request ready timed out");
-        }
-    }
 }
 
 /// `POST /tasks/{key}/stop`: a board member stops the active run. The page follows through the
