@@ -1,13 +1,12 @@
-# Spec Delta
+# forge-webhooks Specification
 
 ## Purpose
+Lets forge events (submitted reviews, closed or merged pull requests, CI failures and mentions) reach the right task without a human, through a signed webhook endpoint, deterministic filtering and routing in the control plane, and a wake-up message per event (ADR-0015).
 
-Lets forge events (submitted reviews, closed or merged pull requests, CI failures and mentions) reach the right task without a human, through a signed webhook endpoint, deterministic filtering and routing in the control plane, and a debounced wake-up message (ADR-0015).
-
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Webhook endpoint
-The control plane SHALL accept `POST /webhooks/{plugin}` without login, session or CSRF token. It SHALL answer `404` when the plugin is unknown, not loaded or has no webhook secret, `413` for a body over 1 MiB, `401` when the signature check fails, `400` when the plugin rejects the payload, and `202` once the events are processed, including when none applies. Every response body SHALL be empty.
+The control plane SHALL accept `POST /webhooks/{plugin}` without login, session or CSRF token. It SHALL answer `404` when the plugin is unknown, not loaded, exports no `webhooks` interface or has no webhook secret, `413` for a body over 1 MiB, `401` when the signature check fails, `400` when the plugin rejects the payload, and `202` once the events are processed, including when none applies. Every response body SHALL be empty.
 
 #### Scenario: Valid delivery
 - **WHEN** Forgejo posts a signed review event to `/webhooks/forgejo`
@@ -23,7 +22,7 @@ The control plane SHALL accept `POST /webhooks/{plugin}` without login, session 
 
 #### Scenario: Processing error
 - **WHEN** the database is unavailable while an accepted event is stored
-- **THEN** the response is `500`, so the forge redelivers
+- **THEN** the response is `500` and the forge records a failed delivery, which an operator can redeliver
 
 ### Requirement: Signature verification
 A request SHALL be accepted only if the plugin verified its signature through the host, and the host found it to be the HMAC-SHA256 of the raw body with the plugin's webhook secret, compared in constant time. If the plugin returns events without a successful verification, the host SHALL answer `401` and discard the events.
@@ -107,19 +106,15 @@ Reviews and mentions from authors other than the bot SHALL pass the project's `w
 - **WHEN** a member comments on the PR of `DF-1` without mentioning the bot
 - **THEN** `DF-1` is not woken
 
-### Requirement: Debounced wake-up
-Accepted review, CI failure, mention and closed-without-merge events SHALL be collected per task. 30 s after the first collected event, the control plane SHALL queue one message from the system principal (reason `webhook`) that lists every event collected until then, and SHALL forget the collected events.
+### Requirement: Wake-up message per event
+Every accepted review, CI failure, mention and closed-without-merge event SHALL queue one message from the system principal (reason `webhook`) on each task it routes to, in the same transaction that processes the event. Like other queued messages, messages arriving during a turn SHALL be held back and forwarded after it, so a burst of events wakes the task once and never starts a second run.
 
 #### Scenario: Review and CI failure together
-- **WHEN** a review is submitted on the PR of `DF-1` and 10 s later CI fails on its branch
-- **THEN** about 30 s after the review, `DF-1` has one new message naming both events
-
-#### Scenario: Event after the window
-- **WHEN** a second review arrives 40 s after the first
-- **THEN** it is delivered in a second message 30 s later
+- **WHEN** a review is submitted on the PR of `DF-1` in status `in_review` and 10 s later CI fails on its branch
+- **THEN** `DF-1` has two new messages, becomes `queued` once, and its PR is marked draft once
 
 ### Requirement: Only non-final tasks wake
-Debounced events SHALL wake a task in any status except `completed`, `cancelled` and `failed`. Events collected for a task that is in one of those statuses when the window ends SHALL be dropped and logged at debug level.
+Events SHALL wake a task in any status except `completed`, `cancelled` and `failed`. An event for a task in one of those statuses SHALL be dropped and logged at debug level.
 
 #### Scenario: Review after merge
 - **WHEN** a review is submitted on the merged PR of completed task `DF-1`
@@ -137,8 +132,12 @@ The wake-up message SHALL name, per event, its kind, the actor's login, the revi
 - **THEN** the message says that `alice` requested changes on PR #12 and to read the feedback with `read_pull_request_feedback`, and contains no part of the review body
 
 ### Requirement: Webhook metric
-The control plane SHALL count webhook requests by plugin and outcome (`accepted`, `unauthorized`, `not_found`, `too_large`, `invalid`, `error`).
+The control plane SHALL count webhook requests by plugin and outcome (`accepted`, `unauthorized`, `not_found`, `too_large`, `invalid`, `error`). A request for a loaded plugin SHALL be counted under the plugin's name, a request for any other name under `unknown`, so the label set stays bounded by the configuration.
 
 #### Scenario: Rejected signature counted
 - **WHEN** a request to `/webhooks/forgejo` fails the signature check
 - **THEN** the counter for plugin `forgejo` and outcome `unauthorized` increases by one
+
+#### Scenario: Loaded plugin without secret counted
+- **WHEN** `plugins.github` is loaded without `webhookSecret` and a request arrives at `/webhooks/github`
+- **THEN** the counter for plugin `github` and outcome `not_found` increases by one

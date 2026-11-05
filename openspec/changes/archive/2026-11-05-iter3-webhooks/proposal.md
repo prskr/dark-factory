@@ -27,7 +27,7 @@ Nothing the forge does reaches a task on its own. A human has to tell the agent 
   - Reviews and mentions also pass the project's new setting **`webhook_wake`**: `none`, `members` (default) or `anyone`. The author's role comes from the plugin.
   - Merges, closes and CI failures apply whatever the actor and the setting.
 - **Wake-ups**:
-  - Accepted events are collected per task and flushed after a fixed 30 s window from the first event (an outbox job). The flush queues one message from the system principal, reason `webhook`.
+  - Every accepted event queues one message from the system principal, reason `webhook`. Messages arriving during a turn wait for its end, so a burst wakes the task once.
   - The message names the events and the tool to read them with. It contains no review or comment text.
   - Only non-final tasks wake. Events for `completed`, `cancelled` and `failed` tasks are logged and dropped.
 - **PR follow-ups** deferred until webhooks exist (`iter1-keep-alive-and-review`, `iter2-task-volume-lifecycle`):
@@ -45,14 +45,14 @@ Out of scope:
 - Waking the reviewed task when an agent reviewer finishes (iteration 3 demo step 3). Agent reviews are authored by the bot and are dropped here. It belongs to `iter3-task-dependencies` / `iter3-task-tree` (`product/iterations/iteration-3.md`).
 - A webhook secret override per project (an extra route naming the project, additive): backlog ("Webhook secret override per project").
 - Forge events as transcript rows: backlog ("Forge activity outside runs", already listed).
-- A deliveries table for deduplicating redeliveries: rejected. A duplicate only adds a line to a debounced message, and completing on merge is idempotent.
-- A configurable debounce window: rejected. It is a constant until someone needs it.
+- A deliveries table for deduplicating redeliveries: rejected. A duplicate only adds a message, and completing on merge is idempotent.
+- Debouncing events per task into one message: rejected in review (design D3). The message queue already holds messages back during a turn.
 - Waking on CI success or CI recovery: rejected. Nothing waits for it; `iter3-ci-tools` adds CI status reads, and waking on success stays out of iteration 3.
 
 ## Capabilities
 
 ### New Capabilities
-- `forge-webhooks`: the inbound webhook endpoint, signature checks, which forge events are accepted, filtering, routing to tasks, debouncing and the wake-up message.
+- `forge-webhooks`: the inbound webhook endpoint, signature checks, which forge events are accepted, filtering, routing to tasks and the wake-up message.
 
 ### Modified Capabilities
 - `plugin-host`: the signature-verification host import, webhook calls without a project, and the `webhooks` capability.
@@ -71,8 +71,8 @@ Out of scope:
 - `crates/df-web`: the route in the base routes, the body limit and the metric.
 - `crates/df-core`: the event model, filtering and routing rules, and the plugin config.
 - `crates/df-db`:
-  - migration for `webhook_events`, `projects.webhook_wake` and `tasks.pr_merged_at`;
-  - the `webhook.flush` and `pr.mark_draft` outbox handlers;
+  - migration for `projects.webhook_wake` and `tasks.pr_merged_at`;
+  - the webhook messages and the `pr.mark_draft` outbox handler;
   - the retention scan condition;
   - `.sqlx/`.
 - `crates/df-agent-channel`: completing on merge, which stops the run.
