@@ -4,6 +4,7 @@
 //! transaction. Credential references hold the name of a Kubernetes Secret and a key, never a
 //! value.
 
+use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, CredentialRefId, Principal};
 use serde::Serialize;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
@@ -41,6 +42,8 @@ pub struct ProjectInput {
     /// harness image and adapter are used.
     pub adapter_command: Vec<String>,
     pub forge_credential_id: Option<Uuid>,
+    /// Whose reviews and mentions wake the project's tasks.
+    pub webhook_wake: WebhookWake,
 }
 
 /// A stored project.
@@ -55,6 +58,8 @@ pub struct ProjectRecord {
     pub base_branch: String,
     pub adapter_command: Vec<String>,
     pub forge_credential_id: Option<Uuid>,
+    #[sqlx(try_from = "String")]
+    pub webhook_wake: WebhookWake,
     /// Whether tasks exist.
     pub has_tasks: bool,
 }
@@ -104,7 +109,7 @@ macro_rules! select_project {
     ($tail:literal) => {
         concat!(
             "SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch, \
-             p.adapter_command, p.forge_credential_id, \
+             p.adapter_command, p.forge_credential_id, p.webhook_wake, \
              EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS has_tasks \
              FROM projects p ",
             $tail
@@ -293,14 +298,14 @@ async fn save_project_in(
         Some(b) => sqlx::query_scalar(
             "UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5, \
              image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9, \
-             updated_at = now() \
+             webhook_wake = $10, updated_at = now() \
              WHERE id = $1 RETURNING id",
         )
         .bind(b.id),
         None => sqlx::query_scalar(
             "INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image, base_branch, \
-             forge_credential_id, adapter_command) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
-             RETURNING id",
+             forge_credential_id, adapter_command, webhook_wake) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
         )
         .bind(Uuid::now_v7()),
     }
@@ -312,6 +317,7 @@ async fn save_project_in(
     .bind(&input.base_branch)
     .bind(input.forge_credential_id)
     .bind(&input.adapter_command)
+    .bind(input.webhook_wake.as_str())
     .fetch_one(&mut **tx)
     .await
     .map_err(|e| conflict_or(e, "a project with this key already exists"))?;
@@ -424,6 +430,7 @@ fn project_input(p: &ProjectRecord) -> ProjectInput {
         base_branch: p.base_branch.clone(),
         adapter_command: p.adapter_command.clone(),
         forge_credential_id: p.forge_credential_id,
+        webhook_wake: p.webhook_wake,
     }
 }
 
@@ -483,6 +490,7 @@ mod tests {
             base_branch: "main".into(),
             adapter_command: Vec::new(),
             forge_credential_id: credential,
+            webhook_wake: WebhookWake::Members,
         }
     }
 

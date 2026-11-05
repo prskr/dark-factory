@@ -1,0 +1,6 @@
+Content-Type: application/json
+X-Forgejo-Delivery: 7b098acb-8271-49fb-91c5-b2f463df52bd
+X-Forgejo-Event: action_run_failure
+X-Forgejo-Event-Type: action_run_failure
+X-Forgejo-Signature: 9f902d21808a7861dea0de3e39ef01b52cd73db7cb7bde2a1a02e284290c1d22
+X-Hub-Signature-256: sha256=9f902d21808a7861dea0de3e39ef01b52cd73db7cb7bde2a1a02e284290c1d22

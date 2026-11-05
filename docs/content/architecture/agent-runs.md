@@ -104,5 +104,6 @@ the task volume.
 
 Each task has one volume (`task-<key>`), mounted at `/data`. It is a cache: committed work is in
 Git, uncommitted work in the WIP snapshot. Volumes of tasks closed for 7 days, or idle for 30 days,
-are deleted hourly (`volumes.retainAfterCloseSeconds`, `volumes.idleTtlSeconds`); **Reset workspace**
+are deleted hourly (`volumes.retainAfterCloseSeconds`, `volumes.idleTtlSeconds`), the volume of a
+task whose pull request was merged at the next hourly check; **Reset workspace**
 in a task's status menu deletes one on demand. The next run re-clones.

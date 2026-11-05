@@ -69,6 +69,30 @@ returns it as the last comment of the thread with role `bot`, and the UI shows i
 conversation; a second review on the same line stays a separate thread; a thread id used on
 another pull request yields `invalid-input` (Forgejo answers 404 for the review).
 
+## Webhooks
+
+`handle-webhook` hex-decodes `X-Forgejo-Signature` and checks it with the host's
+`webhook-signature.verify`; a missing or malformed header yields `unauthorized`. It then maps
+`X-Forgejo-Event`, without network access:
+
+| `X-Forgejo-Event` | Condition | Event |
+|---|---|---|
+| `pull_request_approved`, `pull_request_rejected`, `pull_request_comment` | `action` `reviewed` | review submitted: approved, changes requested, commented (a single line comment arrives as a comment review without body) |
+| `pull_request` | `action` `closed` | pull request closed, `merged` from the payload |
+| `issue_comment` (also for PR comments) | `action` `created` | comment created with `is_pull` and the mentioned logins |
+| `action_run_failure` | – | CI failed: head is `run.prettyref`, for a `pull_request*` run the head branch in `run.event_payload`; check `run.workflow_id`, URL `run.html_url` |
+| anything else | – | none |
+
+A missing `X-Forgejo-Event` or a payload that doesn't match the event yields `invalid-input`.
+Mentions are `@login` at the start or after whitespace or `(`, `[`, `{`, outside code spans and
+fenced blocks; trailing `.`, `-`, `_` are dropped, duplicates (case-insensitive) are skipped.
+Forgejo 15 sends no webhook for commit statuses set by an external CI.
+
+`whoami` is `GET /api/v1/user`; `author-role` uses the role rules of [Review feedback](#review-feedback).
+
+Fixtures: `tests/fixtures/webhooks/` are deliveries recorded from Forgejo 15, signed with
+`test-secret`.
+
 ## Draft emulation
 
 Forgejo has no draft flag in this API; a pull request is work in progress when its title starts with

@@ -117,6 +117,29 @@ Switching the mode while drafts are open is safe: reading recognizes both forms.
   mismatch or a node that is not a review thread is `invalid-input`, an unknown id `not-found`
   (GraphQL `NOT_FOUND`).
 
+## Webhooks
+
+`handle-webhook` takes a delivery with content type `application/json`. The host checks the
+signature: `X-Hub-Signature-256` is `sha256=` plus the hex HMAC-SHA256 of the body. A missing or
+malformed header (also only the legacy `X-Hub-Signature`) or a mismatch is `unauthorized`.
+
+| `X-GitHub-Event` | Condition | Event |
+| --- | --- | --- |
+| `pull_request_review` | action `submitted`, state `approved`, `changes_requested` or `commented` | `review-submitted` |
+| `pull_request` | action `closed` | `pull-request-closed` (`merged` from `pull_request.merged`) |
+| `check_suite` | action `completed`, conclusion `failure` or `timed_out`, a `head_branch` | `ci-failed` (check = app name, no URL) |
+| `status` | state `failure` or `error` | one `ci-failed` per branch at the commit (check = `context`, URL = `target_url`) |
+| `issue_comment` | action `created` | `comment-created` (`is-pull-request` if the issue has `pull_request`) |
+
+Any other event or action (also `ping`) yields no event. `mentions` are `@login` outside code spans
+and fenced blocks; `@org/team` and e-mail addresses are skipped. `whoami` is the GraphQL `viewer`;
+`author-role` maps the permission lookup like the roles in review feedback, without the
+`authorAssociation` filter.
+
+The example payloads in `tests/fixtures/webhooks/` are from
+[`octokit/webhooks`](https://github.com/octokit/webhooks) (MIT), some edited in the tests. Not
+verified against a delivery from github.com.
+
 ## Token
 
 A fine-grained personal access token restricted to the project's repositories, with Pull requests

@@ -13,9 +13,10 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
-    Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
-    PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState, PullRequestUpdate,
-    RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretStore, TaskVolumeSpec,
+    AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
+    NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState,
+    PullRequestUpdate, RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretStore,
+    TaskVolumeSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,13 @@ pub enum ForgeCall {
         thread: String,
         body: String,
     },
+    Whoami {
+        project_id: ProjectId,
+    },
+    AuthorRole {
+        project_id: ProjectId,
+        login: String,
+    },
 }
 
 #[derive(Default)]
@@ -250,6 +258,9 @@ struct ForgeState {
     feedback: HashMap<(ProjectId, u64), Feedback>,
     feedback_results: VecDeque<Result<Feedback, IntegrationError>>,
     reply_results: VecDeque<Result<Comment, IntegrationError>>,
+    bot_login: Option<String>,
+    roles: HashMap<String, AuthorRole>,
+    whoami_results: VecDeque<Result<String, IntegrationError>>,
 }
 
 /// In-memory fake [`ForgeClient`] that records calls and supports both default
@@ -260,6 +271,9 @@ pub struct FakeForgeClient {
 }
 
 impl FakeForgeClient {
+    /// Login `whoami` answers unless [`FakeForgeClient::set_bot_login`] changed it.
+    pub const DEFAULT_BOT_LOGIN: &str = "df-bot";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -380,6 +394,29 @@ impl FakeForgeClient {
             .expect("lock poisoned")
             .reply_results
             .push_back(res);
+    }
+
+    /// Sets the login `whoami` answers; [`FakeForgeClient::DEFAULT_BOT_LOGIN`] without one.
+    pub fn set_bot_login(&self, login: impl Into<String>) {
+        self.state.lock().expect("lock poisoned").bot_login = Some(login.into());
+    }
+
+    /// Queues a scripted result for `whoami`.
+    pub fn push_whoami_result(&self, res: Result<String, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .whoami_results
+            .push_back(res);
+    }
+
+    /// Sets the role `author_role` answers for `login`; [`AuthorRole::Outside`] without one.
+    pub fn set_author_role(&self, login: impl Into<String>, role: AuthorRole) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .roles
+            .insert(login.into(), role);
     }
 }
 
@@ -610,6 +647,35 @@ impl ForgeClient for FakeForgeClient {
             url: format!("https://forge.example.test/pulls/{number}#comment-{id}"),
             id,
         })
+    }
+
+    async fn whoami(&self, p: &ProjectId) -> Result<String, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::Whoami { project_id: *p });
+        if let Some(scripted) = state.whoami_results.pop_front() {
+            return scripted;
+        }
+        Ok(state
+            .bot_login
+            .clone()
+            .unwrap_or_else(|| Self::DEFAULT_BOT_LOGIN.to_string()))
+    }
+
+    async fn author_role(
+        &self,
+        p: &ProjectId,
+        login: &str,
+    ) -> Result<AuthorRole, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::AuthorRole {
+            project_id: *p,
+            login: login.to_string(),
+        });
+        Ok(state
+            .roles
+            .get(login)
+            .copied()
+            .unwrap_or(AuthorRole::Outside))
     }
 }
 

@@ -815,6 +815,16 @@ mod tests {
                 url: "u".into(),
             })
         }
+        async fn whoami(&self, _: &df_core::ProjectId) -> Result<String, IntegrationError> {
+            panic!("not used")
+        }
+        async fn author_role(
+            &self,
+            _: &df_core::ProjectId,
+            _: &str,
+        ) -> Result<df_core::AuthorRole, IntegrationError> {
+            panic!("not used")
+        }
     }
 
     #[tokio::test]

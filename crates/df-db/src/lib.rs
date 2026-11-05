@@ -24,6 +24,7 @@ pub mod tasks;
 pub mod transcript;
 pub mod users;
 pub mod volumes;
+pub mod webhooks;
 
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
 pub use blobs::{BlobRow, PgBlobStore, sha256_hex};

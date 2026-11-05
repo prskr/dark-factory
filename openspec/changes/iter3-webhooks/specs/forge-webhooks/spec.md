@@ -37,22 +37,30 @@ A request SHALL be accepted only if the plugin verified its signature through th
 - **THEN** the response is `401` and the events are discarded
 
 ### Requirement: Accepted events
-The control plane SHALL act on four normalized events and nothing else: review submitted (with verdict), pull request closed (merged or not), CI failed, and comment with mentioned logins. A forge event of any other kind, including a single review comment outside a submitted review, SHALL be answered with `202` and ignored.
+The control plane SHALL act on four normalized events and nothing else: review submitted (with verdict), pull request closed (merged or not), CI failed, and comment with mentioned logins. A single review comment that the forge publishes at once counts as a submitted review with verdict comment. A forge event of any other kind, including a line comment added to a pending review, SHALL be answered with `202` and ignored.
 
-#### Scenario: Single review comment
+#### Scenario: Comment in a pending review
 - **WHEN** a reviewer adds a line comment to a pending review
 - **THEN** no task is woken
+
+#### Scenario: Single review comment
+- **WHEN** a member posts a single line comment on the PR of `DF-1`
+- **THEN** the comment is accepted as a submitted review with verdict comment
 
 #### Scenario: Push event
 - **WHEN** the forge posts a push event
 - **THEN** the response is `202` and nothing is stored
 
 ### Requirement: Repository match
-An event SHALL only apply to tasks of a project whose repository URL matches the event's repository, compared by host, owner and name, case-insensitively and without a trailing `.git`.
+An event SHALL only apply to tasks of a project whose repository URL matches the event's repository, compared by host, owner and name, case-insensitively and without a trailing `.git`. A plugin SHALL yield no review, close or CI failure event for a pull request whose head branch lives in another repository than the event's (a fork, or a deleted fork), because a fork's branch can carry a task branch name.
 
 #### Scenario: Branch name of another repository
 - **WHEN** a signed review event from `git.example.org/eve/other` names head branch `factory/task/DF-1`, and project `DF` is on `git.example.org/peter/dark-factory`
 - **THEN** `DF-1` is not woken
+
+#### Scenario: Pull request from a fork
+- **WHEN** a pull request on `git.example.org/peter/dark-factory` from branch `factory/task/DF-1` of the fork `git.example.org/eve/dark-factory` is reviewed, closed or fails CI
+- **THEN** `DF-1` is not woken and its PR is not marked draft
 
 ### Requirement: Routing
 Review, close and CI events SHALL route to the task whose key the head branch `factory/task/{key}` names. A comment on a pull request SHALL route to the project's task with that PR number. A comment on an issue SHALL route to every non-final task of the project linked to that issue. An event matching no task SHALL be logged at debug level and dropped.

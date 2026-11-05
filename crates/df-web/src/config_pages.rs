@@ -7,6 +7,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use df_core::routing::{ForgeRoutes, ForgeServing};
+use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, StatusSet};
 use df_db::DbError;
 use df_db::catalog::{Actor, CredentialRefInput, ProjectInput, ProjectRecord};
@@ -19,7 +20,7 @@ use uuid::Uuid;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::forms::{INPUT_CLASS, field};
+use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, data_table, dialog_with, empty_panel, forge_icon, form_error, icon, issue_role,
@@ -79,6 +80,7 @@ pub(crate) struct ProjectForm {
     base_branch: String,
     adapter_command: String,
     forge_credential_id: String,
+    webhook_wake: String,
     /// The "Push checks" tab of the edit form.
     #[serde(flatten)]
     push: PushPolicyForm,
@@ -199,6 +201,10 @@ fn validate_project(
         &form.forge_credential_id,
         credentials,
     );
+    let webhook_wake = form.webhook_wake.parse().unwrap_or_else(|_unknown| {
+        errors.add("webhook_wake", "Choose who wakes tasks.");
+        WebhookWake::default()
+    });
     errors.into_result(ProjectInput {
         key,
         name,
@@ -213,6 +219,7 @@ fn validate_project(
             .map(str::to_string)
             .collect(),
         forge_credential_id,
+        webhook_wake,
     })
 }
 
@@ -595,6 +602,7 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
             .forge_credential_id
             .map(|id| id.to_string())
             .unwrap_or_default(),
+        webhook_wake: p.webhook_wake.as_str().to_string(),
         push: PushPolicyForm::from_policy(push_policy),
     }
 }
@@ -603,6 +611,20 @@ fn credential_options(credentials: &[CredentialRef]) -> Vec<(String, String)> {
     credentials
         .iter()
         .map(|c| (c.id.to_string(), c.name.clone()))
+        .collect()
+}
+
+fn wake_options() -> Vec<(String, String)> {
+    WebhookWake::ALL
+        .iter()
+        .map(|wake| {
+            let label = match wake {
+                WebhookWake::None => "Nobody",
+                WebhookWake::Members => "Members with write access",
+                WebhookWake::Anyone => "Anyone",
+            };
+            (wake.as_str().to_string(), label.to_string())
+        })
         .collect()
 }
 
@@ -732,6 +754,10 @@ fn project_form(
         (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
         (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
             &values.forge_credential_id, Some("None"), errors))
+        (full_row(select_field_with_hint("Wake tasks on reviews and mentions", "webhook_wake", &wake_options(),
+            &values.webhook_wake, None,
+            Some("Reviews and @mentions of the bot account wake the task. Merged or closed PRs and failed checks apply regardless."),
+            errors)))
         (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
             Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
     });
@@ -797,6 +823,7 @@ fn key_field(value: &str, errors: &FormErrors, locked: bool) -> Markup {
 fn new_project_values() -> ProjectForm {
     ProjectForm {
         base_branch: "main".into(),
+        webhook_wake: WebhookWake::default().as_str().to_string(),
         ..ProjectForm::default()
     }
 }

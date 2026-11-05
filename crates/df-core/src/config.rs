@@ -691,6 +691,9 @@ pub struct PluginConfig {
     /// How the host sends the forge credential.
     #[serde(default)]
     pub auth_scheme: AuthSchemeSetting,
+    /// File with the webhook secret, read at startup. Unset: no webhook endpoint for the plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret_file: Option<PathBuf>,
 }
 
 impl PluginConfig {
@@ -702,6 +705,7 @@ impl PluginConfig {
             settings: BTreeMap::new(),
             hosts: Vec::new(),
             auth_scheme: AuthSchemeSetting::default(),
+            webhook_secret_file: None,
         }
     }
 }
@@ -998,6 +1002,17 @@ sandbox:
     fn plugin(yaml_body: &str) -> Result<PluginConfig, ConfigError> {
         let yaml = format!("{VALID_FIXTURE}plugins:\n  github:\n    path: /g.wasm\n{yaml_body}");
         Ok(InstanceConfig::from_yaml_str(&yaml)?.plugins["github"].clone())
+    }
+
+    #[test]
+    fn plugin_webhook_secret_file_is_optional() {
+        assert_eq!(plugin("").unwrap().webhook_secret_file, None);
+        assert_eq!(
+            plugin("    webhookSecretFile: /var/run/dark-factory/webhooks/github\n")
+                .unwrap()
+                .webhook_secret_file,
+            Some(PathBuf::from("/var/run/dark-factory/webhooks/github"))
+        );
     }
 
     #[test]

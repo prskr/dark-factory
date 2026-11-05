@@ -6,12 +6,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use df_core::routing::RoutingTable;
+use df_core::webhooks::ParsedEvent;
 use df_core::{
-    Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
-    ProjectId, PullRequest, PullRequestUpdate,
+    AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
+    NewPullRequest, ProjectId, PullRequest, PullRequestUpdate,
 };
 
-use crate::forge::{PluginForgeClient, RepoTarget};
+use crate::forge::{PluginForgeClient, RepoTarget, WebhookError};
 
 /// Where a project's repository lives and who acts on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,30 @@ impl ForgeRouter {
             routes,
             clients,
         }
+    }
+
+    /// Whether `plugin` (the name under `plugins`) loaded.
+    pub fn has_plugin(&self, plugin: &str) -> bool {
+        self.clients.contains_key(plugin)
+    }
+
+    /// Whether `plugin` (the name under `plugins`) loaded, exports `webhooks` and has a webhook
+    /// secret.
+    pub fn has_webhook(&self, plugin: &str) -> bool {
+        self.clients
+            .get(plugin)
+            .is_some_and(PluginForgeClient::accepts_webhooks)
+    }
+
+    /// Parses a webhook delivery with the plugin `plugin`, the name under `plugins`.
+    pub async fn handle_webhook(
+        &self,
+        plugin: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Vec<ParsedEvent>, WebhookError> {
+        let client = self.clients.get(plugin).ok_or(WebhookError::NotFound)?;
+        client.handle_webhook(headers, body).await
     }
 
     async fn resolve(
@@ -156,5 +181,19 @@ impl ForgeClient for ForgeRouter {
     ) -> Result<Comment, IntegrationError> {
         let (client, target) = self.resolve(p).await?;
         client.add_issue_comment(&target, number, body).await
+    }
+
+    async fn whoami(&self, p: &ProjectId) -> Result<String, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.whoami(&target).await
+    }
+
+    async fn author_role(
+        &self,
+        p: &ProjectId,
+        login: &str,
+    ) -> Result<AuthorRole, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.author_role(&target, login).await
     }
 }

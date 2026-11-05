@@ -49,9 +49,11 @@ sequenceDiagram
   allowed because the Rust standard library imports it; the context behind it is empty.
 - Outgoing requests: HTTPS only, authority (host and port) must equal that of the project's base URL.
   The host replaces `Authorization` with `token <credential>`. Denied requests fail inside the plugin
-  as `transport` before any connection is opened.
-- Capabilities (`pull-requests`, `issues`) are detected from the component's exports. The host
-  currently instantiates world `forge` only.
+  as `transport` before any connection is opened. `handle-webhook` runs without project, credential
+  and HTTP policy: every outgoing request of that call is denied.
+- Capabilities (`pull-requests`, `issues`, `webhooks`) are detected from the component's exports.
+  The host currently instantiates world `forge` only. The webhook endpoint of a plugin exists only
+  with the `webhooks` export and a webhook secret.
 
 ## Configuration
 

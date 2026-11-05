@@ -77,6 +77,9 @@ fn shipped_scripts_parse() {
     assert_eq!(secret.sessions.loaded, secret.sessions.new[1..]);
     let protected = Script::from_yaml_str(include_str!("../scripts/push-protected.yaml")).unwrap();
     assert_eq!(protected.sessions.new.len(), 1);
+    let webhook = Script::from_yaml_str(include_str!("../scripts/webhook.yaml")).unwrap();
+    assert_eq!(webhook.sessions.new.len(), 1);
+    assert_eq!(webhook.sessions.loaded.len(), 1);
 }
 
 #[tokio::test]

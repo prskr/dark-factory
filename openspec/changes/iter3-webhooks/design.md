@@ -79,7 +79,7 @@ world forge { include pull-request-provider; include issue-provider; export webh
 
 - `webhooks` is required in world `forge`, like `list-feedback` in `iter3-review-tools`. Both plugins live in this repository, so there is no capability probing beyond the existing detection, and the package stays `0.1.0` (pre-MVP).
 - The plugin, not the host, reads the signature header, because the header name and encoding differ per forge. The host keeps a per-call flag "verify returned true" and accepts events only when it is set.
-- `ci-failed` has no PR: Forgejo commit statuses and GitHub check suites name the branch, not always a PR.
+- `ci-failed` has no PR: Forgejo Actions runs and GitHub check suites name the branch, not always a PR.
 - Comments carry `mentions`, logins parsed by the plugin with the forge's mention syntax. The control plane compares them with `whoami`. No comment body crosses the boundary.
 - A `head` that the forge reports only for same-repository PRs is fine. Task branches always live in the project's repository.
 
@@ -150,7 +150,7 @@ Alternative: a `deliver_after` column on `task_messages`, with later events appe
 ### D7: Secret and config
 
 - `PluginConfig` gets `webhook_secret_file: Option<PathBuf>`, read once at startup into a `SecretString`. A missing or empty file fails startup, naming the plugin.
-- Helm mounts `plugins.<name>.webhookSecret {name, key}` read-only at `/var/run/dark-factory/webhooks/<name>` and writes the path.
+- Helm mounts `plugins.<name>.webhookSecret {name, key}` read-only at `/var/run/dark-factory/webhooks/<name>/secret` and writes the path.
 
 ### D8: Message format
 
@@ -176,6 +176,14 @@ Read reviews and comments with read_pull_request_feedback.
   - a failed commit status and a failed Actions run.
 
   The recordings become plugin fixtures. GitHub fixtures come from GitHub's documented examples.
+
+- **Spike results (Forgejo 15.0.11)**, fixtures in `plugins/forgejo/tests/fixtures/webhooks/`, signed with the test secret `test-secret`:
+  - `X-Forgejo-Event` is `pull_request_approved`, `pull_request_rejected` or `pull_request_comment` for a submitted review (action `reviewed`, `review.type` and `review.content`). A comment in a pending review sends nothing.
+  - A single line comment sends `pull_request_comment` with action `reviewed` and an empty `review.content`, identical to a submitted comment review without body. Both are accepted as a review with verdict comment.
+  - A comment on a PR arrives as `issue_comment` with `is_pull: true` and `issue.pull_request` set.
+  - `pull_request` with action `closed` carries `pull_request.merged`.
+  - Forgejo sends no webhook for commit statuses (`status` is not a webhook event in 15.0.11). CI failures arrive as `action_run_failure` from Forgejo Actions, one per failed run. For a push the head is `run.prettyref`; for a pull request `run.prettyref` is `#<n>` and the head is `pull_request.head.ref` in the JSON string `run.event_payload`. The check name is `run.workflow_id`, the URL `run.html_url`.
+  - Every delivery carries `X-Forgejo-Signature` (hex) and `X-Hub-Signature-256` (`sha256=` hex) with the same HMAC.
 - Control-plane tests post fixtures signed with a test secret to the router with a fake plugin.
 - One `df-e2e` scenario: a review submitted through the Forgejo API queues a `webhook` message on the task. This needs the e2e Forgejo to reach the control plane (`webhook.ALLOWED_HOST_LIST`).
 

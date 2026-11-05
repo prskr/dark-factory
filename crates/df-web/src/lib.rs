@@ -19,6 +19,7 @@ mod task_pages;
 #[cfg(test)]
 mod testkit;
 pub mod transcript;
+pub mod webhooks;
 
 pub use assets::{app_css, get_asset};
 pub use layout::{Nav, Shell, layout};

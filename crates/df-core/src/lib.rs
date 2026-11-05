@@ -16,6 +16,7 @@ pub mod seams;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod title;
+pub mod webhooks;
 
 pub use config::{
     AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,

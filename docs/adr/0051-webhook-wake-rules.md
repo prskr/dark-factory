@@ -14,7 +14,7 @@ ADR-0015 leaves open how the webhook secret is stored, who may wake a task, and 
 - **Bot:** reviews and comments by the bot account are dropped, whichever task caused them. Merges, closes and CI failures apply whoever the actor is.
 - **Who may wake:** a project setting `webhook_wake` (`none`, `members` default, `anyone`) gates reviews and mentions. Authors' roles come from the plugin.
 - **No new task on a mention** for now; a mention on an issue without an active task is dropped.
-- **Debounce:** a fixed 30 s window from the first event per task, run through the outbox of ADR-0049.
+- **No debounce:** every accepted event queues one message on its task. Messages arriving during a turn are held back and forwarded after it, so a burst wakes the task once and never starts a second run.
 - **Final tasks don't wake.** `completed`, `cancelled` and `failed` tasks ignore webhook events. A merged PR completes its task.
 
 ## Consequences
@@ -22,10 +22,11 @@ ADR-0015 leaves open how the webhook secret is stored, who may wake a task, and 
 - Agent-to-agent review wake-ups need a rule in the task dependencies (ADR-0043), not webhooks.
 - One secret covers every repository a plugin serves. The repository check keeps a valid signature from crossing projects.
 - Outside contributors can't start compute on public repositories unless a project opts in with `anyone`.
+- A burst of events costs one turn per event instead of one per burst.
 
 ## Alternatives considered
 
 - **Recording which task posted each forge comment or review, and dropping only self-caused events:** precise, but every posting tool must record ids, and the dependency model covers the agent case anyway.
 - **Secret per project only:** one webhook registration per repository instead of one per org. A per-project override on top of the plugin secret stays on the backlog; it needs a route naming the project, because the secret must be chosen before the payload is trusted.
 - **Host-side verification with header name and scheme from config:** moves forge knowledge into operator config.
-- **Debounce through a `deliver_after` column on queued messages:** mixes debouncing into message editing rules.
+- **Debounce per task (a 30 s window through the outbox of ADR-0049, or a `deliver_after` column on queued messages):** implemented first, dropped in review. The message queue already absorbs bursts; the window added a table, an outbox handler and delayed jobs.

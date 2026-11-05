@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-106.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-116.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -39,6 +39,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-91: design of `lifecycle-events` (generic outbox, design D1 and D3, 2026-11-02).
 - Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
 - Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
+- Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -135,6 +136,15 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-102 | low   | `factory-agent` runner | Harness inherits the whole factory-agent environment |
 | TD-103 | low   | `df-e2e` | Follow-up test can see the PR still in draft after `in_review` |
 | TD-104 | low   | `df-web` tab row | Phone tab-row visibility is only checked by hand |
+| TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
+| TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
+| TD-108 | low   | `dark-factory` lifecycle events | Outbox handler wiring lives in `lifecycle_events.rs` |
+| TD-109 | low   | `df-web` tests | Dev-dependency on `df-agent-channel` only for the metric probe |
+| TD-110 | low   | `deploy/e2e` | Forgejo `ALLOWED_HOST_LIST` hardcodes the release and namespace |
+| TD-111 | low   | `df-e2e` | `submit_review` takes the review event as a string |
+| TD-112 | low   | `plugins/forgejo` webhooks | `review` and `closed` repeat the pull request event parsing |
+| TD-113 | low   | `df-plugins` tests | Three plugin client helpers repeat the same call |
+| TD-115 | medium | `dark-factory` webhooks | A failed webhook delivery is lost until an operator redelivers it |
 
 ## Entries
 
@@ -1020,3 +1030,90 @@ The test checks only the overflow classes and that `tabs.js` calls `scrollIntoVi
 
 **Fix:** an e2e step at 390 px that chooses the last tab and asserts that its bounding box lies inside the tab list and `document.documentElement.scrollWidth <= innerWidth`.
 
+### TD-106 (S2). Webhook parsing helpers are copied between the forge plugins
+
+`plugins/forgejo/src/webhook.rs`, `plugins/github/src/webhook.rs`
+
+`without_code`, `header`, `payload`, `User`, `Repository::into_parts`, `Branch` (with `RepositoryId` and `of_repository`) and the `describe` test helpers are the same in both plugins; `mentions` differs only in its charset and team handling. A fix in one copy (for example the fork check) must be repeated in the other.
+
+**Matters when:** a third forge plugin lands, or a parsing bug is fixed in only one plugin.
+
+**Fix:** a small plugin-support crate (for example `plugins/forge-common`, see TD-80) that both plugins depend on.
+
+### TD-107 (S5). `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs`
+
+`crates/df-db/src/webhooks.rs` (`complete_on_merge_tx`)
+
+The function locks runs, requests a stop and writes a message block. For that, `lock_runs_then_task`, `StopScope`, `request_stop_tx` and `text_block` in `tasks.rs` became `pub(crate)`.
+
+**Matters when:** the task lifecycle in `tasks.rs` changes and the copy of its rules in `webhooks.rs` is missed.
+
+**Fix:** move `complete_on_merge_tx` into `tasks.rs`, call it from the webhooks module and make the helpers private again.
+
+### TD-108 (S7). Outbox handler wiring lives in `lifecycle_events.rs`
+
+`crates/dark-factory/src/lifecycle_events.rs` (`handlers`)
+
+The module started as the lifecycle-event dispatcher and now also registers `MarkDraftHandler`.
+
+**Matters when:** the next outbox job kind is added.
+
+**Fix:** move the outbox dispatcher wiring into its own module (for example `outbox.rs`) and keep `lifecycle_events.rs` for lifecycle events.
+
+### TD-109 (S9). Dev-dependency on `df-agent-channel` only for the metric probe
+
+`crates/df-web/Cargo.toml` (`df-agent-channel` with `test-util`)
+
+`df-web` tests use only `metrics::probe::Probe` from `df-agent-channel`.
+
+**Matters when:** `df-agent-channel` starts to depend on `df-web`, or its test build gets slow.
+
+**Fix:** move the metric probe to a lower crate (for example `df-telemetry` with `test-util`) and depend on that.
+
+### TD-110 (S10). Forgejo `ALLOWED_HOST_LIST` hardcodes the release and namespace
+
+`deploy/e2e/forgejo-values.yaml` (`ALLOWED_HOST_LIST: dark-factory-control-plane.dark-factory.svc`)
+
+`e2e-local.sh` derives the service name from `$release` and `$namespace`; the values file repeats the defaults.
+
+**Matters when:** the e2e runs with another release name or namespace: Forgejo refuses to deliver webhooks.
+
+**Fix:** set the value from the script (`--set`), or add a comment that ties it to the defaults.
+
+### TD-111 (S11). `submit_review` takes the review event as a string
+
+`crates/df-e2e/src/forgejo.rs` (`submit_review(&self, number: u64, event: &str, body: &str)`)
+
+**Matters when:** a test passes a misspelled event; Forgejo rejects it only at run time.
+
+**Fix:** a small enum (`Approve`, `RequestChanges`, `Comment`).
+
+### TD-112 (S13). `review` and `closed` repeat the pull request event parsing
+
+`plugins/forgejo/src/webhook.rs` (`review`, `closed`)
+
+Both deserialize `PullRequestPayload`, check `action`, apply the fork check and build the same `ParsedEvent { repo_url, … PullRequestRef … }`.
+
+**Matters when:** a third pull request event is added.
+
+**Fix:** a helper that takes the action and a variant constructor.
+
+### TD-113 (S15). Three plugin client helpers repeat the same call
+
+`crates/df-plugins/tests/webhooks.rs` (`probe_client`, `forgejo_client`, `github_client`)
+
+Each repeats `common::plugin_client(…, Duration::from_secs(30), 64 << 20)`.
+
+**Matters when:** the timeout or memory limit changes for all of them.
+
+**Fix:** one helper that takes the plugin path.
+
+### TD-115 (P3). A failed webhook delivery is lost until an operator redelivers it
+
+`crates/dark-factory/src/forge.rs`, `crates/df-web/src/webhooks.rs`
+
+The endpoint answers `500` when storing or applying an event fails. Neither GitHub nor Forgejo redelivers a failed delivery on its own; the how-to documents manual redelivery.
+
+**Matters when:** a merge delivery fails during a database outage: the task stays `in_review` and keeps its volume.
+
+**Fix:** a periodic reconcile that asks the forge for the PR state of `in_review` tasks without `pr_merged_at` and applies a missed merge or close.

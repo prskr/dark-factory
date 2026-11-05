@@ -33,7 +33,7 @@ impl<T: Transport> Forgejo<T> {
                     })
             })
             .transpose()?;
-        let bot: ApiUser = self.call(Method::Get, "/api/v1/user".into(), None)?;
+        let bot = self.whoami()?;
         let pr = format!("{}/pulls/{}", repo_path(&id.repo), id.number);
 
         let mut comments_path = format!("{}/issues/{}/comments", repo_path(&id.repo), id.number);
@@ -70,7 +70,7 @@ impl<T: Transport> Forgejo<T> {
         let mut roles = Roles {
             forgejo: self,
             repo: &id.repo,
-            bot: bot.login,
+            bot,
             known: HashMap::new(),
         };
         Ok(Feedback {
@@ -88,6 +88,22 @@ impl<T: Transport> Forgejo<T> {
                 .collect::<Result<_, _>>()?,
             truncated: comments_truncated || reviews_truncated,
         })
+    }
+
+    /// Login of the token owner.
+    pub fn whoami(&self) -> Result<String, Error> {
+        let bot: ApiUser = self.call(Method::Get, "/api/v1/user".into(), None)?;
+        Ok(bot.login)
+    }
+
+    pub fn author_role(&self, repo: &RepoRef, login: &str) -> Result<AuthorRole, Error> {
+        Roles {
+            forgejo: self,
+            repo,
+            bot: self.whoami()?,
+            known: HashMap::new(),
+        }
+        .role(login)
     }
 
     pub fn reply(

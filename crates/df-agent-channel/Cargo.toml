@@ -14,6 +14,7 @@ default = []
 test-util = ["dep:opentelemetry_sdk", "dep:rcgen", "dep:tempfile", "df-core/test-util"]
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 df-core.workspace = true
 df-db.workspace = true
@@ -39,10 +40,10 @@ x509-parser.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-async-trait.workspace = true
 bytes.workspace = true
 df-agent-channel = { path = ".", features = ["test-util"] }
 df-core = { workspace = true, features = ["test-util"] }
+df-telemetry = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-stream = { workspace = true, features = ["net"] }

@@ -1,6 +1,7 @@
 //! Task volume retention (`iter2-task-volume-lifecycle`, design D1): once per hour the leader
-//! deletes the volumes of closed tasks after `volumes.retainAfterCloseSeconds` and of idle tasks
-//! after `volumes.idleTtlSeconds`, and marks them in `tasks.volume_deleted_at`.
+//! deletes the volumes of closed tasks after `volumes.retainAfterCloseSeconds`, of idle tasks
+//! after `volumes.idleTtlSeconds` and of tasks with a merged PR at once, and marks them in
+//! `tasks.volume_deleted_at`.
 
 use std::future::Future;
 use std::time::Duration;
@@ -20,9 +21,9 @@ use crate::runs::terminal_states;
 pub const SCAN_INTERVAL: Duration = Duration::from_hours(1);
 
 /// Tasks whose volume is due for deletion (alias `t`). `$1` is the cutoff of closed tasks, `$2`
-/// the one of every task (`NULL`: never). `GREATEST` ignores `NULL`, so the later applicable
-/// cutoff wins. A task without runs never had a volume: its last run end is `NULL`, it never
-/// matches.
+/// the one of every task (`NULL`: never); a task with a merged PR is due at once (`infinity`,
+/// `iter3-webhooks` design D4). `GREATEST` ignores `NULL`, so the later applicable cutoff wins.
+/// A task without runs never had a volume: its last run end is `NULL`, it never matches.
 macro_rules! due {
     () => {
         concat!(
@@ -34,7 +35,8 @@ macro_rules! due {
              AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)
                  < GREATEST(
                      CASE WHEN t.status IN ('completed', 'cancelled') THEN $1::timestamptz END,
-                     $2::timestamptz
+                     $2::timestamptz,
+                     CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END
                  )"
         )
     };

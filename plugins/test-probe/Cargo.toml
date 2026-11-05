@@ -43,4 +43,5 @@ struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
 [dependencies]
+hex.workspace = true
 wit-bindgen.workspace = true

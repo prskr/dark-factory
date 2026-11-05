@@ -1312,6 +1312,7 @@ dependencies = [
  "df-test-postgres",
  "df-web",
  "futures",
+ "hex",
  "k8s-openapi",
  "kube",
  "opentelemetry",
@@ -1546,6 +1547,7 @@ dependencies = [
  "df-core",
  "df-db",
  "df-proto",
+ "df-telemetry",
  "df-test-postgres",
  "futures",
  "jsonschema 0.60.0",
@@ -1751,9 +1753,11 @@ dependencies = [
  "bytes",
  "df-core",
  "futures",
+ "hex",
  "http",
  "http-body-util",
  "jsonschema 0.60.0",
+ "ring",
  "secrecy",
  "serde_json",
  "tempfile",
@@ -1825,6 +1829,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "comrak",
+ "df-agent-channel",
  "df-core",
  "df-db",
  "df-proto",
@@ -1835,6 +1840,7 @@ dependencies = [
  "insta",
  "maud",
  "openidconnect",
+ "opentelemetry",
  "rsa",
  "rust-embed",
  "secrecy",
@@ -2437,6 +2443,7 @@ name = "forgejo-plugin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "hex",
  "serde",
  "serde_json",
  "wit-bindgen 0.63.0",
@@ -2675,6 +2682,7 @@ name = "github-plugin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "hex",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -7660,6 +7668,7 @@ dependencies = [
 name = "test-probe-plugin"
 version = "0.0.0"
 dependencies = [
+ "hex",
  "wit-bindgen 0.63.0",
 ]
 

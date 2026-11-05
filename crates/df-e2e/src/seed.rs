@@ -73,6 +73,15 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         credential,
     )
     .await?;
+    ensure_project(
+        pool,
+        actor,
+        data::WEBHOOK_PROJECT_KEY,
+        data::WEBHOOK_PROJECT_NAME,
+        data::WEBHOOK_SCRIPT,
+        credential,
+    )
+    .await?;
     Ok(())
 }
 
@@ -202,6 +211,7 @@ async fn ensure_project(
         base_branch: data::BASE_BRANCH.into(),
         adapter_command: data::adapter_command(script),
         forge_credential_id: Some(credential),
+        webhook_wake: df_core::webhooks::WebhookWake::Members,
     };
     let existing = get_project_by_key(pool, key).await?;
     if let Some(p) = &existing
@@ -212,6 +222,7 @@ async fn ensure_project(
         && p.base_branch == wanted.base_branch
         && p.adapter_command == wanted.adapter_command
         && p.forge_credential_id == wanted.forge_credential_id
+        && p.webhook_wake == wanted.webhook_wake
     {
         return Ok(());
     }

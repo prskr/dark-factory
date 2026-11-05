@@ -1,0 +1,30 @@
+# Script of the forge webhook scenario of the e2e suite (project `WH`): run 1 opens the pull request
+# and completes the task, so it waits in review with a ready pull request. A review wakes the task
+# (message from `webhook`); run 2 reads the feedback and waits, so the pull request stays a draft.
+sessions:
+  new:
+    - - say: "I will add a welcome file for this task."
+      - shell: |
+          printf 'welcome from the demo agent\n' > welcome.txt
+          git add welcome.txt
+          git commit -q -m 'Add welcome'
+      - mcp:
+          server: factory
+          tool: update_pull_request
+          args:
+            title: "Add a welcome file"
+            body: "Adds welcome.txt, written by the demo agent."
+      - mcp:
+          server: factory
+          tool: complete_task
+          args:
+            summary: "Added welcome.txt."
+      - say: "Pushed the welcome file. Ready for review."
+      - end: end_turn
+  loaded:
+    - - say: "Reading the review."
+      - mcp:
+          server: factory
+          tool: read_pull_request_feedback
+      - say: "Read the review; waiting for more."
+      - end: end_turn

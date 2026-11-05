@@ -318,6 +318,7 @@ async fn unknown_projects_and_other_projects_subscriptions_are_not_found() {
             base_branch: "main".into(),
             adapter_command: vec![],
             forge_credential_id: None,
+            webhook_wake: df_core::webhooks::WebhookWake::Members,
         },
     )
     .await

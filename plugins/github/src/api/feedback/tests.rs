@@ -417,6 +417,45 @@ fn a_failed_permission_lookup_fails_the_listing() {
     assert!(matches!(err, Error::Upstream(_)), "{err:?}");
 }
 
+fn viewer() -> Response {
+    reply(
+        200,
+        json!({ "data": { "viewer": { "login": "factory-bot" } } }),
+    )
+}
+
+#[test]
+fn whoami_is_the_graphql_viewer() -> anyhow::Result<()> {
+    let fake = fake(vec![viewer()]);
+    assert_eq!(github(&fake, &[]).whoami()?, "factory-bot");
+    assert_eq!(calls(&fake), [(Method::Post, GRAPHQL_URL.to_string())]);
+    Ok(())
+}
+
+#[test]
+fn author_role_maps_permissions_and_the_viewer() -> anyhow::Result<()> {
+    for (login, answer, role) in [
+        ("Factory-Bot", None, AuthorRole::Bot),
+        ("alice", Some(permission("admin")), AuthorRole::Member),
+        ("alice", Some(permission("write")), AuthorRole::Member),
+        // `triage` is reported as `read`.
+        ("alice", Some(permission("read")), AuthorRole::Outside),
+        ("alice", Some(permission("none")), AuthorRole::Outside),
+        (
+            "ghost",
+            Some(reply(404, json!({ "message": "Not Found" }))),
+            AuthorRole::Outside,
+        ),
+    ] {
+        let fake = fake([viewer()].into_iter().chain(answer).collect());
+        let got = github(&fake, &[]).author_role(&pr_ref().repo, login)?;
+        assert_eq!(got, role, "{login}");
+        let expected = usize::from(role != AuthorRole::Bot);
+        assert_eq!(lookups(&fake).len(), expected, "{login}");
+    }
+    Ok(())
+}
+
 #[test]
 fn any_older_page_sets_truncated_and_keeps_the_newest_items_in_order() -> anyhow::Result<()> {
     for pointer in [

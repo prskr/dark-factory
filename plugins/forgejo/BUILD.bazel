@@ -10,7 +10,7 @@ extract_cargo_lints(
     workspace = "//:Cargo.toml",
 )
 
-exports_files(["Cargo.toml"])
+exports_files(["Cargo.toml"] + glob(["tests/fixtures/webhooks/**"]))
 
 rust_library(
     name = "forgejo_plugin_lib",
@@ -39,7 +39,7 @@ rust_shared_library(
 
 rust_test(
     name = "forgejo_plugin_test",
-    compile_data = ["//contract:wit_integrations"],
+    compile_data = ["//contract:wit_integrations"] + glob(["tests/fixtures/**"]),
     crate = ":forgejo_plugin_lib",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(

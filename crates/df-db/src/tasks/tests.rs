@@ -1258,3 +1258,65 @@ async fn a_message_on_a_cancelled_task_with_a_stopped_run_queues_it_for_after_th
     // The stopped run has no connection yet, but it is going away.
     assert_eq!(status_of(&pool, task.id).await, TaskStatus::Queued);
 }
+
+/// A finished task in `status` whose pull request is open, or merged with `merged`.
+async fn task_with_pr(pool: &PgPool, status: TaskStatus, pr: Option<i64>, merged: bool) -> TaskRow {
+    let task = task_with_run(pool, status, "succeeded").await;
+    sqlx::query(
+        "UPDATE tasks SET pr_number = $2, pr_merged_at = CASE WHEN $3 THEN now() END WHERE id = $1",
+    )
+    .bind(task.id.as_uuid())
+    .bind(pr)
+    .bind(merged)
+    .execute(pool)
+    .await
+    .unwrap();
+    task
+}
+
+async fn mark_draft_jobs(pool: &PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar("SELECT payload FROM outbox WHERE kind = $1 ORDER BY id")
+        .bind(MARK_DRAFT_KIND)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_message_on_a_task_with_an_open_pr_enqueues_mark_draft_once() {
+    for status in [TaskStatus::InReview, TaskStatus::Completed] {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_pr(&pool, status, Some(12), false).await;
+
+        queue_message(&pool, task.id, human(), text("rework"))
+            .await
+            .unwrap();
+        queue_message(&pool, task.id, human(), text("and this"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            mark_draft_jobs(&pool).await,
+            [serde_json::json!({ "task_id": task.id })],
+            "{status}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_message_enqueues_no_mark_draft_without_an_open_pr() {
+    for (status, pr, merged) in [
+        (TaskStatus::InReview, None, false),
+        (TaskStatus::Completed, Some(12), true),
+        (TaskStatus::Waiting, Some(12), false),
+    ] {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let task = task_with_pr(&pool, status, pr, merged).await;
+
+        queue_message(&pool, task.id, human(), text("rework"))
+            .await
+            .unwrap();
+
+        assert!(mark_draft_jobs(&pool).await.is_empty(), "{status} {pr:?}");
+    }
+}

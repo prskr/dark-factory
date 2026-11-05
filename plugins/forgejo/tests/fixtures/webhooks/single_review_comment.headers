@@ -1,0 +1,6 @@
+Content-Type: application/json
+X-Forgejo-Delivery: 8e0db615-66d9-4243-99aa-a281b7df08ee
+X-Forgejo-Event: pull_request_comment
+X-Forgejo-Event-Type: pull_request_review_comment
+X-Forgejo-Signature: 7710bb1588b8c8a2eb174cce8043ec43d9dcdf8a585f77f506284b90bf4bf2b7
+X-Hub-Signature-256: sha256=7710bb1588b8c8a2eb174cce8043ec43d9dcdf8a585f77f506284b90bf4bf2b7

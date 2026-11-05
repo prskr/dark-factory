@@ -343,6 +343,7 @@ where
             forges: forge_routes,
             forge: forge.clone(),
             provider: provider.clone(),
+            webhooks: forge::webhooks(&forge, &pool),
         },
         EgressDeps { flows, services },
         approval_types.clone(),
@@ -421,8 +422,8 @@ fn lifecycle_delivery(
     Ok(delivery)
 }
 
-/// Background work only the leader replica does: retention and, with a signing key, the outbox
-/// dispatcher. Each task waits for `is_leader` itself.
+/// Background work only the leader replica does: retention and the outbox dispatcher. Each task
+/// waits for `is_leader` itself.
 fn spawn_leader_tasks(
     listeners: &mut JoinSet<()>,
     ctx: &ChannelContext,
@@ -431,12 +432,15 @@ fn spawn_leader_tasks(
     delivery: lifecycle_events::Delivery,
 ) -> anyhow::Result<()> {
     let meter = opentelemetry::global::meter("dark-factory");
-    if let Some(dispatcher) =
-        lifecycle_events::dispatcher(&ctx.pool, &ctx.notifier, delivery, &meter)?
-    {
-        let (is_leader, stop) = (is_leader.clone(), stop.clone());
-        listeners.spawn(async move { dispatcher.run(is_leader, stop).await });
-    }
+    let dispatcher = lifecycle_events::dispatcher(
+        &ctx.pool,
+        &ctx.notifier,
+        delivery,
+        ctx.forge.clone(),
+        &meter,
+    )?;
+    let (dispatcher_leader, dispatcher_stop) = (is_leader.clone(), stop.clone());
+    listeners.spawn(async move { dispatcher.run(dispatcher_leader, dispatcher_stop).await });
     let retention = df_agent_channel::Retention::new(ctx.clone());
     let retention_stop = stop.clone();
     listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
@@ -643,7 +647,7 @@ where
 }
 
 /// The router of the UI port: the full UI if `auth` is configured, otherwise only health checks
-/// and assets.
+/// and assets. The webhook route is on it either way.
 fn web_router(
     cfg: &InstanceConfig,
     pool: &PgPool,
@@ -657,9 +661,10 @@ fn web_router(
         .signing_key
         .as_ref()
         .map(|key| Arc::from(key.public_key()));
+    let webhooks = df_web::webhooks::routes(backends.webhooks);
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
-        return Ok(df_web::base_router(pool.clone(), lifecycle_public_key));
+        return Ok(df_web::base_router(pool.clone(), lifecycle_public_key).merge(webhooks));
     };
     let oidc = df_web::auth::OidcClient::new(auth).context("invalid `auth` configuration")?;
     Ok(df_web::router(df_web::WebState {
@@ -680,14 +685,16 @@ fn web_router(
         events: df_db::lifecycle_events::EventSinks::new(&cfg.lifecycle_events),
         lifecycle_public_key,
         project_targets: delivery.project_targets,
-    }))
+    })
+    .merge(webhooks))
 }
 
-/// The forges and the sandbox provider the task pages act on.
+/// The forges and the sandbox provider the task pages act on, and the webhook receiver.
 struct WebBackends {
     forges: df_core::routing::ForgeRoutes,
     forge: Arc<dyn df_core::ForgeClient>,
     provider: Arc<dyn df_core::SandboxProvider>,
+    webhooks: df_web::webhooks::Webhooks,
 }
 
 /// What the egress pages need from the outside.
@@ -964,6 +971,8 @@ mod tests {
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 303"), "{tasks}");
         assert!(tasks.contains("location: /login?next=%2ftasks"), "{tasks}");
+        let webhook = ui_response(router.clone(), WEBHOOK_DELIVERY).await;
+        assert!(webhook.starts_with("http/1.1 202"), "{webhook}");
         let health = ui_response(router, "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(health.starts_with("http/1.1 200"), "{health}");
         Ok(())
@@ -986,6 +995,8 @@ mod tests {
         )?;
         let tasks = ui_response(router.clone(), "GET /tasks HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(tasks.starts_with("http/1.1 404"), "{tasks}");
+        let webhook = ui_response(router.clone(), WEBHOOK_DELIVERY).await;
+        assert!(webhook.starts_with("http/1.1 202"), "{webhook}");
         let ready = ui_response(router, "GET /readyz HTTP/1.1\r\nHost: x\r\n\r\n").await;
         assert!(ready.starts_with("http/1.1 200"), "{ready}");
         Ok(())
@@ -1072,8 +1083,38 @@ mod tests {
             forges: df_core::routing::ForgeRoutes::default(),
             forge: Arc::new(df_core::testing::FakeForgeClient::new()),
             provider: Arc::new(df_core::testing::FakeSandboxProvider::new()),
+            webhooks: df_web::webhooks::Webhooks::new(
+                Arc::new(AcceptingWebhooks),
+                &opentelemetry::global::meter("test"),
+            ),
         }
     }
+
+    /// Has an endpoint for `forgejo` and accepts every delivery.
+    struct AcceptingWebhooks;
+
+    #[async_trait::async_trait]
+    impl df_web::webhooks::WebhookReceiver for AcceptingWebhooks {
+        fn is_loaded(&self, plugin: &str) -> bool {
+            plugin == "forgejo"
+        }
+
+        fn has_endpoint(&self, plugin: &str) -> bool {
+            plugin == "forgejo"
+        }
+
+        async fn receive(
+            &self,
+            _plugin: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Result<(), df_web::webhooks::WebhookRejection> {
+            Ok(())
+        }
+    }
+
+    const WEBHOOK_DELIVERY: &str =
+        "POST /webhooks/forgejo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}";
 
     fn serve_config(pool: &PgPool, dir: &std::path::Path, tls: Option<&str>) -> InstanceConfig {
         let options = pool.connect_options();

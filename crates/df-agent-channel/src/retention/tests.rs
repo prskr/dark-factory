@@ -108,6 +108,36 @@ async fn closed_tasks_lose_their_volume_after_the_grace_period_once() {
 }
 
 #[tokio::test]
+async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let df2 = second_task(&env).await;
+    set_status(&pool, env.task.id, "completed").await;
+    ended_run(&env, env.task.id, 1, Utc::now()).await;
+    sqlx::query("UPDATE tasks SET pr_merged_at = now() WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A merged task with an active run keeps its volume until the run ended.
+    sqlx::query("UPDATE tasks SET pr_merged_at = now() WHERE id = $1")
+        .bind(df2.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    env.insert_run(df2, 1, "running").await;
+
+    assert_eq!(
+        Retention::new(env.ctx.clone())
+            .scan(Utc::now())
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(deleted_volumes(&env.provider), ["task-df-1"]);
+}
+
+#[tokio::test]
 async fn volumes_within_their_retention_are_kept() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;

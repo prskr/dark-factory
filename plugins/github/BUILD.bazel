@@ -13,6 +13,7 @@ extract_cargo_lints(
 exports_files([
     "Cargo.toml",
     "tests/fixtures/github-openapi.json",
+    "tests/fixtures/webhooks/pull_request_closed.json",
 ])
 
 rust_library(
@@ -45,7 +46,7 @@ rust_test(
     compile_data = [
         "tests/fixtures/github-openapi.json",
         "//contract:wit_integrations",
-    ],
+    ] + glob(["tests/fixtures/webhooks/**"]),
     crate = ":github_plugin_lib",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(

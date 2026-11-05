@@ -1,0 +1,6 @@
+Content-Type: application/json
+X-Forgejo-Delivery: 42bb6904-e24a-48e7-8ed6-c592378213d4
+X-Forgejo-Event: pull_request_rejected
+X-Forgejo-Event-Type: pull_request_review_rejected
+X-Forgejo-Signature: eaf7d1e571d1d5a5c687de49cea8c482d19f7d6024879e0bb99d65d48ab787e2
+X-Hub-Signature-256: sha256=eaf7d1e571d1d5a5c687de49cea8c482d19f7d6024879e0bb99d65d48ab787e2

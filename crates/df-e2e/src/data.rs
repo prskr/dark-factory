@@ -24,6 +24,11 @@ pub const SECRET_PROJECT_NAME: &str = "Secret Scan";
 pub const PROTECTED_PROJECT_KEY: &str = "PP";
 pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
 
+/// Project whose fake agent completes the task in its first run and only reads feedback in the
+/// next (forge webhooks); tasks are `WH-<n>`.
+pub const WEBHOOK_PROJECT_KEY: &str = "WH";
+pub const WEBHOOK_PROJECT_NAME: &str = "Webhooks";
+
 /// The file of `push-secret.yaml` with the token, and the line the token is on.
 pub const SECRET_PATH: &str = "config.py";
 pub const SECRET_LINE: u32 = 2;
@@ -40,6 +45,9 @@ pub const PERSONA_MODEL: &str = "claude-sonnet-5-5";
 /// Forgejo owner and repository the projects are linked to.
 pub const FORGE_OWNER: &str = "factory";
 pub const FORGE_REPO: &str = "demo";
+
+/// Second Forgejo user with write access to the repository (created by `just e2e-local`).
+pub const FORGE_REVIEWER: &str = "reviewer";
 
 /// Issue of the repository that tasks link to (created by `just e2e-local`).
 pub const FORGE_ISSUE_NUMBER: u64 = 1;
@@ -84,6 +92,7 @@ pub const RATE_LIMIT_SCRIPT: &str = "/opt/harness/scripts/rate-limit.yaml";
 pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
+pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

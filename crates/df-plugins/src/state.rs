@@ -1,4 +1,5 @@
-//! Per-call store data: WASI without capabilities, HTTP policy, non-secret settings, limits.
+//! Per-call store data: WASI without capabilities, HTTP policy, non-secret settings, limits and,
+//! for `handle-webhook`, the request body and webhook secret behind `webhook-signature`.
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -6,6 +7,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::io::AsyncWrite;
 use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
@@ -18,6 +20,7 @@ use wasmtime_wasi_http::{
     WasiHttpView,
 };
 
+use crate::host::webhook_signature;
 use crate::policy::HttpPolicy;
 
 /// Accepts at most this many bytes per `write` call.
@@ -33,14 +36,34 @@ pub(crate) struct State {
     http: WasiHttpCtx,
     hooks: PolicyHooks,
     config: WasiConfigVariables,
+    webhook: Option<WebhookCall>,
     pub limits: StoreLimits,
 }
 
+/// The webhook a `handle-webhook` call parses: what `webhook-signature.verify` checks against.
+pub(crate) struct WebhookCall {
+    key: ring::hmac::Key,
+    body: Vec<u8>,
+    verified: bool,
+}
+
+impl WebhookCall {
+    pub(crate) fn new(secret: &SecretString, body: &[u8]) -> Self {
+        Self {
+            key: ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.expose_secret().as_bytes()),
+            body: body.to_vec(),
+            verified: false,
+        }
+    }
+}
+
 impl State {
+    /// `policy` `None` denies every outgoing request; `webhook` is set only for `handle-webhook`.
     pub(crate) fn new(
         plugin: &str,
-        policy: HttpPolicy,
+        policy: Option<HttpPolicy>,
         settings: HashMap<String, String>,
+        webhook: Option<WebhookCall>,
         limits: StoreLimits,
     ) -> Self {
         // No preopens, environment or sockets: the builder's defaults grant nothing. Only stderr
@@ -55,12 +78,30 @@ impl State {
             http: WasiHttpCtx::new(),
             hooks: PolicyHooks { policy },
             config: settings.into_iter().collect(),
+            webhook,
             limits,
         }
     }
 
     pub(crate) fn config(&mut self) -> WasiConfig<'_> {
         WasiConfig::from(&self.config)
+    }
+
+    /// Whether `webhook-signature.verify` returned true during this call.
+    pub(crate) fn webhook_verified(&self) -> bool {
+        self.webhook.as_ref().is_some_and(|w| w.verified)
+    }
+}
+
+impl webhook_signature::Host for State {
+    fn verify(&mut self, signature: Vec<u8>) -> bool {
+        let Some(webhook) = self.webhook.as_mut() else {
+            return false;
+        };
+        // `ring::hmac::verify` compares in constant time.
+        let valid = ring::hmac::verify(&webhook.key, &webhook.body, &signature).is_ok();
+        webhook.verified |= valid;
+        valid
     }
 }
 
@@ -83,9 +124,9 @@ impl WasiHttpView for State {
     }
 }
 
-/// Applies the [`HttpPolicy`] before delegating to the default sender.
+/// Applies the [`HttpPolicy`] before delegating to the default sender; without one, denies all.
 struct PolicyHooks {
-    policy: HttpPolicy,
+    policy: Option<HttpPolicy>,
 }
 
 impl WasiHttpHooks for PolicyHooks {
@@ -106,7 +147,11 @@ impl WasiHttpHooks for PolicyHooks {
             > + Send,
     > {
         let uri = request.uri().clone();
-        if let Err(reason) = self.policy.admit(&uri, request.headers_mut()) {
+        let Some(policy) = &self.policy else {
+            tracing::warn!(host = ?uri.host(), "denied outgoing plugin request without policy");
+            return Box::new(async { Err(HttpError::HttpRequestDenied) });
+        };
+        if let Err(reason) = policy.admit(&uri, request.headers_mut()) {
             tracing::warn!(?reason, host = ?uri.host(), "denied outgoing plugin request");
             return Box::new(async { Err(HttpError::HttpRequestDenied) });
         }
