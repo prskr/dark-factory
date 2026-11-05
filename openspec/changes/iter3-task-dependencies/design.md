@@ -16,13 +16,19 @@ See proposal.md (Why). The current state:
   - `mark_task_done` sets `completed`; the merged-PR path of `iter3-webhooks` reuses it.
   - `iter2-cancel` sets `cancelled`.
 - **Scheduler**: `start_queued_runs` only picks `queued` tasks, so a new status is skipped automatically.
+- **Status writes**: eight statements set `tasks.status`, each with its own guards:
+  - in `df-db/src/tasks.rs`: the `create_task` insert, `queue_message_tx`, withdrawing a message (back to `waiting`), `mark_task_done` and `cancel_task`;
+  - in `df-agent-channel/src/runs.rs`: `start_queued_runs` (`running`), turn start and end (`running` ⇄ `waiting`) and `end_run_tx` (four overrides, then `plan_resume`).
+
+  `update_task_status` is only called by tests.
 - **Factory tools**: executed in `crates/df-agent-channel/src/tools.rs` (1,244 lines), declared in `contract/mcp/factory-tools.v2.json`. Every call is stored by `call_id` for exactly-once execution.
 - **Fake agent**: `crates/fake-acp-agent` already scripts arbitrary tool calls (`tool_call` steps).
 
 ## Goals / Non-Goals
 
 **Goals:**
-- One place decides what a task event means for dependents and the parent. Run end, mark done and cancel only call it.
+- One pure function decides every task status change, including what an event means for dependents and the parent ([ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)). The current call sites only raise events.
+- The existing transitions move to it first, with no behavior change, before the new statuses and events are added.
 - Releasing a dependent can't be lost to a race between creating it and its target completing.
 - The handover works without webhooks and without any forge call.
 
@@ -53,36 +59,76 @@ One migration:
 - **`tasks.status`**: `CHECK` gains `awaiting_dependencies`.
 - **`personas.description`**: `TEXT NOT NULL DEFAULT ''` with `CHECK (char_length(description) <= 500)`. 500 characters keep `list_personas` small for many personas.
 
-### D2: One event hook
+### D2: Task transitions (ADR-0055)
 
-`df_db::tasks::record_task_event(tx, task_id, event)` with `TaskEvent::{Completed, Done, Failed { reason }, Cancelled}` runs inside the caller's transaction:
+**Pure function** in `df-core` (new module `task_transition`):
 
-1. **Remember the first occurrence**: for `Completed`, sets `first_completed_at` if null; for `Done`, sets `first_done_at` if null. Both updates lock the target row.
-2. **Release dependents**: sets every dependent that is in `awaiting_dependencies` and has no unsatisfied dependency left to `queued`. It publishes `TaskChanged` for every dependent of the target, released or not (the UI's dependency list changes either way), and `TaskMessageQueued` for released ones. Their assignment prompt is already queued, so the scheduler starts them.
-3. **Wake the parent**: locks the parent row (`FOR UPDATE`). If the parent isn't `completed`, `cancelled` or `failed`, it queues the child-ended message with `queue_message_tx` (D4).
+```rust
+pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, Rejected>;
+```
 
-Callers:
-- `end_run_tx`: outcome `completed` → `Completed`; outcome `failed` → `Failed`.
-- `mark_task_done` (and through it the merged-PR path of `iter3-webhooks`) → `Done`.
-- The cancel path → `Cancelled`.
+- **`TaskSnapshot`** holds only what the task's own rows show:
+  - `status`;
+  - `active_run` (none, connected, finalizing, stop requested);
+  - `undelivered_messages` (for a stopped run: only those queued after the stop);
+  - `ever_ran`;
+  - `unsatisfied_dependencies`;
+  - `auto_resumes`.
+- **`TaskEvent`**, one variant per thing that happens:
 
-Every event runs the parent wake-up; only `Completed` and `Done` can release dependents. The run-end mapping itself is unchanged.
+  | Event | Raised by | Today |
+  |---|---|---|
+  | `Created` | `create_task` | insert with `queued` |
+  | `MessageQueued` | `queue_message_tx` | `CASE` in SQL |
+  | `MessageWithdrawn` | withdrawing a message | back to `waiting` |
+  | `RunStarted` | `start_queued_runs` | `running` |
+  | `TurnStarted`, `TurnEnded` | run state `running` ⇄ `awaiting_input` | `running` ⇄ `waiting` |
+  | `RunEnded { outcome, detail, retry_after, max_auto_resumes, now }` | `end_run_tx` | overrides + `plan_resume` |
+  | `MarkedDone` | `mark_task_done`, merged PR (`iter3-webhooks`) | `completed` |
+  | `Cancelled` | cancel path | `cancelled` |
+  | `DependencySatisfied` | effect of a target's Completion or Done | new |
+  | `ChildEnded { child, how }` | effect of a child's end | new |
 
-Alternative: an outbox job per event. That's asynchronous for no gain: everything happens in the database, and the transactions are short.
+  `now` and the limits are event fields, so the function stays pure.
+- **`Transition`**: the new status, `resume_at`, `auto_resumes`, and a list of **effects**:
+  - `RecordFirst(Completion | Done)`: sets `first_completed_at` or `first_done_at` if null;
+  - `NotifyDependents`: raises `DependencySatisfied` on every dependent;
+  - `NotifyParent(how)`: raises `ChildEnded` on the parent;
+  - `QueueMessage(author, content)`, for example the child-ended message (D4);
+  - `CloseRequests(reason)`, `FinalizeIdleRun`, `StopRun`;
+  - `Audit(action, details)`, `Publish(notification)`.
+- **`Rejected`**: a command the status doesn't allow (`can_mark_done`, `can_cancel` move here), mapped to `DbError::Conflict`. An event that changes nothing returns an empty transition.
+
+**New rules as match arms:**
+- `RunEnded` with outcome `completed`: `RecordFirst(Completion)`, `NotifyDependents`, `NotifyParent(completed)`. When the resulting status is `failed` (outcome `failed`, or infrastructure failures with no resume left): `NotifyParent(failed)`. The run-end mapping and its overrides are unchanged.
+- `MarkedDone`: `RecordFirst(Done)`, `NotifyDependents`, `NotifyParent(done)`.
+- `Cancelled`: `NotifyParent(cancelled)`.
+- `DependencySatisfied`, applied to a dependent: `awaiting_dependencies` with no unsatisfied dependency left → `queued` and `Publish(TaskMessageQueued)` (its assignment prompt is already queued, so the scheduler starts it). Always `Publish(TaskChanged)`, because the UI's dependency list changes either way.
+- `ChildEnded`, applied to a parent: `completed`, `cancelled` or `failed` → empty transition. Otherwise `QueueMessage` with the child-ended message, which then goes through the `MessageQueued` arm.
+
+**Applier** in `df-db`: `apply_task_event(tx, task_id, event) -> Result<Transition, DbError>`.
+- For the event a caller raises, it locks the task's run rows, then the task row, as all status writers do today. Loads the snapshot, calls `transition`, writes status, `resume_at` and `auto_resumes`, and executes the effects.
+- Effects that raise events on other tasks go into a work queue in the same transaction. They are applied after the current task's writes, in order: dependents, then the parent.
+- A cross-task event (`DependencySatisfied`, `ChildEnded`) locks only the target's task row, as `queue_message_tx` does today. It never locks run rows of another task. So a transaction holds at most its own task's run rows, and any task row lock it takes after them can't close a cycle with a transaction that locks run rows first (the subtree cancel of `iter3-task-tree`).
+- The eight status writes in Context become calls to `apply_task_event`. `update_task_status` is removed and its tests set the status with SQL.
+
+Alternatives:
+- An event hook after the existing transitions (`record_task_event`, the previous version of this decision). It leaves the rules spread across eight statements (ADR-0055).
+- An outbox job per event. That's asynchronous for no gain: everything happens in the database, and the transactions are short.
 
 ### D3: Creation and the release race
 
 `create_task` gains `created_by: Principal`, `parent_id: Option<TaskId>` and `depends_on: Vec<NewDependency { key, kind }>`. In the same transaction, after allocating the key:
 
 1. It resolves the targets with `SELECT … FROM tasks WHERE project_id = $1 AND key = ANY($2) FOR SHARE`. A missing key, or a key given twice, returns `DbError::InvalidDependency(key)`.
-2. It computes the status: `awaiting_dependencies` if any dependency is unsatisfied, otherwise `queued`.
-3. It inserts the task and its dependency rows.
+2. It counts the unsatisfied dependencies and calls `transition` with `Created` on a snapshot built from that input, since there is no row to load yet. The `Created` arm gives `awaiting_dependencies` if any dependency is unsatisfied, otherwise `queued`.
+3. It inserts the task with that status and its dependency rows.
 
-The race: a target's step 1 in D2 updates the target row and needs a row lock, which conflicts with `FOR SHARE`. Either the creation commits first, and the target's release query then sees the new dependent, or the target commits first, and the creation's lock read returns the new `first_completed_at`. No release is lost. A test drives both orders with two transactions.
+The race: the applier locks a target's row (`FOR UPDATE`) before it handles the target's event, and that lock conflicts with `FOR SHARE`. Either the creation commits first, and the target's release query then sees the new dependent, or the target commits first, and the creation's lock read returns the new `first_completed_at`. No release is lost. A test drives both orders with two transactions.
 
 ### D4: Messages
 
-- **`queue_message_tx`**: the `CASE` gains a first branch. The status stays or becomes `awaiting_dependencies` when the task has never had a run (`NOT EXISTS runs`) and has an unsatisfied dependency. This covers both a message on a waiting task and reopening a cancelled task that never started.
+- **`queue_message_tx`**: inserts the message and applies `MessageQueued`. The SQL `CASE` moves into that arm (`running` with a connected run that has no stop request, otherwise `queued`). The arm gains a first rule: the status stays or becomes `awaiting_dependencies` when the task has never run (`ever_ran` is false) and has an unsatisfied dependency. This covers both a message on a waiting task and reopening a cancelled task that never started.
 - **Child-ended message**: author `System { reason: "task.child_ended" }`, one visible text block:
 
   ```
@@ -133,6 +179,8 @@ The race: a target's step 1 in D2 updates the target row and needs a row lock, w
 - [Child summaries are untrusted input to the parent's agent] → They are quoted and attributed in the message (D4). The parent can only act within its own task and children.
 - [Parent woken twice for one merged child (Completion, then Done)] → Intended. The merge is news for a coordinator, and a wake-up with nothing to do costs a few tokens.
 - [`FOR SHARE` on targets serializes creation against target events] → The locks are held only for single-row updates, so contention is negligible.
+- [Moving the eight existing status writes is a refactor of the run lifecycle] → It is a separate task group (tasks 1.x) that changes no behavior. The existing `df-db` and `df-agent-channel` tests must stay green unchanged before any new event lands. The `end_run_tx` override and `plan_resume` tests become unit tests of `transition`.
+- [Cross-task effects lock a second task while the first is locked] → Cross-task events lock only task rows, never another task's run rows (D2). A transaction that locks several tasks' run rows takes all of them before any task row (`iter3-task-tree` subtree cancel).
 - [`created_by` as JSONB loses the foreign key to `users`] → Users are never deleted (audit references them the same way), and the display name is a snapshot, as for message authors.
 
 ## Migration Plan
