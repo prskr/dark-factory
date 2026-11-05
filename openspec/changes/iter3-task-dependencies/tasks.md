@@ -10,6 +10,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - the `queue_message_tx` `CASE`;
   - the `end_run_tx` overrides (cancelled, pending messages, marked done, reopened after a stop);
   - `plan_resume` (rate limit with and without retry time, capacity rejection, backoff up to `max_auto_resumes`);
+  - the forge job rules of design D2: `EnqueuePrSync` on run end (pushed, completed, both, neither, cancelled task) and on mark done (with and without PR), `EnqueueMarkDraft` on a message (from `in_review`/`completed` with unmerged PR, merged PR, no PR, other statuses);
   - `can_mark_done` and `can_cancel` as `Rejected`.
 
   `plan_resume`, `task_status_for` and `keeps_status_on_pending_prompts` move from `df-agent-channel` to this module, together with their pure tests.
@@ -17,7 +18,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - in `df-db`: `create_task`, `queue_message_tx`, withdrawing a message, `mark_task_done`, `cancel_task`;
   - in `df-agent-channel`: `start_queued_runs`, turn start and end, `end_run_tx`.
 
-  Remove `update_task_status`; its tests set the status with SQL. Verify that `cargo test -p df-db` and `cargo test -p df-agent-channel` pass with no test changed except that one, and that `grep -rn "SET status" crates --include='*.rs'` finds `tasks.status` written only in `apply_task_event` and tests.
+  Replace `pr::enqueue_run_end` and the inline `pr.sync` / `pr.mark_draft` jobs of `mark_task_done` and `queue_message_tx` with the effects; `enqueue_open_after_push` stays. Remove `update_task_status`; its tests set the status with SQL. Verify that `cargo test -p df-db` and `cargo test -p df-agent-channel` pass with no test changed except that one, and that `grep -rn "SET status" crates --include='*.rs'` finds `tasks.status` written only in `apply_task_event` and tests.
 
 ## 2. Schema and domain
 
