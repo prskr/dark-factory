@@ -87,7 +87,8 @@ All targets come from the environment, so the same tests run against any instanc
 | Variable | Default | Effect |
 |---|---|---|
 | `E2E_KEEP` | unset | `1` keeps the cluster after the run. |
-| `E2E_TEST_ARGS` | `--ignored --test-threads=1` | Arguments after `--` of `cargo test -p df-e2e --test demo --test flow --test lifecycle_events --test webhooks`, e.g. a test name. |
+| `E2E_TEST_THREADS` | `1` | Tests that run in parallel per test binary. CI uses `2`; each test works on its own task, branch and requests. More than `1` exceeds the [resource budget](#resource-budget). |
+| `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test demo --test flow --test lifecycle_events --test webhooks`, e.g. a test name. |
 | `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver installer is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
@@ -169,7 +170,7 @@ kind on Podman is experimental. The script sets `KIND_EXPERIMENTAL_PROVIDER=podm
 
 ## Resource budget
 
-The node targets about 3.5 GiB peak memory including Chromium. The manifests set small requests and limits (control plane 128 Mi/512 Mi, PostgreSQL 128 Mi/256 Mi, Forgejo 128 Mi/512 Mi, Dex 32 Mi/128 Mi, Playwright 512 Mi/1.5 Gi), sandbox pods default to 1 Gi, at most four sandbox pods exist and the tests run one at a time. Measure with `podman stats df-e2e-control-plane` (or `docker stats`) while the run is going.
+The node targets about 3.5 GiB peak memory including Chromium. The manifests set small requests and limits (control plane 128 Mi/512 Mi, PostgreSQL 128 Mi/256 Mi, Forgejo 128 Mi/512 Mi, Dex 32 Mi/128 Mi, Playwright 512 Mi/1.5 Gi), sandbox pods default to 1 Gi, at most four sandbox pods exist and the tests run one at a time (`E2E_TEST_THREADS=1`). Measure with `podman stats df-e2e-control-plane` (or `docker stats`) while the run is going.
 
 ## Network policy
 

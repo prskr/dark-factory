@@ -5,7 +5,8 @@
 # Environment:
 #   E2E_KEEP=1        keep the cluster after the run (delete it with `kind delete cluster --name df-e2e`)
 #   E2E_TOOLS_DIR     where the Playwright driver installer is kept (default: ~/.cache/df-e2e)
-#   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=1)
+#   E2E_TEST_THREADS  tests run in parallel per test binary (default: 1, the memory budget of docs/demo.md)
+#   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=$E2E_TEST_THREADS)
 #   BAZEL             Bazel command, e.g. "bazel --bazelrc=.bazelrc.agents" (default: bazel)
 #   KIND_EXPERIMENTAL_PROVIDER, DOCKER_HOST   as for kind; Podman is used when Docker is not installed
 set -euo pipefail
@@ -246,7 +247,7 @@ run_suite() {
   export E2E_RECEIVER_URL="http://127.0.0.1:$receiver_port"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
-  read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=1}"
+  read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-1}}"
   cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
 }
 
