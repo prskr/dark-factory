@@ -3,7 +3,7 @@
 # Debian Trixie (13) with git, bash, curl, CA certificates and the OpenSSH client, UID 1000 and /workspace.
 # It contains no Node.js and no adapter: the control plane mounts the harness image at /opt/harness/claude-code.
 
-FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
