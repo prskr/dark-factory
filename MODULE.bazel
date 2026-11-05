@@ -230,7 +230,7 @@ filegroup(
     srcs = glob(["**/*.json"]),
     visibility = ["//visibility:public"],
 )""",
-    commit = "6ab3493622cd387923a2d0da5234f53e80e1bd28",
+    commit = "c86448cbf1a840ca62d119259864863897c8748a",
     remote = "https://github.com/datreeio/CRDs-catalog.git",
     sparse_checkout_patterns = ["cert-manager.io"],
 )
