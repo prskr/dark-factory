@@ -84,6 +84,32 @@ _Avoid_: Read-only path, locked path
 A repository path of a project whose content agents do not get in their workspace. Every hidden path is also a protected path. Its content can still reach the agent through the repository history.
 _Avoid_: Protected path, secret path, excluded path, private file
 
+### Runs
+
+**Run**:
+One sandbox session in which an agent works on a task, from start until it finishes, is stopped or runs out of budget. A task can have many runs.
+_Avoid_: Session, job, execution
+
+**Turn**:
+One exchange within a run: the agent receives one or more messages as a single input and works until it waits for the next input.
+_Avoid_: Round, step, prompt
+
+**Message**:
+Input for a task's agent, written by a human or a system principal. Messages waiting for the same turn reach the agent together.
+_Avoid_: Prompt, comment, chat message
+
+**Interrupt**:
+Ending the current turn early on a human's request. The run stays alive and the next message continues it.
+_Avoid_: Stop, cancel, abort
+
+**Stop**:
+Ending a run early on a human's request. The agent's work so far is kept and the task waits for the next message.
+_Avoid_: Cancel, interrupt, kill
+
+**Cancel**:
+Ending a task for good on a human's request: its run stops and undelivered messages are discarded.
+_Avoid_: Stop, abort, delete
+
 ### Transcript
 
 **Transcript**:
