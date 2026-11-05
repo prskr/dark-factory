@@ -119,24 +119,24 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
-| Provider adapters as WASI plugins (protocol translation, custom auth) | idea | F5, `openspec/changes/iter3-inference-gateway` (out of scope) |
-| Allowed models per model provider, enforced in the gateway | idea | `openspec/changes/iter3-inference-gateway` (out of scope) |
+| Provider adapters as WASI plugins (protocol translation, custom auth) | idea | F5, `openspec/changes/archive/2026-11-04-iter3-inference-gateway` (out of scope) |
+| Allowed models per model provider, enforced in the gateway | idea | `openspec/changes/archive/2026-11-04-iter3-inference-gateway` (out of scope) |
 | Subscription pools and fallback | idea | F6 |
 | Priorities between due tasks in the scheduler (today: oldest resume time first); per-credential limits plug into the same query (F6) | idea | `openspec/changes/archive/2026-11-02-iter2-run-resilience` (Non-Goals, D6) |
 | Dependencies set by humans: `depends_on` in the new-task composer | idea | `openspec/changes/iter3-task-dependencies` |
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/iter3-task-dependencies` |
 | Dependencies set by humans also covers `base_task` in the new-task composer | idea | `openspec/changes/iter3-task-tree` |
 | Base-branch notices: tell open tasks with own commits that their base branch moved (subtask merged, rebase), without waking them | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
-| Pi harness: a profile plus its files (`AcpHarness.files` prepared in iter3) | idea | `openspec/changes/iter3-opencode-harness` (out of scope) |
-| Import a provider's model list from its `/v1/models` | idea | `openspec/changes/iter3-opencode-harness` (out of scope) |
-| OpenCode Go preset check with a real key: Chat Completions and Anthropic Messages models with scheme `bearer`, reasoning output without the catalog's `reasoning_field` | idea | `openspec/changes/iter3-opencode-harness` (task 9.3, postponed) |
-| Real Claude Code run with a project's own adapter command (no harness mount, no `CLAUDE_CODE_EXECUTABLE`) | idea | `openspec/changes/iter3-opencode-harness` (manual check postponed) |
-| Check whether a repository's `.claude/settings.json` (`env`, for example `ANTHROPIC_BASE_URL`) can redirect Claude Code away from the inference endpoint, as checked for OpenCode | idea | `openspec/changes/iter3-opencode-harness` (task 9.2 results) |
+| Pi harness: a profile plus its files (`AcpHarness.files` prepared in iter3) | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (out of scope) |
+| Import a provider's model list from its `/v1/models` | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (out of scope) |
+| OpenCode Go preset check with a real key: Chat Completions and Anthropic Messages models with scheme `bearer`, reasoning output without the catalog's `reasoning_field` | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (task 9.3, postponed) |
+| Real Claude Code run with a project's own adapter command (no harness mount, no `CLAUDE_CODE_EXECUTABLE`) | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (manual check postponed) |
+| Check whether a repository's `.claude/settings.json` (`env`, for example `ANTHROPIC_BASE_URL`) can redirect Claude Code away from the inference endpoint, as checked for OpenCode | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (task 9.2 results) |
 | Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
 | `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | MCP tools as WASI components | idea | F2 |
-| Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/iter2-continuation-summary` |
+| Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/archive/2026-11-03-iter2-continuation-summary` |
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |
 | Push-check exceptions for a whole project instead of one task | idea | `openspec/changes/archive/2026-11-02-iter2-push-checks` (non-goal) |
 | Declarative configuration import | idea | F4 |
@@ -183,11 +183,11 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Content-Security-Policy for the web UI (needs Alpine's CSP build or a nonce strategy) | idea | `openspec/changes/iter3-markdown-rendering` (design) |
 | Remaining low-severity tech debt | — | [`docs/tech_debt.md`](../../docs/tech_debt.md) |
 | Lifecycle event extensions: a "started" event for volumes (`volume.provisioning`), run and task state events, two signatures during key rotation, delivery history and manual redelivery, hot reload of key and instance subscriptions, per-subscription concurrency or rate limits, the `can()` permission check instead of the `admin` role check | idea | ADR-0049, `openspec/changes/archive/2026-11-04-lifecycle-events` |
-| New task from an issue mention on an issue without an active task (persona choice, prompt, guard against outsiders spending compute) | decided | ADR-0015, ADR-0051, `openspec/changes/iter3-webhooks` |
-| Webhook secret override per project: optional project credential reference, route `POST /webhooks/{plugin}/projects/{key}` verified with the project's secret (else the plugin's) and routed only to that project; additive, no WIT change | idea | ADR-0051, `openspec/changes/iter3-webhooks` |
-| Wake on CI failures that an external CI reports only as a Forgejo commit status (Forgejo 15 sends no webhook for commit statuses; for example polling statuses, or a Forgejo version that adds the event) | idea | `openspec/changes/iter3-webhooks` (design D9) |
-| Edit own PR comments: agents edit or delete PR comments and review comments they posted | idea | `openspec/changes/iter3-review-tools` |
-| Agents review in the forge: agents submit reviews (verdict, line comments) and read other tasks' pull requests, as the reviewer of [`iteration-3.md`](iteration-3.md) demo step 2 | idea | ADR-0036, `openspec/changes/iter3-review-tools` |
+| New task from an issue mention on an issue without an active task (persona choice, prompt, guard against outsiders spending compute) | decided | ADR-0015, ADR-0051, `openspec/changes/archive/2026-11-05-iter3-webhooks` |
+| Webhook secret override per project: optional project credential reference, route `POST /webhooks/{plugin}/projects/{key}` verified with the project's secret (else the plugin's) and routed only to that project; additive, no WIT change | idea | ADR-0051, `openspec/changes/archive/2026-11-05-iter3-webhooks` |
+| Wake on CI failures that an external CI reports only as a Forgejo commit status (Forgejo 15 sends no webhook for commit statuses; for example polling statuses, or a Forgejo version that adds the event) | idea | `openspec/changes/archive/2026-11-05-iter3-webhooks` (design D9) |
+| Edit own PR comments: agents edit or delete PR comments and review comments they posted | idea | `openspec/changes/archive/2026-11-05-iter3-review-tools` |
+| Agents review in the forge: agents submit reviews (verdict, line comments) and read other tasks' pull requests, as the reviewer of [`iteration-3.md`](iteration-3.md) demo step 2 | idea | ADR-0036, `openspec/changes/archive/2026-11-05-iter3-review-tools` |
 | Branch suggestions in the composer's "Existing branch" field from the head branches of open PRs (`pull-requests.list-open`, native `<datalist>`) | idea | `openspec/changes/iter3-branch-workflows` |
 | Waking a task on CI success or recovery | idea | `openspec/changes/iter3-ci-tools` |
 | Re-running or cancelling CI jobs from a factory tool | idea | `openspec/changes/iter3-ci-tools` |
