@@ -28,18 +28,16 @@
 
 `transcript::markdown` moves to `crates/df-web/src/markdown.rs` (`pub fn render(source: &str) -> Markup`), keeping the existing safety steps and their tests. The transcript calls it. Artifacts will call the same function. No trait, one renderer.
 
-### D2: Highlighting through comrak's syntect plugin, wrapped
+### D2: Highlighting through our own comrak `SyntaxHighlighterAdapter` on syntect
 
-- `comrak` gets its `syntect` feature; `syntect` is declared in `[workspace.dependencies]` with `default-features = false` and `default-fancy` (pure-Rust regex, bundled syntaxes and themes, no oniguruma). Check in the lock that `onig` is absent.
-- A small `SyntaxHighlighterAdapter` in `markdown.rs` wraps comrak's `SyntectAdapter` built with `css_with_class_prefix("hl-")`:
-  - content above 64 KiB (`const MAX_HIGHLIGHT_BYTES`) or a language syntect does not know → escaped plain text;
-  - `mermaid` → plain escaped source in a `<pre>` carrying `x-data="mermaidDiagram"` and a `data-mermaid` marker (D5);
-  - otherwise → delegate.
+- `syntect` is declared in `[workspace.dependencies]` with `default-features = false` and the features `default-syntaxes`, `default-themes`, `html` and `regex-fancy` (pure-Rust regex, bundled syntaxes and themes, no oniguruma; `onig` is absent from the lock). Not `default-fancy`: its `yaml-load` pulls in the unmaintained `yaml-rust`, and nothing here loads `.sublime-syntax` or `.tmTheme` files. `comrak` keeps its feature set: its `syntect` feature is not used.
+- `markdown.rs` implements comrak's `SyntaxHighlighterAdapter` directly on syntect (`ClassedHTMLGenerator`, class prefix `hl-`) instead of wrapping comrak's `SyntectAdapter`, which falls back to first-line detection and cannot be told not to:
+  - content above 64 KiB (`const MAX_HIGHLIGHT_BYTES`), no language, a language syntect does not know, or a syntect parse error → escaped plain text;
+  - otherwise → highlighted with classes.
+  - every fenced block is written as `<pre class="hl-code">`, so the theme stylesheet gives plain and highlighted blocks the same background.
 - Language lookup: syntect's `find_syntax_by_token`, which covers names and extensions (`rust`, `rs`). It never falls back to first-line detection.
-- The `SyntectAdapter` (syntax set loading takes tens of milliseconds) is built once in a `LazyLock` and shared.
+- The `SyntaxSet` (loading takes tens of milliseconds) is built once in a `LazyLock` and shared.
 - Comrak passes untrusted text through the adapter; the adapter's output must be escaped. Tests cover `<script>` inside a highlighted `html` fence.
-
-Alternative: syntect directly with a custom comrak AST walk. More code for the same result.
 
 ### D3: Theme names and stylesheet
 
@@ -58,11 +56,14 @@ No change: `ItemKind::Agent { complete: false }` already renders plain text. The
 
 - `assets/vendor/mermaid.min.js`: the IIFE build of the latest Mermaid 11 release, vendored like htmx and Alpine (version and checksum noted in `crates/df-web/README.md`).
 - `assets/markdown.js` registers `Alpine.data('mermaidDiagram', …)` and is added to `COMPONENT_SCRIPTS`. On `init()` it:
-  1. loads Mermaid once per page by injecting a `<script>` with the hashed URL (a module-level promise; the URL is read from a `data-mermaid-src` attribute that `layout.rs` puts on `<body>`),
+  1. loads Mermaid once per page by injecting a `<script>` with the hashed URL (a module-level promise; the URL is read from a `data-mermaid-src` attribute that `layout.rs` puts on `<body>` of every page; the script itself loads only on the first diagram),
   2. calls `mermaid.initialize({ startOnLoad: false, securityLevel: 'sandbox', theme })` with `theme` from `matchMedia('(prefers-color-scheme: dark)')` (`dark` / `default`), keeping `securityLevel` in Mermaid's `secure` list so `%%{init}%%` directives cannot override it,
-  3. `mermaid.render(id, source)` and replaces the `<pre>` content with the returned markup (a sandboxed iframe); keeps the source text for a redraw,
-  4. on a parse error leaves the source and adds a one-line error below it (`textContent`, never HTML),
-  5. listens to the `matchMedia` `change` event and redraws; removes the listener in `destroy()`.
+  3. `mermaid.render(id, source)` and puts the returned markup (a sandboxed iframe) into a sibling `<div class="diagram">` after the `<pre>`, which gets `hidden`; the component keeps the source text for a redraw. The iframe height is computed from the SVG's `viewBox` and the iframe width (Mermaid sizes it for the unscaled SVG, which leaves empty space when the SVG shrinks), and recomputed when the diagram resizes (`ResizeObserver`),
+  4. on a parse error leaves the source visible and adds a one-line error `<p>` below it (`textContent`, never HTML),
+  5. listens to the `matchMedia` `change` event and redraws; removes the listener in `destroy()`, which also removes the siblings,
+  6. keeps the current view (diagram or error) in component state and a `MutationObserver` (the `<pre>`'s `hidden` attribute and the parent's children) puts it back when an htmx morph of the surrounding element (request cards are morphed in place on state changes) resets `hidden` and drops the siblings. The restore only creates what is missing, so a diagram is never drawn twice.
+- The `<pre>` comes from comrak's `codefence_renderers` for `mermaid` (`<pre class="hl-code" x-data="mermaidDiagram"><code>…escaped…</code></pre>`), not from the highlighter; there is no `data-mermaid` marker.
+- `.diagram` is as wide as the bubble allows (`w-screen max-w-full`) and has the `panel` color: the diagram theme follows `prefers-color-scheme`, while agent bubbles are inverted, so the diagram needs its own background. The iframe is `color-scheme: light` so it stays transparent. Request cards render their Markdown in `.md-body` as well.
 - Without JavaScript the `<pre>` stays a plain code block (spec "Diagrams without JavaScript").
 
 Alternative: `securityLevel: 'strict'` (inline SVG, DOMPurify). Rejected in ADR-0047: isolation would depend on the sanitizer.
@@ -76,6 +77,7 @@ Alternative: `securityLevel: 'strict'` (inline SVG, DOMPurify). Rejected in ADR-
 - [Mermaid's `sandbox` level is marked beta; iframe height may not fit the diagram] → After rendering, set the iframe height from the SVG's `viewBox` if Mermaid leaves it fixed; covered by a browser check, not a unit test.
 - [Binary size grows by syntect's bundled syntaxes and themes (a few MiB)] → Accepted (ADR-0047).
 - [fancy-regex highlighting of large or pathological input costs CPU per page view (no cache)] → 64 KiB cap per block; profile before adding a cache.
+- [`syntect` loads its bundled syntax and theme dumps with `bincode` 1, which `cargo deny` reports as unmaintained (RUSTSEC-2025-0141)] → Ignored in `deny.toml` with a reason: bincode 1.3.3 is declared complete by its authors, only bundled data is decoded. Revisit when syntect moves on.
 - [~3 MB Mermaid script] → Loaded only on pages with a diagram, cached immutably by hash.
 - [syntect theme names change between releases] → Names are validated at startup and in the Helm schema; a test asserts every schema enum value exists in `ThemeSet::load_defaults()`.
 

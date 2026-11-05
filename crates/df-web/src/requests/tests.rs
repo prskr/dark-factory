@@ -677,3 +677,12 @@ fn findings_on_a_card_are_shown_as_text() {
         "{card}"
     );
 }
+
+#[test]
+fn markdown_in_a_card_sits_in_md_body_so_diagrams_and_code_get_their_styles() {
+    let mut card = push_check_card(json!([]));
+    card.row.reason = "```mermaid\nflowchart LR; A-->B\n```".into();
+    let html = super::request_card(&card, None).into_string();
+    let body = &html[html.find("md-body").expect("md-body")..];
+    assert!(body.contains(r#"x-data="mermaidDiagram""#), "{html}");
+}

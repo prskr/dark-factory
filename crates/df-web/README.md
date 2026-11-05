@@ -73,6 +73,32 @@ The queued stack shows three rows and scrolls inside itself; the runs list (newe
 `<details>` that starts closed, and its `open` state survives live updates (`morphIgnore`).
 From `md` the details do not scroll as a whole: the sections above Runs keep their height and only the run list scrolls (minimum area 17 rem when open); the description is cut after three lines. The phone sheet scrolls as a whole.
 
+## Markdown, code themes and diagrams
+
+`markdown::render` is the one renderer for agent-written Markdown (the transcript, the request
+cards; artifacts will reuse it). comrak runs with raw HTML escaped, images rewritten to links and
+`rel="noopener noreferrer nofollow"` on links.
+
+- **Highlighting**: fenced blocks with a language token that syntect's bundled syntaxes know by
+  name or extension get `hl-` classes (no inline styles). No fallback to first-line detection;
+  blocks without a language, with an unknown one or above 64 KiB (`MAX_HIGHLIGHT_BYTES`) are
+  escaped plain text. Every fenced block is `<pre class="hl-code">`.
+- **Themes**: `web.codeTheme.light|dark` (syntect theme names, validated at startup by
+  `markdown::CodeTheme::new`) become one stylesheet, `GET /assets/code-theme.css?v=<hash>`
+  (immutable cache), linked after `app.css`. The dark theme sits in
+  `@media (prefers-color-scheme: dark)`. `pre.hl-code` takes the theme's background and color,
+  also inside agent bubbles. `values.schema.json` lists the same theme names; a test compares the
+  two.
+- **Diagrams**: a `mermaid` fence is `<pre class="hl-code" x-data="mermaidDiagram">` with the
+  escaped source. `assets/markdown.js` loads `assets/vendor/mermaid.min.js` (URL from
+  `data-mermaid-src` on `<body>`) on the first diagram of a page and draws with
+  `securityLevel: 'sandbox'` (iframe; kept in Mermaid's `secure` list so `%%{init}%%` cannot lower
+  it). It redraws when `prefers-color-scheme` changes. A parse error leaves the source and adds a
+  one-line error.
+
+Vendored Mermaid: version 11.17.2, `dist/mermaid.min.js` (IIFE) from the npm package,
+SHA-256 `581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8`.
+
 ## Spike: htmx 4 SSE (task 1.1, htmx 4.0.0, `hx-sse.js`)
 
 Result from reading the extension source (`dist/ext/hx-sse.js`):

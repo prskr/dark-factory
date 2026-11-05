@@ -13,9 +13,10 @@ use df_proto::transcript::v1::{
     ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, UserMessage, content_block, event,
     tool_call_content,
 };
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 
 use crate::components::{Icon, transcript as c};
+use crate::markdown;
 
 /// A rendered element of the transcript.
 #[derive(Debug, Clone, PartialEq)]
@@ -585,26 +586,6 @@ fn notice_level(level: i32) -> String {
     )
 }
 
-/// Renders Markdown without raw HTML: markup in the source is escaped, unsafe link schemes are
-/// dropped. The text is untrusted, so the browser must not fetch anything by itself: images
-/// become plain links and every link carries `rel="noopener noreferrer nofollow"`.
-pub fn markdown(source: &str) -> Markup {
-    let mut options = comrak::Options::default();
-    options.render.escape = true;
-    options.render.r#unsafe = false;
-    let arena = comrak::Arena::new();
-    let root = comrak::parse_document(&arena, source, &options);
-    for node in root.descendants() {
-        let mut data = node.data.borrow_mut();
-        if let comrak::nodes::NodeValue::Image(link) = &data.value {
-            data.value = comrak::nodes::NodeValue::Link(link.clone());
-        }
-    }
-    let mut html = String::new();
-    comrak::format_html(root, &options, &mut html).expect("formatting into a String cannot fail");
-    PreEscaped(html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href="))
-}
-
 /// Whether a request card raised at `card_at` goes before an item recorded at `item_at`; at the
 /// same time the card goes first. Page and stream place cards with this one rule.
 pub(crate) fn card_goes_before(card_at: DateTime<Utc>, item_at: DateTime<Utc>) -> bool {
@@ -637,7 +618,7 @@ pub fn render_item(item: &Item) -> Markup {
         } => c::user_message(id, prompt_id, author, item.at, parts),
         ItemKind::Agent { text, complete } => {
             let body = if *complete {
-                markdown(text)
+                markdown::render(text)
             } else {
                 html! { (text) }
             };

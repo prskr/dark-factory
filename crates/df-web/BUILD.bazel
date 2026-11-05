@@ -75,6 +75,7 @@ rust_test(
     name = "df_web_test",
     compile_data = [
         "styles/input.css",
+        "//deploy:helm/dark-factory/values.schema.json",
         "//docs:design-system.md",
     ],
     crate = ":df_web",

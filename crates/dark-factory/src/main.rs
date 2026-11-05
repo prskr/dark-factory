@@ -657,6 +657,8 @@ fn web_router(
     approval_types: df_db::requests::ApprovalTypes,
     delivery: &lifecycle_events::Delivery,
 ) -> anyhow::Result<axum::Router> {
+    // Checked even without `auth`: a typo in a theme name fails startup.
+    let code_theme = web_code_theme(cfg)?;
     let lifecycle_public_key = delivery
         .signing_key
         .as_ref()
@@ -677,6 +679,7 @@ fn web_router(
         flows: egress.flows,
         services: egress.services,
         show_hidden_blocks: cfg.web.show_hidden_blocks,
+        code_theme,
         allow_plain_http: cfg.network.allow_plain_http,
         max_auto_resumes: cfg.runs.max_auto_resumes,
         approval_types,
@@ -687,6 +690,12 @@ fn web_router(
         project_targets: delivery.project_targets,
     })
     .merge(webhooks))
+}
+
+/// The code theme stylesheet of `web.codeTheme`; an unknown theme name is an error.
+fn web_code_theme(cfg: &InstanceConfig) -> anyhow::Result<df_web::markdown::CodeTheme> {
+    df_web::markdown::CodeTheme::new(&cfg.web.code_theme.light, &cfg.web.code_theme.dark)
+        .context("invalid `web.codeTheme`")
 }
 
 /// The forges and the sandbox provider the task pages act on, and the webhook receiver.
@@ -842,6 +851,29 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
+
+    fn config_with_dark_theme(name: &str) -> InstanceConfig {
+        let yaml = format!(
+            "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\nweb:\n  codeTheme:\n    dark: {name}\n"
+        );
+        InstanceConfig::from_yaml_str(&yaml).unwrap()
+    }
+
+    #[test]
+    fn an_unknown_code_theme_fails_startup_naming_the_option() {
+        let cfg = config_with_dark_theme("Monokai");
+        let err = format!("{:#}", web_code_theme(&cfg).unwrap_err());
+        assert!(
+            err.contains("web.codeTheme.dark") && err.contains("Monokai"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_bundled_code_theme_name_is_accepted() {
+        let cfg = config_with_dark_theme("Solarized (dark)");
+        assert!(web_code_theme(&cfg).is_ok());
+    }
 
     #[test]
     fn parses_subcommands() {

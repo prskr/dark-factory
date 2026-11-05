@@ -404,6 +404,7 @@ impl TestApp {
             flows,
             services,
             show_hidden_blocks,
+            code_theme: crate::markdown::CodeTheme::default(),
             allow_plain_http,
             max_auto_resumes: 3,
             approval_types: Self::approval_types(),

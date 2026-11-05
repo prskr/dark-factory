@@ -177,6 +177,7 @@ pub fn profile_menu(shell: &Shell) -> Markup {
     let Shell {
         display_name,
         version,
+        ..
     } = shell;
     html! {
         div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
@@ -249,6 +250,7 @@ mod tests {
         Shell {
             display_name: display_name.into(),
             version: version.into(),
+            ..Shell::default()
         }
     }
 

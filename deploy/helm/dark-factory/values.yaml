@@ -227,6 +227,12 @@ web:
   # Show transcript blocks marked hidden (instructions for the agent) in the task UI, muted and
   # labeled. For debugging prompts; changing it restarts the control plane.
   showHiddenBlocks: false
+  # Theme of highlighted code blocks in the light and in the dark UI theme. One of
+  # InspiredGitHub, Solarized (light), Solarized (dark), base16-ocean.light, base16-ocean.dark,
+  # base16-eighties.dark, base16-mocha.dark. Changing it restarts the control plane.
+  codeTheme:
+    light: InspiredGitHub
+    dark: base16-ocean.dark
 
 controlPlane:
   replicas: 1

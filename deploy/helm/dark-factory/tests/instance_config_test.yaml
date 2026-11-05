@@ -195,6 +195,33 @@ tests:
           pattern: 'web:\n  showHiddenBlocks: true\n'
         documentIndex: 0
 
+  - it: renders the default code themes
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'web:\n  showHiddenBlocks: false\n  codeTheme:\n    light: "InspiredGitHub"\n    dark: "base16-ocean.dark"\n'
+        documentIndex: 0
+
+  - it: quotes code theme names with spaces
+    template: configmap.yaml
+    set:
+      web.codeTheme.light: Solarized (light)
+      web.codeTheme.dark: Solarized (dark)
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '    light: "Solarized \(light\)"\n    dark: "Solarized \(dark\)"\n'
+        documentIndex: 0
+
+  - it: rejects a code theme that is not bundled
+    template: configmap.yaml
+    set:
+      web.codeTheme.light: Monokai
+    asserts:
+      - failedTemplate:
+          errorPattern: codeTheme
+
   - it: renders the harness image from tag and repository
     template: configmap.yaml
     set:
