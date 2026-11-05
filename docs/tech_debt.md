@@ -43,82 +43,77 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 
 ## Summary
 
+Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue column and below the entry heading.
+
 | ID   | Sev    | Area | Issue |
 |------|--------|------|-------|
-| TD-1 | medium | `factory-agent` git | One fixed 5 min timeout for every git command, including clone |
-| TD-3 | low    | `factory-agent` workspace | Diverged workspace: every turn sends a rejected push and a PushReport |
-| TD-4 | low    | `factory-agent` outbox | Failed `run.json` save in `acknowledge` leaves segment accounting inconsistent |
+| TD-1 | medium | `factory-agent` git | One fixed 5 min timeout for every git command, including clone ([#122]) |
+| TD-3 | low    | `factory-agent` workspace | Diverged workspace: every turn sends a rejected push and a PushReport ([#122]) |
+| TD-4 | low    | `factory-agent` outbox | Failed `run.json` save in `acknowledge` leaves segment accounting inconsistent ([#122]) |
 | TD-5 | low    | `factory-agent` tests | Shutdown-while-disconnected test relies on a 100 ms sleep |
-| TD-6 | low    | `factory-agent` connection | Timed-out tool calls are still re-sent after a reconnect |
+| TD-6 | low    | `factory-agent` connection | Timed-out tool calls are still re-sent after a reconnect ([#122]) |
 | TD-7 | low    | `factory-agent` tests | Several behaviors have no test |
-| TD-8 | medium | `df-agent-channel` scheduler | Timeout and Gone handling await provider teardown inline in the scheduler loop |
-| TD-9 | low    | `df-agent-channel` session | Sandbox teardown after a RunReport is awaited inline in the session loop |
-| TD-10 | low   | `df-agent-channel` server | Streams opened during shutdown start new sessions |
+| TD-8 | medium | `df-agent-channel` scheduler | Timeout and Gone handling await provider teardown inline in the scheduler loop ([#121]) |
+| TD-9 | low    | `df-agent-channel` session | Sandbox teardown after a RunReport is awaited inline in the session loop ([#121]) |
+| TD-10 | low   | `df-agent-channel` server | Streams opened during shutdown start new sessions ([#121]) |
 | TD-11 | low   | `df-agent-channel` PR | `completion_summary` is never cleared and can be posted again |
 | TD-12 | low   | `df-agent-channel` PR | A completed run without a push still tries to open a PR |
 | TD-13 | low   | `df-agent-channel` PR | Concurrent PR creation can mark an unrecorded PR ready |
-| TD-14 | low   | `df-agent-channel` session | Two extra database round trips per batch |
+| TD-14 | low   | `df-agent-channel` session | Two extra database round trips per batch ([#123]) |
 | TD-15 | low   | `df-agent-channel` runs | Guarded run update + `RunChanged` publish exists in three copies |
 | TD-16 | low   | `df-agent-channel` tests | `eventually` test helper polls with `sleep` and ends in `panic!` |
-| TD-17 | medium | `df-agent-channel` session | Tool-call handlers have no timeout; drain timeouts disagree with the shutdown budget |
-| TD-19 | low   | `df-agent-channel` storage | Run, task and tool-call SQL is runtime-checked and partly duplicates `df-db` |
+| TD-17 | medium | `df-agent-channel` session | Tool-call handlers have no timeout; drain timeouts disagree with the shutdown budget ([#121]) |
+| TD-19 | low   | `df-agent-channel` storage | Run, task and tool-call SQL is runtime-checked and partly duplicates `df-db` ([#123]) |
 | TD-20 | low   | Helm chart | `agent.tls.clientCaFile` needs `ca.crt`, which an external issuer may not fill |
-| TD-21 | low   | Helm chart | `terminationGracePeriodSeconds` equals `SHUTDOWN_GRACE` (30 s) |
+| TD-21 | low   | Helm chart | `terminationGracePeriodSeconds` equals `SHUTDOWN_GRACE` (30 s) ([#121]) |
 | TD-22 | low   | `df-agent-channel` runs | `pod_ip` is not stored when `Hello` arrives before `Started` |
-| TD-23 | low   | `df-agent-channel` scheduler | `enforce_timeouts` loads every active run on every tick |
-| TD-24 | low   | `df-agent-channel` tests | Lock-wait test is not scoped to its own database |
+| TD-23 | low   | `df-agent-channel` scheduler | `enforce_timeouts` loads every active run on every tick ([#123]) |
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
 | TD-27 | medium | Bazel | No remote build execution: container tests cannot run in agent sandboxes |
-| TD-28 | medium | `df-k8s` provider | A transient resolution error at provision time leaves the run without the target's host alias |
-| TD-29 | low   | `df-k8s` provider | A named target port without a ready endpoint skips the target until endpoints appear |
-| TD-30 | low   | `df-db`, `df-k8s` | Nothing publishes `egress_policy`; DB changes reach policies only through the 30 s resync |
-| TD-31 | medium | `df-k8s` events | Image-volume pull failures (runtime and harness) produce no `Gone` event |
-| TD-32 | low   | `df-k8s` events | Watcher and resolver state is lost across a control-plane restart or leader change |
-| TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions |
-| TD-34 | low   | `df-core`, Helm chart | Runtime image tag is written in two places |
-| TD-35 | low   | `df-core` config | Default `issuer_name` does not match the chart's ClusterIssuer name |
-| TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image |
+| TD-28 | medium | `df-k8s` provider | A transient resolution error at provision time leaves the run without the target's host alias ([sandbox-lifecycle-resilience]) |
+| TD-31 | medium | `df-k8s` events | Image-volume pull failures (runtime and harness) produce no `Gone` event ([sandbox-lifecycle-resilience]) |
+| TD-32 | low   | `df-k8s` events | Watcher and resolver state is lost across a control-plane restart or leader change ([sandbox-lifecycle-resilience]) |
+| TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions ([#123]) |
+| TD-34 | low   | `df-core` config | Defaults for `runtime_image` and `issuer_name` don't match what the chart renders |
+| TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image ([sandbox-lifecycle-resilience]) |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
-| TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand |
-| TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP |
-| TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros |
-| TD-43 | low    | `df-web` transcript | Code blocks are rendered without syntax highlighting (syntect, design D3) |
-| TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested |
-| TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings |
+| TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand ([#125]) |
+| TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP ([sandbox-lifecycle-resilience]) |
+| TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros ([#123]) |
+| TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested ([#124]) |
+| TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings ([#123]) |
 | TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
 | TD-47 | low   | `df-web` components | Message box and composer "+" use one-off class strings |
 | TD-49 | low   | `df-gateway` reasons | Flow reasons and rule scopes are scattered string literals |
 | TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
-| TD-52 | medium | `factory-agent` logging | Tool call `input` is logged at INFO and can carry credentials the agent typed |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
-| TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings |
-| TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway |
+| TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings ([#124]) |
+| TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway ([sandbox-lifecycle-resilience]) |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
-| TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list |
+| TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list ([#124]) |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
-| TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" state list is hard-coded in three SQL statements |
+| TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" and terminal state lists are hard-coded in several SQL statements ([#123]) |
 | TD-66 | low   | `df-agent-channel` session | `start_finalizing(only_idle: bool)` takes a flag argument |
 | TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
 | TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
-| TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) |
+| TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) ([#124]) |
 | TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 | TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
-| TD-78 | low    | `df-core` routing | Plain-HTTP routing table constructor for tests is public API |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
-| TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers |
-| TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked |
+| TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers ([#125]) |
+| TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked ([#123]) |
 | TD-82 | low   | `df-agent-channel` PR creation | First-PR creation holds a pooled connection across forge calls |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
-| TD-87 | medium | `factory-agent` runner | The first turn never reports `Running`; the run stays `preparing` |
+| TD-87 | medium | `factory-agent` runner | The first turn never reports `Running`; the run stays `preparing` ([#122]) |
 | TD-88 | low   | `fake-acp-agent` scripts | An unknown or malformed step loads as an empty script without an error |
 | TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
@@ -126,16 +121,15 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
 | TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
 | TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
-| TD-95 | low   | `df-agent-channel` feedback | Reviews are ranked for the size budget by `submitted_at` only |
-| TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout |
+| TD-95 | low   | `df-agent-channel` feedback | Reviews are ranked for the size budget by `submitted_at` only ([#125]) |
+| TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout ([#125]) |
 | TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
 | TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
 | TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
-| TD-102 | low   | `factory-agent` runner | Harness inherits the whole factory-agent environment |
 | TD-103 | low   | `df-e2e` | Follow-up test can see the PR still in draft after `in_review` |
-| TD-104 | low   | `df-web` tab row | Phone tab-row visibility is only checked by hand |
+| TD-104 | low   | `df-web` tab row | Phone tab-row visibility is only checked by hand ([#124]) |
 | TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
 | TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
 | TD-108 | low   | `dark-factory` lifecycle events | Outbox handler wiring lives in `lifecycle_events.rs` |
@@ -150,6 +144,8 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 
 ### TD-1 (R62). One fixed git timeout for clone and push
 
+Tracked in [#122].
+
 `crates/factory-agent/src/git.rs` (`GIT_TIMEOUT`, `Git::run_cmd_in`)
 
 Every git command runs with `GIT_TIMEOUT` (5 min) and is killed when it expires. For a large repository, the blobless clone or the blob fetch during `checkout -B` can take longer than that. Prepare would then fail on every run, and the limit cannot be changed.
@@ -158,6 +154,8 @@ Every git command runs with `GIT_TIMEOUT` (5 min) and is killed when it expires.
 
 ### TD-3 (R64). Diverged workspace pushes and reports on every turn
 
+Tracked in [#122].
+
 `crates/factory-agent/src/runner.rs` (`initial_last_pushed_sha`), `crates/factory-agent/src/workspace.rs` (`push_after_turn`)
 
 A diverged workspace starts with `last_pushed_sha = None`. `push_after_turn` then tries a non-force push after every turn and at finalize. Each attempt sends a `RejectedNonFastForward` PushReport. The remote is never changed, so the behavior is correct, but it adds noise.
@@ -165,6 +163,8 @@ A diverged workspace starts with `last_pushed_sha = None`. `push_after_turn` the
 **Fix:** Skip `push_after_turn` while `prepare_diverged` is set. The divergence is already reported once, by the `workspace.diverged` notice and `RunReport.workspace.diverged`.
 
 ### TD-4 (R65). Failed `run.json` save leaves segment accounting inconsistent
+
+Tracked in [#122].
 
 `crates/factory-agent/src/outbox.rs` (`Outbox::acknowledge`)
 
@@ -181,6 +181,8 @@ The test sleeps 100 ms so that the manager notices the dropped stream. If the ma
 **Fix:** Wait on a condition instead, for example an observable "disconnected" state on the handle, or the mock control plane seeing the stream close.
 
 ### TD-6 (R67). Timed-out tool calls are still re-sent after a reconnect
+
+Tracked in [#122].
 
 `crates/factory-agent/src/runner.rs` (`handle_mcp_call_tool`, `TOOL_CALL_TIMEOUT`), `crates/factory-agent/src/connection.rs` (`CommandFilter.pending_tool_calls`)
 
@@ -207,6 +209,8 @@ The most valuable tests are the WIP restore, because it prevents data loss, and 
 
 ### TD-8. Provider teardown blocks the scheduler loop
 
+Tracked in [#121].
+
 `crates/df-agent-channel/src/scheduler.rs` (`enforce_timeouts`, Gone handling), `crates/df-agent-channel/src/runs.rs` (`finish_run`)
 
 `finish_run` awaits `provider.teardown`, and `enforce_timeouts` calls it for each timed-out run in sequence, inside the `select!` loop. Sandbox events, task notifications and the shutdown signal wait until all teardowns return. This contradicts the doc comment on `Scheduler::run`. It matters when many runs time out at once and the provider's delete is slow (Kubernetes API under load).
@@ -215,6 +219,8 @@ The most valuable tests are the WIP restore, because it prevents data loss, and 
 
 ### TD-9. Session teardown is awaited inline
 
+Tracked in [#121].
+
 `crates/df-agent-channel/src/session.rs` (`run_effects`, `RunReport` branch)
 
 After a `RunReport` the session awaits `runs::teardown` before it reads the next message. A slow provider delays the remaining acks of the ended run. Impact is small because the session ends right after; tool calls spawned from the same batch still store their results.
@@ -222,6 +228,8 @@ After a `RunReport` the session awaits `runs::teardown` before it reads the next
 **Fix:** Run the teardown in the session's task set, like the forge work after a `RunReport`.
 
 ### TD-10. Streams opened during shutdown start new sessions
+
+Tracked in [#121].
 
 `crates/df-agent-channel/src/server.rs` (`serve`, `AgentService::stop_sessions`, `accept_loop`)
 
@@ -255,6 +263,8 @@ When a run ends `completed` and the task has no PR, `try_ensure_draft` runs even
 
 ### TD-14. Extra round trips per batch
 
+Tracked in [#123].
+
 `crates/df-agent-channel/src/session.rs` (`Session::active`, `persist_batch`)
 
 Each batch loads the full run row (`active`) and reads `last_persisted_seq` once outside and once inside the transaction. A runtime that sends one transcript chunk per batch causes four or more queries per message.
@@ -279,6 +289,8 @@ The helper checks a condition 200 times with a 25 ms `sleep` and ends with a han
 
 ### TD-17. Tool-call timeouts and drain budgets
 
+Tracked in [#121].
+
 `crates/df-agent-channel/src/session.rs` (`run_effects`, `DRAIN_TIMEOUT` = 60 s, `FORGE_TIMEOUT` = 60 s), `crates/df-agent-channel/src/server.rs` (`SESSION_DRAIN` = 20 s), `crates/dark-factory/src/main.rs` (`SHUTDOWN_GRACE` = 30 s)
 
 Tool-call handlers call the forge without a timeout, while forge work after a `PushReport`/`RunReport` is bounded by `FORGE_TIMEOUT`. A hanging forge keeps a claimed `tool_calls` row without a result until the stream ends; re-sent calls get "still in progress" for 5 minutes, then "did not finish". At shutdown the session believes it has 60 s to drain, but `stop_sessions` aborts after 20 s, so a call that needs longer loses its result although the effect may have happened.
@@ -286,6 +298,8 @@ Tool-call handlers call the forge without a timeout, while forge work after a `P
 **Fix:** Bound each tool handler by `FORGE_TIMEOUT` and store a timeout error as the result. Derive the session drain from one budget that fits into `SHUTDOWN_GRACE` (and TD-21).
 
 ### TD-19. Runtime-checked SQL outside `df-db`
+
+Tracked in [#123].
 
 `crates/df-agent-channel/src/runs.rs`, `tools.rs`, `transcript.rs`, `pr.rs`, `session.rs`
 
@@ -303,6 +317,8 @@ Run, task, tool-call and transcript persistence uses `sqlx::query(...)` strings 
 
 ### TD-21. Termination grace period equals the shutdown budget
 
+Tracked in [#121].
+
 `crates/dark-factory/src/main.rs` (`SHUTDOWN_GRACE` = 30 s), control-plane Deployment (no `terminationGracePeriodSeconds`, Kubernetes default 30 s)
 
 The kubelet sends SIGKILL at the same moment the supervisor gives up. Today the session drain (20 s) and scheduler drain (10 s) fit, so nothing is lost; any longer drain would be cut off by SIGKILL instead of the supervisor.
@@ -319,19 +335,13 @@ The kubelet sends SIGKILL at the same moment the supervisor gives up. Today the 
 
 ### TD-23. Timeout scan loads every active run
 
+Tracked in [#123].
+
 `crates/df-agent-channel/src/scheduler.rs` (`enforce_timeouts`), `crates/df-agent-channel/src/runs.rs` (`list_active_runs`)
 
 Every 15 s tick on every replica loads all non-terminal runs and filters the deadlines in Rust. Fine for tens of runs; wasteful for hundreds with several replicas.
 
 **Fix:** Filter overdue runs in SQL (`started_at`/`connected_at` plus interval) and keep the Rust check for the final decision.
-
-### TD-24. Lock-wait test is not scoped to its database
-
-`crates/df-agent-channel/src/runs.rs` (`message_queued_while_the_run_ends_is_not_stranded`)
-
-The test waits for `pg_stat_activity WHERE wait_event_type = 'Lock'` across the whole cluster. A lock wait in another parallel test database ends the wait early; the test then passes without exercising the race (it does not fail spuriously).
-
-**Fix:** Add `AND datname = current_database()`.
 
 ### TD-25. Log message interpolates a value
 
@@ -359,29 +369,19 @@ RBE was removed in favor of local static musl builds with an optional remote cac
 
 ### TD-28 (R9-N1). Transient resolution error at provision time drops a target for the whole run
 
+Tracked in [sandbox-lifecycle-resilience].
+
 `crates/df-k8s/src/provider.rs` (`ClusterTargetResolver::resolve`, `Transient` branch without a cached entry)
 
 If a cluster target cannot be resolved for a transient reason (timeout, 5xx, connection error) and there is no last good resolution yet, the rule is skipped. During provisioning that means the pod starts without the target's `hostAliases` entry and `NO_PROXY` entry. `hostAliases` cannot change after the pod starts, so the run cannot reach the service by name, even after the reconcile pass adds the NetworkPolicy rule. The failure is closed but only logged as a warning. This matters for the first run of a project after a control-plane restart, when the cache is empty.
 
-**Fix:** Let `provision` fail with a retryable error when a target resolves `Transient` without a cached entry, so the run is retried instead of starting degraded. The reconcile path keeps skipping the rule.
+A Service whose `targetPort` is a name resolves only through a ready EndpointSlice port, so a run provisioned while the target's pods are not ready has the same problem (formerly TD-29). Reconcile renders the policy without the rule until the EndpointSlice watch triggers a new pass.
 
-### TD-29 (R9-N2). Named target port without a ready endpoint is skipped
-
-`crates/df-k8s/src/provider.rs` (named `targetPort` lookup in the EndpointSlices, classified `Transient`)
-
-A Service whose `targetPort` is a name resolves only through a ready EndpointSlice port. While the target's pods are not ready, the resolution is transient; without a cached entry the rule is skipped. The EndpointSlice watch triggers a new pass when endpoints appear, so access returns. A run provisioned in that window has the TD-28 problem.
-
-**Fix:** Covered by the TD-28 fix for provisioning. For reconcile, the current behavior is acceptable.
-
-### TD-30 (R9-N3). No writer for the `egress_policy` notification
-
-`crates/df-db/src/notify.rs` (`Notification::EgressPolicy`), `crates/df-db/migrations/20261017000001_initial_schema.sql` (only `egress_policy_version_seq`), `crates/dark-factory/src/main.rs` (notify subscriber)
-
-The reconcile loop listens for `EgressPolicy`, but nothing sends it: there is no trigger and no `NOTIFY` on allowlist changes. A changed cluster-service entry reaches running policies only through the 30 s drift resync, which is still within the spec's 30 s bound.
-
-**Fix:** Send the notification when allowlist entries change. This belongs to `iter1-egress-gateway` (the allowlist writer); delete this entry there.
+**Fix:** Let `provision` fail with a retryable error when a target resolves `Transient` without a cached entry, so the run is retried instead of starting degraded. Reconcile keeps the run's current policy until the target resolves (`run-network-policy`, "Policies follow the database").
 
 ### TD-31 (R5-N5). Image-volume pull failure produces no `Gone`
+
+Tracked in [sandbox-lifecycle-resilience].
 
 `crates/df-k8s/src/provider.rs` (`map_pod_event`)
 
@@ -391,6 +391,8 @@ A runtime or harness image (the two image volumes of a sandbox) that cannot be p
 
 ### TD-32 (R5-N10). State lost across a restart or leader change
 
+Tracked in [sandbox-lifecycle-resilience].
+
 `crates/df-k8s/src/provider.rs` (`EventTracker`, `ClusterTargetResolver` last-good cache), `crates/df-agent-channel/src/scheduler.rs` (no startup resync)
 
 The event tracker knows only objects seen by the current process. A pod or Sandbox that vanished while the control plane was down gets no `Gone`; the run ends through the connect timeout or the hard stop. The resolver's last-good cache also starts empty after a restart or on a new leader, so a transient error drops a rule that a long-running leader would have kept. Documented in `crates/df-k8s/README.md`.
@@ -399,29 +401,25 @@ The event tracker knows only objects seen by the current process. A pod or Sandb
 
 ### TD-33 (R5-N18). Mixed `.sqlx` metadata format
 
+Tracked in [#123].
+
 `.sqlx/`
 
 Only `query-3aad8b60….json` has the `origin` fields of sqlx-cli 0.9.0; the other files come from an older version. Both work.
 
 **Fix:** Regenerate all metadata with one pinned sqlx-cli version (`docs/development.md`, "Updating `sqlx` Offline Metadata").
 
-### TD-34. Runtime image tag written twice
+### TD-34. `df-core` config defaults don't match the chart
 
-`crates/df-core/src/config.rs` (default `runtime_image`), `deploy/helm/dark-factory/values.yaml` (`image.runtime.tag`)
+`crates/df-core/src/config.rs` (defaults `runtime_image: "ghcr.io/prskr/dark-factory/runtime:0.1.0"`, `issuer_name: "dark-factory-ca-issuer"`), `deploy/helm/dark-factory/values.yaml` (`image.runtime.tag: ''`, follows `appVersion`), `templates/certs.yaml` (`<release-ns>-<fullname>-ca-issuer`)
 
-The tag (`0.1.0`) is hard-coded in both. The chart always renders its value, so the df-core default only applies outside the chart. A release bump must change both.
+The chart always renders both values, so deployments are not affected. Running the binary without the chart, or tests built on `Default::default()`, use a stale runtime tag and reference a ClusterIssuer that does not exist; the sandbox's csi volume then never mounts. TD-35 was merged into this entry.
 
-**Fix:** Derive one from the other at build time (for example the chart's `appVersion`), or drop the df-core default and make the value required.
-
-### TD-35. Default issuer name does not match the chart
-
-`crates/df-core/src/config.rs` (default `issuer_name: "dark-factory-ca-issuer"`), `deploy/helm/dark-factory/templates/certs.yaml` (`<release-ns>-<fullname>-ca-issuer`)
-
-The chart always sets the issuer name, so deployments are not affected. Running the binary without the chart, or tests built on `Default::default()`, reference a ClusterIssuer that does not exist; the sandbox's csi volume then never mounts.
-
-**Fix:** Make `issuer_name` required (no default), or document that it must match the ClusterIssuer the chart creates.
+**Fix:** Drop both defaults and make the values required, or derive the runtime tag from the crate version at build time and document that `issuer_name` must match the ClusterIssuer the chart creates.
 
 ### TD-36. Live tests never reach a running sandbox
+
+Tracked in [sandbox-lifecycle-resilience].
 
 `crates/df-k8s/src/provider.rs` (`test_provider_live_cluster_integration`), `crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_reverts_manual_edit_and_adds_new_target`)
 
@@ -439,6 +437,8 @@ The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins
 
 ### TD-40 (R2-S2). Import allow-list duplicates `plugin-base`
 
+Tracked in [#125].
+
 `crates/df-plugins/src/host.rs` (`ALLOWED_IMPORTS`), `contract/wit/integrations/integrations.wit` (world `plugin-base`)
 
 The host lists the allowed interfaces by hand. When `plugin-base` gains an import and the list is not updated, components built against the contract are refused at load.
@@ -446,6 +446,8 @@ The host lists the allowed interfaces by hand. When `plugin-base` gains an impor
 **Fix:** A test that resolves world `plugin-base` (for example with `wit-parser`, or a component built against it) and asserts that every import is in `ALLOWED_IMPORTS`.
 
 ### TD-41. ClusterIP reachability of cluster targets is untested
+
+Tracked in [sandbox-lifecycle-resilience].
 
 `crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_*`), `crates/df-k8s/src/render.rs`
 
@@ -457,6 +459,8 @@ The host lists the allowed interfaces by hand. When `plugin-base` gains an impor
 
 ### TD-42 (S1). Web UI SQL is runtime-checked
 
+Tracked in [#123].
+
 `crates/df-db/src/{users,catalog,task_views}.rs`, `crates/df-web/src/auth/store.rs`
 
 The queries added for the web UI use `sqlx::query_as` / `query_scalar` instead of `query!` / `query_as!`, so `.sqlx/` does not cover them. `catalog.rs` builds its project queries with the `select_project!` string macro, which the sqlx macros cannot take. A schema change that breaks one of these queries surfaces only in the container-backed tests or at runtime.
@@ -465,17 +469,9 @@ The queries added for the web UI use `sqlx::query_as` / `query_scalar` instead o
 
 **Fix:** Write the queries as literal `query_as!` calls (inline the `select_project!` variants), regenerate `.sqlx/`. The session store may stay runtime-checked (it picks its SQL at runtime).
 
-### TD-43 (P7). No code highlighting in the transcript
-
-`crates/df-web/src/transcript/mod.rs` (Markdown rendering)
-
-Design D3 and the proposal name syntect classes for code blocks; the implementation renders Markdown with comrak only, so code blocks are unhighlighted. No spec requirement depends on it.
-
-**Matters when:** users read longer diffs or code in the transcript on a phone.
-
-**Fix:** Run comrak with a syntect adapter emitting CSS classes, add the theme to `styles/input.css`; or remove syntect from design D3 via `/opsx:update`.
-
 ### TD-44 (C5). Contrast ratios are not tested
+
+Tracked in [#124].
 
 `crates/df-web/styles/input.css` (color tokens)
 
@@ -486,6 +482,8 @@ The web-ui-shell spec requires a text contrast of at least 4.5:1 (3:1 for text o
 **Fix:** Add a unit test that parses the foreground/background token pairs for light and dark from `styles/input.css` and asserts each contrast ratio is at least 4.5:1 (3:1 for large text).
 
 ### TD-45 (S5). Turn state read with raw SQL in the channel crate
+
+Tracked in [#123].
 
 `crates/df-agent-channel/src/session.rs` (`turn_open`, `persist_batch`)
 
@@ -545,16 +543,6 @@ The resolver uses `LookupIpStrategy::Ipv4thenIpv6` because the first cluster has
 
 **Fix:** Add a `gateway.ipFamily` setting (`ipv4First` default, `ipv6First`, `ipv4Only`, `ipv6Only`) that maps to the hickory strategy, rendered by the chart and documented in the df-gateway README configuration table. Make the dial try the remaining resolved addresses in order (each under the upstream timeout budget) before it reports `upstream-failed`.
 
-### TD-52 (S1). Tool call input can carry credentials
-
-`crates/factory-agent/src/runner.rs` (`log_outbound`, `ToolCall` arm)
-
-The spec requires the raw tool input (cut to 512 bytes) in the INFO `tool call` event. An agent command such as `curl -H "Authorization: …"` or `git clone https://user:tok@…` puts the token in the pod log at the default level. Accepted as a risk in the `agent-session-logging` design.
-
-**Matters when:** pod logs are shipped to a store with wider access than the sandbox, or an agent handles long-lived credentials.
-
-**Fix:** Spec change first: redact credential-looking patterns (auth headers, userinfo in URLs, `token=`) before logging, or log `input` at DEBUG only. Add a test with a token in the input.
-
 ### TD-55 (S6). RuntimeTiming measurement repeated per operation
 
 `crates/factory-agent/src/runner.rs` (workspace prepare, harness start, turn, finalize)
@@ -567,6 +555,8 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 
 ### TD-56 (P6). Traffic page client behaviour has no runtime test
 
+Tracked in [#124].
+
 `crates/df-web/src/egress/log/page.rs` (Alpine state: pause/resume, divider drag/keys/resize, remembered width, details panel, Advanced badge)
 
 Tests assert that strings appear in the rendered page. Nothing runs the script, and the obscura browser cannot stream SSE, so the live updates, the pause closing the stream, the clamping and the stored width were never exercised. Review rounds 2–4 each found a bug in this code that string tests did not catch (P10, P13, P14).
@@ -576,6 +566,8 @@ Tests assert that strings appear in the rendered page. Nothing runs the script, 
 **Fix:** A browser test (for example Playwright against `just serve-local` with `--demo-flows`) for the spec scenarios Pause, Resume, Drag, Keyboard, Reset, Remembered width and Open/close details; run it in CI.
 
 ### TD-59. SNI mismatch not checked on a cluster
+
+Tracked in [sandbox-lifecycle-resilience].
 
 `crates/df-gateway/src/proxy.rs` (`sni-mismatch`)
 
@@ -606,6 +598,8 @@ Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `c
 **Fix:** Store `max_age` in `AgedEvents` and give it `prune_if_due(now)` and `unexpired()` that compute the cutoff. Apply the clamp once.
 
 ### TD-62 (I1). `AbortError` from `hx-sse` when swapping tasks
+
+Tracked in [#124].
 
 `crates/df-web` (`#ws-detail` swap, htmx SSE extension)
 
@@ -638,9 +632,11 @@ Swapping `#ws-detail` through the task list logs an `AbortError` in the browser 
 
 `crates/df-agent-channel/src/runs.rs`, `crates/df-agent-channel/src/session.rs`, `crates/df-db/src/tasks.rs`
 
-`state NOT IN ('finalizing', 'succeeded', 'blocked', 'failed', 'cancelled')` is written out in `set_idle_tx`, `start_finalizing` and the `queue_message` CASE. It restates `RunState::is_terminal` plus `Finalizing`.
+Tracked in [#123].
 
-`crates/df-db/src/tasks.rs` also repeats the terminal list `state NOT IN ('succeeded', 'failed', 'cancelled')` in `request_stop_tx` and `has_active_run` (code review of `iter2-cancel`, S4, 2026-11-02).
+`state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')` is written out in `runs.rs` (`set_idle_tx`), `session.rs` (`start_finalizing`) and the `queue_message` CASE in `df-db/src/tasks.rs`. It restates `RunState::is_terminal` plus `Finalizing`.
+
+The terminal list `state NOT IN ('succeeded', 'failed', 'cancelled')` is repeated in `df-db/src/tasks.rs` (`request_stop_tx`, `has_active_run`) and `df-db/src/egress.rs`; `df-agent-channel/src/runs.rs` has its own `terminal_states!` macro (code review of `iter2-cancel`, S4, 2026-11-02).
 
 **Matters when:** a run state is added or changed; all three statements have to change together.
 
@@ -698,9 +694,11 @@ Both take the decider's name from `Principal::Human` and match on `RequestState`
 
 `crates/df-agent-channel/tests/agent_port.rs` (`blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked`)
 
-The in-process test calls `df_db::requests::decide` directly instead of the `/requests/{id}/answer` handler. It sends `RunReport BLOCKED` itself instead of going through the control-plane `Release` deadline, and it only checks that the task is `queued`, not that a new run starts. `iter1-demo-e2e` (the `df-e2e` crate) does not exist yet, so task 6.1 stays open.
+Tracked in [#124].
 
-**Matters when:** `iter1-demo-e2e` lands.
+The in-process test calls `df_db::requests::decide` directly instead of the `/requests/{id}/answer` handler. It sends `RunReport BLOCKED` itself instead of going through the control-plane `Release` deadline, and it only checks that the task is `queued`, not that a new run starts. The `df-e2e` crate exists, but `crates/df-e2e/tests/flow.rs` has no blocking-question scenario yet, so task 6.1 stays open.
+
+**Matters when:** a change touches requests, `Release` or the follow-up run; nothing end to end catches a break today.
 
 **Fix:** Extend the e2e test as task 6.1 describes. Answer through the UI handler while the run awaits input; leave a second question unanswered until `Release`; check that answering it starts run 2.
 
@@ -739,16 +737,6 @@ Each plugin image repeats the same six targets and a push target with only the n
 
 **Fix:** generate the targets with a list comprehension or a small macro over the plugin names, as `crates/df-plugins/BUILD.bazel` does for its test targets, and pass `name=dir` pairs to `test_images.sh`. Pass `name=digestfile` pairs to `dev.sh` and loop over them to emit `--set plugins.<name>.image.{repository,digest}`.
 
-### TD-78 (S5). Plain-HTTP routing table constructor is public API
-
-`crates/df-core/src/routing.rs` (`RoutingTable::from_plugins_allowing_plain_http`)
-
-The `df-plugins` integration tests route to `wiremock` servers, which speak plain HTTP, so `df-core` exposes a constructor that accepts `http://` `apiUrl`s and repository URLs. Production code calls it only when `network.allowPlainHttp` is on (`iter1-demo-e2e`); nothing else stops a caller from building a table that sends forge tokens over plain HTTP.
-
-**Matters when:** a caller outside the tests uses it, for example a dev or e2e switch in the instance configuration.
-
-**Fix:** move the constructor behind the `test-util` feature (or into `df_core::testing`) once the Bazel production targets build `df_core` without `test-util`.
-
 ### TD-79 (P5). Skipping a plugin without `pull-requests` has no test
 
 `crates/dark-factory/src/forge.rs` (`load_forge_plugins`)
@@ -761,6 +749,8 @@ Startup logs a plugin without the `pull-requests` capability as "not a forge plu
 
 ### TD-80 (S2, S3). Forge plugins copy transport and draft helpers
 
+Tracked in [#125].
+
 `plugins/github/src/draft.rs` (`DEFAULT_PREFIXES`, `parse_prefixes`, `split_title`, `apply_title` and their tests), `plugins/github/src/wasi_transport.rs` (`write_body`, `read_body`, `internal`, `transport`, `WRITE_CHUNK`)
 
 Both files duplicate `plugins/forgejo/src/draft.rs` and `plugins/forgejo/src/wasi_transport.rs`.
@@ -770,6 +760,8 @@ Both files duplicate `plugins/forgejo/src/draft.rs` and `plugins/forgejo/src/was
 **Fix:** a small shared crate such as `plugins/forge-common`. Each plugin keeps its own WIT bindings; the shared code works on plain types.
 
 ### TD-81 (S6). e2e database checks are not compile-time checked
+
+Tracked in [#123].
 
 `crates/df-e2e/src/db.rs:43,52,64`
 
@@ -820,6 +812,8 @@ Both tools parse `blocking`, build the agent principal and the `Raise`, map the 
 **Fix:** use `CallError` inside the push record sender and wrap it in `RecordError` only at the `PushRecorder` boundary; add `From<LinkError> for CallError` so connect failures convert with `?`.
 
 ### TD-87 (observation a). The first turn never reports `Running`
+
+Tracked in [#122].
 
 `crates/factory-agent/src/runner.rs` (idle wait, `IdleWake::Prompt`)
 
@@ -904,6 +898,8 @@ With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails
 
 ### TD-95. Reviews are ranked for the size budget by `submitted_at` only
 
+Tracked in [#125].
+
 `crates/df-agent-channel/src/tools/feedback.rs` (`fit_to_budget`), `contract/wit/integrations/integrations.wit` (`review`)
 
 `read_pull_request_feedback` drops the least recently active items when the result exceeds 48 KiB. Comments and threads are ranked by their newest `created_at`/`updated_at`, reviews only by `submitted_at`: the WIT `review` record and the core `Review` have no `updated_at`, although both plugins use it for `since`. An old review whose body was edited is dropped first.
@@ -913,6 +909,8 @@ With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails
 **Fix:** add `updated-at` to the WIT `review` record, the core `Review` and both plugin conversions, and use it in `latest`. Test: an old review with a recent `updated_at` survives the budget while newer comments are dropped.
 
 ### TD-96. Forgejo `list-feedback` sends one request per review, sequentially
+
+Tracked in [#125].
 
 `plugins/forgejo/src/api/feedback.rs` (`list_feedback`)
 
@@ -959,6 +957,9 @@ These were reviewed and kept on purpose. Don't raise them as issues unless the s
 - **At-most-once tool calls:** a crash between the forge call and storing its result loses the result; the call is not repeated (`crates/df-agent-channel/src/tools.rs`, spec `factory-tools`).
 - **Session ends the stream once its run ended:** after a `RunReport` a relevant notification closes the stream. The runtime sends `RunReport` last (`crates/factory-agent/src/runner.rs`), it is acked before the effects run, and in-flight handlers are drained, so nothing is lost.
 - **`Assign` may differ on reconnect:** `continuation.summary` is rebuilt from the transcript on every connect. The runtime uses only the first `Assign` per `run_id` (`CommandFilter`, `crates/factory-agent/src/connection.rs`).
+- **Tool call input logged at INFO (formerly TD-52):** the INFO `tool call` event carries the raw tool input (cut to 512 bytes, `log_outbound` in `crates/factory-agent/src/runner.rs`). The sandbox holds no Git or model provider credentials (Git goes through the gateway's Git proxy, inference through its inference endpoint), so there are no credentials for the agent to type. Revisit when a credential reaches the sandbox again: then redact auth headers, URL userinfo and `token=` before logging, or log `input` at DEBUG only.
+- **Harness inherits the runtime environment (formerly TD-102):** `spawn_harness` adds the harness env to the runtime's full environment, without `env_clear`. The runtime environment holds no secret, and the e2e dumps the environment to check that. Revisit when a secret or token is added to the runtime's environment: then `env_clear()` plus an allowlist (`PATH`, `HOME`, locale, `AcpHarness.env`).
+- **Plain-HTTP routing table is public API (formerly TD-78):** `RoutingTable::from_plugins_allowing_plain_http` (`crates/df-core/src/routing.rs`) is used by tests and, in production, only when `network.allowPlainHttp` is set (`crates/dark-factory/src/forge.rs`, local e2e against Forgejo over HTTP). Hiding it behind `test-util` no longer works. Revisit if another caller appears.
 
 Origin of TD-99: implementation of `release-versioning` (2026-11-03).
 
@@ -998,16 +999,6 @@ Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activ
 
 Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). The `TD-n (ID)` headings give the IDs used in that review. Both existed before that change.
 
-### TD-102 (TD-env). Harness inherits the whole factory-agent environment
-
-`crates/factory-agent/src/runner.rs` (`spawn_harness`)
-
-The harness process gets the runtime's full environment plus the harness env; there is no `env_clear`. Today the runtime env holds no secret (the model credential stays in the gateway), and the e2e dumps the env to check that.
-
-**Matters when:** a secret or token is added to the runtime's environment (for example for the agent channel or a future tool).
-
-**Fix:** `env_clear()` plus an allowlist (`PATH`, `HOME`, locale, the harness env from `AcpHarness.env`); a runtime test that an extra variable does not reach the harness. Users may set harness variables with `ENV` in the sandbox image, which relies on the inheritance; decide whether to allowlist a documented prefix or move such settings into the harness constants (as done for `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`).
-
 ### TD-103 (TD-e2e). Follow-up e2e test can see the PR still in draft
 
 `crates/df-e2e/tests/flow.rs:229` (`follow_up_resumes_the_session_and_completing_marks_the_pr_ready`)
@@ -1021,6 +1012,8 @@ The test waits for task status `in_review`, then asserts `draft == false`. Marki
 Origin of TD-104: code review of `project-dialog-lifecycle-events` (`df-web`, 2026-11-04). The `TD-n (ID)` heading gives the ID used in that review.
 
 ### TD-104 (P6). Phone tab-row visibility is only checked by hand
+
+Tracked in [#124].
 
 `crates/df-web/src/config_pages/push_policy/tests.rs` (`the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view`)
 
@@ -1117,3 +1110,10 @@ The endpoint answers `500` when storing or applying an event fails. Neither GitH
 **Matters when:** a merge delivery fails during a database outage: the task stays `in_review` and keeps its volume.
 
 **Fix:** a periodic reconcile that asks the forge for the PR state of `in_review` tasks without `pr_merged_at` and applies a missed merge or close.
+
+[#121]: https://github.com/prskr/dark-factory/issues/121
+[#122]: https://github.com/prskr/dark-factory/issues/122
+[#123]: https://github.com/prskr/dark-factory/issues/123
+[#124]: https://github.com/prskr/dark-factory/issues/124
+[#125]: https://github.com/prskr/dark-factory/issues/125
+[sandbox-lifecycle-resilience]: ../openspec/changes/sandbox-lifecycle-resilience/proposal.md
