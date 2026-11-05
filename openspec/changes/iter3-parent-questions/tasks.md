@@ -1,8 +1,8 @@
 # Tasks
 
 Prerequisites:
-- `iter3-task-dependencies` is merged (`parent_id`, `record_task_event`, the child-ended message format).
-- `iter3-chats` is merged (`CHAT_TOOLS`, `df_db::chats::archive`, the chat page link).
+- `iter3-task-dependencies` is merged (`parent_id`, the task transitions `transition` / `apply_task_event`, the child-ended message format).
+- `iter3-chats` is merged (`CHAT_TOOLS`, the `Archived` event, the chat page link).
 
 Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS.md`.
 
@@ -17,11 +17,12 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 - [ ] 2.1 Write failing `df-db` tests, then add `Addressee` to `raise_question` with the parent resolution and the `question.asked` message of design D2 and D4. Verify with `cargo test -p df-db raise_question`. The tests cover the spec `agent-requests` scenarios of "Question addressee" and "Question delivered to the parent", plus:
   - no parent gives `NoParent`;
   - a merged duplicate returns the existing addressee and queues no second message.
-- [ ] 2.2 Write failing tests, then add `readdress_to_humans_tx` (design D3) and call it from `record_task_event` for Done, Failed and Cancelled. Verify with `cargo test -p df-db readdress`. The tests cover:
+- [ ] 2.2 Write failing tests, then add the `ReaddressQuestions` effect to `transition` (emitted when the resulting status becomes `completed`, `cancelled` or `failed`, and by `Archived`) and execute it with `readdress_to_humans_tx` in `apply_task_event` (design D3). Verify with `cargo test -p df-core task_transition` and `cargo test -p df-db readdress`. The tests cover:
   - the scenario "Parent cancelled with a pending question";
-  - `Completed` leaves the question addressed to the parent;
+  - a Completion (`in_review`) emits no `ReaddressQuestions`, and the question stays addressed to the parent;
+  - a failed run and exhausted resumes both emit it;
   - the `request.readdress` audit entry and the `request_changed` notification.
-- [ ] 2.3 Write a failing test, then call `readdress_to_humans_tx` from chat archiving and allow archiving with pending questions addressed to the chat. Verify with `cargo test -p df-db archive`, covering the scenarios "Chat archived with a pending question" and "Unarchived chat".
+- [ ] 2.3 Write a failing test, then emit `ReaddressQuestions` from the `Archived` arm and make sure its pending-request check counts only the chat's own requests, not questions addressed to it. Verify with `cargo test -p df-core task_transition` and `cargo test -p df-db archive`, covering the scenarios "Chat archived with a pending question" and "Unarchived chat".
 - [ ] 2.4 Write a test that runs the D2 race in both orders with two transactions: raising against a parent while it is being cancelled. Verify that the question always ends up addressed to humans, with `cargo test -p df-db raise_question_race`.
 
 ## 3. Answering

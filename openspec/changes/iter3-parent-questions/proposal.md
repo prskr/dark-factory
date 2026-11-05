@@ -58,7 +58,7 @@ None.
 
 ## Impact
 
-- **Database** (`crates/df-db`): migration adding `agent_requests.addressee_task_id` (the parent task, `NULL` for humans; always `NULL` for approval requests) and `readdressed_at`. Raising a question, deciding by an agent principal, readdressing in `record_task_event` and in chat archiving, and `list_pending` / `pending_count` filtered to human-addressed requests. `.sqlx/` metadata regenerated.
+- **Database** (`crates/df-db`): migration adding `agent_requests.addressee_task_id` (the parent task, `NULL` for humans; always `NULL` for approval requests) and `readdressed_at`. Raising a question, deciding by an agent principal, readdressing as the `ReaddressQuestions` effect of task transitions (a task becoming final, a chat archived; ADR-0055), and `list_pending` / `pending_count` filtered to human-addressed requests. `.sqlx/` metadata regenerated.
 - **Factory tools**:
   - `contract/mcp/factory-tools.v2.json`: `ask_question.to` and `answer_question`;
   - `crates/df-agent-channel`: the handlers, plus `answer_question` added to `CHAT_TOOLS`.
@@ -68,5 +68,5 @@ None.
   - archiving the chat with a pending question puts the question in the inbox.
 - **Docs**: ADR-0043, ADR-0038 and ADR-0053 amended, glossary term Question, `iteration-3.md` (written); `product/agent-playbook.md` (when to ask the parent, relaying).
 - **Depends on**:
-  - `iter3-task-dependencies`: `parent_id`, `record_task_event`, the quoting format of the child-ended message;
+  - `iter3-task-dependencies`: `parent_id`, the task transitions (`transition`, `apply_task_event`), the quoting format of the child-ended message;
   - `iter3-chats`: `CHAT_TOOLS`, archiving, the chat page link.

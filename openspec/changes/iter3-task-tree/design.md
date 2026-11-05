@@ -8,7 +8,7 @@ See proposal.md (Why). Current state, after `iter3-task-dependencies` and `iter3
   - `df_agent_channel::assign::load_run_context`, which feeds `Workspace.base_branch`;
   - `df_agent_channel::pr::try_ensure_draft`, as the PR base;
   - the gateway snapshot query in `df_db::egress`, as `GitRoute.base_branch`, used by push checks.
-- **Tasks**: `parent_id` and the event hook `record_task_event(tx, task_id, TaskEvent)` come from `iter3-task-dependencies` (D2). The hook wakes the parent unless the parent is `completed`, `cancelled` or `failed`. `create_task` validates its input in one transaction under row locks. `tasks.pr_merged_at` and the merged-PR path through mark-done come from `iter3-webhooks` (D4).
+- **Tasks**: `parent_id` and the task transitions come from `iter3-task-dependencies` (D2, [ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)): the pure `df_core::task_transition::transition` and the applier `df_db::apply_task_event`. A child's end raises `ChildEnded` on its parent, whose arm ignores it when the parent is `completed`, `cancelled` or `failed`. A cross-task event locks only the target's task row. `create_task` validates its input in one transaction under row locks. `tasks.pr_merged_at` and the merged-PR path through mark-done come from `iter3-webhooks` (D4).
 - **Cancel**: `df_db::tasks::cancel_task` runs in one transaction. Lock order everywhere is run rows first, then the task row.
 - **Prepare**: `crates/factory-agent/src/workspace.rs` fetches base and task branch and fast-forwards the task branch only to its own remote.
 - **Plugins**: the WIT `pull-requests` interface has `create`, `find-open`, `get` and `update`. The host detects capability interfaces by export.
@@ -92,12 +92,14 @@ Alternative: count subtasks ever created. Rejected, because it breaks long-lived
 
 `cancel_task` becomes:
 1. Select the subtree: a recursive CTE over `parent_id`, keeping the root and the descendants not in `completed`, `failed` or `cancelled`. It is ordered by depth.
-2. Lock all their run rows, then all task rows. This is the global order "runs, then task" for the whole set, so a concurrent run end of a descendant, which locks child then parent, either finishes first or waits.
-3. Apply today's per-task cancel body to each task, top-down, including the `TaskEvent::Cancelled` hook.
+2. Lock all their run rows, then all task rows. This is the global order "runs, then task" for the whole set. A concurrent run end of a descendant holds only that descendant's run and task rows, and wakes its parent by locking only the parent's task row (ADR-0055). It either finishes first or waits, and no cycle forms.
+3. Call `apply_task_event` with `Cancelled { via }` for each task, top-down (`via` is `None` for the root, the root's key for descendants). The applier's own locks are already held.
 
-Because parents are already `cancelled` when their children's hooks run, the existing "final parents are not woken" rule suppresses every wake-up inside the subtree. Only the root's parent is woken, so no special case is needed.
+Because parents are already `cancelled` when their children's `NotifyParent` effects run, the `ChildEnded` arm returns an empty transition for them. Only the root's parent is woken, so no special case is needed.
 
-The root's status check stays (a `completed` or `cancelled` root is rejected). Each task gets its own `task.cancel` audit entry; descendants carry `{"via": "<root key>"}`.
+The `Cancelled` arm rejects a `completed` or `cancelled` root, as today. For a descendant the subtree query already left those out. Each task gets its own `task.cancel` audit effect; descendants carry `{"via": "<root key>"}`.
+
+Alternative: a `CancelChildren` effect of the `Cancelled` arm. It would lock children one by one while their parent is locked, so the "all run rows first" order of step 2 would be lost.
 
 ### D7: Merging subtask PRs
 
@@ -114,7 +116,7 @@ The root's status check stays (a `completed` or `cancelled` root is rejected). E
 Then, outside the transaction, call `pull-requests.merge(pr, head-sha)`. A forge call doesn't belong inside a row lock.
 
 On success:
-- In a new transaction, set `pr_merged_at` if it is null and run the mark-done path with the agent principal (audit `task.done`, reason `pr.merged.by_parent`). The mark-ready call is skipped as for the webhook path, and the `TaskEvent::Done` hook releases dependents and wakes the caller, as intended (ADR-0052).
+- In a new transaction, set `pr_merged_at` if it is null and run the mark-done path with the agent principal (audit `task.done`, reason `pr.merged.by_parent`). The mark-ready call is skipped as for the webhook path, and the effects of the `MarkedDone` event release dependents and wake the caller, as intended (ADR-0052).
 - Then `ensure_draft` for the caller's task opens its PR (spec "PR after a subtask merge").
 
 A later merge webhook finds `pr_merged_at` set and does nothing (`iter3-webhooks` D4). The `call_id` store makes retries return the stored result.
@@ -145,7 +147,7 @@ Alternative: a new `branches` capability interface. Rejected: host detection wou
 
 ### D9: Web UI
 
-- **Details column** (`df-web`): an Alpine component `detailsTabs` in `assets/details-tabs.js` holds the active tab and remembers it per browser (try/catch around storage). The tabs render server-side: Overview is today's markup plus the base task link, and Subtasks is a list. Both re-render on `TaskChanged` of the task or of any direct subtask; the subtask event is published to the parent too (the hook already touches the parent on child events, and status changes add one `TaskChanged` for `parent_id`).
+- **Details column** (`df-web`): an Alpine component `detailsTabs` in `assets/details-tabs.js` holds the active tab and remembers it per browser (try/catch around storage). The tabs render server-side: Overview is today's markup plus the base task link, and Subtasks is a list. Both re-render on `TaskChanged` of the task or of any direct subtask; the subtask event is published to the parent too: every transition that changes the status of a task with a parent adds the effect `Publish(TaskChanged { parent })`, a rule in `transition` itself.
 - **Chip**: the task list query adds two counts per row from a `LEFT JOIN LATERAL` over direct subtasks.
 - **Project form**: a select with the two values and one hint line each.
 

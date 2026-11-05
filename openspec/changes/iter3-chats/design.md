@@ -23,7 +23,8 @@ See proposal.md (Why). The current state this change builds on:
   - restores WIP;
   - pushes new task branches, commits and WIP snapshots.
 - **Git proxy** (`crates/df-gateway/src/git/refs.rs`): `RefScope` allows the task branch (create or fast-forward) and the WIP branch. The scope is built per run from `GitRoute` (`control/snapshot.rs`).
-- **Delegation** (`iter3-task-dependencies`): `parent_id`, the principal `created_by`, the tools `create_task`, `list_personas` and `send_message`, and the child-ended message queued in `record_task_event`.
+- **Delegation** (`iter3-task-dependencies`): `parent_id`, the principal `created_by`, the tools `create_task`, `list_personas` and `send_message`, and the child-ended message queued by the parent's `ChildEnded` transition.
+- **Task transitions** ([ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md), from `iter3-task-dependencies` D2): every status change goes through the pure `df_core::task_transition::transition(&TaskSnapshot, TaskEvent)` and the applier `df_db::apply_task_event`.
 - **Web** (`crates/df-web`):
   - `task_pages.rs` serves `/tasks/...`;
   - `layout.rs` holds `Nav` and `workspace_layout`;
@@ -116,14 +117,20 @@ Alternative: a shorter keep-alive for chats. That loses warm sandboxes even when
 
 ### D6: Kind checks at the edges
 
-- **`mark_task_done` and cancel**: reject `kind = 'chat'` with `Conflict` before any write.
-- **Archive and unarchive** (`df_db::chats`):
-  - Archive locks the task row. It rejects a chat that is `queued` or `running`, or has an `agent_requests` row in state `pending`.
-  - Archive then sets `archived_at`/`archived_by` and writes the audit entry.
-  - Unarchive clears both, sets the status to `queued` if undelivered messages exist (with the same `CASE` as `queue_message_tx`), and writes the audit entry.
+`TaskSnapshot` gains `kind` and `archived`. The chat rules are arms of `transition`, so they are unit tests in `df-core`:
+
+- **`MarkedDone` and `Cancelled`**: rejected for `kind = chat` (`Rejected` → `Conflict`), so nothing is written or audited.
+- **Archive and unarchive** (`df_db::chats`) raise two new events through `apply_task_event`:
+  - `Archived { by }`:
+    - rejected while the chat is `queued` or `running`, or has an `agent_requests` row in state `pending` (snapshot field `pending_requests`, read from the chat's own rows);
+    - otherwise the status is unchanged, with the effects `SetArchived(Some(by))` and `Audit(chat.archive)`.
+  - `Unarchived`:
+    - effects `SetArchived(None)` and `Audit(chat.unarchive)`;
+    - the status follows the `MessageQueued` rule when undelivered messages exist, otherwise it is unchanged.
+  - Both are rejected for `kind = task`.
 - **Messages**:
-  - `queue_message` from the web rejects an archived chat.
-  - The child-ended message (`record_task_event`) is queued regardless. The scheduler's `archived_at IS NULL` filter keeps it from starting a run.
+  - `queue_message` from the web rejects an archived chat. That is a check at the web edge, not in `transition`, because the child-ended message must still be queued.
+  - The child-ended message is queued regardless: the `ChildEnded` arm treats an archived chat like any open parent. The scheduler's `archived_at IS NULL` filter keeps it from starting a run.
 - **Volume retention**: treats `archived_at` as the close time of a chat.
 
 ### D7: Compaction notice

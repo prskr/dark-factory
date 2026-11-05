@@ -1,7 +1,7 @@
 # Tasks
 
 Prerequisites, all merged before this change:
-- `iter3-task-dependencies`: `parent_id`, `create_task`, `list_personas`, `send_message`, `record_task_event`, persona descriptions.
+- `iter3-task-dependencies`: `parent_id`, `create_task`, `list_personas`, `send_message`, the task transitions (`transition`, `apply_task_event`, ADR-0055), persona descriptions.
 - `iter2-continuation-summary`: the summary the compaction notice shows.
 - `iter2-run-resilience`: `runs.maxConcurrent` in `start_queued_runs`.
 
@@ -29,11 +29,11 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 ## 2. Chat lifecycle in the database
 
 - [ ] 2.1 Write failing `df-db` tests, then implement `create_chat` (design D2). Verify with `cargo test -p df-db chat_create`. The tests cover the `chats` scenarios "New chat", "Several chats with one persona", "Empty first message" and "Audit on start", and the `task-management` scenario "Chat between tasks".
-- [ ] 2.2 Write failing tests, then implement archive and unarchive (design D6). Verify with `cargo test -p df-db chat_archive`. The tests cover every scenario of the `chats` requirements:
+- [ ] 2.2 Write failing tests, then implement archive and unarchive as the `Archived` and `Unarchived` events (design D6). Verify with `cargo test -p df-core task_transition` for the rules and `cargo test -p df-db chat_archive` for the writes. The tests cover every scenario of the `chats` requirements:
   - "Archiving a chat";
   - "Archived chats are read-only", the message rejection only;
   - "Unarchiving a chat".
-- [ ] 2.3 Write failing tests, then reject cancel and mark done for chats. Verify with `cargo test -p df-db`: the `task-management` scenario "Mark a chat done", the `chats` scenario "Cancel rejected", and no audit entry written.
+- [ ] 2.3 Write failing `transition` unit tests, then reject `MarkedDone` and `Cancelled` for chats (design D6). Verify with `cargo test -p df-core task_transition` and `cargo test -p df-db`: the `task-management` scenario "Mark a chat done", the `chats` scenario "Cancel rejected", and no audit entry written.
 - [ ] 2.4 Count `archived_at` as the close time of a chat in the volume retention scan. Verify with a retention test: an archived chat's volume is deleted after `volumes.retainAfterCloseSeconds`.
 
 ## 3. Scheduling
