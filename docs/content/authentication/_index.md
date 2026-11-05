@@ -30,6 +30,7 @@ Provider guides:
 
 - [Keycloak](keycloak.md): client role `board-member` in a `roles` claim.
 - [Dex](dex.md): group `board-member` in the `groups` claim.
+- [Authentik](authentik.md): group `board-member` in the `groups` claim.
 
 ## Control plane settings
 
