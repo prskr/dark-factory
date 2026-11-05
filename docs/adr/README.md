@@ -50,7 +50,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3; amended by ADR-0048 and on 2026-11-03) |
 | [ADR-0045](0045-full-harness-mode-as-separate-acp-binary.md) | Full-harness mode as a separate ACP binary | Proposed (spike `native-harness-spike`) |
 | [ADR-0046](0046-forge-activity-in-the-transcript.md) | Forge activity in the transcript | Accepted |
-| [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md) | Markdown rendering with class-based syntect themes and sandboxed Mermaid | Accepted (planned for iteration 3) |
+| [ADR-0047](0047-markdown-rendering-syntect-classes-mermaid-sandbox.md) | Markdown rendering with class-based syntect themes and sandboxed Mermaid | Accepted (amended on 2026-11-05) |
 | [ADR-0048](0048-image-artifacts.md) | Image artifacts | Accepted (planned for iteration 3; amended on 2026-11-03) |
 | [ADR-0049](0049-lifecycle-events-outbox-and-ed25519-signatures.md) | Lifecycle events via a PostgreSQL outbox, signed with Ed25519 | Accepted |
 | [ADR-0050](0050-model-traffic-and-usage-only-through-the-gateway.md) | Model traffic and usage only through the gateway | Accepted (planned for iteration 3) |

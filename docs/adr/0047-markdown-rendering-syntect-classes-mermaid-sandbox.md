@@ -1,6 +1,6 @@
 # ADR-0047: Markdown rendering with class-based syntect themes and sandboxed Mermaid
 
-- **Status:** Accepted (planned for iteration 3)
+- **Status:** Accepted (implemented with `iter3-markdown-rendering`; amended on 2026-11-05: own syntect adapter instead of comrak's, syntect features without `yaml-load`)
 - **Date:** 2026-11-02
 - **Related:** [ADR-0004](0004-server-rendered-ui-maud-htmx-alpine.md), [ADR-0020](0020-configuration-in-database.md), [ADR-0044](0044-task-artifacts-and-cross-task-reading.md), [ADR-0048](0048-image-artifacts.md)
 
@@ -10,7 +10,7 @@ ADR-0004 renders Markdown on the server with `comrak` + `syntect`; only comrak w
 
 ## Decision
 
-- **Code blocks:** highlighted on the server by comrak's syntect adapter in CSS-class mode (`hl-` prefix), syntect with the pure-Rust regex engine (`default-fancy`, no oniguruma, builds as static musl). The HTML carries classes only, no colours.
+- **Code blocks:** highlighted on the server by a small comrak highlighter adapter over syntect in CSS-class mode (`hl-` prefix; comrak's own syntect adapter falls back to first-line detection), syntect with the pure-Rust regex engine (`regex-fancy` with bundled syntaxes and themes, no oniguruma and no `yaml-load`, builds as static musl). The HTML carries classes only, no colours.
 - **Language:** taken from the fence's info string only (syntect name or extension). No language, an unknown one or a block above 64 KiB renders plain. No content-based guessing.
 - **When:** only completed Markdown is highlighted (agent messages after their turn, artifacts). Streaming messages stay plain text.
 - **Themes:** the instance config options `web.codeTheme.light` and `web.codeTheme.dark` (Helm values of the same name; defaults `InspiredGitHub` and `base16-ocean.dark`) name bundled syntect themes; an unknown name fails startup. The control plane generates one stylesheet at startup (light as default, dark under `prefers-color-scheme: dark`), served by content hash. Code blocks carry their theme's background, inside agent bubbles too.
