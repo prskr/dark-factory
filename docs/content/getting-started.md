@@ -25,7 +25,7 @@ flowchart LR
 | cert-manager (with the CSI driver) | Issues the mTLS certificates of the control plane, the gateway and every sandbox. |
 | A CNI that enforces `NetworkPolicy` (Cilium or any other) | Sandboxes may only reach the gateway; the chart ships a default-deny policy. |
 | PostgreSQL 17, reachable from the cluster | The only state of an instance (the version the tests run against). |
-| An OIDC provider: [Keycloak](authentication/keycloak.md) (this guide) or [Dex](authentication/dex.md) | Login to the web UI. |
+| An OIDC provider: [Keycloak](authentication/keycloak.md) (this guide), [Authentik](authentication/authentik.md), or [Dex](authentication/dex.md) | Login to the web UI. |
 | A Gateway API `Gateway` (or any other way to publish port `8080` of the control plane) with a TLS certificate | The browser needs an HTTPS URL; it is also the OIDC redirect target. |
 | `helm` 3.8 or newer and access to `ghcr.io/prskr/dark-factory` | The chart is an OCI artifact. |
 
@@ -54,9 +54,10 @@ yourself: see [Database](database.md).
 
 ## 2. Create the OIDC client
 
-Create the confidential client `dark-factory` and the role `board-member`, and map the role into a
-top-level `roles` claim of the ID token. The steps are in [Keycloak](authentication/keycloak.md)
-(with Dex: [Dex](authentication/dex.md)). At the end you have a client secret; store it:
+Create the confidential client `dark-factory` and provide `board-member` in a top-level role or group
+claim of the ID token. The steps are in [Keycloak](authentication/keycloak.md),
+[Authentik](authentication/authentik.md), and [Dex](authentication/dex.md). At the end you have a
+client secret; store it:
 
 ```bash
 kubectl -n dark-factory create secret generic dark-factory-oidc --from-literal=client-secret='<secret from Keycloak>'
@@ -121,13 +122,12 @@ The images default to the chart's `appVersion`, so the images match the chart ve
 
 ## 5. First login
 
-1. Give your Keycloak user the client role `board-member`.
-2. Open the `oidc.publicUrl`. You are redirected to Keycloak and, after the login, to the task list.
+1. Give your user the `board-member` role or group described by your provider's guide.
+2. Open the `oidc.publicUrl`. You are redirected to the provider and, after the login, to the task list.
 3. The profile menu (your initials) shows the version of the running instance and links to the docs
    of exactly that version.
 
-A user without the role gets `403`; other symptoms are in the
-[Keycloak troubleshooting table](authentication/keycloak.md#troubleshooting).
+A user without the role gets `403`; other symptoms are in the provider's troubleshooting table.
 
 ## Upgrade
 
