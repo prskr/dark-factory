@@ -29,7 +29,7 @@ The task branch SHALL be `factory/task/<KEY>`, the WIP snapshot branch `factory/
 - **THEN** they are `factory/task/DF-1`, `factory/wip/DF-1` and `task-df-1`
 
 ### Requirement: Task creation queues the assignment prompt
-Creating a task SHALL store description, project, assigned persona, optional linked issue number, creator and an optional title, and SHALL queue one prompt authored by the system principal (reason `task.assigned`) containing the description, in the same transaction. When the task has no title from the user, the prompt SHALL ask the persona to set one with `set_task_title`, in a separate content block marked `hidden`; the description SHALL be in visible blocks.
+Creating a task SHALL store description, project, assigned persona, optional linked issue number, creator (a principal), optional parent, dependencies and an optional title, and SHALL queue, in the same transaction, one prompt from the system principal (reason `task.assigned`) with the description. Without a title from its creator, the prompt SHALL ask the persona to call `set_task_title` in a separate `hidden` content block; the description SHALL be visible.
 
 #### Scenario: Task created
 - **WHEN** a board member creates a task with description "Fix login" assigned to persona "Linus"
@@ -43,8 +43,12 @@ Creating a task SHALL store description, project, assigned persona, optional lin
 - **WHEN** a task is created with a title
 - **THEN** the assignment prompt contains no hidden block
 
+#### Scenario: Task created by an agent
+- **WHEN** the agent of `DF-20` creates a task with a title and a prompt
+- **THEN** the task's creator is the agent of `DF-20`, its parent is `DF-20`, and its assignment prompt contains the prompt and no hidden block
+
 ### Requirement: Queued messages
-A human SHALL be able to queue a message on any task at any time. Each message SHALL get a unique prompt id, its author and queue time, and stays undelivered until a transcript `UserMessage` event with that prompt id is persisted. If the task has an active run that is not `finalizing`, the status SHALL become `running`; otherwise it SHALL become `queued`.
+A human SHALL be able to queue a message on any task at any time. Each message SHALL get a unique prompt id, its author and queue time, and stays undelivered until a transcript `UserMessage` event with that prompt id is persisted. If the task has an active run that is not `finalizing`, the status SHALL become `running`; if the task has never started a run and has an unsatisfied dependency, it SHALL become or stay `awaiting_dependencies`; otherwise it SHALL become `queued`.
 
 #### Scenario: Message on a waiting task
 - **WHEN** a board member queues "also add a test for X" on a task in status `waiting` without an active run
@@ -66,8 +70,16 @@ A human SHALL be able to queue a message on any task at any time. Each message S
 - **WHEN** a message is queued on a task in status `in_review`
 - **THEN** the task status becomes `queued` and a new run starts
 
+#### Scenario: Message on a task awaiting dependencies
+- **WHEN** a message is queued on a task in status `awaiting_dependencies`
+- **THEN** the task stays `awaiting_dependencies` and no run starts
+
+#### Scenario: Reopening a cancelled task that never started
+- **WHEN** a message is queued on a cancelled task that never ran and still has an unsatisfied dependency
+- **THEN** the task becomes `awaiting_dependencies`
+
 ### Requirement: Task status vocabulary
-A task SHALL have exactly one status: `queued` (work pending, no active run), `running` (a turn is in progress or starting), `waiting` (waits for a human; the run may still be in its keep-alive window), `blocked` (an answer or approval was not given within the idle deadline), `in_review` (the agent called `complete_task`), `completed` (marked done by a human, or its PR was merged), `cancelled` (cancelled by a human), `rate_limited`, `limit_reached` or `failed`.
+A task SHALL have exactly one status: `awaiting_dependencies` (unsatisfied dependencies, never started), `queued` (pending work, no active run), `running` (a turn runs or is about to start), `waiting` (last turn ended, waits for a human; the run may be kept alive), `blocked` (no answer or approval within the idle deadline), `in_review` (`complete_task` called; the PR waits for review), `completed` (marked done or PR merged), `cancelled`, `rate_limited`, `limit_reached` or `failed`.
 
 #### Scenario: Status is always one of the defined values
 - **WHEN** any component writes a task status outside this set
@@ -77,12 +89,16 @@ A task SHALL have exactly one status: `queued` (work pending, no active run), `r
 - **WHEN** a message is queued on a task in status `blocked`
 - **THEN** the task status becomes `queued`
 
+#### Scenario: New task with an unsatisfied dependency
+- **WHEN** a task is created with a dependency that is not satisfied
+- **THEN** its status is `awaiting_dependencies`
+
 ### Requirement: Task status groups
-`waiting`, `blocked`, `in_review` and `limit_reached` SHALL form the "Waiting" group of the task list filters, `completed` and `failed` the "Done" group.
+`awaiting_dependencies`, `waiting`, `blocked`, `in_review` and `limit_reached` SHALL form the "Waiting" group of the task list filters, `completed` and `failed` the "Done" group.
 
 #### Scenario: Waiting group
 - **WHEN** the task list is filtered by the "Waiting" group
-- **THEN** it lists the tasks in status `waiting`, `blocked`, `in_review` and `limit_reached`
+- **THEN** it lists the tasks in status `awaiting_dependencies`, `waiting`, `blocked`, `in_review` and `limit_reached`
 
 ### Requirement: Change notifications
 Writes that change a task, run, transcript or queued message SHALL publish a notification after commit, so any control plane replica can react without polling.
