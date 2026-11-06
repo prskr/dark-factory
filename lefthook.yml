@@ -69,6 +69,11 @@ pre-commit:
       glob: 'deploy/helm/**'
       run: build/with_tools.sh helm-unittest deploy/helm/dark-factory
 
+    # Same command and version as the "Type-check web scripts" step of .github/workflows/ci.yaml; Renovate updates both in one PR.
+    web-typecheck:
+      glob: ['crates/df-web/scripts/**', 'crates/df-web/tsconfig.json']
+      run: npx --yes -p typescript@7.0.2 tsc -p crates/df-web
+
     # Same command and version as .github/workflows/openspec.yaml; Renovate updates both in one PR.
     openspec-validate:
       glob: 'openspec/**'

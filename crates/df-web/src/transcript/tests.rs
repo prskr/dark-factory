@@ -266,6 +266,10 @@ fn runtime_ids_cannot_break_out_of_dom_ids() {
 }
 
 #[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 fn a_long_code_line_stays_inside_a_block_that_scrolls_horizontally() {
     let long = "x".repeat(300);
     let mut folder = Folder::default();
@@ -409,6 +413,10 @@ fn tool_calls_sit_between_agent_messages_as_agent_items() {
 }
 
 #[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 fn agent_writes_twice_with_a_collapsed_tool_row_between_and_css_that_hides_the_first_avatar() {
     let mut folder = Folder::new("Linus");
     folder.apply(&chunk(1, "t", "m1", "first"));

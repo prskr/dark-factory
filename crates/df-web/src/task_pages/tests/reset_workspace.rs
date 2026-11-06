@@ -222,6 +222,10 @@ async fn the_status_menu_offers_reset_workspace_before_cancel_with_a_confirmatio
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn opening_the_status_menu_makes_the_phone_sheet_full_height() {
     let app = TestApp::new().await;
     let cookie = app.login().await;

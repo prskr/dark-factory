@@ -94,7 +94,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 15] = [
+const TOOLS: [GithubTool; 16] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -238,6 +238,20 @@ const TOOLS: [GithubTool; 15] = [
             let cpu = if p.cpu == "x86_64" { "x64" } else { p.cpu };
             // glibc build: the musl one needs a musl loader that glibc hosts (CI runners, dev VMs) lack
             (format!("tailwindcss-{}-{cpu}", p.os), String::new())
+        },
+    },
+    GithubTool {
+        name: "swc",
+        repo: "swc-project/swc",
+        // Standalone CLI, bare executables; static musl builds on Linux.
+        asset: |_, p| {
+            let (os, cpu) = match (p.os, p.cpu) {
+                ("linux", "x86_64") => ("linux", "x64-musl"),
+                ("linux", _) => ("linux", "arm64-musl"),
+                (_, "x86_64") => ("darwin", "x64"),
+                _ => ("darwin", "arm64"),
+            };
+            (format!("swc-{os}-{cpu}"), String::new())
         },
     },
     GithubTool {
@@ -610,6 +624,23 @@ mod tests {
             (name.as_str(), file.as_str()),
             ("tailwindcss-macos-arm64", "")
         );
+    }
+
+    #[test]
+    fn swc_asset_names_pick_the_musl_build_on_linux() {
+        let names: Vec<_> = PLATFORMS
+            .iter()
+            .map(|&p| (tool("swc").asset)("1.16.22", p))
+            .collect();
+        let expected = [
+            "swc-linux-x64-musl",
+            "swc-linux-arm64-musl",
+            "swc-darwin-x64",
+            "swc-darwin-arm64",
+        ];
+        for (got, want) in names.iter().zip(expected) {
+            assert_eq!((got.0.as_str(), got.1.as_str()), (want, ""));
+        }
     }
 
     #[test]

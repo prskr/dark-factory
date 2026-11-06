@@ -27,7 +27,7 @@
 
 ### D1: swc as a standalone binary, run by a genrule and by `build.rs`
 
-The swc CLI binary is pinned like `tailwindcss`: an entry in `TOOLS`, `multitool.lock.json` and `//:bazel_env`. A genrule in `crates/df-web/BUILD.bazel` compiles every `scripts/*.ts` with a checked-in `.swcrc` that strips types, targets ES2022 and minifies. Its output directory reaches `build.rs` through `WEB_SCRIPTS_DIR`. Under plain `cargo`, `build.rs` runs the same command with `swc` from `PATH` (or `SWC_BIN`).
+The swc CLI binary is pinned like `tailwindcss`: an entry in `TOOLS`, `multitool.lock.json` and `//:bazel_env`. A genrule in `crates/df-web/BUILD.bazel` compiles every `scripts/*.ts` with a checked-in `.swcrc` that strips types, targets ES2022 and minifies. Its outputs reach `build.rs` through `WEB_SCRIPTS`, a space-separated list of the compiled file paths (a genrule cannot declare a directory). Under plain `cargo`, `build.rs` runs the same command with `swc` from `PATH` (or `SWC_BIN`).
 
 Alternatives:
 
@@ -47,7 +47,7 @@ Alternatives:
 
 For each asset kind (scripts, stylesheet), `build.rs` decides in this order:
 
-1. The Bazel env var is set (`WEB_SCRIPTS_DIR`, `TAILWIND_APP_CSS`): copy that output.
+1. The Bazel env var is set (`WEB_SCRIPTS`, `TAILWIND_APP_CSS`): copy that output.
 2. The tool runs (`SWC_BIN` / `TAILWIND_BIN`, otherwise `PATH`): compile.
 3. The tool is not found: `cargo::warning`, nothing embedded for that kind.
 

@@ -161,6 +161,10 @@ async fn icon_only_controls_have_accessible_names() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn split_screen_widths_keep_the_rail_and_the_list_next_to_the_transcript() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
@@ -193,7 +197,7 @@ async fn split_screen_widths_keep_the_rail_and_the_list_next_to_the_transcript()
 
 #[tokio::test]
 async fn the_workspace_state_is_a_component_script_with_named_pieces() {
-    let script = crate::assets::script_source("workspace.js");
+    let script = crate::assets::script_source("workspace.ts");
     assert!(script.contains("Alpine.data('workspace'"));
     for method in [
         "setCollapsed(value)",
@@ -220,6 +224,10 @@ async fn the_workspace_state_is_a_component_script_with_named_pieces() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn the_phone_sheet_keeps_handle_and_head_fixed_and_scrolls_only_its_body() {
     let html = crate::components::details_panel("Details", maud::html! { "x" }).into_string();
     let handle = html.find("aria-label=\"Resize details\"").unwrap();
@@ -249,11 +257,19 @@ async fn the_phone_sheet_keeps_handle_and_head_fixed_and_scrolls_only_its_body()
 async fn the_sheet_does_not_animate_while_it_is_dragged() {
     let html = crate::components::details_panel("Details", maud::html! { "x" }).into_string();
     assert!(html.contains(":data-dragging=\"dragging\""), "{html}");
+    let script = crate::assets::script_source("workspace.ts");
+    assert!(script.contains("this.dragging = true") && script.contains("this.dragging = false"));
+}
+
+#[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
+fn the_stylesheet_has_no_transition_while_the_sheet_is_dragged() {
     let css = crate::app_css().unwrap();
     assert!(
         css.contains("[data-dragging=true]{transition:none"),
         "no lag behind the finger"
     );
-    let script = crate::assets::script_source("workspace.js");
-    assert!(script.contains("this.dragging = true") && script.contains("this.dragging = false"));
 }

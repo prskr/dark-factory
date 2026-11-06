@@ -377,7 +377,7 @@ fn pause_stops_the_stream_explicitly_and_the_stored_width_is_clamped() {
     // also ends a reconnect that has no reader yet. Cancelling the reader of an aborted stream
     // rejects with the abort error: swallow it, or it is logged as unhandled.
     let script = component_script();
-    let pause = &script[script.find("togglePause() {").unwrap()..];
+    let pause = &script[script.find("togglePause(): void {").unwrap()..];
     let abort = pause.find("abortController.abort()").unwrap();
     assert!(
         abort < pause.find("slot.replaceChildren()").unwrap(),
@@ -387,7 +387,7 @@ fn pause_stops_the_stream_explicitly_and_the_stored_width_is_clamped() {
     // The stored width is passed through the limits once the layout exists.
     assert!(script.contains("this.$nextTick(() => this.setW(this.want, false))"));
     // Only a drag, a key or a double click remembers a width; fitting does not.
-    assert!(script.contains("setW(value, persist = true)"));
+    assert!(script.contains("setW(value: number, persist = true)"));
     // Clamp first, then remember what is shown.
     assert!(script.contains("Math.round(persist ? value : this.want)"));
     assert!(script.contains("if (persist) {"));

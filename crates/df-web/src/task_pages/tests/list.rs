@@ -31,6 +31,10 @@ async fn task_list_shows_newest_first_with_status_and_status_line() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn task_rows_are_keyboard_reachable_links_in_list_order() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
@@ -426,6 +430,10 @@ async fn a_list_row_title_is_one_truncated_line_with_the_full_title_on_hover() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn the_selected_row_has_an_accent_edge_and_the_others_a_transparent_one() {
     let app = TestApp::new().await;
     let cookie = app.login().await;

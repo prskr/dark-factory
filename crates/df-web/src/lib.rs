@@ -6,6 +6,10 @@
 
 pub mod assets;
 pub mod auth;
+// The asset staging of `build.rs`, compiled here for its tests.
+#[cfg(test)]
+#[path = "../build_assets.rs"]
+mod build_assets;
 pub mod components;
 mod config_pages;
 pub mod egress;
@@ -161,6 +165,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     async fn assets_are_compressed_without_login() {
         let pool = sqlx::PgPool::connect_lazy("postgres://unused/db").unwrap();
         let css = crate::base_router(pool, None)
@@ -193,6 +201,10 @@ mod tests {
 
     // Needs a PostgreSQL container (testcontainers).
     #[tokio::test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     async fn pages_are_compressed_but_live_streams_are_not() {
         let app = TestApp::new().await;
         let cookie = app.login().await;

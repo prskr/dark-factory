@@ -232,7 +232,7 @@ impl SyntaxHighlighterAdapter for Highlighter {
 }
 
 /// A `mermaid` fence stays a plain code block (no JavaScript, or a failed diagram); the
-/// `mermaidDiagram` Alpine component (`assets/markdown.js`) replaces it by the drawn diagram.
+/// `mermaidDiagram` Alpine component (`scripts/markdown.ts`) replaces it by the drawn diagram.
 struct MermaidFence;
 
 impl CodefenceRendererAdapter for MermaidFence {

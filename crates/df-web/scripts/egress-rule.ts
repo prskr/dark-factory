@@ -7,18 +7,18 @@
 // `every project` and `any`. Switching back restores what was typed. Disabled fields are not
 // submitted, and the server ignores project and port for a deny rule anyway.
 document.addEventListener('alpine:init', () => {
-  Alpine.data('egressRule', (cfg) => ({
+  Alpine.data('egressRule', (cfg: { effect: 'allow' | 'deny' }) => ({
     effect: cfg.effect,
-    typed: {},
+    typed: {} as Record<string, string>,
 
-    get deny() {
+    get deny(): boolean {
       return this.effect === 'deny';
     },
 
-    init() {
+    init(): void {
       this.$watch('effect', () => {
         for (const [ref, shown] of [['project', ''], ['port', 'any']]) {
-          const el = this.$refs[ref];
+          const el = this.$refs[ref] as HTMLInputElement;
           if (this.deny) {
             this.typed[ref] = el.value;
             el.value = shown;

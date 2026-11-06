@@ -1,108 +1,84 @@
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+//! Stages the web assets into `$OUT_DIR/assets/`: the checked-in `assets/` folder, the scripts
+//! compiled from `scripts/*.ts` and the Tailwind stylesheet `app.css`. The decisions are in
+//! `build_assets.rs`, which has the tests.
+//!
+//! The cfgs `df_web_scripts` and `df_web_styles` tell the tests which kinds were compiled.
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::remove_file(&dst_path).ok(); // best-effort cleanup
-            fs::copy(&src_path, &dst_path)?;
-        }
+mod build_assets;
+
+use std::env;
+use std::path::{Path, PathBuf};
+
+use build_assets::{Config, Result, Tool, parse_web_scripts, resolve_path, stage_assets};
+
+/// An environment variable that may be unset; a value that is not UTF-8 is an error.
+fn optional_env(var: &str) -> Result<Option<String>> {
+    match env::var(var) {
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err @ env::VarError::NotUnicode(_)) => Err(format!("{var}: {err}").into()),
+    }
+}
+
+fn tool(var: &'static str, default: &str, manifest_dir: &Path, pwd: Option<&Path>) -> Result<Tool> {
+    Ok(match optional_env(var)? {
+        Some(path) => Tool {
+            program: resolve_path(&path, manifest_dir, pwd),
+            override_var: Some(var),
+        },
+        None => Tool {
+            program: default.into(),
+            override_var: None,
+        },
+    })
+}
+
+fn main() -> Result<()> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let staged = PathBuf::from(env::var("OUT_DIR")?).join("assets");
+
+    for path in [
+        "styles/input.css",
+        "scripts",
+        ".swcrc",
+        "src",
+        "assets",
+        "build_assets.rs",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    for var in [
+        "WEB_SCRIPTS",
+        "TAILWIND_APP_CSS",
+        "SWC_BIN",
+        "TAILWIND_BIN",
+        "DF_WEB_REQUIRE_ASSETS",
+        "PATH",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+    println!("cargo:rustc-check-cfg=cfg(df_web_scripts)");
+    println!("cargo:rustc-check-cfg=cfg(df_web_styles)");
+
+    // Only a lookup hint for `resolve_path`, so any value (even non-UTF-8) is fine.
+    let pwd = env::var_os("PWD").map(PathBuf::from);
+    let pwd = pwd.as_deref();
+    let config = Config {
+        require_assets: optional_env("DF_WEB_REQUIRE_ASSETS")?.is_some_and(|v| v == "1"),
+        web_scripts: optional_env("WEB_SCRIPTS")?
+            .map(|files| parse_web_scripts(&files, &manifest_dir, pwd)),
+        tailwind_app_css: optional_env("TAILWIND_APP_CSS")?
+            .map(|file| resolve_path(&file, &manifest_dir, pwd)),
+        swc: tool("SWC_BIN", "swc", &manifest_dir, pwd)?,
+        tailwind: tool("TAILWIND_BIN", "tailwindcss", &manifest_dir, pwd)?,
+        manifest_dir,
+    };
+    let report = stage_assets(&config, &staged)?;
+    for cfg in report.cfgs {
+        println!("cargo:rustc-cfg={cfg}");
+    }
+    for warning in report.warnings {
+        println!("cargo:warning={warning}");
     }
     Ok(())
-}
-
-fn resolve_path(raw: &str, manifest_dir: &Path) -> PathBuf {
-    let candidate = PathBuf::from(raw);
-    if candidate.exists() {
-        return candidate;
-    }
-    if let Ok(pwd) = env::var("PWD") {
-        let from_pwd = PathBuf::from(pwd).join(raw);
-        if from_pwd.exists() {
-            return from_pwd;
-        }
-    }
-    manifest_dir.join(raw)
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let out_dir = PathBuf::from(env::var("OUT_DIR")?);
-    let staged_assets = out_dir.join("assets");
-    fs::create_dir_all(&staged_assets)?;
-
-    println!("cargo:rerun-if-changed=styles/input.css");
-    println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed=assets");
-    println!("cargo:rerun-if-env-changed=TAILWIND_APP_CSS");
-    println!("cargo:rerun-if-env-changed=TAILWIND_BIN");
-
-    let assets_dir = manifest_dir.join("assets");
-    if assets_dir.exists() {
-        copy_dir_recursive(&assets_dir, &staged_assets)?;
-    }
-
-    let app_css_out = staged_assets.join("app.css");
-
-    if let Ok(pregenerated) = env::var("TAILWIND_APP_CSS") {
-        let src = resolve_path(&pregenerated, &manifest_dir);
-        fs::remove_file(&app_css_out).ok(); // best-effort cleanup
-        fs::copy(&src, &app_css_out)?;
-        return Ok(());
-    }
-
-    let input_css = manifest_dir.join("styles/input.css");
-    let tailwind_bin = env::var("TAILWIND_BIN").ok().map_or_else(
-        || PathBuf::from("tailwindcss"),
-        |p| resolve_path(&p, &manifest_dir),
-    );
-
-    let status = Command::new(&tailwind_bin)
-        .current_dir(&manifest_dir)
-        .arg("-i")
-        .arg(&input_css)
-        .arg("-o")
-        .arg(&app_css_out)
-        .arg("--minify")
-        .status();
-
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => {
-            if app_css_out.exists() && fs::metadata(&app_css_out)?.len() > 100 {
-                println!(
-                    "cargo:warning=tailwindcss exited with status {s}; using pregenerated assets/app.css"
-                );
-                Ok(())
-            } else {
-                Err(format!(
-                    "tailwindcss exited with error status {s} while compiling styles/input.css"
-                )
-                .into())
-            }
-        }
-        Err(err) => {
-            if app_css_out.exists() && fs::metadata(&app_css_out)?.len() > 100 {
-                println!(
-                    "cargo:warning=tailwindcss not found ({err}); using pregenerated assets/app.css"
-                );
-                Ok(())
-            } else {
-                Err(format!(
-                    "tailwindcss is not available ({err}) and no pregenerated app.css found in assets/; \
-                     install tailwindcss or set TAILWIND_APP_CSS / TAILWIND_BIN"
-                )
-                .into())
-            }
-        }
-    }
 }

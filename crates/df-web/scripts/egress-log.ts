@@ -1,7 +1,23 @@
 // Alpine component of the traffic page (`/egress/log`): pause, graph divider and details panel.
 // `cfg` carries the server values (see `state_args` in `src/egress/log/page.rs`).
+interface EgressLogConfig {
+  advanced: number;
+  dirty: boolean;
+  defaultWidth: number;
+  widthKey: string;
+  advancedFields: string[];
+  minGraphPanel: number;
+  dividerWidth: number;
+  minTableWidth: number;
+}
+
+/** The htmx SSE extension's state, kept on the connect element. */
+interface SseElement extends Element {
+  _htmx?: { sse?: { abortController?: AbortController; reader?: ReadableStreamDefaultReader } };
+}
+
 document.addEventListener('alpine:init', () => {
-  Alpine.data('egressLog', (cfg) => ({
+  Alpine.data('egressLog', (cfg: EgressLogConfig) => ({
     paused: false,
     reconnecting: false,
     adv: cfg.advanced,
@@ -15,12 +31,12 @@ document.addEventListener('alpine:init', () => {
     graphDragging: false,
     gx: 0,
     gy: 0,
-    flow: null,
+    flow: null as Record<string, unknown> | null,
     flowId: '',
-    flowRow: null,
-    init() {
+    flowRow: null as HTMLElement | null,
+    init(): void {
       try {
-        const stored = parseInt(localStorage.getItem(cfg.widthKey), 10)
+        const stored = parseInt(localStorage.getItem(cfg.widthKey) ?? '', 10)
         if (stored) this.want = stored
       } catch (e) {}
       // The stored width may not fit this window: clamp it once the layout exists.
@@ -29,8 +45,8 @@ document.addEventListener('alpine:init', () => {
       document.addEventListener('htmx:sse:after:connection', () => { this.reconnecting = false })
       document.addEventListener('htmx:after:swap', () => { this.swapped() })
     },
-    badge() { return this.paused ? 'Paused' : this.reconnecting ? 'Reconnecting' : 'Live' },
-    togglePause() {
+    badge(): string { return this.paused ? 'Paused' : this.reconnecting ? 'Reconnecting' : 'Live' },
+    togglePause(): void {
       const slot = document.getElementById('sse-slot')
       if (!slot) return
       this.paused = !this.paused
@@ -39,7 +55,8 @@ document.addEventListener('alpine:init', () => {
         // stream explicitly, then remove the element. A reconnect in flight has no reader yet,
         // only the abort ends it. Cancelling the reader of an aborted stream rejects with the
         // abort error: swallow it.
-        const sse = slot.firstElementChild && slot.firstElementChild._htmx && slot.firstElementChild._htmx.sse
+        const connected = slot.firstElementChild as SseElement | null
+        const sse = connected && connected._htmx && connected._htmx.sse
         if (sse) {
           if (sse.abortController) sse.abortController.abort()
           if (sse.reader && sse.reader.cancel) sse.reader.cancel().catch(() => undefined)
@@ -48,44 +65,46 @@ document.addEventListener('alpine:init', () => {
         this.reconnecting = false
       } else {
         const connect = document.createElement('div')
-        connect.setAttribute('hx-sse:connect', slot.dataset.url)
+        connect.setAttribute('hx-sse:connect', slot.dataset.url ?? '')
         connect.setAttribute('hx-swap', 'none')
         slot.append(connect)
         htmx.process(connect)
       }
     },
-    swapped() {
+    swapped(): void {
       const slot = document.getElementById('sse-slot')
       // A filter change swaps in a connected stream: that resumes.
       if (this.paused && slot && slot.firstElementChild) this.paused = false
       // New rows come in on top: drop the oldest past the row limit (the server does the same).
-      const tbody = document.querySelector('#flows tbody')
-      const limit = tbody ? parseInt(tbody.dataset.limit, 10) : 0
-      if (limit) while (tbody.rows.length > limit) tbody.lastElementChild.remove()
+      const tbody = document.querySelector<HTMLTableSectionElement>('#flows tbody')
+      const limit = tbody ? parseInt(tbody.dataset.limit ?? '', 10) : 0
+      if (tbody && limit) while (tbody.rows.length > limit) tbody.lastElementChild?.remove()
       this.refreshFlow()
     },
-    advancedCount(form) {
-      return cfg.advancedFields.filter((name) => form.elements[name].value.trim() !== '').length
+    advancedCount(form: HTMLFormElement): number {
+      return cfg.advancedFields.filter((name) => (form.elements.namedItem(name) as HTMLInputElement).value.trim() !== '').length
     },
-    sync(form) {
+    sync(form: HTMLFormElement): void {
       this.adv = this.advancedCount(form)
-      const verdict = form.querySelector('input[name=verdict]:checked')
-      this.dirty = this.adv > 0 || form.elements.q.value.trim() !== '' || (verdict && verdict.value !== 'all')
+      const verdict = form.querySelector<HTMLInputElement>('input[name=verdict]:checked')
+      const q = form.elements.namedItem('q') as HTMLInputElement
+      this.dirty = this.adv > 0 || q.value.trim() !== '' || (verdict !== null && verdict.value !== 'all')
     },
-    clearFilters(form) {
-      form.querySelectorAll('input[type=search], input[type=text], select[name=persona]').forEach((input) => { input.value = '' })
-      form.querySelector('input[name=verdict][value=all]').checked = true
+    clearFilters(form: HTMLFormElement): void {
+      form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[type=search], input[type=text], select[name=persona]').forEach((input) => { input.value = '' })
+      const all = form.querySelector<HTMLInputElement>('input[name=verdict][value=all]')
+      if (all) all.checked = true
       this.adv = 0
       this.dirty = false
       form.dispatchEvent(new Event('change', { bubbles: true }))
     },
-    limits() {
+    limits(): [number, number] {
       const total = this.$refs.split ? this.$refs.split.clientWidth : 0
       return [cfg.minGraphPanel, Math.max(cfg.minGraphPanel, total - cfg.dividerWidth - cfg.minTableWidth)]
     },
     // `want` is what the board member chose (and the browser remembers); `w` is what fits now.
     // Fitting alone (`persist` false: start, window resize) never changes the remembered width.
-    setW(value, persist = true) {
+    setW(value: number, persist = true): void {
       const [lo, hi] = this.limits()
       this.w = Math.min(hi, Math.max(lo, Math.round(persist ? value : this.want)))
       if (persist) {
@@ -93,18 +112,18 @@ document.addEventListener('alpine:init', () => {
         try { localStorage.setItem(cfg.widthKey, String(this.want)) } catch (e) {}
       }
     },
-    dragStart(e) {
-      e.currentTarget.setPointerCapture(e.pointerId)
+    dragStart(e: PointerEvent): void {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
       this.dragging = true
       this.startX = e.clientX
       this.startW = this.w
     },
-    dragMove(e) { if (this.dragging) this.setW(this.startW + e.clientX - this.startX) },
-    dragEnd() { this.dragging = false },
+    dragMove(e: PointerEvent): void { if (this.dragging) this.setW(this.startW + e.clientX - this.startX) },
+    dragEnd(): void { this.dragging = false },
     // Drag the graph background to scroll it; node cards keep their text selectable.
-    graphDragStart(e) {
-      const box = e.currentTarget
-      if (e.button !== 0 || e.target.closest('[data-node]')) return
+    graphDragStart(e: PointerEvent): void {
+      const box = e.currentTarget as HTMLElement
+      if (e.button !== 0 || (e.target as HTMLElement).closest('[data-node]')) return
       // A press on the scrollbar scrolls natively.
       const rect = box.getBoundingClientRect()
       if (e.clientX - rect.left - box.clientLeft >= box.clientWidth || e.clientY - rect.top - box.clientTop >= box.clientHeight) return
@@ -113,39 +132,42 @@ document.addEventListener('alpine:init', () => {
       this.gx = e.clientX + box.scrollLeft
       this.gy = e.clientY + box.scrollTop
     },
-    graphDragMove(e) {
+    graphDragMove(e: PointerEvent): void {
       if (!this.graphDragging) return
-      e.currentTarget.scrollLeft = this.gx - e.clientX
-      e.currentTarget.scrollTop = this.gy - e.clientY
+      const box = e.currentTarget as HTMLElement
+      box.scrollLeft = this.gx - e.clientX
+      box.scrollTop = this.gy - e.clientY
     },
-    graphDragEnd() { this.graphDragging = false },
-    divKey(e) {
+    graphDragEnd(): void { this.graphDragging = false },
+    divKey(e: KeyboardEvent): void {
       const step = e.shiftKey ? 96 : 32
       const [lo, hi] = this.limits()
-      const to = { ArrowLeft: this.w - step, ArrowRight: this.w + step, Home: lo, End: hi }[e.key]
+      const targets: Record<string, number | undefined> = { ArrowLeft: this.w - step, ArrowRight: this.w + step, Home: lo, End: hi }
+      const to = targets[e.key]
       if (to === undefined) return
       e.preventDefault()
       this.setW(to)
     },
-    openDetails(button) {
+    openDetails(button: HTMLElement): void {
       const row = button.closest('tr')
+      if (!row) return
       this.flowId = row.id
       this.flowRow = row
-      this.flow = JSON.parse(row.dataset.flow)
+      this.flow = JSON.parse(row.dataset.flow ?? 'null')
       this.$nextTick(() => this.$refs.closeButton.focus())
     },
-    rowOf() {
+    rowOf(): HTMLElement | null {
       if (this.flowId) return document.getElementById(this.flowId)
       return this.flowRow && this.flowRow.isConnected ? this.flowRow : null
     },
-    refreshFlow() {
+    refreshFlow(): void {
       if (!this.flow) return
       const row = this.rowOf()
       if (!row) { this.flow = null; return }
       this.flowRow = row
-      this.flow = JSON.parse(row.dataset.flow)
+      this.flow = JSON.parse(row.dataset.flow ?? 'null')
     },
-    close() {
+    close(): void {
       const row = this.rowOf()
       this.flow = null
       this.flowId = ''

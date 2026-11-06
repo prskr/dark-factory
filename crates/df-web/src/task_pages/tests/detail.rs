@@ -304,7 +304,7 @@ async fn details_can_be_collapsed_to_a_strip_that_is_remembered() {
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
 
     // The state is read and written in try/catch, defaults to expanded and applies to the workspace.
-    let script = crate::assets::script_source("workspace.js");
+    let script = crate::assets::script_source("workspace.ts");
     assert!(
         script.contains(
             "try { this.collapsed = localStorage.getItem('df.details.collapsed') === '1' }"
@@ -339,11 +339,16 @@ async fn details_can_be_collapsed_to_a_strip_that_is_remembered() {
             "{link}"
         );
     }
+}
+
+#[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
+fn the_stylesheet_collapses_the_details_column() {
     let css = crate::app_css().unwrap();
-    assert!(
-        css.contains("data-collapsed=true"),
-        "the stylesheet collapses the column"
-    );
+    assert!(css.contains("data-collapsed=true"));
 }
 
 #[tokio::test]
@@ -368,9 +373,11 @@ async fn the_details_sheet_closes_with_escape_the_backdrop_and_the_button() {
         "{html}"
     );
     // A cancelled pointer (no click follows) resets `dragged`; only pointerup sets it.
-    let script = crate::assets::script_source("workspace.js");
+    let script = crate::assets::script_source("workspace.ts");
     let method = |name: &str| {
-        let start = script.find(&format!("{name}(e) {{")).expect(name);
+        let start = script
+            .find(&format!("{name}(e: PointerEvent): void {{"))
+            .expect(name);
         let rest = &script[start..];
         &rest[..rest.find("\n    },").unwrap_or(rest.len())]
     };
@@ -475,6 +482,10 @@ async fn links_show_when_the_task_has_them_and_nothing_when_it_has_none() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn the_collapsed_strip_shows_status_and_links_without_any_heading() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
@@ -516,6 +527,10 @@ fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
 }
 
 #[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 fn tool_rows_share_one_line_between_consecutive_calls() {
     let css = crate::app_css().unwrap();
     let rule = |selector: &str| css_rule(&css, selector);
@@ -529,6 +544,10 @@ fn tool_rows_share_one_line_between_consecutive_calls() {
 }
 
 #[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 fn the_runs_fill_the_details_column_and_keep_room_for_two_cards() {
     let css = crate::app_css().unwrap();
     let rule = |selector: &str| css_rule(&css, selector);
@@ -667,6 +686,10 @@ async fn a_run_without_usage_says_which_model_was_meant_and_that_nothing_was_rec
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn the_description_header_matches_the_other_sections_and_runs_has_no_bottom_border() {
     let app = TestApp::new().await;
     let cookie = app.login().await;

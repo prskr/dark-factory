@@ -82,7 +82,7 @@ pub fn dialog_close() -> Markup {
 }
 
 /// The details of a workspace. It expects the parent to hold the workspace Alpine state
-/// (`assets/workspace.js`): `details` (open or not), `collapsed` with
+/// (`scripts/workspace.ts`): `details` (open or not), `collapsed` with
 /// `setCollapsed(value)` and, for the phone sheet, `sheet`, `dragging` and the `sheetToggle` /
 /// `sheetDrag*` methods; from 1280 px it is a permanent column that
 /// collapses to a strip. The live region inside `body` renders the strip (`ws-strip`) and marks
@@ -154,6 +154,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn the_phone_sheet_has_a_resize_handle_for_keyboard_and_pointer() {
         let html = details_panel("Details", html! { "x" }).into_string();
         let start = html.find("aria-label=\"Resize details\"").unwrap();

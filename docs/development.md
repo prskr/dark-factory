@@ -222,8 +222,8 @@ The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` 
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `tailwindcss` and `yq` come from Bazel, so the
-lefthook hooks use the same versions on every machine. The exception is OpenSpec: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml` (needs Node.js and, on first use, network access); a Renovate regex manager updates both copies in one PR.
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `swc`, `tailwindcss` and `yq` come from Bazel, so the
+lefthook hooks use the same versions on every machine. The exceptions run through `npx` and need Node.js and, on first use, network access: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml`, and the `web-typecheck` hook runs `tsc` from `typescript@<version>`, pinned in `lefthook.yml` and `.github/workflows/ci.yaml`. A Renovate regex manager updates both copies of each version in one PR.
 
 | Task | Command |
 |------|---------|
@@ -236,6 +236,25 @@ lefthook hooks use the same versions on every machine. The exception is OpenSpec
 | Install git hooks without direnv | `LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install` (git hooks use `LEFTHOOK_BIN`) |
 
 `multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits.
+
+## Web assets (TypeScript and Tailwind)
+
+`crates/df-web` serves scripts compiled from `crates/df-web/scripts/*.ts` (one minified `<name>.js` each, by `swc` with `crates/df-web/.swcrc`) and a stylesheet compiled from `crates/df-web/styles/input.css` (`tailwindcss`). Neither output is checked in.
+
+| Build | How the assets are built |
+|-------|--------------------------|
+| Bazel (CI, images, releases) | The genrules `:web_scripts` and `:app_css` of `//crates/df-web` use the pinned tools. The build script gets the outputs through `WEB_SCRIPTS` and `TAILWIND_APP_CSS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
+| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. |
+
+`build.rs` sets the cfgs `df_web_scripts` and `df_web_styles` for the kinds it compiled. Tests that read compiled output are ignored without the matching cfg, so `cargo test -p df-web` without the tools passes and lists them as `ignored`. Bazel always compiles both, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing.
+
+Type check (strict `tsc`, no emit; Node.js needed). Use the version pinned in the `web-typecheck` command of `lefthook.yml`:
+
+```bash
+npx --yes -p typescript@<version> tsc -p crates/df-web
+```
+
+The `web-typecheck` pre-commit hook and the CI step run the same command. The Alpine API the components use is declared in `crates/df-web/scripts/types/alpine.d.ts`.
 
 ## Dependency freshness
 
