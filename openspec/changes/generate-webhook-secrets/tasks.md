@@ -2,7 +2,7 @@
 
 ## 1. Secret store get-or-create (design D1, D5)
 
-- [ ] 1.1 Add `SecretKeyRef` and `SecretStore::get_or_create` to `df-core` (`seams.rs`), plus `CredentialRef::key_ref()`; implement it for `FakeSecretStore` (records created Secrets), `UnconfiguredSecretStore` and the gateway test store. Write the fake's tests first (missing → created and returned, existing → returned unchanged); verify `cargo test -p df-core` passes
+- [ ] 1.1 Add `SecretKeyRef` and `SecretStore::get_or_create` to `df-core` (`seams.rs`), change `SecretStore::get` to take `&SecretKeyRef`, add `CredentialRef::key_ref()` and switch the existing callers (`df-plugins/src/forge.rs`, `df-gateway/src/control/snapshot.rs` and `inference_routes.rs`, and any other `SecretStore::get` call the compiler reports) to it; implement it for `FakeSecretStore` (records created Secrets), `UnconfiguredSecretStore` and the gateway test store. Write the fake's tests first (missing → created and returned, existing → returned unchanged); verify `cargo test -p df-core` passes
 - [ ] 1.2 Write failing `K8sSecretStore` tests against the mocked API in `crates/df-k8s/src/secrets.rs` tests: Secret missing → create with one key, 64 hex characters, the given labels, no owner reference; exists → no create; create answers `409` → read again; exists without the key → `NotFound` and no write; `403` → `Backend` error. Then implement with `ring::rand::SystemRandom` and `hex` (add `ring` to `df-k8s` per skill `rust`); verify `cargo test -p df-k8s secrets` passes
 
 ## 2. Instance config and startup (design D2, D3, D5)
@@ -21,7 +21,7 @@
 
 ## 4. Operator docs and ADR (design D6)
 
-- [ ] 4.1 Rewrite "Set the webhook secret" in `docs/content/integrations/forges/webhooks.md`: default generated Secret and how to read it (`kubectl get secret <fullname>-webhook-<plugin> -o jsonpath='{.data.secret}' | base64 -d`), `existingSecret` alternative, rotation (delete or change the Secret, restart the control plane, update the forge; no hot reload), the Secret surviving `helm uninstall` with the label-selector cleanup command, an upgrade note for the `name` → `existingSecret` rename, and the `404` row of the troubleshooting table; check `docs/content/operations/troubleshooting.md` and `docs/content/integrations/forges/_index.md` for references to the old setup; verify with `just docs-build`
+- [ ] 4.1 Rewrite "Set the webhook secret" in `docs/content/integrations/forges/webhooks.md`: default generated Secret and how to read it (`kubectl get secret <fullname>-webhook-<plugin> -o jsonpath='{.data.secret}' | base64 -d`), `existingSecret` alternative, rotation (delete or change the Secret, restart the control plane, update the forge; no hot reload; deliveries during the rollout can get `401`, redeliver them from the forge afterwards), rollback after switching to a generated Secret (re-enter the old value in the forge or reference the generated Secret from the old chart), the Secret surviving `helm uninstall` with the label-selector cleanup command, an upgrade note for the `name` → `existingSecret` rename, and the `404` row of the troubleshooting table; check `docs/content/operations/troubleshooting.md` and `docs/content/integrations/forges/_index.md` for references to the old setup; verify with `just docs-build`
 - [ ] 4.2 Write `docs/adr/0056-control-plane-generates-missing-instance-secrets.md` (template in `docs/adr/template.md`) and add its row to `docs/adr/README.md`; verify the link resolves
 
 ## 5. Integration checks

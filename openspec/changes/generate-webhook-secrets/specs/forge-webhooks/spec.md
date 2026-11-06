@@ -94,6 +94,10 @@ The control plane SHALL read webhook secrets only at startup. A changed or delet
 - **WHEN** the operator deletes `df-webhook-forgejo` and restarts the control plane
 - **THEN** the control plane generates a new value, and requests signed with the old value get `401`
 
+#### Scenario: Deliveries during a rotation
+- **WHEN** a rotation's rollout is in progress and old and restarted replicas hold different values
+- **THEN** a delivery signed with the value a replica does not hold gets `401` from that replica, and the forge records it as failed so the operator can redeliver it once the rollout and the forge update are done
+
 #### Scenario: Secret changed while running
 - **WHEN** the operator changes the value of a referenced Secret without restarting
 - **THEN** the control plane keeps checking signatures against the value it read at startup
