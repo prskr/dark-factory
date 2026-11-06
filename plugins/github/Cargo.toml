@@ -42,6 +42,7 @@ struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
 [dependencies]
+forge-common.workspace = true
 hex.workspace = true
 percent-encoding.workspace = true
 serde.workspace = true

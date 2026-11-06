@@ -181,10 +181,14 @@ async fn webhook_review_from_a_member_queues_a_message_for_the_task() {
     }));
 }
 
+/// The forge answers `outside` for an author it would not tell the role of (a refused permission
+/// lookup in the plugin): under `members` the event is dropped without an error.
 #[tokio::test]
-async fn webhook_review_from_an_outside_author_needs_wake_policy_anyone() {
+async fn webhook_review_from_an_outside_author_is_dropped_under_members_and_accepted_under_anyone()
+{
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool).await;
+    set_wake(&env, "members").await;
     let applier = applier(&env);
 
     applier.apply(&[review("mallory")]).await.unwrap();

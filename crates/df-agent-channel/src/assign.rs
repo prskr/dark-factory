@@ -580,6 +580,22 @@ mod tests {
             "{}",
             read.description
         );
+        for term in [
+            "newest first",
+            "next_since",
+            "pass it as since",
+            "whose id and updated_at you already handled",
+            "review comments you have not seen",
+            "truncated: true",
+            "will not return them",
+            "role the forge would not tell",
+        ] {
+            assert!(
+                read.description.contains(term),
+                "{term}: {}",
+                read.description
+            );
+        }
         assert!(read.annotations.as_ref().is_some_and(|a| a.read_only));
         let comment = tools
             .iter()

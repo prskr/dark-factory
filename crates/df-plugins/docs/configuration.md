@@ -29,7 +29,7 @@ plugins:
 | Key | Required | Default | Effect |
 |---|---|---|---|
 | `plugins.<name>.path` | yes | none | Component file. |
-| `plugins.<name>.callTimeoutSeconds` | no | `30` | Upper bound of one plugin call (retries excluded). Guest code is stopped by epoch interruption (50 ms granularity), network waits by a timeout. A timed-out call fails with `internal`; the instance is discarded. |
+| `plugins.<name>.callTimeoutSeconds` | no | `30` | Upper bound of one plugin call (retries excluded); at least `1` and at most `300`, any other value fails startup naming the key. `read_pull_request_feedback` assumes a call is shorter than its 5-minute `next_since` overlap, see [Review feedback](_index.md#review-feedback). Guest code is stopped by epoch interruption (50 ms granularity), network waits by a timeout. A timed-out call fails with `internal`; the instance is discarded. |
 | `plugins.<name>.memoryMib` | no | `64` | Linear memory limit per instance. Exceeding it fails the call with `internal`. |
 | `plugins.<name>.hosts` | no | `[]` | Repository hosts this plugin serves. Each entry is a string `host[:port]` or a map `{host, apiUrl}`; the map rejects unknown keys. Hosts are DNS names, IPv4 or bracketed IPv6 addresses; they are lowercased, a trailing dot and port `443` are dropped, any other port stays part of the host. A host may be claimed by one entry only. An entry without `hosts` (or with `[]`) is the default plugin; at most one is allowed. |
 | `plugins.<name>.hosts[].apiUrl` | no | `https://<host>` | API base URL for this host. Must start with `https://` and have no userinfo, query or fragment; host lowercased, port `443` and a trailing `/` dropped, the path is kept (`https://ghe.example.org/api/v3`). Becomes the plugin's `base-url` and the only authority its requests may reach. Only valid in the `{host, apiUrl}` form, which rejects unknown keys. |
@@ -103,8 +103,9 @@ Each successful load is logged at `info` ("plugin loaded") with the fields `plug
 read, i.e. import validation, compilation and pre-instantiation; the shared engine is created once
 before). Use it to see what the plugin costs at startup.
 
-Plugin stderr is logged at `info` with the fields `plugin` (the name under `plugins`) and `line`;
-lines longer than 4 KiB are split.
+Plugin stderr is logged as event "plugin stderr" with the fields `plugin` (the name under `plugins`)
+and `line`, at `warn` for a line that starts with `warning: ` (what the forge plugins write for
+warnings) and at `info` otherwise; lines longer than 4 KiB are split.
 
 Per project (database): `repo_url` (`https://<host>/<owner>/<name>[.git]`, without userinfo, query
 or fragment) selects the route and gives the repository; `base-url` comes from the route (see
@@ -228,7 +229,7 @@ private repositories on GitHub Free.
    native drafts (creating a draft fails with `invalid-input` naming `draft-mode: title-prefix`),
    or for a `WIP:` marker in the title consistent with Forgejo. `auto` creates native drafts where
    possible and falls back to the title prefix elsewhere, at the cost of one failed request per
-   draft and a warning (event "plugin stderr", `plugin=github`, level `info`).
+   draft and a warning (event "plugin stderr", `plugin=github`, level `warn`).
 2. Set it in the entry's `settings` (chart: `plugins.github.settings`):
 
    ```yaml
@@ -275,15 +276,60 @@ private repositories on GitHub Free.
    separate entry, the web UI shows these projects with the generic Git icon and the hint names
    that entry ("Served by the github-enterprise integration; …").
 
-## Forgejo token scopes
+## Bot account access
+
+The forge credential of a project belongs to a bot account. What the factory can do depends on the
+account's access to the repository, not only on the token scopes. Three levels matter:
+
+**Forgejo**
+
+| Access of the account | PR create and update | Comments | `list-feedback` | Author roles | Webhook policy `members` |
+| --- | --- | --- | --- | --- | --- |
+| Read | no (`unauthorized`) | no (`unauthorized`) | works; every human is `outside` | every human is `outside` | never wakes |
+| Write | yes | yes | works; every human is `outside` | every human is `outside` | never wakes |
+| Repository admin | yes | yes | works | `member` for write, admin and owner permission, else `outside` | works |
+
+**GitHub**
+
+| Access of the account | PR create and update | Comments | `list-feedback` | Author roles | Webhook policy `members` |
+| --- | --- | --- | --- | --- | --- |
+| Read | no (`unauthorized`) | no (`unauthorized`) | works; owners, members and collaborators are `outside` | those are `outside` | never wakes |
+| Write (or admin) | yes | yes | works | `member` for write and admin permission, else `outside` | works |
+
+The role of an author comes from the repository permission lookup
+(`GET .../collaborators/{login}/permission`). Forgejo answers it with 403 unless the account is a
+site or repository admin; GitHub needs push access. When the forge refuses the lookup (403), the plugin
+does not fail the call. The author is `outside`, the agent treats the content as untrusted, and a
+project with the wake policy `members` does not wake the task for that author. The plugin writes one
+warning per author and call to stderr, logged at `warn` as event "plugin stderr" with the field
+`plugin` and the text below in `line`:
+
+| Forge | Warning |
+| --- | --- |
+| Forgejo | `warning: cannot read the repository permission of <login>: the bot account needs repository admin; treating <login> as outside` |
+| GitHub | `warning: cannot read the repository permission of <login>: treating <login> as outside` |
+
+So with a Forgejo bot account that has write access only, the review loop works, but every human
+reviewer is `outside`. Make the bot account repository admin to get correct roles.
+
+`GET .../collaborators/{login}` (answers 204 or 404) is not used as a fallback: it needs only read
+access, but Forgejo answers 404 for the repository owner and for members of the owning
+organisation, so they would come out `outside` as well, at the cost of one more request. The
+backlog has an item for a lookup that works without repository admin.
+
+### Forgejo token scopes
 
 The bot account's token needs `write:repository` (create and update pull requests, read branches),
 `write:issue` (comments on issues and pull requests) and `read:user` (`list-feedback` reads the
 token's own account to label its comments `bot`; Forgejo 15 answers 403 without this scope).
 Read-only use needs `read:repository`, `read:issue` and `read:user`.
 
-The account needs write access to the repository for pull requests and comments. The review loop
-(`list-feedback`) needs repository admin: it reads each author's permission, which Forgejo only
-answers for site or repository admins. With write access only, `list-feedback` fails with
-`unauthorized`.
+### Refused requests
 
+A forge answer 401 or 403 becomes the error `unauthorized`. Only a 403 on the role lookup is
+turned into `outside` (see above); a 401 there is an invalid credential and fails the call. Its message starts with the failed
+request (`GET /api/v1/repos/o/r/pulls/7/reviews: token does not have required scope`) followed by
+the forge's own message. The agent sees it as a tool error ("the forge refused the request (...)")
+and is told to ask a human to check the bot account's access and the project's forge credential.
+A missing scope and a missing repository permission look alike; the request and the forge's message
+tell which endpoint failed.

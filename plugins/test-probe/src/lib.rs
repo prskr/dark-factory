@@ -173,6 +173,7 @@ impl PullRequestsGuest for Probe {
                 body: "please change".to_string(),
                 url: url("r1"),
                 submitted_at: at.clone(),
+                updated_at: "2026-11-02T11:00:00Z".to_string(),
             }],
             threads: vec![ReviewThread {
                 id: "t1".to_string(),

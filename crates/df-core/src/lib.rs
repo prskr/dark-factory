@@ -21,8 +21,8 @@ pub mod webhooks;
 
 pub use config::{
     AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
-    InstanceConfig, NetworkConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
-    SandboxSectionConfig,
+    InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig, PluginConfig,
+    SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,

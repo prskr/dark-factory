@@ -76,6 +76,35 @@ async fn draft_pull_request_carries_the_marker_and_the_host_injected_token() -> 
     Ok(())
 }
 
+/// A request body over the 4096 bytes of one `blocking-write-and-flush` reaches the server whole.
+#[tokio::test]
+async fn pull_request_body_of_64_kib_is_sent_whole() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    let body = "x".repeat(64 * 1024);
+    Mock::given(method("POST"))
+        .and(path(PULLS))
+        .and(body_json(json!({
+            "title": "DF-1: Fix login", "body": body,
+            "head": "factory/task/DF-1", "base": "main"
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(pr("DF-1: Fix login")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let created = client(&server)?
+        .create_pull_request(
+            &ProjectId::new(),
+            NewPullRequest {
+                body,
+                ..new_pr(false)
+            },
+        )
+        .await?;
+    assert_eq!(created.id.number, 7);
+    Ok(())
+}
+
 #[tokio::test]
 async fn duplicate_pull_request_is_a_conflict() -> anyhow::Result<()> {
     let server = MockServer::start().await;

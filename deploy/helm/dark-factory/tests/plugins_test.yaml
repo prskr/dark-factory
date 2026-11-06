@@ -144,6 +144,25 @@ tests:
           path: data["config.yaml"]
           pattern: '  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"'
 
+  - it: rejects a plugin call timeout above 300 seconds
+    # the values schema rejects the value before any template renders
+    template: configmap.yaml
+    set:
+      plugins.forgejo.callTimeoutSeconds: 301
+    asserts:
+      - failedTemplate:
+          errorPattern: "callTimeoutSeconds"
+
+  - it: accepts a plugin call timeout of 300 seconds
+    template: configmap.yaml
+    documentIndex: 0
+    set:
+      plugins.forgejo.callTimeoutSeconds: 300
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'callTimeoutSeconds: 300'
+
   - it: rejects an unknown plugin auth scheme
     # the values schema rejects the value before any template renders
     template: configmap.yaml

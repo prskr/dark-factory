@@ -5,13 +5,15 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
 
 use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
-use crate::draft;
 use crate::error;
 use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
 use crate::exports::darkfactory::integrations::pull_requests::{
     NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
 use crate::settings::Settings;
+use forge_common::draft;
+use forge_common::http;
+use forge_common::log::Log;
 
 /// `User-Agent` of every request; GitHub rejects requests without one.
 const USER_AGENT: &str = concat!("dark-factory-github-plugin/", env!("CARGO_PKG_VERSION"));
@@ -28,12 +30,7 @@ const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
 mod feedback;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    Get,
-    Post,
-    Patch,
-}
+pub use forge_common::http::Method;
 
 /// A request to GitHub's API host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,9 +66,19 @@ pub trait Clock {
     fn now(&self) -> u64;
 }
 
-/// Warnings for the operator.
-pub trait Log {
-    fn warn(&self, message: &str);
+/// A failed request: the error and the HTTP status of the response, if there was one.
+struct Failure {
+    status: Option<u16>,
+    error: Error,
+}
+
+impl From<Error> for Failure {
+    fn from(error: Error) -> Self {
+        Self {
+            status: None,
+            error,
+        }
+    }
 }
 
 /// GitHub client of one plugin instance.
@@ -287,11 +294,16 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
         variables: serde_json::Value,
     ) -> Result<Response, Error> {
         let body = json!({ "query": document, "variables": variables });
-        let response = self.send(Method::Post, self.settings.graphql_url.clone(), Some(body))?;
+        let url = self.settings.graphql_url.clone();
+        let request = http::request_line(Method::Post, &url);
+        let response = self.send(Method::Post, url, Some(body))?;
         if !(200..300).contains(&response.status) {
-            return Err(error::from_response(&response, self.clock.now()));
+            return Err(error::with_request(
+                error::from_response(&response, self.clock.now()),
+                &request,
+            ));
         }
-        error::from_graphql(&response.body)?;
+        error::from_graphql(&response.body).map_err(|e| error::with_request(e, &request))?;
         Ok(response)
     }
 
@@ -302,13 +314,31 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
         path: &str,
         body: Option<serde_json::Value>,
     ) -> Result<R, Error> {
+        self.rest_with_status(method, path, body)
+            .map_err(|failure| failure.error)
+    }
+
+    /// Like [`Self::rest`]; a failure also carries the HTTP status of the response, if any.
+    fn rest_with_status<R: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<R, Failure> {
         let url = format!("{}{path}", self.settings.rest_url);
+        let request = http::request_line(method, &url);
         let response = self.send(method, url, body)?;
         if !(200..300).contains(&response.status) {
-            return Err(error::from_response(&response, self.clock.now()));
+            return Err(Failure {
+                status: Some(response.status),
+                error: error::with_request(
+                    error::from_response(&response, self.clock.now()),
+                    &request,
+                ),
+            });
         }
-        serde_json::from_slice(&response.body)
-            .map_err(|e| Error::Internal(format!("unexpected GitHub response: {e}")))
+        Ok(serde_json::from_slice(&response.body)
+            .map_err(|e| Error::Internal(format!("unexpected GitHub response: {e}")))?)
     }
 
     fn send(

@@ -176,7 +176,10 @@ pub fn repository_matches(project_repo_url: &str, event_repo_url: &str) -> bool 
 pub fn render_message(event: &WebhookEvent) -> String {
     let mut message = format!("Forge event on your task: {}\n", event_line(event));
     if event.feedback_author().is_some() {
-        message.push_str("Read reviews and comments with read_pull_request_feedback.\n");
+        message.push_str(
+            "Read reviews and comments with read_pull_request_feedback. \
+             Pass the next_since of your last read as since.\n",
+        );
     }
     message
 }
@@ -381,7 +384,8 @@ mod tests {
         assert_eq!(
             render_message(&review),
             "Forge event on your task: alice submitted a review on PR #12: changes requested.\n\
-             Read reviews and comments with read_pull_request_feedback.\n"
+             Read reviews and comments with read_pull_request_feedback. \
+             Pass the next_since of your last read as since.\n"
         );
         let comment = WebhookEvent::CommentCreated {
             number: 3,
@@ -392,7 +396,8 @@ mod tests {
         assert_eq!(
             render_message(&comment),
             "Forge event on your task: carol commented on issue #3.\n\
-             Read reviews and comments with read_pull_request_feedback.\n"
+             Read reviews and comments with read_pull_request_feedback. \
+             Pass the next_since of your last read as since.\n"
         );
     }
 

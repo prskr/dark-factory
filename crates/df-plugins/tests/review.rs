@@ -74,6 +74,7 @@ async fn list_feedback_round_trips_and_retries_a_rate_limit() -> anyhow::Result<
             body: "please change".into(),
             url: "https://forge.test/o/r/pulls/7#r1".into(),
             submitted_at: at.clone(),
+            updated_at: "2026-11-02T11:00:00Z".into(),
         }],
         threads: vec![ReviewThread {
             id: "t1".into(),

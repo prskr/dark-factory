@@ -106,7 +106,7 @@ Every key in `values.yaml` is documented below:
 | `plugins.forgejo.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `plugins.forgejo.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
 | `plugins.forgejo.path` | `string` | `""` | Component file in the control plane image. Required without an image (the values schema rejects an entry naming neither), ignored with one. |
-| `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
+| `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config), at most `300`: the feedback tool's `next_since` overlap of 5 minutes assumes a shorter call. The values schema rejects a larger value. |
 | `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
 | `plugins.forgejo.webhookSecret` | `object` | `null` | Optional. `{name, key}` of a `Secret` in the release namespace holding the shared secret the forge signs webhooks with. The key is mounted read-only at `/var/run/dark-factory/webhooks/<name>/secret` and the instance config sets `plugins.<name>.webhookSecretFile` to it. Unset: `POST /webhooks/<name>` answers `404`. See [Forge webhooks](#forge-webhooks). |
@@ -114,7 +114,7 @@ Every key in `values.yaml` is documented below:
 | `plugins.github.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `plugins.github.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
 | `plugins.github.path` | `string` | `""` | Component file in the control plane image. Required without an image, ignored with one. |
-| `plugins.github.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config). |
+| `plugins.github.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config), at most `300`: the feedback tool's `next_since` overlap of 5 minutes assumes a shorter call. The values schema rejects a larger value. |
 | `plugins.github.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.github.authScheme` | `string` | `"bearer"` | GitHub expects `Authorization: Bearer …`. |
 | `plugins.github.hosts` | `list` | `[{host: github.com, apiUrl: https://api.github.com}]` | Routes of the GitHub plugin; add GitHub Enterprise Server hosts here. |

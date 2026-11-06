@@ -31,12 +31,11 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
-- Origin of TD-80: review of PR #44 (`iter2-github-plugin`) by Peter, 2026-10-30. The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-81: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
-- Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
+- Origin of TD-93 to TD-94: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03). TD-94 existed before that change.
 - Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
@@ -75,7 +74,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-34 | low   | `df-core` config | Defaults for `runtime_image` and `issuer_name` don't match what the chart renders |
 | TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image ([sandbox-lifecycle-resilience]) |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
-| TD-40 | low    | `df-plugins` host | Import allow-list duplicates WIT world `plugin-base` by hand ([#125]) |
 | TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP ([sandbox-lifecycle-resilience]) |
 | TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros ([#123]) |
 | TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested ([#124]) |
@@ -104,7 +102,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 | TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
-| TD-80 | low    | `plugins/github`, `plugins/forgejo` | Forge plugins copy transport and draft helpers ([#125]) |
 | TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked ([#123]) |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
@@ -116,8 +113,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
 | TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
 | TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
-| TD-95 | low   | `df-agent-channel` feedback | Reviews are ranked for the size budget by `submitted_at` only ([#125]) |
-| TD-96 | medium | `plugins/forgejo` list-feedback | One sequential request per review can exceed the plugin call timeout ([#125]) |
 | TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
@@ -407,16 +402,6 @@ Tracked in [sandbox-lifecycle-resilience].
 The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins/forgejo.wasm`. `wasm-tools validate` ran once by hand (2026-10-22: 338 KB, valid). `wasm-tools` is not in the Bazel multitool. A broken opt transition or toolchain change only shows when `serve` loads the component.
 
 **Fix:** Add `wasm-tools` to multitool and run `wasm-tools validate` (optionally check the exports) in the image test.
-
-### TD-40 (R2-S2). Import allow-list duplicates `plugin-base`
-
-Tracked in [#125].
-
-`crates/df-plugins/src/host.rs` (`ALLOWED_IMPORTS`), `contract/wit/integrations/integrations.wit` (world `plugin-base`)
-
-The host lists the allowed interfaces by hand. When `plugin-base` gains an import and the list is not updated, components built against the contract are refused at load.
-
-**Fix:** A test that resolves world `plugin-base` (for example with `wit-parser`, or a component built against it) and asserts that every import is in `ALLOWED_IMPORTS`.
 
 ### TD-41. ClusterIP reachability of cluster targets is untested
 
@@ -720,18 +705,6 @@ Startup logs a plugin without the `pull-requests` capability as "not a forge plu
 
 **Fix:** a startup test that loads that plugin next to Forgejo and asserts it is skipped with an error event.
 
-### TD-80 (S2, S3). Forge plugins copy transport and draft helpers
-
-Tracked in [#125].
-
-`plugins/github/src/draft.rs` (`DEFAULT_PREFIXES`, `parse_prefixes`, `split_title`, `apply_title` and their tests), `plugins/github/src/wasi_transport.rs` (`write_body`, `read_body`, `internal`, `transport`, `WRITE_CHUNK`)
-
-Both files duplicate `plugins/forgejo/src/draft.rs` and `plugins/forgejo/src/wasi_transport.rs`.
-
-**Matters when:** a fix in one plugin has to be repeated in the other, or a third plugin copies them again.
-
-**Fix:** a small shared crate such as `plugins/forge-common`. Each plugin keeps its own WIT bindings; the shared code works on plain types.
-
 ### TD-81 (S6). e2e database checks are not compile-time checked
 
 Tracked in [#123].
@@ -849,30 +822,6 @@ With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails
 
 **Fix:** iterate with `${pids[@]+"${pids[@]}"}` (or guard with `(( ${#pids[@]} ))`). Test: run the script with a failing first step under `/bin/bash` 3.2 and check that the cluster is gone.
 
-### TD-95. Reviews are ranked for the size budget by `submitted_at` only
-
-Tracked in [#125].
-
-`crates/df-agent-channel/src/tools/feedback.rs` (`fit_to_budget`), `contract/wit/integrations/integrations.wit` (`review`)
-
-`read_pull_request_feedback` drops the least recently active items when the result exceeds 48 KiB. Comments and threads are ranked by their newest `created_at`/`updated_at`, reviews only by `submitted_at`: the WIT `review` record and the core `Review` have no `updated_at`, although both plugins use it for `since`. An old review whose body was edited is dropped first.
-
-**Matters when:** a pull request's feedback exceeds the budget and a reviewer edits an old review body instead of commenting.
-
-**Fix:** add `updated-at` to the WIT `review` record, the core `Review` and both plugin conversions, and use it in `latest`. Test: an old review with a recent `updated_at` survives the budget while newer comments are dropped.
-
-### TD-96. Forgejo `list-feedback` sends one request per review, sequentially
-
-Tracked in [#125].
-
-`plugins/forgejo/src/api/feedback.rs` (`list_feedback`)
-
-The plugin reads every review's comments (`GET .../reviews/{id}/comments`) one after another and applies `since` afterwards. A pull request with many reviews can exceed the plugin call timeout (`plugins.<name>.callTimeoutSeconds`, default 30 s); the call fails with `plugin call timed out`, and every retry with the same `since` fails the same way.
-
-**Matters when:** long-lived pull requests with many review rounds on a slow Forgejo.
-
-**Fix:** skip the comment request for reviews that cannot hold anything newer than `since`. Careful: `reply` adds the reply to the review it answers, so an old review can get a new comment; a review's `updated_at` must cover that (check against Forgejo) before filtering on it. Otherwise cap the reviews read per call (newest first) and set `truncated`. Test: a listing with `since` sends no comment request for an untouched old review.
-
 Origin of TD-97 to TD-98: code review of `iter2-egress-deny-rules` (2026-11-03).
 
 ### TD-97 (O1). "Deny always" copies a wildcard request host into the deny rule
@@ -984,7 +933,7 @@ The test checks only the overflow classes and that `tabs.js` calls `scrollIntoVi
 
 **Matters when:** a third forge plugin lands, or a parsing bug is fixed in only one plugin.
 
-**Fix:** a small plugin-support crate (for example `plugins/forge-common`, see TD-80) that both plugins depend on.
+**Fix:** a small plugin-support crate (for example `plugins/forge-common`, created for the transport and draft helpers) that both plugins depend on.
 
 ### TD-107 (S5). `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs`
 

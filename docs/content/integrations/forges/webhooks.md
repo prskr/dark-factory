@@ -20,7 +20,9 @@ names, numbers and URLs, never review or comment text. The agent reads the feedb
 `read_pull_request_feedback`. Messages that arrive while the agent works wait for the end of its
 turn, so a burst of events wakes the task once. A task in `in_review` whose pull request is still
 open goes back to work and its pull request becomes a draft again; a closed pull request stays as
-it is. Tasks in `completed`, `cancelled` or `failed` are not woken.
+it is. Tasks in `completed`, `cancelled` or `failed` are not woken. The message for a review or a
+mention also tells the agent to pass the `next_since` of its last read as `since`, so it reads only
+what is new ([Review feedback](_index.md#review-feedback)).
 
 ```mermaid
 sequenceDiagram
@@ -146,6 +148,12 @@ and mentions wake the project's tasks:
 With *Members with write access*, the control plane asks the forge for the author's permission on
 each review or mention. Changes are written to the audit log.
 
+On Forgejo the permission lookup needs a bot account that is repository admin. When the forge
+refuses it, the author counts as not a member: the event is accepted but does not wake the task, and
+the log has the plugin's warning "cannot read the repository permission of ..." (event "plugin
+stderr"). Make the bot account repository admin, or choose *Anyone*
+([Bot account access](configuration.md#bot-account-access)).
+
 ## Troubleshooting
 
 The metric `df.webhook.requests` (Prometheus: `df_webhook_requests_total`) counts requests by
@@ -174,7 +182,7 @@ controlPlane:
 | `webhook event names no factory task` | The pull request's or CI run's branch is not `factory/task/<key>`. |
 | `webhook event matches no task` | No task of the project has this key or pull request, or no unfinished task is linked to the commented issue. |
 | `webhook event dropped` | The author is the bot account (`reason="bot"`), or a comment does not mention the bot account (`reason="no mention"`). |
-| `webhook author below the wake policy` | The wake setting is *Nobody*, or the author has no write access and the wake setting is *Members with write access*. |
+| `webhook author below the wake policy` | The wake setting is *Nobody*, or the author has no write access (or the forge refused the permission lookup, see above) and the wake setting is *Members with write access*. |
 | `webhook event of a finished task dropped` | The task is `completed`, `cancelled` or `failed`. |
 | `webhook signature not verified` | As outcome `unauthorized`. |
 

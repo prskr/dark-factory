@@ -14,12 +14,10 @@ wit_bindgen::generate!({
 });
 
 mod api;
-mod draft;
 mod error;
 #[cfg(test)]
 mod operations;
 mod settings;
-mod timestamp;
 mod wasi_transport;
 mod webhook;
 
@@ -31,9 +29,10 @@ use exports::darkfactory::integrations::pull_requests::{
     PullRequestUpdate,
 };
 use exports::darkfactory::integrations::webhooks::{Guest as WebhooksGuest, ParsedEvent};
-use wasi_transport::{StderrLog, WallClock, WasiTransport};
+use wasi_transport::{WallClock, WasiTransport};
 
-pub use api::{Clock, GitHub, Log, Method, Request, Response, Transport};
+pub use api::{Clock, GitHub, Method, Request, Response, Transport};
+pub use forge_common::log::{Log, StderrLog};
 pub use settings::{DraftMode, Settings};
 
 pub struct GitHubPlugin;

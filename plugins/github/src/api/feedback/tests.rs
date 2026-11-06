@@ -660,3 +660,68 @@ fn an_empty_thread_id_is_invalid_input_without_a_request() {
     assert!(matches!(err, Error::InvalidInput(_)), "{err:?}");
     assert!(fake.requests.borrow().is_empty());
 }
+
+#[test]
+fn review_carries_its_updated_at() -> anyhow::Result<()> {
+    let mut response = scenario();
+    response["data"]["repository"]["pullRequest"]["reviews"]["nodes"][0]["updatedAt"] =
+        json!("2026-11-03T09:00:00Z");
+    let (feedback, _) = list(response, None)?;
+    let updated: Vec<_> = feedback
+        .reviews
+        .iter()
+        .map(|r| r.updated_at.as_str())
+        .collect();
+    assert_eq!(
+        updated,
+        [
+            "2026-11-03T09:00:00Z",
+            "2026-11-01T12:00:00Z",
+            "2026-11-02T08:00:00Z"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_refused_permission_lookup_makes_the_author_outside_and_warns() -> anyhow::Result<()> {
+    let mut responses = vec![reply(200, scenario())];
+    responses.extend((0..8).map(|_| reply(403, json!({ "message": "Must have push access" }))));
+    let fake = fake(responses);
+    let feedback = github(&fake, &[]).list_feedback(&pr_ref(), None)?;
+
+    // alice (MEMBER) and carol (OWNER) need a lookup; both were refused.
+    let roles: Vec<_> = feedback
+        .reviews
+        .iter()
+        .map(|r| (r.author.login.as_str(), r.author.role))
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            ("alice", AuthorRole::Outside),
+            ("Factory-Bot", AuthorRole::Bot),
+            ("carol", AuthorRole::Outside),
+        ]
+    );
+    let warnings = fake.warnings.borrow();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[0].contains("alice") && warnings[1].contains("carol"));
+    Ok(())
+}
+
+#[test]
+fn an_invalid_credential_in_the_permission_lookup_fails_the_call_without_a_warning() {
+    let fake = fake(vec![
+        reply(200, scenario()),
+        reply(401, json!({ "message": "Bad credentials" })),
+    ]);
+    let err = github(&fake, &[])
+        .list_feedback(&pr_ref(), None)
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Unauthorized(m) if m.contains("Bad credentials")),
+        "{err:?}"
+    );
+    assert!(fake.warnings.borrow().is_empty());
+}

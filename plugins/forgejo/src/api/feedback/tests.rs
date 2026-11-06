@@ -6,8 +6,9 @@ use serde_json::{Value, json};
 use super::super::{Method, Request, Response};
 use super::*;
 use crate::darkfactory::integrations::types::RepoRef;
-use crate::draft;
 use crate::exports::darkfactory::integrations::pull_requests::{AuthorRole, ReviewVerdict};
+use forge_common::draft;
+use forge_common::log::Log;
 
 const PR: &str = "/api/v1/repos/o/r/pulls/7";
 const ISSUE_COMMENTS: &str = "/api/v1/repos/o/r/issues/7/comments";
@@ -16,18 +17,32 @@ const ISSUE_COMMENTS: &str = "/api/v1/repos/o/r/issues/7/comments";
 #[derive(Default)]
 struct Routes {
     responses: RefCell<HashMap<String, Response>>,
+    /// Answers for a path with any query string, unless a response is registered for the exact one.
+    any_query: RefCell<HashMap<String, Response>>,
     requests: RefCell<Vec<Request>>,
+    warnings: RefCell<Vec<String>>,
+}
+
+impl Log for &Routes {
+    fn warn(&self, message: &str) {
+        self.warnings.borrow_mut().push(message.to_string());
+    }
 }
 
 impl Transport for &Routes {
     fn send(&self, request: Request) -> Result<Response, Error> {
         let key = key(request.method, &request.path);
+        let path = request
+            .path
+            .split('?')
+            .next()
+            .unwrap_or_default()
+            .to_string();
         self.requests.borrow_mut().push(request);
-        Ok(self
-            .responses
-            .borrow()
-            .get(&key)
-            .cloned()
+        let exact = self.responses.borrow().get(&key).cloned();
+        let any_query = || self.any_query.borrow().get(&path).cloned();
+        Ok(exact
+            .or_else(any_query)
             .unwrap_or_else(|| response(404, &json!({ "message": format!("no route {key}") }))))
     }
 }
@@ -41,6 +56,14 @@ impl Routes {
 
     fn get(&self, path: &str, body: &Value) {
         self.on(Method::Get, path, 200, body);
+    }
+
+    /// `items` for `path` with any query: the endpoint ignores `page` and `limit`, as Forgejo's
+    /// issue comment listing does.
+    fn get_any_query(&self, path: &str, items: &Value) {
+        self.any_query
+            .borrow_mut()
+            .insert(path.to_string(), response(200, items));
     }
 
     /// `items` on page 1 and an empty page 2.
@@ -80,8 +103,12 @@ fn response(status: u16, body: &Value) -> Response {
     }
 }
 
-fn plugin(routes: &Routes) -> Forgejo<&Routes> {
-    Forgejo::new(routes, draft::parse_prefixes(draft::DEFAULT_PREFIXES))
+fn plugin(routes: &Routes) -> Forgejo<&Routes, &Routes> {
+    Forgejo::new(
+        routes,
+        routes,
+        draft::parse_prefixes(draft::DEFAULT_PREFIXES),
+    )
 }
 
 fn pr() -> PullRequestRef {
@@ -125,7 +152,7 @@ fn line_comment(id: u64, login: &str, path: &str, line: i64, created_at: &str) -
 fn scenario() -> Routes {
     let routes = Routes::default();
     routes.get("/api/v1/user", &user("factory"));
-    routes.pages(
+    routes.get_any_query(
         ISSUE_COMMENTS,
         &json!([{
             "id": 50, "user": user("bob"), "body": "looks odd", "html_url": "http://forge/c/50",
@@ -379,25 +406,111 @@ fn a_failed_permission_lookup_fails_the_call() {
     routes.on(
         Method::Get,
         &permission_path("alice"),
-        403,
-        &json!({ "message": "forbidden" }),
+        500,
+        &json!({ "message": "boom" }),
     );
     let err = plugin(&routes).list_feedback(&pr(), None).unwrap_err();
+    assert!(matches!(err, Error::Upstream(_)), "{err:?}");
+}
+
+/// Exactly one warning was logged; it names `login` and the missing repository admin access.
+fn assert_one_admin_warning(routes: &Routes, login: &str) {
+    let warnings = routes.warnings.borrow();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains(login) && warnings[0].contains("repository admin"));
+}
+
+#[test]
+fn an_invalid_credential_in_the_permission_lookup_fails_the_call_without_a_warning() {
+    let routes = scenario();
+    routes.on(
+        Method::Get,
+        &permission_path("alice"),
+        401,
+        &json!({ "message": "token is invalid" }),
+    );
+    let err = plugin(&routes).list_feedback(&pr(), None).unwrap_err();
+    assert!(
+        matches!(&err, Error::Unauthorized(m) if m.contains("token is invalid")),
+        "{err:?}"
+    );
+    assert!(routes.warnings.borrow().is_empty());
+
+    let err = plugin(&routes)
+        .author_role(&pr().repo, "alice")
+        .unwrap_err();
     assert!(matches!(err, Error::Unauthorized(_)), "{err:?}");
+}
+
+/// Forgejo answers the permission lookup with 403 unless the bot account is repository admin.
+fn refuse_permission_lookup(routes: &Routes, login: &str) {
+    routes.on(
+        Method::Get,
+        &permission_path(login),
+        403,
+        &json!({ "message": "Must have admin permission" }),
+    );
+}
+
+#[test]
+fn a_refused_permission_lookup_makes_the_author_outside_and_warns_once() -> anyhow::Result<()> {
+    let routes = scenario();
+    refuse_permission_lookup(&routes, "alice");
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+
+    let alice = [
+        &feedback.reviews[0].author,
+        &feedback.threads[0].comments[0].author,
+        &feedback.threads[1].comments[0].author,
+    ];
+    assert!(
+        alice
+            .iter()
+            .all(|a| a.login == "alice" && a.role == AuthorRole::Outside)
+    );
+    assert_eq!(routes.count(Method::Get, &permission_path("alice")), 1);
+    assert_one_admin_warning(&routes, "alice");
+    Ok(())
+}
+
+#[test]
+fn a_refused_permission_lookup_makes_author_role_outside_and_warns() -> anyhow::Result<()> {
+    let routes = scenario();
+    refuse_permission_lookup(&routes, "alice");
+    assert_eq!(
+        plugin(&routes).author_role(&pr().repo, "alice")?,
+        AuthorRole::Outside
+    );
+    assert_one_admin_warning(&routes, "alice");
+    Ok(())
+}
+
+#[test]
+fn an_unauthorized_error_names_the_request_and_the_forge_message() {
+    let routes = scenario();
+    routes.on(
+        Method::Get,
+        "/api/v1/user",
+        403,
+        &json!({ "message": "token does not have required scope" }),
+    );
+    let err = plugin(&routes).whoami().unwrap_err();
+    assert!(
+        matches!(&err, Error::Unauthorized(m)
+            if m == "GET /api/v1/user: token does not have required scope"),
+        "{err:?}"
+    );
 }
 
 #[test]
 fn since_keeps_newer_items_and_whole_threads_with_a_newer_comment() -> anyhow::Result<()> {
     let routes = scenario();
     let since_comments = format!("{ISSUE_COMMENTS}?since=2026-11-01T11%3A00%3A00Z");
-    routes.pages(&since_comments, &json!([]));
+    routes.get(&since_comments, &json!([]));
     let feedback = plugin(&routes).list_feedback(&pr(), Some("2026-11-01T11:00:00Z"))?;
 
     // Forgejo filters PR comments itself.
-    assert_eq!(
-        routes.count(Method::Get, &format!("{since_comments}&page=1&limit=50")),
-        1
-    );
+    assert_eq!(routes.count(Method::Get, &since_comments), 1);
     assert!(feedback.comments.is_empty());
     // At or after `since`, in any time zone: review 14 is 08:00 UTC on Nov 2.
     assert_eq!(
@@ -418,7 +531,7 @@ fn since_keeps_newer_items_and_whole_threads_with_a_newer_comment() -> anyhow::R
 #[test]
 fn since_with_an_offset_is_compared_as_an_instant() -> anyhow::Result<()> {
     let routes = scenario();
-    routes.pages(
+    routes.get(
         &format!("{ISSUE_COMMENTS}?since=2026-11-01T13%3A30%3A00%2B01%3A00"),
         &json!([]),
     );
@@ -443,18 +556,145 @@ fn since_that_is_not_rfc3339_is_invalid_input() {
 }
 
 #[test]
-fn listing_stops_at_the_page_limit_and_reports_truncation() -> anyhow::Result<()> {
+fn each_pr_comment_is_returned_once_and_not_truncated() -> anyhow::Result<()> {
     let routes = scenario();
-    let comment = json!([{
-        "id": 50, "user": user("bob"), "body": "again", "html_url": "u",
-        "created_at": "2026-11-01T08:00:00Z", "updated_at": "2026-11-01T08:00:00Z",
-    }]);
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+    assert_eq!(ids(feedback.comments.iter().map(|c| c.id.as_str())), ["50"]);
+    assert!(!feedback.truncated);
+    assert_eq!(
+        routes
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r.path.starts_with(ISSUE_COMMENTS))
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn review_listing_stops_at_the_page_limit_and_reports_truncation() -> anyhow::Result<()> {
+    let routes = scenario();
+    let reviews = json!([review(14, "bob", "APPROVED", "2026-11-02T09:00:00+01:00")]);
     for page in 1..=MAX_PAGES + 1 {
-        routes.get(&format!("{ISSUE_COMMENTS}?page={page}&limit=50"), &comment);
+        routes.get(&format!("{PR}/reviews?page={page}&limit=50"), &reviews);
     }
     let feedback = plugin(&routes).list_feedback(&pr(), None)?;
     assert!(feedback.truncated);
-    assert_eq!(feedback.comments.len(), MAX_PAGES);
+    assert_eq!(feedback.reviews.len(), MAX_PAGES);
+    Ok(())
+}
+
+/// A pull request with `count` approved reviews by bob, review `n` submitted on day `n` of
+/// October with one line comment on line `n`.
+fn routes_with_reviews(count: u64) -> Routes {
+    routes_with_reviews_listed(&(1..=count).collect::<Vec<_>>(), |n| {
+        format!("2026-10-{n:02}T09:00:00Z")
+    })
+}
+
+/// Like [`routes_with_reviews`] for the review ids `listed`, in that listing order, with the
+/// submission time of review `n` given by `submitted`.
+fn routes_with_reviews_listed(listed: &[u64], submitted: impl Fn(u64) -> String) -> Routes {
+    let routes = Routes::default();
+    routes.get("/api/v1/user", &user("factory"));
+    routes.get_any_query(ISSUE_COMMENTS, &json!([]));
+    routes.get(&permission_path("bob"), &json!({ "permission": "read" }));
+    let reviews: Vec<_> = listed
+        .iter()
+        .map(|n| review(*n, "bob", "APPROVED", &submitted(*n)))
+        .collect();
+    routes.pages(&format!("{PR}/reviews"), &json!(reviews));
+    for n in listed {
+        let comment = line_comment(
+            100 + n,
+            "bob",
+            "src/lib.rs",
+            i64::try_from(*n).unwrap(),
+            &submitted(*n),
+        );
+        routes.get(&format!("{PR}/reviews/{n}/comments"), &json!([comment]));
+    }
+    routes
+}
+
+/// The ids of the reviews the threads belong to (`<review-id>:<path>:<line>`).
+fn thread_reviews(feedback: &Feedback) -> Vec<u64> {
+    feedback
+        .threads
+        .iter()
+        .map(|t| t.id.split(':').next().unwrap().parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn review_threads_are_read_for_the_20_newest_reviews_only() -> anyhow::Result<()> {
+    let routes = routes_with_reviews(25);
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+
+    assert_eq!(feedback.reviews.len(), 25);
+    assert_eq!(thread_reviews(&feedback), (6..=25).collect::<Vec<_>>());
+    assert!(feedback.truncated);
+    let requested: Vec<_> = (1..=25)
+        .filter(|n| routes.count(Method::Get, &format!("{PR}/reviews/{n}/comments")) == 1)
+        .collect();
+    assert_eq!(requested, (6..=25).collect::<Vec<_>>());
+    Ok(())
+}
+
+#[test]
+fn the_20_reviews_submitted_last_are_selected_whatever_their_ids_and_listing_order()
+-> anyhow::Result<()> {
+    // Review 1 was submitted last; the listing is not in submission order.
+    let listed: Vec<u64> = (1..=25).rev().collect();
+    let routes = routes_with_reviews_listed(&listed, |n| {
+        if n == 1 {
+            "2026-11-01T09:00:00Z".to_string()
+        } else {
+            format!("2026-10-{n:02}T09:00:00Z")
+        }
+    });
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+
+    let mut expected: Vec<u64> = std::iter::once(1).chain(7..=25).collect();
+    let mut threads = thread_reviews(&feedback);
+    threads.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(threads, expected);
+    let requested: Vec<u64> = (1..=25)
+        .filter(|n| routes.count(Method::Get, &format!("{PR}/reviews/{n}/comments")) == 1)
+        .collect();
+    assert_eq!(requested, expected);
+    assert!(feedback.truncated);
+    Ok(())
+}
+
+#[test]
+fn review_threads_of_all_reviews_are_returned_and_not_truncated_up_to_20_reviews()
+-> anyhow::Result<()> {
+    let routes = routes_with_reviews(3);
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+
+    assert_eq!(thread_reviews(&feedback), [1, 2, 3]);
+    assert!(!feedback.truncated);
+    Ok(())
+}
+
+#[test]
+fn a_reply_in_a_thread_of_a_review_beyond_the_newest_20_is_not_returned() -> anyhow::Result<()> {
+    let routes = routes_with_reviews(25);
+    routes.get(
+        &format!("{PR}/reviews/1/comments"),
+        &json!([
+            line_comment(101, "bob", "src/lib.rs", 1, "2026-10-01T09:00:00Z"),
+            line_comment(900, "bob", "src/lib.rs", 1, "2026-11-05T08:00:00Z"),
+        ]),
+    );
+    let feedback = plugin(&routes).list_feedback(&pr(), Some("2026-11-05T00:00:00Z"))?;
+
+    assert!(feedback.threads.is_empty());
+    assert!(feedback.truncated);
     Ok(())
 }
 
@@ -611,4 +851,21 @@ fn a_pending_review_is_invalid_input() {
         routes.count(Method::Post, &format!("{PR}/reviews/12/comments")),
         0
     );
+}
+
+#[test]
+fn review_carries_its_updated_at() -> anyhow::Result<()> {
+    let routes = scenario();
+    let mut edited = review(10, "alice", "REQUEST_CHANGES", "2026-11-01T10:00:00Z");
+    edited["updated_at"] = json!("2026-11-03T09:00:00Z");
+    routes.pages(&format!("{PR}/reviews"), &json!([edited]));
+    let feedback = plugin(&routes).list_feedback(&pr(), None)?;
+
+    let updated: Vec<_> = feedback
+        .reviews
+        .iter()
+        .map(|r| r.updated_at.as_str())
+        .collect();
+    assert_eq!(updated, ["2026-11-03T09:00:00Z"]);
+    Ok(())
 }

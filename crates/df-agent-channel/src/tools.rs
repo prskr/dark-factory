@@ -569,9 +569,10 @@ fn forge_error(err: &IntegrationError) -> Outcome {
         },
         IntegrationError::NotFound(what) => format!("not found on the forge: {what}"),
         IntegrationError::InvalidInput(what) => format!("the forge rejected the request: {what}"),
-        IntegrationError::Unauthorized(_) => {
-            "the forge rejected the credentials; ask a human to check the project's forge credential".to_string()
-        }
+        IntegrationError::Unauthorized(what) => format!(
+            "the forge refused the request ({what}); ask a human to check the bot account's access \
+             to the repository and the project's forge credential"
+        ),
         other => format!("the forge request failed: {other}; retry later"),
     })
 }
@@ -608,6 +609,27 @@ mod tests {
             Some(content_block::Kind::Text(t)) => t.text.clone(),
             other => panic!("unexpected content {other:?}"),
         }
+    }
+
+    #[test]
+    fn forge_error_for_a_refused_request_shows_the_forge_message_and_the_access_hint() {
+        let refused = IntegrationError::Unauthorized(
+            "GET /api/v1/repos/o/r/pulls/7/reviews: token does not have required scope".into(),
+        );
+        let outcome = forge_error(&refused);
+        assert!(outcome.is_error);
+        assert!(
+            outcome.text.contains(
+                "GET /api/v1/repos/o/r/pulls/7/reviews: token does not have required scope"
+            ),
+            "{}",
+            outcome.text
+        );
+        assert!(
+            outcome.text.contains("bot account's access"),
+            "{}",
+            outcome.text
+        );
     }
 
     #[test]
