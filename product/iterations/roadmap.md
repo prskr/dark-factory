@@ -195,6 +195,6 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | CI and PR read tools (`list_pull_requests`, `read_ci_status`, `read_ci_log`) in chats | idea | `openspec/changes/iter3-ci-tools` |
 | Signing of images and the Helm chart (cosign), SBOMs and provenance attestations for releases | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
 | Pruning old images and chart versions from GHCR | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
-| Chat autocomplete of repository file and skill names | idea | `openspec/changes/web-assets-typescript` |
-| JS unit test runner for web UI component logic | idea | `openspec/changes/web-assets-typescript` |
-| Type check with the native TypeScript compiler as a pinned standalone binary instead of `npx` | idea | `openspec/changes/web-assets-typescript` |
+| Chat autocomplete of repository file and skill names | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
+| JS unit test runner for web UI component logic | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
+| Type check with the native TypeScript compiler as a pinned standalone binary instead of `npx` | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
