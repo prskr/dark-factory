@@ -205,7 +205,7 @@ A 403 or 429 response SHALL map to `rate-limited` when `x-ratelimit-remaining` i
 - **THEN** both review comments are in one review thread
 
 ### Requirement: Author roles
-Every author SHALL get role `bot` if it is the account that owns the plugin's credential, `member` if GitHub reports its association as owner, member or collaborator and its repository permission is write or admin, and `outside` otherwise, including a deleted author.
+Every author SHALL get role `bot` if it is the account that owns the plugin's credential, `member` if GitHub reports its association as owner, member or collaborator and its repository permission is write or admin, and `outside` otherwise, including a deleted author. When GitHub refuses the permission lookup, the author SHALL get role `outside` and the plugin SHALL write a warning that names the author; the call SHALL NOT fail.
 
 #### Scenario: First-time contributor
 - **WHEN** a user with association `FIRST_TIME_CONTRIBUTOR` comments
@@ -215,9 +215,20 @@ Every author SHALL get role `bot` if it is the account that owns the plugin's cr
 - **WHEN** a user with association `MEMBER` and repository permission `read` reviews
 - **THEN** the review's author role is `outside`
 
+#### Scenario: Permission lookup refused
+- **WHEN** GitHub answers the permission lookup for a user with association `COLLABORATOR` with 403
+- **THEN** the call succeeds, the user's role is `outside` and the control plane log has a warning naming the user
+
 ### Requirement: Reply in a review thread
 `reply` SHALL add a reply to the review thread on GitHub. A thread id the plugin didn't issue for that pull request SHALL yield `invalid-input` or `not-found`.
 
 #### Scenario: Reply joins the thread
 - **WHEN** `reply` is called with a thread id from `list-feedback`
 - **THEN** the next `list-feedback` returns the reply as the last review comment of that thread
+
+### Requirement: Review updated-at
+Every review returned by `list-feedback` SHALL carry `updated-at`, the time of its last change as GitHub reports it.
+
+#### Scenario: Edited review body
+- **WHEN** a reviewer edits the body of a submitted review
+- **THEN** the review's `updated-at` is the time of the edit and its `submitted-at` is unchanged
