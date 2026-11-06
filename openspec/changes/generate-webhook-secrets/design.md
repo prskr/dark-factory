@@ -32,7 +32,7 @@ async fn get_or_create(&self, r: &SecretKeyRef, labels: &BTreeMap<String, String
 
 `K8sSecretStore` implements it as: `get`; on `404` create a Secret with one key holding 32 bytes from `ring::rand::SystemRandom`, hex-encoded (`hex`, already a workspace dependency); on `409 AlreadyExists` `get` again. It never updates or patches. A Secret that exists without the key is an error (`SecretError::NotFound`), not a patch.
 
-`get` today takes a `CredentialRef` (with id and display name from the database). Webhook secrets have neither, so the method takes a smaller `SecretKeyRef { secret_name, secret_key }`; `CredentialRef` gets a helper that returns one. `UnconfiguredSecretStore`, `FakeSecretStore` and the gateway's test store implement the new method (the fake records created Secrets for tests).
+`get` today takes a `CredentialRef` (with id and display name from the database), although `K8sSecretStore` uses only the Secret name and key. Webhook secrets have no id or display name, so both methods take a smaller `SecretKeyRef { secret_name, secret_key }`: `get(&self, r: &SecretKeyRef)` replaces `get(&self, r: &CredentialRef)`, and existing callers pass `credential.key_ref()`, a new helper on `CredentialRef`. The resolver calls `get` with the configured `{name, key}` when `generate` is false, and `get_or_create` when it is true. `UnconfiguredSecretStore`, `FakeSecretStore` and the gateway's test store implement the new method (the fake records created Secrets for tests).
 
 Alternatives: a separate `WebhookSecretProvisioner` trait. Rejected: same backend, same namespace, same error type; a second trait doubles the wiring through `SandboxWiring` for one method.
 
@@ -84,4 +84,6 @@ New `docs/adr/0056-control-plane-generates-missing-instance-secrets.md`: context
 
 1. Operators rename `plugins.<name>.webhookSecret.name` to `existingSecret` (keeping `key`), or remove the value and copy the generated secret into the forge after the upgrade.
 2. `deploy/values-e2e.yaml` uses `existingSecret`.
-3. Rollback: the previous chart version mounts the referenced Secret again; generated Secrets stay and can be referenced with the old `{name, key}`.
+3. Rollback: the previous chart version mounts the referenced Secret again; generated Secrets stay. If the forge was switched to the generated value, the old chart and the forge disagree and deliveries get `401`: either enter the old value in the forge again, or point the old chart at the generated Secret with `webhookSecret: {name: <fullname>-webhook-<plugin>, key: secret}`. Then redeliver the failed events from the forge.
+
+Rotation and replicas: during the rolling restart after a rotation, old and new replicas hold different values, and the forge holds whichever value the operator has entered so far. Deliveries in that window can get `401`. The operator docs say to finish the rollout and the forge update, then redeliver the failed events from the forge's delivery history.
