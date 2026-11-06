@@ -14,9 +14,9 @@ pub const K8S_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 
 pub use config::{ControlPlaneEndpoint, GatewayEndpoint, ProvisioningConfig};
 pub use provider::{
-    ClusterServiceRef, ClusterTargetResolver, ClusterTargetsProvider, K8sSandboxProvider,
-    ResolveError, map_pod_delete_event, map_pod_event, parse_spiffe_san, resolve_cluster_target,
-    resolve_identity_from_pod_store, run_id_from_metadata,
+    ClusterServiceRef, ClusterTargetResolution, ClusterTargetResolver, ClusterTargetsProvider,
+    K8sSandboxProvider, ResolveError, map_pod_delete_event, map_pod_event, parse_spiffe_san,
+    resolve_cluster_target, resolve_identity_from_pod_store, run_id_from_metadata,
 };
 pub use reconcile::{
     reconcile_active_runs, run_leader_election, run_policy_reconcile_loop,

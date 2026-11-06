@@ -23,7 +23,7 @@
 
 | Component | Where | Permissions |
 |---|---|---|
-| Control plane | Role in the **sandbox namespace** | `persistentvolumeclaims` create/get/list/watch/delete · `networkpolicies` (`networking.k8s.io`) create/get/list/watch/update/patch/delete · `ciliumnetworkpolicies` (`cilium.io`, Cilium mode only) same · `pods` create/get/list/watch/delete · `events` create |
+| Control plane | Role in the **sandbox namespace** | `persistentvolumeclaims` create/get/list/watch/delete · `networkpolicies` (`networking.k8s.io`) create/get/list/watch/update/patch/delete · `ciliumnetworkpolicies` (`cilium.io`, Cilium mode only) same · `pods` create/get/list/watch/delete · `events` get/list/watch (sandbox pod failure reasons) |
 | Control plane | Role in the **instance namespace** | `leases` (`coordination.k8s.io`) get/create/update · `secrets` get (credential references) · `endpointslices` (`discovery.k8s.io`) get/list/watch (gateway pod discovery) |
 | Control plane | Role per **cluster-target namespace** (listed in values), or a read-only ClusterRole if `clusterTargets.anyNamespace: true` | `services`, `endpointslices` get/list/watch |
 | Gateway | — | None; `automountServiceAccountToken: false`. Everything comes from the control plane (`PolicyWatch`). |

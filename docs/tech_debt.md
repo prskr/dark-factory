@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-121.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-122.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -40,6 +40,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-119: code review of `conversation-flow` (`df-agent-channel`, `factory-agent`, 2026-11-06). The `TD-n (ID)` heading gives the IDs used in that review.
 - Origin of TD-120: full `just e2e-local` run while closing #124 (2026-11-07).
+- Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
 
 ## Summary
 
@@ -68,14 +69,9 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
 | TD-27 | medium | Bazel | No remote build execution: container tests cannot run in agent sandboxes |
-| TD-28 | medium | `df-k8s` provider | A transient resolution error at provision time leaves the run without the target's host alias ([sandbox-lifecycle-resilience]) |
-| TD-31 | medium | `df-k8s` events | Image-volume pull failures (runtime and harness) produce no `Gone` event ([sandbox-lifecycle-resilience]) |
-| TD-32 | low   | `df-k8s` events | Watcher and resolver state is lost across a control-plane restart or leader change ([sandbox-lifecycle-resilience]) |
 | TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions ([#123]) |
 | TD-34 | low   | `df-core` config | Defaults for `runtime_image` and `issuer_name` don't match what the chart renders |
-| TD-36 | low   | `df-k8s` tests | No live test asserts a running sandbox; the shared live config uses `alpine` as the runtime image ([sandbox-lifecycle-resilience]) |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
-| TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP ([sandbox-lifecycle-resilience]) |
 | TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros ([#123]) |
 | TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings ([#123]) |
 | TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
@@ -84,7 +80,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
-| TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway ([sandbox-lifecycle-resilience]) |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
@@ -128,6 +123,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-118 | low   | `df-db`, `df-web` tests | Two test helpers set a task status by SQL |
 | TD-119 | low   | `df-agent-channel` tests | Repeated single-prompt extraction and `TurnEnded` test fixtures ([#141]) |
 | TD-120 | medium | `df-gateway` relay, `df-web` egress log | Live rows of the traffic page stopped once; live delivery has no e2e test |
+| TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
 
 ## Entries
 
@@ -332,38 +328,6 @@ RBE was removed in favor of local static musl builds with an optional remote cac
 
 **Fix:** Self-hosted RBE workers with a controlled image and an exec C toolchain that does not depend on the client, see [remote-execution.md](remote-execution.md) §3.
 
-### TD-28 (R9-N1). Transient resolution error at provision time drops a target for the whole run
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-k8s/src/provider.rs` (`ClusterTargetResolver::resolve`, `Transient` branch without a cached entry)
-
-If a cluster target cannot be resolved for a transient reason (timeout, 5xx, connection error) and there is no last good resolution yet, the rule is skipped. During provisioning that means the pod starts without the target's `hostAliases` entry and `NO_PROXY` entry. `hostAliases` cannot change after the pod starts, so the run cannot reach the service by name, even after the reconcile pass adds the NetworkPolicy rule. The failure is closed but only logged as a warning. This matters for the first run of a project after a control-plane restart, when the cache is empty.
-
-A Service whose `targetPort` is a name resolves only through a ready EndpointSlice port, so a run provisioned while the target's pods are not ready has the same problem (formerly TD-29). Reconcile renders the policy without the rule until the EndpointSlice watch triggers a new pass.
-
-**Fix:** Let `provision` fail with a retryable error when a target resolves `Transient` without a cached entry, so the run is retried instead of starting degraded. Reconcile keeps the run's current policy until the target resolves (`run-network-policy`, "Policies follow the database").
-
-### TD-31 (R5-N5). Image-volume pull failure produces no `Gone`
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-k8s/src/provider.rs` (`map_pod_event`)
-
-A runtime or harness image (the two image volumes of a sandbox) that cannot be pulled keeps the pod in `ContainerCreating`. The failure is not in the container statuses, so no `Gone` event is emitted. The run waits until the connect timeout (10 min).
-
-**Fix:** Watch the pod's Events (reason `Failed`/`ErrImagePull` for the image volume), or treat a pod that stays in `ContainerCreating` beyond a limit as `Gone` with a reason.
-
-### TD-32 (R5-N10). State lost across a restart or leader change
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-k8s/src/provider.rs` (`EventTracker`, `ClusterTargetResolver` last-good cache), `crates/df-agent-channel/src/scheduler.rs` (no startup resync)
-
-The event tracker knows only objects seen by the current process. A pod or Sandbox that vanished while the control plane was down gets no `Gone`; the run ends through the connect timeout or the hard stop. The resolver's last-good cache also starts empty after a restart or on a new leader, so a transient error drops a rule that a long-running leader would have kept. Documented in `crates/df-k8s/README.md`.
-
-**Fix:** At startup (and on becoming leader), reconcile the active runs from the database against the Sandbox store and end runs whose Sandbox is missing.
-
 ### TD-33 (R5-N18). Mixed `.sqlx` metadata format
 
 Tracked in [#123].
@@ -382,16 +346,6 @@ The chart always renders both values, so deployments are not affected. Running t
 
 **Fix:** Drop both defaults and make the values required, or derive the runtime tag from the crate version at build time and document that `issuer_name` must match the ClusterIssuer the chart creates.
 
-### TD-36. Live tests never reach a running sandbox
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-k8s/src/provider.rs` (`test_provider_live_cluster_integration`), `crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_reverts_manual_edit_and_adds_new_target`)
-
-`live_config()` (`crates/df-k8s/src/test_support.rs`) delivers `alpine:latest` as the runtime image, which has no `/opt/factory/factory-agent`, so the container cannot start. Only `test_reconciliation_live_cluster` overrides it with `runtime:dev`, and it checks the policy only. None of the live tests asserts `Running` or a `Started` event. The pod-start path is only covered by unit tests with a seeded store.
-
-**Fix:** Use the real runtime image (published for the dev cluster) in one live test and assert the `Started` event with the pod IP.
-
 ### TD-39 (R2-P1). Shipped plugin component is not validated by a test
 
 `deploy/test_images.sh`, `deploy/BUILD.bazel` (`forgejo_plugin`)
@@ -399,18 +353,6 @@ Tracked in [sandbox-lifecycle-resilience].
 The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins/forgejo.wasm`. `wasm-tools validate` ran once by hand (2026-10-22: 338 KB, valid). `wasm-tools` is not in the Bazel multitool. A broken opt transition or toolchain change only shows when `serve` loads the component.
 
 **Fix:** Add `wasm-tools` to multitool and run `wasm-tools validate` (optionally check the exports) in the image test.
-
-### TD-41. ClusterIP reachability of cluster targets is untested
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-k8s/src/reconcile.rs` (`test_reconciliation_live_cluster`, `policy_loop_live_*`), `crates/df-k8s/src/render.rs`
-
-`hostAliases` map target names to the Service's ClusterIP, while the generated `NetworkPolicy` allows the backing pods (selector) or endpoint addresses (`/32` `ipBlock`). That only works if the CNI evaluates egress policy after Service translation. The live tests compare the rendered policy with the expected one, but none opens a connection from a sandbox pod to an allowed and to a non-allowed ClusterIP.
-
-**Matters when:** a new CNI, an eBPF kube-proxy replacement or a CNI upgrade is rolled out.
-
-**Fix:** Add a live test with a pod in the sandbox namespace, a target Service and a second non-target Service: connecting to the target's ClusterIP succeeds, to the other fails.
 
 ### TD-42 (S1). Web UI SQL is runtime-checked
 
@@ -495,18 +437,6 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 **Matters when:** more operations are timed, or the timing message changes; a missed `send_timing` goes unnoticed.
 
 **Fix:** One `async fn timed<T, E>(tx, op, fut) -> Result<T, E>` that sends the timing and returns the result; keep explicit calls only where the result needs extra handling (push).
-
-### TD-59. SNI mismatch not checked on a cluster
-
-Tracked in [sandbox-lifecycle-resilience].
-
-`crates/df-gateway/src/proxy.rs` (`sni-mismatch`)
-
-The gateway closes a CONNECT tunnel whose ClientHello names another host than the allowed CONNECT target and logs it as `sni-mismatch`. Unit tests in `crates/df-gateway/src/proxy/tests.rs` cover it, but the check against the deployed gateway (`harness-images` task 7.4: `openssl s_client -proxy <gateway>:3128 -connect <allowlisted host>:443 -servername <other-name>` from a sandbox) was not done: a run ends before a manual request can be sent from its sandbox.
-
-**Matters when:** the gateway, its network policy or the sandbox proxy setup changes, or before the egress controls are relied on for isolation.
-
-**Fix:** Run the check from a sandbox that stays up (for example a fake-acp-agent mode that waits, or a debug pod with the sandbox labels in the sandbox namespace); verify the tunnel is closed before the destination is contacted and the event is logged as `sni-mismatch`. Then delete this entry.
 
 ### TD-60 (CR3). Adapter command loses argument boundaries
 
@@ -978,9 +908,18 @@ In one full `just e2e-local` run on a fresh cluster (2026-11-07), the traffic pa
 
 **Fix:** add an e2e check that a connected page gets new rows without a reload, run it repeatedly on fresh clusters, and trace the relay (session reuse within `SESSION_GRACE`, discovery while the gateway pods start, `Lagged` handling) when it fails.
 
+### TD-121 (D1). Reconcile keeps the whole policy while one cluster target is unresolvable
+
+`crates/df-k8s/src/reconcile.rs` (`get_targets` error branch)
+
+If a cluster service rule fails transiently and has no earlier resolution, reconcile skips the run and keeps its current NetworkPolicy. A rule removed from the allowlist in the meantime stays in the policy of running sandboxes until the target resolves again.
+
+**Matters when:** a named `targetPort` has no matching EndpointSlice port for a long time after a control plane restart (empty cache), and an operator removes another rule in that window.
+
+**Fix:** render the resolved targets, plus the current policy's entries only for the unavailable rules.
+
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
 [#123]: https://github.com/prskr/dark-factory/issues/123
 [#125]: https://github.com/prskr/dark-factory/issues/125
 [#141]: https://github.com/prskr/dark-factory/pull/141
-[sandbox-lifecycle-resilience]: ../openspec/changes/sandbox-lifecycle-resilience/proposal.md

@@ -4,15 +4,16 @@
 //! Every replica runs a scheduler. Nothing here needs a single writer: runs are claimed with
 //! `FOR UPDATE SKIP LOCKED`, and every state change is a guarded, idempotent update.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use df_core::config::RunsConfig;
 use df_core::{
-    CAPACITY_DETAIL, ProjectKey, ProviderError, RunOutcome, RunSandboxSpec, RunState, SandboxEvent,
-    TaskVolumeSpec,
+    CAPACITY_DETAIL, ProjectKey, ProviderError, RunId, RunOutcome, RunSandboxSpec, RunState,
+    SandboxEvent, TaskVolumeSpec,
 };
 use df_db::Notification;
 use futures::StreamExt;
@@ -38,38 +39,54 @@ const START_BATCH: i64 = 10;
 const STOP_TIMEOUT_SECONDS: u64 = 120;
 /// Time granted to in-flight provisioning when the scheduler stops.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
+/// Detail of a run the startup sweep ends because its sandbox is gone (design D4).
+const LOST_WHILE_DOWN: &str = "sandbox pod no longer present after a control plane restart";
+/// Passes of the startup sweep; a failed listing or check is retried after a tick interval.
+const SWEEP_ATTEMPTS: u32 = 3;
+/// Existence checks the startup sweep runs at once.
+const SWEEP_CONCURRENCY: usize = 8;
 
 /// Scheduler of one control plane replica.
 #[derive(Clone)]
 pub struct Scheduler {
     ctx: ChannelContext,
+    /// Runs this replica is provisioning; a tick starts no second attempt for them. Another
+    /// replica may still retry such a run (design D2); creation is idempotent.
+    in_flight: Arc<Mutex<HashSet<RunId>>>,
 }
 
 impl Scheduler {
     pub fn new(ctx: ChannelContext) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            in_flight: Arc::default(),
+        }
     }
 
     /// Runs until `shutdown` resolves. New runs start when a message is queued (and on every
     /// tick as a safety net); provisioning runs in its own tasks so slow provider calls never
-    /// delay events, timeouts or shutdown. Timeouts are checked on the tick.
+    /// delay events, timeouts or shutdown. Timeouts are checked on the tick. On start, runs whose
+    /// sandbox disappeared while no replica watched are ended in the background.
     pub async fn run(&self, shutdown: impl Future<Output = ()>) {
         let mut notifications = self.ctx.notifier.subscribe();
         let mut events = self.ctx.provider.events();
         let mut interval = tokio::time::interval(TICK_INTERVAL);
-        let mut provisions = JoinSet::new();
+        // Provisioning and the startup sweep run here, off the event loop.
+        let mut background = JoinSet::new();
+        let scheduler = self.clone();
+        background.spawn(async move { scheduler.sweep_lost_sandboxes(TICK_INTERVAL).await });
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
                 () = &mut shutdown => break,
                 _ = interval.tick() => {
-                    if let Err(e) = self.tick(&mut provisions, Utc::now()).await {
+                    if let Err(e) = self.tick(&mut background, Utc::now()).await {
                         tracing::error!(error = %e, "failed to enforce run timeouts");
                     }
                 }
                 note = notifications.recv() => match note {
                     Ok(Notification::TaskMessageQueued { .. } | Notification::Reconnected)
-                        | Err(RecvError::Lagged(_)) => self.start_in_background(&mut provisions).await,
+                        | Err(RecvError::Lagged(_)) => self.start_in_background(&mut background).await,
                     // A stop of a run without a connection ends it here, not on the tick.
                     Ok(Notification::RunChanged { .. }) => {
                         if let Err(e) = self.enforce_timeouts(Utc::now()).await {
@@ -83,15 +100,14 @@ impl Scheduler {
                     tracing::warn!("sandbox event stream ended; scheduler continues on ticks only");
                     events = futures::stream::pending().boxed();
                 },
-                Some(_) = provisions.join_next() => {}
+                Some(_) = background.join_next() => {}
             }
         }
-        // Runs that were created but not provisioned yet would only end on the connect timeout.
-        let drain = async { while provisions.join_next().await.is_some() {} };
+        // Unfinished work is picked up again by the next replica: unprovisioned runs by the
+        // stale-run retry, unchecked runs by its startup sweep.
+        let drain = async { while background.join_next().await.is_some() {} };
         if tokio::time::timeout(SHUTDOWN_DRAIN, drain).await.is_err() {
-            tracing::warn!(
-                "provisioning still in flight at shutdown; runs end on the connect timeout"
-            );
+            tracing::warn!("background work still in flight at shutdown; abandoning it");
         }
     }
 
@@ -99,18 +115,18 @@ impl Scheduler {
     /// tasks and enforces the timeouts.
     async fn tick(
         &self,
-        provisions: &mut JoinSet<()>,
+        background: &mut JoinSet<()>,
         now: DateTime<Utc>,
     ) -> Result<(), ChannelError> {
-        self.reprovision_stale(provisions, now).await;
-        self.start_in_background(provisions).await;
+        self.reprovision_stale(background, now).await;
+        self.start_in_background(background).await;
         self.enforce_timeouts(now).await
     }
 
     /// Provisions runs again that stayed `pending`/`provisioning` for [`REPROVISION_AFTER`], for
     /// example because the replica that created them stopped before the sandbox existed. Volume
     /// and sandbox creation are idempotent; a run that has a sandbox only costs one existence check.
-    async fn reprovision_stale(&self, provisions: &mut JoinSet<()>, now: DateTime<Utc>) {
+    async fn reprovision_stale(&self, background: &mut JoinSet<()>, now: DateTime<Utc>) {
         let Some(before) = now.checked_sub_signed(REPROVISION_AFTER) else {
             return;
         };
@@ -118,16 +134,96 @@ impl Scheduler {
             Ok(runs) => {
                 for run in runs {
                     let scheduler = self.clone();
-                    provisions.spawn(async move { scheduler.retry_provision(run).await });
+                    self.spawn_provisioning(background, run.id, async move {
+                        scheduler.retry_provision(run).await;
+                    });
                 }
             }
             Err(e) => tracing::error!(error = %e, "failed to list runs to provision again"),
         }
     }
 
-    /// Provisions a stale run again unless its sandbox exists. A failure is only logged: the run
-    /// is tried again on the next tick or ends on the connect timeout, so a transient API error
-    /// never ends a run that may be starting up fine.
+    /// Spawns `work` provisioning `run_id` unless an earlier attempt of this replica is still
+    /// in flight.
+    fn spawn_provisioning(
+        &self,
+        background: &mut JoinSet<()>,
+        run_id: RunId,
+        work: impl Future<Output = ()> + Send + 'static,
+    ) {
+        let Some(claim) = InFlight::claim(&self.in_flight, run_id) else {
+            return;
+        };
+        background.spawn(async move {
+            let _claim = claim;
+            work.await;
+        });
+    }
+
+    /// Ends every run in `connecting` or later whose sandbox no longer exists as `sandbox_lost`
+    /// (design D4): the event stream only reports deletions it sees, not those that happened
+    /// while no replica ran. `pending`/`provisioning` runs are left to [`Self::reprovision_stale`].
+    /// A failed listing or check is retried after `retry_after`, [`SWEEP_ATTEMPTS`] passes in
+    /// all; a run still unchecked then ends on its timeouts if the sandbox is really gone.
+    async fn sweep_lost_sandboxes(&self, retry_after: Duration) {
+        for attempt in 1..=SWEEP_ATTEMPTS {
+            if self.sweep_once().await {
+                return;
+            }
+            if attempt < SWEEP_ATTEMPTS {
+                tokio::time::sleep(retry_after).await;
+            }
+        }
+        tracing::error!(
+            attempts = SWEEP_ATTEMPTS,
+            "gave up checking runs for lost sandboxes after a restart; unchecked runs end on their timeouts"
+        );
+    }
+
+    /// One pass of [`Self::sweep_lost_sandboxes`]; `false` if the listing or a check failed.
+    async fn sweep_once(&self) -> bool {
+        let runs = match list_active_runs(&self.ctx.pool).await {
+            Ok(runs) => runs,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to list runs to check for lost sandboxes");
+                return false;
+            }
+        };
+        let started = runs
+            .into_iter()
+            .filter(|run| !matches!(run.state, RunState::Pending | RunState::Provisioning));
+        futures::stream::iter(started)
+            .map(|run| self.end_if_sandbox_lost(run.id))
+            .buffer_unordered(SWEEP_CONCURRENCY)
+            .fold(true, |all, checked| async move { all && checked })
+            .await
+    }
+
+    /// Ends the run as `sandbox_lost` if its sandbox is gone; `false` if that could not be
+    /// determined or recorded.
+    async fn end_if_sandbox_lost(&self, run_id: RunId) -> bool {
+        match self.ctx.provider.sandbox_exists(run_id).await {
+            Ok(true) => true,
+            Ok(false) => {
+                let end = RunEnd::failure(run_id, RunOutcome::SandboxLost, LOST_WHILE_DOWN);
+                if let Err(e) = finish_run(&self.ctx, &end).await {
+                    tracing::error!(error = %e, run_id = %run_id, "failed to end a run whose sandbox is gone");
+                    return false;
+                }
+                true
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, run_id = %run_id, "failed to check for the sandbox of a run after a restart");
+                false
+            }
+        }
+    }
+
+    /// Provisions a stale run again unless its sandbox exists. A transient failure is only
+    /// logged: the run is tried again on the next tick or ends on the connect timeout, so it never
+    /// ends a run that may be starting up fine. A rejection the provider won't change its mind on
+    /// (`Capacity`, `InvalidSpec`) ends the run as `provisioning_failed`, unless the sandbox
+    /// exists by now (a concurrent attempt's pod may be what exceeded the quota).
     async fn retry_provision(&self, run: RunRow) {
         let run_id = run.id;
         match self.ctx.provider.sandbox_exists(run_id).await {
@@ -138,9 +234,18 @@ impl Scheduler {
                 return;
             }
         }
-        if let Err(e) = self.provision(run).await {
-            tracing::warn!(error = %e, run_id = %run_id, "provisioning a stale run again failed; retrying on a later tick");
+        let Err(e) = self.provision(run).await else {
+            return;
+        };
+        let permanent = matches!(
+            e,
+            ChannelError::Provider(ProviderError::Capacity(_) | ProviderError::InvalidSpec(_))
+        );
+        if permanent && matches!(self.ctx.provider.sandbox_exists(run_id).await, Ok(false)) {
+            self.fail_provisioning(run_id, &e).await;
+            return;
         }
+        tracing::warn!(error = %e, run_id = %run_id, "provisioning a stale run again failed; retrying on a later tick");
     }
 
     /// Creates `pending` runs for due tasks.
@@ -153,12 +258,14 @@ impl Scheduler {
         .await
     }
 
-    pub(crate) async fn start_in_background(&self, provisions: &mut JoinSet<()>) {
+    pub(crate) async fn start_in_background(&self, background: &mut JoinSet<()>) {
         match self.start_runs().await {
             Ok(runs) => {
                 for run in runs {
                     let scheduler = self.clone();
-                    provisions.spawn(async move { scheduler.provision_or_fail(run).await });
+                    self.spawn_provisioning(background, run.id, async move {
+                        scheduler.provision_or_fail(run).await;
+                    });
                 }
             }
             Err(e) => tracing::error!(error = %e, "failed to start runs"),
@@ -166,19 +273,38 @@ impl Scheduler {
     }
 
     /// Provisions the run; anything that goes wrong ends it as `provisioning_failed` instead of
-    /// leaving it `pending` until the connect timeout.
+    /// leaving it `pending` until the connect timeout. A temporarily unavailable provider leaves
+    /// the run `provisioning` for `reprovision_stale` to retry.
     async fn provision_or_fail(&self, run: RunRow) {
         let run_id = run.id;
         if let Err(e) = self.provision(run).await {
-            tracing::error!(error = %e, run_id = %run_id, "provisioning failed");
-            // The error is logged above; the run keeps the marker the run end acts on.
-            let detail = match &e {
-                ChannelError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
-                _ => e.to_string(),
-            };
-            if let Err(e2) = self.provisioning_failed(run_id, &detail).await {
-                tracing::error!(error = %e2, run_id = %run_id, "failed to record provisioning failure");
+            if let ChannelError::Provider(ProviderError::Unavailable(_)) = &e {
+                // ponytail: design D2 – no backoff. Once the run is older than 60 s,
+                // `reprovision_stale` retries it every tick, costing one `sandbox_exists` list
+                // plus up to two lookups per rule every 5 s, until the pod exists or
+                // `enforce_timeouts` ends the run with `connect_timeout`.
+                tracing::warn!(
+                    error = %e,
+                    run_id = %run_id,
+                    "sandbox provider temporarily unavailable, run stays provisioning"
+                );
+                return;
             }
+            tracing::error!(error = %e, run_id = %run_id, "provisioning failed");
+            self.fail_provisioning(run_id, &e).await;
+        }
+    }
+
+    /// Ends the run as `provisioning_failed`; a capacity rejection requeues the task without
+    /// counting a resume.
+    async fn fail_provisioning(&self, run_id: RunId, error: &ChannelError) {
+        let detail = match error {
+            ChannelError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
+            _ => error.to_string(),
+        };
+        let end = RunEnd::failure(run_id, RunOutcome::ProvisioningFailed, detail);
+        if let Err(e) = finish_run(&self.ctx, &end).await {
+            tracing::error!(error = %e, run_id = %run_id, "failed to record provisioning failure");
         }
     }
 
@@ -249,16 +375,6 @@ impl Scheduler {
             tracing::info!(run_id = %run_id, "run ended while its sandbox was created; tearing it down");
             teardown(&self.ctx, run_id).await;
         }
-        Ok(())
-    }
-
-    async fn provisioning_failed(
-        &self,
-        run_id: df_core::RunId,
-        detail: &str,
-    ) -> Result<(), ChannelError> {
-        let end = RunEnd::failure(run_id, RunOutcome::ProvisioningFailed, detail);
-        finish_run(&self.ctx, &end).await?;
         Ok(())
     }
 
@@ -347,6 +463,35 @@ impl Scheduler {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+}
+
+/// A run in [`Scheduler::in_flight`]; dropping the claim (attempt finished or aborted) releases it.
+struct InFlight {
+    runs: Arc<Mutex<HashSet<RunId>>>,
+    run_id: RunId,
+}
+
+impl InFlight {
+    /// `None` if the run is claimed already.
+    fn claim(runs: &Arc<Mutex<HashSet<RunId>>>, run_id: RunId) -> Option<Self> {
+        let claimed = runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run_id);
+        claimed.then(|| Self {
+            runs: runs.clone(),
+            run_id,
+        })
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.run_id);
     }
 }
 

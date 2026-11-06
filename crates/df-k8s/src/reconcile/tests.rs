@@ -13,9 +13,11 @@ use std::future::Future as _;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+/// `nativelink/scheduler`, plus `forgejo/ssh` once `added`; `Unavailable` while `unavailable`.
 #[derive(Default)]
 struct DynamicTargetsProvider {
     added: AtomicBool,
+    unavailable: AtomicBool,
     calls: AtomicUsize,
 }
 
@@ -26,6 +28,9 @@ impl ClusterTargetsProvider for DynamicTargetsProvider {
         _project_key: Option<&str>,
     ) -> Result<Vec<ResolvedClusterTarget>, ProviderError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.unavailable.load(Ordering::SeqCst) {
+            return crate::test_support::unavailable_scheduler_targets();
+        }
         let mut targets = vec![ResolvedClusterTarget {
             namespace: "nativelink".to_string(),
             service: "scheduler".to_string(),
@@ -58,20 +63,13 @@ impl ClusterTargetsProvider for DynamicTargetsProvider {
 }
 
 #[tokio::test]
-#[ignore = "requires live dev cluster"]
+#[ignore = "requires a live cluster (DF_LIVE_* variables, see README)"]
 async fn test_reconciliation_live_cluster() {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let client = Client::try_default().await.expect("cluster connection");
-    let live = crate::test_support::live_config();
-    let config = ProvisioningConfig {
-        sandbox: df_core::SandboxProvisioningConfig {
-            runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
-            ..live.sandbox.clone()
-        },
-        ..live
-    };
+    let config = crate::test_support::live_config(&client).await;
 
     let dynamic_targets = Arc::new(DynamicTargetsProvider::default());
 
@@ -158,18 +156,18 @@ async fn test_reconciliation_live_cluster() {
 /// within one resync period (30 s). Runs `run_policy_reconcile_loop` as in `serve`, with
 /// leadership forced (no Lease involved).
 ///
-/// Changes in the cluster (all in `dark-factory-dev-sandboxes`): a PVC `task-df-889`, a
+/// Changes in the cluster (all in the sandbox namespace): a PVC `task-df-889`, a
 /// `Pod` and a `NetworkPolicy` named `run-df-889-1`. It edits the
 /// policy once by hand. Everything is removed again at the end, also if an assertion failed.
 /// Run with: `cargo test -p df-k8s --lib policy_loop_live -- --ignored --nocapture`
 #[tokio::test]
-#[ignore = "requires dev cluster"]
+#[ignore = "requires a live cluster (DF_LIVE_* variables, see README)"]
 async fn policy_loop_live_reverts_manual_edit_and_adds_new_target() {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let client = Client::try_default().await.expect("cluster connection");
-    let config = crate::test_support::live_config();
+    let config = crate::test_support::live_config(&client).await;
     let targets = Arc::new(DynamicTargetsProvider::default());
     let (pod_store, _) = reflector::store();
     let provider =
@@ -882,6 +880,48 @@ async fn notifications_within_the_debounce_window_share_one_pass() {
     shutdown_tx.send(true).unwrap();
     loop_handle.await.unwrap();
     responder.await.unwrap();
+}
+
+/// One reconcile pass over the run pod `run-df-1-1`; returns the count and the policy patches.
+async fn reconcile_pass(
+    targets: &DynamicTargetsProvider,
+) -> (Result<usize, ProviderError>, Vec<serde_json::Value>) {
+    let (mock_service, handle) = tower_test::mock::pair();
+    let responder = spawn_api_responder(handle, vec![("run-df-1-1", None)]);
+    let client = Client::new(mock_service, "default");
+    let count = reconcile_active_runs(&client, &test_config(), targets).await;
+    drop(client);
+    (count, responder.await.unwrap())
+}
+
+#[tokio::test]
+async fn unavailable_targets_keep_the_policy_and_warn_until_they_resolve_again() {
+    let targets = DynamicTargetsProvider::default();
+    targets.unavailable.store(true, Ordering::SeqCst);
+
+    let (logs, guard) = df_telemetry::testing::capture("warn");
+    let (count, patches) = reconcile_pass(&targets).await;
+    drop(guard);
+    assert_eq!(count.unwrap(), 0);
+    assert!(
+        patches.is_empty(),
+        "the current policy must be kept: {patches:?}"
+    );
+    let captured = logs.text();
+    assert!(
+        captured.contains("WARN") && captured.contains("nativelink/scheduler"),
+        "a warning names the unavailable target: {captured}"
+    );
+
+    targets.unavailable.store(false, Ordering::SeqCst);
+    let (count, patches) = reconcile_pass(&targets).await;
+    assert_eq!(count.unwrap(), 1);
+    assert_eq!(patches.len(), 1);
+    let egress = patches[0]["spec"]["egress"].to_string();
+    assert!(
+        egress.contains("nativelink") && egress.contains("50051"),
+        "the policy is rendered with the resolved target: {egress}"
+    );
 }
 
 #[tokio::test]

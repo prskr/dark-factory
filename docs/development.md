@@ -73,6 +73,8 @@ cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p git
 
 With direnv, `cargo` and `rustc` on `PATH` are the Bazel-managed wrappers from `.bazel_env/bin`, which only have the host's standard library. Build the plugins with rustup's toolchain instead, as `just plugins` does: `RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin`.
 
+The `#[ignore]` tests of `df-k8s` need a cluster with a Dark Factory release and the `DF_LIVE_*` variables (`DF_LIVE_RUNTIME_IMAGE` is required); see "Live cluster tests" in `crates/df-k8s/README.md`, which includes a command for the kind cluster of `just e2e-local`.
+
 ## 4. Updating `sqlx` Offline Metadata
 
 All compile-time checked queries in `df-db` have their metadata checked into `.sqlx/` so the workspace builds without a live database (e.g. in Bazel and CI).

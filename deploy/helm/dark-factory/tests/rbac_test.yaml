@@ -95,6 +95,24 @@ tests:
           value: ["dark-factory-sandboxes"]
         documentIndex: 10
 
+  - it: grants read and watch on events in the sandbox namespace
+    template: rbac.yaml
+    asserts:
+      - isKind:
+          of: Role
+        documentIndex: 2
+      - equal:
+          path: metadata.namespace
+          value: dark-factory-sandboxes
+        documentIndex: 2
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["events"]
+            verbs: ["get", "list", "watch"]
+        documentIndex: 2
+
   - it: renders a namespace- and release-prefixed ClusterRole when clusterTargets.anyNamespace is true
     template: rbac.yaml
     release:

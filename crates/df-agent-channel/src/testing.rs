@@ -493,6 +493,26 @@ impl Env {
         }
     }
 
+    /// Creates task `DF-2` in the seeded project, for the persona.
+    pub async fn second_task(&self) -> TaskId {
+        let (task, _) = create_task(
+            &self.ctx.pool,
+            NewTask {
+                project_id: self.project_id,
+                persona_id: self.persona_id,
+                title: Some("Second".into()),
+                description: String::new(),
+                issue_number: None,
+                created_by: df_core::Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
+            },
+        )
+        .await
+        .expect("create a second task");
+        task.id
+    }
+
     /// Creates a run for the task in `state` with pod IP `127.0.0.1`.
     pub async fn insert_run(&self, task_id: TaskId, number: i64, state: &str) -> RunId {
         let run_id = RunId::new();

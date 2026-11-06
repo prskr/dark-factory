@@ -706,7 +706,7 @@
           "FILE:@@//crates/df-db/Cargo.toml 3f3536537c876588c69c0ff1c83a83fc6045a0258e275f493871b82f6f258b80",
           "FILE:@@//crates/df-gateway/Cargo.toml a3f6bf99ab1e686c70746d2fd363ac7b4f3eb7463a490e7e9df832d4922cf10d",
           "FILE:@@//crates/df-harness/Cargo.toml adc2629bbae41db40ce7b15e447310b2bca65f52c8c8ca8bf108a813736c38ab",
-          "FILE:@@//crates/df-k8s/Cargo.toml 4aa38a02da680aad5bb6f89d664236d7804ec121ac43e07ad592f67c79a1c4cc",
+          "FILE:@@//crates/df-k8s/Cargo.toml e642a6e4b24556241ce9929b9f162a3b755419884fed5afabb968a80e2f3e3b5",
           "FILE:@@//crates/df-plugins/Cargo.toml 7c39199b3896700e01c5b67daaa94792b9d9aff155a6c9c8652f7df63a10cea2",
           "FILE:@@//crates/df-proto/Cargo.toml cc19fc9825e77fac413be79103ef4a16ea1a1fcd3edfbae92c1a02046d8f35e2",
           "FILE:@@//crates/df-telemetry/Cargo.toml 16866e9a1f043613801199bb1188042c86e5ce9622b26981a72c068891bea1f4",

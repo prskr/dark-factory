@@ -82,6 +82,10 @@ pub enum ProviderError {
     /// The run is retried later and the attempt does not count as a resume.
     #[error("provider capacity exhausted: {0}")]
     Capacity(String),
+    /// The provider can't create the sandbox right now (for example a cluster target is
+    /// temporarily unresolvable); retry, the run is fine.
+    #[error("sandbox temporarily unavailable: {0}")]
+    Unavailable(String),
     #[error("kubernetes / provider failure: {0}")]
     Backend(String),
 }

@@ -11,7 +11,7 @@ use df_core::ids::RunId;
 use df_core::seams::{PeerIdentity, ProviderError, RunSandboxSpec, SandboxEvent, SandboxProvider};
 use futures::stream::{BoxStream, Stream};
 use futures::{StreamExt as _, future};
-use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Service, ServicePort};
+use k8s_openapi::api::core::v1::{Event, PersistentVolumeClaim, Pod, Service, ServicePort};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -32,12 +32,18 @@ use crate::render::{
     RenderError, ResolvedClusterTarget, render_network_policy, render_pod, render_pvc,
 };
 
+mod pull_events;
+
+pub use pull_events::map_image_pull_event;
+
 /// Trait providing resolved cluster targets for sandbox provisioning.
 ///
-/// An `Err` means the targets could not be determined at all (for example the allowlist cannot
-/// be read): provisioning fails and reconciliation keeps the run's existing policy. Individual
-/// targets that cannot be resolved are not an error; the implementation skips them or reuses
-/// their last good resolution (see [`ClusterTargetResolver`]), so the list may be partial.
+/// An `Err` means the targets could not be determined (for example the allowlist cannot be read,
+/// or a target is temporarily unresolvable and has no earlier resolution:
+/// [`ProviderError::Unavailable`]): provisioning fails and reconciliation keeps the run's
+/// existing policy. A target that no longer resolves for good is not an error; the
+/// implementation drops it, or reuses its last good resolution after a transient error (see
+/// [`ClusterTargetResolver`]).
 #[async_trait]
 pub trait ClusterTargetsProvider: Send + Sync {
     async fn get_targets(
@@ -294,6 +300,35 @@ pub struct ClusterServiceRef {
     pub allow_dns: bool,
 }
 
+/// The result of [`ClusterTargetResolver::resolve`].
+#[derive(Debug, Clone, Default)]
+pub struct ClusterTargetResolution {
+    /// The resolved targets, including rules kept at their last good resolution.
+    pub targets: Vec<ResolvedClusterTarget>,
+    /// Rules that failed transiently and have no cached resolution: the target list lacks them
+    /// for now, but they may resolve on the next attempt.
+    pub unavailable: Vec<ClusterServiceRef>,
+}
+
+impl ClusterTargetResolution {
+    /// The resolved targets, or [`ProviderError::Unavailable`] naming each unavailable rule as
+    /// `<namespace>/<service>` (see [`ClusterTargetsProvider`]).
+    pub fn into_targets(self) -> Result<Vec<ResolvedClusterTarget>, ProviderError> {
+        if self.unavailable.is_empty() {
+            return Ok(self.targets);
+        }
+        let names = self
+            .unavailable
+            .iter()
+            .map(|rule| format!("{}/{}", rule.namespace, rule.service))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(ProviderError::Unavailable(format!(
+            "cluster target(s) temporarily unresolvable: {names}"
+        )))
+    }
+}
+
 /// Resolves allowlist rules against the cluster, one rule at a time.
 ///
 /// A rule that cannot be resolved never blocks the others:
@@ -302,7 +337,8 @@ pub struct ClusterServiceRef {
 /// - on a permanent error ([`ResolveError::Permanent`], e.g. the Service was deleted) the cached
 ///   resolution is evicted and the rule is skipped with a warning naming it, so stale access is
 ///   not kept;
-/// - without a cached resolution a failing rule is skipped (fail closed).
+/// - on a transient error without a cached resolution the rule is skipped (fail closed) and
+///   reported in [`ClusterTargetResolution::unavailable`].
 ///
 /// The cache is kept per scope (the project key of the call; per-project calls pass different
 /// rule sets) and pruned to the rules of the latest call of that scope, so a removed rule that
@@ -332,9 +368,10 @@ impl ClusterTargetResolver {
         &self,
         scope: Option<&str>,
         rules: &[ClusterServiceRef],
-    ) -> Vec<ResolvedClusterTarget> {
+    ) -> ClusterTargetResolution {
         let scope = scope.map(str::to_string);
         let mut targets = Vec::with_capacity(rules.len());
+        let mut unavailable = Vec::new();
         for rule in rules {
             let resolved = resolve_cluster_target(
                 &self.client,
@@ -355,15 +392,15 @@ impl ClusterTargetResolver {
                     scoped.insert(rule.clone(), target.clone());
                     targets.push(target);
                 }
-                Err(err @ ResolveError::Transient(_)) => match scoped.get(rule) {
-                    Some(previous) => {
+                Err(err @ ResolveError::Transient(_)) => {
+                    if let Some(previous) = scoped.get(rule) {
                         warn!(error = %err, namespace = %rule.namespace, service = %rule.service, "cannot resolve allowlist rule; using its last good resolution");
                         targets.push(previous.clone());
+                    } else {
+                        warn!(error = %err, namespace = %rule.namespace, service = %rule.service, "cannot resolve allowlist rule and it has no earlier resolution");
+                        unavailable.push(rule.clone());
                     }
-                    None => {
-                        warn!(error = %err, namespace = %rule.namespace, service = %rule.service, "cannot resolve allowlist rule; skipping it");
-                    }
-                },
+                }
                 Err(err @ ResolveError::Permanent(_)) => {
                     scoped.remove(rule);
                     warn!(error = %err, namespace = %rule.namespace, service = %rule.service, "allowlist rule no longer resolves; dropping it from the policy");
@@ -378,7 +415,10 @@ impl ClusterTargetResolver {
             .entry(scope)
             .or_default()
             .retain(|rule, _| rules.contains(rule));
-        targets
+        ClusterTargetResolution {
+            targets,
+            unavailable,
+        }
     }
 }
 
@@ -536,9 +576,10 @@ impl K8sSandboxProvider {
         }
     }
 
-    /// Starts the sandbox provider, spawning the pod reflector with backoff.
+    /// Starts the sandbox provider: a pod reflector and a watcher on the pods' core v1 Events
+    /// (image pull failures, design D3), both with backoff.
     ///
-    /// The returned future drives the reflectors and the event translation; the caller owns it
+    /// The returned future drives both watchers and the event translation; the caller owns it
     /// and must run it for the provider to see changes.
     pub fn start(
         client: Client,
@@ -546,7 +587,7 @@ impl K8sSandboxProvider {
         targets_provider: Arc<dyn ClusterTargetsProvider>,
     ) -> (
         Arc<Self>,
-        std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+        std::pin::Pin<Box<dyn Future<Output = ()> + Send>>,
     ) {
         let selector = format!("dark-factory.io/instance={}", config.instance_name);
 
@@ -555,13 +596,29 @@ impl K8sSandboxProvider {
         let pod_watcher =
             watcher(pod_api, watcher::Config::default().labels(&selector)).default_backoff();
         let pod_reflector = reflector::reflector(pod_writer, pod_watcher);
+        let event_api: Api<Event> = Api::namespaced(client.clone(), &config.sandbox.namespace);
+        let event_watcher = watcher(
+            event_api,
+            watcher::Config::default().fields("involvedObject.kind=Pod"),
+        )
+        .default_backoff()
+        .applied_objects();
 
+        let namespace = config.sandbox.namespace.clone();
         let provider = Arc::new(Self::new(client, config, targets_provider, pod_store));
 
         let prov_for_events = provider.clone();
-        let watcher_task = Box::pin(forward_events(pod_reflector.boxed(), move |event| {
-            prov_for_events.emit_event(event);
-        }));
+        let watcher_task = Box::pin(async move {
+            let pod_store = prov_for_events.pod_store.clone();
+            forward_events(
+                pod_reflector.boxed(),
+                event_watcher.boxed(),
+                &pod_store,
+                &namespace,
+                |event| prov_for_events.emit_event(event),
+            )
+            .await;
+        });
 
         (provider, watcher_task)
     }
@@ -808,7 +865,8 @@ fn is_quota_rejection(err: &kube::Error) -> bool {
 /// A relist (`Init` .. `InitDone`) never sends `Delete`: runs whose pod vanished while
 /// the watch was down are only noticed by comparing what was known with what the relist
 /// returned. Only objects seen by this process are known; after a control plane restart nothing
-/// is known, and a run whose pod disappeared meanwhile ends through the scheduler's timeouts.
+/// is known; a run whose pod disappeared meanwhile is ended by the scheduler's startup sweep
+/// (`Scheduler::sweep_lost_sandboxes` in `df-agent-channel`).
 #[derive(Default)]
 struct EventTracker {
     started: HashSet<RunId>,
@@ -844,6 +902,12 @@ impl EventTracker {
                 })
             })
             .collect()
+    }
+
+    /// Maps a core v1 Event of the stored `pod` with [`map_image_pull_event`]; a run already
+    /// reported `Gone` (for example through its container status) is not reported again.
+    fn image_pull_event(&mut self, event: &Event, pod: Option<&Pod>) -> Option<SandboxEvent> {
+        map_image_pull_event(event, pod).and_then(|event| self.dedupe(event))
     }
 
     fn pod_event(&mut self, event: watcher::Event<Pod>) -> Vec<SandboxEvent> {
@@ -887,17 +951,53 @@ impl EventTracker {
     }
 }
 
-/// Consumes the pod watch stream until it ends and calls `emit` for every resulting event.
-/// Stream errors are logged; the stream retries with backoff on its own.
-async fn forward_events<P>(mut pods: P, emit: impl Fn(SandboxEvent))
-where
+/// An item of one of the two watch streams [`forward_events`] consumes (boxed: both are large).
+enum Watched {
+    Pod(Box<Result<watcher::Event<Pod>, watcher::Error>>),
+    Event(Box<Result<Event, watcher::Error>>),
+}
+
+/// Consumes the pod watch stream and the stream of the pods' core v1 Events until both end, and
+/// calls `emit` for every resulting event. Both go through one [`EventTracker`], so a run is
+/// reported `Gone` once, whichever stream reports it first.
+///
+/// An Event is matched to its pod by name in `pod_store` (the pods of `namespace`), which the
+/// pod reflector keeps current; Events of pods not in the store are ignored. Stream errors are
+/// logged; the streams retry with backoff on their own.
+async fn forward_events<P, E>(
+    pods: P,
+    pod_events: E,
+    pod_store: &Store<Pod>,
+    namespace: &str,
+    emit: impl Fn(SandboxEvent),
+) where
     P: Stream<Item = Result<watcher::Event<Pod>, watcher::Error>> + Unpin,
+    E: Stream<Item = Result<Event, watcher::Error>> + Unpin,
 {
     let mut tracker = EventTracker::default();
-    while let Some(res) = pods.next().await {
-        match res {
-            Ok(event) => tracker.pod_event(event).into_iter().for_each(&emit),
-            Err(err) => warn!(error = %err, "pod reflector error"),
+    let mut watched = futures::stream::select(
+        pods.map(|item| Watched::Pod(Box::new(item))),
+        pod_events.map(|item| Watched::Event(Box::new(item))),
+    );
+    while let Some(item) = watched.next().await {
+        match item {
+            Watched::Pod(item) => match *item {
+                Ok(event) => tracker.pod_event(event).into_iter().for_each(&emit),
+                Err(err) => warn!(error = %err, "pod reflector error"),
+            },
+            Watched::Event(item) => match *item {
+                Ok(event) => {
+                    let pod =
+                        event.involved_object.name.as_deref().and_then(|name| {
+                            pod_store.get(&ObjectRef::new(name).within(namespace))
+                        });
+                    tracker
+                        .image_pull_event(&event, pod.as_deref())
+                        .into_iter()
+                        .for_each(&emit);
+                }
+                Err(err) => warn!(error = %err, "pod event watcher error"),
+            },
         }
     }
 }

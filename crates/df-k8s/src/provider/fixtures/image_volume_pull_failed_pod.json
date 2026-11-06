@@ -1,0 +1,41 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "slr-pull-fail",
+    "namespace": "dark-factory-sandboxes",
+    "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+  },
+  "status": {
+    "phase": "Pending",
+    "containerStatuses": [
+      {
+        "image": "ghcr.io/prskr/dark-factory/runtime:e2e",
+        "imageID": "",
+        "lastState": {},
+        "name": "runtime",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "waiting": {
+            "message": "rpc error: code = NotFound desc = failed to pull and unpack image \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\": failed to resolve reference \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\": ghcr.io/prskr/dark-factory/claude-harness:does-not-exist: not found",
+            "reason": "ErrImagePull"
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/opt/harness/claude-code",
+            "name": "harness-claude-code"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-t7xmz",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ]
+  }
+}

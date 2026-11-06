@@ -8,7 +8,7 @@ Current state in code:
 
 - `ClusterTargetResolver::resolve` (`crates/df-k8s/src/provider.rs`) keeps a per-process "last good" cache per scope. A transient lookup error without a cached entry skips the rule with a warning. Both `K8sSandboxProvider::provision` and the leader's `render_run_policy` (`crates/df-k8s/src/reconcile.rs`) get targets through `ClusterTargetsProvider::get_targets` (`crates/dark-factory/src/sandbox.rs`). On an `Err`, reconcile already skips the run and keeps its policy.
 - `Scheduler::provision_or_fail` (`crates/df-agent-channel/src/scheduler.rs`) ends the run `provisioning_failed` on any provider error. `reprovision_stale` provisions runs again that stay `pending`/`provisioning` for more than 60 s, every 5 s tick, unless `sandbox_exists`.
-- `map_pod_event` maps container `waiting` reasons (`ErrImagePull`, `ImagePullBackOff`, `CreateContainerConfigError`) to `Gone`. A failed image volume pull leaves the pod `Pending` with containers in `ContainerCreating`, so nothing fires.
+- `map_pod_event` maps container `waiting` reasons (`ErrImagePull`, `ImagePullBackOff`, `CreateContainerConfigError`) to `Gone`. TD-31 assumed that a failed image volume pull leaves the containers in `ContainerCreating`. Task 1.1 disproved this on kind (containerd, Kubernetes 1.36.1 and 1.37.0): the pod stays `Pending` and the container's `waiting.reason` is `ErrImagePull`, with the image reference in the message. The container-status check already ends such a run.
 - `EventTracker` reports a vanished pod only if this process saw it before. After a restart, a pod deleted while no replica ran is never reported. The scheduler runs on every replica; reconcile runs on the leader only.
 
 ## Goals / Non-Goals
@@ -41,9 +41,13 @@ Alternative: end the run `provisioning_failed` and requeue like `capacity`. Reje
 
 Ceiling: a stuck run costs one `sandbox_exists` list plus up to two lookups per rule every 5 s. Code gets a `ponytail:` comment naming it.
 
-### D3: Image volume pull failures come from pod Events
+### D3: Image volume pull failures also come from pod Events
 
-The provider starts a second watcher on core `v1` `Event`s in the sandbox namespace, field selector `involvedObject.kind=Pod`. An event whose reason and message say an image pull failed (kubelet: reason `Failed`, message `Failed to pull image "<ref>": …`; the exact strings are confirmed in task 1.1 on a cluster before the matcher is written) is mapped to the run through the pod's `dark-factory.io/run-id` label in the existing pod store, and fed into `EventTracker` as `Gone { reason: "image pull failed: <ref>: <message>" }`. Events of pods not in the store are ignored, and so are events of a pod whose phase is no longer `Pending`: Kubernetes keeps Events for an hour, and a watcher start or relist lists them again, so a pod that started after a failed pull attempt must not end as `sandbox_lost`. `EventTracker::dedupe` already drops a second `Gone`.
+On containerd with Kubernetes 1.36 and 1.37 the container status already reports the failed pull (Context). The Event watcher is defense in depth for runtimes that report it only as an Event. The project decided to keep it despite the extra RBAC.
+
+The provider starts a second watcher on core `v1` `Event`s in the sandbox namespace, field selector `involvedObject.kind=Pod`. An event whose reason and message say an image pull failed is mapped to the run through the pod's `dark-factory.io/run-id` label in the existing pod store, and fed into `EventTracker` as `Gone { reason: "image pull failed: <ref>: <message>" }`. Events of pods not in the store are ignored, and so are events of a pod whose phase is no longer `Pending`: Kubernetes keeps Events for an hour, and a watcher start or relist lists them again, so a pod that started after a failed pull attempt must not end as `sandbox_lost`. `EventTracker::dedupe` already drops a second `Gone`.
+
+Recorded pattern (task 1.1, fixture `crates/df-k8s/src/provider/fixtures/image_volume_pull_failed_events.json`): `type: Warning`, `reason: Failed`, `source.component: kubelet`, message `Failed to pull image "<ref>": <runtime error>`. The same pull also produces `Failed` events with messages `Error: ErrImagePull` and `Error: ImagePullBackOff`; they name no image and are ignored. Only the message prefix `Failed to pull image "` matches, and the image is the quoted reference after it. `<message>` in the `Gone` reason is the runtime error after `"<ref>": `. An event whose `involvedObject.uid` differs from the stored pod's UID belongs to an earlier pod with the same name and is ignored (`map_image_pull_event` in `provider/pull_events.rs`).
 
 This also covers the project image, but `map_pod_event` keeps its container-status check: whichever comes first wins.
 
@@ -55,7 +59,7 @@ Alternatives:
 
 ### D4: The scheduler sweeps runs with a sandbox once at startup
 
-When `Scheduler::run` starts, it spawns one task into its existing `provisions` `JoinSet`: list the non-terminal runs in `connecting` or later (a sandbox was reported), call `sandbox_exists` for each, and `finish_run` with `sandbox_lost` (`"sandbox pod no longer present after a control plane restart"`) when it returns `false`. The reason names no pod: the scheduler sees the provider only through `SandboxProvider`, and the run id already identifies the pod (label `dark-factory.io/run-id`). Errors are logged per run; the run then ends through the usual timeouts.
+When `Scheduler::run` starts, it spawns one task into its existing `background` `JoinSet`: list the non-terminal runs in `connecting` or later (a sandbox was reported), call `sandbox_exists` for each, and `finish_run` with `sandbox_lost` (`"sandbox pod no longer present after a control plane restart"`) when it returns `false`. The reason names no pod: the scheduler sees the provider only through `SandboxProvider`, and the run id already identifies the pod (label `dark-factory.io/run-id`). Errors are logged per run; the run then ends through the usual timeouts.
 
 Every replica sweeps; `finish_run` is guarded by the run state, so two replicas ending the same run is harmless. Runs in `pending`/`provisioning` are left to `reprovision_stale`.
 
@@ -68,6 +72,7 @@ Alternatives:
 The live tests stay `#[ignore]` and need a cluster: the dev cluster, or the kind cluster of `just e2e-local` (`deploy/e2e/kind.yaml`; kindnet enforces `NetworkPolicy`).
 
 - TD-36: `test_support::live_config` reads the runtime image from `DF_LIVE_RUNTIME_IMAGE` and fails with a message naming the variable when it is unset; `alpine` goes away. The provider live test asserts a `Started` event with a pod IP.
+  - Further settings: `DF_LIVE_INSTANCE_NAMESPACE` (default `dark-factory-dev`), `DF_LIVE_STORAGE_CLASS` (default `longhorn`, empty = cluster default), `DF_LIVE_RUNTIME_CLASS` (default `kata`, empty = none). The cluster IPs of the `dark-factory-control-plane` and `dark-factory-gateway` Services in the instance namespace are looked up.
 - TD-41: a live test creates a target Service with one pod and a second, non-target Service, provisions the run's policy with only the first as target, and starts a pod with the run's labels whose command connects to both ClusterIPs (`nc -z -w 3`) and exits with a code encoding both results. The test reads the pod's exit code; no `exec` support is needed.
 - TD-59: a manual check from a pod in the sandbox namespace: `openssl s_client -proxy <gateway>:3128 -connect <allowlisted host>:443 -servername <other name>`. The tunnel must close before the destination is contacted and the traffic page must show `sni-mismatch`. The result is recorded in tasks.md.
 
