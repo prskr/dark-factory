@@ -127,6 +127,7 @@ pub(crate) fn from_feedback(f: prs::Feedback) -> df_core::Feedback {
                 body: r.body,
                 url: r.url,
                 submitted_at: r.submitted_at,
+                updated_at: r.updated_at,
             })
             .collect(),
         threads: f

@@ -297,7 +297,85 @@ fn epoch_deadline(timeout: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use wit_parser::{Resolve, WorldId, WorldItem, WorldKey};
+
     use super::*;
+
+    /// `contract/wit/integrations`: Bazel passes `WIT_INTEGRATIONS_FILE` (a file in it), cargo
+    /// finds it relative to the crate.
+    fn wit_dir() -> PathBuf {
+        match std::env::var_os("WIT_INTEGRATIONS_FILE") {
+            Some(file) => PathBuf::from(file)
+                .parent()
+                .expect("a file in the WIT directory")
+                .to_path_buf(),
+            None => {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contract/wit/integrations")
+            }
+        }
+    }
+
+    /// Every interface imported by `world`, including those pulled in by `use`, as
+    /// `namespace:package/interface` without version; a named interface import
+    /// (`import name: interface { … }`) is its plain name. Functions and types are skipped.
+    fn interface_imports(resolve: &Resolve, world: WorldId) -> Vec<String> {
+        let mut imports = Vec::new();
+        for (key, item) in &resolve.worlds[world].imports {
+            if !matches!(item, WorldItem::Interface { .. }) {
+                continue;
+            }
+            let name = match key {
+                WorldKey::Name(name) => name.clone(),
+                WorldKey::Interface(id) => {
+                    let name = resolve
+                        .id_of(*id)
+                        .expect("an imported interface has a name");
+                    name.split('@').next().unwrap_or(&name).to_string()
+                }
+            };
+            imports.push(name);
+        }
+        imports
+    }
+
+    fn plugin_base_imports() -> anyhow::Result<Vec<String>> {
+        let mut resolve = Resolve::default();
+        let (package, _sources) = resolve.push_dir(wit_dir())?;
+        let world = resolve.select_world(&[package], Some("plugin-base"))?;
+        Ok(interface_imports(&resolve, world))
+    }
+
+    #[test]
+    fn named_interface_imports_are_listed_by_their_plain_name() -> anyhow::Result<()> {
+        let mut resolve = Resolve::default();
+        let package = resolve.push_str(
+            "test.wit",
+            "package test:imports;\nworld w {\n  import inline: interface { ping: func(); }\n  import some-func: func();\n}\n",
+        )?;
+        let world = resolve.select_world(&[package], Some("w"))?;
+        assert_eq!(interface_imports(&resolve, world), ["inline"]);
+        Ok(())
+    }
+
+    #[test]
+    fn every_import_of_world_plugin_base_is_allowed() -> anyhow::Result<()> {
+        let imports = plugin_base_imports()?;
+        assert!(
+            imports.len() > 10,
+            "world plugin-base not resolved: {imports:?}"
+        );
+        let missing: Vec<_> = imports
+            .iter()
+            .filter(|name| !ALLOWED_IMPORTS.contains(&name.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "add to ALLOWED_IMPORTS in host.rs: {missing:?}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn epoch_deadline_saturates_instead_of_overflowing() {

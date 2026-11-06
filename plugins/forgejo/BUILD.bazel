@@ -21,7 +21,7 @@ rust_library(
     edition = "2024",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + ["//plugins/forge-common:forge_common"],
 )
 
 rust_shared_library(
@@ -34,7 +34,7 @@ rust_shared_library(
     lint_config = ":lints",
     platform = "//build/platforms:wasm32_wasip2",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + ["//plugins/forge-common:forge_common"],
 )
 
 rust_test(

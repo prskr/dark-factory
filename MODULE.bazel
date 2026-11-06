@@ -184,6 +184,7 @@ crate.from_cargo(
         "//crates/df-web:Cargo.toml",
         "//crates/factory-agent:Cargo.toml",
         "//crates/fake-acp-agent:Cargo.toml",
+        "//plugins/forge-common:Cargo.toml",
         "//plugins/forgejo:Cargo.toml",
         "//plugins/github:Cargo.toml",
         "//plugins/test-probe:Cargo.toml",

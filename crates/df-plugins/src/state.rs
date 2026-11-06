@@ -30,6 +30,10 @@ const WRITE_BUDGET: usize = 8192;
 /// newline.
 const MAX_LINE: usize = 4096;
 
+/// Same as `forge_common::log::WARNING_PREFIX`: what a forge plugin writes before a warning.
+/// df-plugins does not depend on the plugins' crate, so the value is repeated.
+const WARNING_PREFIX: &str = "warning: ";
+
 pub(crate) struct State {
     wasi: WasiCtx,
     table: ResourceTable,
@@ -217,9 +221,16 @@ impl LineLog {
         }
     }
 
-    // Plugin output is untrusted: it goes into a field, never into the message.
+    // Plugin output is untrusted: it goes into a field, never into the message. A line with the
+    // prefix of `forge_common::log::StderrLog` is a warning for the operator.
     fn log(&self, line: &[u8]) {
-        tracing::info!(plugin = %self.plugin, line = %String::from_utf8_lossy(line).trim_end(), "plugin stderr");
+        let line = String::from_utf8_lossy(line);
+        let line = line.trim_end();
+        if line.starts_with(WARNING_PREFIX) {
+            tracing::warn!(plugin = %self.plugin, line = %line, "plugin stderr");
+        } else {
+            tracing::info!(plugin = %self.plugin, line = %line, "plugin stderr");
+        }
     }
 }
 
@@ -265,6 +276,32 @@ impl AsyncWrite for LineLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn logged(lines: &[u8]) -> serde_json::Value {
+        let (captured, _guard) = df_telemetry::testing::capture("info");
+        LineLog::new("forgejo").push(lines);
+        let text = captured.text();
+        let first = text.lines().next().expect("a log line");
+        serde_json::from_str(first).expect("json log line")
+    }
+
+    #[test]
+    fn a_stderr_line_with_the_warning_prefix_is_logged_at_warn() {
+        let event = logged(b"warning: cannot read the repository permission of alice\n");
+        assert_eq!(event["level"], "WARN");
+        assert_eq!(event["fields"]["plugin"], "forgejo");
+        assert_eq!(
+            event["fields"]["line"],
+            "warning: cannot read the repository permission of alice"
+        );
+        assert_eq!(event["fields"]["message"], "plugin stderr");
+    }
+
+    #[test]
+    fn other_stderr_lines_are_logged_at_info() {
+        let event = logged(b"just some output\n");
+        assert_eq!(event["level"], "INFO");
+    }
 
     #[test]
     fn output_without_newline_stays_bounded() {

@@ -16,7 +16,7 @@ pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 pub(super) struct Fake {
     responses: RefCell<VecDeque<Response>>,
     pub(super) requests: RefCell<Vec<Request>>,
-    warnings: RefCell<Vec<String>>,
+    pub(super) warnings: RefCell<Vec<String>>,
 }
 
 impl Log for &Fake {
@@ -371,11 +371,11 @@ fn non_success_status_is_upstream_with_githubs_message() {
 }
 
 #[test]
-fn bad_token_is_unauthorized() {
+fn an_unauthorized_error_names_the_request_and_githubs_message() {
     let fake = fake(vec![reply(401, json!({"message": "Bad credentials"}))]);
     let err = github(&fake, &[]).get(&pr_ref()).unwrap_err();
     assert!(
-        matches!(&err, Error::Unauthorized(m) if m == "Bad credentials"),
+        matches!(&err, Error::Unauthorized(m) if m == "GET /repos/o/r/pulls/7: Bad credentials"),
         "{err:?}"
     );
 }
@@ -1029,4 +1029,17 @@ fn graphql_not_found_is_not_found() {
         .update(&pr_ref(), &changes(None, None, Some(false)))
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)), "{err:?}");
+}
+
+#[test]
+fn an_unauthorized_graphql_error_names_the_request() {
+    let body = json!({ "errors": [{ "type": "FORBIDDEN", "message": "no access" }] });
+    let fake = fake(vec![reply(200, body)]);
+    let err = github(&fake, &[])
+        .list_feedback(&pr_ref(), None)
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Unauthorized(m) if m == "POST /graphql: no access"),
+        "{err:?}"
+    );
 }

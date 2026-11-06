@@ -14,9 +14,9 @@ use crate::exports::darkfactory::integrations::pull_requests::{
     Author, AuthorRole, Feedback, PostedComment, PrComment, Review, ReviewComment, ReviewThread,
     ReviewVerdict,
 };
-use crate::timestamp::{self, touched_since};
+use forge_common::timestamp::{self, touched_since};
 
-use super::{Clock, GitHub, Log, Method, QUERY_VALUE, Transport, repo_path};
+use super::{Clock, Failure, GitHub, Log, Method, QUERY_VALUE, Transport, repo_path};
 
 /// Pending reviews are left out; only their author could see them.
 const FEEDBACK_QUERY: &str = r"query($owner: String!, $name: String!, $number: Int!) {
@@ -232,12 +232,30 @@ impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
             repo_path(self.repo),
             utf8_percent_encode(login, QUERY_VALUE)
         );
-        let role = match self.github.rest::<ApiPermission>(Method::Get, &path, None) {
+        let role = match self
+            .github
+            .rest_with_status::<ApiPermission>(Method::Get, &path, None)
+        {
             // `maintain` is reported as `write`.
             Ok(p) if matches!(p.permission.as_str(), "admin" | "write") => AuthorRole::Member,
             // A deleted account is not found.
-            Ok(_) | Err(Error::NotFound(_)) => AuthorRole::Outside,
-            Err(e) => return Err(e),
+            Ok(_)
+            | Err(Failure {
+                error: Error::NotFound(_),
+                ..
+            }) => AuthorRole::Outside,
+            // The token cannot read the permission (GitHub requires push access for the lookup).
+            // A 401 is an invalid credential and fails the call.
+            Err(Failure {
+                status: Some(403),
+                error: Error::Unauthorized(_),
+            }) => {
+                self.github.log.warn(&format!(
+                    "cannot read the repository permission of {login}: treating {login} as outside"
+                ));
+                AuthorRole::Outside
+            }
+            Err(failure) => return Err(failure.error),
         };
         self.known.insert(key, role);
         Ok(role)
@@ -262,6 +280,7 @@ impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
             body: r.body,
             url: r.url,
             submitted_at: r.submitted_at.unwrap_or_default(),
+            updated_at: r.updated_at,
         })
     }
 

@@ -136,6 +136,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
 | `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Forgejo author role lookup without repository admin: `GET .../collaborators/{login}` needs only read access but answers 404 for the owner and members of the owning organisation, so it needs a Forgejo API change | idea | `openspec/changes/forge-feedback-fixes` (out of scope) |
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/archive/2026-11-03-iter2-continuation-summary` |
 | `push-check` WASI plugins, Git LFS through the proxy, file-type limits | idea | F1, [`design/agent-run.md`](../../design/agent-run.md) §11, `openspec/changes/archive/2026-11-01-iter2-git-proxy` |

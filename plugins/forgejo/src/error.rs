@@ -19,6 +19,16 @@ pub(crate) fn from_status(status: u16, retry_after: Option<u32>, body: &[u8]) ->
     }
 }
 
+/// Names the failed `request` (`GET /api/v1/user`) in a refusal: a 403 for a token that lacks only
+/// the permission for one endpoint is otherwise hard to tell from a bad credential. Other errors
+/// stay as they are.
+pub(crate) fn with_request(error: Error, request: &str) -> Error {
+    match error {
+        Error::Unauthorized(message) => Error::Unauthorized(format!("{request}: {message}")),
+        other => other,
+    }
+}
+
 /// Forgejo reports `{"message": "..."}`; anything else is passed on as (truncated) text.
 fn message(body: &[u8]) -> String {
     #[derive(serde::Deserialize)]

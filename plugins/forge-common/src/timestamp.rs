@@ -1,12 +1,12 @@
-//! RFC 3339 timestamps as comparable instants. Forgejo writes them in the server's time zone, so
-//! strings can't be compared directly.
+//! RFC 3339 timestamps as comparable instants: `since` may carry any offset, and Forgejo writes
+//! timestamps in the server's time zone, so strings can't be compared directly.
 
 /// Seconds and nanoseconds since the Unix epoch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Instant(i64, u32);
+pub struct Instant(i64, u32);
 
 /// Parses `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`; `T` and `Z` may be lowercase.
-pub(crate) fn parse(s: &str) -> Option<Instant> {
+pub fn parse(s: &str) -> Option<Instant> {
     let year = digits(s, 0, 4)?;
     let month = digits(s, 5, 2)?;
     let day = digits(s, 8, 2)?;
@@ -32,7 +32,7 @@ pub(crate) fn parse(s: &str) -> Option<Instant> {
 }
 
 /// Whether one of `timestamps` is at or after `since`; empty and unreadable ones are skipped.
-pub(crate) fn touched_since(timestamps: &[&str], since: Instant) -> bool {
+pub fn touched_since(timestamps: &[&str], since: Instant) -> bool {
     timestamps
         .iter()
         .filter_map(|t| parse(t))

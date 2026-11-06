@@ -58,7 +58,7 @@ sequenceDiagram
 ## Configuration
 
 Reference: [`docs/configuration.md`](docs/configuration.md) (section `plugins` of the instance
-configuration, per-project inputs, Forgejo token scopes).
+configuration, per-project inputs, bot account access and token scopes).
 
 ### Retries
 

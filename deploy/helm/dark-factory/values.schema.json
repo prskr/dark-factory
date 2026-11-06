@@ -446,7 +446,7 @@
       "properties": {
         "image": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/imageRef" }] },
         "path": { "type": "string" },
-        "callTimeoutSeconds": { "type": "integer", "minimum": 1 },
+        "callTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
         "memoryMib": { "type": "integer", "minimum": 1 },
         "settings": { "type": "object", "additionalProperties": { "type": "string" } },
         "hosts": {

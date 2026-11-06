@@ -13,6 +13,8 @@ filegroup(
     srcs = glob(["mcp/*.json"]),
 )
 
+exports_files(["wit/integrations/integrations.wit"])
+
 filegroup(
     name = "wit_integrations",
     srcs = glob(["wit/integrations/**/*.wit"]),

@@ -3,23 +3,20 @@
 use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
-use crate::draft;
 use crate::error;
 use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
 use crate::exports::darkfactory::integrations::pull_requests::{
     NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
+use forge_common::draft;
+use forge_common::http;
+use forge_common::log::Log;
 
 mod feedback;
 
 const PAGE_SIZE: usize = 50;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    Get,
-    Post,
-    Patch,
-}
+pub use forge_common::http::Method;
 
 /// A request relative to the configured `base-url`, e.g. `/api/v1/repos/o/r/pulls`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,15 +39,32 @@ pub trait Transport {
     fn send(&self, request: Request) -> Result<Response, Error>;
 }
 
-pub struct Forgejo<T> {
+/// A failed request: the error and the HTTP status of the response, if there was one.
+struct Failure {
+    status: Option<u16>,
+    error: Error,
+}
+
+impl From<Error> for Failure {
+    fn from(error: Error) -> Self {
+        Self {
+            status: None,
+            error,
+        }
+    }
+}
+
+pub struct Forgejo<T, L> {
     transport: T,
+    log: L,
     prefixes: Vec<String>,
 }
 
-impl<T: Transport> Forgejo<T> {
-    pub fn new(transport: T, prefixes: Vec<String>) -> Self {
+impl<T: Transport, L: Log> Forgejo<T, L> {
+    pub fn new(transport: T, log: L, prefixes: Vec<String>) -> Self {
         Self {
             transport,
+            log,
             prefixes,
         }
     }
@@ -184,20 +198,34 @@ impl<T: Transport> Forgejo<T> {
         path: String,
         body: Option<serde_json::Value>,
     ) -> Result<R, Error> {
+        self.call_with_status(method, path, body)
+            .map_err(|failure| failure.error)
+    }
+
+    /// Like [`Self::call`]; a failure also carries the HTTP status of the response, if any.
+    fn call_with_status<R: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: String,
+        body: Option<serde_json::Value>,
+    ) -> Result<R, Failure> {
         let body = body
             .map(|b| serde_json::to_vec(&b))
             .transpose()
             .map_err(|e| Error::Internal(format!("encoding request: {e}")))?;
+        let request = http::request_line(method, &path);
         let response = self.transport.send(Request { method, path, body })?;
         if !(200..300).contains(&response.status) {
-            return Err(error::from_status(
-                response.status,
-                response.retry_after,
-                &response.body,
-            ));
+            return Err(Failure {
+                status: Some(response.status),
+                error: error::with_request(
+                    error::from_status(response.status, response.retry_after, &response.body),
+                    &request,
+                ),
+            });
         }
-        serde_json::from_slice(&response.body)
-            .map_err(|e| Error::Internal(format!("unexpected Forgejo response: {e}")))
+        Ok(serde_json::from_slice(&response.body)
+            .map_err(|e| Error::Internal(format!("unexpected Forgejo response: {e}")))?)
     }
 
     fn pull_request(&self, repo: RepoRef, pr: ApiPullRequest) -> PullRequest {
@@ -297,6 +325,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
+    use forge_common::log::StderrLog;
 
     /// Replays canned responses and records the requests.
     struct Fake {
@@ -341,8 +370,12 @@ mod tests {
         }
     }
 
-    fn plugin(fake: &Fake) -> Forgejo<&Fake> {
-        Forgejo::new(fake, draft::parse_prefixes(draft::DEFAULT_PREFIXES))
+    fn plugin(fake: &Fake) -> Forgejo<&Fake, StderrLog> {
+        Forgejo::new(
+            fake,
+            StderrLog,
+            draft::parse_prefixes(draft::DEFAULT_PREFIXES),
+        )
     }
 
     fn sent_json(fake: &Fake, index: usize) -> serde_json::Value {

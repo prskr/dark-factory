@@ -14,9 +14,7 @@ wit_bindgen::generate!({
 });
 
 mod api;
-mod draft;
 mod error;
-mod timestamp;
 mod wasi_transport;
 mod webhook;
 
@@ -28,8 +26,10 @@ use exports::darkfactory::integrations::pull_requests::{
     PullRequestUpdate,
 };
 use exports::darkfactory::integrations::webhooks::{Guest as WebhooksGuest, ParsedEvent};
+use forge_common::draft;
 
 pub use api::{Forgejo, Method, Request, Response, Transport};
+pub use forge_common::log::{Log, StderrLog};
 
 pub struct ForgejoPlugin;
 
@@ -95,19 +95,20 @@ impl WebhooksGuest for ForgejoPlugin {
 }
 
 /// Reads configuration through `wasi:config/store` and talks to Forgejo over `wasi:http`.
-fn instance() -> Result<Forgejo<wasi_transport::WasiTransport>, Error> {
+fn instance() -> Result<Forgejo<wasi_transport::WasiTransport, StderrLog>, Error> {
     forgejo(config("base-url")?, config("wip-prefixes")?)
 }
 
 fn forgejo(
     base_url: Option<String>,
     wip_prefixes: Option<String>,
-) -> Result<Forgejo<wasi_transport::WasiTransport>, Error> {
+) -> Result<Forgejo<wasi_transport::WasiTransport, StderrLog>, Error> {
     let base_url =
         base_url.ok_or_else(|| Error::Config("`base-url` is not configured".to_string()))?;
     let prefixes = wip_prefixes.unwrap_or_else(|| draft::DEFAULT_PREFIXES.to_string());
     Ok(Forgejo::new(
         wasi_transport::WasiTransport::new(&base_url)?,
+        StderrLog,
         draft::parse_prefixes(&prefixes),
     ))
 }

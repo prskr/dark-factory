@@ -28,6 +28,7 @@ wasmtime-wasi-http.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 df-core = { workspace = true, features = ["test-util"] }
+df-telemetry = { workspace = true, features = ["test-util"] }
 hex.workspace = true
 jsonschema.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
@@ -35,3 +36,4 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 wiremock.workspace = true
+wit-parser.workspace = true

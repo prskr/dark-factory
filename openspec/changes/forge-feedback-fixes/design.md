@@ -91,7 +91,7 @@ Items the size budget dropped are older than `newest − CURSOR_OVERLAP` in all 
 
 A review's activity is the later of `submitted_at` and `updated_at` (D6). A thread's activity is its newest review comment.
 
-New description text (`contract/mcp/factory-tools.v2.json`), core sentences:
+New description text (`contract/mcp/factory-tools.v2.json`, which has no output schemas, so `next_since` is documented in the description only), core sentences:
 
 > Lists are newest first. The result has next_since: on your next read pass it as since to get only what changed since this read; items from the last few minutes before it can come back, so skip ids you already handled. truncated: true means older items were left out, and later reads with next_since will not return them; open the pull request URL if you need older context. Role outside also covers authors whose role the forge would not tell the bot account.
 

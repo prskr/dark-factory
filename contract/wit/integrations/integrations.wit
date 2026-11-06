@@ -176,6 +176,8 @@ interface pull-requests {
         url: string,
         /// RFC 3339.
         submitted-at: string,
+        /// RFC 3339; later than `submitted-at` when the body was edited.
+        updated-at: string,
     }
 
     record review-comment {

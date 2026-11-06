@@ -1761,6 +1761,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "df-core",
+ "df-telemetry",
  "futures",
  "hex",
  "http",
@@ -1779,6 +1780,7 @@ dependencies = [
  "wasmtime-wasi-config",
  "wasmtime-wasi-http",
  "wiremock",
+ "wit-parser 0.263.0",
 ]
 
 [[package]]
@@ -2460,10 +2462,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
+name = "forge-common"
+version = "0.0.0"
+dependencies = [
+ "wasip2 2.0.1+wasi-0.2.12",
+]
+
+[[package]]
 name = "forgejo-plugin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "forge-common",
  "hex",
  "serde",
  "serde_json",
@@ -2658,7 +2668,7 @@ dependencies = [
  "js-sys",
  "libc",
  "r-efi 5.3.0",
- "wasip2",
+ "wasip2 1.0.4+wasi-0.2.12",
  "wasm-bindgen",
 ]
 
@@ -2703,6 +2713,7 @@ name = "github-plugin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "forge-common",
  "hex",
  "percent-encoding",
  "serde",
@@ -8563,6 +8574,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasip2"
+version = "2.0.1+wasi-0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89aafd4b69fb41a64cfd5d7f214cde92ab422ec4d9bcd55fcc816d3f5f49bbf3"
+dependencies = [
+ "wit-bindgen 0.62.0",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8697,6 +8717,16 @@ dependencies = [
  "bitflags 2.13.2",
  "hashbrown 0.17.1",
  "indexmap 2.14.2",
+ "semver",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.263.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5fa0a054ae153606df820eb0a84213e28cda41bbe04ba2628e71b6ba100fcb"
+dependencies = [
+ "bitflags 2.13.2",
  "semver",
 ]
 
@@ -9359,6 +9389,15 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wit-bindgen"
+version = "0.62.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53cb4b5556c3a791e86838ea287782bdafa704d55b0e68b5b81a3a16b9ea5f4b"
+dependencies = [
+ "bitflags 2.13.2",
+]
+
+[[package]]
+name = "wit-bindgen"
 version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b85a987ab61d365382d25c7d47e26edd48941b3bf6e3fbf76eff918bc71dab06"
@@ -9484,6 +9523,22 @@ dependencies = [
  "serde_json",
  "unicode-ident",
  "wasmparser 0.262.0",
+]
+
+[[package]]
+name = "wit-parser"
+version = "0.263.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "874d6ce9db4261cb66980ab14f3da066b24292497b6f46f988c0d1b9b27913f3"
+dependencies = [
+ "anyhow",
+ "hashbrown 0.17.1",
+ "id-arena",
+ "indexmap 2.14.2",
+ "log",
+ "semver",
+ "unicode-ident",
+ "wasmparser 0.263.0",
 ]
 
 [[package]]

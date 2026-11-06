@@ -1,7 +1,7 @@
 //! Plugin settings from `wasi:config/store`: API endpoints, API version and draft handling.
 
 use crate::darkfactory::integrations::types::Error;
-use crate::draft;
+use forge_common::draft;
 
 /// `X-GitHub-Api-Version` unless `api-version` is set: the current version on github.com.
 /// The REST API description extract (`cargo xtask update-github-spec`) is taken from this version.

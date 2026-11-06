@@ -11,14 +11,19 @@ use crate::exports::darkfactory::integrations::pull_requests::{
     Author, AuthorRole, Feedback, PostedComment, PrComment, Review, ReviewComment, ReviewThread,
     ReviewVerdict,
 };
-use crate::timestamp::{self, touched_since};
+use forge_common::log::Log;
+use forge_common::timestamp::{self, touched_since};
 
-use super::{Forgejo, Method, PAGE_SIZE, Transport, repo_path};
+use super::{Failure, Forgejo, Method, PAGE_SIZE, Transport, repo_path};
 
 /// Pages read per listing before `truncated` is set.
 const MAX_PAGES: usize = 20;
 
-impl<T: Transport> Forgejo<T> {
+/// Forgejo has no per-thread listing and does not move a review's `updated_at` when a comment is
+/// added, so the comments of the newest reviews only are read; older ones set `truncated`.
+const MAX_REVIEWS_WITH_COMMENTS: usize = 20;
+
+impl<T: Transport, L: Log> Forgejo<T, L> {
     pub fn list_feedback(
         &self,
         id: &PullRequestRef,
@@ -41,14 +46,17 @@ impl<T: Transport> Forgejo<T> {
             // Forgejo filters PR comments itself; reviews and threads are filtered below.
             comments_path = format!("{comments_path}?since={}", query_value(raw));
         }
-        let (comments, comments_truncated) = self.pages::<ApiIssueComment>(&comments_path)?;
+        // The endpoint ignores `page` and `limit` and always answers the whole list.
+        let comments: Vec<ApiIssueComment> = self.call(Method::Get, comments_path, None)?;
         let (reviews, reviews_truncated) = self.pages::<ApiReview>(&format!("{pr}/reviews"))?;
         let mut reviews: Vec<_> = reviews
             .into_iter()
             .filter_map(|review| verdict(&review.state).map(|verdict| (review, verdict)))
             .collect();
+        let newest = newest_review_ids(&reviews);
+        let reviews_skipped = reviews.len() > newest.len();
         let mut review_comments = Vec::new();
-        for (review, _) in &reviews {
+        for (review, _) in reviews.iter().filter(|(r, _)| newest.contains(&r.id)) {
             let listed: Vec<ApiReviewComment> = self.call(
                 Method::Get,
                 format!("{pr}/reviews/{}/comments", review.id),
@@ -86,7 +94,7 @@ impl<T: Transport> Forgejo<T> {
                 .into_iter()
                 .map(|t| roles.thread(t))
                 .collect::<Result<_, _>>()?,
-            truncated: comments_truncated || reviews_truncated,
+            truncated: reviews_truncated || reviews_skipped,
         })
     }
 
@@ -182,16 +190,30 @@ impl<T: Transport> Forgejo<T> {
     }
 }
 
+/// Ids of the [`MAX_REVIEWS_WITH_COMMENTS`] reviews submitted last.
+fn newest_review_ids(reviews: &[(ApiReview, ReviewVerdict)]) -> Vec<u64> {
+    let mut by_age: Vec<_> = reviews
+        .iter()
+        .map(|(r, _)| (timestamp::parse(&r.submitted_at), r.id))
+        .collect();
+    by_age.sort_by(|a, b| b.cmp(a));
+    by_age
+        .into_iter()
+        .take(MAX_REVIEWS_WITH_COMMENTS)
+        .map(|(_, id)| id)
+        .collect()
+}
+
 /// Assigns author roles, with one permission lookup per distinct author.
-struct Roles<'a, T> {
-    forgejo: &'a Forgejo<T>,
+struct Roles<'a, T, L> {
+    forgejo: &'a Forgejo<T, L>,
     repo: &'a RepoRef,
     bot: String,
     /// Keyed by lowercase login: Forgejo logins are case-insensitive.
     known: HashMap<String, AuthorRole>,
 }
 
-impl<T: Transport> Roles<'_, T> {
+impl<T: Transport, L: Log> Roles<'_, T, L> {
     fn author(&mut self, user: Option<ApiUser>) -> Result<Author, Error> {
         let login = user.map(|u| u.login).unwrap_or_default();
         let role = self.role(&login)?;
@@ -209,7 +231,7 @@ impl<T: Transport> Roles<'_, T> {
         if let Some(role) = self.known.get(&key) {
             return Ok(*role);
         }
-        let lookup = self.forgejo.call::<ApiPermission>(
+        let lookup = self.forgejo.call_with_status::<ApiPermission>(
             Method::Get,
             format!("{}/collaborators/{login}/permission", repo_path(self.repo)),
             None,
@@ -219,8 +241,23 @@ impl<T: Transport> Roles<'_, T> {
                 AuthorRole::Member
             }
             // A deleted account is not found.
-            Ok(_) | Err(Error::NotFound(_)) => AuthorRole::Outside,
-            Err(e) => return Err(e),
+            Ok(_)
+            | Err(Failure {
+                error: Error::NotFound(_),
+                ..
+            }) => AuthorRole::Outside,
+            // Forgejo answers 403 unless the bot account is repository admin. A 401 is an invalid
+            // credential and fails the call.
+            Err(Failure {
+                status: Some(403), ..
+            }) => {
+                self.forgejo.log.warn(&format!(
+                    "cannot read the repository permission of {login}: the bot account needs \
+                     repository admin; treating {login} as outside"
+                ));
+                AuthorRole::Outside
+            }
+            Err(failure) => return Err(failure.error),
         };
         self.known.insert(key, role);
         Ok(role)
@@ -245,6 +282,7 @@ impl<T: Transport> Roles<'_, T> {
             body: r.body,
             url: r.html_url,
             submitted_at: r.submitted_at,
+            updated_at: r.updated_at,
         })
     }
 

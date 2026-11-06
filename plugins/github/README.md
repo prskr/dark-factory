@@ -12,6 +12,8 @@ wasm-tools component wit target/wasm32-wasip2/release/github_plugin.wasm
 Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
 `wasi:cli` (pulled in by `std`) and `darkfactory:integrations/types`.
 
+Title prefixes, timestamps, the stderr log and the `wasi:http` transport are shared with the other forge plugin in `plugins/forge-common`.
+
 ## Configuration (`wasi:config/store`)
 
 `base-url` is set by the host from the route's `apiUrl`; all other keys come from `plugins.github.settings` in the instance configuration.
@@ -85,7 +87,7 @@ Forgejo plugin's; it never sends a request that fails.
 `auto` is for setups where some repositories have drafts and some don't. It creates native drafts;
 where GitHub answers that 422, the plugin sends the pull request once more with the title prefix and
 logs a warning naming the repository (`draft-mode: title-prefix` silences it). The host forwards
-plugin stderr at `info` level (event "plugin stderr"), so the warning appears there, not at `warn`.
+plugin stderr lines that start with `warning: ` at `warn` level (event "plugin stderr").
 In repositories without drafts this costs one failed request per draft pull request. The fallback
 depends on GitHub's message text; if it changes, `auto` fails like `native`. `draft: true` on a
 ready pull request adds the prefix.
@@ -110,7 +112,11 @@ Switching the mode while drafts are open is safe: reading recognizes both forms.
   association alone says nothing about write access: an organization member with read access is
   `MEMBER`. Other associations (`CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, `FIRST_TIMER`, `MANNEQUIN`,
   `NONE`) are `outside` without a lookup. A deleted author has an empty login and is `outside`.
-  Any other failed lookup fails `list-feedback`. The lookup was not verified against github.com.
+  When GitHub refuses the lookup (403, the token lacks push access), the author is `outside` and
+  the plugin writes the warning `cannot read the repository permission of <login>: treating
+  <login> as outside` to stderr, once per author and call; the call does not fail. Any other failed
+  lookup, a 401 (invalid credential) included, fails `list-feedback`. The lookup was not verified against github.com.
+- Every review carries `updated-at` (`updatedAt`), next to `submitted-at`.
 - `since` (RFC 3339, any offset) is applied in the plugin: comments by `createdAt` or `updatedAt`,
   reviews by `submittedAt` or `updatedAt`, threads if one comment matches, each kept whole.
 - `reply` checks the thread's pull request number and repository (case-insensitive) first: a
@@ -162,7 +168,7 @@ Rate limits are checked first, then the status table applies.
 | GitHub response | `error` variant |
 |---|---|
 | 403 or 429 with `x-ratelimit-remaining: 0`, a `retry-after` header or a message naming a rate limit | `rate-limited`: `retry-after` seconds, else seconds until `x-ratelimit-reset` (0 if past), else 60 |
-| 401, 403 | `unauthorized` |
+| 401, 403 | `unauthorized`; the message is prefixed with the request (`GET /repos/o/r/pulls/7: <GitHub message>`; `POST /graphql` for GraphQL) |
 | 404 | `not-found`, noting that GitHub also answers 404 when the token cannot see a private repository |
 | 409 | `conflict` |
 | 422 with "pull request already exists" (any case) in `message` or `errors[].message` | `conflict` |

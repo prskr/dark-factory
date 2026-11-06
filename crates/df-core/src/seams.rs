@@ -282,6 +282,7 @@ pub struct Review {
     pub body: String,
     pub url: String,
     pub submitted_at: String,
+    pub updated_at: String,
 }
 
 /// Comment in a review thread (`pull-requests.review-comment`).

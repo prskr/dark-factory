@@ -32,6 +32,15 @@ pub(crate) fn from_response(response: &Response, now: u64) -> Error {
     }
 }
 
+/// Names the failed `request` (`GET /repos/o/r`) in a refusal: GitHub's message alone does not say
+/// which endpoint the token lacks access to. Other errors stay as they are.
+pub(crate) fn with_request(error: Error, request: &str) -> Error {
+    match error {
+        Error::Unauthorized(message) => Error::Unauthorized(format!("{request}: {message}")),
+        other => other,
+    }
+}
+
 /// Errors of a GraphQL response with HTTP 200, mapped by the first error's `type`.
 pub(crate) fn from_graphql(body: &[u8]) -> Result<(), Error> {
     let body: GraphqlBody = serde_json::from_slice(body)

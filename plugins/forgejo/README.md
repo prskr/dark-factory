@@ -12,6 +12,8 @@ wasm-tools component wit target/wasm32-wasip2/release/forgejo_plugin.wasm
 Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
 `wasi:cli` (pulled in by `std`) and `darkfactory:integrations/types`.
 
+Title prefixes, timestamps, the stderr log and the `wasi:http` transport are shared with the other forge plugin in `plugins/forge-common`.
+
 ## Configuration (`wasi:config/store`)
 
 `base-url` is set by the host from the project; all other keys come from `plugins.forgejo.settings` in the instance configuration.
@@ -31,7 +33,7 @@ Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:i
 | `update` | `PATCH .../pulls/{index}` (preceded by a `GET` when title or draft change) |
 | issues `get` | `GET .../issues/{index}` |
 | issues `add-comment` | `POST .../issues/{index}/comments` (pull request numbers work as issue numbers) |
-| `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments?since=` (PR comments), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` per submitted review, `GET .../collaborators/{login}/permission` once per distinct non-bot author |
+| `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments[?since=]` (PR comments, one request), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` for each of the 20 newest submitted reviews, `GET .../collaborators/{login}/permission` once per distinct non-bot author |
 | `reply` | `GET .../pulls/{index}/reviews/{review-id}`, `GET .../pulls/{index}/reviews/{review-id}/comments` (a path and line without a comment in that review yields `invalid-input`), then `POST .../pulls/{index}/reviews/{review-id}/comments` with `path` and `new_position` (or `old_position` for a negative line) |
 
 `find-open` lists and filters instead of using `GET .../pulls/{base}/{head}`, because that route
@@ -52,15 +54,25 @@ Forgejo has no review thread id.
 - Reviews in state `PENDING` (drafts) and `REQUEST_REVIEW` (review requests) and their comments are
   not listed.
 - Roles: the login of `GET /user` is `bot`. Otherwise the repository permission `write`, `admin` or
-  `owner` is `member`; anything else, including an unknown user (404), is `outside`. Other lookup
-  errors fail the call. Forgejo answers 403 unless the token's account is a site admin or an
-  admin of the repository, so the plugin's credential needs repository admin: with write access
-  only, `list-feedback` fails with `unauthorized`.
+  `owner` is `member`; anything else, including an unknown user (404), is `outside`. Forgejo
+  answers 403 unless the token's account is a site admin or an admin of the repository. The plugin
+  then treats the author as `outside` and writes the warning `cannot read the repository
+  permission of <login>: the bot account needs repository admin; treating <login> as outside` to
+  stderr, once per author and call; the call does not fail. Other lookup errors, a 401 (invalid
+  credential) included, fail the call.
+  `GET .../collaborators/{login}` is no fallback: it answers 404 for the repository owner and
+  members of the owning organisation.
 - `since` (RFC 3339, any offset) is passed to Forgejo for PR comments. Reviews are kept if submitted
   or updated at or after it, threads if one of their comments was created or updated at or after it;
   the plugin compares instants, because Forgejo writes timestamps in the server's time zone.
-- Issue comments and reviews are read 50 per page, at most 20 pages each; `truncated` is set when
-  the limit stopped a listing.
+- `GET .../issues/{index}/comments` ignores `page` and `limit` and returns all comments, so it is
+  read with one request. Reviews are read 50 per page, at most 20 pages; `truncated` is set when the
+  limit stopped the listing (Forgejo lists oldest first, so the newest reviews are the missing ones).
+- Forgejo has no per-thread listing and does not change a review's `updated_at` when a comment is
+  added to it. The review comments of the 20 reviews submitted last are read; every review is still
+  returned, and `truncated` is set when older reviews were skipped. While 20 newer reviews exist, a
+  new reply in a thread of an older review is not returned.
+- Every review carries `updated-at`, next to `submitted-at`.
 
 Status: verified against Forgejo 15.0.11 in a container
 (`cargo test -p df-plugins --test homelab -- --ignored review_reply`, 2026-11-03): the reply to a
@@ -113,7 +125,7 @@ the pull request and on an issue all succeed.
 | Forgejo response | `error` variant |
 |---|---|
 | 404 | `not-found` |
-| 401, 403 | `unauthorized` |
+| 401, 403 | `unauthorized`; the message is prefixed with the request (`GET /api/v1/repos/o/r/pulls/7: <Forgejo message>`) |
 | 409, or any message containing "already exists" | `conflict` |
 | 422 | `invalid-input` |
 | 429 (`Retry-After` in seconds if numeric) | `rate-limited` |

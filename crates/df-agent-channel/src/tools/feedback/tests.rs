@@ -38,6 +38,7 @@ fn review(id: &str, verdict: ReviewVerdict, at: &str) -> Review {
         body: String::new(),
         url: format!("https://forge.example.test/pulls/7#{id}"),
         submitted_at: at.into(),
+        updated_at: at.into(),
     }
 }
 
@@ -232,7 +233,9 @@ async fn forge_errors_of_the_feedback_tools_are_tool_errors() {
     let (env, rc) = setup(pool.clone()).await;
     open_pr(&pool, &rc).await;
     env.forge
-        .push_list_pull_request_feedback_result(Err(IntegrationError::Unauthorized("no".into())));
+        .push_list_pull_request_feedback_result(Err(IntegrationError::Unauthorized(
+            "GET /pulls: no".into(),
+        )));
     env.forge
         .push_add_issue_comment_result(Err(IntegrationError::RateLimited(RateLimit {
             retry_after_seconds: Some(30),
@@ -258,7 +261,7 @@ async fn forge_errors_of_the_feedback_tools_are_tool_errors() {
     )
     .await;
 
-    assert!(read.is_error && message(&read).contains("credentials"));
+    assert!(read.is_error && message(&read).contains("GET /pulls: no"));
     assert!(comment.is_error && message(&comment).contains("retry in 30 seconds"));
     assert!(reply.is_error && message(&reply).contains("not found"));
 }
@@ -413,8 +416,15 @@ async fn repeated_call_id_posts_the_thread_reply_once() {
     assert_eq!(replies, 1);
 }
 
-fn encoded_len(feedback: &Feedback) -> usize {
-    serde_json::to_string(feedback).unwrap().len()
+/// `feedback` as the tool returns it: the plugin's result plus the cursor.
+fn result_json(feedback: &Feedback, next_since: Option<&str>) -> Value {
+    let mut value = serde_json::to_value(feedback).unwrap();
+    value["next_since"] = json!(next_since);
+    value
+}
+
+fn encoded_len(feedback: &Feedback, next_since: Option<&str>) -> usize {
+    result_json(feedback, next_since).to_string().len()
 }
 
 /// `feedback` as the budget returns it after dropping items.
@@ -425,6 +435,15 @@ fn truncated(feedback: Feedback) -> Feedback {
     }
 }
 
+fn ids(result: &Value, list: &str) -> Vec<String> {
+    result[list]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
 #[test]
 fn feedback_within_the_budget_is_returned_whole() {
     let feedback = Feedback {
@@ -432,9 +451,9 @@ fn feedback_within_the_budget_is_returned_whole() {
         ..Feedback::default()
     };
 
-    let result = fit_to_budget(feedback.clone(), FEEDBACK_BUDGET_BYTES).unwrap();
+    let result = fit_to_budget(feedback.clone(), None, FEEDBACK_BUDGET_BYTES).unwrap();
 
-    assert_eq!(result, serde_json::to_value(&feedback).unwrap());
+    assert_eq!(result, result_json(&feedback, Some("2026-11-03T07:55:00Z")));
     assert_eq!(result["truncated"], false);
 }
 
@@ -445,9 +464,203 @@ fn truncation_by_the_plugin_is_reported_within_the_budget() {
         ..Feedback::default()
     };
 
-    let result = fit_to_budget(feedback, FEEDBACK_BUDGET_BYTES).unwrap();
+    let result = fit_to_budget(feedback, None, FEEDBACK_BUDGET_BYTES).unwrap();
 
     assert_eq!(result["truncated"], true);
+}
+
+#[test]
+fn each_list_is_ordered_by_last_activity_newest_first() {
+    let mut edited = pr_comment("edited", AuthorRole::Member, "2026-11-01T08:00:00Z");
+    edited.updated_at = "2026-11-03T09:00:00Z".into();
+    let unedited = pr_comment("unedited", AuthorRole::Member, "2026-11-02T08:00:00Z");
+    let mut edited_review = review("edited", ReviewVerdict::Commented, "2026-11-01T08:00:00Z");
+    edited_review.updated_at = "2026-11-03T09:00:00Z".into();
+    let newer_review = review("newer", ReviewVerdict::Approved, "2026-11-02T08:00:00Z");
+    let quiet = thread(
+        "quiet",
+        1,
+        false,
+        vec![review_comment("q", "2026-11-02T08:00:00Z")],
+    );
+    let replied = thread(
+        "replied",
+        2,
+        false,
+        vec![
+            review_comment("first", "2026-11-01T08:00:00Z"),
+            review_comment("reply", "2026-11-03T09:00:00Z"),
+        ],
+    );
+    let feedback = Feedback {
+        comments: vec![unedited, edited],
+        reviews: vec![newer_review, edited_review],
+        threads: vec![quiet, replied],
+        truncated: false,
+    };
+
+    let result = fit_to_budget(feedback, None, FEEDBACK_BUDGET_BYTES).unwrap();
+
+    assert_eq!(ids(&result, "comments"), ["edited", "unedited"]);
+    assert_eq!(ids(&result, "reviews"), ["edited", "newer"]);
+    assert_eq!(ids(&result, "threads"), ["replied", "quiet"]);
+}
+
+#[test]
+fn items_with_the_same_activity_keep_the_plugins_order_and_unparsable_ones_come_last() {
+    let at = "2026-11-03T08:00:00Z";
+    let feedback = Feedback {
+        comments: vec![
+            pr_comment("broken", AuthorRole::Member, "yesterday"),
+            pr_comment("b", AuthorRole::Member, at),
+            pr_comment("a", AuthorRole::Member, at),
+        ],
+        ..Feedback::default()
+    };
+
+    let result = fit_to_budget(feedback, None, FEEDBACK_BUDGET_BYTES).unwrap();
+
+    assert_eq!(ids(&result, "comments"), ["b", "a", "broken"]);
+}
+
+#[test]
+fn next_since_is_the_newest_activity_minus_five_minutes_in_utc() {
+    // 10:00+02:00 is 08:00Z; the later review comment is at 08:20Z.
+    let feedback = Feedback {
+        comments: vec![pr_comment(
+            "c",
+            AuthorRole::Member,
+            "2026-11-03T10:00:00+02:00",
+        )],
+        threads: vec![thread(
+            "t",
+            1,
+            false,
+            vec![review_comment("r", "2026-11-03T08:20:30Z")],
+        )],
+        ..Feedback::default()
+    };
+
+    let result = fit_to_budget(feedback, None, FEEDBACK_BUDGET_BYTES).unwrap();
+
+    assert_eq!(result["next_since"], "2026-11-03T08:15:30Z");
+}
+
+#[test]
+fn next_since_never_moves_before_the_given_since() {
+    let feedback = Feedback {
+        comments: vec![pr_comment("c", AuthorRole::Member, "2026-11-03T09:02:00Z")],
+        ..Feedback::default()
+    };
+
+    let result = fit_to_budget(
+        feedback,
+        Some("2026-11-03T09:00:00Z"),
+        FEEDBACK_BUDGET_BYTES,
+    )
+    .unwrap();
+
+    assert_eq!(result["next_since"], "2026-11-03T09:00:00Z");
+}
+
+#[test]
+fn next_since_keeps_the_fractional_seconds_of_the_given_since() {
+    let result = fit_to_budget(
+        Feedback::default(),
+        Some("2026-11-05T10:15:00.900Z"),
+        FEEDBACK_BUDGET_BYTES,
+    )
+    .unwrap();
+
+    assert_eq!(result["next_since"], "2026-11-05T10:15:00.900Z");
+}
+
+#[test]
+fn an_empty_result_returns_the_given_since_or_null() {
+    let with = fit_to_budget(
+        Feedback::default(),
+        Some("2026-11-03T09:00:00+01:00"),
+        FEEDBACK_BUDGET_BYTES,
+    )
+    .unwrap();
+    let without = fit_to_budget(Feedback::default(), None, FEEDBACK_BUDGET_BYTES).unwrap();
+
+    assert_eq!(with["next_since"], "2026-11-03T08:00:00Z");
+    assert_eq!(without["next_since"], Value::Null);
+}
+
+#[test]
+fn cursor_overlap_covers_the_longest_plugin_call() {
+    let max_call = i64::try_from(df_core::MAX_PLUGIN_CALL_TIMEOUT_SECONDS).unwrap();
+    assert!(CURSOR_OVERLAP.num_seconds() >= max_call);
+}
+
+#[tokio::test]
+async fn an_item_created_between_two_plugin_listings_is_returned_by_the_next_read() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    open_pr(&pool, &rc).await;
+    // The newest returned review is from 10:15:00Z; a PR comment from 10:14:58Z was missed.
+    let newest = review("r", ReviewVerdict::Commented, "2026-11-05T10:15:00Z");
+    env.forge
+        .push_list_pull_request_feedback_result(Ok(Feedback {
+            reviews: vec![newest.clone()],
+            ..Feedback::default()
+        }));
+    env.forge
+        .push_list_pull_request_feedback_result(Ok(Feedback {
+            comments: vec![pr_comment(
+                "late",
+                AuthorRole::Member,
+                "2026-11-05T10:14:58Z",
+            )],
+            reviews: vec![newest],
+            ..Feedback::default()
+        }));
+
+    let first = structured(&execute(&env.ctx, &rc, read()).await);
+    assert_eq!(first["next_since"], "2026-11-05T10:10:00Z");
+    assert!(ids(&first, "comments").is_empty());
+    let since = first["next_since"].as_str().unwrap();
+    let second = structured(
+        &execute(
+            &env.ctx,
+            &rc,
+            call("read_pull_request_feedback", json!({ "since": since })),
+        )
+        .await,
+    );
+
+    let sent: Vec<_> = env
+        .forge
+        .calls()
+        .into_iter()
+        .filter_map(|c| match c {
+            ForgeCall::ListPullRequestFeedback { since, .. } => Some(since),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, [None, Some("2026-11-05T10:10:00Z".to_string())]);
+    assert_eq!(ids(&second, "comments"), ["late"]);
+}
+
+#[test]
+fn without_a_parsable_timestamp_next_since_is_the_given_since_or_null() {
+    let feedback = Feedback {
+        comments: vec![pr_comment("c", AuthorRole::Member, "")],
+        ..Feedback::default()
+    };
+
+    let without = fit_to_budget(feedback.clone(), None, FEEDBACK_BUDGET_BYTES).unwrap();
+    let with = fit_to_budget(
+        feedback,
+        Some("2026-11-03T09:00:00Z"),
+        FEEDBACK_BUDGET_BYTES,
+    )
+    .unwrap();
+
+    assert_eq!(without["next_since"], Value::Null);
+    assert_eq!(with["next_since"], "2026-11-03T09:00:00Z");
 }
 
 #[test]
@@ -471,10 +684,11 @@ fn oversized_feedback_drops_the_oldest_item_first() {
         threads: vec![thread],
         truncated: false,
     };
+    let next_since = Some("2026-11-03T02:55:00Z");
 
-    let result = fit_to_budget(feedback, encoded_len(&expected)).unwrap();
+    let result = fit_to_budget(feedback, None, encoded_len(&expected, next_since)).unwrap();
 
-    assert_eq!(result, serde_json::to_value(&expected).unwrap());
+    assert_eq!(result, result_json(&expected, next_since));
 }
 
 #[test]
@@ -505,10 +719,11 @@ fn threads_are_dropped_whole_by_their_last_activity() {
         threads: vec![replied_today, quiet],
         ..Feedback::default()
     };
+    let next_since = Some("2026-11-03T07:55:00Z");
 
-    let result = fit_to_budget(feedback, encoded_len(&expected)).unwrap();
+    let result = fit_to_budget(feedback, None, encoded_len(&expected, next_since)).unwrap();
 
-    assert_eq!(result, serde_json::to_value(&expected).unwrap());
+    assert_eq!(result, result_json(&expected, next_since));
 }
 
 #[test]
@@ -524,14 +739,15 @@ fn last_activity_compares_instants_not_strings() {
         comments: vec![older, newer],
         ..Feedback::default()
     };
+    let next_since = Some("2026-11-03T08:55:00Z");
 
-    let result = fit_to_budget(feedback, encoded_len(&expected)).unwrap();
+    let result = fit_to_budget(feedback, None, encoded_len(&expected, next_since)).unwrap();
 
-    assert_eq!(result, serde_json::to_value(&expected).unwrap());
+    assert_eq!(result, result_json(&expected, next_since));
 }
 
 #[test]
-fn the_budget_is_filled_exactly_with_the_newest_items_in_plugin_order() {
+fn the_budget_is_filled_exactly_with_the_newest_items_newest_first() {
     // Plugin order differs from activity order; mixed kinds exercise the per-list commas.
     let at = |minute: u32| format!("2026-11-03T08:{minute:02}:00Z");
     let comments: Vec<PrComment> = [5, 1, 9, 3]
@@ -549,33 +765,65 @@ fn the_budget_is_filled_exactly_with_the_newest_items_in_plugin_order() {
         threads: threads.clone(),
         truncated: false,
     };
-    // Items newer than minute 5 survive, in the plugin's order.
+    // Items newer than minute 5 survive.
     let pick = |items: &[PrComment], keep: &[&str]| -> Vec<PrComment> {
-        items
-            .iter()
-            .filter(|c| keep.contains(&c.id.as_str()))
-            .cloned()
+        keep.iter()
+            .filter_map(|id| items.iter().find(|c| c.id == *id).cloned())
             .collect()
     };
     let expected = truncated(Feedback {
-        comments: pick(&comments, &["c5", "c9"]),
-        reviews: reviews
+        comments: pick(&comments, &["c9", "c5"]),
+        reviews: ["r8", "r6"]
             .iter()
-            .filter(|r| ["r8", "r6"].contains(&r.id.as_str()))
-            .cloned()
+            .filter_map(|id| reviews.iter().find(|r| r.id == *id).cloned())
             .collect(),
         threads,
         truncated: true,
     });
-    let budget = encoded_len(&expected);
+    let next_since = Some("2026-11-03T08:04:00Z");
+    let budget = encoded_len(&expected, next_since);
 
-    let fits = fit_to_budget(feedback.clone(), budget).unwrap();
-    let one_byte_less = fit_to_budget(feedback, budget - 1).unwrap();
+    let fits = fit_to_budget(feedback.clone(), None, budget).unwrap();
+    let one_byte_less = fit_to_budget(feedback, None, budget - 1).unwrap();
 
-    assert_eq!(fits, serde_json::to_value(&expected).unwrap());
+    assert_eq!(fits, result_json(&expected, next_since));
     assert_eq!(fits.to_string().len(), budget);
     assert!(one_byte_less.to_string().len() < budget);
     assert_eq!(one_byte_less["comments"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn old_review_edited_today_survives_the_budget_while_newer_pr_comments_are_dropped() {
+    let mut edited = review(
+        "edited",
+        ReviewVerdict::ChangesRequested,
+        "2026-10-27T08:00:00Z",
+    );
+    edited.updated_at = "2026-11-03T08:00:00Z".into();
+    let comments: Vec<PrComment> = ["a", "b"]
+        .iter()
+        .map(|id| pr_comment(id, AuthorRole::Member, "2026-11-02T08:00:00Z"))
+        .collect();
+    let expected = truncated(Feedback {
+        reviews: vec![edited.clone()],
+        ..Feedback::default()
+    });
+    let feedback = Feedback {
+        comments,
+        reviews: vec![edited],
+        ..Feedback::default()
+    };
+
+    let result = fit_to_budget(
+        feedback,
+        None,
+        encoded_len(&expected, Some("2026-11-03T07:55:00Z")),
+    )
+    .unwrap();
+
+    assert_eq!(ids(&result, "reviews"), ["edited"]);
+    assert!(ids(&result, "comments").is_empty());
+    assert_eq!(result["truncated"], true);
 }
 
 #[test]
@@ -595,17 +843,12 @@ fn large_feedback_keeps_the_newest_items_within_48_kib() {
         ..Feedback::default()
     };
 
-    let result = fit_to_budget(feedback, FEEDBACK_BUDGET_BYTES).unwrap();
+    let result = fit_to_budget(feedback, None, FEEDBACK_BUDGET_BYTES).unwrap();
 
     assert!(result.to_string().len() <= 48 * 1024);
     assert_eq!(result["truncated"], true);
-    let ids: Vec<&str> = result["comments"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids.last(), Some(&"c99"));
-    assert!(!ids.contains(&"c0"));
+    let ids = ids(&result, "comments");
+    assert_eq!(ids.first().map(String::as_str), Some("c99"));
+    assert!(!ids.contains(&"c0".to_string()));
     assert!(ids.len() > 40, "only as many items as needed are dropped");
 }

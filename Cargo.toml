@@ -77,6 +77,7 @@ df-proto = { path = "crates/df-proto" }
 df-telemetry = { path = "crates/df-telemetry" }
 df-test-postgres = { path = "crates/df-test-postgres" }
 df-web = { path = "crates/df-web" }
+forge-common = { path = "plugins/forge-common" }
 futures = "0.3"
 gix = { version = "0.90.0", default-features = false, features = ["sha1", "blocking-network-client"] }
 gix-error = "0.5.2"
@@ -159,6 +160,7 @@ tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
+wasip2 = "2"
 wasmtime = { version = "50", default-features = false, features = ["component-model", "async", "cranelift", "runtime", "std", "parallel-compilation", "wat"] }
 wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
 wasmtime-wasi-config = "50"
@@ -166,6 +168,7 @@ wasmtime-wasi-http = { version = "50", default-features = false, features = ["p2
 webpki-roots = "1"
 wiremock = "0.6"
 wit-bindgen = "0.63"
+wit-parser = { version = "0.263", default-features = false, features = ["std"] }
 x509-parser = "0.18"
 
 
