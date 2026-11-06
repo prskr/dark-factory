@@ -16,6 +16,7 @@ use super::Env;
 pub(crate) enum Gate {
     Provision,
     DeleteTaskVolume,
+    SandboxExists,
 }
 
 /// Forwards every call to the fake; the gated call signals `entered` after the fake recorded it
@@ -72,7 +73,9 @@ impl SandboxProvider for GatedProvider {
     }
 
     async fn sandbox_exists(&self, run_id: RunId) -> Result<bool, ProviderError> {
-        self.inner.sandbox_exists(run_id).await
+        let result = self.inner.sandbox_exists(run_id).await;
+        self.hold(Gate::SandboxExists).await;
+        result
     }
 
     async fn resolve_identity(&self, peer: &PeerIdentity) -> Option<RunId> {

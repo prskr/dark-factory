@@ -65,10 +65,10 @@ allowed cluster services. Details: [Security](../security/).
 | Instance (for example `dark-factory`) | Control plane, gateway, `migrate` job, Services, Secrets with credentials, Leases | the Helm release |
 | Sandbox (for example `dark-factory-sandboxes`) | Sandbox pods, task volumes (PVCs), generated per-run NetworkPolicies | the chart (`sandboxNamespace.create`) or you; never the control plane |
 
-The control plane gets the permissions it needs in these two namespaces only: pods, PVCs and
-NetworkPolicies in the sandbox namespace; leases, Secrets (read) and EndpointSlices in the instance
-namespace. The gateway and sandbox pods get no Kubernetes API token. At startup the control plane
-checks its permissions and refuses to start if one is missing.
+The control plane gets the permissions it needs in these two namespaces only: pods, PVCs,
+NetworkPolicies and events (read) in the sandbox namespace; leases, Secrets (read) and EndpointSlices
+in the instance namespace. The gateway and sandbox pods get no Kubernetes API token. At startup the
+control plane checks its permissions and refuses to start if one is missing.
 
 ## Design records
 

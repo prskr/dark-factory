@@ -57,14 +57,15 @@ The chart always sets the three name keys from the release's `fullname`; the fal
 ## Behavior Reference
 
 - **Cluster targets.** The egress allowlist (`cluster-service` rows that apply to the run: instance-scoped plus the run's project) is resolved against the cluster for every provision and reconcile, rule by rule. A rule that cannot be resolved never blocks the others:
-  - **Transient errors** (timeout, `5xx`, `408`, `429`, connection errors, a named port without a ready endpoint): the rule's last good resolution is used, with a warning naming the rule, so a hiccup does not revoke access of a live run.
+  - **Transient errors** (timeout, `5xx`, `408`, `429`, connection errors, a named `targetPort` that no selected pod exposes, so no EndpointSlice port is named after the Service port): the rule's last good resolution is used, with a warning naming the rule, so a hiccup does not revoke access of a live run.
   - **Permanent errors** (`404`, `403` and other `4xx`; a headless Service without `allowDns`; configured ports that match no Service port; no ports at all): the cached resolution is evicted and the rule is skipped with a warning naming it, so stale access (old selectors, `/32` blocks) is not kept.
-  - Without a cached resolution a failing rule is skipped (fail closed).
+  - A transient error without a cached resolution reports the rule as unavailable: provisioning creates no pod and the run stays `provisioning` until a later attempt resolves the rule or the connect timeout ends the run; reconcile keeps the run's current NetworkPolicy meanwhile. A permanent error without a cached resolution skips the rule (fail closed).
   - A rule that is no longer in the allowlist is dropped from every policy. The cache is kept per project key and pruned to the rules of the latest call of that project, so a removed and re-added rule starts without history.
-  - Provisioning fails only if the allowlist itself cannot be read (database error). One bad entry does not fail provisioning of other runs; the affected run starts without that target.
   - Rules resolve one after another (worst case two API calls of `K8S_API_TIMEOUT` per rule).
+  - If the allowlist itself cannot be read (database error), provisioning fails and the run ends `provisioning_failed`; reconcile keeps the run's current NetworkPolicy.
 - **Named `targetPort`.** Resolved through the EndpointSlices of the Service. EndpointSlice ports are named after the Service port's `name`, so that name is matched; ports of all matching slices are allowed (pods may use different numbers for the same name).
-- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container (even if the pod never ran), a pod that completed without a run report (phase `Succeeded`), or a pod that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known, and the scheduler does **not** resync active runs against the cluster: a run whose pod vanished while the control plane was down ends through the scheduler's connect timeout or wall-clock hard stop.
+- **Sandbox events.** `Started` once a pod runs with an IP. `Gone` once per run for a deleted or failed pod, an image-pull / config error in a container (even if the pod never ran), a pod that completed without a run report (phase `Succeeded`), or a pod that is missing after a watch relist (a relist never sends deletes). Only objects this process has seen are compared; after a control plane restart nothing is known. To cover that gap, the scheduler sweeps once when it starts: every non-terminal run in `connecting` or later whose sandbox no longer exists ends as `sandbox_lost` ("sandbox pod no longer present after a control plane restart"). `pending` and `provisioning` runs are skipped (the tick provisions them again). A failed existence check is logged and retried one tick later, 3 passes in all; a run still unchecked then ends through the connect timeout or wall-clock hard stop if its pod is really gone.
+  - **Image volume pull failures.** A failed pull of an image of the sandbox pod (the harness image volume or the project image) ends the run `Gone` with `image pull failed: <image>: <message>` instead of waiting for the connect timeout. On containerd the container status reports `ErrImagePull` for it, which the pod watcher already maps. A second watcher on the core v1 `Events` of pods in the sandbox namespace (`involvedObject.kind=Pod`) is defense in depth for runtimes that only report the failure as an Event (reason `Failed`, message `Failed to pull image "<image>": …`). Such an Event is ignored when its pod is not in the pod watcher's store, is no longer `Pending`, or has a different UID (an earlier pod with the same name). Both sources share one tracker, so a run is reported `Gone` once.
 - **Timeouts.** Every Kubernetes API call made by this crate is bounded by `K8S_API_TIMEOUT` (5 s).
 - **Loops.** The reconcile loop ends when shutdown is requested, or when the shutdown or leader channel sender is gone. A closed notification channel only disables that trigger; the 30 s resync continues.
 
@@ -88,6 +89,7 @@ The control plane verifies the following with `SelfSubjectAccessReview` at start
   - `core` `persistentvolumeclaims`: `create`, `get`, `list`, `watch`, `patch`, `delete`
   - `networking.k8s.io` `networkpolicies`: `create`, `get`, `delete`, `list`, `watch`, `patch`
   - `core` `pods`: `create`, `get`, `list`, `watch`, `delete`
+  - `core` `events`: `get`, `list`, `watch`
 - **Instance Namespace**:
   - `coordination.k8s.io` `leases`: `create`, `get`, `update`
   - `core` `services`: `get`
@@ -102,4 +104,32 @@ The control plane verifies the following with `SelfSubjectAccessReview` at start
 
 Line coverage from `cargo llvm-cov -p df-k8s`: **86.88 %** (3,141 lines, 412 missed; the figure includes the inline test code of each file). Region coverage 85.81 %. The target is 70 %.
 
-Not covered by automated runs here (`#[ignore]`, need the dev cluster; the owner reports having run the dev-cluster checks, but the test code itself was not re-run here): `test_provider_live_cluster_integration`, `test_reconciliation_live_cluster` (calls `reconcile_active_runs` directly; it does not exercise the loop or the 30 s window), and in `dark-factory` `serve_startup_check_refuses_to_start_with_missing_role` and `serve_starts_with_the_charts_rbac`.
+Not covered by automated runs (`#[ignore]`, need a cluster): the live cluster tests below, and in `dark-factory` `serve_startup_check_refuses_to_start_with_missing_role` and `serve_starts_with_the_charts_rbac`.
+
+### Live cluster tests
+
+The `#[ignore]` tests of this crate run against any cluster with a Dark Factory release whose Helm release name is `dark-factory` (the tests look up the `dark-factory-control-plane` and `dark-factory-gateway` Services and derive the sandbox namespace `<namespace>-sandboxes` and the issuer `<namespace>-dark-factory-ca-issuer`). `KUBECONFIG` selects the cluster.
+
+| Test | Checks |
+| --- | --- |
+| `test_provider_live_cluster_integration` | Provisions a sandbox, waits for a `Started` event with a pod IP, tears it down. |
+| `test_reconciliation_live_cluster` | `reconcile_active_runs` against the cluster; does not exercise the loop or the 30 s window. |
+| `policy_loop_live_reverts_manual_edit_and_adds_new_target` | The policy loop reverts a manual NetworkPolicy edit and adds a new target. |
+| `sandbox_reaches_the_target_cluster_ip_and_not_another_service` | A run-labelled pod reaches the ClusterIP of the Service in its NetworkPolicy and not a second Service (`nc -z`, exit code read from the pod status); a control pod outside the sandbox namespace reaches both. |
+
+| Variable | Required | Default | Effect |
+| --- | --- | --- | --- |
+| `DF_LIVE_RUNTIME_IMAGE` | yes | – | Runtime image of the sandbox pods. The tests fail with a message naming the variable when it is unset. |
+| `DF_LIVE_INSTANCE_NAMESPACE` | no | `dark-factory-dev` | Namespace of the release. |
+| `DF_LIVE_STORAGE_CLASS` | no | `longhorn` | Storage class of the task volumes; empty uses the cluster default. |
+| `DF_LIVE_RUNTIME_CLASS` | no | `kata` | Runtime class of the sandbox pods; empty sets none. |
+
+The tests share the sandbox namespace and interfere when run in parallel; run them with one thread. Against the kind cluster of `E2E_KEEP=1 just e2e-local`:
+
+```bash
+kind get kubeconfig --name df-e2e > target/tmp/kind-df-e2e.kubeconfig
+KUBECONFIG=target/tmp/kind-df-e2e.kubeconfig \
+DF_LIVE_RUNTIME_IMAGE=ghcr.io/prskr/dark-factory/runtime:e2e \
+DF_LIVE_INSTANCE_NAMESPACE=dark-factory DF_LIVE_STORAGE_CLASS= DF_LIVE_RUNTIME_CLASS= \
+cargo test -p df-k8s --lib -- --ignored --test-threads=1
+```

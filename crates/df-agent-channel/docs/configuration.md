@@ -86,18 +86,24 @@ stateDiagram-v2
     [*] --> pending: task queued, no active run
     pending --> provisioning: volume ensured
     pending --> failed: provisioning_failed
+    pending --> failed: connect_timeout
     provisioning --> connecting: provider Started (pod IP)
     provisioning --> failed: provisioning_failed
+    provisioning --> failed: connect_timeout
+    provisioning --> failed: sandbox_lost
     connecting --> preparing: Hello
     connecting --> failed: connect_timeout
+    connecting --> failed: sandbox_lost
     preparing --> running: PhaseChanged RUNNING
     running --> awaiting_input: PhaseChanged AWAITING_INPUT (turn ended)
     awaiting_input --> running: PhaseChanged RUNNING (follow-up prompt)
     awaiting_input --> finalizing: idle deadline (Release) or mark done (Cancel)
+    awaiting_input --> failed: sandbox_lost
     running --> finalizing: PhaseChanged FINALIZING
     finalizing --> succeeded: RunReport completed / end_turn / limit_reached / rate_limited
     finalizing --> cancelled: RunReport cancelled
     finalizing --> failed: RunReport failed
+    finalizing --> failed: sandbox_lost
     preparing --> failed: sandbox_lost
     running --> failed: sandbox_lost, hard stop
     preparing --> finalizing: human stop (Cancel)
@@ -108,6 +114,9 @@ stateDiagram-v2
     connecting --> cancelled: human stop
     finalizing --> cancelled: stop timeout (120 s)
 ```
+
+On startup the control plane ends every run in `connecting` or a later non-terminal state with
+`sandbox_lost` if its sandbox pod no longer exists.
 
 A `RunReport` is accepted in any non-terminal state. `Cancel` is sent by the replica holding the
 stream at connect + `maxWallClock` + `cancelGrace` (and at the handshake if that moment has passed).

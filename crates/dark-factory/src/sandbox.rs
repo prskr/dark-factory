@@ -180,9 +180,11 @@ struct DbClusterTargetsProvider {
 
 #[async_trait::async_trait]
 impl ClusterTargetsProvider for DbClusterTargetsProvider {
-    /// Fails only if the allowlist cannot be read (provisioning fails; reconciliation keeps the
-    /// run's current policy). A rule whose Service cannot be resolved is skipped, or kept at its
-    /// last good resolution, with a warning naming the rule (see [`ClusterTargetResolver`]).
+    /// Fails if the allowlist cannot be read, or with [`df_core::seams::ProviderError::Unavailable`]
+    /// if a rule's Service fails transiently and has no earlier resolution (provisioning fails and
+    /// is retried; reconciliation keeps the run's current policy). A rule whose Service is gone
+    /// for good is skipped, and one that fails transiently after an earlier resolution keeps that
+    /// resolution, with a warning naming the rule (see [`ClusterTargetResolver`]).
     async fn get_targets(
         &self,
         project_key: Option<&str>,
@@ -203,7 +205,10 @@ impl ClusterTargetsProvider for DbClusterTargetsProvider {
                     allow_dns: rule.allow_dns,
                 })
                 .collect();
-        Ok(self.resolver.resolve(project_key, &rules).await)
+        self.resolver
+            .resolve(project_key, &rules)
+            .await
+            .into_targets()
     }
 }
 
@@ -453,5 +458,41 @@ mod tests {
             },
         };
         assert!(any.check_namespace("anything").is_ok());
+    }
+
+    #[tokio::test]
+    async fn targets_are_unavailable_while_a_new_cluster_target_cannot_be_resolved() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        // An unreachable API server: every lookup fails transiently.
+        let client =
+            Client::try_from(kube::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+        let provider = DbClusterTargetsProvider {
+            pool: pool.clone(),
+            resolver: ClusterTargetResolver::new(client),
+        };
+        assert!(provider.get_targets(None).await.unwrap().is_empty());
+
+        let (peter, roles) = (
+            df_core::Principal::human(df_core::UserId::new(), "Peter"),
+            Vec::new(),
+        );
+        let actor = df_db::catalog::Actor {
+            principal: &peter,
+            roles: &roles,
+        };
+        let scheduler = df_db::egress::EntryKind::ClusterService {
+            namespace: "nativelink".into(),
+            service: "scheduler".into(),
+            ports: vec![],
+            allow_dns: false,
+        };
+        df_db::egress::add_entry(&pool, actor, None, &scheduler)
+            .await
+            .unwrap();
+        let result = provider.get_targets(None).await;
+        assert!(
+            matches!(&result, Err(df_core::seams::ProviderError::Unavailable(m)) if m.contains("nativelink/scheduler")),
+            "{result:?}"
+        );
     }
 }

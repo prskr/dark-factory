@@ -38,12 +38,7 @@ async fn list_runs(pool: &PgPool) -> Vec<RunRow> {
         .unwrap();
     let mut runs = Vec::new();
     for id in ids {
-        runs.push(
-            get_run(pool, df_core::RunId::from_uuid(id))
-                .await
-                .unwrap()
-                .unwrap(),
-        );
+        runs.push(get_run(pool, RunId::from_uuid(id)).await.unwrap().unwrap());
     }
     runs
 }
@@ -419,7 +414,7 @@ async fn resume_at(pool: &PgPool, env: &Env) -> Option<DateTime<Utc>> {
 }
 
 /// A run 1 of the task that was created `age` ago and has no sandbox.
-async fn stale_run(pool: &PgPool, env: &Env, state: &str, age: &str) -> df_core::RunId {
+async fn stale_run(pool: &PgPool, env: &Env, state: &str, age: &str) -> RunId {
     let run_id = env.insert_run(env.task.id, 1, state).await;
     sqlx::query("UPDATE runs SET started_at = now() - $2::interval, pod_ip = NULL WHERE id = $1")
         .bind(run_id.as_uuid())
@@ -435,7 +430,7 @@ async fn stale_run(pool: &PgPool, env: &Env, state: &str, age: &str) -> df_core:
     run_id
 }
 
-fn provisions_of(env: &Env, run_id: df_core::RunId) -> usize {
+fn provisions_of(env: &Env, run_id: RunId) -> usize {
     env.provider
         .calls()
         .into_iter()
@@ -486,7 +481,7 @@ async fn a_stale_run_whose_sandbox_exists_is_not_provisioned_again() {
 }
 
 #[tokio::test]
-async fn a_failing_retry_of_a_stale_run_leaves_the_run_alone() {
+async fn a_transient_failure_on_a_retry_of_a_stale_run_leaves_the_run_alone() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
@@ -496,14 +491,113 @@ async fn a_failing_retry_of_a_stale_run_leaves_the_run_alone() {
     env.provider
         .push_exists_result(Err(ProviderError::Backend("api unavailable".into())));
     tick(&scheduler, Utc::now()).await.unwrap();
+    env.provider.push_exists_result(Ok(false));
     env.provider
-        .push_provision_result(Err(ProviderError::Capacity("exceeded quota".into())));
+        .push_provision_result(Err(ProviderError::Backend(
+            "timeout trying to create".into(),
+        )));
     tick(&scheduler, Utc::now()).await.unwrap();
 
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
     assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
     assert_eq!(auto_resumes(&pool, &env).await, 0);
     assert_eq!(task_status(&pool, &env).await, "running");
+}
+
+/// A stale run whose retry the provider rejects with `error`; the sandbox stays absent.
+async fn retry_rejected_with(env: &Env, error: ProviderError) -> RunRow {
+    let run_id = stale_run(&env.ctx.pool, env, "provisioning", "2 minutes").await;
+    env.provider.push_exists_result(Ok(false));
+    env.provider.push_provision_result(Err(error));
+    env.provider.push_exists_result(Ok(false));
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+    get_run(&env.ctx.pool, run_id).await.unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn capacity_rejection_on_a_retry_requeues_the_task_without_counting_a_resume() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+
+    let run = retry_rejected_with(&env, ProviderError::Capacity("exceeded quota".into())).await;
+
+    assert_eq!(
+        (run.state, run.outcome, run.detail.as_str()),
+        (
+            RunState::Failed,
+            Some(RunOutcome::ProvisioningFailed),
+            "capacity"
+        )
+    );
+    assert_eq!(task_status(&pool, &env).await, "queued");
+    assert_eq!(auto_resumes(&pool, &env).await, 0);
+}
+
+#[tokio::test]
+async fn invalid_spec_on_a_retry_ends_the_run_provisioning_failed() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+
+    let run = retry_rejected_with(
+        &env,
+        ProviderError::InvalidSpec("no image is configured for harness `claude-code`".into()),
+    )
+    .await;
+
+    assert_eq!(run.outcome, Some(RunOutcome::ProvisioningFailed));
+    assert!(run.detail.contains("claude-code"), "{}", run.detail);
+}
+
+#[tokio::test]
+async fn capacity_rejection_on_a_retry_keeps_a_run_whose_sandbox_appeared_meanwhile() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let run_id = stale_run(&pool, &env, "provisioning", "2 minutes").await;
+    // Another attempt created the pod, which uses up the quota of this one.
+    env.provider.push_exists_result(Ok(false));
+    env.provider
+        .push_provision_result(Err(ProviderError::Capacity("exceeded quota".into())));
+    env.provider.push_exists_result(Ok(true));
+
+    tick(&scheduler, Utc::now()).await.unwrap();
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
+    assert_eq!(teardowns(&env), 0);
+}
+
+#[tokio::test]
+async fn a_retry_still_in_flight_is_not_started_again() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool.clone()).await;
+    let (entered, release) = GatedProvider::install(&mut env, Gate::Provision);
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let run_id = stale_run(&pool, &env, "provisioning", "2 minutes").await;
+    let mut background = JoinSet::new();
+    scheduler
+        .reprovision_stale(&mut background, Utc::now())
+        .await;
+    entered.notified().await;
+
+    // The next tick still finds the run without a sandbox.
+    env.provider.push_exists_result(Ok(false));
+    scheduler
+        .reprovision_stale(&mut background, Utc::now())
+        .await;
+    assert_eq!(background.len(), 1);
+    release.notify_one();
+    while background.join_next().await.is_some() {}
+
+    // Once the attempt finished, a later tick retries again (with the answer queued above).
+    release.notify_one();
+    scheduler
+        .reprovision_stale(&mut background, Utc::now())
+        .await;
+    while background.join_next().await.is_some() {}
+    assert_eq!(provisions_of(&env, run_id), 2);
 }
 
 #[tokio::test]
@@ -515,6 +609,105 @@ async fn young_unprovisioned_runs_are_left_alone() {
         .await
         .unwrap();
     assert_eq!(provisions_of(&env, run_id), 0);
+}
+
+/// What the Kubernetes provider returns while a cluster target has never resolved (design D2).
+fn unresolvable_target() -> ProviderError {
+    ProviderError::Unavailable(
+        "cluster target(s) temporarily unresolvable: nativelink/scheduler".into(),
+    )
+}
+
+/// The provider created no sandbox on the previous attempt, so the next stale-run retry
+/// provisions again (the fake counts a recorded `provision` call as an existing sandbox).
+fn script_unavailable_retry(env: &Env) {
+    env.provider.push_exists_result(Ok(false));
+    env.provider
+        .push_provision_result(Err(unresolvable_target()));
+}
+
+#[tokio::test]
+async fn unresolvable_cluster_target_leaves_the_run_provisioning_and_logs_the_target() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    env.provider
+        .push_provision_result(Err(unresolvable_target()));
+    let (logs, _guard) = df_telemetry::testing::capture("warn");
+
+    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        .await
+        .unwrap();
+
+    let run = only_run(&pool).await;
+    assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
+    assert_eq!(task_status(&pool, &env).await, "running");
+    assert_eq!(auto_resumes(&pool, &env).await, 0);
+    assert_eq!(teardowns(&env), 0);
+    let captured = logs.text();
+    assert!(captured.contains("WARN"), "{captured}");
+    assert!(captured.contains("nativelink/scheduler"), "{captured}");
+}
+
+#[tokio::test]
+async fn run_with_an_unresolvable_target_is_provisioned_once_the_target_resolves() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    env.provider
+        .push_provision_result(Err(unresolvable_target()));
+    let now = Utc::now();
+    tick(&scheduler, now).await.unwrap();
+    let run_id = only_run(&pool).await.id;
+
+    // A later tick: the target resolves, the provider creates the sandbox.
+    env.provider.push_exists_result(Ok(false));
+    tick(&scheduler, now + chrono::Duration::seconds(61))
+        .await
+        .unwrap();
+    assert_eq!(provisions_of(&env, run_id), 2);
+
+    scheduler
+        .handle_event(SandboxEvent::Started {
+            run_id,
+            pod_ip: "10.0.0.7".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!((run.state, run.outcome), (RunState::Connecting, None));
+}
+
+#[tokio::test]
+async fn run_whose_target_never_resolves_ends_with_connect_timeout() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    env.provider
+        .push_provision_result(Err(unresolvable_target()));
+    let now = Utc::now();
+    tick(&scheduler, now).await.unwrap();
+    let run_id = only_run(&pool).await.id;
+
+    script_unavailable_retry(&env);
+    tick(&scheduler, now + chrono::Duration::seconds(61))
+        .await
+        .unwrap();
+    assert_eq!(provisions_of(&env, run_id), 2);
+    assert_eq!(
+        get_run(&pool, run_id).await.unwrap().unwrap().state,
+        RunState::Provisioning
+    );
+
+    script_unavailable_retry(&env);
+    tick(&scheduler, now + chrono::Duration::seconds(601))
+        .await
+        .unwrap();
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!(
+        (run.state, run.outcome),
+        (RunState::Failed, Some(RunOutcome::ConnectTimeout))
+    );
+    assert_eq!(task_status(&pool, &env).await, "queued");
 }
 
 #[tokio::test]
@@ -574,14 +767,7 @@ async fn gone_event_fails_a_running_run_and_keeps_the_volume() {
         })
         .await
         .unwrap();
-    assert_eq!(
-        env.provider
-            .calls()
-            .iter()
-            .filter(|c| matches!(c, SandboxCall::Teardown(_)))
-            .count(),
-        1
-    );
+    assert_eq!(teardowns(&env), 1);
 }
 
 #[tokio::test]
@@ -669,7 +855,7 @@ fn huge_budgets_mean_no_deadline_instead_of_a_panic() {
 async fn enforcing_timeouts_with_unbounded_budgets_does_not_panic() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    env.ctx.config = std::sync::Arc::new(crate::ChannelConfig {
+    env.ctx.config = Arc::new(crate::ChannelConfig {
         runs: RunsConfig {
             max_wall_clock_seconds: u64::MAX,
             connect_timeout_seconds: u64::MAX,
@@ -875,6 +1061,162 @@ async fn run_loop_starts_runs_on_notification_and_applies_events() {
     );
     stop_tx.send(()).ok();
     handle.await.unwrap();
+}
+
+/// Run 1 of the running task in `state`, as a replica left it when it stopped.
+async fn active_run(pool: &PgPool, env: &Env, state: &str) -> RunId {
+    let run_id = env.insert_run(env.task.id, 1, state).await;
+    sqlx::query("UPDATE tasks SET status = 'running' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    run_id
+}
+
+fn teardowns(env: &Env) -> usize {
+    env.provider
+        .calls()
+        .iter()
+        .filter(|c| matches!(c, SandboxCall::Teardown(_)))
+        .count()
+}
+
+#[tokio::test]
+async fn sandbox_deleted_while_no_replica_ran_ends_the_run_when_a_replica_starts() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // The fake recorded no `provision` of the run: its sandbox does not exist.
+    let run_id = active_run(&pool, &env, "running").await;
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let handle = tokio::spawn(async move {
+        scheduler
+            .run(async {
+                stop_rx.await.ok();
+            })
+            .await;
+    });
+
+    let ended = async {
+        loop {
+            let run = get_run(&pool, run_id).await.unwrap().unwrap();
+            if run.state.is_terminal() {
+                break run;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let run = tokio::time::timeout(Duration::from_secs(30), ended)
+        .await
+        .expect("the startup sweep ends the run");
+    assert_eq!(
+        (run.state, run.outcome, run.detail.as_str()),
+        (
+            RunState::Failed,
+            Some(RunOutcome::SandboxLost),
+            "sandbox pod no longer present after a control plane restart"
+        )
+    );
+    assert_eq!(task_status(&pool, &env).await, "queued");
+    assert_eq!(auto_resumes(&pool, &env).await, 1);
+    stop_tx.send(()).ok();
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn sandbox_still_there_after_a_restart_keeps_its_run() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = active_run(&pool, &env, "running").await;
+    env.provider.push_exists_result(Ok(true));
+
+    Scheduler::new(env.ctx.clone())
+        .sweep_lost_sandboxes(Duration::ZERO)
+        .await;
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!((run.state, run.outcome), (RunState::Running, None));
+    assert_eq!(teardowns(&env), 0);
+}
+
+#[tokio::test]
+async fn startup_sweep_leaves_a_provisioning_run_alone() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // No sandbox yet: provisioning may still be creating it.
+    let run_id = active_run(&pool, &env, "provisioning").await;
+
+    Scheduler::new(env.ctx.clone())
+        .sweep_lost_sandboxes(Duration::ZERO)
+        .await;
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
+    assert_eq!(teardowns(&env), 0);
+}
+
+#[tokio::test]
+async fn sandbox_check_failing_on_every_attempt_at_startup_leaves_the_run_alone_and_logs_it() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = active_run(&pool, &env, "connecting").await;
+    for _ in 0..SWEEP_ATTEMPTS {
+        env.provider
+            .push_exists_result(Err(ProviderError::Backend("api unavailable".into())));
+    }
+    let (logs, _guard) = df_telemetry::testing::capture("warn");
+
+    Scheduler::new(env.ctx.clone())
+        .sweep_lost_sandboxes(Duration::ZERO)
+        .await;
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!((run.state, run.outcome), (RunState::Connecting, None));
+    let captured = logs.text();
+    assert!(captured.contains("api unavailable"), "{captured}");
+    assert!(captured.contains(&run_id.to_string()), "{captured}");
+    assert!(captured.contains("gave up"), "{captured}");
+}
+
+#[tokio::test]
+async fn failed_sandbox_check_at_startup_is_retried() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = active_run(&pool, &env, "running").await;
+    // The second attempt finds the sandbox gone.
+    env.provider
+        .push_exists_result(Err(ProviderError::Backend("api unavailable".into())));
+
+    Scheduler::new(env.ctx.clone())
+        .sweep_lost_sandboxes(Duration::ZERO)
+        .await;
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!(
+        (run.state, run.outcome),
+        (RunState::Failed, Some(RunOutcome::SandboxLost))
+    );
+}
+
+#[tokio::test]
+async fn startup_sweep_checks_the_runs_concurrently() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool.clone()).await;
+    let (entered, release) = GatedProvider::install(&mut env, Gate::SandboxExists);
+    active_run(&pool, &env, "running").await;
+    let df2 = env.second_task().await;
+    env.insert_run(df2, 1, "running").await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let sweep = tokio::spawn(async move { scheduler.sweep_lost_sandboxes(Duration::ZERO).await });
+
+    // Both checks are in flight while the first one still waits for the API.
+    entered.notified().await;
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .expect("the second check starts before the first one finished");
+    release.notify_waiters();
+    sweep.await.unwrap();
 }
 
 #[tokio::test]

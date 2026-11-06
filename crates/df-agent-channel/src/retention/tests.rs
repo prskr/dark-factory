@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use df_core::testing::{FakeSandboxProvider, SandboxCall};
 use df_core::{ProviderError, TaskId};
-use df_db::{NewTask, create_task};
 use sqlx::PgPool;
 use tokio::task::JoinSet;
 
@@ -64,25 +63,6 @@ fn deleted_volumes(provider: &FakeSandboxProvider) -> Vec<String> {
         .collect()
 }
 
-async fn second_task(env: &Env) -> TaskId {
-    let (task, _) = create_task(
-        &env.ctx.pool,
-        NewTask {
-            project_id: env.project_id,
-            persona_id: env.persona_id,
-            title: Some("Second".into()),
-            description: String::new(),
-            issue_number: None,
-            created_by: df_core::Principal::system("test"),
-            parent_id: None,
-            depends_on: Vec::new(),
-        },
-    )
-    .await
-    .unwrap();
-    task.id
-}
-
 /// Starts and provisions the queued runs, as one scheduler tick does.
 async fn scheduler_tick(scheduler: &Scheduler) {
     let mut provisions = JoinSet::new();
@@ -94,7 +74,7 @@ async fn scheduler_tick(scheduler: &Scheduler) {
 async fn closed_tasks_lose_their_volume_after_the_grace_period_once() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    let df2 = second_task(&env).await;
+    let df2 = env.second_task().await;
     set_status(&pool, env.task.id, "completed").await;
     set_status(&pool, df2, "cancelled").await;
     ended_run(&env, env.task.id, 1, days_ago(8)).await;
@@ -113,7 +93,7 @@ async fn closed_tasks_lose_their_volume_after_the_grace_period_once() {
 async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    let df2 = second_task(&env).await;
+    let df2 = env.second_task().await;
     set_status(&pool, env.task.id, "completed").await;
     ended_run(&env, env.task.id, 1, Utc::now()).await;
     sqlx::query("UPDATE tasks SET pr_merged_at = now() WHERE id = $1")
@@ -143,7 +123,7 @@ async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
 async fn volumes_within_their_retention_are_kept() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    let df2 = second_task(&env).await;
+    let df2 = env.second_task().await;
     set_status(&pool, env.task.id, "completed").await;
     set_status(&pool, df2, "waiting").await;
     ended_run(&env, env.task.id, 1, days_ago(6)).await;
@@ -238,7 +218,7 @@ async fn task_with_an_active_run_keeps_its_volume() {
 async fn failed_deletion_keeps_the_task_unmarked_and_the_scan_goes_on() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    let df2 = second_task(&env).await;
+    let df2 = env.second_task().await;
     for task_id in [env.task.id, df2] {
         set_status(&pool, task_id, "waiting").await;
         ended_run(&env, task_id, 1, days_ago(31)).await;
@@ -262,7 +242,7 @@ async fn failed_deletion_keeps_the_task_unmarked_and_the_scan_goes_on() {
 async fn shutdown_during_a_deletion_commits_it_and_ends_the_loop() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    let df2 = second_task(&env).await;
+    let df2 = env.second_task().await;
     for task_id in [env.task.id, df2] {
         set_status(&pool, task_id, "waiting").await;
         ended_run(&env, task_id, 1, days_ago(31)).await;

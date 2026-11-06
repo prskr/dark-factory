@@ -1,0 +1,165 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d0415e61f26",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1562",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "Scheduled",
+    "message": "Successfully assigned dark-factory-sandboxes/slr-pull-fail to df-e2e-control-plane",
+    "type": "Normal",
+    "count": 1,
+    "firstTimestamp": "2026-11-06T19:57:55Z",
+    "lastTimestamp": "2026-11-06T19:57:55Z",
+    "source": {
+      "component": "default-scheduler"
+    },
+    "reportingComponent": "default-scheduler"
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d04319b4055",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1563",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "Pulling",
+    "message": "Pulling image \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\"",
+    "type": "Normal",
+    "count": 4,
+    "firstTimestamp": "2026-11-06T19:57:55Z",
+    "lastTimestamp": "2026-11-06T19:59:15Z",
+    "source": {
+      "component": "kubelet",
+      "host": "df-e2e-control-plane"
+    },
+    "reportingComponent": "kubelet"
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d044ff00258",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1563",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "Failed",
+    "message": "Failed to pull image \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\": rpc error: code = NotFound desc = failed to pull and unpack image \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\": failed to resolve reference \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\": ghcr.io/prskr/dark-factory/claude-harness:does-not-exist: not found",
+    "type": "Warning",
+    "count": 4,
+    "firstTimestamp": "2026-11-06T19:57:56Z",
+    "lastTimestamp": "2026-11-06T19:59:16Z",
+    "source": {
+      "component": "kubelet",
+      "host": "df-e2e-control-plane"
+    },
+    "reportingComponent": "kubelet"
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d044ff9c9ca",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "fieldPath": "spec.containers{runtime}",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1563",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "Failed",
+    "message": "Error: ErrImagePull",
+    "type": "Warning",
+    "count": 4,
+    "firstTimestamp": "2026-11-06T19:57:56Z",
+    "lastTimestamp": "2026-11-06T19:59:16Z",
+    "source": {
+      "component": "kubelet",
+      "host": "df-e2e-control-plane"
+    },
+    "reportingComponent": "kubelet"
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d047548ee57",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1563",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "BackOff",
+    "message": "Back-off pulling image \"ghcr.io/prskr/dark-factory/claude-harness:does-not-exist\"",
+    "type": "Normal",
+    "count": 5,
+    "firstTimestamp": "2026-11-06T19:57:56Z",
+    "lastTimestamp": "2026-11-06T19:59:27Z",
+    "source": {
+      "component": "kubelet",
+      "host": "df-e2e-control-plane"
+    },
+    "reportingComponent": "kubelet"
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "slr-pull-fail.18e58d04754c6aee",
+      "namespace": "dark-factory-sandboxes"
+    },
+    "involvedObject": {
+      "apiVersion": "v1",
+      "fieldPath": "spec.containers{runtime}",
+      "kind": "Pod",
+      "name": "slr-pull-fail",
+      "namespace": "dark-factory-sandboxes",
+      "resourceVersion": "1563",
+      "uid": "b592b4b3-225f-4624-98a5-fee7a1882274"
+    },
+    "reason": "Failed",
+    "message": "Error: ImagePullBackOff",
+    "type": "Warning",
+    "count": 5,
+    "firstTimestamp": "2026-11-06T19:57:56Z",
+    "lastTimestamp": "2026-11-06T19:59:27Z",
+    "source": {
+      "component": "kubelet",
+      "host": "df-e2e-control-plane"
+    },
+    "reportingComponent": "kubelet"
+  }
+]

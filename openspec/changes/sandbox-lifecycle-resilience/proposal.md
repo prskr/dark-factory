@@ -37,4 +37,4 @@ None.
 - `crates/df-agent-channel`: scheduler keeps a run `provisioning` on `Unavailable`; startup sweep of lost sandboxes.
 - `deploy/helm/dark-factory`: `events` get/list/watch in the sandbox namespace Role; chart README permission table.
 - Docs: `docs/content/operations/troubleshooting.md`.
-- Tech debt: deletes TD-28, TD-31, TD-32, TD-36, TD-41, TD-59 from `docs/tech_debt.md`.
+- Tech debt: deletes TD-28, TD-29, TD-31, TD-32, TD-36, TD-41, TD-59 from `docs/tech_debt.md`.

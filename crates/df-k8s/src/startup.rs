@@ -109,6 +109,21 @@ pub const SANDBOX_PERMISSIONS: &[RequiredPermission] = &[
         resource: "pods",
         verb: "delete",
     },
+    RequiredPermission {
+        group: "",
+        resource: "events",
+        verb: "get",
+    },
+    RequiredPermission {
+        group: "",
+        resource: "events",
+        verb: "list",
+    },
+    RequiredPermission {
+        group: "",
+        resource: "events",
+        verb: "watch",
+    },
 ];
 
 /// Required permissions checked in the instance namespace at startup (e.g. Lease coordination, Services).
@@ -565,6 +580,35 @@ mod tests {
             err,
             StartupCheckError::MissingPermissions {
                 missing: vec!["create pods in namespace `sandboxes`".to_string()],
+            }
+        );
+        drop(client);
+        responder.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_names_missing_event_permissions() {
+        let (mock_service, handle) = mock::pair();
+        let responder = spawn_ssar_responder(handle, |ns, resource, _verb| {
+            !(ns == Some("sandboxes") && resource == "events")
+        });
+        let client = Client::new(mock_service, "default");
+        let err = verify_startup(
+            &client,
+            "sandboxes",
+            "instance",
+            &ClusterTargetsConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err,
+            StartupCheckError::MissingPermissions {
+                missing: vec![
+                    "get events in namespace `sandboxes`".to_string(),
+                    "list events in namespace `sandboxes`".to_string(),
+                    "watch events in namespace `sandboxes`".to_string(),
+                ],
             }
         );
         drop(client);
