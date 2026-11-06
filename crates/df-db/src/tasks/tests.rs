@@ -100,7 +100,7 @@ async fn first_task_gets_df_1_and_queues_assignment_prompt() {
     assert_eq!(task.issue_number, Some(42));
 
     assert_eq!(msg.task_id, task.id);
-    assert_eq!(msg.author, Principal::system("task.assigned"));
+    assert_eq!(msg.author, Principal::system(system_reason::TASK_ASSIGNED));
     assert!(msg.delivered_at.is_none());
     assert!(msg.delivered_run_id.is_none());
 

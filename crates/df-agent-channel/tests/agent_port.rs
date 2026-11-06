@@ -73,9 +73,9 @@ impl Harness {
         let mut runtime = self.connect().await?;
         let ack = runtime.hello().await?;
         let mut bodies = vec![ack.body.expect("HelloAck")];
-        // HelloAck, Assign, then one Prompt for the assignment.
+        // HelloAck, Assign, then one prompt batch for the assignment.
         let rest = runtime
-            .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+            .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
             .await?;
         bodies.extend(rest.into_iter().filter_map(|m| m.body));
         Ok((runtime, bodies))
@@ -252,10 +252,13 @@ async fn first_connect_receives_ack_assign_and_the_assignment_prompt() -> anyhow
     let [
         control_message::Body::HelloAck(ack),
         control_message::Body::Assign(assign),
-        control_message::Body::Prompt(prompt),
+        control_message::Body::Prompts(batch),
     ] = bodies.as_slice()
     else {
         anyhow::bail!("unexpected handshake: {bodies:?}");
+    };
+    let [prompt] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
     };
     assert_eq!(
         (ack.run_id.as_str(), ack.last_persisted_seq),
@@ -314,7 +317,7 @@ async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch() -> anyhow:
         matches!(ack.body, Some(control_message::Body::HelloAck(a)) if a.last_persisted_seq == 7)
     );
     second
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
     // The runtime replays from its outbox: 5-9 while 5-7 are already stored.
     for seq in 5..=9 {
@@ -349,7 +352,7 @@ async fn a_timing_sent_while_the_stream_was_down_is_replayed_and_recorded_once()
         matches!(ack.body, Some(control_message::Body::HelloAck(a)) if a.last_persisted_seq == 0)
     );
     second
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
     let timing = || {
         agent_message::Body::RuntimeTiming(RuntimeTiming {
@@ -409,8 +412,57 @@ async fn a_sequence_gap_closes_the_stream_with_data_loss() -> anyhow::Result<()>
 async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts() -> anyhow::Result<()>
 {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
-    let h = Harness::start(pool).await?;
-    let (first, bodies_a) = h.handshake().await?;
+    let h = Harness::start(pool.clone()).await?;
+    let (mut first, bodies_a) = h.handshake().await?;
+    let [
+        control_message::Body::HelloAck(_),
+        control_message::Body::Assign(assign_a),
+        control_message::Body::Prompts(batch_a),
+    ] = bodies_a.as_slice()
+    else {
+        anyhow::bail!("unexpected handshake: {bodies_a:?}");
+    };
+    let [assignment] = batch_a.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
+    };
+
+    df_db::queue_message(
+        &pool,
+        h.env.task.id,
+        h.env.human(),
+        vec![text("also add a test")],
+    )
+    .await?;
+    let turn_end_seq = first
+        .send(agent_message::Body::TranscriptEvent(Event {
+            schema_version: 1,
+            occurred_at: None,
+            turn_id: "t1".into(),
+            kind: Some(event::Kind::TurnEnded(TurnEnded::default())),
+        }))
+        .await;
+    first.recv_until(|m| m.ack == turn_end_seq).await?;
+    let forwarded = first
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
+        .await?;
+    let Some(control_message::Body::Prompts(batch)) =
+        forwarded.last().and_then(|m| m.body.as_ref())
+    else {
+        anyhow::bail!("no follow-up prompt");
+    };
+    let [follow_up] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one follow-up prompt");
+    };
+    assert_ne!(assignment.prompt_id, follow_up.prompt_id);
+    assert_eq!(follow_up.content, [text("also add a test")]);
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM transcript_events WHERE kind = 'user_message'"
+        )
+        .await,
+        0
+    );
     drop(first);
 
     let replica_b = TestServer::start(h.env.other_replica().await, &h.pki).await?;
@@ -418,13 +470,19 @@ async fn reconnect_to_another_replica_resends_assign_and_unconfirmed_prompts() -
     let mut runtime = RuntimeClient::open(channel).await?;
     runtime.hello().await?;
     let rest = runtime
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
     let bodies_b: Vec<_> = rest.into_iter().filter_map(|m| m.body).collect();
 
-    // Same Assign and same prompt as replica A sent.
-    assert_eq!(bodies_a[1], bodies_b[0]);
-    assert_eq!(bodies_a[2], bodies_b[1]);
+    let [
+        control_message::Body::Assign(assign_b),
+        control_message::Body::Prompts(batch_b),
+    ] = bodies_b.as_slice()
+    else {
+        anyhow::bail!("unexpected reconnect: {bodies_b:?}");
+    };
+    assert_eq!(assign_a, assign_b);
+    assert_eq!(batch_b.prompts, [assignment.clone(), follow_up.clone()]);
     Ok(())
 }
 
@@ -434,8 +492,11 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[2] else {
+    let control_message::Body::Prompts(batch) = &bodies[2] else {
         anyhow::bail!("no prompt")
+    };
+    let [assignment] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
     };
 
     // The assignment prompt is confirmed by the transcript and its turn ends, then a follow-up
@@ -469,11 +530,14 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
     )
     .await?;
     let msgs = runtime
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
-    let Some(control_message::Body::Prompt(follow_up)) = msgs.last().and_then(|m| m.body.clone())
+    let Some(control_message::Body::Prompts(batch)) = msgs.last().and_then(|m| m.body.clone())
     else {
         anyhow::bail!("no follow-up prompt");
+    };
+    let [follow_up] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one follow-up prompt");
     };
     assert_ne!(follow_up.prompt_id, assignment.prompt_id);
 
@@ -483,11 +547,16 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
     let prompts: Vec<_> = bodies
         .iter()
         .filter_map(|b| match b {
-            control_message::Body::Prompt(p) => Some(p.prompt_id.clone()),
+            control_message::Body::Prompts(batch) => Some(batch.prompts.as_slice()),
             _ => None,
         })
+        .flatten()
+        .map(|prompt| prompt.prompt_id.clone())
         .collect();
-    assert_eq!(prompts, [follow_up.prompt_id]);
+    assert_eq!(
+        prompts.as_slice(),
+        std::slice::from_ref(&follow_up.prompt_id)
+    );
     Ok(())
 }
 
@@ -831,8 +900,11 @@ async fn message_queued_while_finalizing_requeues_the_task() -> anyhow::Result<(
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[2] else {
+    let control_message::Body::Prompts(batch) = &bodies[2] else {
         anyhow::bail!("no prompt")
+    };
+    let [assignment] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
     };
     sqlx::query("UPDATE task_messages SET delivered_at = now() WHERE id = $1")
         .bind(assignment.prompt_id.parse::<uuid::Uuid>()?)
@@ -889,8 +961,11 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let h = Harness::start(pool.clone()).await?;
     let (mut runtime, bodies) = h.handshake().await?;
-    let control_message::Body::Prompt(assignment) = &bodies[2] else {
+    let control_message::Body::Prompts(batch) = &bodies[2] else {
         anyhow::bail!("no prompt")
+    };
+    let [assignment] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
     };
     // The assignment prompt is confirmed by the transcript, as the runtime does.
     runtime.send(user_message(assignment)).await;
@@ -944,11 +1019,14 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
     )
     .await?;
     let msgs = runtime
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
-    let Some(control_message::Body::Prompt(prompt)) = msgs.last().and_then(|m| m.body.clone())
+    let Some(control_message::Body::Prompts(batch)) = msgs.last().and_then(|m| m.body.clone())
     else {
         anyhow::bail!("no prompt");
+    };
+    let [prompt] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one prompt");
     };
     assert!(format!("{:?}", prompt.content).contains("Postgres"));
     assert_eq!(run_state(&pool, h.run_id).await, RunState::AwaitingInput);
@@ -1072,13 +1150,16 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     let mut runtime = RuntimeClient::open(server.channel(&pki, Some(&client)).await?).await?;
     runtime.hello().await?;
     let msgs = runtime
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
-    let Some(control_message::Body::Prompt(assignment)) = msgs.last().and_then(|m| m.body.clone())
+    let Some(control_message::Body::Prompts(batch)) = msgs.last().and_then(|m| m.body.clone())
     else {
         anyhow::bail!("no assignment prompt");
     };
-    runtime.send(user_message(&assignment)).await;
+    let [assignment] = batch.prompts.as_slice() else {
+        anyhow::bail!("expected one assignment prompt");
+    };
+    runtime.send(user_message(assignment)).await;
     runtime.send(agent_text("on it")).await;
     runtime
         .send(agent_message::Body::ToolCallRequest(ToolCallRequest {
@@ -1148,7 +1229,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     let mut runtime = RuntimeClient::open(server.channel(&pki, Some(&client)).await?).await?;
     runtime.hello().await?;
     let msgs = runtime
-        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompt(_))))
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::Prompts(_))))
         .await?;
     let assign = msgs
         .iter()

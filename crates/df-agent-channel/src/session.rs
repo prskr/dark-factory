@@ -14,8 +14,8 @@ use df_db::transcript::lock_run_and_task;
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, PushReport, PushStatus, PushTarget,
-    Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
+    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, Prompts, PushReport, PushStatus,
+    PushTarget, Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
@@ -463,21 +463,29 @@ impl Session {
             Some(RunState::Finalizing) => return Ok(true),
             Some(_) => {}
         }
-        for prompt in pending_prompts(&self.ctx.pool, self.rc.task.id, self.busy).await? {
-            if !self.sent_prompts.insert(prompt.prompt_id.clone()) {
-                continue;
-            }
-            if !self
-                .send(control(control_message::Body::Prompt(prompt)))
-                .await
-            {
-                return Ok(false);
-            }
-            // The runtime starts a turn for it: hold back new messages until the persisted
-            // `TurnEnded` clears this, not only once `TurnStarted` is persisted.
-            self.busy = true;
-            self.idle_at = None;
+        let prompts: Vec<_> = pending_prompts(&self.ctx.pool, self.rc.task.id, self.busy)
+            .await?
+            .into_iter()
+            .filter(|prompt| !self.sent_prompts.contains(&prompt.prompt_id))
+            .collect();
+        if prompts.is_empty() {
+            return Ok(true);
         }
+        let prompt_ids: Vec<_> = prompts
+            .iter()
+            .map(|prompt| prompt.prompt_id.clone())
+            .collect();
+        if !self
+            .send(control(control_message::Body::Prompts(Prompts { prompts })))
+            .await
+        {
+            return Ok(false);
+        }
+        self.sent_prompts.extend(prompt_ids);
+        // The runtime starts a turn for the batch: hold back new messages until the persisted
+        // `TurnEnded` clears this, not only once `TurnStarted` is persisted.
+        self.busy = true;
+        self.idle_at = None;
         Ok(true)
     }
 

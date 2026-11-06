@@ -117,10 +117,12 @@ pub enum QueuedState {
 }
 
 /// A message the agent has not received yet, in the stack above the message input. Held-back
-/// messages offer edit and remove; forwarded ones only say where they stand.
+/// messages offer edit and remove; forwarded ones only say where they stand. `author_prefix` is
+/// the name of an agent or system author, shown as a prefix; human authors have none.
 pub fn queued_message(
     key: &str,
     id: &str,
+    author_prefix: Option<&str>,
     parts: &[(String, bool)],
     queued_at: DateTime<Utc>,
     state: QueuedState,
@@ -136,6 +138,9 @@ pub fn queued_message(
             ":class"={"editing === '" (id) "' ? 'border-accent-text bg-accent-soft' : 'border-line-strong bg-app'"}
             class="flex shrink-0 items-center gap-2 rounded-[10px] border border-dashed px-3 h-11 lg:h-9" {
             div class="min-w-0 flex-1 truncate text-sm" title=(text) {
+                @if let Some(author) = author_prefix {
+                    span class="text-xs text-faint" { (author) ": " }
+                }
                 @for (part, hidden) in parts {
                     @if *hidden {
                         // Inline: the row is one truncated line, so no rule or padding as in the bubble.
@@ -378,6 +383,7 @@ mod tests {
         let held = queued_message(
             "DF-1",
             "abc",
+            None,
             &[("later <b>".into(), false)],
             at(),
             QueuedState::Editable,
@@ -430,6 +436,7 @@ mod tests {
         let sent = queued_message(
             "DF-1",
             "abc",
+            None,
             &[("later".into(), false)],
             at(),
             QueuedState::WaitingForDelivery,
@@ -439,6 +446,7 @@ mod tests {
         let ended = queued_message(
             "DF-1",
             "abc",
+            None,
             &[("later".into(), false)],
             at(),
             QueuedState::NotDelivered,

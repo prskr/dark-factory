@@ -133,7 +133,7 @@ async fn webhook_event_queues_one_message_per_event() {
     let messages = list_undelivered_messages(&pool, task_id).await.unwrap();
     assert_eq!(messages.len(), before + 2);
     let message = messages.last().unwrap();
-    assert_eq!(message.author, Principal::system("webhook"));
+    assert_eq!(message.author, Principal::system(WEBHOOK));
     let [block] = message.content.as_slice() else {
         panic!("expected one block: {:?}", message.content);
     };

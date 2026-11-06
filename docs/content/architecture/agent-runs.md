@@ -28,20 +28,23 @@ sequenceDiagram
     CP->>K: task volume task-<key>, sandbox pod, NetworkPolicy
     K-->>CP: pod started (pod IP)
     R->>CP: connect (mTLS), Hello
-    CP->>R: Assign (gateway URL, placeholder key), prompt
+    CP->>R: Assign (gateway URL, placeholder key), Prompts
     R->>G: clone or fetch through the Git proxy
     G->>F: forward with the forge credential
     H->>G: model requests (placeholder key)
     G->>CP: usage records
     R->>H: start session (new or resumed)
     loop each turn
-        R->>H: prompt
+        R->>H: prompt (messages with author lines)
         H-->>R: updates (messages, tool calls)
         R->>CP: transcript events
         R->>G: push factory/task/<KEY> (push checks)
         R->>CP: push report
         opt first commit ahead of base
             CP->>DB: enqueue pr.sync (same transaction as the push report)
+        end
+        opt held-back messages after persisted TurnEnded
+            CP->>R: Prompts (all released messages)
         end
     end
     Note over CP,R: waits for messages until the idle deadline
@@ -70,10 +73,14 @@ sequenceDiagram
 5. **Turns.** The harness works on the prompt. Every message and tool call is streamed to the
    control plane and stored as the task's transcript. After a turn with new commits the runtime
    pushes the task branch. The first push ahead of the base branch enqueues the draft pull request;
-   an outbox job opens it (see [Pull request actions](#pull-request-actions)).
+   an outbox job opens it (see [Pull request actions](#pull-request-actions)). All messages waiting
+   at turn start form one harness input, in queue order. Each starts with the same readable author
+   name as in the UI and a colon, for example `Peter Kurfer:` or `Task assignment:`. A continuation
+   summary stays first.
 6. **Waiting.** Between turns the run waits for messages. A message queued in the UI reaches the
-   agent at the next turn boundary without a new run. After `runs.keepAliveSeconds` (default 600)
-   without a message, the control plane releases the run.
+   agent at the next turn boundary without a new run. Messages released together arrive in one
+   `Prompts` control message, including after reconnects, so they start one turn. After
+   `runs.keepAliveSeconds` (default 600) without a message, the control plane releases the run.
 7. **Finalizing.** The runtime stops the harness, pushes the task branch, writes a WIP snapshot of
    uncommitted files to `factory/wip/<KEY>` and reports the outcome. The control plane deletes the
    pod; the task volume stays for the next run.

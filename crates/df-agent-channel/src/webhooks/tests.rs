@@ -72,7 +72,7 @@ async fn queued(env: &Env, task_id: TaskId) -> usize {
         .await
         .unwrap()
         .iter()
-        .filter(|m| m.author == Principal::system("webhook"))
+        .filter(|m| m.author == Principal::system(df_core::system_reason::WEBHOOK))
         .count()
 }
 

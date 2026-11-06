@@ -48,7 +48,7 @@ async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() ->
         data::FORGE_REVIEWER
     );
     session.expect_text(&line, WEBHOOK_TIMEOUT).await?;
-    let messages = db::system_messages(&pool, &key, df_db::webhooks::MESSAGE_REASON).await?;
+    let messages = db::system_messages(&pool, &key, df_core::system_reason::WEBHOOK).await?;
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains(&line), "{messages:?}");
     // Run 2 of the script reads the feedback and waits; the reopened task's pull request stays a

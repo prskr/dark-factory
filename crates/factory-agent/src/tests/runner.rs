@@ -5,7 +5,7 @@
     reason = "scenario tests set up and check a whole run"
 )]
 
-use super::RunScenario;
+use super::{RunScenario, id_prompt, prompts_body};
 
 #[test]
 fn test_determine_run_outcome_priority() {
@@ -167,8 +167,7 @@ sessions:
 #[tokio::test]
 async fn test_scenario_outcome_complete_task_called() {
     use df_proto::agent::v1::{
-        ControlMessage, Prompt, RunOutcome, ToolCallResult, ToolDescriptor, agent_message,
-        control_message,
+        ControlMessage, RunOutcome, ToolCallResult, ToolDescriptor, agent_message, control_message,
     };
 
     let (logs, _log_guard) = df_telemetry::testing::capture("info");
@@ -228,12 +227,7 @@ sessions:
                 // Also queue a prompt to verify COMPLETED takes precedence over queued prompt
                 let prompt_msg = ControlMessage {
                     ack: 0,
-                    body: Some(control_message::Body::Prompt(Prompt {
-                        prompt_id: "extra-prompt-queued".to_string(),
-                        author: None,
-                        content: vec![],
-                        queued_at: None,
-                    })),
+                    body: Some(prompts_body(vec![id_prompt("extra-prompt-queued")])),
                 };
                 control.try_send(prompt_msg).unwrap();
             }
@@ -313,9 +307,7 @@ sessions:
 
 #[tokio::test]
 async fn test_scenario_outcome_turn_limit() {
-    use df_proto::agent::v1::{
-        Budgets, ControlMessage, Prompt, RunOutcome, agent_message, control_message,
-    };
+    use df_proto::agent::v1::{Budgets, ControlMessage, RunOutcome, agent_message};
 
     // 2 turns in script, but 3 prompts will be queued
     let script = r#"
@@ -348,12 +340,10 @@ sessions:
                     control
                         .try_send(ControlMessage {
                             ack: 0,
-                            body: Some(control_message::Body::Prompt(Prompt {
-                                prompt_id: format!("prompt-{}", turn_count + 1),
-                                author: None,
-                                content: vec![],
-                                queued_at: None,
-                            })),
+                            body: Some(prompts_body(vec![id_prompt(&format!(
+                                "prompt-{}",
+                                turn_count + 1
+                            ))])),
                         })
                         .unwrap();
                 }

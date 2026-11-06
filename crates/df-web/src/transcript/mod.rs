@@ -458,7 +458,9 @@ fn author_name(p: &df_proto::transcript::v1::Principal) -> String {
     match &p.kind {
         Some(Kind::Human(h)) => h.display_name.clone(),
         Some(Kind::Agent(a)) => a.display_name.clone(),
-        Some(Kind::System(s)) => s.reason.clone(),
+        Some(Kind::System(s)) => df_core::Principal::system(&s.reason)
+            .display_name()
+            .to_string(),
         None => String::new(),
     }
 }

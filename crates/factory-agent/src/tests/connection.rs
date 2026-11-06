@@ -11,6 +11,7 @@ use df_proto::agent::v1::{
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::{prompts_body, text_prompt};
 use crate::connection::{TlsFiles, connect_channel};
 use crate::test_harness::{MockControlPlane, TestPki};
 
@@ -788,19 +789,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
     server
         .send_control_message(ControlMessage {
             ack: 0,
-            body: Some(control_message::Body::Prompt(df_proto::agent::v1::Prompt {
-                prompt_id: "prompt-1".to_string(),
-                author: None,
-                content: vec![df_proto::transcript::v1::ContentBlock {
-                    kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                        df_proto::transcript::v1::TextContent {
-                            text: "Do something".to_string(),
-                        },
-                    )),
-                    hidden: false,
-                }],
-                queued_at: None,
-            })),
+            body: Some(prompts_body(vec![text_prompt("prompt-1", "Do something")])),
         })
         .await
         .expect("send prompt-1");
@@ -808,8 +797,11 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
     // 3. Runtime receives prompt-1
     let received_prompt = handle.recv().await.expect("handle received prompt-1");
     match received_prompt.body {
-        Some(control_message::Body::Prompt(p)) => assert_eq!(p.prompt_id, "prompt-1"),
-        other => panic!("expected Prompt, got {other:?}"),
+        Some(control_message::Body::Prompts(batch)) => {
+            assert_eq!(batch.prompts.len(), 1);
+            assert_eq!(batch.prompts[0].prompt_id, "prompt-1");
+        }
+        other => panic!("expected Prompts, got {other:?}"),
     }
 
     // 4. Stream drops
@@ -838,19 +830,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
     server
         .send_control_message(ControlMessage {
             ack: 0,
-            body: Some(control_message::Body::Prompt(df_proto::agent::v1::Prompt {
-                prompt_id: "prompt-1".to_string(),
-                author: None,
-                content: vec![df_proto::transcript::v1::ContentBlock {
-                    kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                        df_proto::transcript::v1::TextContent {
-                            text: "Do something".to_string(),
-                        },
-                    )),
-                    hidden: false,
-                }],
-                queued_at: None,
-            })),
+            body: Some(prompts_body(vec![text_prompt("prompt-1", "Do something")])),
         })
         .await
         .expect("send duplicate prompt-1");
@@ -859,19 +839,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
     server
         .send_control_message(ControlMessage {
             ack: 0,
-            body: Some(control_message::Body::Prompt(df_proto::agent::v1::Prompt {
-                prompt_id: "prompt-2".to_string(),
-                author: None,
-                content: vec![df_proto::transcript::v1::ContentBlock {
-                    kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                        df_proto::transcript::v1::TextContent {
-                            text: "Do next thing".to_string(),
-                        },
-                    )),
-                    hidden: false,
-                }],
-                queued_at: None,
-            })),
+            body: Some(prompts_body(vec![text_prompt("prompt-2", "Do next thing")])),
         })
         .await
         .expect("send prompt-2");
@@ -883,9 +851,10 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
         .expect("received message");
 
     match next_prompt.body {
-        Some(control_message::Body::Prompt(p)) => {
+        Some(control_message::Body::Prompts(batch)) => {
+            assert_eq!(batch.prompts.len(), 1);
             assert_eq!(
-                p.prompt_id, "prompt-2",
+                batch.prompts[0].prompt_id, "prompt-2",
                 "duplicate prompt-1 should have been filtered"
             );
         }
@@ -1289,19 +1258,21 @@ async fn test_final_report_is_delivered_when_the_control_plane_returns_after_60_
     // The control plane is back: from here on in real time.
     tokio::time::resume();
 
-    loop {
-        let msg = tokio::time::timeout(Duration::from_secs(30), server.recv_agent_message())
-            .await
-            .expect("the manager must reconnect after the outage")
-            .expect("stream open");
-        if matches!(msg.body, Some(agent_message::Body::Hello(_))) {
-            break;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let msg = server.recv_agent_message().await.expect("stream open");
+            if matches!(msg.body, Some(agent_message::Body::Hello(_)))
+                && server
+                    .send_control_message(hello_ack("run-outage"))
+                    .await
+                    .is_ok()
+            {
+                break;
+            }
         }
-    }
-    server
-        .send_control_message(hello_ack("run-outage"))
-        .await
-        .unwrap();
+    })
+    .await
+    .expect("the manager must complete a live handshake after the outage");
     receive_and_ack_report(&mut server).await;
     let task = handle.task.take().unwrap();
     tokio::time::timeout(Duration::from_secs(10), task)

@@ -64,11 +64,14 @@ Alternatives:
 | System `request.decided` | Request decision |
 | System `push.rejected` | Push check |
 | System `webhook` | Forge events |
+| System `task.child_ended` | Subtask update |
 | Any other system reason | Dark Factory |
 
 The `webhook` row applies once `iter3-webhooks` is merged.
 
 The runtime doesn't map principals itself; it writes `author_name` as given. One function serves the agent and the web UI, so both use the same wording. Keeping the reason code in `Principal` (and the audit log) is unchanged.
+
+The queued stack lists every undelivered message and prefixes the rows of agents and the system with that name (`Principal::non_human_name`); human rows have no prefix.
 
 ### D3: Author line in the harness prompt
 

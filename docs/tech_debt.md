@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-119.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-120.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -39,6 +39,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-119: code review of `conversation-flow` (`df-agent-channel`, `factory-agent`, 2026-11-06). The `TD-n (ID)` heading gives the IDs used in that review.
 
 ## Summary
 
@@ -131,6 +132,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-116 | low   | `df-db` tasks | `tasks.rs` and `task_events.rs` depend on each other |
 | TD-117 | low   | `df-db` tests | `tasks/tests.rs` is at the file-length limit |
 | TD-118 | low   | `df-db`, `df-web` tests | Two test helpers set a task status by SQL |
+| TD-119 | low   | `df-agent-channel` tests | Repeated single-prompt extraction and `TurnEnded` test fixtures ([#141]) |
 
 ## Entries
 
@@ -1031,9 +1033,25 @@ The suites are sibling files instead of the `tests/` directory layout `AGENTS.md
 
 **Fix:** expose the `df-db` helper through a `test-util` feature and use it from `df-web`.
 
+### TD-119 (S7, S11). Repeated prompt and transcript test fixtures in `df-agent-channel`
+
+[PR #141][#141]
+
+The channel tests (`agent_port.rs`) repeat single-prompt extraction; the reconnect test also
+repeats the inline `TurnEnded` fixture. The `factory-agent` tests share `prompts_body`,
+`text_prompt` and `id_prompt` (`crates/factory-agent/src/tests/mod.rs`).
+
+**Matters when:** the prompt-batch or transcript-event format changes and the fixtures need the
+same adjustment in several places.
+
+**Fix:** add small shared test helpers for these fixture shapes in `df-agent-channel`. Keep the
+tests' explicit cardinality and queue-order assertions; do not hide them in a generic fixture
+builder.
+
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
 [#123]: https://github.com/prskr/dark-factory/issues/123
 [#124]: https://github.com/prskr/dark-factory/issues/124
 [#125]: https://github.com/prskr/dark-factory/issues/125
+[#141]: https://github.com/prskr/dark-factory/pull/141
 [sandbox-lifecycle-resilience]: ../openspec/changes/sandbox-lifecycle-resilience/proposal.md

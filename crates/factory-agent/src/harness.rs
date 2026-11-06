@@ -241,7 +241,7 @@ pub async fn setup_session(
     })
 }
 
-/// Builds ACP prompt content blocks from Dark Factory prompts.
+/// Builds ACP prompt content blocks with an author line before each message.
 pub fn build_acp_prompt_blocks(
     prompts: &[Prompt],
     prepend_summary: Option<&str>,
@@ -256,10 +256,16 @@ pub fn build_acp_prompt_blocks(
         ))));
     }
 
-    for p in prompts {
-        for b in &p.content {
-            if let Some(ContentBlockKind::Text(t)) = &b.kind {
-                blocks.push(AcpContentBlock::Text(AcpTextContent::new(&t.text)));
+    for prompt in prompts {
+        if !prompt.author_name.is_empty() {
+            blocks.push(AcpContentBlock::Text(AcpTextContent::new(format!(
+                "{}:",
+                prompt.author_name
+            ))));
+        }
+        for block in &prompt.content {
+            if let Some(ContentBlockKind::Text(text)) = &block.kind {
+                blocks.push(AcpContentBlock::Text(AcpTextContent::new(&text.text)));
             }
         }
     }

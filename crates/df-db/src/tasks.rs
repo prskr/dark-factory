@@ -5,7 +5,7 @@ use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, trans
 use df_core::{
     DependencyKind, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId,
     TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource, is_satisfied, placeholder_title,
-    sanitize_title, title_too_long,
+    sanitize_title, system_reason, title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
@@ -402,7 +402,7 @@ async fn enqueue_assignment_prompt(
     description: &str,
 ) -> Result<TaskMessageRow, DbError> {
     let prompt_id = PromptId::new();
-    let author = Principal::system("task.assigned");
+    let author = Principal::system(system_reason::TASK_ASSIGNED);
     let content = format_assignment_prompt(user_title, description);
     let author_json = serde_json::to_value(&author)?;
     let content_json = serde_json::to_value(&content)?;
@@ -508,7 +508,7 @@ pub async fn queue_resume_prompt_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
 ) -> Result<bool, DbError> {
-    let author = serde_json::to_value(Principal::system("run.resumed"))?;
+    let author = serde_json::to_value(Principal::system(system_reason::RUN_RESUMED))?;
     let content = serde_json::to_value(vec![text_block(RESUME_PROMPT.into(), false)])?;
     let inserted = sqlx::query(
         "INSERT INTO task_messages (id, task_id, author, content)

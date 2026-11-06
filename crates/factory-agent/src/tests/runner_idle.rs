@@ -4,13 +4,13 @@
 use std::time::Duration;
 
 use df_proto::agent::v1::{
-    AgentMessage, Budgets, ControlMessage, Prompt, Release, RunOutcome, RunPhase, ToolCallResult,
+    AgentMessage, Budgets, ControlMessage, Release, RunOutcome, RunPhase, ToolCallResult,
     ToolDescriptor, agent_message, control_message,
 };
 use df_proto::transcript::v1::event::Kind as EventKind;
 use tokio::sync::mpsc;
 
-use super::RunScenario;
+use super::{RunScenario, prompts_body, text_prompt};
 use crate::outbox::Outbox;
 use crate::runner::{RunExecutionResult, run_session};
 
@@ -56,22 +56,6 @@ fn chunk_text(msg: &AgentMessage) -> Option<&str> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-fn text_prompt(id: &str) -> Prompt {
-    Prompt {
-        prompt_id: id.to_string(),
-        author: None,
-        content: vec![df_proto::transcript::v1::ContentBlock {
-            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                df_proto::transcript::v1::TextContent {
-                    text: "go".to_string(),
-                },
-            )),
-            hidden: false,
-        }],
-        queued_at: None,
     }
 }
 
@@ -188,12 +172,53 @@ impl IdleRun {
 }
 
 #[tokio::test]
+async fn a_prompt_batch_while_idle_starts_one_turn_with_all_its_prompt_ids() {
+    let Some(mut run) = start(TWO_TURNS, None) else {
+        return;
+    };
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(prompts_body(vec![
+        text_prompt("prompt-2", "go"),
+        text_prompt("prompt-3", "go"),
+    ]))
+    .await;
+
+    let prompt_ids = run
+        .next(|body| match body {
+            agent_message::Body::TranscriptEvent(event) => match &event.kind {
+                Some(EventKind::TurnStarted(turn)) => Some(turn.prompt_ids.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .await;
+    assert_eq!(prompt_ids, ["prompt-2", "prompt-3"]);
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Release(Release {})).await;
+
+    let turns = run
+        .seen
+        .iter()
+        .filter(|message| {
+            matches!(
+                &message.body,
+                Some(agent_message::Body::TranscriptEvent(event))
+                    if matches!(event.kind, Some(EventKind::TurnStarted(_)))
+            )
+        })
+        .count();
+    assert_eq!(turns, 2);
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
 async fn follow_up_while_idle_starts_the_next_turn_in_the_same_session() {
     let Some(mut run) = start(TWO_TURNS, None) else {
         return;
     };
     run.phase(RunPhase::AwaitingInput).await;
-    run.send(control_message::Body::Prompt(text_prompt("prompt-2")))
+    run.send(prompts_body(vec![text_prompt("prompt-2", "go")]))
         .await;
     run.phase(RunPhase::Running).await;
     run.turn_ended().await;
@@ -239,7 +264,7 @@ async fn an_answer_within_the_window_starts_the_next_turn_and_the_flag_is_forgot
     };
     run.answer_call("ask_question", true, false).await;
     run.phase(RunPhase::AwaitingInput).await;
-    run.send(control_message::Body::Prompt(text_prompt("prompt-2")))
+    run.send(prompts_body(vec![text_prompt("prompt-2", "go")]))
         .await;
     run.phase(RunPhase::Running).await;
     run.turn_ended().await;
@@ -395,7 +420,7 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
     server
         .send_control_message(ControlMessage {
             ack: 0,
-            body: Some(control_message::Body::Prompt(text_prompt("prompt-2"))),
+            body: Some(prompts_body(vec![text_prompt("prompt-2", "go")])),
         })
         .await
         .unwrap();

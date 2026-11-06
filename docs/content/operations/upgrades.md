@@ -42,6 +42,16 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Prompt batches
+
+The agent protocol replaces the singular `Prompt` control message with `Prompts` batches. The
+sandbox runtime and control plane must come from the same release and chart version. If you pin
+their images, align both pins with that version.
+
+Let active runs finish before upgrading, or accept the interrupted-run behavior described above.
+Roll back the runtime and control plane together, following the
+[database restore requirements](#rolling-back).
+
 ### Cluster-scoped RBAC names
 
 The cluster-scoped `ClusterRole`s and `ClusterRoleBinding`s and the reader `Role`s in

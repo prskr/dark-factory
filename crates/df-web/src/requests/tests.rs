@@ -19,7 +19,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    let app = TestApp::new().await;
+    fixture_with_app(TestApp::new().await).await
+}
+
+async fn fixture_with_app(app: TestApp) -> Fixture {
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
     let task = new_task(&app.pool, &seed, "Fix backups").await.id;
@@ -212,6 +215,78 @@ async fn card_inputs_use_the_shared_input_class() {
 }
 
 #[tokio::test]
+async fn questions_and_approvals_share_the_neutral_frame_in_every_state() {
+    let f = fixture().await;
+    let question = f.ask("Use Postgres 16 or 17?", &["16", "17"]).await;
+    let approval = f.approval("Allow the backup connection").await;
+    let denial = f.approval("Allow the restore connection").await;
+    let pending = f.page("/tasks/DF-1").await;
+    assert!(pending.contains("Your answer"), "{pending}");
+    assert!(
+        pending.contains("hx-vals=\"{&quot;answer&quot;:&quot;17&quot;}\"")
+            && pending.contains("value=\"task\" checked")
+            && pending.contains("value=\"project\""),
+        "{pending}"
+    );
+
+    let (status, answered) = f
+        .post(
+            &format!("/requests/{question}/answer"),
+            &form(&[("answer", "17")]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(answered.contains("Answered by Peter: 17"), "{answered}");
+    assert!(answered.contains("bg-status-completed-bg"), "{answered}");
+
+    let (status, approved) = f
+        .post(
+            &format!("/requests/{approval}/approve"),
+            &form(&[("scope", "task")]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        approved.contains("Approved by Peter for scope task"),
+        "{approved}"
+    );
+    assert!(approved.contains("bg-status-completed-bg"), "{approved}");
+
+    let (status, denied) = f
+        .post(
+            &format!("/requests/{denial}/deny"),
+            &form(&[("comment", "Not required")]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(denied.contains("Denied by Peter: Not required"), "{denied}");
+    assert!(denied.contains("bg-status-failed-bg"), "{denied}");
+
+    for card in [&answered, &approved, &denied] {
+        assert!(
+            !card.contains("<form") && !card.contains("<button") && !card.contains("<input"),
+            "{card}"
+        );
+    }
+    for (id, state, card) in [
+        (question, "pending", &pending),
+        (approval, "pending", &pending),
+        (question, "answered", &answered),
+        (approval, "approved", &approved),
+        (denial, "denied", &denied),
+    ] {
+        let tag = crate::testkit::tag_around(card, &format!("id=\"request-{id}\""));
+        assert!(tag.contains(&format!("data-state=\"{state}\"")), "{tag}");
+        assert!(
+            tag.contains(
+                "class=\"min-w-0 space-y-3 rounded-xl border border-line-strong bg-sunk p-4\""
+            ),
+            "{state}: {tag}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn approving_offers_the_scopes_narrowest_first_and_rejects_others() {
     let f = fixture().await;
     let id = f.approval("needs it").await;
@@ -294,20 +369,71 @@ async fn unknown_request_is_not_found() {
 }
 
 #[tokio::test]
-async fn decided_request_stays_in_the_task_timeline() {
-    let f = fixture().await;
-    let id = f.ask("Postgres?", &["16"]).await;
-    f.post(
-        &format!("/requests/{id}/answer"),
-        &form(&[("answer", "16")]),
-    )
-    .await;
-    let page = f.page("/tasks/DF-1").await;
-    assert!(page.contains(&format!("id=\"request-{id}\"")), "{page}");
-    assert!(
-        page.contains("Postgres?") && page.contains("Answered by Peter: 16"),
-        "{page}"
-    );
+async fn answered_question_hides_its_decision_message_unless_hidden_blocks_are_shown() {
+    for show_hidden in [false, true] {
+        let app = if show_hidden {
+            TestApp::with_hidden_blocks().await
+        } else {
+            TestApp::new().await
+        };
+        let f = fixture_with_app(app).await;
+        let run = insert_run(&f.app.pool, f.task, 1, "running").await;
+        let id = f.ask("Postgres?", &["16"]).await;
+        let (status, _) = f
+            .post(
+                &format!("/requests/{id}/answer"),
+                &form(&[("answer", "16")]),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let messages = df_db::tasks::list_undelivered_messages(&f.app.pool, f.task)
+            .await
+            .unwrap();
+        let message = messages
+            .iter()
+            .find(|message| message.author == Principal::system("request.decided"))
+            .expect("decision queued for the agent");
+        let event = add_event(
+            &f.app.pool,
+            f.task,
+            run,
+            1,
+            "t1",
+            json!({"userMessage": {
+                "promptId": message.id.to_string(),
+                "author": {"system": {"reason": "request.decided"}},
+                "content": message.content,
+            }}),
+        )
+        .await;
+        sqlx::query(
+            "UPDATE task_messages SET forwarded_at = now(), delivered_at = now(), delivered_run_id = $2 WHERE id = $1",
+        )
+        .bind(message.id.as_uuid())
+        .bind(run)
+        .execute(&f.app.pool)
+        .await
+        .unwrap();
+        let page = f.page("/tasks/DF-1").await;
+        assert_eq!(
+            page.matches(&format!("id=\"request-{id}\"")).count(),
+            1,
+            "{page}"
+        );
+        assert!(
+            page.contains("Postgres?") && page.contains("Answered by Peter: 16"),
+            "{page}"
+        );
+        assert_eq!(page.contains(&format!("id=\"ev-{event}\"")), show_hidden);
+        assert_eq!(page.contains("Instruction for the agent"), show_hidden);
+        assert_eq!(page.contains("Request decision"), show_hidden);
+        assert_eq!(
+            page.matches("was answered by Peter: 16").count(),
+            usize::from(show_hidden),
+            "{page}"
+        );
+        assert!(!page.contains("request.decided"), "{page}");
+    }
 }
 
 #[tokio::test]

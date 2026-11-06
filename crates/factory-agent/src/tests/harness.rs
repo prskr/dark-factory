@@ -5,7 +5,7 @@
     reason = "scenario tests set up and check a whole run"
 )]
 
-use df_proto::agent::v1::control_message;
+use super::authored_prompt;
 
 #[tokio::test]
 async fn test_scenario_harness_resume_success() {
@@ -57,6 +57,7 @@ async fn test_scenario_harness_resume_success() {
                 let prompt_blocks = build_acp_prompt_blocks(
                     &[df_proto::agent::v1::Prompt {
                         prompt_id: "p1".to_string(),
+                        author_name: String::new(),
                         author: None,
                         queued_at: None,
                         content: vec![df_proto::transcript::v1::ContentBlock {
@@ -147,6 +148,7 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                 let prompt_blocks = build_acp_prompt_blocks(
                     &[df_proto::agent::v1::Prompt {
                         prompt_id: "p1".to_string(),
+                        author_name: String::new(),
                         author: None,
                         queued_at: None,
                         content: vec![df_proto::transcript::v1::ContentBlock {
@@ -345,6 +347,70 @@ sessions:
     child2.kill().await.ok();
 }
 
+fn harness_prompt_texts(
+    prompts: &[df_proto::agent::v1::Prompt],
+    summary: Option<&str>,
+) -> Vec<String> {
+    crate::harness::build_acp_prompt_blocks(prompts, summary)
+        .into_iter()
+        .map(|block| {
+            let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block else {
+                panic!("expected a text block");
+            };
+            text.text
+        })
+        .collect()
+}
+
+#[test]
+fn harness_prompt_names_each_author_in_queue_order() {
+    let prompts = [
+        authored_prompt("Peter Kurfer", "first message"),
+        authored_prompt("Request decision", "second message"),
+    ];
+
+    assert_eq!(
+        harness_prompt_texts(&prompts, None),
+        [
+            "Peter Kurfer:",
+            "first message",
+            "Request decision:",
+            "second message"
+        ]
+    );
+}
+
+#[test]
+fn harness_prompt_names_the_author_of_a_single_message() {
+    assert_eq!(
+        harness_prompt_texts(&[authored_prompt("Peter Kurfer", "single message")], None),
+        ["Peter Kurfer:", "single message"]
+    );
+}
+
+#[test]
+fn harness_prompt_without_an_author_name_has_no_author_line() {
+    assert_eq!(
+        harness_prompt_texts(&[authored_prompt("", "legacy message")], None),
+        ["legacy message"]
+    );
+}
+
+#[test]
+fn harness_prompt_keeps_the_continuation_summary_before_author_lines() {
+    assert_eq!(
+        harness_prompt_texts(
+            &[authored_prompt("Peter Kurfer", "follow-up")],
+            Some("Earlier work"),
+        ),
+        [
+            "Context from previous run:\nEarlier work",
+            "Peter Kurfer:",
+            "follow-up"
+        ]
+    );
+}
+
 #[test]
 fn test_scenario_two_queued_messages_arrive_during_turn() {
     use crate::harness::{PromptQueue, build_acp_prompt_blocks};
@@ -358,6 +424,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
 
     let p1 = Prompt {
         prompt_id: "prompt-1".to_string(),
+        author_name: String::new(),
         author: Some(Principal {
             kind: Some(df_proto::transcript::v1::principal::Kind::Human(
                 df_proto::transcript::v1::HumanPrincipal {
@@ -395,6 +462,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
     // While Turn 1 is active, two new prompts arrive
     let p2 = Prompt {
         prompt_id: "prompt-2".to_string(),
+        author_name: String::new(),
         author: None,
         content: vec![ContentBlock {
             kind: Some(ContentKind::Text(TextContent {
@@ -407,6 +475,7 @@ fn test_scenario_two_queued_messages_arrive_during_turn() {
 
     let p3 = Prompt {
         prompt_id: "prompt-3".to_string(),
+        author_name: String::new(),
         author: None,
         content: vec![ContentBlock {
             kind: Some(ContentKind::Text(TextContent {
@@ -469,6 +538,7 @@ fn test_hidden_block_is_delivered_and_keeps_its_flag_in_the_event() {
     let mut queue = PromptQueue::new();
     queue.push(Prompt {
         prompt_id: "p".into(),
+        author_name: String::new(),
         author: None,
         content: vec![block("visible", false), block("secret", true)],
         queued_at: None,
@@ -488,21 +558,58 @@ fn test_hidden_block_is_delivered_and_keeps_its_flag_in_the_event() {
 #[test]
 fn test_scenario_prompt_queue_deduplicates_duplicate_prompts() {
     use crate::connection::CommandFilter;
-    use df_proto::agent::v1::{ControlMessage, Prompt, control_message};
+    use df_proto::agent::v1::ControlMessage;
 
     // Duplicates are dropped at the connection boundary by `CommandFilter`
-    let msg = ControlMessage {
+    let mut msg = ControlMessage {
         ack: 0,
-        body: Some(control_message::Body::Prompt(Prompt {
-            prompt_id: "prompt-dup".to_string(),
-            author: None,
-            content: vec![],
-            queued_at: None,
-        })),
+        body: Some(super::prompts_body(vec![super::id_prompt("prompt-dup")])),
     };
     let mut filter = CommandFilter::new();
-    assert!(filter.filter_control_message(&msg));
-    assert!(!filter.filter_control_message(&msg));
+    assert!(filter.filter_control_message(&mut msg));
+    assert!(!filter.filter_control_message(&mut msg));
+}
+
+#[test]
+fn command_filter_drops_seen_and_repeated_prompt_ids_and_keeps_order() {
+    use crate::connection::CommandFilter;
+    use df_proto::agent::v1::{ControlMessage, control_message};
+
+    let message = |ids: &[&str]| ControlMessage {
+        body: Some(super::prompts_body(
+            ids.iter().map(|id| super::id_prompt(id)).collect(),
+        )),
+        ..Default::default()
+    };
+    let mut filter = CommandFilter::new();
+    assert!(filter.filter_control_message(&mut message(&["seen"])));
+    let mut follow_up = message(&["seen", "first", "first", "second"]);
+
+    assert!(filter.filter_control_message(&mut follow_up));
+    let Some(control_message::Body::Prompts(batch)) = &follow_up.body else {
+        panic!("expected a prompt batch");
+    };
+    assert_eq!(
+        batch
+            .prompts
+            .iter()
+            .map(|prompt| prompt.prompt_id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert!(!filter.filter_control_message(&mut follow_up));
+}
+
+#[test]
+fn an_empty_prompt_batch_is_not_forwarded() {
+    use crate::connection::CommandFilter;
+    use df_proto::agent::v1::{ControlMessage, Prompts, control_message};
+
+    let mut message = ControlMessage {
+        body: Some(control_message::Body::Prompts(Prompts::default())),
+        ..Default::default()
+    };
+    assert!(!CommandFilter::new().filter_control_message(&mut message));
 }
 
 #[test]
@@ -516,13 +623,13 @@ fn test_empty_prompt_ids_are_not_duplicates() {
     queue.push(Prompt::default());
     assert_eq!(queue.len(), 2);
 
-    let msg = ControlMessage {
+    let mut msg = ControlMessage {
         ack: 0,
-        body: Some(control_message::Body::Prompt(Prompt::default())),
+        body: Some(super::prompts_body(vec![Prompt::default()])),
     };
     let mut filter = CommandFilter::new();
-    assert!(filter.filter_control_message(&msg));
-    assert!(filter.filter_control_message(&msg));
+    assert!(filter.filter_control_message(&mut msg));
+    assert!(filter.filter_control_message(&mut msg));
 }
 
 mod harness_files {

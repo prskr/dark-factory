@@ -33,6 +33,13 @@ The task view has three columns: the task list, the transcript and the details.
   [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
   no usage are counted separately ("2 requests without usage") instead of as zero.
 
+The transcript shows the author of each message. In the queued-message stack, messages from agents and
+the system are prefixed with their name; your own messages have none. System authors use
+readable names instead of internal reason codes: **Task assignment**, **Resume**, **Request decision**,
+**Push check**, **Forge events** and **Subtask update**. Other system authors show **Dark Factory**.
+[Request decisions](requests.md#what-happens-on-a-decision) appear on their cards; their delivery
+messages are hidden by default.
+
 ## Agent messages: Markdown, code and diagrams
 
 An agent message is plain text while it streams and is rendered as Markdown when its turn ends.
