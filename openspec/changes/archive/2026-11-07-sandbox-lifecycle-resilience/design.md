@@ -41,6 +41,10 @@ Alternative: end the run `provisioning_failed` and requeue like `capacity`. Reje
 
 Ceiling: a stuck run costs one `sandbox_exists` list plus up to two lookups per rule every 5 s. Code gets a `ponytail:` comment naming it.
 
+A tick starts no second attempt for a run whose earlier attempt on this replica is still in flight (an in-memory claim per run id, released when the attempt ends). Otherwise a slow `Unavailable` attempt and the 5 s tick stack attempts. The claim only covers one replica; another replica may still retry the same run, which is harmless because volume and sandbox creation are idempotent.
+
+On a retry by `reprovision_stale`, `Unavailable` and `Backend` errors are only logged: a timed-out create may still have succeeded, and the Kubernetes provider maps both a rejected pod create and a timeout to `Backend`. `Capacity` and `InvalidSpec` end the run `provisioning_failed` like a first attempt (a capacity rejection requeues the task without counting a resume), unless a second `sandbox_exists` finds the sandbox by now.
+
 ### D3: Image volume pull failures also come from pod Events
 
 On containerd with Kubernetes 1.36 and 1.37 the container status already reports the failed pull (Context). The Event watcher is defense in depth for runtimes that report it only as an Event. The project decided to keep it despite the extra RBAC.
@@ -59,7 +63,7 @@ Alternatives:
 
 ### D4: The scheduler sweeps runs with a sandbox once at startup
 
-When `Scheduler::run` starts, it spawns one task into its existing `background` `JoinSet`: list the non-terminal runs in `connecting` or later (a sandbox was reported), call `sandbox_exists` for each, and `finish_run` with `sandbox_lost` (`"sandbox pod no longer present after a control plane restart"`) when it returns `false`. The reason names no pod: the scheduler sees the provider only through `SandboxProvider`, and the run id already identifies the pod (label `dark-factory.io/run-id`). Errors are logged per run; the run then ends through the usual timeouts.
+When `Scheduler::run` starts, it spawns one task into its existing `background` `JoinSet`: list the non-terminal runs in `connecting` or later (a sandbox was reported), call `sandbox_exists` for each, and `finish_run` with `sandbox_lost` (`"sandbox pod no longer present after a control plane restart"`) when it returns `false`. The reason names no pod: the scheduler sees the provider only through `SandboxProvider`, and the run id already identifies the pod (label `dark-factory.io/run-id`). Up to 8 checks run at once. A failed listing or check is logged and the whole pass is retried one tick interval later, 3 passes in all; runs still unchecked then end through the usual timeouts, and an error is logged.
 
 Every replica sweeps; `finish_run` is guarded by the run state, so two replicas ending the same run is harmless. Runs in `pending`/`provisioning` are left to `reprovision_stale`.
 
