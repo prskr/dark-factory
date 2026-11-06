@@ -40,6 +40,17 @@ When a child completes (its run ends with outcome `completed`), becomes Done, fa
 - **WHEN** child `DF-21` ends a turn without calling `complete_task` and becomes `waiting`
 - **THEN** its parent receives no message
 
+### Requirement: Completed runs on finished children
+A run that ends `completed` on a child that is already Done or `cancelled` SHALL NOT wake its parent.
+
+#### Scenario: Run completes on a cancelled child
+- **WHEN** child `DF-21` was cancelled and its run then ends with outcome `completed`
+- **THEN** its parent receives no further message
+
+#### Scenario: Run completes on a done child
+- **WHEN** child `DF-21` is Done and a later run of it ends with outcome `completed`
+- **THEN** its parent receives no message for it
+
 ### Requirement: Final parents are not woken
 No child-ended message SHALL be queued on a parent that is Done (`completed`), `cancelled` or `failed`.
 

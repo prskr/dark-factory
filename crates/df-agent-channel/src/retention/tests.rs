@@ -73,7 +73,9 @@ async fn second_task(env: &Env) -> TaskId {
             title: Some("Second".into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await

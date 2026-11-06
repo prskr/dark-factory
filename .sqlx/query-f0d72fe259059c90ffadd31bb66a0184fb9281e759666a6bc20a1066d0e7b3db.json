@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, parent_id, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -193,7 +193,7 @@
       {
         "ordinal": 17,
         "name": "created_by",
-        "type_info": "Uuid",
+        "type_info": "Jsonb",
         "origin": {
           "Table": {
             "table": "tasks",
@@ -203,6 +203,17 @@
       },
       {
         "ordinal": 18,
+        "name": "parent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -213,7 +224,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -247,10 +258,11 @@
       true,
       false,
       false,
+      false,
       true,
       false,
       false
     ]
   },
-  "hash": "5e0811f47a99e91e34ed5caa027c0f38f93902cc30ba0c9bcf0c8f563815d710"
+  "hash": "f0d72fe259059c90ffadd31bb66a0184fb9281e759666a6bc20a1066d0e7b3db"
 }

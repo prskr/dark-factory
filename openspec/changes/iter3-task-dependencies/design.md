@@ -115,7 +115,7 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
 The applier fills `ready` with `clock_timestamp()` when it executes `EnqueuePrSync`, still under the task lock. So `transition` stays pure and a reopening message is still ordered against the ready time (`pr-forge-outbox` D3). The push-report job changes no status and stays in `session.rs`.
 
 **New rules as match arms:**
-- `RunEnded` with outcome `completed`: `RecordFirst(Completion)`, `NotifyDependents`, `NotifyParent(completed)`. When the resulting status is `failed` (outcome `failed`, or infrastructure failures with no resume left): `NotifyParent(failed)`. The run-end mapping and its overrides are unchanged.
+- `RunEnded` with outcome `completed`: `RecordFirst(Completion)`, `NotifyDependents`, `NotifyParent(completed)`. Not a Completion when the status before the event is `cancelled` (no `RecordFirst`, `NotifyDependents`, `NotifyParent` or PR sync; `TaskChanged` is still published); when it is already `completed` (Done), `NotifyParent` is omitted. When the resulting status is `failed` (outcome `failed`, or infrastructure failures with no resume left): `NotifyParent(failed)`. The run-end mapping and its overrides are unchanged.
 - `MarkedDone`: `RecordFirst(Done)`, `NotifyDependents`, `NotifyParent(done)`.
 - `Cancelled`: `NotifyParent(cancelled)`.
 - `DependencySatisfied`, applied to a dependent: `awaiting_dependencies` with no unsatisfied dependency left → `queued` and `Publish(TaskMessageQueued)` (its assignment prompt is already queued, so the scheduler starts it). Always `Publish(TaskChanged)`, because the UI's dependency list changes either way.
@@ -178,11 +178,16 @@ The race: the applier locks a target's row (`FOR UPDATE`) before it handles the 
 
 - **Task details**:
   - creator: a human principal shows its display name; an agent principal shows `<KEY> · <persona>`, with the key linked;
-  - the parent link;
-  - while `awaiting_dependencies`, a "Waiting for" section listing each dependency with its satisfied state. It re-renders on `TaskChanged`, which D2 publishes for every dependent.
-- **Status**: the status chip label is "awaiting dependencies".
+  - the parent link; creator and parent follow the branch in the properties;
+  - a collapsible "Dependencies" section between the properties (and the description) and the runs, hidden when the task has neither dependencies nor dependants:
+    - "Waits for": each dependency with key (linked), kind, title and its satisfied state;
+    - "Needed by": each dependant with key (linked), kind, title and status, read through the index on `task_dependencies.depends_on_task_id`;
+    - open on page load while `awaiting_dependencies`, closed otherwise; its `open` attribute is in `morphIgnore`, as for Runs, so live updates keep the reader's choice;
+    - it re-renders on `TaskChanged`, which D2 publishes for every dependent. A dependant's status in "Needed by" is not updated live.
+  - Reference boards: `Tasks - Details Sidebar / Desktop · awaiting dependencies` and `Desktop · dependencies collapsed`; every other task board shows the section collapsed (`docs/design-workflow.md`).
+- **Status**: the status chip label is "awaiting dependencies", in the Queued tone (nothing waits on a human); PenPot `Status badge` variant `Awaiting dependencies`.
 - **Filters**: the "Waiting" filter group adds the status in `df-core`, where the group mapping lives.
-- **Personas**: the persona form gets a description textarea (500 characters, counter). The card shows the description when it is set.
+- **Personas**: the persona form gets a description textarea between name and system prompt (500 characters, counter `n / 500`). The card shows the description when it is set. Reference boards: the four persona edit boards and `Settings · personas` on `Config - Personas`.
 
 ### D7: Demo and tests without webhooks
 

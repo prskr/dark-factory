@@ -62,6 +62,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
     for (key, script) in [
         (data::SECRET_PROJECT_KEY, data::SECRET_SCRIPT),
         (data::PROTECTED_PROJECT_KEY, data::PROTECTED_SCRIPT),
+        (data::DELEGATION_PROJECT_KEY, data::DELEGATION_SCRIPT),
     ] {
         let project = get_project_by_key(&pool, key)
             .await?

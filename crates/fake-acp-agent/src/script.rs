@@ -84,6 +84,33 @@ pub enum Step {
     Plan(PlanStep),
     Model(crate::model::ModelStep),
     End(EndStep),
+    /// Plays its steps only if the text of the turn's prompt contains `prompt_contains`, so one
+    /// script serves tasks and messages that need different answers.
+    When(WhenStep),
+}
+
+/// Steps that are played only for a prompt with certain text.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WhenStep {
+    pub prompt_contains: String,
+    pub steps: Vec<Step>,
+}
+
+impl Step {
+    /// The steps to play for a prompt with `prompt` as text: `when` steps are replaced by their
+    /// steps if the prompt matches and dropped otherwise.
+    pub fn expand(steps: Vec<Self>, prompt: &str) -> Vec<Self> {
+        steps
+            .into_iter()
+            .flat_map(|step| match step {
+                Self::When(when) if prompt.contains(&when.prompt_contains) => {
+                    Self::expand(when.steps, prompt)
+                }
+                Self::When(_) => Vec::new(),
+                other => vec![other],
+            })
+            .collect()
+    }
 }
 
 /// Scripted tool call details.

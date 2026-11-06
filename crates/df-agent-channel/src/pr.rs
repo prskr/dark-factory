@@ -6,12 +6,11 @@
 //! them; [`sync::PrSyncHandler`] does the forge work and retries it with backoff
 //! (`pr-forge-outbox` design D1, D2).
 
-use df_core::{RepoRef, RunId, RunOutcome, TaskId};
-use df_db::tasks::{PR_SYNC_KIND, PrSyncJob, clock_under_task_lock};
+use df_core::{RepoRef, RunId, TaskId};
+use df_db::tasks::{PR_SYNC_KIND, PrSyncJob};
 use sqlx::{Postgres, Transaction};
 
 use crate::error::ChannelError;
-use crate::runs::RunEnd;
 
 pub mod mark_draft;
 pub mod sync;
@@ -39,35 +38,6 @@ pub(crate) async fn enqueue_open_after_push(
     };
     enqueue(tx, job).await?;
     Ok(true)
-}
-
-/// Enqueues the `pr.sync` job of a run end: open the PR if the branch was pushed, mark it ready
-/// if the run completed. No job for a run that did neither.
-///
-/// The caller holds the task row lock. The ready time is read from the database clock under it,
-/// the same clock `task_messages.queued_at` uses, so a message that waited for the lock to
-/// reopen the task is queued after it and one pending at completion before it (design D3).
-pub(crate) async fn enqueue_run_end(
-    tx: &mut Transaction<'_, Postgres>,
-    task_id: TaskId,
-    end: &RunEnd,
-) -> Result<(), ChannelError> {
-    let completed = end.outcome == RunOutcome::Completed;
-    if !end.task_branch_pushed && !completed {
-        return Ok(());
-    }
-    let ready = if completed {
-        Some(clock_under_task_lock(tx).await?)
-    } else {
-        None
-    };
-    let job = PrSyncJob {
-        task_id,
-        run_id: Some(end.run_id),
-        open: end.task_branch_pushed,
-        ready,
-    };
-    enqueue(tx, job).await
 }
 
 async fn enqueue(tx: &mut Transaction<'_, Postgres>, job: PrSyncJob) -> Result<(), ChannelError> {

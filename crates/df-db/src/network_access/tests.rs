@@ -57,7 +57,9 @@ async fn task(pool: &PgPool, project_id: ProjectId) -> TaskRow {
             title: Some("T".into()),
             description: "d".into(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await

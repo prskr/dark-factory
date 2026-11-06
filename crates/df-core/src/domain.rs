@@ -3,10 +3,14 @@
 use std::fmt;
 use std::str::FromStr;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ids::{PersonaId, RunId, TaskId, UserId};
+
+/// Longest persona description, in characters (`personas.description`).
+pub const PERSONA_DESCRIPTION_MAX_CHARS: usize = 500;
 
 /// Error parsing a domain enum from a string.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -21,7 +25,8 @@ pub struct ParseEnumError {
 pub enum StatusGroup {
     /// Queued, running or rate limited: the work is moving without a human.
     Active,
-    /// Waiting or limit reached: a human has to act.
+    /// Awaiting dependencies, waiting, blocked, in review or limit reached: the work waits for
+    /// a human or for other tasks.
     Waiting,
     /// Completed, cancelled or failed.
     Done,
@@ -33,7 +38,7 @@ pub enum StatusGroup {
 pub enum StatusSet {
     /// Queued, running, rate limited.
     Active,
-    /// Waiting, limit reached.
+    /// Awaiting dependencies, waiting, blocked, in review, limit reached.
     Waiting,
     /// Completed, cancelled, failed.
     Done,
@@ -53,6 +58,7 @@ impl StatusSet {
                 TaskStatus::RateLimited,
             ],
             Self::Waiting => &[
+                TaskStatus::AwaitingDependencies,
                 TaskStatus::Waiting,
                 TaskStatus::Blocked,
                 TaskStatus::InReview,
@@ -83,6 +89,8 @@ impl From<StatusGroup> for StatusSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
+    /// Created with an unsatisfied dependency; has never started.
+    AwaitingDependencies,
     Queued,
     Running,
     Waiting,
@@ -103,9 +111,11 @@ impl TaskStatus {
     pub const fn group(&self) -> StatusGroup {
         match self {
             Self::Queued | Self::Running | Self::RateLimited => StatusGroup::Active,
-            Self::Waiting | Self::Blocked | Self::InReview | Self::LimitReached => {
-                StatusGroup::Waiting
-            }
+            Self::AwaitingDependencies
+            | Self::Waiting
+            | Self::Blocked
+            | Self::InReview
+            | Self::LimitReached => StatusGroup::Waiting,
             Self::Completed | Self::Cancelled | Self::Failed => StatusGroup::Done,
         }
     }
@@ -128,6 +138,7 @@ impl TaskStatus {
     }
 
     pub const ALL: &'static [Self] = &[
+        Self::AwaitingDependencies,
         Self::Queued,
         Self::Running,
         Self::Waiting,
@@ -142,6 +153,7 @@ impl TaskStatus {
 
     pub const fn as_str(&self) -> &'static str {
         match self {
+            Self::AwaitingDependencies => "awaiting_dependencies",
             Self::Queued => "queued",
             Self::Running => "running",
             Self::Waiting => "waiting",
@@ -175,6 +187,7 @@ impl FromStr for TaskStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "awaiting_dependencies" => Ok(Self::AwaitingDependencies),
             "queued" => Ok(Self::Queued),
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
@@ -191,6 +204,58 @@ impl FromStr for TaskStatus {
             }),
         }
     }
+}
+
+/// How a task depends on another one (`task_dependencies.kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyKind {
+    /// The target completed at least once, or is done.
+    Completion,
+    /// The target is done: a board member marked it done or its pull request was merged.
+    Done,
+}
+
+impl DependencyKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completion => "completion",
+            Self::Done => "done",
+        }
+    }
+}
+
+impl fmt::Display for DependencyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for DependencyKind {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "completion" => Ok(Self::Completion),
+            "done" => Ok(Self::Done),
+            _ => Err(ParseEnumError {
+                kind: "DependencyKind",
+                value: s.to_string(),
+            }),
+        }
+    }
+}
+
+/// Whether a dependency of `kind` is satisfied by its target, given the times the target first
+/// completed and first became done. A satisfied dependency stays satisfied: both times are set
+/// once.
+pub const fn is_satisfied(
+    kind: DependencyKind,
+    first_completed_at: Option<DateTime<Utc>>,
+    first_done_at: Option<DateTime<Utc>>,
+) -> bool {
+    first_done_at.is_some()
+        || matches!(kind, DependencyKind::Completion) && first_completed_at.is_some()
 }
 
 /// Run lifecycle state (`runs.state`).
@@ -430,6 +495,7 @@ mod tests {
             (TaskStatus::RateLimited, "rate_limited"),
             (TaskStatus::LimitReached, "limit_reached"),
             (TaskStatus::Failed, "failed"),
+            (TaskStatus::AwaitingDependencies, "awaiting_dependencies"),
         ];
         assert_eq!(expected.len(), TaskStatus::ALL.len());
 
@@ -454,7 +520,13 @@ mod tests {
         assert_eq!(StatusSet::Running.statuses(), [Running, RateLimited]);
         assert_eq!(
             StatusSet::Waiting.statuses(),
-            [Waiting, Blocked, InReview, LimitReached]
+            [
+                AwaitingDependencies,
+                Waiting,
+                Blocked,
+                InReview,
+                LimitReached
+            ]
         );
         assert_eq!(StatusSet::Done.statuses(), [Completed, Cancelled, Failed]);
         // The groups are made of the statuses `TaskStatus::group` assigns to them.
@@ -476,6 +548,7 @@ mod tests {
     fn only_idle_or_ended_statuses_can_be_marked_done() {
         use TaskStatus::*;
         for status in [
+            AwaitingDependencies,
             Waiting,
             Blocked,
             InReview,
@@ -513,6 +586,7 @@ mod tests {
             (TaskStatus::Completed, Done),
             (TaskStatus::Cancelled, Done),
             (TaskStatus::Failed, Done),
+            (TaskStatus::AwaitingDependencies, Waiting),
         ];
         assert_eq!(expected.len(), TaskStatus::ALL.len());
         for (status, group) in expected {
@@ -579,6 +653,39 @@ mod tests {
         }
 
         assert!(RunOutcome::from_str("bogus").is_err());
+    }
+
+    #[test]
+    fn dependency_kind_string_and_serde_roundtrip() {
+        for (kind, s) in [
+            (DependencyKind::Completion, "completion"),
+            (DependencyKind::Done, "done"),
+        ] {
+            assert_eq!(kind.as_str(), s);
+            assert_eq!(DependencyKind::from_str(s).unwrap(), kind);
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, format!("\"{s}\""));
+            assert_eq!(serde_json::from_str::<DependencyKind>(&json).unwrap(), kind);
+        }
+        assert!(DependencyKind::from_str("start").is_err());
+    }
+
+    #[test]
+    fn a_dependency_is_satisfied_by_the_event_of_its_kind_or_by_done() {
+        let at = Some(Utc::now());
+        let cases = [
+            // (kind, first completed, first done, satisfied)
+            (DependencyKind::Completion, None, None, false),
+            (DependencyKind::Completion, at, None, true),
+            (DependencyKind::Completion, None, at, true),
+            (DependencyKind::Done, None, None, false),
+            (DependencyKind::Done, at, None, false),
+            (DependencyKind::Done, None, at, true),
+            (DependencyKind::Done, at, at, true),
+        ];
+        for (kind, completed, done, satisfied) in cases {
+            assert_eq!(is_satisfied(kind, completed, done), satisfied, "{kind:?}");
+        }
     }
 
     #[test]

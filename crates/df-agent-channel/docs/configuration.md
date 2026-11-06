@@ -131,6 +131,27 @@ If prompts are still undelivered when a run ends with an outcome other than `fai
 marked done, or whose pull request was merged (`completed`), keeps its status when its run ends,
 unless prompts are undelivered.
 
+### Task transitions and delegation
+
+Every change of `tasks.status` goes through one function of `df-core`
+(`task_transition::transition`, ADR-0055); `df_db::apply_task_event` loads the task, applies the
+result and runs its effects in the caller's transaction. Besides the table above:
+
+- A run that ends with `completed` records `tasks.first_completed_at` (once), releases the tasks
+  that depend on it and wakes the parent. A task marked done records `first_done_at`, releases and
+  wakes the same way; a task that ends `failed` or is cancelled wakes its parent.
+- A dependent leaves `awaiting_dependencies` for `queued` when all its dependencies are satisfied
+  (`completion`: `first_completed_at` or `first_done_at` is set; `done`: `first_done_at` is set).
+  It leaves the status once.
+- The message to the parent has the author `system` with reason `task.child_ended` and goes through
+  the same rules as any message. No message is queued on a parent that is `completed`, `cancelled`
+  or `failed`.
+- Cross-task effects lock only the other task's row, never its run rows.
+
+The factory tools `create_task`, `list_personas` and `send_message` are described in
+[Delegate work between agents](../../using/delegation.md). `create_task` stores the title with
+source `agent`; a retried call (same `call_id`) returns the stored key and creates one task.
+
 ### Human stop and cancel
 
 A board member stops the active run (`POST /tasks/{key}/stop`) or cancels the task (`POST /tasks/{key}/cancel`, which stops the run too). Both set `runs.stop_requested_at`.
@@ -206,6 +227,12 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
   (a trailing `.git` is optional). Secret values are never logged or stored.
 
 ## Database changes
+
+`20261105000004_task_dependencies.sql` adds `tasks.parent_id`, turns `tasks.created_by` into a
+JSONB principal (existing users become `human`, `NULL` becomes `system` with reason `migration`),
+adds `tasks.first_completed_at` and `tasks.first_done_at` (filled from the status of existing
+tasks), the table `task_dependencies (task_id, depends_on_task_id, kind)`, the status
+`awaiting_dependencies` and `personas.description` (at most 500 characters).
 
 `20261019000001_task_completion_summary.sql` adds `tasks.completion_summary` (unused since
 `20261105000002_run_completion_summary.sql`) and `runs.connected_at` (first `Hello`; start of the

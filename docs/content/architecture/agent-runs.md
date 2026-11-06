@@ -94,6 +94,20 @@ sequenceDiagram
 If messages are still undelivered at the end of a run, the task becomes `queued` instead, so the next
 run picks them up.
 
+## Agent tools
+
+The control plane gives every run the factory tools of `contract/mcp/factory-tools.v2.json`; the
+harness sees them as the MCP server `factory`. Calls are executed by the control plane, scoped to
+the run's task, and at most once per `call_id`.
+
+| Tool | Purpose |
+| --- | --- |
+| `update_pull_request`, `comment_on_issue`, `report_progress`, `set_task_title` | Shape the pull request, comment on the linked issue, set the status line and the title |
+| `complete_task` | Ends the run after the turn; the task goes to review |
+| `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task |
+| `read_pull_request_feedback`, `comment_on_pull_request` | Read and answer reviews |
+| `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project; `send_message` acts only on children of the run's task |
+
 ## Pull request actions
 
 The control plane never calls the forge from the agent stream. Opening the draft pull request,

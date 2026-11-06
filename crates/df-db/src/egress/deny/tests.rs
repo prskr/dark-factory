@@ -42,8 +42,8 @@ async fn project_and_task(pool: &PgPool) -> (Uuid, Uuid) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
-         VALUES ($1, $2, 7, 'DF-7', 't', 'user', $3)",
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id, created_by)
+         VALUES ($1, $2, 7, 'DF-7', 't', 'user', $3, '{\"kind\":\"system\",\"reason\":\"test\"}')",
     )
     .bind(task)
     .bind(project)
@@ -129,8 +129,9 @@ async fn an_allow_rule_of_a_task_still_covers_a_host_that_a_deny_rule_matches() 
     let (project, df7) = project_and_task(&pool).await;
     let other = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
-         VALUES ($1, $2, 8, 'DF-8', 't', 'user', (SELECT id FROM personas LIMIT 1))",
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id, created_by)
+         VALUES ($1, $2, 8, 'DF-8', 't', 'user', (SELECT id FROM personas LIMIT 1),
+                 '{\"kind\":\"system\",\"reason\":\"test\"}')",
     )
     .bind(other)
     .bind(project)

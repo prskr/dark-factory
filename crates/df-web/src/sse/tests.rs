@@ -403,9 +403,7 @@ async fn the_live_stack_follows_the_task_status_for_forwarded_messages() {
     );
 
     // The task ends with the message still undelivered: the stack says so without a reload.
-    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::Failed)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Failed).await;
     let frame = sse.next_within(LIVE).await;
     let stack = &frame.data[frame.data.find(r##"hx-target="#pending""##).expect("stack")..];
     assert!(
@@ -532,9 +530,7 @@ async fn task_list_stream_shows_status_changes_within_two_seconds() {
     let first = sse.next().await;
     assert!(first.data.contains(r##"hx-target="#task-rows""##) && first.data.contains(">queued<"));
 
-    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::Running)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
     let frame = sse.next_within(Duration::from_secs(2)).await;
     assert!(
         frame.data.contains(">running<") && !frame.data.contains(">queued<"),
@@ -552,9 +548,7 @@ async fn filtered_list_stream_drops_a_task_that_leaves_the_filter() {
     let mut done = f.events("/tasks/events?status=done").await;
     assert!(!done.next().await.data.contains("row-DF-1"));
 
-    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::Completed)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Completed).await;
 
     // Well below POLL: only the notification can have triggered the updates.
     let left = active.next_within(LIVE).await;
@@ -619,9 +613,7 @@ async fn narrower_status_filter_of_the_list_stream_follows_status_changes() {
     assert!(queued.next().await.data.contains("row-DF-1"));
     assert!(!running.next().await.data.contains("row-DF-1"));
 
-    df_db::update_task_status(&f.app.pool, f.task, TaskStatus::RateLimited)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::RateLimited).await;
 
     let left = queued.next_within(LIVE).await;
     assert!(!left.data.contains("row-DF-1"), "{}", left.data);
@@ -670,4 +662,83 @@ async fn streams_end_when_the_session_token_is_due_for_refresh() {
     let mut sse = f.events("/tasks/DF-1/events?after=0").await;
     sse.next().await;
     assert!(!sse.ends_within(Duration::from_secs(2)).await);
+}
+
+/// `DF-2`, which waits for the completion of the fixture's task `DF-1`.
+async fn waiting_task(f: &Fixture) -> df_db::TaskRow {
+    let waiting = df_db::create_task(
+        &f.app.pool,
+        df_db::NewTask {
+            project_id: df_core::ProjectId::from_uuid(
+                sqlx::query_scalar("SELECT id FROM projects")
+                    .fetch_one(&f.app.pool)
+                    .await
+                    .unwrap(),
+            ),
+            persona_id: df_core::PersonaId::from_uuid(
+                sqlx::query_scalar("SELECT id FROM personas")
+                    .fetch_one(&f.app.pool)
+                    .await
+                    .unwrap(),
+            ),
+            title: Some("Review".into()),
+            description: String::new(),
+            issue_number: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: vec![df_db::NewDependency {
+                key: "DF-1".parse().unwrap(),
+                kind: df_core::DependencyKind::Completion,
+            }],
+        },
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(waiting.status, TaskStatus::AwaitingDependencies);
+    waiting
+}
+
+/// Marks the fixture's task done, which releases `DF-2`.
+async fn finish_fixture_task(f: &Fixture) {
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Waiting).await;
+    df_db::mark_task_done(&f.app.pool, f.task, df_core::Principal::system("test"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn releasing_a_waiting_task_marks_its_dependency_satisfied_and_queues_it_live() {
+    let f = fixture().await;
+    waiting_task(&f).await;
+    let mut sse = f.events("/tasks/DF-2/events").await;
+    let first = sse.next().await;
+    assert!(
+        first.data.contains(r##"hx-target="#dependencies""##),
+        "{}",
+        first.data
+    );
+    assert!(first.data.contains(">waiting<"), "{}", first.data);
+
+    finish_fixture_task(&f).await;
+
+    let mut seen = String::new();
+    while !(seen.contains(">satisfied<") && seen.contains(">queued<")) {
+        seen.push_str(&sse.next_within(LIVE).await.data);
+    }
+    assert!(!seen.contains("<details open"), "{seen}");
+}
+
+#[tokio::test]
+async fn a_released_task_leaves_the_waiting_list_without_a_reload() {
+    let f = fixture().await;
+    waiting_task(&f).await;
+    let mut waiting = f.events("/tasks/events?status=waiting").await;
+    let first = waiting.next().await;
+    assert!(first.data.contains("id=\"row-DF-2\""), "{}", first.data);
+
+    finish_fixture_task(&f).await;
+
+    let left = waiting.next_within(LIVE).await;
+    assert!(!left.data.contains("row-DF-2"), "{}", left.data);
 }

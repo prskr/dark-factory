@@ -140,8 +140,9 @@ pub(crate) async fn insert_task(
 ) -> Result<Uuid> {
     let task = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
-         VALUES ($1, $2, $3, 'DF-' || $3::text, 't', 'user', $4)",
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id, created_by)
+         VALUES ($1, $2, $3, 'DF-' || $3::text, 't', 'user', $4,
+                 '{\"kind\":\"system\",\"reason\":\"test\"}')",
     )
     .bind(task)
     .bind(project)

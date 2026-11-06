@@ -163,7 +163,9 @@ async fn placeholder_titles_are_italic_until_the_task_is_renamed() {
             title: None,
             description: "Backups run twice. Since last week.".into(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await

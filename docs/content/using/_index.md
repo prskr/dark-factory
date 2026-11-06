@@ -33,3 +33,4 @@ Set up in this order:
 3. [Tasks](tasks.md): describe the work, follow the transcript, send messages, stop or cancel.
 4. [Requests](requests.md): answer questions and decide approvals.
 5. [Network access](network-access.md): allow the hosts agents need.
+6. [Delegation](delegation.md): agents that create tasks for other agents and wake when they end.

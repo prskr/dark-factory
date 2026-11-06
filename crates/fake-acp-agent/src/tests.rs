@@ -77,6 +77,10 @@ fn shipped_scripts_parse() {
     assert_eq!(secret.sessions.loaded, secret.sessions.new[1..]);
     let protected = Script::from_yaml_str(include_str!("../scripts/push-protected.yaml")).unwrap();
     assert_eq!(protected.sessions.new.len(), 1);
+    let delegation = Script::from_yaml_str(include_str!("../scripts/delegation.yaml")).unwrap();
+    assert_eq!(delegation.sessions.new.len(), 4);
+    assert_eq!(delegation.sessions.loaded.len(), 4);
+    assert_eq!(delegation.sessions.new[0], delegation.sessions.loaded[3]);
     let webhook = Script::from_yaml_str(include_str!("../scripts/webhook.yaml")).unwrap();
     assert_eq!(webhook.sessions.new.len(), 1);
     assert_eq!(webhook.sessions.loaded.len(), 1);
@@ -1075,4 +1079,37 @@ async fn retry_pause_runs_out_without_a_cancel() {
     .await;
 
     assert!(!was_cancelled);
+}
+
+#[test]
+fn when_steps_are_played_only_for_a_prompt_with_their_text() {
+    let script = Script::from_yaml_str(
+        r#"
+sessions:
+  new:
+    - - say: "always"
+      - when:
+          prompt_contains: "Review"
+          steps:
+            - say: "reviewing"
+            - when:
+                prompt_contains: "twice"
+                steps:
+                  - say: "again"
+      - end: end_turn
+"#,
+    )
+    .unwrap();
+    let steps = |prompt: &str| {
+        crate::script::Step::expand(script.sessions.new[0].steps.clone(), prompt)
+            .into_iter()
+            .filter_map(|step| match step {
+                crate::script::Step::Say(text) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(steps("Implement it"), ["always"]);
+    assert_eq!(steps("Review it"), ["always", "reviewing"]);
+    assert_eq!(steps("Review it twice"), ["always", "reviewing", "again"]);
 }

@@ -19,6 +19,7 @@ use crate::ChannelContext;
 use crate::assign::{RunContext, tool_input_schemas};
 use crate::error::ChannelError;
 
+mod delegation;
 mod feedback;
 
 static VALIDATORS: LazyLock<HashMap<&'static str, Validator>> = LazyLock::new(|| {
@@ -282,6 +283,9 @@ async fn run_handler(
         "request_approval" => request_approval(ctx, rc, args).await,
         "read_pull_request_feedback" => feedback::read_feedback(ctx, rc, args).await,
         "comment_on_pull_request" => feedback::comment(ctx, rc, args).await,
+        "create_task" => delegation::create_task(ctx, rc, args).await,
+        "list_personas" => delegation::list_personas(ctx).await,
+        "send_message" => delegation::send_message(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -608,7 +612,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 9);
+        assert_eq!(VALIDATORS.len(), 12);
     }
 
     #[tokio::test]

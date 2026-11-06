@@ -1,10 +1,11 @@
 //! Run rows: lookup, creation for queued tasks, state changes and the run-end mapping to task
 //! status (design D2, D4).
 
-use chrono::{DateTime, TimeDelta, Utc};
-use df_core::{CAPACITY_DETAIL, RunId, RunOutcome, RunState, TaskId, TaskStatus};
+use chrono::{DateTime, Utc};
+use df_core::task_transition::{RunEnded, TaskEvent};
+use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskStatus};
 use df_db::lifecycle_events::{self, Event, EventSinks};
-use df_db::{Notification, publish};
+use df_db::{Notification, apply_task_event, publish};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 
 use crate::error::ChannelError;
@@ -204,6 +205,7 @@ pub async fn start_queued_runs(
     .fetch_all(&mut *tx)
     .await?;
 
+    let actor = Principal::system("run.started");
     let mut started = Vec::with_capacity(tasks.len());
     for (task_id, resumed) in tasks {
         // Without a prompt the resumed run would end idle at once.
@@ -220,21 +222,10 @@ pub async fn start_queued_runs(
         .bind(task_id)
         .fetch_one(&mut *tx)
         .await?;
-        sqlx::query(
-            "UPDATE tasks SET status = 'running', resume_at = NULL, updated_at = now() WHERE id = $1",
-        )
-        .bind(task_id)
-            .execute(&mut *tx)
-            .await?;
         let run = RunRow::try_from(record)?;
         notify_run(&mut tx, &run).await?;
-        publish(
-            &mut *tx,
-            &Notification::TaskChanged {
-                task_id: run.task_id,
-            },
-        )
-        .await?;
+        // The task row is locked by the `SELECT` above.
+        apply_task_event(&mut tx, run.task_id, TaskEvent::RunStarted, &actor).await?;
         started.push(run);
     }
     tx.commit().await?;
@@ -318,27 +309,13 @@ pub async fn set_idle_tx(
     if changed.is_none() {
         return Ok(());
     }
-    // `waiting` -> `running` is the idle task being woken by the next turn.
-    let (from, to) = if idle {
-        (TaskStatus::Running, TaskStatus::Waiting)
-    } else {
-        (TaskStatus::Waiting, TaskStatus::Running)
-    };
-    sqlx::query(
-        "UPDATE tasks SET status = $3, updated_at = now()
-         WHERE id = $1 AND status = $2
-           AND ($4 = false OR NOT EXISTS (
-               SELECT 1 FROM task_messages
-                   WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL))",
-    )
-    .bind(task_id.as_uuid())
-    .bind(from.as_str())
-    .bind(to.as_str())
-    .bind(idle)
-    .execute(&mut **tx)
-    .await?;
     publish(&mut **tx, &Notification::RunChanged { run_id, task_id }).await?;
-    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+    let event = if idle {
+        TaskEvent::TurnEnded
+    } else {
+        TaskEvent::TurnStarted
+    };
+    apply_task_event(tx, task_id, event, &Principal::system("run.turn")).await?;
     Ok(())
 }
 
@@ -395,116 +372,6 @@ pub const fn run_state_for(outcome: RunOutcome) -> RunState {
         | RunOutcome::ProvisioningFailed
         | RunOutcome::ConnectTimeout
         | RunOutcome::SandboxLost => RunState::Failed,
-    }
-}
-
-/// Task status for a finished run, before the "undelivered prompts" override. `completed` is
-/// reserved for a human (mark done), so the agent's `completed` outcome puts the task in review.
-pub const fn task_status_for(outcome: RunOutcome) -> TaskStatus {
-    match outcome {
-        RunOutcome::Completed => TaskStatus::InReview,
-        RunOutcome::EndTurn | RunOutcome::Cancelled => TaskStatus::Waiting,
-        RunOutcome::Blocked => TaskStatus::Blocked,
-        RunOutcome::LimitReached => TaskStatus::LimitReached,
-        RunOutcome::RateLimited => TaskStatus::RateLimited,
-        RunOutcome::Failed
-        | RunOutcome::ProvisioningFailed
-        | RunOutcome::ConnectTimeout
-        | RunOutcome::SandboxLost => TaskStatus::Failed,
-    }
-}
-
-const fn keeps_status_on_pending_prompts(outcome: RunOutcome) -> bool {
-    matches!(
-        outcome,
-        RunOutcome::Failed
-            | RunOutcome::ProvisioningFailed
-            | RunOutcome::ConnectTimeout
-            | RunOutcome::SandboxLost
-            | RunOutcome::RateLimited
-    )
-}
-
-/// Resume time of a task whose run reported a rate limit without a retry time.
-const UNKNOWN_RETRY_AFTER: TimeDelta = TimeDelta::hours(1);
-/// Backoff per resume attempt after an infrastructure failure, and the wait after a capacity
-/// rejection.
-const RESUME_BACKOFF: TimeDelta = TimeDelta::minutes(2);
-
-/// What a run end leaves on the task besides the "undelivered prompts" overrides (design D2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ResumePlan {
-    status: TaskStatus,
-    resume_at: Option<DateTime<Utc>>,
-    auto_resumes: i32,
-}
-
-const fn is_infrastructure_failure(outcome: RunOutcome) -> bool {
-    matches!(
-        outcome,
-        RunOutcome::ProvisioningFailed | RunOutcome::ConnectTimeout | RunOutcome::SandboxLost
-    )
-}
-
-/// Decides status, resume time and resume count after a run end (design D2). `overridden` is a
-/// status the "undelivered prompts", "marked done" and "cancelled" rules already chose; it keeps
-/// its status and gets no resume time. The count is reset by every end except an infrastructure
-/// failure, which keeps it (or increments it when the task resumes). `max_auto_resumes` is
-/// `runs.maxAutoResumes`.
-fn plan_resume(
-    end: &RunEnd,
-    overridden: Option<TaskStatus>,
-    auto_resumes: i32,
-    max_auto_resumes: u32,
-    now: DateTime<Utc>,
-) -> ResumePlan {
-    if let Some(status) = overridden {
-        return ResumePlan {
-            status,
-            resume_at: None,
-            auto_resumes: if is_infrastructure_failure(end.outcome) {
-                auto_resumes
-            } else {
-                0
-            },
-        };
-    }
-    let later = |delta: TimeDelta| now.checked_add_signed(delta).unwrap_or(now);
-    if end.outcome == RunOutcome::RateLimited {
-        return ResumePlan {
-            status: TaskStatus::RateLimited,
-            resume_at: Some(
-                end.retry_after
-                    .unwrap_or_else(|| later(UNKNOWN_RETRY_AFTER)),
-            ),
-            auto_resumes: 0,
-        };
-    }
-    if !is_infrastructure_failure(end.outcome) {
-        return ResumePlan {
-            status: task_status_for(end.outcome),
-            resume_at: None,
-            auto_resumes: 0,
-        };
-    }
-    if end.outcome == RunOutcome::ProvisioningFailed && end.detail == CAPACITY_DETAIL {
-        return ResumePlan {
-            status: TaskStatus::Queued,
-            resume_at: Some(later(RESUME_BACKOFF)),
-            auto_resumes,
-        };
-    }
-    if auto_resumes < i32::try_from(max_auto_resumes).unwrap_or(i32::MAX) {
-        return ResumePlan {
-            status: TaskStatus::Queued,
-            resume_at: Some(later(RESUME_BACKOFF * (auto_resumes + 1))),
-            auto_resumes: auto_resumes + 1,
-        };
-    }
-    ResumePlan {
-        status: TaskStatus::Failed,
-        resume_at: None,
-        auto_resumes,
     }
 }
 
@@ -596,56 +463,28 @@ pub async fn end_run_tx(
         lifecycle_events::enqueue(tx, &config.events, &event).await?;
     }
 
-    // `queue_message` locks the task row before it inserts. Waiting for that lock makes a message
-    // queued concurrently visible below, instead of the task becoming `waiting` with it stranded.
-    lock_task(tx, task_id).await?;
-    let pending_prompts = has_undelivered_message(tx, task_id, stop_requested_at).await?;
-    let (current, auto_resumes): (String, i32) =
-        sqlx::query_as("SELECT status, auto_resumes FROM tasks WHERE id = $1")
-            .bind(task_id.as_uuid())
-            .fetch_one(&mut **tx)
-            .await?;
-    let current: TaskStatus = current.parse()?;
-    let overridden = if current == TaskStatus::Cancelled {
-        // A human cancelled the task; the end of its run must not reopen it. A message queued
-        // since has already made the task `queued`.
-        Some(TaskStatus::Cancelled)
-    } else if pending_prompts && !keeps_status_on_pending_prompts(end.outcome) {
-        Some(TaskStatus::Queued)
-    } else if current == TaskStatus::Completed {
-        // A human marked the task done; the end of its run must not reopen it.
-        Some(TaskStatus::Completed)
-    } else if current == TaskStatus::Queued && stop_requested_at.is_some() {
-        // Reopened by a message after the stop: whatever the outcome, the message is next.
-        Some(TaskStatus::Queued)
-    } else {
-        None
-    };
-    let plan = plan_resume(
-        end,
-        overridden,
-        auto_resumes,
-        config.runs.max_auto_resumes,
-        Utc::now(),
-    );
-    let task_status = plan.status;
-    // A cancelled task keeps its PR as it is.
-    if current != TaskStatus::Cancelled {
-        crate::pr::enqueue_run_end(tx, task_id, end).await?;
-    }
-
+    // The applier locks the task row, as `queue_message` does before it inserts. Waiting for
+    // that lock makes a message queued concurrently visible to the rules, instead of the task
+    // becoming `waiting` with it stranded.
+    let event = TaskEvent::RunEnded(RunEnded {
+        run_id: end.run_id,
+        outcome: end.outcome,
+        detail: end.detail.clone(),
+        retry_after: end.retry_after,
+        task_branch_pushed: end.task_branch_pushed,
+        stop_requested_at,
+        max_auto_resumes: config.runs.max_auto_resumes,
+        now: Utc::now(),
+    });
+    let next = apply_task_event(tx, task_id, event, &Principal::system("run.ended")).await?;
     sqlx::query(
-        "UPDATE tasks SET status = $2,
-             harness_session_id = CASE WHEN $3 <> '' THEN $3 ELSE harness_session_id END,
-             diverged = diverged OR $4, resume_at = $5, auto_resumes = $6, updated_at = now()
+        "UPDATE tasks SET harness_session_id = CASE WHEN $2 <> '' THEN $2 ELSE harness_session_id END,
+             diverged = diverged OR $3, updated_at = now()
          WHERE id = $1",
     )
     .bind(task_id.as_uuid())
-    .bind(task_status.as_str())
     .bind(&end.harness_session_id)
     .bind(end.diverged)
-    .bind(plan.resume_at)
-    .bind(plan.auto_resumes)
     .execute(&mut **tx)
     .await?;
 
@@ -657,14 +496,10 @@ pub async fn end_run_tx(
         },
     )
     .await?;
-    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
-    if task_status == TaskStatus::Queued {
-        publish(&mut **tx, &Notification::TaskMessageQueued { task_id }).await?;
-    }
     Ok(Some(EndedRun {
         task_id,
         run_state,
-        task_status,
+        task_status: next.status,
     }))
 }
 

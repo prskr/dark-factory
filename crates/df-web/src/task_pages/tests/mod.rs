@@ -3,6 +3,7 @@
 use crate::testkit::TestApp;
 
 mod create;
+mod dependencies;
 mod detail;
 mod layout;
 mod list;

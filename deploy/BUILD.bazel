@@ -219,6 +219,7 @@ image_layer(
     name = "test_project_layer",
     srcs = {
         "/opt/harness/bin/fake-acp-agent": ":fake_acp_agent",
+        "/opt/harness/scripts/delegation.yaml": "//crates/fake-acp-agent:scripts/delegation.yaml",
         "/opt/harness/scripts/demo.yaml": "//crates/fake-acp-agent:scripts/demo.yaml",
         "/opt/harness/scripts/network-access.yaml": "//crates/fake-acp-agent:scripts/network-access.yaml",
         "/opt/harness/scripts/push-protected.yaml": "//crates/fake-acp-agent:scripts/push-protected.yaml",
@@ -228,6 +229,7 @@ image_layer(
     },
     file_metadata = {
         "/opt/harness/bin/fake-acp-agent": file_metadata(mode = "0755"),
+        "/opt/harness/scripts/delegation.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/demo.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/network-access.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/push-protected.yaml": file_metadata(mode = "0644"),

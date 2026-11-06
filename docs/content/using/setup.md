@@ -55,6 +55,7 @@ A **persona** is an agent with a role. **Settings → Personas → New persona**
 | Field | Meaning |
 | --- | --- |
 | Name | Shown in the task list and transcript, for example "Linus". |
+| Description | Optional, at most 500 characters: the role and strengths of the persona. The persona card shows it, and agents read it through `list_personas` when they choose whom to [delegate](delegation.md) to. |
 | System prompt | The role and the working rules of this agent. |
 | Harness | The coding agent that runs in the sandbox: `claude-code` or `opencode` ([guide](opencode.md)). |
 | Model provider | The [model provider](model-providers.md) the harness talks to. Only providers that offer a wire API of the harness are listed. |

@@ -20,9 +20,7 @@ async fn follow_up_message_is_pending_and_requeues_the_task() {
     df_db::mark_prompt_delivered(&app.pool, initial[0].id, df_core::RunId::from_uuid(run))
         .await
         .unwrap();
-    df_db::update_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting).await;
 
     let response = app
         .post(
@@ -146,9 +144,7 @@ async fn task_with_queued_message(
     df_db::mark_prompt_delivered(&app.pool, initial[0].id, df_core::RunId::from_uuid(run))
         .await
         .unwrap();
-    df_db::update_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting)
-        .await
-        .unwrap();
+    crate::testkit::set_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting).await;
     let message = df_db::queue_message(&app.pool, task.id, human(), text_content(text))
         .await
         .unwrap();

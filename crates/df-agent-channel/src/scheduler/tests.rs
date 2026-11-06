@@ -770,7 +770,9 @@ async fn an_unreadable_run_does_not_stop_the_timeouts_of_the_others() {
             title: Some("Second".into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -843,7 +845,9 @@ async fn run_loop_starts_runs_on_notification_and_applies_events() {
             title: Some("Second".into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
