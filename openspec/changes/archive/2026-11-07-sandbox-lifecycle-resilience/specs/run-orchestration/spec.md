@@ -45,3 +45,7 @@ The control plane SHALL fail a run that doesn't connect within the configured co
 #### Scenario: Pod still there after a restart
 - **WHEN** a replica starts while the sandbox pod of running run 2 of `DF-4` still exists
 - **THEN** the run is not ended
+
+#### Scenario: Sandbox check fails after a restart
+- **WHEN** a replica starts after the sandbox pod of running run 2 of `DF-4` was deleted, and the first check for the pod fails because the Kubernetes API is unavailable
+- **THEN** the check is retried and the run fails with `sandbox_lost` once the API answers, within the 3 attempts of the startup check

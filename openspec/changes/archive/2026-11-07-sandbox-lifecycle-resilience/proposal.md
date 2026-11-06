@@ -9,7 +9,8 @@ Three gaps in the sandbox lifecycle make runs start degraded or wait for a timeo
 - Provisioning waits for cluster targets: when a cluster target cannot be resolved for a transient reason and no earlier resolution is cached, provisioning does not create the pod. The run stays `provisioning` and the scheduler tries again on its next pass, bounded by the connect timeout.
 - Policy reconciliation keeps a run's current NetworkPolicy when a target resolves transiently without a cached resolution (for example on a new leader after a restart), instead of rendering the policy without that target.
 - Image volume pull failures end the run: when the kubelet reports that the runtime or harness image of a sandbox pod cannot be pulled, the provider emits `Gone` with a reason naming the image, so the run ends `sandbox_lost` within seconds. The control plane watches pod Events in the sandbox namespace for this; the chart grants and startup verification checks read access to `events`.
-- Lost sandboxes are found after a restart: when the scheduler starts, it checks every run that had a sandbox (`connecting` and later, non-terminal) and ends runs whose pod no longer exists as `sandbox_lost`.
+- Lost sandboxes are found after a restart: when the scheduler starts, it checks every run that had a sandbox (`connecting` and later, non-terminal) and ends runs whose pod no longer exists as `sandbox_lost`. A failed check is retried.
+- Retries of stale runs: a tick starts no second attempt for a run this replica is still provisioning, and a retry rejected for capacity or an invalid spec ends the run `provisioning_failed` like a first attempt (added during review).
 - Live cluster verification: a live test that a sandbox with the real runtime image reaches `Started` with its pod IP (TD-36), a live test of ClusterIP reachability for an allowed and a non-allowed Service (TD-41), and a recorded check of the gateway's `sni-mismatch` handling from inside the sandbox namespace (TD-59).
 
 ## Capabilities
@@ -34,7 +35,7 @@ None.
 
 - `crates/df-k8s`: `ClusterTargetResolver::resolve` reports unresolved targets; `K8sSandboxProvider::provision` returns a new retryable error; reconcile skips runs with unresolved targets; a pod Event watcher feeds `EventTracker`; startup verification lists `events`; live tests.
 - `crates/df-core`: new `ProviderError::Unavailable` variant (`seams.rs`).
-- `crates/df-agent-channel`: scheduler keeps a run `provisioning` on `Unavailable`; startup sweep of lost sandboxes.
-- `deploy/helm/dark-factory`: `events` get/list/watch in the sandbox namespace Role; chart README permission table.
+- `crates/df-agent-channel`: scheduler keeps a run `provisioning` on `Unavailable`; in-flight claim and permanent rejections on retries; startup sweep of lost sandboxes.
+- `deploy/helm/dark-factory`: `events` get/list/watch in the sandbox namespace Role. The chart README has no permission table; the permission lists in `design/deployment.md` §3 and `docs/content/architecture/_index.md` are updated instead (task 1.5).
 - Docs: `docs/content/operations/troubleshooting.md`.
 - Tech debt: deletes TD-28, TD-29, TD-31, TD-32, TD-36, TD-41, TD-59 from `docs/tech_debt.md`.

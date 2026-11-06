@@ -175,6 +175,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Separate UIDs for runtime and harness | idea | [`design/agent-run.md`](../../design/agent-run.md) §17 |
 | LSP support | idea | context §4.2 |
 | Cloud VM sandboxes (conflicts with current non-goals) | idea | [`design/cloud-vm-sandboxes.md`](../../design/cloud-vm-sandboxes.md) |
+| Live cluster tests in CI: run the ignored `df-k8s` live tests (`DF_LIVE_*`) against a kind cluster | idea | `openspec/changes/archive/2026-11-07-sandbox-lifecycle-resilience` |
 | Valkey session store for the web UI as an alternative to PostgreSQL (performance: no database round trip per request); needs its own per-session lock for token refresh | idea | `crates/df-web/src/auth/store.rs` |
 | Credential form autocomplete: Secret name from the Secrets in the factory namespace, key from the chosen Secret's keys; free text stays allowed with a soft "not found" hint, plain inputs when listing fails. The control plane gets `list`/`get` on Secrets in its namespace (values readable is accepted for a developer tool; no separate secrets namespace); only key names reach the UI | decided | design canvas, "Later" row |
 | Phone layout of the network traffic page: at 390 px the page scrolls horizontally, because the Connections graph keeps its 398 px minimum width and the panels stay side by side instead of stacking | idea | `openspec/changes/archive/2026-10-30-ui-design-alignment/review-log.md` (browser check) |

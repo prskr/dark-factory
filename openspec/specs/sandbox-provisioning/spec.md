@@ -74,7 +74,7 @@ Tearing down a run SHALL delete its Pod (and with it the network policy) and SHA
 - **THEN** the call succeeds
 
 ### Requirement: Sandbox events
-The provider SHALL report when a run's pod is running with its pod IP, and when a run's pod is deleted, failed or completed, or cannot start its container, including the reason.
+The provider SHALL report when a run's pod is running with its pod IP, and when a run's pod is deleted, failed or completed, or cannot start its container, including the reason. A pod that cannot start because its runtime or harness image volume cannot be pulled counts as unable to start.
 
 #### Scenario: Pod started
 - **WHEN** the run's pod becomes Running with IP 10.0.3.7
@@ -82,6 +82,14 @@ The provider SHALL report when a run's pod is running with its pod IP, and when 
 
 #### Scenario: Image pull fails
 - **WHEN** the project image can't be pulled
+- **THEN** a `Gone` event with a reason naming the image pull failure is emitted
+
+#### Scenario: Harness image cannot be pulled
+- **WHEN** the harness image `registry.example.org/claude-harness:missing` of a run's pod can't be pulled
+- **THEN** a `Gone` event with a reason naming the image pull failure and the image is emitted within 30 seconds of the kubelet reporting the failure, and the run doesn't wait for the connect timeout
+
+#### Scenario: Runtime image cannot be pulled
+- **WHEN** the runtime image of a run's pod can't be pulled
 - **THEN** a `Gone` event with a reason naming the image pull failure is emitted
 
 #### Scenario: Container exits without a report
@@ -97,6 +105,10 @@ At startup the control plane SHALL verify that the configured sandbox namespace 
 
 #### Scenario: Missing pod permission
 - **WHEN** the control plane may not create `pods` in the sandbox namespace
+- **THEN** it exits non-zero with a message naming that permission
+
+#### Scenario: Missing event permission
+- **WHEN** the control plane may not `watch` `events` in the sandbox namespace
 - **THEN** it exits non-zero with a message naming that permission
 
 #### Scenario: No agent-sandbox permissions required
