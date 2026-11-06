@@ -153,7 +153,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
     };
     html! {
         article id=(id) data-state=(row.state.as_str())
-            class="min-w-0 space-y-3 rounded-xl border border-line bg-panel p-4" {
+            class="min-w-0 space-y-3 rounded-xl border border-line-strong bg-sunk p-4" {
             div class="flex flex-wrap items-center gap-2 text-xs text-faint" {
                 (chip(&kind_label))
                 @if row.blocking && pending { (tone_badge(Tone::Waiting, "Blocking")) }

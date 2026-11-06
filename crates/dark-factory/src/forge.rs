@@ -617,7 +617,7 @@ mod tests {
             .unwrap();
         let from_webhook = messages
             .iter()
-            .filter(|m| m.author == df_core::Principal::system("webhook"))
+            .filter(|m| m.author == df_core::Principal::system(df_core::system_reason::WEBHOOK))
             .count();
         assert_eq!(from_webhook, 1);
     }

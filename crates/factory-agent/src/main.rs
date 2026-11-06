@@ -209,7 +209,7 @@ async fn receive_assignment(conn_handle: &mut connection::ConnectionHandle) -> O
                     break;
                 }
                 Some(Body::Cancel(_)) => cancel_requested = true,
-                Some(Body::Prompt(p)) => initial_prompts.push(p),
+                Some(Body::Prompts(batch)) => initial_prompts.extend(batch.prompts),
                 _ => {}
             }
         }

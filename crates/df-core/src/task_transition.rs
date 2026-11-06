@@ -10,11 +10,8 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
 
-use crate::domain::{CAPACITY_DETAIL, Principal, RunOutcome, TaskStatus};
+use crate::domain::{CAPACITY_DETAIL, Principal, RunOutcome, TaskStatus, system_reason};
 use crate::ids::RunId;
-
-/// `system` reason of the message a parent gets when a child ends.
-pub const CHILD_ENDED_REASON: &str = "task.child_ended";
 
 /// Resume time of a task whose run reported a rate limit without a retry time.
 const UNKNOWN_RETRY_AFTER: TimeDelta = TimeDelta::hours(1);
@@ -588,7 +585,7 @@ fn child_ended(task: &TaskSnapshot, child: &ChildEnded) -> Transition {
         return Transition::unchanged(task);
     }
     Transition::unchanged(task).with(Effect::QueueMessage {
-        author: Principal::system(CHILD_ENDED_REASON),
+        author: Principal::system(system_reason::CHILD_ENDED),
         text: child_ended_text(child),
     })
 }

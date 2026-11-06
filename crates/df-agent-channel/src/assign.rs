@@ -441,6 +441,7 @@ fn prompt_from_row(row: TaskMessageRow) -> Prompt {
     Prompt {
         prompt_id: row.id.to_string(),
         author: Some(principal(&row.author)),
+        author_name: row.author.display_name().to_string(),
         content: row.content,
         queued_at: Some(timestamp(row.queued_at)),
     }
@@ -1030,9 +1031,9 @@ mod tests {
 
     #[test]
     fn principals_convert_to_the_wire_type() {
-        let p = principal(&Principal::system("task.assigned"));
+        let p = principal(&Principal::system(df_core::system_reason::TASK_ASSIGNED));
         assert!(
-            matches!(p.kind, Some(transcript::principal::Kind::System(s)) if s.reason == "task.assigned")
+            matches!(p.kind, Some(transcript::principal::Kind::System(s)) if s.reason == df_core::system_reason::TASK_ASSIGNED)
         );
     }
 }

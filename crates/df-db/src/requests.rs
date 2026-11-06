@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use df_core::system_reason::REQUEST_DECIDED;
 use df_core::{Principal, RequestId, RunId, TaskId};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde_json::{Value, json};
@@ -567,8 +568,8 @@ async fn record_decision(
     queue_message_tx(
         tx,
         task_id,
-        Principal::system("request.decided"),
-        vec![text_block(message)],
+        Principal::system(REQUEST_DECIDED),
+        vec![crate::tasks::text_block(message, true)],
     )
     .await?;
     publish(

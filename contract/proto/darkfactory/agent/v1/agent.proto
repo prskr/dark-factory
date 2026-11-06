@@ -78,8 +78,8 @@ message ControlMessage {
   // 16 was CredentialGrant: the gateway's Git proxy injects the forge credential.
   // 12 was HarnessCredentials: the gateway's inference endpoint injects the model credential
   // (iter3-inference-gateway).
-  reserved 12, 16;
-  reserved "credential_grant", "harness_credentials";
+  reserved 12, 13, 16;
+  reserved "credential_grant", "harness_credentials", "prompt";
 
   // Highest AgentMessage.seq the control plane has persisted (cumulative).
   // A ControlMessage without a body is a pure acknowledgement.
@@ -88,10 +88,10 @@ message ControlMessage {
   oneof body {
     HelloAck hello_ack = 10;
     Assign assign = 11;
-    Prompt prompt = 13;
     Cancel cancel = 14;
     ToolCallResult tool_call_result = 15;
     Release release = 17;
+    Prompts prompts = 18;
   }
 }
 
@@ -275,6 +275,11 @@ message Prompt {
   darkfactory.transcript.v1.Principal author = 2;
   repeated darkfactory.transcript.v1.ContentBlock content = 3;
   google.protobuf.Timestamp queued_at = 4;
+  string author_name = 5;
+}
+
+message Prompts {
+  repeated Prompt prompts = 1;
 }
 
 // Stop the current turn, then finalize (push, WIP snapshot, RunReport).
@@ -304,7 +309,7 @@ enum RunPhase {
   RUN_PHASE_PREPARING = 1;
   RUN_PHASE_RUNNING = 2;
   // A turn ended normally and no prompt is queued: the run and the harness
-  // session stay up until a Prompt, Cancel or Release arrives (or the
+  // session stay up until Prompts, Cancel or Release arrives (or the
   // wall-clock budget ends). RUN_PHASE_RUNNING is reported with the next turn.
   RUN_PHASE_AWAITING_INPUT = 3;
   RUN_PHASE_FINALIZING = 4;

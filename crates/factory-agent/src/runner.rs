@@ -576,9 +576,16 @@ async fn handle_control_message(
     cancel_tx: &broadcast::Sender<String>,
 ) {
     match msg.body {
-        Some(control_message::Body::Prompt(p)) => {
-            log_prompt_received(&p);
-            shared.prompt_queue.lock().await.push(p);
+        Some(control_message::Body::Prompts(batch)) => {
+            if batch.prompts.is_empty() {
+                return;
+            }
+            let mut queue = shared.prompt_queue.lock().await;
+            for prompt in batch.prompts {
+                log_prompt_received(&prompt);
+                queue.push(prompt);
+            }
+            drop(queue);
             shared.input_wake.notify_one();
         }
         Some(control_message::Body::Release(_)) => {

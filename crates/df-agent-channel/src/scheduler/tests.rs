@@ -398,7 +398,7 @@ async fn deliver_all_messages(pool: &PgPool, env: &Env) {
 }
 
 fn resume_author() -> df_core::Principal {
-    df_core::Principal::system("run.resumed")
+    df_core::Principal::system(df_core::system_reason::RUN_RESUMED)
 }
 
 async fn undelivered_authors(pool: &PgPool, env: &Env) -> Vec<df_core::Principal> {

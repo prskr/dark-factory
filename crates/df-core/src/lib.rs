@@ -26,7 +26,7 @@ pub use config::{
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,
-    RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus, is_satisfied,
+    RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus, is_satisfied, system_reason,
 };
 pub use forge::ForgeKind;
 pub use ids::{

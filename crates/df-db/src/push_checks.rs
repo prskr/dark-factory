@@ -5,6 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 
+use df_core::system_reason::PUSH_REJECTED;
 use df_core::{Principal, RequestId, TaskId, TaskStatus};
 use df_proto::gateway::v1 as pb;
 use df_proto::push_reasons::{PUSH_TOO_LARGE, finding_reason};
@@ -27,9 +28,6 @@ use crate::tasks::{TaskRow, queue_message_tx};
 
 /// Name of the approval type.
 pub const PUSH_CHECK_EXCEPTION: &str = "push-check-exception";
-
-/// Reason of the system message about a rejected push, and the raiser of its requests.
-pub const PUSH_REJECTED: &str = "push.rejected";
 
 /// `push.rejected` messages queued since the last accepted task-branch push after which no more
 /// are queued.

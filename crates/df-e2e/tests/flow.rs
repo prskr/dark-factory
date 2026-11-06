@@ -6,13 +6,16 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use df_core::{RequestId, TaskId};
 use df_db::push_checks::PushCheck;
+use df_db::requests::RequestKind;
 use df_e2e::browser::Session;
 use df_e2e::forgejo::Forgejo;
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data, db};
 use serde_json::Value;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 /// Wait limit for the approval to be stored.
 const RETRY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -24,6 +27,11 @@ const NEED: &str = "I need the package index from pypi.org.";
 const FETCHED: &str = "Fetched https://pypi.org/";
 /// What the second turn of the `network-access` script (the decision message) says.
 const NOTED: &str = "Noted the decision.";
+const CONVERSATION_QUESTION: &str = "Which inputs should the next turn receive?";
+const QUEUED_FOLLOW_UP: &str = "Please keep this queued follow-up with the question answer.";
+const QUESTION_ANSWER: &str = "Both the queued follow-up and this answer.";
+const HUMAN_AUTHOR: &str = "E2E Admin";
+const COMBINED_INPUT: &str = "Received the queued follow-up and question answer with author lines.";
 
 struct World {
     env: E2eEnv,
@@ -53,6 +61,47 @@ impl World {
             || async { Ok((db::task_status(&self.pool, key).await? == status).then_some(())) },
         )
         .await
+    }
+
+    async fn answer_question(&self, id: RequestId, question: &str, answer: &str) -> Result<()> {
+        let card = format!("#request-{id}");
+        self.session
+            .expect_region_text(&card, question, RETRY_TIMEOUT)
+            .await?;
+        self.session
+            .page
+            .locator(format!("{card} input[name=answer]"))
+            .fill(answer, None)
+            .await
+            .context("fill the question answer")?;
+        self.session
+            .page
+            .locator(format!("{card} form button[type=submit]"))
+            .click(None)
+            .await
+            .context("answer the question")?;
+        self.session
+            .expect_region_text(&card, answer, RETRY_TIMEOUT)
+            .await
+    }
+
+    async fn turn_prompt_ids(&self, key: &str) -> Result<Vec<Vec<String>>> {
+        let events = sqlx::query_scalar::<_, Value>(
+            "SELECT e.payload FROM transcript_events e JOIN tasks t ON t.id = e.task_id \
+             WHERE t.key = $1 AND e.kind = 'turn_started' ORDER BY e.id",
+        )
+        .bind(key)
+        .fetch_all(&self.pool)
+        .await?;
+        events
+            .into_iter()
+            .map(|event| {
+                let ids = event
+                    .pointer("/turnStarted/promptIds")
+                    .with_context(|| format!("prompt IDs in {event}"))?;
+                serde_json::from_value(ids.clone()).context("decode the turn's prompt IDs")
+            })
+            .collect()
     }
 
     /// The pull requests of the repository whose head is `branch`.
@@ -415,6 +464,108 @@ async fn denied_host_is_requested_and_the_approval_lets_the_retry_through() -> R
     assert_eq!(transcript.matches(NOTED).count(), 1, "{transcript}");
     let runs = db::runs(&world.pool, &key).await?;
     assert_eq!(runs.len(), 1, "{runs:?}");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn queued_follow_up_and_question_answer_share_one_turn_with_author_lines() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::NETWORK_PROJECT_KEY,
+            "[conversation-flow] Combine a queued follow-up and a question answer.",
+            None,
+        )
+        .await?;
+    world.session.expect_text(NEED, RUN_TIMEOUT).await?;
+    let gate = eventually("the held first-turn fetch", RUN_TIMEOUT, || async {
+        db::network_request(&world.pool, &key, data::NETWORK_HOST, data::NETWORK_PORT).await
+    })
+    .await?;
+    assert_eq!(gate.state, "pending");
+    let task_id = TaskId::from_uuid(
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM tasks WHERE key = $1")
+            .bind(&key)
+            .fetch_one(&world.pool)
+            .await?,
+    );
+    let question = df_db::requests::list_for_task(&world.pool, task_id)
+        .await?
+        .into_iter()
+        .find(|request| {
+            request.kind == RequestKind::Question
+                && request.question_text() == CONVERSATION_QUESTION
+        })
+        .context("the script must ask the question before its held fetch")?;
+    assert_eq!(db::task_status(&world.pool, &key).await?, "running");
+    assert_eq!(world.turn_prompt_ids(&key).await?.len(), 1);
+
+    world.session.send_message(QUEUED_FOLLOW_UP).await?;
+    world
+        .session
+        .expect_region_text("#pending", QUEUED_FOLLOW_UP, RETRY_TIMEOUT)
+        .await?;
+    world
+        .answer_question(question.id, CONVERSATION_QUESTION, QUESTION_ANSWER)
+        .await?;
+    let queued = df_db::list_undelivered_messages(&world.pool, task_id).await?;
+    assert_eq!(queued.len(), 2, "{queued:?}");
+    assert!(queued.iter().all(|message| message.forwarded_at.is_none()));
+    assert_eq!(queued[0].author.display_name(), HUMAN_AUTHOR);
+    assert_eq!(queued[1].author.display_name(), "Request decision");
+    assert!(!queued[1].content.is_empty());
+    assert!(queued[1].content.iter().all(|block| block.hidden));
+    let required_ids: Vec<String> = queued
+        .iter()
+        .map(|message| message.id.to_string())
+        .collect();
+
+    world
+        .session
+        .approve_request(
+            &world.env,
+            &gate.id.to_string(),
+            &format!(
+                "network access to {}:{}",
+                data::NETWORK_HOST,
+                data::NETWORK_PORT
+            ),
+            Some("task"),
+        )
+        .await?;
+    world.session.open_task(&world.env, &key).await?;
+    world
+        .session
+        .expect_region_text("#transcript", COMBINED_INPUT, RUN_TIMEOUT)
+        .await?;
+    world.wait_for_status(&key, "waiting").await?;
+    let turns = world.turn_prompt_ids(&key).await?;
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert_eq!(
+        turns[1].len(),
+        3,
+        "the gate decision is the third input: {turns:?}"
+    );
+    assert_eq!(
+        turns[1].iter().take(2).cloned().collect::<Vec<_>>(),
+        required_ids
+    );
+    let transcript = world.session.region_text("#transcript").await?;
+    assert_eq!(
+        transcript.matches(COMBINED_INPUT).count(),
+        1,
+        "{transcript}"
+    );
+    assert_eq!(db::runs(&world.pool, &key).await?.len(), 1);
+    println!(
+        "{key}: one next TurnStarted {:?}; ACP matched {HUMAN_AUTHOR}: and Request decision: with the question answer",
+        turns[1]
+    );
+    world.session.cancel_task().await?;
+    world.wait_for_status(&key, "cancelled").await?;
     Ok(())
 }
 

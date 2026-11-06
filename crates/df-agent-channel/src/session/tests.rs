@@ -284,10 +284,12 @@ async fn the_idle_phase_keeps_the_task_running_while_a_message_is_undelivered() 
     // The session forwards the message to the idle run.
     let prompts: Vec<_> = sent
         .into_iter()
-        .filter_map(|c| match c.body {
-            Some(control_message::Body::Prompt(p)) => Some(p.prompt_id),
+        .filter_map(|control| match control.body {
+            Some(control_message::Body::Prompts(batch)) => Some(batch.prompts),
             _ => None,
         })
+        .flatten()
+        .map(|prompt| prompt.prompt_id)
         .collect();
     assert_eq!(prompts, [prompt_id]);
 }
@@ -927,14 +929,24 @@ async fn queue_human(env: &Env, text: &str) -> String {
         .to_string()
 }
 
-fn sent_prompt_ids(rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>) -> Vec<String> {
-    let mut ids = Vec::new();
+fn sent_prompt_batches(
+    rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>,
+) -> Vec<Vec<df_proto::agent::v1::Prompt>> {
+    let mut batches = Vec::new();
     while let Ok(Ok(control)) = rx.try_recv() {
-        if let Some(control_message::Body::Prompt(p)) = control.body {
-            ids.push(p.prompt_id);
+        if let Some(control_message::Body::Prompts(batch)) = control.body {
+            batches.push(batch.prompts);
         }
     }
-    ids
+    batches
+}
+
+fn sent_prompt_ids(rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>) -> Vec<String> {
+    sent_prompt_batches(rx)
+        .into_iter()
+        .flatten()
+        .map(|prompt| prompt.prompt_id)
+        .collect()
 }
 
 async fn forwarded(env: &Env, prompt_id: &str) -> bool {
@@ -998,6 +1010,49 @@ async fn a_message_queued_during_a_turn_is_sent_when_the_turn_ends() {
         .unwrap();
     assert_eq!(sent_prompt_ids(&mut rx), vec![queued.clone()]);
     assert!(forwarded(&env, &queued).await);
+}
+
+#[tokio::test]
+async fn messages_queued_during_a_turn_are_released_in_one_ordered_batch() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.running_run().await;
+    let (mut session, mut rx) = session_for(&env, run_id).await;
+    assert!(session.send_new_prompts().await.unwrap());
+    let assignment = sent_prompt_batches(&mut rx);
+    assert_eq!(assignment.len(), 1);
+    assert_eq!(assignment[0][0].author_name, "Task assignment");
+    session
+        .handle_batch(vec![msg(1, turn_started())])
+        .await
+        .unwrap();
+
+    let first = queue_human(&env, "first follow-up").await;
+    let second = queue_human(&env, "second follow-up").await;
+    assert!(session.send_new_prompts().await.unwrap());
+    assert!(sent_prompt_batches(&mut rx).is_empty());
+    assert!(!forwarded(&env, &first).await);
+    assert!(!forwarded(&env, &second).await);
+
+    session
+        .handle_batch(vec![msg(2, turn_ended())])
+        .await
+        .unwrap();
+
+    assert!(!turn_open(&pool, run_id).await.unwrap());
+    let batches = sent_prompt_batches(&mut rx);
+    assert_eq!(batches.len(), 1);
+    let prompts = &batches[0];
+    assert_eq!(
+        prompts
+            .iter()
+            .map(|prompt| prompt.prompt_id.as_str())
+            .collect::<Vec<_>>(),
+        [first.as_str(), second.as_str()]
+    );
+    assert!(prompts.iter().all(|prompt| prompt.author_name == "Ada"));
+    assert!(forwarded(&env, &first).await);
+    assert!(forwarded(&env, &second).await);
 }
 
 #[tokio::test]

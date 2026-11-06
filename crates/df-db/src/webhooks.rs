@@ -1,6 +1,7 @@
 //! Applying forge webhook events to tasks (`iter3-webhooks` design D3, D4, D8): a message per
 //! event, or the completion of the task of a merged pull request.
 
+use df_core::system_reason::WEBHOOK;
 use df_core::task_transition::{DoneBy, TaskEvent};
 use df_core::webhooks::{Target, WebhookEvent, WebhookWake, render_message};
 use df_core::{Principal, ProjectId, StatusGroup, StatusSet, TaskId, TaskStatus};
@@ -11,8 +12,6 @@ use crate::task_events::apply_task_event;
 use crate::task_views::statuses_of;
 use crate::tasks::{lock_runs_then_task, queue_message_tx, text_block};
 
-/// `system` reason of the message.
-pub const MESSAGE_REASON: &str = "webhook";
 /// `system` reason of the `task.done` audit entry of a merged pull request.
 pub const MERGED_REASON: &str = "pr.merged";
 
@@ -142,7 +141,7 @@ pub async fn queue_event_tx(
         return Ok(false);
     }
     let content = vec![text_block(render_message(event), false)];
-    queue_message_tx(tx, task_id, Principal::system(MESSAGE_REASON), content).await?;
+    queue_message_tx(tx, task_id, Principal::system(WEBHOOK), content).await?;
     Ok(true)
 }
 

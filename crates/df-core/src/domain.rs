@@ -426,6 +426,30 @@ impl FromStr for RunOutcome {
     }
 }
 
+/// Reasons of system principals that [`Principal::display_name`] names for the UI.
+pub mod system_reason {
+    pub const TASK_ASSIGNED: &str = "task.assigned";
+    pub const RUN_RESUMED: &str = "run.resumed";
+    pub const REQUEST_DECIDED: &str = "request.decided";
+    pub const PUSH_REJECTED: &str = "push.rejected";
+    pub const WEBHOOK: &str = "webhook";
+    /// The message a parent gets when a subtask ends.
+    pub const CHILD_ENDED: &str = "task.child_ended";
+
+    /// The name shown for a system reason that is not in [`NAMES`].
+    pub const FALLBACK_NAME: &str = "Dark Factory";
+
+    /// Every reason above with the author name shown for it.
+    pub const NAMES: [(&str, &str); 6] = [
+        (TASK_ASSIGNED, "Task assignment"),
+        (RUN_RESUMED, "Resume"),
+        (REQUEST_DECIDED, "Request decision"),
+        (PUSH_REJECTED, "Push check"),
+        (WEBHOOK, "Forge events"),
+        (CHILD_ENDED, "Subtask update"),
+    ];
+}
+
 /// Identifies who performed an action or authored a prompt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -474,6 +498,25 @@ impl Principal {
     pub fn system(reason: impl Into<String>) -> Self {
         Self::System {
             reason: reason.into(),
+        }
+    }
+
+    /// The author name used in the UI and harness prompts.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Human { display_name, .. } | Self::Agent { display_name, .. } => display_name,
+            Self::System { reason } => system_reason::NAMES
+                .iter()
+                .find(|(known, _)| known == reason)
+                .map_or(system_reason::FALLBACK_NAME, |(_, name)| name),
+        }
+    }
+
+    /// The author name of an agent or the system, `None` for a human.
+    pub fn non_human_name(&self) -> Option<&str> {
+        match self {
+            Self::Human { .. } => None,
+            Self::Agent { .. } | Self::System { .. } => Some(self.display_name()),
         }
     }
 }
@@ -685,6 +728,47 @@ mod tests {
         ];
         for (kind, completed, done, satisfied) in cases {
             assert_eq!(is_satisfied(kind, completed, done), satisfied, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn principal_display_name_preserves_human_and_agent_names() {
+        let human = Principal::human(UserId::new(), "Peter Kurfer");
+        let agent = Principal::agent(PersonaId::new(), "Linus", Some(RunId::new()), TaskId::new());
+
+        assert_eq!(human.display_name(), "Peter Kurfer");
+        assert_eq!(agent.display_name(), "Linus");
+    }
+
+    #[test]
+    fn non_human_name_is_only_set_for_agents_and_the_system() {
+        let human = Principal::human(UserId::new(), "Peter Kurfer");
+        let agent = Principal::agent(PersonaId::new(), "Linus", None, TaskId::new());
+
+        assert_eq!(human.non_human_name(), None);
+        assert_eq!(agent.non_human_name(), Some("Linus"));
+        assert_eq!(
+            Principal::system(system_reason::TASK_ASSIGNED).non_human_name(),
+            Some("Task assignment")
+        );
+    }
+
+    #[test]
+    fn every_system_reason_has_its_own_display_name() {
+        for (reason, name) in system_reason::NAMES {
+            assert_eq!(Principal::system(reason).display_name(), name, "{reason}");
+            assert_ne!(name, system_reason::FALLBACK_NAME, "{reason}");
+        }
+    }
+
+    #[test]
+    fn principal_display_name_falls_back_for_unknown_reasons() {
+        for reason in ["", "unknown", "task.assigned.extra"] {
+            assert_eq!(
+                Principal::system(reason).display_name(),
+                system_reason::FALLBACK_NAME,
+                "{reason}"
+            );
         }
     }
 

@@ -38,6 +38,41 @@ fn release_message() -> ControlMessage {
     }
 }
 
+/// A control message body carrying one batch of `prompts`.
+fn prompts_body(prompts: Vec<Prompt>) -> control_message::Body {
+    control_message::Body::Prompts(df_proto::agent::v1::Prompts { prompts })
+}
+
+/// A prompt by `author_name` with one visible text block and no id.
+fn authored_prompt(author_name: &str, text: &str) -> Prompt {
+    use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+
+    Prompt {
+        author_name: author_name.into(),
+        content: vec![ContentBlock {
+            kind: Some(content_block::Kind::Text(TextContent { text: text.into() })),
+            hidden: false,
+        }],
+        ..Default::default()
+    }
+}
+
+/// An unauthored prompt `id` without content.
+fn id_prompt(id: &str) -> Prompt {
+    Prompt {
+        prompt_id: id.into(),
+        ..Default::default()
+    }
+}
+
+/// An unauthored prompt `id` with one visible text block.
+fn text_prompt(id: &str, text: &str) -> Prompt {
+    Prompt {
+        prompt_id: id.into(),
+        ..authored_prompt("", text)
+    }
+}
+
 /// Logs `body` through `log_outbound` at `filter` and returns the parsed JSON lines.
 fn logged(filter: &str, body: &df_proto::agent::v1::agent_message::Body) -> Vec<serde_json::Value> {
     let (out, _guard) = df_telemetry::testing::capture(filter);
@@ -157,11 +192,20 @@ impl RunScenario {
                 .join("../../target/debug")
                 .join(name)
         };
-        let (fake_bin, mcp_bin) = (bin("fake-acp-agent"), bin("factory-agent"));
+        let fake_bin = std::env::var_os("FAKE_ACP_AGENT_BIN")
+            .map_or_else(|| bin("fake-acp-agent"), PathBuf::from);
+        let mcp_bin =
+            std::env::var_os("DF_TEST_BIN").map_or_else(|| bin("factory-agent"), PathBuf::from);
         if !fake_bin.exists() || !mcp_bin.exists() {
             eprintln!("Skipping integration test: binaries not present");
             return None;
         }
+        let fake_bin = fake_bin
+            .canonicalize()
+            .expect("resolve fake-acp-agent test binary");
+        let mcp_bin = mcp_bin
+            .canonicalize()
+            .expect("resolve factory-agent test binary");
         let temp = tempfile::tempdir().unwrap();
         let upstream = setup_test_remote_repo(temp.path());
         let script_file = temp.path().join("script.yaml");
@@ -265,23 +309,13 @@ impl RunScenario {
             budgets: self.budgets,
             continuation: self.continuation.clone(),
         };
-        let content = self
-            .prompt
-            .iter()
-            .map(|text| df_proto::transcript::v1::ContentBlock {
-                kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                    df_proto::transcript::v1::TextContent { text: text.clone() },
-                )),
-                hidden: false,
-            });
+        let initial_prompt = self.prompt.as_deref().map_or_else(
+            || id_prompt("prompt-1"),
+            |text| text_prompt("prompt-1", text),
+        );
         RunDriverParams {
             assign,
-            initial_prompts: vec![Prompt {
-                prompt_id: "prompt-1".to_string(),
-                author: None,
-                content: content.collect(),
-                queued_at: None,
-            }],
+            initial_prompts: vec![initial_prompt],
             home_dir: self.home_dir(),
             runtime_dir,
             hooks_path,

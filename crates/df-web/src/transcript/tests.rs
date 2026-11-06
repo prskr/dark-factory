@@ -108,6 +108,28 @@ fn every_kind() -> Vec<StoredEvent> {
 }
 
 #[test]
+fn system_message_authors_show_a_readable_name_never_the_reason() {
+    for (reason, name) in [
+        ("task.assigned", "Task assignment"),
+        ("unknown.reason", "Dark Factory"),
+    ] {
+        let folder = fold(&[stored(
+            1,
+            "t1",
+            json!({"userMessage": {
+                "promptId": "p1",
+                "author": {"system": {"reason": reason}},
+                "content": [{"text": {"text": "System message"}}]
+            }}),
+        )]);
+
+        let html = render_all(&folder);
+        assert!(html.contains(name), "{html}");
+        assert!(!html.contains(reason), "{html}");
+    }
+}
+
+#[test]
 fn renders_every_event_kind() {
     insta::assert_snapshot!(render_all(&fold(&every_kind())));
 }

@@ -66,6 +66,45 @@ mod tests {
     use serde_json::Value;
 
     #[test]
+    fn released_prompts_keep_queue_order_and_author_names_on_the_wire() {
+        use super::agent::v1::{ControlMessage, Prompt, Prompts, control_message};
+        use prost::Message as _;
+
+        let message = ControlMessage {
+            ack: 7,
+            body: Some(control_message::Body::Prompts(Prompts {
+                prompts: vec![
+                    Prompt {
+                        prompt_id: "first".into(),
+                        author_name: "Peter Kurfer".into(),
+                        ..Default::default()
+                    },
+                    Prompt {
+                        prompt_id: "second".into(),
+                        author_name: "Request decision".into(),
+                        ..Default::default()
+                    },
+                ],
+            })),
+        };
+
+        let encoded = message.encode_to_vec();
+        assert_eq!(ControlMessage::decode(encoded.as_slice()).unwrap(), message);
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["prompts"]["prompts"][0]["promptId"], "first");
+        assert_eq!(json["prompts"]["prompts"][0]["authorName"], "Peter Kurfer");
+        assert_eq!(json["prompts"]["prompts"][1]["promptId"], "second");
+        assert_eq!(
+            json["prompts"]["prompts"][1]["authorName"],
+            "Request decision"
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMessage>(json).unwrap(),
+            message
+        );
+    }
+
+    #[test]
     fn agent_channel_client_and_server_types_exist() {
         fn _assert_types<T: AgentChannel>(svc: T) {
             let _server = AgentChannelServer::new(svc);

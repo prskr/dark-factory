@@ -64,9 +64,16 @@ These are compiled in and not configurable.
   (`/run/factory/tls/ca.crt`), plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so Claude Code sends
   no telemetry or update checks past the endpoint. The runtime holds no model credential and reports no token usage: the
   gateway measures it, and usage the harness reports over ACP is not forwarded.
+- **Prompt input.** The control plane releases queued messages together in one `Prompts` control
+  message, in queue order, also after a reconnect. The runtime queues the whole batch before waking
+  and starts one turn with every waiting prompt. Each message starts with its `author_name` and a
+  colon, for example `Peter Kurfer:` or `Request decision:`, even for a single message. An empty
+  name adds no author line. A continuation summary stays before the messages; hidden text blocks
+  still reach the harness. Deploy the runtime and control plane from the same release: the old
+  singular `Prompt` control message is not supported.
 - **Idle wait.** After a turn that ended normally with no queued prompt (and no `complete_task`,
   rate limit, budget limit, cancel or crash), the runtime reports `AWAITING_INPUT` and keeps the
-  harness session up. A `Prompt` starts the next turn in the same session (reported as `RUNNING`),
+  harness session up. A `Prompts` batch starts the next turn in the same session (reported as `RUNNING`),
   `Cancel` ends the run `CANCELLED`, and `Release` or the end of the wall-clock budget ends it
   `END_TURN`. If the turn had a blocking request (a `ToolCallResult` with `await_input_after_turn`,
   `ask_question` with `blocking: true`), `Release` ends the run `BLOCKED` instead; the budget end

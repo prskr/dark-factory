@@ -1,8 +1,9 @@
 //! The database of the instance, read by the tests for what the UI does not show.
 
 use anyhow::{Context, Result};
+use df_core::system_reason::PUSH_REJECTED;
 use df_db::git_pushes::RefUpdate;
-use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, PUSH_REJECTED, request_findings};
+use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, request_findings};
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Executor, Row};

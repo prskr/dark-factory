@@ -5,13 +5,15 @@
     reason = "scenario tests set up and check a whole run"
 )]
 
-use df_proto::agent::v1::{AgentMessage, ControlMessage, agent_message, control_message};
+use df_proto::agent::v1::{AgentMessage, ControlMessage, agent_message};
 
-use super::{RunScenario, release_message, setup_test_remote_repo};
+use super::{
+    RunScenario, id_prompt, prompts_body, release_message, setup_test_remote_repo, text_prompt,
+};
 
 #[tokio::test]
 async fn test_run_sends_runtime_timings_in_sequence_with_other_messages() {
-    use df_proto::agent::v1::{Prompt, RuntimeOperation, agent_message};
+    use df_proto::agent::v1::{RuntimeOperation, agent_message};
 
     let script = r#"
 sessions:
@@ -33,16 +35,10 @@ sessions:
             {
                 turns += 1;
                 if turns == 1 {
-                    let prompt = Prompt {
-                        prompt_id: "prompt-2".to_string(),
-                        author: None,
-                        content: vec![],
-                        queued_at: None,
-                    };
                     control
                         .try_send(ControlMessage {
                             ack: 0,
-                            body: Some(control_message::Body::Prompt(prompt)),
+                            body: Some(prompts_body(vec![id_prompt("prompt-2")])),
                         })
                         .expect("the run still reads its inbox");
                 }
@@ -100,8 +96,8 @@ async fn test_df_harness_complete_task_ends_run_completed() {
     use crate::outbox::Outbox;
     use crate::runner::{RunDriverParams, run_session};
     use df_proto::agent::v1::{
-        Assign, ControlMessage, Harness, Prompt, RunOutcome, ToolCallResult, ToolDescriptor,
-        Workspace, agent_message, control_message,
+        Assign, ControlMessage, Harness, RunOutcome, ToolCallResult, ToolDescriptor, Workspace,
+        agent_message, control_message,
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::mpsc;
@@ -200,19 +196,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
         budgets: None,
         continuation: None,
     };
-    let initial_prompts = vec![Prompt {
-        prompt_id: "prompt-1".to_string(),
-        author: None,
-        content: vec![df_proto::transcript::v1::ContentBlock {
-            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                df_proto::transcript::v1::TextContent {
-                    text: "Complete the task".to_string(),
-                },
-            )),
-            hidden: false,
-        }],
-        queued_at: None,
-    }];
+    let initial_prompts = vec![text_prompt("prompt-1", "Complete the task")];
 
     let (inbound_tx, inbound_rx) = mpsc::channel(100);
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<AgentMessage>(100);
@@ -267,9 +251,9 @@ async fn test_scenario_full_runtime_two_runs_on_single_data_dir() {
     use crate::runner::{RunDriverParams, run_session};
     use crate::test_harness::{LocalHttpsGitServer, TestPki};
     use df_proto::agent::v1::{
-        Assign, CommitIdentity, Continuation, ControlMessage, GitConfigEntry, Harness, Prompt,
-        PushStatus, PushTarget, RunOutcome, ToolCallResult, ToolDescriptor, Workspace,
-        agent_message, control_message,
+        Assign, CommitIdentity, Continuation, ControlMessage, GitConfigEntry, Harness, PushStatus,
+        PushTarget, RunOutcome, ToolCallResult, ToolDescriptor, Workspace, agent_message,
+        control_message,
     };
     use tokio::sync::mpsc;
 
@@ -444,19 +428,7 @@ sessions:
         continuation: None,
     };
 
-    let initial_prompts1 = vec![Prompt {
-        prompt_id: "prompt-1".to_string(),
-        author: None,
-        content: vec![df_proto::transcript::v1::ContentBlock {
-            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                df_proto::transcript::v1::TextContent {
-                    text: "Start run 1 work".to_string(),
-                },
-            )),
-            hidden: false,
-        }],
-        queued_at: None,
-    }];
+    let initial_prompts1 = vec![text_prompt("prompt-1", "Start run 1 work")];
 
     let (inbound_tx1, inbound_rx1) = mpsc::channel(100);
     inbound_tx1.try_send(release_message()).unwrap();
@@ -594,19 +566,7 @@ sessions:
         }),
     };
 
-    let initial_prompts2 = vec![Prompt {
-        prompt_id: "prompt-2".to_string(),
-        author: None,
-        content: vec![df_proto::transcript::v1::ContentBlock {
-            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                df_proto::transcript::v1::TextContent {
-                    text: "Continue and complete work".to_string(),
-                },
-            )),
-            hidden: false,
-        }],
-        queued_at: None,
-    }];
+    let initial_prompts2 = vec![text_prompt("prompt-2", "Continue and complete work")];
 
     let (inbound_tx2, inbound_rx2) = mpsc::channel(100);
     let (outbound_tx2, mut outbound_rx2) = mpsc::channel::<AgentMessage>(100);
@@ -740,8 +700,7 @@ async fn test_manual_claude_acp_run() {
     use crate::outbox::Outbox;
     use crate::runner::{RunDriverParams, run_session};
     use df_proto::agent::v1::{
-        Assign, Harness, Prompt, RunOutcome, ToolCallResult, ToolDescriptor, Workspace,
-        control_message,
+        Assign, Harness, RunOutcome, ToolCallResult, ToolDescriptor, Workspace, control_message,
     };
     use tokio::sync::mpsc;
 
@@ -822,20 +781,10 @@ async fn test_manual_claude_acp_run() {
         continuation: None,
     };
 
-    let initial_prompts = vec![Prompt {
-        prompt_id: "prompt-1".to_string(),
-        author: None,
-        content: vec![df_proto::transcript::v1::ContentBlock {
-            kind: Some(df_proto::transcript::v1::content_block::Kind::Text(
-                df_proto::transcript::v1::TextContent {
-                    text: "Read README.md, append '# Claude Edit' and call complete_task."
-                        .to_string(),
-                },
-            )),
-            hidden: false,
-        }],
-        queued_at: None,
-    }];
+    let initial_prompts = vec![text_prompt(
+        "prompt-1",
+        "Read README.md, append '# Claude Edit' and call complete_task.",
+    )];
 
     let (inbound_tx, inbound_rx) = mpsc::channel::<ControlMessage>(100);
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<AgentMessage>(100);

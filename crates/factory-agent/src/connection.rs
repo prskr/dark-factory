@@ -135,15 +135,19 @@ impl CommandFilter {
         Self::default()
     }
 
-    /// Returns true if the message is fresh (not a duplicate) and records it.
-    pub fn filter_control_message(&mut self, msg: &ControlMessage) -> bool {
-        match &msg.body {
+    /// Removes duplicate prompts and records whether a fresh command remains.
+    pub fn filter_control_message(&mut self, msg: &mut ControlMessage) -> bool {
+        match &mut msg.body {
             Some(control_message::Body::Assign(assign)) => {
                 self.assigned_runs.insert(assign.run_id.clone())
             }
-            Some(control_message::Body::Prompt(prompt)) => {
+            Some(control_message::Body::Prompts(batch)) => {
                 // An empty id carries no identity, so it can't be deduplicated
-                prompt.prompt_id.is_empty() || self.seen_prompt_ids.insert(prompt.prompt_id.clone())
+                batch.prompts.retain(|prompt| {
+                    prompt.prompt_id.is_empty()
+                        || self.seen_prompt_ids.insert(prompt.prompt_id.clone())
+                });
+                !batch.prompts.is_empty()
             }
             Some(control_message::Body::ToolCallResult(res)) => {
                 self.pending_tool_calls.remove(&res.call_id);
@@ -254,7 +258,11 @@ impl ConnectionManager {
 
     /// Applies an inbound control message: acknowledges the outbox, deduplicates commands and
     /// forwards fresh ones to the runner.
-    async fn handle_inbound(&self, msg: ControlMessage, inbound_tx: &mpsc::Sender<ControlMessage>) {
+    async fn handle_inbound(
+        &self,
+        mut msg: ControlMessage,
+        inbound_tx: &mpsc::Sender<ControlMessage>,
+    ) {
         // Acknowledge outbox up to cumulative ack seq
         if msg.ack > 0 {
             let mut ob = self.outbox.lock().await;
@@ -262,13 +270,13 @@ impl ConnectionManager {
                 tracing::warn!(error = %error, ack = msg.ack, "failed to acknowledge outbox messages");
             }
         }
-        // Deduplicate commands: Assign, Prompt, ToolCallResult
+        // Deduplicate commands: Assign, Prompts, ToolCallResult
         if msg.body.is_some() {
             let is_fresh = self
                 .command_filter
                 .lock()
                 .await
-                .filter_control_message(&msg);
+                .filter_control_message(&mut msg);
             if is_fresh {
                 inbound_tx.send(msg).await.ok(); // receiver may be gone
             } else {

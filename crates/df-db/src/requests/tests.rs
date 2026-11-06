@@ -103,6 +103,21 @@ async fn audit_count(pool: &PgPool, action: &str) -> i64 {
         .unwrap()
 }
 
+/// The newest message of the task is the system's decision notice, made only of hidden blocks.
+async fn assert_hidden_decision_message(pool: &PgPool, task_id: TaskId) {
+    let (author, content): (Value, Value) = sqlx::query_as(
+        "SELECT author, content FROM task_messages WHERE task_id = $1 ORDER BY queued_at DESC LIMIT 1",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(author, json!(Principal::system(REQUEST_DECIDED)));
+    let blocks = content.as_array().unwrap();
+    assert!(!blocks.is_empty());
+    assert!(blocks.iter().all(|block| block["hidden"] == true));
+}
+
 #[tokio::test]
 async fn blocked_is_an_accepted_task_status() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
@@ -207,7 +222,7 @@ async fn request_flood_is_limited_but_merging_still_works() {
 }
 
 #[tokio::test]
-async fn answer_is_stored_audited_and_queued_as_a_message() {
+async fn answer_is_stored_audited_and_queued_as_a_hidden_message() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let task = task(&pool).await;
     sqlx::query("UPDATE tasks SET status = 'blocked' WHERE id = $1")
@@ -244,14 +259,7 @@ async fn answer_is_stored_audited_and_queued_as_a_message() {
         .await
         .unwrap();
     assert_eq!(status, "queued");
-    let author: Value = sqlx::query_scalar(
-        "SELECT author FROM task_messages WHERE task_id = $1 ORDER BY queued_at DESC LIMIT 1",
-    )
-    .bind(task.id.as_uuid())
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(author["reason"], "request.decided");
+    assert_hidden_decision_message(&pool, task.id).await;
     let again = decide(
         &pool,
         &types(),
@@ -287,7 +295,7 @@ async fn concurrent_decisions_store_exactly_one() {
 }
 
 #[tokio::test]
-async fn approval_applies_the_action_and_is_audited() {
+async fn approval_applies_the_action_and_queues_a_hidden_decision() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let task = task(&pool).await;
     let Raised::Request { request: r, .. } = raise_approval(
@@ -330,6 +338,7 @@ async fn approval_applies_the_action_and_is_audited() {
     assert_eq!(decided.scope(), Some(Scope::Task));
     assert_eq!(audit_count(&pool, "request.approve").await, 1);
     assert_eq!(audit_count(&pool, "fake.applied").await, 1);
+    assert_hidden_decision_message(&pool, task.id).await;
 }
 
 #[tokio::test]

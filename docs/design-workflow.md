@@ -154,6 +154,11 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Queue / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Tasks - Details Sidebar / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
 | Tasks / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
+| Tasks / Desktop · conversation flow · question pending | `/tasks/<key>` | task DF-12 with a pending blocking question and suggested answers; approved `conversation-flow` request-card styling | 1440 |
+| Tasks / Desktop · conversation flow · question answered | `/tasks/<key>` | same task and question after Peter Kurfer answered; outcome on the card, no decision form | 1440 |
+| Tasks / Desktop · conversation flow · approval pending | `/tasks/<key>` | same task with a pending registered network-access approval; scopes, optional comment, Approve and Deny | 1440 |
+| Tasks / Desktop · conversation flow · approval approved | `/tasks/<key>` | same approval granted for this task; outcome and decider, no decision form | 1440 |
+| Tasks / Desktop · conversation flow · approval denied | `/tasks/<key>` | same approval denied with a reason; outcome and decider, no decision form | 1440 |
 | Tasks / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
 | Tasks / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
 | Tasks / Desktop · reset workspace | `/tasks/<id>` | manual seed (not built): task `waiting` with ended runs; Status menu open | 1440 |

@@ -3,6 +3,15 @@
 sessions:
   new:
     - - say: "I need the package index from pypi.org."
+      - when:
+          prompt_contains: "[conversation-flow]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which inputs should the next turn receive?"
+                  blocking: false
       - fetch:
           url: https://pypi.org/simple/pip/
           timeout_seconds: 240
@@ -10,4 +19,11 @@ sessions:
     # The approval's decision message is queued during the fetch and becomes the next prompt of
     # this session, in the same run.
     - - say: "Noted the decision."
+      - when:
+          prompt_contains: "E2E Admin:\nPlease keep this queued follow-up with the question answer.\nRequest decision:"
+          steps:
+            - when:
+                prompt_contains: "Both the queued follow-up and this answer."
+                steps:
+                  - say: "Received the queued follow-up and question answer with author lines."
       - end: end_turn

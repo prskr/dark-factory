@@ -42,7 +42,15 @@ rust_test(
     aliases = aliases(),
     compile_data = ["docs/configuration.md"],
     crate_root = "src/main.rs",
+    data = [
+        ":factory-agent",
+        "//crates/fake-acp-agent",
+    ],
     edition = "2024",
+    env = {
+        "DF_TEST_BIN": "$(rootpath :factory-agent)",
+        "FAKE_ACP_AGENT_BIN": "$(rootpath //crates/fake-acp-agent:fake-acp-agent)",
+    },
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(
         proc_macro = True,

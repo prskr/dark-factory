@@ -36,12 +36,8 @@ async fn coordinator_delegates_implementation_and_review_and_relays_the_next_rou
         let status = db::task_status(&pool, key).await?;
         assert_eq!(status, "in_review", "{key}");
     }
-    let wakeups = db::system_messages(
-        &pool,
-        &coordinator,
-        df_core::task_transition::CHILD_ENDED_REASON,
-    )
-    .await?;
+    let wakeups =
+        db::system_messages(&pool, &coordinator, df_core::system_reason::CHILD_ENDED).await?;
     assert_eq!(wakeups.len(), 3, "{wakeups:?}");
     assert!(
         wakeups
