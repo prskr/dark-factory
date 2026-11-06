@@ -172,6 +172,10 @@ _Avoid_: Webhook, hook, endpoint
 An HTTP request a forge sends to Dark Factory. Notifications Dark Factory sends are lifecycle events, never webhooks.
 _Avoid_: Incoming webhook, forge event
 
+**Webhook secret**:
+The shared secret a forge signs webhooks with and Dark Factory checks them against. There is one per forge plugin, shared by every repository that plugin serves.
+_Avoid_: Signing key, HMAC key, webhook token
+
 ### Network
 
 **Egress rule**:
