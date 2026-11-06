@@ -239,6 +239,10 @@ async fn the_composer_has_a_link_issue_plus_on_the_left_and_the_assignee_next_to
 }
 
 #[tokio::test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 async fn the_composer_chips_are_rounded_rectangles_the_persona_has_no_border_and_create_is_an_arrow()
  {
     let app = TestApp::new().await;

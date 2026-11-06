@@ -410,6 +410,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn floating_create_shadow_and_plus_size_are_in_the_stylesheet() {
         let css = crate::app_css().unwrap();
         assert!(css.contains(".shadow-fab"), "shadow token utility");

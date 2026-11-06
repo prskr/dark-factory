@@ -22,8 +22,9 @@ When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` li
 
 ## Plain `cargo` builds
 
-The repository MUST keep building with plain `cargo` commands (`cargo build --workspace`, `cargo test --workspace`, `cargo clippy --all-targets`) and rust-analyzer without any dependency on Bazel.
+Rust code, including generated Rust code, MUST keep building with plain `cargo` commands (`cargo build --workspace`, `cargo test --workspace`, `cargo clippy --all-targets`) and rust-analyzer without any dependency on Bazel. These commands pass without non-Rust tools, apart from generators of Rust code (`protoc`).
 
+- Compiled web assets are the exception: the scripts of `df-web` (TypeScript, compiled by `swc`) and its stylesheet (`tailwindcss`) need the pinned tools (`bazel run //:bazel_env`, then they are on `PATH`). A `cargo` build without them prints a warning and embeds no compiled asset; the tests that read compiled assets are reported as ignored. No compiled asset is checked in. Details: `crates/df-web/AGENTS.md`.
 - `sqlx` query metadata is checked in under `.sqlx/` (offline mode is the default via `.cargo/config.toml`). After adding or changing a `sqlx::query!` / `query_as!` macro, regenerate it (see `docs/development.md`, "Updating `sqlx` Offline Metadata") and commit the result.
 - Other generated code that Bazel needs but `cargo` cannot produce must not exist. If a generator is needed, make sure `build.rs` or checked-in output covers the plain `cargo` path as well.
 

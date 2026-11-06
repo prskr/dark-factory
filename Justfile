@@ -40,8 +40,14 @@ db:
 db-rm:
     {{container}} compose down -v
 
+# Fail early when the tools that compile the web UI's scripts (swc) and stylesheet (tailwindcss) are missing
+[private]
+web-tools:
+    @command -v swc >/dev/null && command -v tailwindcss >/dev/null \
+        || { echo "swc and tailwindcss must be on PATH (the web UI needs the compiled scripts and stylesheet): bazel run //:bazel_env && direnv allow" >&2; exit 1; }
+
 # Run the control plane with the web UI on http://127.0.0.1:8080 without a Kubernetes cluster and with scripted network traffic (login: admin@example.com / password). Needs the `dev-tools` feature.
-serve-local: db plugins
+serve-local: web-tools db plugins
     mkdir -p target/local-dev
     printf 'postgres\n' > target/local-dev/owner-password
     printf 'app-local-password\n' > target/local-dev/app-password
@@ -49,6 +55,7 @@ serve-local: db plugins
     [ -f target/local-dev/agent.crt ] || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
         -days 365 -subj /CN=localhost -keyout target/local-dev/agent.key -out target/local-dev/agent.crt 2>/dev/null
     # Ed25519 PKCS#8 (RFC 8410 prefix + 32 random bytes); macOS' LibreSSL cannot `genpkey` Ed25519.
+    # Generates a fresh key, contains no key material: kingfisher:ignore
     [ -f target/local-dev/lifecycle-events.key ] || { echo '-----BEGIN PRIVATE KEY-----'; \
         { printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'; head -c 32 /dev/urandom; } | openssl base64; \
         echo '-----END PRIVATE KEY-----'; } > target/local-dev/lifecycle-events.key

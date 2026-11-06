@@ -12,16 +12,21 @@
 //
 // Theme: `dark` or `default` from `prefers-color-scheme`; a change redraws the diagram.
 (() => {
+  /** What the diagram currently shows: the drawn SVG or the error message. */
+  type View = { svg: string; message?: undefined } | { svg?: undefined; message: string };
+  /** The sibling elements added after the `<pre>`. */
+  type Slot = 'diagram' | 'error';
+
   const SECURE = ['secure', 'securityLevel', 'startOnLoad', 'suppressErrorRendering', 'maxTextSize', 'maxEdges'];
   const scheme = window.matchMedia('(prefers-color-scheme: dark)');
-  let loading = null;
+  let loading: Promise<MermaidApi> | null = null;
   let counter = 0;
 
   // Loads Mermaid on first use; a failed load can be retried by the next diagram.
   function loadMermaid() {
-    loading ??= new Promise((resolve, reject) => {
+    loading ??= new Promise<MermaidApi>((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = document.body.dataset.mermaidSrc;
+      script.src = document.body.dataset.mermaidSrc ?? '';
       script.onload = () => resolve(window.mermaid);
       script.onerror = () => {
         loading = null;
@@ -34,7 +39,7 @@
   }
 
   // The `viewBox` of the SVG inside Mermaid's sandbox iframe (a data URL, or `srcdoc`).
-  function viewBoxOf(frame) {
+  function viewBoxOf(frame: Element): { width: number; height: number } | null {
     const src = frame.getAttribute('srcdoc') ?? atob((frame.getAttribute('src') ?? '').split(',')[1] ?? '');
     const box = /viewBox="[\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)"/.exec(src);
     return box && { width: Number(box[1]), height: Number(box[2]) };
@@ -45,38 +50,38 @@
       source: '',
       drawing: 0,
       // What the diagram currently shows: `{ svg }` or `{ message }` (the error); null until drawn.
-      view: null,
-      diagram: null,
-      error: null,
-      observer: null,
-      resizer: null,
-      onSchemeChange: null,
+      view: null as View | null,
+      diagram: null as HTMLElement | null,
+      error: null as HTMLElement | null,
+      observer: null as MutationObserver | null,
+      resizer: null as ResizeObserver | null,
+      onSchemeChange: null as (() => void) | null,
 
-      init() {
-        this.source = this.$el.textContent;
-        this.onSchemeChange = () => this.draw();
+      init(): void {
+        this.source = this.$el.textContent ?? '';
+        this.onSchemeChange = () => void this.draw();
         scheme.addEventListener('change', this.onSchemeChange);
         // An htmx morph of the surrounding element (a request card) keeps this `<pre>` but resets
         // its attributes and drops the siblings added below. Whatever it changes, `apply()` puts
         // the current view back.
         this.observer = new MutationObserver(() => this.apply());
         this.observer.observe(this.$el, { attributes: true, attributeFilter: ['hidden'] });
-        this.observer.observe(this.$el.parentNode, { childList: true });
+        if (this.$el.parentNode) this.observer.observe(this.$el.parentNode, { childList: true });
         this.resizer = new ResizeObserver(() => this.fit());
-        this.draw();
+        void this.draw();
       },
 
-      destroy() {
-        scheme.removeEventListener('change', this.onSchemeChange);
-        this.observer.disconnect();
-        this.resizer.disconnect();
+      destroy(): void {
+        if (this.onSchemeChange) scheme.removeEventListener('change', this.onSchemeChange);
+        this.observer?.disconnect();
+        this.resizer?.disconnect();
         this.discard('diagram');
         this.discard('error');
       },
 
       // Draws the source in the current theme. A newer call makes an older one that is still
       // waiting for Mermaid give up.
-      async draw() {
+      async draw(): Promise<void> {
         const run = ++this.drawing;
         try {
           const mermaid = await loadMermaid();
@@ -90,12 +95,12 @@
           const { svg } = await mermaid.render(`mermaid-${++counter}`, this.source);
           if (run === this.drawing) this.show({ svg });
         } catch (err) {
-          const message = String(err?.message ?? err).split('\n')[0];
+          const message = String((err as Error | undefined)?.message ?? err).split('\n')[0];
           if (run === this.drawing) this.show({ message: `Diagram error: ${message}` });
         }
       },
 
-      show(view) {
+      show(view: View): void {
         this.view = view;
         // A new drawing replaces the old one; apply() creates what is missing.
         this.discard('diagram');
@@ -106,23 +111,25 @@
       // Makes the page match `view`: the diagram in a sibling `<div>` and the source hidden, or
       // the source with a one-line error below it. It only touches what differs, because its own
       // changes trigger the observer again.
-      apply() {
+      apply(): void {
         if (!this.view) return;
         const { svg, message } = this.view;
         if (this.$el.hidden !== (svg !== undefined)) this.$el.hidden = svg !== undefined;
         if (svg !== undefined) {
-          if (this.sibling('diagram', 'div', 'diagram')) {
-            this.diagram.innerHTML = svg;
-            this.resizer.observe(this.diagram);
+          const diagram = this.sibling('diagram', 'div', 'diagram');
+          if (diagram) {
+            diagram.innerHTML = svg;
+            this.resizer?.observe(diagram);
           }
-        } else if (this.sibling('error', 'p', 'diagram-error')) {
-          this.error.textContent = message;
+        } else {
+          const error = this.sibling('error', 'p', 'diagram-error');
+          if (error) error.textContent = message;
         }
       },
 
       // Mermaid sizes the iframe for the SVG at its natural width, but the SVG shrinks to the
       // iframe's width: the height follows the scale, so no empty space is left below.
-      fit() {
+      fit(): void {
         const frame = this.diagram?.querySelector('iframe');
         const box = frame && viewBoxOf(frame);
         if (!box || !frame.clientWidth) return;
@@ -130,20 +137,24 @@
       },
 
       // Removes the sibling `this[name]`; the resizer only ever observes the current diagram.
-      discard(name) {
-        if (!this[name]) return;
-        this.resizer.unobserve(this[name]);
-        this[name].remove();
+      discard(name: Slot): void {
+        const element = this[name];
+        if (!element) return;
+        this.resizer?.unobserve(element);
+        element.remove();
         this[name] = null;
       },
 
-      // Ensures the element `this[name]` follows the `<pre>`; true if it had to be created.
-      sibling(name, tag, className) {
-        if (this[name]?.isConnected) return false;
+      // Ensures the element `this[name]` follows the `<pre>`; returns it if it had to be created,
+      // otherwise null.
+      sibling(name: Slot, tag: 'div' | 'p', className: string): HTMLElement | null {
+        if (this[name]?.isConnected) return null;
         this.discard(name); // one an htmx morph removed
-        this[name] = this.$el.insertAdjacentElement('afterend', document.createElement(tag));
-        this[name].className = className;
-        return true;
+        const element = document.createElement(tag);
+        element.className = className;
+        this.$el.after(element);
+        this[name] = element;
+        return element;
       },
     }));
   });

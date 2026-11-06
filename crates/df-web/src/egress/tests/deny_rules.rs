@@ -186,7 +186,7 @@ async fn the_deny_rule_link_highlights_its_row() {
 
 #[test]
 fn the_dialog_component_disables_applies_to_and_port_and_shows_any_for_deny() {
-    let script = crate::assets::script_source("egress-rule.js");
+    let script = crate::assets::script_source("egress-rule.ts");
 
     assert!(script.contains("Alpine.data('egressRule'"), "{script}");
     assert!(script.contains("this.effect === 'deny'"), "{script}");

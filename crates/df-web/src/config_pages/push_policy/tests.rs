@@ -293,7 +293,7 @@ async fn the_edit_modal_is_wide_and_its_tabs_follow_the_keyboard() {
         tablist.contains("x-on:keydown=\"move($event)\""),
         "{tablist}"
     );
-    let script = crate::assets::script_source("tabs.js");
+    let script = crate::assets::script_source("tabs.ts");
     assert!(script.contains("Alpine.data('tabs'"));
     for key in [
         "ArrowUp",
@@ -371,7 +371,7 @@ async fn the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view() {
         "{tablist}"
     );
     assert!(tag_around(&html, "role=\"tab\"").contains("shrink-0"));
-    let script = crate::assets::script_source("tabs.js");
+    let script = crate::assets::script_source("tabs.ts");
     assert!(
         script.contains("scrollIntoView({ block: 'nearest', inline: 'nearest' })"),
         "{script}"

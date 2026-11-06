@@ -27,7 +27,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-75: discussion during `split-long-functions` (`df-web`, 2026-10-29), after the Alpine components moved to `crates/df-web/assets/`.
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
@@ -99,7 +98,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
 | TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
 | TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) ([#124]) |
-| TD-75 | low   | `df-web` assets | Component scripts are plain, unminified JavaScript |
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 | TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
@@ -661,21 +659,6 @@ The in-process test calls `df_db::requests::decide` directly instead of the `/re
 **Matters when:** a change touches requests, `Release` or the follow-up run; nothing end to end catches a break today.
 
 **Fix:** Extend the e2e test as task 6.1 describes. Answer through the UI handler while the run awaits input; leave a second question unanswered until `Release`; check that answering it starts run 2.
-
-### TD-75. Component scripts are plain, unminified JavaScript
-
-`crates/df-web/assets/*.js` (`COMPONENT_SCRIPTS` in `crates/df-web/src/layout.rs`)
-
-The Alpine components are served as written: no types, no minification. Today that is two files of about 13 KB raw, compressed and cached by content hash, so minification alone would save 2 to 3 KB on a first load.
-
-**Matters when:** the components grow beyond a few files or tens of KB, or their logic gets complex enough that type errors reach the browser.
-
-**Fix (recommended):** write the components in TypeScript and compile them with `rules_swc` (aspect-build) in Bazel, which strips types and minifies in one step. Decide at the same time:
-- tests that assert on component source must read the `.ts` sources, not the served asset;
-- the plain `cargo` path (AGENTS.md, "Plain `cargo` builds") needs the compiled JS too, for example checked-in output or a `build.rs` step;
-- source maps for debugging in the browser.
-
-Update the "Web UI scripts" rule in `crates/df-web/AGENTS.md` with the result.
 
 ### TD-76 (SP7). Warnings for failed outbox and lock-release calls have no test
 

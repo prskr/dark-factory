@@ -32,10 +32,17 @@ pub fn app_css() -> Option<Cow<'static, str>> {
     }
 }
 
-/// Source of an embedded script, for tests that check a component's code.
+/// TypeScript sources of the components, for tests that check a component's code. Unlike
+/// [`Assets`], they exist in every build, with or without `swc`.
+#[cfg(test)]
+#[derive(RustEmbed)]
+#[folder = "scripts/"]
+struct ScriptSources;
+
+/// Source of a component, `script_source("tabs.ts")`.
 #[cfg(test)]
 pub(crate) fn script_source(path: &str) -> String {
-    let file = Assets::get(path).unwrap_or_else(|| panic!("{path} is embedded"));
+    let file = ScriptSources::get(path).unwrap_or_else(|| panic!("{path} exists in scripts/"));
     String::from_utf8(file.data.into_owned()).unwrap()
 }
 
@@ -102,6 +109,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn radios_and_checkboxes_use_the_accent_text_color() {
         let css = app_css().expect("app.css is embedded");
         let rule = css
@@ -116,16 +127,46 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn embeds_stylesheet_and_vendored_scripts() {
         assert!(!app_css().expect("app.css is embedded").is_empty());
         for path in [
             "vendor/htmx.min.js",
             "vendor/hx-sse.min.js",
             "vendor/alpine.min.js",
-            "egress-log.js",
             "vendor/mermaid.min.js",
         ] {
             assert!(get_asset(path).is_some(), "{path}");
+        }
+    }
+
+    #[test]
+    fn vendored_scripts_are_embedded_byte_for_byte() {
+        let embedded = get_asset("vendor/alpine.min.js").expect("alpine is embedded");
+        assert!(
+            embedded.data.as_ref() == include_bytes!("../assets/vendor/alpine.min.js"),
+            "vendor/alpine.min.js differs from the checked-in file"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(df_web_scripts),
+        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+    )]
+    fn compiled_components_are_embedded_without_typescript_syntax() {
+        for script in crate::layout::COMPONENT_SCRIPTS {
+            let file = get_asset(script).unwrap_or_else(|| panic!("{script} is embedded"));
+            let js = std::str::from_utf8(&file.data).unwrap();
+            assert!(js.contains("Alpine.data("), "{script}");
+        }
+        let tabs = String::from_utf8(get_asset("tabs.js").unwrap().data.into_owned()).unwrap();
+        // The source has `initial: string` and `move(event: KeyboardEvent): void`.
+        for typescript in [": string", ": void", ": KeyboardEvent", "as HTMLElement"] {
+            assert!(!tabs.contains(typescript), "{typescript} in {tabs}");
         }
     }
 
@@ -144,6 +185,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(df_web_scripts),
+        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+    )]
     async fn the_component_scripts_are_served_as_javascript() {
         for script in crate::layout::COMPONENT_SCRIPTS {
             let response = get_path(&format!("/assets/{script}")).await;
@@ -156,6 +201,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn stylesheet_contains_only_classes_from_the_sources() {
         // Tailwind's automatic source detection scans the working directory, which in a Bazel
         // sandbox is the whole execroot (~90 KB of CSS). Minified with `@source "../src"` only,
@@ -165,6 +214,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn stylesheet_covers_the_classes_the_pages_use() {
         let css = app_css().expect("app.css is embedded");
         for rule in [
@@ -184,6 +237,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn stylesheet_defines_the_tokens_for_both_themes() {
         let css = app_css().expect("app.css is embedded");
         assert!(css.contains("--app:#fafaf9"), "light tokens");
@@ -203,6 +260,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn transcript_on_a_phone_hides_the_bottom_bar() {
         let css = app_css().expect("app.css is embedded");
         assert!(
@@ -218,6 +279,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn stylesheet_refers_to_the_control_plane_only() {
         let css = app_css().expect("app.css is embedded");
         assert!(!css.contains("url(http") && !css.contains("@import"));
@@ -264,7 +329,7 @@ mod tests {
 
     #[test]
     fn markdown_component_keeps_diagrams_isolated() {
-        let js = script_source("markdown.js");
+        let js = script_source("markdown.ts");
         assert!(js.contains("Alpine.data('mermaidDiagram'"));
         assert!(js.contains("securityLevel: 'sandbox'"));
         // `%%{init}%%` in the diagram source must not be able to lower the level.
@@ -289,7 +354,7 @@ mod tests {
 
     #[test]
     fn markdown_component_restores_its_diagram_after_a_morph() {
-        let js = script_source("markdown.js");
+        let js = script_source("markdown.ts");
         // A morph resets `hidden` on the `<pre>` and removes the sibling diagram: the component
         // watches both and puts the current view back, without creating a second diagram.
         assert!(js.contains("new MutationObserver"), "{js}");
@@ -300,16 +365,20 @@ mod tests {
             "creates a sibling only when it is gone"
         );
         assert!(
-            js.contains("this.resizer.unobserve(this[name])"),
+            js.contains("this.resizer?.unobserve(element)"),
             "replaced diagrams are unobserved"
         );
         assert!(
-            js.contains("this.observer.disconnect()"),
+            js.contains("this.observer?.disconnect()"),
             "observer ends with the component"
         );
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn asset_url_carries_a_content_hash() {
         let url = asset_url("app.css");
         assert!(url.starts_with("/assets/app.css?v="), "{url}");

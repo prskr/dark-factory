@@ -10,31 +10,33 @@
 // to the previous or next tab (wrapping), Home and End to the first or last; the focused tab opens
 // (WAI-ARIA tabs pattern, automatic activation). Other keys are left alone.
 document.addEventListener('alpine:init', () => {
-  Alpine.data('tabs', (initial) => ({
+  Alpine.data('tabs', (initial: string) => ({
     tab: initial,
 
-    init() {
+    init(): void {
       this.$watch('tab', () => this.reveal());
       this.reveal();
     },
 
-    reveal() {
-      const tab = [...this.$el.querySelectorAll('[role="tab"]')].find((t) => t.dataset.tab === this.tab);
+    reveal(): void {
+      const tab = [...this.$el.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.dataset.tab === this.tab);
       if (tab) tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     },
 
-    move(event) {
-      const tabs = [...event.currentTarget.querySelectorAll('[role="tab"]')];
-      const at = tabs.indexOf(document.activeElement);
+    move(event: KeyboardEvent): void {
+      const list = event.currentTarget as HTMLElement;
+      const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
+      const at = tabs.indexOf(document.activeElement as HTMLElement);
       if (at < 0) return;
-      const step = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[event.key];
-      let next;
+      const steps: Record<string, number | undefined> = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 };
+      const step = steps[event.key];
+      let next: number;
       if (step !== undefined) next = (at + step + tabs.length) % tabs.length;
       else if (event.key === 'Home') next = 0;
       else if (event.key === 'End') next = tabs.length - 1;
       else return;
       event.preventDefault();
-      this.tab = tabs[next].dataset.tab;
+      this.tab = tabs[next].dataset.tab ?? '';
       tabs[next].focus();
     },
   }));

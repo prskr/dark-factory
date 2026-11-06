@@ -428,7 +428,7 @@ fn scope_field(options: &[(String, String)], selected: &str, errors: &FormErrors
 }
 
 /// The "New egress rule" dialog. `effect` (Allow or Deny) is a radio group; the Alpine component
-/// `egressRule` (`assets/egress-rule.js`) disables "Applies to" and Port for Deny and shows
+/// `egressRule` (`scripts/egress-rule.ts`) disables "Applies to" and Port for Deny and shows
 /// `every project` and `any` in them. The server renders the same state, so a form that is shown
 /// again after an error keeps it. Disabled fields are not submitted.
 fn host_form(options: &[(String, String)], values: &HostForm, errors: &FormErrors) -> Markup {

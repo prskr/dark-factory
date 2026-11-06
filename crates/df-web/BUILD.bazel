@@ -22,6 +22,37 @@ alias(
     actual = "@multitool//tools/tailwindcss",
 )
 
+alias(
+    name = "swc",
+    actual = "@multitool//tools/swc",
+)
+
+# One minified `.js` per `scripts/<name>.ts`, in `web_scripts/`; `build.rs` embeds them as `<name>.js`.
+filegroup(
+    name = "ts_srcs",
+    srcs = glob(["scripts/*.ts"]),
+)
+
+genrule(
+    name = "web_scripts",
+    srcs = [
+        ".swcrc",
+        ":ts_srcs",
+    ],
+    outs = [
+        "web_scripts/" + src.removeprefix("scripts/").removesuffix(".ts") + ".js"
+        for src in glob(["scripts/*.ts"])
+    ],
+    cmd = """
+        for src in $(locations :ts_srcs); do
+            name=$$(basename "$$src" .ts)
+            $(execpath :swc) compile "$$src" --config-file $(location .swcrc) \
+                --out-file "$(RULEDIR)/web_scripts/$$name.js"
+        done
+    """,
+    tools = [":swc"],
+)
+
 genrule(
     name = "app_css",
     srcs = [
@@ -39,11 +70,20 @@ genrule(
 
 cargo_build_script(
     name = "build_script",
-    srcs = ["build.rs"],
+    srcs = [
+        "build.rs",
+        "build_assets.rs",
+    ],
     build_script_env = {
+        "DF_WEB_REQUIRE_ASSETS": "1",
         "TAILWIND_APP_CSS": "$(execpath :app_css)",
+        "WEB_SCRIPTS": "$(execpaths :web_scripts)",
     },
-    data = glob(["assets/**"]) + [":app_css"],
+    crate_root = "build.rs",
+    data = glob(["assets/**"]) + [
+        ":app_css",
+        ":web_scripts",
+    ],
     edition = "2024",
     proc_macro_deps = all_crate_deps(build_proc_macro = True),
     deps = all_crate_deps(build = True),
@@ -51,9 +91,16 @@ cargo_build_script(
 
 rust_library(
     name = "df_web",
-    srcs = [":rs_srcs"],
+    srcs = [
+        "build_assets.rs",
+        ":rs_srcs",
+    ],
     aliases = aliases(),
-    compile_data = glob(["assets/**"]) + ["src/components/brands.json"],
+    # `scripts/**`: the tests embed the TypeScript sources (`assets::script_source`).
+    compile_data = glob([
+        "assets/**",
+        "scripts/**",
+    ]) + ["src/components/brands.json"],
     crate_name = "df_web",
     edition = "2024",
     lint_config = ":lints",

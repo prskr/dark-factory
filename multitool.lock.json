@@ -176,6 +176,42 @@
       }
     ]
   },
+  "hugo": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "hugo",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "c41672a0725d307758a132bc94a962e59760eb33f9ba08c991b81f9881d6fa7d",
+        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_linux-amd64.tar.gz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "hugo",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "5b190e5d2836c09efe25cc6249f70bde8a6c5331ef412a4c9137e9d5de89a515",
+        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_linux-arm64.tar.gz"
+      },
+      {
+        "cpu": "x86_64",
+        "file": "Payload/hugo",
+        "kind": "pkg",
+        "os": "macos",
+        "sha256": "d48dfd5adab308f941e83e48c5ba925747cf383395972278942cf526ad27cf38",
+        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_darwin-universal.pkg"
+      },
+      {
+        "cpu": "arm64",
+        "file": "Payload/hugo",
+        "kind": "pkg",
+        "os": "macos",
+        "sha256": "d48dfd5adab308f941e83e48c5ba925747cf383395972278942cf526ad27cf38",
+        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_darwin-universal.pkg"
+      }
+    ]
+  },
   "jq": {
     "binaries": [
       {
@@ -432,6 +468,38 @@
       }
     ]
   },
+  "swc": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "a7db904188837ab92d9fe0ceefb031006d9778ecb16446e3ce1ea253fde41fab",
+        "url": "https://github.com/swc-project/swc/releases/download/v1.16.22/swc-linux-x64-musl"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "linux",
+        "sha256": "855b8ceeddb88ab94fd8999d770e5ded5fa8f8094317808a22f67e4ca96d27c0",
+        "url": "https://github.com/swc-project/swc/releases/download/v1.16.22/swc-linux-arm64-musl"
+      },
+      {
+        "cpu": "x86_64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "fc8e8b985ff40a73f4d04e36e3fc810d15d6fa7571e2e7b420abeae61b717aa4",
+        "url": "https://github.com/swc-project/swc/releases/download/v1.16.22/swc-darwin-x64"
+      },
+      {
+        "cpu": "arm64",
+        "kind": "file",
+        "os": "macos",
+        "sha256": "4519900160a188cbaaab6dd2976f273fe01451004eb06aeff5090a36f73830a0",
+        "url": "https://github.com/swc-project/swc/releases/download/v1.16.22/swc-darwin-arm64"
+      }
+    ]
+  },
   "tailwindcss": {
     "binaries": [
       {
@@ -533,42 +601,6 @@
         "os": "macos",
         "sha256": "60d0c91aa8bf4030d38e80bb05f84c20be2e955f24d62b2e55d15ad643fa7afa",
         "url": "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_darwin_arm64.tar.gz"
-      }
-    ]
-  },
-  "hugo": {
-    "binaries": [
-      {
-        "cpu": "x86_64",
-        "file": "hugo",
-        "kind": "archive",
-        "os": "linux",
-        "sha256": "c41672a0725d307758a132bc94a962e59760eb33f9ba08c991b81f9881d6fa7d",
-        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_linux-amd64.tar.gz"
-      },
-      {
-        "cpu": "arm64",
-        "file": "hugo",
-        "kind": "archive",
-        "os": "linux",
-        "sha256": "5b190e5d2836c09efe25cc6249f70bde8a6c5331ef412a4c9137e9d5de89a515",
-        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_linux-arm64.tar.gz"
-      },
-      {
-        "cpu": "x86_64",
-        "file": "Payload/hugo",
-        "kind": "pkg",
-        "os": "macos",
-        "sha256": "d48dfd5adab308f941e83e48c5ba925747cf383395972278942cf526ad27cf38",
-        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_darwin-universal.pkg"
-      },
-      {
-        "cpu": "arm64",
-        "file": "Payload/hugo",
-        "kind": "pkg",
-        "os": "macos",
-        "sha256": "d48dfd5adab308f941e83e48c5ba925747cf383395972278942cf526ad27cf38",
-        "url": "https://github.com/gohugoio/hugo/releases/download/v0.169.0/hugo_extended_0.169.0_darwin-universal.pkg"
       }
     ]
   }

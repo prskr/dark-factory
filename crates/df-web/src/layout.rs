@@ -11,8 +11,8 @@ use crate::auth::CurrentUser;
 use crate::components::shell::is_settings;
 use crate::components::{CreateAction, bottom_bar, floating_create, rail, settings_sidebar};
 
-/// Alpine components in `assets/` (`Alpine.data` on `alpine:init`), loaded on every page before
-/// Alpine starts.
+/// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
+/// loaded on every page before Alpine starts.
 pub(crate) const COMPONENT_SCRIPTS: [&str; 5] = [
     "egress-log.js",
     "egress-rule.js",
@@ -384,6 +384,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(df_web_scripts, df_web_styles)),
+        ignore = "needs compiled scripts and app.css: swc and tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn page_loads_vendored_scripts_stylesheet_and_fonts_with_hashes() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         for asset in [
@@ -412,6 +416,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_scripts),
+        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+    )]
     fn component_scripts_load_before_alpine_starts() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         let alpine = page.find("/assets/vendor/alpine.min.js?v=").unwrap();
@@ -422,6 +430,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn code_theme_stylesheet_is_linked_after_app_css_with_its_hash() {
         let shell = Shell {
             code_theme_url: Some(crate::markdown::CodeTheme::default().url().to_owned()),
@@ -482,6 +494,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+    )]
     fn the_bottom_bar_hides_on_the_transcript_screen_with_a_rule_that_beats_its_flex_utility() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         let bar = nav_html(&page, "mobile-menu");

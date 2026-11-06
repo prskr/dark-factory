@@ -214,5 +214,5 @@ fn flow(mut event: FlowEvent, id: u64) -> FlowEvent {
 
 /// The source of the embedded Alpine component of the log page.
 pub(in crate::egress) fn component_script() -> String {
-    crate::assets::script_source("egress-log.js")
+    crate::assets::script_source("egress-log.ts")
 }

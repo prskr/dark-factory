@@ -17,42 +17,51 @@
 // Methods: `setCollapsed(value)`, `sheetToggle()` (tap or keyboard on the handle), and the
 // pointer sequence `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` (pointerup) and
 // `sheetDragCancel(e)` (pointercancel: no click follows, so `dragged` is reset).
+interface SheetDrag {
+  y: number;
+  h: number;
+  el: HTMLElement;
+  moved: boolean;
+}
+
 document.addEventListener('alpine:init', () => {
   Alpine.data('workspace', () => ({
     details: false,
     collapsed: false,
-    sheet: 'half',
+    sheet: 'half' as 'half' | 'full',
     dragging: false,
-    drag: null,
+    drag: null as SheetDrag | null,
     dragged: false,
     closeBelow: 0.25,
     fullAbove: 0.7,
     dragSlop: 4,
-    init() {
+    init(): void {
       try { this.collapsed = localStorage.getItem('df.details.collapsed') === '1' } catch (e) {}
     },
-    setCollapsed(value) {
+    setCollapsed(value: boolean): void {
       this.collapsed = value
       try { localStorage.setItem('df.details.collapsed', value ? '1' : '0') } catch (e) {}
     },
-    sheetToggle() {
+    sheetToggle(): void {
       if (this.dragged) { this.dragged = false; return }
       this.sheet = this.sheet === 'half' ? 'full' : 'half'
     },
-    sheetDragStart(e) {
-      const el = e.currentTarget.closest('aside')
-      e.currentTarget.setPointerCapture(e.pointerId)
+    sheetDragStart(e: PointerEvent): void {
+      const handle = e.currentTarget as HTMLElement
+      const el = handle.closest('aside')
+      if (!el) return
+      handle.setPointerCapture(e.pointerId)
       this.drag = { y: e.clientY, h: el.offsetHeight, el, moved: false }
       this.dragging = true
     },
-    sheetDragMove(e) {
+    sheetDragMove(e: PointerEvent): void {
       const d = this.drag
       if (!d) return
       const dy = e.clientY - d.y
       if (Math.abs(dy) > this.dragSlop) d.moved = true
       if (d.moved) d.el.style.height = Math.max(0, d.h - dy) + 'px'
     },
-    sheetDragEnd(e) {
+    sheetDragEnd(e: PointerEvent): void {
       const d = this.drag
       this.drag = null
       this.dragging = false
@@ -64,7 +73,7 @@ document.addEventListener('alpine:init', () => {
       if (share < this.closeBelow) { this.details = false; this.sheet = 'half' }
       else this.sheet = share > this.fullAbove ? 'full' : 'half'
     },
-    sheetDragCancel(e) {
+    sheetDragCancel(e: PointerEvent): void {
       const d = this.drag
       this.drag = null
       this.dragging = false

@@ -372,7 +372,7 @@ pub(crate) struct Tab {
 
 /// A modal form (a wide [`DialogStyle`], chosen by the caller) with its tabs on the left (on top
 /// below 768 px), one panel per tab and the footer across the full width. `open` is the id of the
-/// tab shown first; the Alpine component `tabs` (`assets/tabs.js`) switches them.
+/// tab shown first; the Alpine component `tabs` (`scripts/tabs.ts`) switches them.
 pub(crate) fn tabbed_form(
     action: &str,
     errors: &FormErrors,

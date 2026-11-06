@@ -43,7 +43,7 @@ fn state_args(advanced: usize, dirty: bool) -> String {
 
 /// The page; `personas` (id, name) are the choices of the persona filter, `backlog` is what the
 /// stream's first message will show. The Alpine component `egressLog` of the page is
-/// `assets/egress-log.js`; the layout loads it before Alpine.
+/// `scripts/egress-log.ts`; the layout loads it before Alpine.
 pub(super) fn page_body(
     filter: &Filter,
     personas: &[(String, String)],
@@ -393,7 +393,7 @@ mod tests {
         assert!(scroll.contains("pointerdown") && scroll.contains("graphDragStart"));
         assert!(scroll.contains("graphDragMove") && scroll.contains("cursor-grab"));
         let js = component_script();
-        assert!(js.contains("graphDragStart(e)") && js.contains("[data-node]"));
+        assert!(js.contains("graphDragStart(e: PointerEvent)") && js.contains("[data-node]"));
         // Relative to the scroll box, not to the event target (the tall graph inside it).
         assert!(js.contains("e.clientX - rect.left - box.clientLeft >= box.clientWidth"));
         assert!(!js.contains("offsetX") && !js.contains("offsetY"));

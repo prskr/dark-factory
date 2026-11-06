@@ -133,6 +133,19 @@
       ],
       "depNameTemplate": "@fission-ai/openspec",
       "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "TypeScript compiler run through npx in CI and in the pre-commit hook",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.yaml$/",
+        "/^lefthook\\.yml$/"
+      ],
+      "matchStrings": [
+        "npx --yes -p typescript@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "typescript",
+      "datasourceTemplate": "npm"
     }
   ],
   "packageRules": [
@@ -173,6 +186,13 @@
         "@fission-ai/openspec"
       ],
       "groupName": "OpenSpec CLI"
+    },
+    {
+      "description": "One PR for TypeScript: the CI workflow and the lefthook hook",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "groupName": "TypeScript compiler"
     }
   ]
 }

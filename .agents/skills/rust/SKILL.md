@@ -22,6 +22,7 @@ cargo clippy --version && cargo fmt --version
 - `rust-toolchain.toml` is the source of truth. The same version is repeated in `MODULE.bazel` (`versions`); bump both together.
 - A missing component or target: `rustup component add <name>` / `rustup target add <triple>` with the names from the file; don't change the file.
 - A plain `cargo build` also needs `protoc` (>= 29.x) on `PATH` (or `PROTOC`). Without it, build and test through Bazel.
+- `df-web` compiles its scripts (`swc`) and stylesheet (`tailwindcss`) in `build.rs`. Without the tools (`bazel run //:bazel_env` puts them on `PATH`; in a sandbox they are usually missing) the build succeeds with a warning, nothing is embedded, and `cargo test -p df-web` lists the tests that read compiled assets as `ignored` (cfgs `df_web_scripts` / `df_web_styles`). Say in the report that they did not run; `bazel test //crates/df-web/...` always runs them.
 
 ## Adding a dependency
 

@@ -1,7 +1,7 @@
 # df-web
 
 Server-rendered web UI of the control plane: maud templates, htmx 4 and Alpine (vendored in
-`assets/vendor/`), Tailwind (standalone binary, `build.rs` / Bazel genrule). Design: ADR-0004,
+`assets/vendor/`), TypeScript (`swc`) and Tailwind (standalone binaries, `build.rs` / Bazel genrules). Design: ADR-0004,
 ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 
 **Design system:** tokens, components, patterns and the review checklist for new views are in
@@ -90,7 +90,7 @@ cards; artifacts will reuse it). comrak runs with raw HTML escaped, images rewri
   also inside agent bubbles. `values.schema.json` lists the same theme names; a test compares the
   two.
 - **Diagrams**: a `mermaid` fence is `<pre class="hl-code" x-data="mermaidDiagram">` with the
-  escaped source. `assets/markdown.js` loads `assets/vendor/mermaid.min.js` (URL from
+  escaped source. `scripts/markdown.ts` (served as `markdown.js`) loads `assets/vendor/mermaid.min.js` (URL from
   `data-mermaid-src` on `<body>`) on the first diagram of a page and draws with
   `securityLevel: 'sandbox'` (iframe; kept in Mermaid's `secure` list so `%%{init}%%` cannot lower
   it). It redraws when `prefers-color-scheme` changes. A parse error leaves the source and adds a
@@ -124,13 +124,10 @@ Result from reading the extension source (`dist/ext/hx-sse.js`):
 
 ## Assets and styles
 
-`assets/app.css` is the Tailwind output committed as a fallback for builds without the `tailwindcss`
-binary (`TAILWIND_BIN` or `PATH`); `build.rs` regenerates it when the binary is available and Bazel
-always does. Regenerate the committed file after changing classes:
-
-```bash
-tailwindcss -i crates/df-web/styles/input.css -o crates/df-web/assets/app.css --minify
-```
+The stylesheet (`styles/input.css`) and the component scripts (`scripts/*.ts`) are compiled, not
+checked in: Bazel builds them with the pinned `tailwindcss` and `swc`; plain `cargo` runs the tools
+from `PATH` (`TAILWIND_BIN` / `SWC_BIN`) in `build.rs` and warns when one is missing. How and what
+the tests do then: `docs/development.md`, "Web assets".
 
 Alpine attributes with `@` are not valid in maud; use `x-on:click`. Attribute names with `.`
 (`x-on:event.window`) are written as strings.
