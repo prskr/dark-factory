@@ -88,7 +88,7 @@ Reviews and comments whose author is the account that owns the project's forge c
 - **THEN** `DF-4` is completed
 
 ### Requirement: Wake policy per project
-Reviews and mentions from authors other than the bot SHALL pass the project's `webhook_wake` setting: `none` drops them, `members` accepts only authors with write access or more, and `anyone` accepts every author. A comment SHALL count as a mention only if it mentions the bot account.
+Reviews and mentions from authors other than the bot SHALL pass the project's `webhook_wake` setting: `none` drops them, `members` accepts only authors with write access or more, and `anyone` accepts every author. A comment SHALL count as a mention only if it mentions the bot account. With `members`, an author whose role the forge refuses to look up SHALL count as not a member; the event SHALL be dropped, not fail.
 
 #### Scenario: Outside review with members policy
 - **WHEN** a user without write access submits a review on the PR of `DF-1` and the project's setting is `members`
@@ -105,6 +105,10 @@ Reviews and mentions from authors other than the bot SHALL pass the project's `w
 #### Scenario: Comment without mention
 - **WHEN** a member comments on the PR of `DF-1` without mentioning the bot
 - **THEN** `DF-1` is not woken
+
+#### Scenario: Role lookup refused with members policy
+- **WHEN** a member submits a review on the PR of `DF-1`, the setting is `members`, and the Forgejo bot account is not repository admin
+- **THEN** `DF-1` is not woken, the event is acknowledged, and the control plane log has the plugin's warning naming the author
 
 ### Requirement: Wake-up message per event
 Every accepted review, CI failure, mention and closed-without-merge event SHALL queue one message from the system principal (reason `webhook`) on each task it routes to, in the same transaction that processes the event. Like other queued messages, messages arriving during a turn SHALL be held back and forwarded after it, so a burst of events wakes the task once and never starts a second run.
