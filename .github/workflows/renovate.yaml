@@ -23,7 +23,7 @@ jobs:
       # renovate: datasource=npm depName=renovate
       RENOVATE_VERSION: 44.198.3
       # renovate: datasource=npm depName=pnpm
-      PNPM_VERSION: 12.16.1
+      PNPM_VERSION: 12.17.0
     steps:
       # only for the cache keys of setup-bazel; Renovate clones the repository itself
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
