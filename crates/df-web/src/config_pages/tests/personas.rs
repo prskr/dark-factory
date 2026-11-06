@@ -238,3 +238,131 @@ fn a_model_conflict_is_shown_under_the_model_and_a_duplicate_under_the_name() {
     assert_eq!(name.get("name"), Some("duplicate"));
     assert_eq!(name.get("model"), None);
 }
+
+fn described(name: &str, description: &str, provider: &str) -> String {
+    form(&[
+        ("name", name),
+        ("description", description),
+        ("system_prompt", "You review pull requests with great care."),
+        ("model", "claude-sonnet-5-5"),
+        ("model_provider_id", provider),
+    ])
+}
+
+#[tokio::test]
+async fn the_card_shows_the_description_in_place_of_the_start_of_the_system_prompt() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    let saved = app
+        .post(
+            "/personas",
+            &described(
+                "Reviewer",
+                "Reviews Rust PRs for correctness and tests",
+                &provider,
+            ),
+            &cookie,
+        )
+        .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let plain = app
+        .post("/personas", &described("Plain", "", &provider), &cookie)
+        .await;
+    assert_eq!(plain.status(), StatusCode::OK);
+
+    let page = text(app.get("/personas", &cookie).await).await;
+
+    let card = |name: &str| {
+        page.split("<li ")
+            .find(|card| card.contains(&format!(">{name}<")))
+            .unwrap_or_else(|| panic!("{name}: {page}"))
+    };
+    let reviewer = card("Reviewer");
+    assert!(reviewer.contains("Reviews Rust PRs for correctness and tests"));
+    assert!(!reviewer.contains("You review pull requests"), "{reviewer}");
+    let plain = card("Plain");
+    assert!(
+        plain.contains("You review pull requests with great care."),
+        "{plain}"
+    );
+}
+
+#[tokio::test]
+async fn a_description_over_500_characters_is_rejected_and_the_persona_is_unchanged() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    app.post(
+        "/personas",
+        &described("Reviewer", "short", &provider),
+        &cookie,
+    )
+    .await;
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE name = 'Reviewer'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+
+    let at_limit = "x".repeat(500);
+    let ok = app
+        .post(
+            &format!("/personas/{id}"),
+            &described("Reviewer", &at_limit, &provider),
+            &cookie,
+        )
+        .await;
+    assert_eq!(ok.status(), StatusCode::OK);
+
+    let too_long = "y".repeat(501);
+    let response = app
+        .post(
+            &format!("/personas/{id}"),
+            &described("Reviewer", &too_long, &provider),
+            &cookie,
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = text(response).await;
+    assert!(
+        html.contains("Description is at most 500 characters."),
+        "{html}"
+    );
+    assert!(html.contains(">501</span> / 500"), "{html}");
+    let stored: String = sqlx::query_scalar("SELECT description FROM personas WHERE id = $1")
+        .bind(id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, at_limit);
+}
+
+#[tokio::test]
+async fn the_form_has_a_description_with_a_counter_between_name_and_system_prompt() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    app.post(
+        "/personas",
+        &described("Reviewer", "Reviews PRs", &provider),
+        &cookie,
+    )
+    .await;
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE name = 'Reviewer'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+
+    let html = text(app.get_htmx(&format!("/personas/{id}/edit"), &cookie).await).await;
+
+    let at = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("{needle}: {html}"))
+    };
+    assert!(at(r#"name="name""#) < at(r#"name="description""#));
+    assert!(at(r#"name="description""#) < at(r#"name="system_prompt""#));
+    assert!(html.contains(">11</span> / 500"), "{html}");
+    let new_form = text(app.get_htmx("/personas/new", &cookie).await).await;
+    assert!(new_form.contains(">0</span> / 500"), "{new_form}");
+}

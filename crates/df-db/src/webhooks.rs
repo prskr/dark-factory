@@ -1,17 +1,15 @@
 //! Applying forge webhook events to tasks (`iter3-webhooks` design D3, D4, D8): a message per
 //! event, or the completion of the task of a merged pull request.
 
+use df_core::task_transition::{DoneBy, TaskEvent};
 use df_core::webhooks::{Target, WebhookEvent, WebhookWake, render_message};
 use df_core::{Principal, ProjectId, StatusGroup, StatusSet, TaskId, TaskStatus};
-use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::audit::{NewAuditEntry, write_audit_entry};
-use crate::notify::{Notification, publish};
 use crate::pool::DbError;
-use crate::requests::close_pending_for_task;
+use crate::task_events::apply_task_event;
 use crate::task_views::statuses_of;
-use crate::tasks::{StopScope, lock_runs_then_task, queue_message_tx, request_stop_tx, text_block};
+use crate::tasks::{lock_runs_then_task, queue_message_tx, text_block};
 
 /// `system` reason of the message.
 pub const MESSAGE_REASON: &str = "webhook";
@@ -100,39 +98,25 @@ pub async fn complete_on_merge_tx(
     login: &str,
 ) -> Result<bool, DbError> {
     lock_runs_then_task(tx, task_id).await?;
-    let row = sqlx::query!(
-        r#"SELECT status, pr_merged_at IS NOT NULL AS "merged!" FROM tasks WHERE id = $1"#,
-        task_id.as_uuid()
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(row) = row.filter(|row| !row.merged) else {
+    let merged: Option<bool> =
+        sqlx::query_scalar("SELECT pr_merged_at IS NOT NULL FROM tasks WHERE id = $1")
+            .bind(task_id.as_uuid())
+            .fetch_optional(&mut **tx)
+            .await?;
+    if merged != Some(false) {
         return Ok(false);
-    };
+    }
     sqlx::query!(
         "UPDATE tasks SET pr_merged_at = now() WHERE id = $1",
         task_id.as_uuid()
     )
     .execute(&mut **tx)
     .await?;
-    let old_status: TaskStatus = row.status.parse()?;
-    if matches!(old_status, TaskStatus::Completed | TaskStatus::Cancelled) {
-        return Ok(true);
-    }
-    sqlx::query!(
-        "UPDATE tasks SET status = 'completed', resume_at = NULL, updated_at = now()
-         WHERE id = $1",
-        task_id.as_uuid()
-    )
-    .execute(&mut **tx)
-    .await?;
-    request_stop_tx(tx, task_id, StopScope::ActiveOnly).await?;
     let actor = Principal::system(MERGED_REASON);
-    close_pending_for_task(tx, task_id, "task-completed", &actor).await?;
-    let entry = NewAuditEntry::new(actor, Vec::new(), "task.done", "task", task_id.to_string())
-        .with_details(&json!({ "old_status": old_status, "login": login }))?;
-    write_audit_entry(&mut **tx, &entry).await?;
-    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+    let done = TaskEvent::MarkedDone(DoneBy::Merge {
+        login: login.to_string(),
+    });
+    apply_task_event(tx, task_id, done, &actor).await?;
     Ok(true)
 }
 

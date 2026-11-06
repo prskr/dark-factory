@@ -276,7 +276,7 @@ async fn first_connect_receives_ack_assign_and_the_assignment_prompt() -> anyhow
         assign.workspace.as_ref().expect("workspace").task_branch,
         "factory/task/DF-1"
     );
-    assert_eq!(assign.tools.len(), 9);
+    assert_eq!(assign.tools.len(), 12);
     let Some(content_block::Kind::Text(t)) = &prompt.content[0].kind else {
         anyhow::bail!("no text")
     };

@@ -585,7 +585,14 @@ pub(crate) fn details_region(
             "Branch",
             html! { span class="font-mono text-xs" { (branch) } },
         ),
+        ("Created by", super::dependencies::creator(task)),
     ];
+    if let (Some(key), Some(title)) = (&task.parent_key, &task.parent_title) {
+        properties.push((
+            "Parent",
+            html! { a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) } " " span class="font-normal text-muted" { (title) } },
+        ));
+    }
     if resume.count > 0 {
         properties.push((
             "Resumes",
@@ -877,13 +884,14 @@ fn run_detail(detail: &str) -> Markup {
 /// The details panel: bottom sheet, slide-over or column depending on the width.
 pub(super) fn details_column(
     task: &TaskDetail,
+    deps: &df_db::task_views::Dependencies,
     runs: &[RunView],
     cancel: &CancelNote,
     resume: &ResumeNote,
 ) -> Markup {
     details_panel(
         "Details",
-        html! { (details_region(task, cancel, resume, None)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
+        html! { (details_region(task, cancel, resume, None)) (super::dependencies::dependencies_region(deps, task.status)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
     )
 }
 
@@ -1006,7 +1014,7 @@ fn short_time(time: DateTime<Utc>) -> String {
 }
 
 /// A task status as shown: without underscores.
-fn status_name(status: TaskStatus) -> String {
+pub(super) fn status_name(status: TaskStatus) -> String {
     status.as_str().replace('_', " ")
 }
 

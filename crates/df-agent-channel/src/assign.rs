@@ -540,7 +540,10 @@ mod tests {
                 "ask_question",
                 "request_approval",
                 "read_pull_request_feedback",
-                "comment_on_pull_request"
+                "comment_on_pull_request",
+                "create_task",
+                "list_personas",
+                "send_message"
             ]
         );
         let first = &tool_descriptors()[0];
@@ -599,7 +602,7 @@ mod tests {
         assert_eq!(workspace.task_branch, "factory/task/DF-1");
         assert_eq!(workspace.wip_branch, "factory/wip/DF-1");
         assert_eq!(workspace.base_branch, "main");
-        assert_eq!(assign.tools.len(), 9);
+        assert_eq!(assign.tools.len(), 12);
         assert_eq!(assign.task.expect("task").task_key, "DF-1");
         assert!(assign.continuation.is_none());
         let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {

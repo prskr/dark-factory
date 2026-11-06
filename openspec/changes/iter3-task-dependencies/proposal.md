@@ -37,7 +37,7 @@ Agents can't hand work to each other: only a human creates tasks, a task can't w
 - **Personas** get an optional `description` (role, strengths), editable in the persona form and shown on the card.
 - **Task page**:
   - The details show the creator and the parent (link).
-  - While the task is `awaiting_dependencies`, the details list each dependency with its kind and current state.
+  - The details show a collapsible Dependencies section (the tasks it waits for and the tasks that need it), open while the task waits for its dependencies.
 - **Task transitions** (internal, [ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)):
   - Every task status change goes through one pure function of task snapshot and event.
   - The existing status writes (creation, messages, run start, turns, run end, mark done, cancel) move to it first, with no behavior change.
@@ -70,7 +70,7 @@ Out of scope:
 - `task-management`: the status vocabulary and groups gain `awaiting_dependencies`. Task creation stores a principal as creator. Queued messages leave an `awaiting_dependencies` task in that status. Completion, mark done and cancel feed dependencies and the parent wake-up.
 - `factory-tools`: `create_task`, `list_personas` and `send_message`. Calls may act on the caller's own children and create tasks in the caller's project.
 - `configuration-management`: persona `description` (at most 500 characters) in the form and on the card.
-- `task-ui`: creator, parent and dependencies in the task details. The Waiting filter includes `awaiting_dependencies`.
+- `task-ui`: creator, parent and a Dependencies section (dependencies and dependants) in the task details. The Waiting filter includes `awaiting_dependencies`.
 
 ## Impact
 

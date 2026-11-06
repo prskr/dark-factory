@@ -625,6 +625,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
         None,
         &PersonaInput {
             name: "Linus".into(),
+            description: String::new(),
             system_prompt: "Be Linus.".into(),
             harness: "claude-code".into(),
             model: "claude-sonnet-5-5".into(),
@@ -649,12 +650,32 @@ pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::
             title: Some(title.into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: df_core::Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
     .unwrap()
     .0
+}
+
+/// Sets a task's status with SQL and publishes `task_changed`: tests reach states that the task
+/// events get to only through a long history.
+pub(crate) async fn set_task_status(
+    pool: &PgPool,
+    task: df_core::TaskId,
+    status: df_core::TaskStatus,
+) {
+    sqlx::query("UPDATE tasks SET status = $2, updated_at = now() WHERE id = $1")
+        .bind(task.as_uuid())
+        .bind(status.as_str())
+        .execute(pool)
+        .await
+        .unwrap();
+    df_db::publish(pool, &df_db::Notification::TaskChanged { task_id: task })
+        .await
+        .unwrap();
 }
 
 pub(crate) async fn insert_run(

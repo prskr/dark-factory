@@ -35,12 +35,20 @@ async fn creating_a_task_opens_its_page_as_queued_with_a_placeholder_title() {
     let page = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(page.contains("DF-1") && page.contains("The nightly backup runs twice."));
     assert!(page.contains(">queued<"), "{page}");
-    let (created_by, source): (Option<uuid::Uuid>, String) =
+    let (created_by, source): (serde_json::Value, String) =
         sqlx::query_as("SELECT created_by, title_source FROM tasks")
             .fetch_one(&app.pool)
             .await
             .unwrap();
-    assert!(created_by.is_some());
+    // The creator is the board member who submitted the composer, and the task has no parent.
+    assert_eq!(created_by["kind"], "human");
+    assert!(created_by["user_id"].is_string() && created_by["display_name"].is_string());
+    assert_eq!(source, "placeholder");
+    let parent: Option<uuid::Uuid> = sqlx::query_scalar("SELECT parent_id FROM tasks")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(parent, None);
     assert_eq!(source, "placeholder");
     let audit: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'task.create' AND resource_id = 'DF-1'",

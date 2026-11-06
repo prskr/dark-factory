@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-116.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-119.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -39,6 +39,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-93 to TD-96: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03), TD-95 and TD-96 from the CodeRabbit review of PR #96. TD-94 existed before that change.
 - Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
 
 ## Summary
 
@@ -132,6 +133,9 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-112 | low   | `plugins/forgejo` webhooks | `review` and `closed` repeat the pull request event parsing |
 | TD-113 | low   | `df-plugins` tests | Three plugin client helpers repeat the same call |
 | TD-115 | medium | `dark-factory` webhooks | A failed webhook delivery is lost until an operator redelivers it |
+| TD-116 | low   | `df-db` tasks | `tasks.rs` and `task_events.rs` depend on each other |
+| TD-117 | low   | `df-db` tests | `tasks/tests.rs` is at the file-length limit |
+| TD-118 | low   | `df-db`, `df-web` tests | Two test helpers set a task status by SQL |
 
 ## Entries
 
@@ -1049,6 +1053,34 @@ The endpoint answers `500` when storing or applying an event fails. Neither GitH
 **Matters when:** a merge delivery fails during a database outage: the task stays `in_review` and keeps its volume.
 
 **Fix:** a periodic reconcile that asks the forge for the PR state of `in_review` tasks without `pr_merged_at` and applies a missed merge or close.
+
+### TD-116 (S10). `tasks.rs` and `task_events.rs` depend on each other
+
+`crates/df-db/src/tasks.rs`, `crates/df-db/src/task_events.rs`
+
+`tasks.rs` calls `apply_task_event` and `execute_effects`; `task_events.rs` uses `lock_runs_then_task`, `clock_under_task_lock`, `request_stop_tx` and `PrSyncJob` from `tasks.rs`.
+
+**Matters when:** the lock order or the stop path changes and one side is missed.
+
+**Fix:** move the helpers the applier needs into `task_events.rs` (or a small shared module) so the dependency runs one way.
+
+### TD-117 (S11, S23). `tasks/tests.rs` is at the file-length limit
+
+`crates/df-db/src/tasks/tests.rs`, `crates/df-db/src/tasks/dependency_tests.rs`, `crates/df-db/src/tasks/test_support.rs`
+
+The suites are sibling files instead of the `tests/` directory layout `AGENTS.md` asks for beyond about 1,500 lines.
+
+**Matters when:** the next test is added to `tests.rs`.
+
+**Fix:** `tasks/tests/mod.rs` with the fixtures (absorbing `test_support.rs`) and one file per topic.
+
+### TD-118 (S13). Two test helpers set a task status by SQL
+
+`crates/df-web/src/testkit.rs` (`set_task_status`), `crates/df-db/src/task_events.rs` (`set_status_for_test`)
+
+**Matters when:** setting a status in tests needs another side effect (for example a new notice) and only one copy gets it.
+
+**Fix:** expose the `df-db` helper through a `test-util` feature and use it from `df-web`.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

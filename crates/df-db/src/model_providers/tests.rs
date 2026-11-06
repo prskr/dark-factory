@@ -69,6 +69,7 @@ fn input(name: &str, credential: Uuid) -> ModelProviderInput {
 fn persona(provider: Uuid) -> PersonaInput {
     PersonaInput {
         name: "Linus".into(),
+        description: String::new(),
         system_prompt: "p".into(),
         harness: "claude-code".into(),
         model: "claude-sonnet-5-5".into(),
@@ -474,7 +475,9 @@ async fn run_providers_pair_each_active_run_with_its_harness_and_provider() {
             title: Some("T".into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await

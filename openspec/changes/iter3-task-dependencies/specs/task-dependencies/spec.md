@@ -26,7 +26,11 @@ A task SHALL be creatable with a list of dependencies, each naming a target task
 - **THEN** the creation is rejected with an error naming `DF-20`
 
 ### Requirement: When a dependency is satisfied
-A `completion` dependency SHALL be satisfied once its target has completed at least once (the agent called `complete_task` and the run ended with outcome `completed`) or has been Done. A `done` dependency SHALL be satisfied once its target has been Done: a board member marked it done or its PR was merged. A satisfied dependency SHALL stay satisfied, whatever the target does afterwards.
+A `completion` dependency SHALL be satisfied once its target has completed at least once (the agent called `complete_task` and the run ended with outcome `completed`) or has been Done. A `done` dependency SHALL be satisfied once its target has been Done: a board member marked it done or its PR was merged. A satisfied dependency SHALL stay satisfied, whatever the target does afterwards. A run that ends `completed` on a target that is already `cancelled` SHALL NOT count as a completion.
+
+#### Scenario: Completion on a cancelled target
+- **WHEN** `DF-20` is cancelled and its running run then ends with outcome `completed`
+- **THEN** no dependency on `DF-20` is satisfied
 
 #### Scenario: Completion satisfies completion
 - **WHEN** `DF-20` ends a run with outcome `completed` and becomes `in_review`

@@ -1,5 +1,8 @@
 //! Tests of the run rows: start query, run end mapping and resume plan.
 
+use chrono::TimeDelta;
+use df_core::CAPACITY_DETAIL;
+
 use super::*;
 use crate::testing::{Env, task_resume_state};
 
@@ -12,83 +15,8 @@ fn config() -> ChannelConfig {
     config
 }
 
-fn failure_of(outcome: RunOutcome, detail: &str) -> RunEnd {
-    RunEnd::failure(RunId::new(), outcome, detail)
-}
-
 #[test]
-fn an_infrastructure_failure_below_the_cap_resumes_with_a_growing_backoff() {
-    let now = Utc::now();
-    let end = failure_of(RunOutcome::SandboxLost, "");
-    let plan = plan_resume(&end, None, 1, MAX_AUTO_RESUMES, now);
-    assert_eq!(plan.status, TaskStatus::Queued);
-    assert_eq!(plan.resume_at, Some(now + TimeDelta::minutes(4)));
-    assert_eq!(plan.auto_resumes, 2);
-}
-
-#[test]
-fn an_infrastructure_failure_at_the_cap_fails_the_task_and_keeps_the_count() {
-    let now = Utc::now();
-    let end = failure_of(RunOutcome::SandboxLost, "");
-    let plan = plan_resume(&end, None, 3, MAX_AUTO_RESUMES, now);
-    assert_eq!(
-        (plan.status, plan.resume_at, plan.auto_resumes),
-        (TaskStatus::Failed, None, 3)
-    );
-    assert_eq!(
-        plan_resume(&end, None, 0, 0, now).status,
-        TaskStatus::Failed
-    );
-}
-
-#[test]
-fn a_capacity_rejection_requeues_without_counting_a_resume() {
-    let now = Utc::now();
-    let end = failure_of(RunOutcome::ProvisioningFailed, CAPACITY_DETAIL);
-    let plan = plan_resume(&end, None, 5, 0, now);
-    assert_eq!((plan.status, plan.auto_resumes), (TaskStatus::Queued, 5));
-    assert_eq!(plan.resume_at, Some(now + TimeDelta::minutes(2)));
-}
-
-#[test]
-fn a_rate_limit_without_a_retry_time_resumes_in_an_hour_and_resets_the_count() {
-    let now = Utc::now();
-    let end = failure_of(RunOutcome::RateLimited, "");
-    let plan = plan_resume(&end, None, 2, MAX_AUTO_RESUMES, now);
-    assert_eq!(plan.resume_at, Some(now + TimeDelta::hours(1)));
-    assert_eq!(plan.auto_resumes, 0);
-}
-
-#[test]
-fn an_overridden_status_gets_no_resume_time_and_resets_the_count_unless_infrastructure_failed() {
-    let now = Utc::now();
-    let reset = plan_resume(
-        &failure_of(RunOutcome::EndTurn, ""),
-        Some(TaskStatus::Queued),
-        2,
-        MAX_AUTO_RESUMES,
-        now,
-    );
-    assert_eq!(
-        (reset.status, reset.resume_at, reset.auto_resumes),
-        (TaskStatus::Queued, None, 0)
-    );
-    let kept = plan_resume(
-        &failure_of(RunOutcome::SandboxLost, ""),
-        Some(TaskStatus::Cancelled),
-        2,
-        MAX_AUTO_RESUMES,
-        now,
-    );
-    assert_eq!(
-        (kept.status, kept.resume_at, kept.auto_resumes),
-        (TaskStatus::Cancelled, None, 2)
-    );
-}
-
-#[test]
-fn the_agent_completing_puts_the_task_in_review() {
-    assert_eq!(task_status_for(RunOutcome::Completed), TaskStatus::InReview);
+fn a_completed_run_succeeds() {
     assert_eq!(run_state_for(RunOutcome::Completed), RunState::Succeeded);
 }
 
@@ -389,7 +317,9 @@ async fn due_task(env: &Env, key: &str, status: &str, resume_at: &str) -> TaskId
             title: Some(key.into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -695,4 +625,63 @@ async fn the_end_of_a_run_of_a_cancelled_task_enqueues_no_pr_job() {
             .await
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn a_completion_releases_the_dependent_and_wakes_the_parent_in_one_transaction() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    deliver_all(&pool, env.task.id).await;
+    sqlx::query("UPDATE tasks SET status = 'waiting' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let new_task = |title: &str, parent: Option<TaskId>, depends_on: Vec<df_db::NewDependency>| {
+        df_db::NewTask {
+            project_id: env.project_id,
+            persona_id: env.persona_id,
+            title: Some(title.into()),
+            description: String::new(),
+            issue_number: None,
+            created_by: Principal::system("test"),
+            parent_id: parent,
+            depends_on,
+        }
+    };
+    let (child, _) = df_db::create_task(&pool, new_task("Implement", Some(env.task.id), vec![]))
+        .await
+        .unwrap();
+    let on_child = vec![df_db::NewDependency {
+        key: child.key.clone(),
+        kind: df_core::DependencyKind::Completion,
+    }];
+    let (review, _) = df_db::create_task(&pool, new_task("Review", Some(env.task.id), on_child))
+        .await
+        .unwrap();
+    assert_eq!(review.status, TaskStatus::AwaitingDependencies);
+    deliver_all(&pool, child.id).await;
+    let run_id = env.insert_run(child.id, 1, "running").await;
+    sqlx::query("UPDATE tasks SET status = 'running' WHERE id = $1")
+        .bind(child.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    end_run(&pool, &end_with(run_id, RunOutcome::Completed), &config())
+        .await
+        .unwrap();
+
+    assert_eq!(status_of(&pool, child.id).await, "in_review");
+    assert_eq!(status_of(&pool, review.id).await, "queued");
+    assert_eq!(status_of(&pool, env.task.id).await, "queued");
+    let woken: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM task_messages
+         WHERE task_id = $1 AND author->>'reason' = 'task.child_ended'",
+    )
+    .bind(env.task.id.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(woken, 1);
 }

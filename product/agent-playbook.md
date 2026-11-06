@@ -102,7 +102,7 @@
 5. **Report.** Children summarize in their PRs; the coordinator gives the human one overview (what was fixed, what was merged, what still needs a decision).
 
 ### 2.2 Implementation and review
-**Situation:** a change should be reviewed by a second agent before a human looks at it.
+**Situation:** a change should be reviewed by a second agent before a human looks at it. How-to: [Delegate work between agents](../docs/content/using/delegation.md).
 
 1. The coordinator creates an implementation task and a review task that depends on its Completion (ADR-0026), with the implementation task as its `base_task` (ADR-0041). The reviewer's workspace then contains the changes, and every run starts from the current state of the implementation branch.
 2. The reviewer reads the PR and reviews it in the forge (line comments, submitted review — ADR-0036). It can build and test in its workspace, but doesn't commit: commits would open a second PR against the implementation branch.

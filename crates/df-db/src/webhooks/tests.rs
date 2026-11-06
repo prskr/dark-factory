@@ -7,6 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::*;
+use crate::tasks::test_support::{child_ended_messages, completed_run_ended};
 use crate::tasks::{NewTask, create_task, get_task, list_undelivered_messages};
 
 async fn seed_project(pool: &PgPool) -> (ProjectId, PersonaId) {
@@ -42,7 +43,9 @@ async fn add_task(pool: &PgPool, (project_id, persona_id): (ProjectId, PersonaId
             title: Some("Fix login".into()),
             description: "Validate the state.".into(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -378,4 +381,102 @@ async fn closed_pr_wakes_the_task_without_changing_its_status_otherwise() {
     let task = get_task(&pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Queued);
     assert_eq!(task.pr_number, Some(12));
+}
+
+/// A child task of `parent`, created by the parent's agent.
+async fn add_child(
+    pool: &PgPool,
+    (project_id, persona_id): (ProjectId, PersonaId),
+    parent: TaskId,
+) -> TaskId {
+    let (task, _) = create_task(
+        pool,
+        NewTask {
+            project_id,
+            persona_id,
+            title: Some("Child".into()),
+            description: String::new(),
+            issue_number: None,
+            created_by: Principal::agent(persona_id, "Linus", None, parent),
+            parent_id: Some(parent),
+            depends_on: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    task.id
+}
+
+#[tokio::test]
+async fn a_child_that_completed_and_is_merged_later_wakes_its_parent_twice() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let project = seed_project(&pool).await;
+    let parent = add_task(&pool, project).await;
+    let child = add_child(&pool, project, parent).await;
+    set_status(&pool, child, "running").await;
+    let run_id = df_core::RunId::new();
+    sqlx::query("INSERT INTO runs (id, task_id, number, state) VALUES ($1, $2, 1, 'succeeded')")
+        .bind(run_id.as_uuid())
+        .bind(child.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    apply_task_event(
+        &mut tx,
+        child,
+        completed_run_ended(run_id),
+        &Principal::system("test"),
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(child_ended_messages(&pool, parent).await.len(), 1);
+
+    assert!(complete_on_merge(&pool, child).await);
+
+    assert_eq!(child_ended_messages(&pool, parent).await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_pull_request_closed_without_merge_leaves_a_done_dependency_unsatisfied() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let project = seed_project(&pool).await;
+    let target = add_task(&pool, project).await;
+    set_status(&pool, target, "in_review").await;
+    set_numbers(&pool, target, Some(20), None).await;
+    let dependent = add_done_dependent(&pool, project).await;
+    let closed = WebhookEvent::PullRequestClosed {
+        number: 20,
+        head: "factory/task/DF-1".into(),
+        actor: "carol".into(),
+        merged: false,
+    };
+    assert!(queue_event(&pool, target, &closed).await);
+
+    let dependent = get_task(&pool, dependent).await.unwrap().unwrap();
+    assert_eq!(dependent.status, TaskStatus::AwaitingDependencies);
+}
+
+/// A task that waits for the `done` of `DF-1`.
+async fn add_done_dependent(pool: &PgPool, project: (ProjectId, PersonaId)) -> TaskId {
+    let (task, _) = create_task(
+        pool,
+        NewTask {
+            project_id: project.0,
+            persona_id: project.1,
+            title: Some("Dependent".into()),
+            description: String::new(),
+            issue_number: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: vec![crate::tasks::NewDependency {
+                key: "DF-1".parse().unwrap(),
+                kind: df_core::DependencyKind::Done,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    task.id
 }

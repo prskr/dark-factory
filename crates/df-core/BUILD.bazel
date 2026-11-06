@@ -36,6 +36,7 @@ rust_test(
     name = "df_core_test",
     # `lifecycle` compares its event types with the Helm values schema
     compile_data = [
+        "docs/task-transitions.md",
         "testdata/opencode-config.json",
         "//deploy:helm/dark-factory/values.schema.json",
     ],

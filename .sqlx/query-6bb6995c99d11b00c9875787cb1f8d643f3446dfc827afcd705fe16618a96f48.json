@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO tasks (\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, created_by\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        RETURNING\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, created_at, updated_at\n        ",
+  "query": "\n        INSERT INTO tasks (\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, created_by, parent_id\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n        RETURNING\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -192,17 +192,6 @@
       },
       {
         "ordinal": 17,
-        "name": "created_by",
-        "type_info": "Uuid",
-        "origin": {
-          "Table": {
-            "table": "tasks",
-            "name": "created_by"
-          }
-        }
-      },
-      {
-        "ordinal": 18,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -213,7 +202,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -236,6 +225,7 @@
         "Uuid",
         "Int8",
         "Text",
+        "Jsonb",
         "Uuid"
       ]
     },
@@ -257,10 +247,9 @@
       true,
       false,
       false,
-      true,
       false,
       false
     ]
   },
-  "hash": "d84ea91b221785dcadaa4a7debc7ae12f12499d29454e7908a3cb4594a654d37"
+  "hash": "6bb6995c99d11b00c9875787cb1f8d643f3446dfc827afcd705fe16618a96f48"
 }

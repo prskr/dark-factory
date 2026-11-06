@@ -58,7 +58,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks | Main task workspace and its variants (status menu, stop, cancel, reset, rename, blocked question, rate limited), profile menu, Requests · deny always |
 | Tasks - Queue | Queued messages: many, editing one |
 | Tasks - Status | Task status `in_review` |
-| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed |
+| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed |
 | Tasks - Phone | Phone boards of tasks and requests, profile menu (main component `Profile menu`) |
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
@@ -149,6 +149,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
 | Tasks - Status / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
 | Tasks - Details Sidebar / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
+| Tasks - Details Sidebar / Desktop · awaiting dependencies | `/tasks/<id>` | manual seed (not built): task DF-23 `awaiting_dependencies` (persona Grace), created by the agent of DF-19 (persona CEO) with parent DF-19; dependencies DF-20 (`completion`, satisfied) and DF-22 (`done`, not satisfied); dependant DF-24 (`done`); no runs, no PR | 1440 |
+| Tasks - Details Sidebar / Desktop · dependencies collapsed | `/tasks/<id>` | as Desktop · awaiting dependencies after DF-22 is done; DF-23 `running` with run #1 | 1440 |
 | Tasks - Queue / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Tasks - Details Sidebar / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
 | Tasks / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |
@@ -191,10 +193,9 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Model providers / Model providers · new, OpenCode Go preset, models | `/model-providers/new` | as above; tab Models with the seven preset models | 1440 |
 | Config - Model providers / Model providers · edit, many models, scrolled | `/model-providers/<id>/edit` | manual seed (not built): provider with 15 models; tab Models, list scrolls below fixed column labels | 1440 |
 | Config - Model providers / Model providers · edit, model errors | `/model-providers/<id>/edit` | as above; OpenAI Responses unchecked, one model with one limit, a duplicate ID, `minimax-m3` (used by Ada) removed, saved | 1440 |
-| Config - Personas / Personas · cards | `/personas` | manual seed (not built): four personas with model providers | 1440 |
-| Config - Personas / Settings · personas | `/personas` | as Personas · cards | 1440 |
-| Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Personas · cards; edit of Linus clicked | 1440 |
-| Config - Personas / Personas · edit modal, OpenCode, model select open | `/personas/<id>/edit` | persona Ada with harness `opencode` and provider OpenCode Go (preset models); model select open | 1440 |
+| Config - Personas / Settings · personas | `/personas` | manual seed (not built): four personas with model providers; Linus, Grace and Ada with a description, Ken without | 1440 |
+| Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Settings · personas; edit of Linus clicked | 1440 |
+| Config - Personas / Personas · edit modal, OpenCode, model select open | `/personas/<id>/edit` | persona Ada (with description) with harness `opencode` and provider OpenCode Go (preset models); model select open, opening upward | 1440 |
 | Config - Personas / Personas · edit modal, claude-code, models filtered | `/personas/<id>/edit` | as above with harness `claude-code`; the select lists only the Anthropic Messages models | 1440 |
 | Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |

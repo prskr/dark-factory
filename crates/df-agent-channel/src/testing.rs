@@ -436,7 +436,9 @@ impl Env {
                 title: Some("Fix login".into()),
                 description: "Validate the OIDC state.".into(),
                 issue_number: Some(42),
-                created_by: None,
+                created_by: df_core::Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
             },
         )
         .await

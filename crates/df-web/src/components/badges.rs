@@ -54,7 +54,7 @@ impl Tone {
     /// Tone of a task status.
     pub const fn of_status(status: TaskStatus) -> Self {
         match status {
-            TaskStatus::Queued => Self::Queued,
+            TaskStatus::Queued | TaskStatus::AwaitingDependencies => Self::Queued,
             TaskStatus::Running => Self::Running,
             TaskStatus::Waiting | TaskStatus::Blocked => Self::Waiting,
             TaskStatus::InReview => Self::Review,
@@ -125,6 +125,7 @@ mod tests {
     fn every_status_has_its_own_tone_colors() {
         let expected = [
             (TaskStatus::Queued, "status-queued"),
+            (TaskStatus::AwaitingDependencies, "status-queued"),
             (TaskStatus::Running, "status-running"),
             (TaskStatus::Waiting, "status-waiting"),
             (TaskStatus::Blocked, "status-waiting"),

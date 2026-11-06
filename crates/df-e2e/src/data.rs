@@ -29,6 +29,11 @@ pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
 pub const WEBHOOK_PROJECT_KEY: &str = "WH";
 pub const WEBHOOK_PROJECT_NAME: &str = "Webhooks";
 
+/// Project whose fake agent delegates (`create_task`, `send_message`) without any webhook; tasks
+/// are `DG-<n>`.
+pub const DELEGATION_PROJECT_KEY: &str = "DG";
+pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
+
 /// The file of `push-secret.yaml` with the token, and the line the token is on.
 pub const SECRET_PATH: &str = "config.py";
 pub const SECRET_LINE: u32 = 2;
@@ -93,6 +98,7 @@ pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
+pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

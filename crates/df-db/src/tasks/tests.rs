@@ -2,11 +2,12 @@
 
 use super::*;
 use crate::notify::Notifier;
+use df_core::UserId;
 use std::collections::HashSet;
 use std::time::Duration;
 use uuid::Uuid;
 
-async fn seed_project_and_persona(
+pub(super) async fn seed_project_and_persona(
     pool: &PgPool,
     project_key: &ProjectKey,
     persona_name: &str,
@@ -84,7 +85,9 @@ async fn first_task_gets_df_1_and_queues_assignment_prompt() {
             title: Some("Fix login".into()),
             description: "Ensure OIDC callback validates state.".into(),
             issue_number: Some(42),
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -126,7 +129,9 @@ async fn concurrent_task_creation_allocates_consecutive_gap_free_keys() {
                     title: Some(format!("Concurrent task {i}")),
                     description: String::new(),
                     issue_number: None,
-                    created_by: None,
+                    created_by: Principal::system("test"),
+                    parent_id: None,
+                    depends_on: Vec::new(),
                 },
             )
             .await
@@ -168,7 +173,9 @@ async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
             title: Some("Initial work".into()),
             description: "Desc".into(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -206,10 +213,8 @@ async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
         .await
         .unwrap();
     // Transition task to `waiting`, then queue a follow-up message
-    update_task_status(&pool, task.id, TaskStatus::Waiting)
-        .await
-        .unwrap();
-    let _ = rx.recv().await.unwrap(); // task_changed from update_task_status
+    crate::task_events::set_status_for_test(&pool, task.id, TaskStatus::Waiting).await;
+    let _ = rx.recv().await.unwrap(); // task_changed from the status change
 
     let author = Principal::human(UserId::new(), "Peter");
     let content = vec![ContentBlock {
@@ -234,9 +239,7 @@ async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
     let _ = rx.recv().await.unwrap(); // task_changed from queue_message
 
     // Transition task to `failed`, then queue another message -> becomes `queued`
-    update_task_status(&pool, task.id, TaskStatus::Failed)
-        .await
-        .unwrap();
+    crate::task_events::set_status_for_test(&pool, task.id, TaskStatus::Failed).await;
     queue_message(&pool, task.id, author.clone(), vec![])
         .await
         .unwrap();
@@ -247,9 +250,7 @@ async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
     // and `iter1-demo-e2e` ("the task is `rate_limited`, and a new message starts a run
     // that continues the work"), queueing a new message on a `rate_limited` task moves
     // it to `queued`.
-    update_task_status(&pool, task.id, TaskStatus::RateLimited)
-        .await
-        .unwrap();
+    crate::task_events::set_status_for_test(&pool, task.id, TaskStatus::RateLimited).await;
     queue_message(&pool, task.id, author, vec![]).await.unwrap();
     let reloaded_after_rate_limited = get_task(&pool, task.id).await.unwrap().unwrap();
     assert_eq!(reloaded_after_rate_limited.status, TaskStatus::Queued);
@@ -296,7 +297,9 @@ async fn database_check_constraints_reject_invalid_project_keys_task_statuses_an
             title: Some("Check constraints".into()),
             description: String::new(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await
@@ -329,14 +332,20 @@ async fn database_check_constraints_reject_invalid_project_keys_task_statuses_an
     );
 }
 
-fn new_task(project_id: ProjectId, persona_id: PersonaId, title: Option<&str>) -> NewTask {
+pub(super) fn new_task(
+    project_id: ProjectId,
+    persona_id: PersonaId,
+    title: Option<&str>,
+) -> NewTask {
     NewTask {
         project_id,
         persona_id,
         title: title.map(str::to_string),
         description: "The nightly backup job sometimes runs twice. It started last week.".into(),
         issue_number: None,
-        created_by: None,
+        created_by: Principal::system("test"),
+        parent_id: None,
+        depends_on: Vec::new(),
     }
 }
 
@@ -561,7 +570,7 @@ async fn rename_locks_the_title_and_is_audited() {
         .unwrap();
     assert_eq!(changed, Notification::TaskChanged { task_id: task.id });
 }
-async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
+pub(super) async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
     let run_id = RunId::new();
     sqlx::query(
         "INSERT INTO runs (id, task_id, number, state)
@@ -575,14 +584,14 @@ async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
     run_id
 }
 
-fn text(t: &str) -> Vec<ContentBlock> {
+pub(super) fn text(t: &str) -> Vec<ContentBlock> {
     vec![ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
         hidden: false,
     }]
 }
 
-fn human() -> Principal {
+pub(super) fn human() -> Principal {
     Principal::human(UserId::new(), "Ada")
 }
 
@@ -596,9 +605,7 @@ async fn task_with_queued_message(pool: &PgPool) -> (TaskRow, TaskMessageRow) {
     mark_prompt_delivered(pool, assignment.id, insert_run(pool, task.id).await)
         .await
         .unwrap();
-    update_task_status(pool, task.id, TaskStatus::Waiting)
-        .await
-        .unwrap();
+    crate::task_events::set_status_for_test(pool, task.id, TaskStatus::Waiting).await;
     let msg = queue_message(pool, task.id, human(), text("first"))
         .await
         .unwrap();
@@ -634,7 +641,7 @@ async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: &str) -> Ta
         .execute(pool)
         .await
         .unwrap();
-    update_task_status(pool, task.id, status).await.unwrap();
+    crate::task_events::set_status_for_test(pool, task.id, status).await;
     task
 }
 
@@ -859,20 +866,28 @@ async fn message_undelivered_before_the_migration_is_not_editable() {
 async fn task_with_queued_message_pre_migration(pool: &PgPool) -> (TaskId, PromptId) {
     let key: ProjectKey = "DF".parse().unwrap();
     let (project_id, persona_id) = seed_project_and_persona(pool, &key, "Linus").await.unwrap();
-    let (task, _) = create_task(pool, new_task(project_id, persona_id, Some("T")))
-        .await
-        .unwrap();
-    // Plain SQL: `queue_message` reads columns that newer migrations added.
+    // Plain SQL: `create_task` and `queue_message` use columns that newer migrations added.
+    let task = TaskId::new();
+    sqlx::query(
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
+         VALUES ($1, $2, 1, 'DF-1', 'T', 'user', $3)",
+    )
+    .bind(task.as_uuid())
+    .bind(project_id.as_uuid())
+    .bind(persona_id.as_uuid())
+    .execute(pool)
+    .await
+    .unwrap();
     let msg = PromptId::new();
     sqlx::query("INSERT INTO task_messages (id, task_id, author, content) VALUES ($1, $2, $3, $4)")
         .bind(msg.as_uuid())
-        .bind(task.id.as_uuid())
+        .bind(task.as_uuid())
         .bind(serde_json::to_value(human()).unwrap())
         .bind(serde_json::to_value(text("old")).unwrap())
         .execute(pool)
         .await
         .unwrap();
-    (task.id, msg)
+    (task, msg)
 }
 
 #[tokio::test]

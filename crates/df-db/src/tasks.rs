@@ -1,10 +1,11 @@
 //! Task management persistence operations (`specs/task-management/spec.md`).
 
 use chrono::{DateTime, Utc};
+use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
-    FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId, TITLE_MAX_CHARS,
-    TaskId, TaskKey, TaskStatus, TitleSource, UserId, placeholder_title, sanitize_title,
-    title_too_long,
+    DependencyKind, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId,
+    TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource, is_satisfied, placeholder_title,
+    sanitize_title, title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use uuid::Uuid;
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::task_events::{apply_task_event, execute_effects};
 
 /// Outbox kind that marks a task's open pull request as draft again; payload [`MarkDraftJob`].
 pub const MARK_DRAFT_KIND: &str = "pr.mark_draft";
@@ -67,7 +69,19 @@ pub struct NewTask {
     pub title: Option<String>,
     pub description: String,
     pub issue_number: Option<i64>,
-    pub created_by: Option<UserId>,
+    /// Who creates the task: a board member, or the agent of the creating task.
+    pub created_by: Principal,
+    /// The task that creates this one; `None` for a task created in the UI.
+    pub parent_id: Option<TaskId>,
+    /// Tasks of the project this one waits for before its first start.
+    pub depends_on: Vec<NewDependency>,
+}
+
+/// A dependency of a new task on another task of the project, named by key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewDependency {
+    pub key: TaskKey,
+    pub kind: DependencyKind,
 }
 
 /// Stored task record from `tasks`.
@@ -90,7 +104,8 @@ pub struct TaskRow {
     pub pr_body: Option<String>,
     pub diverged: bool,
     pub harness_session_id: String,
-    pub created_by: Option<UserId>,
+    pub created_by: Principal,
+    pub parent_id: Option<TaskId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -137,7 +152,8 @@ pub fn format_assignment_prompt(title: Option<&str>, description: &str) -> Vec<C
     blocks
 }
 
-pub(crate) fn text_block(text: String, hidden: bool) -> ContentBlock {
+/// A text content block, hidden from the transcript view when `hidden`.
+pub fn text_block(text: String, hidden: bool) -> ContentBlock {
     ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text })),
         hidden,
@@ -153,34 +169,119 @@ pub async fn create_task(
     input: NewTask,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
     let mut tx = pool.begin().await?;
-    let (task_key, number) = allocate_task_key(&mut tx, input.project_id).await?;
+    let created = create_task_tx(&mut tx, input).await?;
+    tx.commit().await?;
+    Ok(created)
+}
+
+/// [`create_task`] inside the caller's transaction; the notifications go out on commit.
+pub async fn create_task_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: NewTask,
+) -> Result<(TaskRow, TaskMessageRow), DbError> {
+    let (task_key, number) = allocate_task_key(tx, input.project_id).await?;
+    let resolved = resolve_dependencies(tx, &input).await?;
     let user_title = input.title.as_deref().and_then(sanitize_title);
-    let task_row = insert_task(&mut tx, &input, task_key, number, user_title.as_deref()).await?;
+    let snapshot = TaskSnapshot {
+        unsatisfied_dependencies: resolved.unsatisfied_count,
+        ..TaskSnapshot::new_task()
+    };
+    let created = transition(&snapshot, TaskEvent::Created)
+        .map_err(|rejected| DbError::Conflict(rejected.to_string()))?;
+    let task_row = insert_task(
+        tx,
+        &input,
+        task_key,
+        number,
+        user_title.as_deref(),
+        created.status,
+    )
+    .await?;
+    for (target, kind) in resolved.targets {
+        sqlx::query(
+            "INSERT INTO task_dependencies (task_id, depends_on_task_id, kind) VALUES ($1, $2, $3)",
+        )
+        .bind(task_row.id.as_uuid())
+        .bind(target)
+        .bind(kind.as_str())
+        .execute(&mut **tx)
+        .await?;
+    }
     let message_row = enqueue_assignment_prompt(
-        &mut tx,
+        tx,
         task_row.id,
         user_title.as_deref(),
         &task_row.description,
     )
     .await?;
 
-    publish(
-        &mut *tx,
-        &Notification::TaskChanged {
-            task_id: task_row.id,
-        },
+    // `Created` has effects on this task only, so there is no work for other tasks.
+    let followups = execute_effects(
+        tx,
+        task_row.id,
+        &created,
+        &Principal::system("task.created"),
     )
     .await?;
-    publish(
-        &mut *tx,
-        &Notification::TaskMessageQueued {
-            task_id: task_row.id,
-        },
-    )
-    .await?;
-    tx.commit().await?;
-
+    debug_assert!(followups.is_empty(), "Created yields no follow-up work");
     Ok((task_row, message_row))
+}
+
+/// A dependency target as [`resolve_dependencies`] reads it.
+#[derive(sqlx::FromRow)]
+struct TargetRow {
+    id: Uuid,
+    key: String,
+    first_completed_at: Option<DateTime<Utc>>,
+    first_done_at: Option<DateTime<Utc>>,
+}
+
+/// The dependencies of a new task, resolved: the target rows and how many are unsatisfied.
+struct ResolvedDependencies {
+    targets: Vec<(Uuid, DependencyKind)>,
+    unsatisfied_count: u32,
+}
+
+/// Resolves the dependency keys of `input` in its project and counts the unsatisfied ones. The
+/// targets are read `FOR SHARE`: a target's event locks its row `FOR UPDATE` before it releases
+/// its dependents, so either this creation commits first and the release sees the new dependent,
+/// or the event commits first and this read sees its `first_completed_at` (design D3).
+async fn resolve_dependencies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &NewTask,
+) -> Result<ResolvedDependencies, DbError> {
+    let mut seen = std::collections::HashSet::new();
+    if let Some(twice) = input.depends_on.iter().find(|d| !seen.insert(&d.key)) {
+        return Err(DbError::InvalidDependency(twice.key.to_string()));
+    }
+    let keys: Vec<String> = input.depends_on.iter().map(|d| d.key.to_string()).collect();
+    let rows: Vec<TargetRow> = sqlx::query_as(
+        "SELECT id, key, first_completed_at, first_done_at FROM tasks
+         WHERE project_id = $1 AND key = ANY($2) ORDER BY id FOR SHARE",
+    )
+    .bind(input.project_id.as_uuid())
+    .bind(&keys)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut resolved = ResolvedDependencies {
+        targets: Vec::new(),
+        unsatisfied_count: 0,
+    };
+    for dependency in &input.depends_on {
+        let key = dependency.key.to_string();
+        let Some(target) = rows.iter().find(|row| row.key == key) else {
+            return Err(DbError::InvalidDependency(key));
+        };
+        resolved.targets.push((target.id, dependency.kind));
+        if !is_satisfied(
+            dependency.kind,
+            target.first_completed_at,
+            target.first_done_at,
+        ) {
+            resolved.unsatisfied_count += 1;
+        }
+    }
+    Ok(resolved)
 }
 
 /// Locks the project row and allocates the next gap-free task number. Returns the task key and
@@ -220,31 +321,37 @@ async fn insert_task(
     task_key: TaskKey,
     allocated_number: i64,
     user_title: Option<&str>,
+    status: TaskStatus,
 ) -> Result<TaskRow, DbError> {
+    // A title the creating agent chose is an agent title, which a generated or edited one replaces.
+    let given_source = if matches!(input.created_by, Principal::Agent { .. }) {
+        TitleSource::Agent
+    } else {
+        TitleSource::User
+    };
     let (title, title_source) = match user_title {
-        Some(title) => (title.to_string(), TitleSource::User),
+        Some(title) => (title.to_string(), given_source),
         None => (
             placeholder_title(&input.description).unwrap_or_else(|| FALLBACK_TITLE.to_string()),
             TitleSource::Placeholder,
         ),
     };
     let task_id = TaskId::new();
-    let status = TaskStatus::Queued;
     let key_str = task_key.to_string();
-    let created_by_uuid = input.created_by.map(|u| u.as_uuid());
+    let created_by = serde_json::to_value(&input.created_by)?;
 
     let row = sqlx::query!(
         r#"
         INSERT INTO tasks (
             id, project_id, number, key, title, title_source, description,
-            persona_id, issue_number, status, created_by
+            persona_id, issue_number, status, created_by, parent_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
-            diverged, harness_session_id, created_by, created_at, updated_at
+            diverged, harness_session_id, created_at, updated_at
         "#,
         task_id.as_uuid(),
         input.project_id.as_uuid(),
@@ -256,7 +363,8 @@ async fn insert_task(
         input.persona_id.as_uuid(),
         input.issue_number,
         status.as_str(),
-        created_by_uuid
+        created_by,
+        input.parent_id.map(|id| id.as_uuid())
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -279,7 +387,8 @@ async fn insert_task(
         pr_body: row.pr_body,
         diverged: row.diverged,
         harness_session_id: row.harness_session_id,
-        created_by: row.created_by.map(UserId::from_uuid),
+        created_by: input.created_by.clone(),
+        parent_id: input.parent_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
@@ -360,45 +469,7 @@ pub async fn queue_message_tx(
     let author_json = serde_json::to_value(&author)?;
     let content_json = serde_json::to_value(&content)?;
 
-    let updated = sqlx::query!(
-        r#"
-        WITH old AS (
-            SELECT id, status, pr_number, pr_merged_at IS NULL AS pr_unmerged
-            FROM tasks WHERE id = $1 FOR UPDATE
-        )
-        UPDATE tasks
-        SET status = CASE
-                WHEN EXISTS (
-                    SELECT 1 FROM runs
-                    WHERE runs.task_id = tasks.id
-                      AND runs.state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')
-                      AND runs.stop_requested_at IS NULL
-                ) THEN 'running'
-                ELSE 'queued'
-            END,
-            resume_at = NULL,
-            auto_resumes = 0,
-            updated_at = now()
-        FROM old
-        WHERE tasks.id = old.id
-        RETURNING old.status AS "old_status!", old.pr_number, old.pr_unmerged AS "pr_unmerged!"
-        "#,
-        task_id.as_uuid()
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-
-    let Some(updated) = updated else {
-        return Err(DbError::NotFound(format!("task `{task_id}` not found")));
-    };
-    let old_status: TaskStatus = updated.old_status.parse()?;
-    let reopens_pr = matches!(old_status, TaskStatus::InReview | TaskStatus::Completed)
-        && updated.pr_number.is_some()
-        && updated.pr_unmerged;
-    if reopens_pr {
-        let job = serde_json::to_value(MarkDraftJob { task_id })?;
-        crate::outbox::enqueue(tx, MARK_DRAFT_KIND, &job).await?;
-    }
+    apply_task_event(tx, task_id, TaskEvent::MessageQueued, &author).await?;
 
     let msg_row = sqlx::query!(
         r#"
@@ -413,9 +484,6 @@ pub async fn queue_message_tx(
     )
     .fetch_one(&mut **tx)
     .await?;
-
-    publish(&mut **tx, &Notification::TaskMessageQueued { task_id }).await?;
-    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
 
     Ok(TaskMessageRow {
         id: PromptId::from_uuid(msg_row.id),
@@ -491,7 +559,7 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
-            diverged, harness_session_id, created_by, created_at, updated_at
+            diverged, harness_session_id, created_by, parent_id, created_at, updated_at
         FROM tasks
         WHERE id = $1
         "#,
@@ -534,7 +602,8 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             pr_body: r.pr_body,
             diverged: r.diverged,
             harness_session_id: r.harness_session_id,
-            created_by: r.created_by.map(UserId::from_uuid),
+            created_by: serde_json::from_value(r.created_by)?,
+            parent_id: r.parent_id.map(TaskId::from_uuid),
             created_at: r.created_at,
             updated_at: r.updated_at,
         })
@@ -702,22 +771,8 @@ pub async fn remove_queued_message(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(not_editable)?;
-    let back_to_waiting = sqlx::query!(
-        r#"
-        UPDATE tasks SET status = 'waiting', updated_at = now()
-        WHERE id = $1 AND status = 'queued'
-          AND NOT EXISTS (
-              SELECT 1 FROM task_messages
-              WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL)
-        "#,
-        task_id.as_uuid()
-    )
-    .execute(&mut *tx)
-    .await?
-    .rows_affected()
-        > 0;
     let entry = NewAuditEntry::new(
-        actor,
+        actor.clone(),
         Vec::new(),
         "message.remove",
         "task_message",
@@ -726,9 +781,7 @@ pub async fn remove_queued_message(
     .with_details(&serde_json::json!({ "task_id": task_id, "text": plain_text(old)? }))?;
     write_audit_entry(&mut *tx, &entry).await?;
     publish(&mut *tx, &Notification::TaskMessageChanged { task_id }).await?;
-    if back_to_waiting {
-        publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-    }
+    apply_task_event(&mut tx, task_id, TaskEvent::MessageWithdrawn, &actor).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -748,35 +801,6 @@ fn plain_text(content: serde_json::Value) -> Result<String, DbError> {
         })
         .collect::<Vec<_>>()
         .join("\n"))
-}
-
-/// Updates a task's status (`tasks.status`) and publishes `task_changed` in the same transaction.
-pub async fn update_task_status(
-    pool: &PgPool,
-    task_id: TaskId,
-    status: TaskStatus,
-) -> Result<(), DbError> {
-    let mut tx = pool.begin().await?;
-
-    let res = sqlx::query!(
-        r#"
-        UPDATE tasks
-        SET status = $2, updated_at = now()
-        WHERE id = $1
-        "#,
-        task_id.as_uuid(),
-        status.as_str()
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    if res.rows_affected() == 0 {
-        return Err(DbError::NotFound(format!("task `{task_id}` not found")));
-    }
-
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-    tx.commit().await?;
-    Ok(())
 }
 
 /// Sets a task's title to the sanitized `title` if `source` may replace the current title's
@@ -839,66 +863,13 @@ pub async fn mark_task_done(
     actor: Principal,
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    // Lock order everywhere: run rows, then the task row (see `lock_task` in df-agent-channel).
-    sqlx::query("SELECT 1 FROM runs WHERE task_id = $1 FOR UPDATE")
-        .bind(task_id.as_uuid())
-        .execute(&mut *tx)
-        .await?;
-    let (status, pr_number): (String, Option<i64>) =
-        sqlx::query_as("SELECT status, pr_number FROM tasks WHERE id = $1 FOR UPDATE")
-            .bind(task_id.as_uuid())
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
-    let parsed: TaskStatus = status.parse()?;
-    if !parsed.can_mark_done() {
-        return Err(DbError::Conflict(format!(
-            "a {status} task cannot be marked done"
-        )));
-    }
-    if pr_number.is_some() {
-        let job = PrSyncJob {
-            task_id,
-            run_id: None,
-            open: false,
-            ready: Some(clock_under_task_lock(&mut tx).await?),
-        };
-        crate::outbox::enqueue(&mut tx, PR_SYNC_KIND, &serde_json::to_value(job)?).await?;
-    }
-    sqlx::query(
-        "UPDATE tasks SET status = 'completed', resume_at = NULL, updated_at = now() WHERE id = $1",
+    apply_task_event(
+        &mut tx,
+        task_id,
+        TaskEvent::MarkedDone(DoneBy::Board),
+        &actor,
     )
-    .bind(task_id.as_uuid())
-    .execute(&mut *tx)
     .await?;
-    let idle_run: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE runs SET state = 'finalizing' WHERE task_id = $1 AND state = 'awaiting_input'
-         RETURNING id",
-    )
-    .bind(task_id.as_uuid())
-    .fetch_optional(&mut *tx)
-    .await?;
-    let entry = NewAuditEntry::new(
-        actor.clone(),
-        Vec::new(),
-        "task.done",
-        "task",
-        task_id.to_string(),
-    )
-    .with_details(&serde_json::json!({ "old_status": status }))?;
-    write_audit_entry(&mut *tx, &entry).await?;
-    crate::requests::close_pending_for_task(&mut tx, task_id, "task-completed", &actor).await?;
-    if let Some(run_id) = idle_run {
-        publish(
-            &mut *tx,
-            &Notification::RunChanged {
-                run_id: RunId::from_uuid(run_id),
-                task_id,
-            },
-        )
-        .await?;
-    }
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -929,44 +900,7 @@ pub async fn stop_run(pool: &PgPool, task_id: TaskId, actor: Principal) -> Resul
 /// with [`DbError::Conflict`]. The PR and the issue are not touched.
 pub async fn cancel_task(pool: &PgPool, task_id: TaskId, actor: Principal) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    lock_runs_then_task(&mut tx, task_id).await?;
-    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
-    if !status.parse::<TaskStatus>()?.can_cancel() {
-        return Err(DbError::Conflict(format!(
-            "a {status} task cannot be cancelled"
-        )));
-    }
-    sqlx::query(
-        "UPDATE tasks SET status = 'cancelled', resume_at = NULL, updated_at = now() WHERE id = $1",
-    )
-    .bind(task_id.as_uuid())
-    .execute(&mut *tx)
-    .await?;
-    let discarded = sqlx::query(
-        "UPDATE task_messages SET discarded_at = now()
-         WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL",
-    )
-    .bind(task_id.as_uuid())
-    .execute(&mut *tx)
-    .await?
-    .rows_affected();
-    request_stop_tx(&mut tx, task_id, StopScope::IncludingFinalizing).await?;
-    crate::requests::close_pending_for_task(&mut tx, task_id, "task-cancelled", &actor).await?;
-    let entry = NewAuditEntry::new(
-        actor,
-        Vec::new(),
-        "task.cancel",
-        "task",
-        task_id.to_string(),
-    )
-    .with_details(&serde_json::json!({ "old_status": status, "discarded_messages": discarded }))?;
-    write_audit_entry(&mut *tx, &entry).await?;
-    publish(&mut *tx, &Notification::TaskMessageChanged { task_id }).await?;
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
+    apply_task_event(&mut tx, task_id, TaskEvent::Cancelled, &actor).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -985,15 +919,6 @@ pub(crate) async fn lock_runs_then_task(
         .execute(&mut **tx)
         .await?;
     Ok(())
-}
-
-/// Which runs [`request_stop_tx`] marks.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StopScope {
-    /// A human stop of a run: a `finalizing` run is left alone.
-    ActiveOnly,
-    /// Cancelling the task: a `finalizing` run is marked as well.
-    IncludingFinalizing,
 }
 
 /// Sets the stop marker on the task's active run if it has none and publishes `run_changed`.
@@ -1076,5 +1001,9 @@ async fn set_title_in(
     Ok(changed)
 }
 
+#[cfg(test)]
+mod dependency_tests;
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

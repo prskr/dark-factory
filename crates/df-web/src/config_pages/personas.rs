@@ -6,6 +6,7 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router};
+use df_core::PERSONA_DESCRIPTION_MAX_CHARS;
 use df_core::harness;
 use df_core::harness::PROFILES;
 use df_db::DbError;
@@ -42,6 +43,7 @@ pub(super) fn routes() -> Router<WebState> {
 #[serde(default)]
 pub(crate) struct PersonaForm {
     name: String,
+    description: String,
     system_prompt: String,
     harness: String,
     model_provider_id: String,
@@ -92,6 +94,13 @@ fn validate_persona(
 ) -> Result<PersonaInput, FormErrors> {
     let mut errors = FormErrors::default();
     let name = required(&mut errors, "name", &form.name, "Name");
+    let description = form.description.trim().to_string();
+    if description.chars().count() > PERSONA_DESCRIPTION_MAX_CHARS {
+        errors.add(
+            "description",
+            format!("Description is at most {PERSONA_DESCRIPTION_MAX_CHARS} characters."),
+        );
+    }
     let system_prompt = required(
         &mut errors,
         "system_prompt",
@@ -129,6 +138,7 @@ fn validate_persona(
     }
     errors.into_result(PersonaInput {
         name,
+        description,
         system_prompt,
         harness: harness_name.to_string(),
         model: model.to_string(),
@@ -164,6 +174,7 @@ fn model_options(
 fn persona_values(p: &PersonaRecord) -> PersonaForm {
     PersonaForm {
         name: p.name.clone(),
+        description: p.description.clone(),
         system_prompt: p.system_prompt.clone(),
         harness: p.harness.clone(),
         model: p.model.clone(),
@@ -216,6 +227,7 @@ fn persona_form(
             (form_error(errors))
             (form_grid(html! {
                 (full_row(text_field("Name", "name", &values.name, errors, None)))
+                (full_row(description_field(&values.description, errors)))
                 (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
                 (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
                 (refreshing_select("Model provider", "model_provider_id", &with_empty(super::providers::compatible_options(providers, harness_name)),
@@ -226,6 +238,27 @@ fn persona_form(
             (form_footer(submit))
         }
     }
+}
+
+/// The description textarea with its `n / 500` counter, which follows what is typed.
+fn description_field(value: &str, errors: &FormErrors) -> Markup {
+    let count = value.chars().count();
+    field(
+        "Description",
+        "description",
+        errors,
+        Some("Role and strengths. Agents read it when they choose whom to delegate to."),
+        html! {
+            div x-data={"{ n: " (count) " }"} {
+                textarea id="description" name="description" rows="3" class=(INPUT_CLASS)
+                    "x-on:input"="n = $event.target.value.length"
+                    aria-invalid=[errors.get("description").map(|_| "true")] { (value) }
+                p class="mt-1 text-right text-xs text-faint" {
+                    span x-text="n" { (count) } " / " (PERSONA_DESCRIPTION_MAX_CHARS)
+                }
+            }
+        },
+    )
 }
 
 /// `options` with the empty choice in front.
@@ -258,7 +291,9 @@ fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]
                                 }
                                 (edit_button(&format!("/personas/{}/edit", p.id), &format!("Edit persona {}", p.name)))
                             }
-                            p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" { (p.system_prompt) }
+                            p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" {
+                                @if p.description.is_empty() { (p.system_prompt) } @else { (p.description) }
+                            }
                             p class="mt-auto text-xs text-faint" {
                                 "Model provider: " span class="font-mono" { (provider.unwrap_or("none")) }
                             }

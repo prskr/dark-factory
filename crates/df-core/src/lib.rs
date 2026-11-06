@@ -13,6 +13,7 @@ pub mod model_provider;
 pub mod public_address;
 pub mod routing;
 pub mod seams;
+pub mod task_transition;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod title;
@@ -24,8 +25,8 @@ pub use config::{
     SandboxSectionConfig,
 };
 pub use domain::{
-    CAPACITY_DETAIL, ParseEnumError, Principal, RunOutcome, RunState, StatusGroup, StatusSet,
-    TaskStatus,
+    CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,
+    RunOutcome, RunState, StatusGroup, StatusSet, TaskStatus, is_satisfied,
 };
 pub use forge::ForgeKind;
 pub use ids::{

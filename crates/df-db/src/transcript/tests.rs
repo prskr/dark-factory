@@ -28,8 +28,8 @@ async fn seed_task(pool: &PgPool) -> TaskId {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
-         VALUES ($1, $2, 1, 'DF-1', 't', 'user', $3)",
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id, created_by)
+         VALUES ($1, $2, 1, 'DF-1', 't', 'user', $3, '{\"kind\":\"system\",\"reason\":\"test\"}')",
     )
     .bind(task)
     .bind(project)

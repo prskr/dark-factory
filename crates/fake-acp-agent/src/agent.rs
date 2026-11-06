@@ -241,8 +241,17 @@ async fn handle_prompt(
         NextTurn::Turn(turn, ctx) => (turn, ctx),
     };
 
+    let prompt = req
+        .prompt
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut stop_reason = StopReason::EndTurn;
-    for step in turn.steps {
+    for step in Step::expand(turn.steps, &prompt) {
         match play_step(step, &mut ctx, cx).await {
             StepOutcome::Continue => {}
             StepOutcome::Stop(reason) => stop_reason = reason,
@@ -341,6 +350,8 @@ async fn play_step(step: Step, ctx: &mut TurnContext, cx: &ConnectionTo<Client>)
         Step::Model(model) => play_model(&model, ctx, cx).await,
         Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
         Step::End(end_step) => return play_end(end_step, ctx).await,
+        // Replaced by `Step::expand` before the turn is played.
+        Step::When(_) => {}
     }
     StepOutcome::Continue
 }

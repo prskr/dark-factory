@@ -2,7 +2,9 @@
 //! usage records) and the transcript.
 
 use chrono::{DateTime, Utc};
-use df_core::{RunState, StatusSet, TaskId, TaskStatus, TitleSource};
+use df_core::{
+    DependencyKind, Principal, RunState, StatusSet, TaskId, TaskStatus, TitleSource, is_satisfied,
+};
 use df_proto::transcript::v1::Event;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -81,6 +83,37 @@ pub struct TaskDetail {
     pub resume_at: Option<DateTime<Utc>>,
     /// Consecutive automatic resumes after infrastructure failures.
     pub auto_resumes: i32,
+    #[sqlx(json)]
+    pub created_by: Principal,
+    /// Key of the task whose agent created this one, if an agent did.
+    pub creator_task_key: Option<String>,
+    pub parent_key: Option<String>,
+    pub parent_title: Option<String>,
+}
+
+/// A task this task waits for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyView {
+    pub key: String,
+    pub title: String,
+    pub kind: DependencyKind,
+    pub satisfied: bool,
+}
+
+/// A task that waits for this task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependantView {
+    pub key: String,
+    pub title: String,
+    pub kind: DependencyKind,
+    pub status: TaskStatus,
+}
+
+/// The dependencies of a task and the tasks that depend on it, ordered by task number.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Dependencies {
+    pub waits_for: Vec<DependencyView>,
+    pub needed_by: Vec<DependantView>,
 }
 
 /// Token counts of one model within a run, summed over its requests with known usage.
@@ -190,10 +223,14 @@ macro_rules! select_task_detail {
             "SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
                 p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
                 ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title,
-                t.resume_at, t.auto_resumes
+                t.resume_at, t.auto_resumes, t.created_by, creator.key AS creator_task_key,
+                parent.key AS parent_key, parent.title AS parent_title
              FROM tasks t
              JOIN projects p ON p.id = t.project_id
-             JOIN personas ps ON ps.id = t.persona_id ",
+             JOIN personas ps ON ps.id = t.persona_id
+             LEFT JOIN tasks creator ON creator.id =
+                 CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
+             LEFT JOIN tasks parent ON parent.id = t.parent_id ",
             $tail
         )
     };
@@ -214,6 +251,61 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         .bind(id.as_uuid())
         .fetch_optional(pool)
         .await?)
+}
+
+#[derive(FromRow)]
+struct DependencyRecord {
+    key: String,
+    title: String,
+    kind: String,
+    status: String,
+    first_completed_at: Option<DateTime<Utc>>,
+    first_done_at: Option<DateTime<Utc>>,
+}
+
+/// The tasks `task_id` waits for and the tasks that wait for it.
+pub async fn list_dependencies(pool: &PgPool, task_id: TaskId) -> Result<Dependencies, DbError> {
+    let waits_for: Vec<DependencyRecord> = sqlx::query_as(
+        "SELECT t.key, t.title, d.kind, t.status, t.first_completed_at, t.first_done_at
+         FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id
+         WHERE d.task_id = $1 ORDER BY t.number",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_all(pool)
+    .await?;
+    let needed_by: Vec<DependencyRecord> = sqlx::query_as(
+        "SELECT t.key, t.title, d.kind, t.status, t.first_completed_at, t.first_done_at
+         FROM task_dependencies d JOIN tasks t ON t.id = d.task_id
+         WHERE d.depends_on_task_id = $1 ORDER BY t.number",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_all(pool)
+    .await?;
+    Ok(Dependencies {
+        waits_for: waits_for
+            .into_iter()
+            .map(|r| {
+                let kind: DependencyKind = r.kind.parse()?;
+                Ok(DependencyView {
+                    satisfied: is_satisfied(kind, r.first_completed_at, r.first_done_at),
+                    key: r.key,
+                    title: r.title,
+                    kind,
+                })
+            })
+            .collect::<Result<_, DbError>>()?,
+        needed_by: needed_by
+            .into_iter()
+            .map(|r| {
+                Ok(DependantView {
+                    kind: r.kind.parse()?,
+                    status: r.status.parse()?,
+                    key: r.key,
+                    title: r.title,
+                })
+            })
+            .collect::<Result<_, DbError>>()?,
+    })
 }
 
 /// Runs of a task, newest first, with token usage summed per model from the gateway's records
@@ -383,7 +475,9 @@ mod tests {
                 title: Some("Fix login".into()),
                 description: String::new(),
                 issue_number: Some(7),
-                created_by: None,
+                created_by: Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
             },
         )
         .await
@@ -591,9 +685,7 @@ mod tests {
             (1, 0, 0, 1)
         );
 
-        crate::update_task_status(&pool, task, TaskStatus::Completed)
-            .await
-            .unwrap();
+        crate::task_events::set_status_for_test(&pool, task, TaskStatus::Completed).await;
         let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
             .await
             .unwrap();
@@ -622,9 +714,7 @@ mod tests {
             group: Some(set),
             project_key: None,
         };
-        crate::update_task_status(&pool, task, TaskStatus::RateLimited)
-            .await
-            .unwrap();
+        crate::task_events::set_status_for_test(&pool, task, TaskStatus::RateLimited).await;
         let running = list_task_items(&pool, &by(StatusSet::Running))
             .await
             .unwrap();

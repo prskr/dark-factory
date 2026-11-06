@@ -1,5 +1,5 @@
 {
-  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question and request_approval, plus read_pull_request_feedback and comment_on_pull_request (iteration 3). The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
+  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question and request_approval, plus read_pull_request_feedback and comment_on_pull_request, plus create_task, list_personas and send_message (iteration 3). The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
   "version": 2,
   "tools": [
     {
@@ -270,6 +270,120 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": true
+      }
+    },
+    {
+      "name": "create_task",
+      "title": "Create a task",
+      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "persona": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the persona that does the work, as listed by list_personas."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short title, at most 80 characters, plain text."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "description": "What the task is about, self-contained, in Markdown. It is the persona's first message."
+          },
+          "depends_on": {
+            "type": "array",
+            "maxItems": 20,
+            "description": "Tasks of this project to wait for before the first start.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Key of the task, for example DF-20."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "completion",
+                    "done"
+                  ],
+                  "description": "completion: the task completed at least once or is done. done: the task is done."
+                }
+              },
+              "required": [
+                "task",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "persona",
+          "title",
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_personas",
+      "title": "List personas",
+      "description": "List the personas of this instance with their names and descriptions (role and strengths), ordered by name. Use it to choose the persona for create_task.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "send_message",
+      "title": "Send a message to a child task",
+      "description": "Queue a message on one of your own child tasks (a task you created), for example to ask the implementer to address review findings or the reviewer to review again. It has the same effect as a board member's message: it is delivered between turns and reopens a child that is in review, done or cancelled. You cannot message any other task. After sending, end your turn: you are woken when the child ends again. Returns the prompt id and the child's resulting status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key of the child task, for example DF-20."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "description": "The message in Markdown, self-contained."
+          }
+        },
+        "required": [
+          "task",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
       }
     }
   ]

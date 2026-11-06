@@ -82,6 +82,15 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         credential,
     )
     .await?;
+    ensure_project(
+        pool,
+        actor,
+        data::DELEGATION_PROJECT_KEY,
+        data::DELEGATION_PROJECT_NAME,
+        data::DELEGATION_SCRIPT,
+        credential,
+    )
+    .await?;
     Ok(())
 }
 
@@ -170,6 +179,7 @@ async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> 
 async fn ensure_persona(pool: &PgPool, actor: Actor<'_>, provider: Uuid) -> Result<()> {
     let wanted = PersonaInput {
         name: data::PERSONA_NAME.into(),
+        description: String::new(),
         system_prompt: "You are the e2e persona.".into(),
         harness: df_core::config::CLAUDE_CODE_HARNESS.into(),
         model: data::PERSONA_MODEL.into(),
@@ -181,6 +191,7 @@ async fn ensure_persona(pool: &PgPool, actor: Actor<'_>, provider: Uuid) -> Resu
         .find(|p| p.name == wanted.name);
     if let Some(p) = &existing
         && p.system_prompt == wanted.system_prompt
+        && p.description == wanted.description
         && p.harness == wanted.harness
         && p.model == wanted.model
         && p.model_provider_id == wanted.model_provider_id

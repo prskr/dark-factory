@@ -1,6 +1,7 @@
 //! Task pages: the three-column workspace (list, transcript, details), the composer, rename and
 //! the message input (`specs/task-ui/spec.md`, design D4 to D8).
 
+mod dependencies;
 mod resume;
 mod view;
 
@@ -14,7 +15,7 @@ use df_core::{
     title_too_long,
 };
 use df_db::NewTask;
-use df_db::task_views::{RunView, TaskDetail};
+use df_db::task_views::{Dependencies, RunView, TaskDetail};
 use df_db::volumes::VolumeError;
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use maud::{Markup, html};
@@ -29,6 +30,7 @@ use crate::layout::{Shell, View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
 use crate::transcript::{Folder, render_transcript};
+pub(crate) use dependencies::dependencies_region;
 pub(crate) use resume::ResumeNote;
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
@@ -77,6 +79,7 @@ impl ListQuery {
 /// Loads everything the stream and the page render for one task.
 pub(crate) struct DetailData {
     pub task: TaskDetail,
+    pub dependencies: Dependencies,
     pub runs: Vec<RunView>,
     pub pending: Vec<df_db::TaskMessageRow>,
 }
@@ -86,12 +89,14 @@ pub(crate) async fn load_detail(
     task: TaskDetail,
 ) -> Result<DetailData, df_db::DbError> {
     let id = TaskId::from_uuid(task.id);
-    let (runs, pending) = tokio::try_join!(
+    let (runs, pending, dependencies) = tokio::try_join!(
         df_db::task_views::list_runs(&state.pool, id),
-        df_db::list_undelivered_messages(&state.pool, id)
+        df_db::list_undelivered_messages(&state.pool, id),
+        df_db::task_views::list_dependencies(&state.pool, id)
     )?;
     Ok(DetailData {
         task,
+        dependencies,
         runs,
         pending,
     })
@@ -112,6 +117,7 @@ pub(crate) struct MessageForm {
 /// Everything the transcript and details columns render for one task.
 struct Selected {
     detail: TaskDetail,
+    dependencies: Dependencies,
     runs: Vec<RunView>,
     pending: Vec<df_db::TaskMessageRow>,
     folder: Folder,
@@ -192,6 +198,7 @@ fn selected_columns(s: &Selected) -> Markup {
         }
         (details_column(
             &s.detail,
+            &s.dependencies,
             &s.runs,
             &CancelNote::new(&s.runs, &s.pending),
             &ResumeNote::new(&s.detail, &s.runs, s.max_auto_resumes),
@@ -266,6 +273,7 @@ async fn task_detail(
         };
     let selected = Selected {
         detail: data.task,
+        dependencies: data.dependencies,
         runs: data.runs,
         pending: data.pending,
         folder,
@@ -375,7 +383,9 @@ async fn task_create(
             title: None,
             description,
             issue_number,
-            created_by: Some(user.id),
+            created_by: user.principal(),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await;

@@ -30,8 +30,8 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
-    CancelNote, Filters, ListQuery, ResumeNote, composer_action, details_region, head_region,
-    load_detail, pending_region, runs_region, stoppable, task_rows,
+    CancelNote, Filters, ListQuery, ResumeNote, composer_action, dependencies_region,
+    details_region, head_region, load_detail, pending_region, runs_region, stoppable, task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -104,10 +104,10 @@ struct DetailStream {
     /// Id of the last transcript row read.
     cursor: i64,
     folder: Folder,
-    /// Re-render the five regions at the next opportunity.
+    /// Re-render the six regions at the next opportunity.
     check_regions: bool,
     /// Last sent markup of head, details, runs, pending list and composer action.
-    regions: [String; 5],
+    regions: [String; 6],
     /// Pause before the next read to coalesce chunks.
     settle: Option<Duration>,
 }
@@ -238,6 +238,7 @@ impl DetailStream {
                 &ResumeNote::new(&data.task, &data.runs, self.state.max_auto_resumes),
                 None,
             ),
+            dependencies_region(&data.dependencies, data.task.status),
             runs_region(
                 &data.task.key,
                 &data.runs,
@@ -258,6 +259,7 @@ impl DetailStream {
             [
                 "#task-head",
                 "#task-details",
+                "#dependencies",
                 "#runs",
                 "#pending",
                 "#composer-action",

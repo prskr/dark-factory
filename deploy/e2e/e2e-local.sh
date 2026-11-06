@@ -224,7 +224,7 @@ install_driver() {
   )
 }
 
-suite_tests=(--test demo --test flow --test lifecycle_events --test webhooks)
+suite_tests=(--test delegation --test demo --test flow --test lifecycle_events --test webhooks)
 
 # Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {

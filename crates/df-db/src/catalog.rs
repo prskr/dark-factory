@@ -68,6 +68,9 @@ pub struct ProjectRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PersonaInput {
     pub name: String,
+    /// Role and strengths, at most [`df_core::PERSONA_DESCRIPTION_MAX_CHARS`] characters; agents read it
+    /// through `list_personas`.
+    pub description: String,
     pub system_prompt: String,
     pub harness: String,
     pub model: String,
@@ -79,6 +82,7 @@ pub struct PersonaInput {
 pub struct PersonaRecord {
     pub id: Uuid,
     pub name: String,
+    pub description: String,
     pub system_prompt: String,
     pub harness: String,
     pub model: String,
@@ -121,7 +125,7 @@ macro_rules! select_project {
 macro_rules! select_persona {
     ($tail:literal) => {
         concat!(
-            "SELECT id, name, system_prompt, harness, model, \
+            "SELECT id, name, description, system_prompt, harness, model, \
              model_provider_id FROM personas ",
             $tail
         )
@@ -347,6 +351,12 @@ pub async fn save_persona(
     id: Option<Uuid>,
     input: &PersonaInput,
 ) -> Result<PersonaRecord, DbError> {
+    if input.description.chars().count() > df_core::PERSONA_DESCRIPTION_MAX_CHARS {
+        return Err(DbError::InvalidData(format!(
+            "the description is longer than {} characters",
+            df_core::PERSONA_DESCRIPTION_MAX_CHARS
+        )));
+    }
     check_persona_model(pool, input).await?;
     let mut tx = pool.begin().await?;
     let before: Option<PersonaRecord> = match id {
@@ -362,14 +372,14 @@ pub async fn save_persona(
     let record: PersonaRecord = match &before {
         Some(b) => sqlx::query_as(
             "UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5, \
-             model_provider_id = $6, updated_at = now() WHERE id = $1 \
-             RETURNING id, name, system_prompt, harness, model, model_provider_id",
+             model_provider_id = $6, description = $7, updated_at = now() WHERE id = $1 \
+             RETURNING id, name, description, system_prompt, harness, model, model_provider_id",
         )
         .bind(b.id),
         None => sqlx::query_as(
-            "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id) \
-             VALUES ($1, $2, $3, $4, $5, $6) \
-             RETURNING id, name, system_prompt, harness, model, model_provider_id",
+            "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id, \
+             description) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             RETURNING id, name, description, system_prompt, harness, model, model_provider_id",
         )
         .bind(Uuid::now_v7()),
     }
@@ -378,12 +388,14 @@ pub async fn save_persona(
     .bind(&input.harness)
     .bind(&input.model)
     .bind(input.model_provider_id)
+    .bind(&input.description)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| conflict_or(e, "a persona with this name already exists"))?;
 
     let before_input = before.map(|b| PersonaInput {
         name: b.name,
+        description: b.description,
         system_prompt: b.system_prompt,
         harness: b.harness,
         model: b.model,
@@ -497,6 +509,7 @@ mod tests {
     fn persona(prompt: &str, provider: Uuid) -> PersonaInput {
         PersonaInput {
             name: "Linus".into(),
+            description: String::new(),
             system_prompt: prompt.into(),
             harness: "claude-code".into(),
             model: "test-model".into(),
@@ -714,7 +727,9 @@ mod tests {
                 title: Some("t".into()),
                 description: String::new(),
                 issue_number: None,
-                created_by: None,
+                created_by: Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
             },
         )
         .await

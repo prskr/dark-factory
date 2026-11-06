@@ -231,6 +231,16 @@ impl Session {
             .context("open the runs")
     }
 
+    /// Opens the closed "Dependencies" disclosure of the open task (it is open only while the
+    /// task awaits its dependencies).
+    pub async fn open_dependencies(&self) -> Result<()> {
+        self.page
+            .locator("#dependencies summary")
+            .click(None)
+            .await
+            .context("open the dependencies")
+    }
+
     /// Waits until the element `selector` of the open task contains `text`.
     pub async fn expect_region_text(
         &self,

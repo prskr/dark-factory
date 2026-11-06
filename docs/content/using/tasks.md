@@ -25,9 +25,11 @@ The task view has three columns: the task list, the transcript and the details.
   the gateway, not from the agent, and are never sent to the agent.
 - **Messages**: type into the message box at any time. A message reaches the agent at the next
   turn boundary, without restarting anything; while it waits it is shown as queued and can be
-  edited or removed. A message to a finished task reopens it.
+  edited or removed. A message to a finished task reopens it. A message to a task that awaits its dependencies is
+  delivered in its first run.
 - **Details**: what the agent is doing now, the pull request and issue links, project, persona,
-  branch and the list of runs with model and token usage. The tokens are summed per model from the
+  branch, who created the task and its parent (for a task an agent created), the
+  [dependencies](delegation.md#in-the-task-view) and the list of runs with model and token usage. The tokens are summed per model from the
   [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
   no usage are counted separately ("2 requests without usage") instead of as zero.
 
@@ -53,6 +55,7 @@ An agent message is plain text while it streams and is rendered as Markdown when
 
 | Status | Meaning |
 | --- | --- |
+| `awaiting_dependencies` | Created with an unsatisfied [dependency](delegation.md#dependencies); it has no run, branch or sandbox and becomes `queued` when the last dependency is satisfied |
 | `queued` | Work is pending; a run starts when a slot is free or the resume time has passed |
 | `running` | A run is working on it |
 | `waiting` | The agent finished its turn and waits for you; the sandbox stays alive for a while (`runs.keepAliveSeconds`) |
@@ -64,8 +67,8 @@ An agent message is plain text while it streams and is rendered as Markdown when
 | `cancelled` | Cancelled by a human |
 | `failed` | The run failed and automatic retries are exhausted |
 
-The list's filters group them: *Active*, *Waiting* (`waiting`, `blocked`, `in_review`,
-`limit_reached`) and *Done* (`completed`, `failed`).
+The list's filters group them: *Active*, *Waiting* (`awaiting_dependencies`, `waiting`, `blocked`,
+`in_review`, `limit_reached`) and *Done* (`completed`, `failed`).
 
 ## Stop, mark done, cancel
 

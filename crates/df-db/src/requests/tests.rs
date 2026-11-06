@@ -77,7 +77,9 @@ async fn task(pool: &PgPool) -> TaskRow {
             title: Some("T".into()),
             description: "d".into(),
             issue_number: None,
-            created_by: None,
+            created_by: Principal::system("test"),
+            parent_id: None,
+            depends_on: Vec::new(),
         },
     )
     .await

@@ -32,6 +32,9 @@ pub enum DbError {
     /// provider or harness.
     #[error("conflict: {0}")]
     ModelConflict(String),
+    /// A dependency of a new task names a task that is not in the project, or names one twice.
+    #[error("invalid dependency `{0}`")]
+    InvalidDependency(String),
     #[error("permission or role management error: {0}")]
     RoleManagement(String),
 }

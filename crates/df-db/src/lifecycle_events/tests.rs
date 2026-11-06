@@ -16,10 +16,43 @@ struct Fixture {
 }
 
 async fn seed(pool: &PgPool, key: &str) -> Fixture {
+    let (project_id, persona_id) = seed_project_and_persona(pool, key).await;
+    let task_id = TaskId::new();
+    sqlx::query(
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id, created_by)
+         VALUES ($1, $2, 42, $3, 't', 'user', $4, '{\"kind\":\"system\",\"reason\":\"test\"}')",
+    )
+    .bind(task_id.as_uuid())
+    .bind(project_id)
+    .bind(format!("{key}-42"))
+    .bind(persona_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    seed_run(pool, project_id, task_id).await
+}
+
+/// Like `seed`, for a schema from before `tasks.created_by` became a principal.
+async fn seed_without_creator(pool: &PgPool, key: &str) -> Fixture {
+    let (project_id, persona_id) = seed_project_and_persona(pool, key).await;
+    let task_id = TaskId::new();
+    sqlx::query(
+        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id)
+         VALUES ($1, $2, 42, $3, 't', 'user', $4)",
+    )
+    .bind(task_id.as_uuid())
+    .bind(project_id)
+    .bind(format!("{key}-42"))
+    .bind(persona_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    seed_run(pool, project_id, task_id).await
+}
+
+async fn seed_project_and_persona(pool: &PgPool, key: &str) -> (Uuid, Uuid) {
     let project_id = ProjectId::new().as_uuid();
     let persona_id = Uuid::now_v7();
-    let task_id = TaskId::new();
-    let run_id = RunId::new();
     sqlx::query(
         "INSERT INTO projects (id, key, name, repo_url, image) VALUES ($1, $2, $2, $3, 'img')",
     )
@@ -30,16 +63,11 @@ async fn seed(pool: &PgPool, key: &str) -> Fixture {
     .await
     .unwrap();
     insert_persona(pool, persona_id, &format!("Linus {key}")).await;
-    sqlx::query(
-        "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id) VALUES ($1, $2, 42, $3, 't', 'user', $4)",
-    )
-    .bind(task_id.as_uuid())
-    .bind(project_id)
-    .bind(format!("{key}-42"))
-    .bind(persona_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    (project_id, persona_id)
+}
+
+async fn seed_run(pool: &PgPool, project_id: Uuid, task_id: TaskId) -> Fixture {
+    let run_id = RunId::new();
     sqlx::query("INSERT INTO runs (id, task_id, number) VALUES ($1, $2, 3)")
         .bind(run_id.as_uuid())
         .bind(task_id.as_uuid())
@@ -289,14 +317,14 @@ async fn migration_backfills_the_volume_marker_of_tasks_with_an_existing_volume(
             .await
             .unwrap();
     }
-    let with_run = seed(&pool, "DF").await;
-    let deleted = seed(&pool, "DE").await;
+    let with_run = seed_without_creator(&pool, "DF").await;
+    let deleted = seed_without_creator(&pool, "DE").await;
     sqlx::query("UPDATE tasks SET volume_deleted_at = now() WHERE id = $1")
         .bind(deleted.task.as_uuid())
         .execute(&pool)
         .await
         .unwrap();
-    let without_run = seed(&pool, "NR").await;
+    let without_run = seed_without_creator(&pool, "NR").await;
     sqlx::query("DELETE FROM runs WHERE id = $1")
         .bind(without_run.run.as_uuid())
         .execute(&pool)
