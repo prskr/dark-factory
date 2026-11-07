@@ -76,7 +76,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
 | TD-41 | medium | `df-k8s` tests | No live test that a sandbox reaches an allowed target through its ClusterIP ([sandbox-lifecycle-resilience]) |
 | TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros ([#123]) |
-| TD-44 | low    | `df-web` styles | Text contrast ratios (≥ 4.5:1) are documented, not tested ([#124]) |
 | TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings ([#123]) |
 | TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
 | TD-47 | low   | `df-web` components | Message box and composer "+" use one-off class strings |
@@ -426,18 +425,6 @@ The queries added for the web UI use `sqlx::query_as` / `query_scalar` instead o
 **Matters when:** a migration renames or retypes a column these queries read.
 
 **Fix:** Write the queries as literal `query_as!` calls (inline the `select_project!` variants), regenerate `.sqlx/`. The session store may stay runtime-checked (it picks its SQL at runtime).
-
-### TD-44 (C5). Contrast ratios are not tested
-
-Tracked in [#124].
-
-`crates/df-web/styles/input.css` (color tokens)
-
-The web-ui-shell spec requires a text contrast of at least 4.5:1 (3:1 for text of 24 px and larger) in both themes. The ratios are only listed in `docs/design-system.md`; no test computes them from the tokens, so a token change can break the requirement unnoticed.
-
-**Matters when:** a color token is changed or a theme is added.
-
-**Fix:** Add a unit test that parses the foreground/background token pairs for light and dark from `styles/input.css` and asserts each contrast ratio is at least 4.5:1 (3:1 for large text).
 
 ### TD-45 (S5). Turn state read with raw SQL in the channel crate
 
