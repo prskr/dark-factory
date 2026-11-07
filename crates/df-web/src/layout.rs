@@ -21,6 +21,10 @@ pub(crate) const COMPONENT_SCRIPTS: [&str; 5] = [
     "workspace.js",
 ];
 
+/// htmx extension in `scripts/sse-cleanup.ts`; loaded between htmx and `hx-sse`, so its cleanup
+/// hook runs before the one of `hx-sse`.
+pub(crate) const SSE_CLEANUP_SCRIPT: &str = "sse-cleanup.js";
+
 /// htmx keeps the `open` state of `<details>` (tool calls, the runs list) when it morphs an
 /// updated element.
 const HTMX_CONFIG: &str = r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"]}"#;
@@ -138,6 +142,7 @@ fn document(
                 link rel="preload" as="font" type="font/woff2" crossorigin
                     href=(asset_url("fonts/inter-latin-wght-normal.woff2"));
                 script src=(asset_url("vendor/htmx.min.js")) defer {}
+                script src=(asset_url(SSE_CLEANUP_SCRIPT)) defer {}
                 script src=(asset_url("vendor/hx-sse.min.js")) defer {}
                 // Deferred scripts run in document order, so the components register first.
                 @for script in COMPONENT_SCRIPTS {
@@ -413,6 +418,31 @@ mod tests {
             !page.contains("<script src=\"/assets/vendor/mermaid"),
             "{page}"
         );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(df_web_scripts),
+        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+    )]
+    fn sse_cleanup_extension_loads_between_htmx_and_hx_sse() {
+        let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
+        let htmx = page.find("/assets/vendor/htmx.min.js?v=").unwrap();
+        let cleanup = page
+            .find(&format!("/assets/{SSE_CLEANUP_SCRIPT}?v="))
+            .expect(SSE_CLEANUP_SCRIPT);
+        let sse = page.find("/assets/vendor/hx-sse.min.js?v=").unwrap();
+        assert!(htmx < cleanup && cleanup < sse, "{page}");
+    }
+
+    #[test]
+    fn sse_cleanup_extension_cancels_the_reader_before_hx_sse_aborts() {
+        let js = crate::assets::script_source("sse-cleanup.ts");
+        assert!(js.contains("htmx.registerExtension("), "{js}");
+        assert!(js.contains("htmx_before_cleanup"), "{js}");
+        // The rejection is handled and `hx-sse` finds no reader to cancel again.
+        assert!(js.contains("reader.cancel().catch("), "{js}");
+        assert!(js.contains("sse.reader = null"), "{js}");
     }
 
     #[test]

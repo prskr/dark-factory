@@ -11,11 +11,6 @@ interface EgressLogConfig {
   minTableWidth: number;
 }
 
-/** The htmx SSE extension's state, kept on the connect element. */
-interface SseElement extends Element {
-  _htmx?: { sse?: { abortController?: AbortController; reader?: ReadableStreamDefaultReader } };
-}
-
 document.addEventListener('alpine:init', () => {
   Alpine.data('egressLog', (cfg: EgressLogConfig) => ({
     paused: false,

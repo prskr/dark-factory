@@ -87,7 +87,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway ([sandbox-lifecycle-resilience]) |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
-| TD-62 | low   | `df-web` SSE | `AbortError` from `hx-sse` in `htmx_before_cleanup` when a task is opened from the list ([#124]) |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
 | TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" and terminal state lists are hard-coded in several SQL statements ([#123]) |
@@ -539,18 +538,6 @@ Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `c
 **Matters when:** a third buffer needs the age rule, or the rule changes (the floor or the prune interval).
 
 **Fix:** Store `max_age` in `AgedEvents` and give it `prune_if_due(now)` and `unexpired()` that compute the cutoff. Apply the clamp once.
-
-### TD-62 (I1). `AbortError` from `hx-sse` when swapping tasks
-
-Tracked in [#124].
-
-`crates/df-web` (`#ws-detail` swap, htmx SSE extension)
-
-Swapping `#ws-detail` through the task list logs an `AbortError` in the browser console at `htmx_before_cleanup`. Found in the browser check of `transcript-view-polish`, not traced. Probably the cause fixed for Pause in 001e81e (cleanup aborts the stream while the read is pending); no visible effect seen.
-
-**Matters when:** console errors are collected or alerted on, or the swap leaves a stream open.
-
-**Fix:** Reproduce with the Playwright container, then handle the abort in the same place as the Pause fix (cancel the reader before the controller aborts) and add a browser-level check.
 
 ### TD-63 (S3). `DF_HARNESS_*` variables undocumented
 
