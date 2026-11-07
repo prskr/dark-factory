@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-120.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-121.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -39,6 +39,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-119: code review of `conversation-flow` (`df-agent-channel`, `factory-agent`, 2026-11-06). The `TD-n (ID)` heading gives the IDs used in that review.
+- Origin of TD-120: full `just e2e-local` run while closing #124 (2026-11-07).
 
 ## Summary
 
@@ -83,7 +84,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
-| TD-56 | low   | `df-web` egress log | Client-side behaviour of the traffic page is only checked through markup strings ([#124]) |
 | TD-59 | low   | `df-gateway` dev cluster | CONNECT with a mismatching TLS SNI was never checked against the deployed gateway ([sandbox-lifecycle-resilience]) |
 | TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
@@ -127,6 +127,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-117 | low   | `df-db` tests | `tasks/tests.rs` is at the file-length limit |
 | TD-118 | low   | `df-db`, `df-web` tests | Two test helpers set a task status by SQL |
 | TD-119 | low   | `df-agent-channel` tests | Repeated single-prompt extraction and `TurnEnded` test fixtures ([#141]) |
+| TD-120 | medium | `df-gateway` relay, `df-web` egress log | Live rows of the traffic page stopped once; live delivery has no e2e test |
 
 ## Entries
 
@@ -494,18 +495,6 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 **Matters when:** more operations are timed, or the timing message changes; a missed `send_timing` goes unnoticed.
 
 **Fix:** One `async fn timed<T, E>(tx, op, fut) -> Result<T, E>` that sends the timing and returns the result; keep explicit calls only where the result needs extra handling (push).
-
-### TD-56 (P6). Traffic page client behaviour has no runtime test
-
-Tracked in [#124].
-
-`crates/df-web/src/egress/log/page.rs` (Alpine state: pause/resume, divider drag/keys/resize, remembered width, details panel, Advanced badge)
-
-Tests assert that strings appear in the rendered page. Nothing runs the script, and the obscura browser cannot stream SSE, so the live updates, the pause closing the stream, the clamping and the stored width were never exercised. Review rounds 2–4 each found a bug in this code that string tests did not catch (P10, P13, P14).
-
-**Matters when:** the page script changes again, or htmx/Alpine are upgraded (P1 and P10 depend on internals of the vendored versions).
-
-**Fix:** A browser test (for example Playwright against `just serve-local` with `--demo-flows`) for the spec scenarios Pause, Resume, Drag, Keyboard, Reset, Remembered width and Open/close details; run it in CI.
 
 ### TD-59. SNI mismatch not checked on a cluster
 
@@ -977,10 +966,21 @@ same adjustment in several places.
 tests' explicit cardinality and queue-order assertions; do not hide them in a generic fixture
 builder.
 
+### TD-120. Live rows of the traffic page stopped once
+
+`crates/df-gateway/src/control/relay.rs` (viewer sessions, pod streams), `crates/df-web/src/egress/log/mod.rs` (`events`)
+
+In one full `just e2e-local` run on a fresh cluster (2026-11-07), the traffic page of a task whose fetch the proxy denied once a second showed one row and then nothing for 300 s, in two viewers. The gateway had buffered 237 events of that task; a page loaded afterwards showed all of them. Not reproduced in the following runs, cause unknown. The control plane logged no `tail stream failed`.
+
+`traffic_page_pauses_resizes_and_opens_details` (`crates/df-e2e/tests/ui.rs`) therefore checks Pause and Resume against the buffered backlog of a fresh page load, not against live rows. No e2e test checks that live rows arrive.
+
+**Matters when:** a board member watches traffic live; a stuck viewer session shows a quiet sandbox that is not quiet.
+
+**Fix:** add an e2e check that a connected page gets new rows without a reload, run it repeatedly on fresh clusters, and trace the relay (session reuse within `SESSION_GRACE`, discovery while the gateway pods start, `Lagged` handling) when it fails.
+
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
 [#123]: https://github.com/prskr/dark-factory/issues/123
-[#124]: https://github.com/prskr/dark-factory/issues/124
 [#125]: https://github.com/prskr/dark-factory/issues/125
 [#141]: https://github.com/prskr/dark-factory/pull/141
 [sandbox-lifecycle-resilience]: ../openspec/changes/sandbox-lifecycle-resilience/proposal.md
