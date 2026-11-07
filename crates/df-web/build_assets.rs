@@ -4,9 +4,12 @@
 //! For the scripts and the stylesheet each, in this order: the output Bazel built
 //! (`WEB_SCRIPTS`, `TAILWIND_APP_CSS`), the tool (`SWC_BIN` / `TAILWIND_BIN`, otherwise `PATH`),
 //! otherwise a warning and nothing embedded. A tool that runs and fails is an error. With
-//! `DF_WEB_REQUIRE_ASSETS=1` (Bazel) a missing tool is an error too.
+//! `DF_WEB_REQUIRE_ASSETS=1` (Bazel) a missing tool is an error too. A `WEB_SCRIPTS` that lists
+//! no file is an error.
 
+use std::env;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -74,6 +77,34 @@ pub(crate) fn resolve_path(raw: &str, manifest_dir: &Path, pwd: Option<&Path>) -
         return from_pwd;
     }
     manifest_dir.join(raw)
+}
+
+/// Files outside the crate whose change must rerun the build script: Bazel's outputs, the
+/// override programs, and, for a tool looked up on `PATH`, every readable `PATH` directory, so
+/// that installing or updating the tool there is noticed although `PATH` itself is unchanged.
+pub(crate) fn rerun_inputs(config: &Config, path: Option<&OsStr>) -> Vec<PathBuf> {
+    let mut inputs: Vec<PathBuf> = config.web_scripts.iter().flatten().cloned().collect();
+    inputs.extend(config.tailwind_app_css.clone());
+    let mut path_lookup = false;
+    for (tool, used) in [
+        (&config.swc, config.web_scripts.is_none()),
+        (&config.tailwind, config.tailwind_app_css.is_none()),
+    ] {
+        match (used, tool.override_var) {
+            (false, _) => {}
+            (true, Some(_)) => inputs.push(tool.program.clone()),
+            (true, None) => path_lookup = true,
+        }
+    }
+    if path_lookup {
+        // Unreadable directories (`/root/...` in a container) would make Cargo rerun every time.
+        for dir in env::split_paths(path.unwrap_or_default()) {
+            if fs::read_dir(&dir).is_ok() && !inputs.contains(&dir) {
+                inputs.push(dir);
+            }
+        }
+    }
+    inputs
 }
 
 /// Rebuilds `staged` from `assets/` and the compiled outputs. Whatever an earlier build left
@@ -153,6 +184,9 @@ fn run_tool(command: &mut Command, kind: &Kind, tool: &Tool) -> Result<bool> {
 /// Returns whether the scripts were staged.
 fn stage_scripts(config: &Config, staged: &Path) -> Result<bool> {
     if let Some(built) = &config.web_scripts {
+        if built.is_empty() {
+            return Err("WEB_SCRIPTS is set but lists no compiled script".into());
+        }
         for src in built {
             let name = src
                 .file_name()
@@ -361,6 +395,46 @@ mod tests {
         fs::write(exec.join("bin/tabs.js"), "").unwrap();
         let paths = parse_web_scripts("bin/tabs.js", &manifest, Some(&exec));
         assert_eq!(paths, [exec.join("bin/tabs.js")]);
+    }
+
+    #[test]
+    fn an_empty_bazel_script_list_is_an_error() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config(NOT_INSTALLED, "true");
+        config.web_scripts = Some(Vec::new());
+        let err = stage_assets(&config, &fixture.staged()).unwrap_err();
+        assert!(err.to_string().starts_with("WEB_SCRIPTS"), "{err}");
+    }
+
+    #[test]
+    fn a_change_to_a_bazel_output_or_an_override_reruns_the_build() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
+        config.web_scripts = Some(vec!["/built/tabs.js".into()]);
+        config.tailwind = Tool {
+            program: "/tools/tailwindcss".into(),
+            override_var: Some("TAILWIND_BIN"),
+        };
+        let path_dir = fixture.dir.path().to_str().unwrap().to_owned();
+        assert_eq!(
+            rerun_inputs(&config, Some(path_dir.as_ref())),
+            [PathBuf::from("/built/tabs.js"), "/tools/tailwindcss".into()]
+        );
+    }
+
+    #[test]
+    fn a_tool_looked_up_on_path_reruns_the_build_when_a_readable_path_directory_changes() {
+        let fixture = Fixture::new();
+        let (bin, other) = (
+            fixture.dir.path().join("bin"),
+            fixture.dir.path().join("other"),
+        );
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let missing = fixture.dir.path().join("missing");
+        let path = env::join_paths([&bin, &missing, &other, &bin]).unwrap();
+        let config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
+        assert_eq!(rerun_inputs(&config, Some(&path)), [bin, other]);
     }
 
     #[test]

@@ -9,7 +9,9 @@ mod build_assets;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use build_assets::{Config, Result, Tool, parse_web_scripts, resolve_path, stage_assets};
+use build_assets::{
+    Config, Result, Tool, parse_web_scripts, rerun_inputs, resolve_path, stage_assets,
+};
 
 /// An environment variable that may be unset; a value that is not UTF-8 is an error.
 fn optional_env(var: &str) -> Result<Option<String>> {
@@ -73,6 +75,9 @@ fn main() -> Result<()> {
         tailwind: tool("TAILWIND_BIN", "tailwindcss", &manifest_dir, pwd)?,
         manifest_dir,
     };
+    for input in rerun_inputs(&config, env::var_os("PATH").as_deref()) {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
     let report = stage_assets(&config, &staged)?;
     for cfg in report.cfgs {
         println!("cargo:rustc-cfg={cfg}");

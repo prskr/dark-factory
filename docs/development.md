@@ -244,7 +244,7 @@ lefthook hooks use the same versions on every machine. The exceptions run throug
 | Build | How the assets are built |
 |-------|--------------------------|
 | Bazel (CI, images, releases) | The genrules `:web_scripts` and `:app_css` of `//crates/df-web` use the pinned tools. The build script gets the outputs through `WEB_SCRIPTS` and `TAILWIND_APP_CSS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
-| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. |
+| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. Installing or updating a tool in a `PATH` directory reruns the build script on the next build. |
 
 `build.rs` sets the cfgs `df_web_scripts` and `df_web_styles` for the kinds it compiled. Tests that read compiled output are ignored without the matching cfg, so `cargo test -p df-web` without the tools passes and lists them as `ignored`. Bazel always compiles both, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing.
 

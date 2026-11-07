@@ -43,8 +43,8 @@ db-rm:
 # Fail early when the tools that compile the web UI's scripts (swc) and stylesheet (tailwindcss) are missing
 [private]
 web-tools:
-    @command -v swc >/dev/null && command -v tailwindcss >/dev/null \
-        || { echo "swc and tailwindcss must be on PATH (the web UI needs the compiled scripts and stylesheet): bazel run //:bazel_env && direnv allow" >&2; exit 1; }
+    @command -v "${SWC_BIN:-swc}" >/dev/null && command -v "${TAILWIND_BIN:-tailwindcss}" >/dev/null \
+        || { echo "swc and tailwindcss must be on PATH or set in SWC_BIN / TAILWIND_BIN (the web UI needs the compiled scripts and stylesheet): bazel run //:bazel_env && direnv allow" >&2; exit 1; }
 
 # Run the control plane with the web UI on http://127.0.0.1:8080 without a Kubernetes cluster and with scripted network traffic (login: admin@example.com / password). Needs the `dev-tools` feature.
 serve-local: web-tools db plugins

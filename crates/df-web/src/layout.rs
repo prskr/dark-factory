@@ -385,8 +385,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(all(df_web_scripts, df_web_styles)),
-        ignore = "needs compiled scripts and app.css: swc and tailwindcss on PATH (bazel run //:bazel_env)"
+        not(df_web_styles),
+        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
     )]
     fn page_loads_vendored_scripts_stylesheet_and_fonts_with_hashes() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
