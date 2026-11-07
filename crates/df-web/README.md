@@ -122,6 +122,15 @@ Result from reading the extension source (`dist/ext/hx-sse.js`):
 - Not verified in a real browser in this environment (no phone/desktop browser session); see the
   manual checks in `openspec/changes/iter1-control-plane-web/tasks.md` (5.1).
 
+Added after the spike:
+
+- **Cleanup of a swapped-out stream.** The extension's `htmx_before_cleanup` aborts the request and
+  then cancels the reader of the aborted stream without handling the rejection: an uncaught
+  `AbortError` on every swap of `#ws-detail`. `scripts/sse-cleanup.ts` registers a hook that runs
+  first (loaded between htmx and `hx-sse`; htmx calls hooks in registration order) and cancels
+  the reader of the still open stream. The e2e test
+  `opening_tasks_from_the_list_leaves_a_clean_console` (`crates/df-e2e/tests/ui.rs`) checks it.
+
 ## Assets and styles
 
 The stylesheet (`styles/input.css`) and the component scripts (`scripts/*.ts`) are compiled, not
