@@ -4,12 +4,22 @@
 
 use anyhow::{Context, Result};
 use df_e2e::browser::Session;
-use df_e2e::wait::RUN_TIMEOUT;
+use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data};
+use playwright_rs::protocol::{DragToOptions, Position};
 use playwright_rs::{Viewport, expect};
 
-/// What the first turn of the `network-access` script says; it then holds the turn.
-const NEED: &str = "I need the package index from pypi.org.";
+/// Wide enough for the graph to grow next to the 520 px events table.
+const WIDE: Viewport = Viewport {
+    width: 1440,
+    height: 900,
+};
+/// Rows of the events table of the traffic page.
+const ROWS: &str = "#flows tbody tr";
+/// Divider between the graph and the events table of the traffic page.
+const DIVIDER: &str = "[role=separator]";
+/// Width change of an arrow key on the divider (`divKey` in `scripts/egress-log.ts`).
+const DIVIDER_STEP: u32 = 32;
 
 /// Opens the dialog of project `key` from the projects page.
 async fn open_project_dialog(session: &Session, env: &E2eEnv, key: &str) -> Result<()> {
@@ -145,5 +155,208 @@ async fn opening_tasks_from_the_list_leaves_a_clean_console() -> Result<()> {
         session.open_task(&env, key).await?;
         session.cancel_task().await?;
     }
+    Ok(())
+}
+
+/// egress-log: pause and resume, the divider (keyboard, reset, drag, remembered width) and the
+/// details panel, on the live events of a task whose fetch the proxy keeps denying.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn traffic_page_pauses_resizes_and_opens_details() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    // The script retries the denied fetch once a second until the request is decided.
+    let key = session
+        .create_task(&env, data::NETWORK_PROJECT_KEY, "Live traffic.", None)
+        .await?;
+    session.expect_text(data::NETWORK_NEED, RUN_TIMEOUT).await?;
+    let url = format!("{}/egress/log?task={key}", env.base_url);
+    session.page.set_viewport_size(WIDE).await?;
+    // Reloaded until the backlog holds the first denied fetch.
+    eventually("the first event of the task", RUN_TIMEOUT, || async {
+        session.page.goto(&url, None).await?;
+        Ok((rows(&session).await? > 0).then_some(()))
+    })
+    .await?;
+
+    pause_and_resume(&session, &env, &url).await?;
+    divider(&session).await?;
+    details(&session).await?;
+
+    session.open_task(&env, &key).await?;
+    session.cancel_task().await?;
+    Ok(())
+}
+
+async fn rows(session: &Session) -> Result<usize> {
+    Ok(session.page.locator(ROWS).count().await?)
+}
+
+/// Waits until the events table has at least `count` rows; returns the number it has then.
+async fn wait_for_rows(session: &Session, count: usize) -> Result<usize> {
+    eventually(&format!("at least {count} rows"), RUN_TIMEOUT, || async {
+        let rows = rows(session).await?;
+        Ok((rows >= count).then_some(rows))
+    })
+    .await
+}
+
+/// Pause aborts the stream and the page stops changing while new events arrive; Resume brings
+/// them in. A second viewer sees the new events in the buffered backlog of a fresh page load, so
+/// the check does not rest on a live stream.
+async fn pause_and_resume(session: &Session, env: &E2eEnv, url: &str) -> Result<()> {
+    // The rows come with the page; the stream connects after it.
+    eventually("the stream of the traffic page", RUN_TIMEOUT, || async {
+        let connected = session
+            .page
+            .evaluate_value("!!document.querySelector('#sse-slot > *')?._htmx?.sse")
+            .await?;
+        Ok((connected == "true").then_some(()))
+    })
+    .await?;
+    // The extension's handle on the request, kept to check that Pause aborted it.
+    session
+        .page
+        .evaluate_value(
+            "(window.pausedStream = document.querySelector('#sse-slot > *')._htmx.sse.abortController, 1)",
+        )
+        .await
+        .context("the connected stream of the traffic page")?;
+    let badge = session.page.locator("header [role=status]");
+    session
+        .page
+        .locator("button:has-text('Pause')")
+        .click(None)
+        .await?;
+    expect(badge.clone()).to_contain_text("Paused").await?;
+    let aborted = session
+        .page
+        .evaluate_value("window.pausedStream.signal.aborted")
+        .await?;
+    assert_eq!(aborted, "true", "Pause aborts the stream's request");
+    let streams = session
+        .page
+        .evaluate_value("document.getElementById('sse-slot').children.length")
+        .await?;
+    assert_eq!(streams, "0", "Pause removes the stream element");
+    let paused = rows(session).await?;
+
+    // The denied retries go on (up to 240 s after the task started, far longer than this takes).
+    let watcher = Session::start(env).await?;
+    watcher.login(env).await?;
+    let buffered = eventually("an event after the pause", RUN_TIMEOUT, || async {
+        watcher.page.goto(url, None).await?;
+        let count = rows(&watcher).await?;
+        Ok((count > paused).then_some(count))
+    })
+    .await?;
+    assert_eq!(rows(session).await?, paused, "rows changed while paused");
+
+    session
+        .page
+        .locator("button:has-text('Resume')")
+        .click(None)
+        .await?;
+    expect(badge).to_contain_text("Live").await?;
+    wait_for_rows(session, buffered).await?;
+    Ok(())
+}
+
+async fn divider_value(session: &Session, attribute: &str) -> Result<String> {
+    session
+        .page
+        .locator(DIVIDER)
+        .get_attribute(attribute)
+        .await?
+        .with_context(|| format!("{attribute} of the divider"))
+}
+
+/// Arrow key, double-click reset, drag up to the limit, and the width kept across a reload.
+async fn divider(session: &Session) -> Result<()> {
+    let divider = session.page.locator(DIVIDER);
+    let initial: u32 = divider_value(session, "aria-valuenow").await?.parse()?;
+
+    divider.focus().await?;
+    divider.press("ArrowRight", None).await?;
+    expect(divider.clone())
+        .to_have_attribute("aria-valuenow", &(initial + DIVIDER_STEP).to_string())
+        .await
+        .context("Right Arrow grows the graph by one step")?;
+
+    divider.dblclick(None).await?;
+    expect(divider.clone())
+        .to_have_attribute("aria-valuenow", &initial.to_string())
+        .await
+        .context("double-click restores the default width")?;
+
+    // Dropped near the right edge of the events panel: the table keeps its minimum width.
+    let events = session
+        .page
+        .locator("#events")
+        .bounding_box()
+        .await?
+        .context("box of the events panel")?;
+    divider
+        .drag_to(
+            &session.page.locator("#events"),
+            DragToOptions::builder()
+                .target_position(Position {
+                    x: events.width - 10.0,
+                    y: events.height / 2.0,
+                })
+                .build(),
+        )
+        .await
+        .context("drag the divider")?;
+    let max = divider_value(session, "aria-valuemax").await?;
+    expect(divider.clone())
+        .to_have_attribute("aria-valuenow", &max)
+        .await
+        .context("dragging stops at the limit")?;
+    assert_ne!(max, initial.to_string(), "the drag did not resize");
+
+    session.page.reload(None).await?;
+    let divider = session.page.locator(DIVIDER);
+    expect(divider.clone())
+        .to_have_attribute("aria-valuenow", &max)
+        .await
+        .context("the width is remembered across a reload")?;
+    // Back to the default: at the limit the table is too narrow for the inline row actions.
+    divider.dblclick(None).await?;
+    expect(divider)
+        .to_have_attribute("aria-valuenow", &initial.to_string())
+        .await
+        .context("double-click after the reload restores the default width")
+}
+
+/// The details of a row open in a panel; Escape closes it and focus returns to the row.
+async fn details(session: &Session) -> Result<()> {
+    wait_for_rows(session, 1).await?;
+    // By label (host and time): a live update re-renders the rows.
+    let label = session
+        .page
+        .locator("#flows button[aria-label^='Request details for']:visible")
+        .first()
+        .get_attribute("aria-label")
+        .await?
+        .context("label of the newest row's details button")?;
+    let opener = session
+        .page
+        .locator(format!("#flows button[aria-label='{label}']:visible"));
+    opener.click(None).await?;
+    let panel = session.page.locator("aside[role=dialog]");
+    expect(panel.clone()).to_be_visible().await?;
+    expect(session.page.locator("#flow-title"))
+        .to_contain_text(data::NETWORK_HOST)
+        .await?;
+
+    session.page.keyboard().press("Escape", None).await?;
+    expect(panel).to_be_hidden().await?;
+    let focused = session
+        .page
+        .evaluate_value("document.activeElement.getAttribute('aria-label')")
+        .await?;
+    assert_eq!(focused, label, "focus returns to the row's details button");
     Ok(())
 }

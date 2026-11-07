@@ -33,7 +33,9 @@ document.addEventListener('alpine:init', () => {
       try {
         const stored = parseInt(localStorage.getItem(cfg.widthKey) ?? '', 10)
         if (stored) this.want = stored
-      } catch (e) {}
+      } catch {
+        // Storage unavailable: start at the default width.
+      }
       // The stored width may not fit this window: clamp it once the layout exists.
       this.$nextTick(() => this.setW(this.want, false))
       document.addEventListener('htmx:sse:error', () => { this.reconnecting = true })
@@ -104,7 +106,11 @@ document.addEventListener('alpine:init', () => {
       this.w = Math.min(hi, Math.max(lo, Math.round(persist ? value : this.want)))
       if (persist) {
         this.want = this.w
-        try { localStorage.setItem(cfg.widthKey, String(this.want)) } catch (e) {}
+        try {
+          localStorage.setItem(cfg.widthKey, String(this.want))
+        } catch {
+          // Storage unavailable: the width is not remembered.
+        }
       }
     },
     dragStart(e: PointerEvent): void {
