@@ -39,8 +39,46 @@ pub use transcript::QueuedState;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     const DOC: &str = include_str!("../../../../docs/design-system.md");
     const CSS: &str = include_str!("../../styles/input.css");
+    /// WCAG 2.x minimum for body text. No token pair is reserved for large text (3:1).
+    const MIN_TEXT_CONTRAST: f64 = 4.5;
+    /// Foreground and background tokens of the text pairs in `docs/design-system.md`,
+    /// "Contrast ratios".
+    const TEXT_PAIRS: [(&str, &str); 30] = [
+        ("ink", "app"),
+        ("ink", "panel"),
+        ("ink", "raised"),
+        ("ink", "bubble-me"),
+        ("muted", "app"),
+        ("muted", "panel"),
+        ("muted", "sunk"),
+        ("muted", "raised"),
+        ("faint", "app"),
+        ("faint", "panel"),
+        ("faint", "sunk"),
+        ("faint", "raised"),
+        ("faint", "accent-soft"),
+        ("danger", "raised"),
+        ("danger", "app"),
+        ("danger", "danger-soft"),
+        ("accent-text", "panel"),
+        ("accent-text", "accent-soft"),
+        ("on-accent", "accent"),
+        ("on-bubble-agent", "bubble-agent"),
+        ("on-bubble-agent", "code-on-agent"),
+        ("rail-ink", "rail"),
+        ("accent", "rail"),
+        ("status-running-fg", "status-running-bg"),
+        ("status-waiting-fg", "status-waiting-bg"),
+        ("status-queued-fg", "status-queued-bg"),
+        ("status-completed-fg", "status-completed-bg"),
+        ("status-failed-fg", "status-failed-bg"),
+        ("status-limited-fg", "status-limited-bg"),
+        ("status-review-fg", "status-review-bg"),
+    ];
 
     /// Names of the variables in the light `:root` block of the stylesheet.
     fn tokens() -> Vec<String> {
@@ -55,6 +93,79 @@ mod tests {
             .filter_map(|line| line.split(':').next())
             .map(str::to_string)
             .collect()
+    }
+
+    /// The `--name: #rrggbb` colors of the first `:root { … }` block in `css`.
+    fn colors(css: &str) -> HashMap<String, String> {
+        let block = css
+            .split(":root {")
+            .nth(1)
+            .and_then(|b| b.split('}').next());
+        block
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("--")?.split_once(':'))
+            .map(|(name, value)| {
+                let value = value.trim().trim_end_matches(';');
+                (name.to_string(), value.to_string())
+            })
+            .filter(|(_, value)| value.len() == 7 && value.starts_with('#'))
+            .collect()
+    }
+
+    /// Light and dark colors; the dark theme keeps every light value it does not redefine.
+    fn themes() -> [(&'static str, HashMap<String, String>); 2] {
+        let light = colors(CSS);
+        let mut dark = light.clone();
+        let dark_css = CSS
+            .split("@media (prefers-color-scheme: dark)")
+            .nth(1)
+            .expect("dark theme block in styles/input.css");
+        dark.extend(colors(dark_css));
+        [("light", light), ("dark", dark)]
+    }
+
+    /// Relative luminance of `#rrggbb` (WCAG 2.x).
+    fn luminance(hex: &str) -> f64 {
+        let channel = |at: usize| {
+            let c = f64::from(u8::from_str_radix(&hex[at..at + 2], 16).unwrap()) / 255.0;
+            if c <= 0.040_45 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+    }
+
+    fn contrast(a: &str, b: &str) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn contrast_follows_the_wcag_formula() {
+        assert!((contrast("#000000", "#ffffff") - 21.0).abs() < 1e-9);
+        assert!((contrast("#ffffff", "#ffffff") - 1.0).abs() < 1e-9);
+        // The lightest grey that meets 4.5:1 on white, and the next lighter one.
+        assert!(contrast("#767676", "#ffffff") >= MIN_TEXT_CONTRAST);
+        assert!(contrast("#777777", "#ffffff") < MIN_TEXT_CONTRAST);
+    }
+
+    #[test]
+    fn every_text_pair_meets_the_minimum_contrast_in_both_themes() {
+        for (theme, colors) in themes() {
+            for (fg, bg) in TEXT_PAIRS {
+                let (Some(fg_hex), Some(bg_hex)) = (colors.get(fg), colors.get(bg)) else {
+                    panic!("`{fg}` or `{bg}` is not a hex color of the {theme} theme");
+                };
+                let ratio = contrast(fg_hex, bg_hex);
+                assert!(
+                    ratio >= MIN_TEXT_CONTRAST,
+                    "{theme}: `{fg}` on `{bg}` is {ratio:.2}:1, below {MIN_TEXT_CONTRAST}:1"
+                );
+            }
+        }
     }
 
     #[test]

@@ -50,7 +50,7 @@ Defined once in `styles/input.css`: CSS variables in `:root` (light), redefined 
 
 ### Contrast ratios
 
-Measured with the WCAG 2.x formula; every text pair meets 4.5:1.
+Measured with the WCAG 2.x formula; every text pair meets 4.5:1. The unit test `every_text_pair_meets_the_minimum_contrast_in_both_themes` (`crates/df-web/src/components/mod.rs`) computes these pairs from `styles/input.css`.
 
 | Pair | Light | Dark |
 |---|---|---|
@@ -227,7 +227,7 @@ Do: keep the stack and the input in one Alpine scope (`draft`, `saved`, `editing
 - [ ] Usable at 390 px: no horizontal page scroll, targets of 44 px, nothing hover-only.
 - [ ] One primary action; icon-only controls have an `aria-label`.
 - [ ] Keyboard: every action reachable, focus ring visible, dialogs close with Escape.
-- [ ] Text contrast of any new token pair is at least 4.5:1 and listed above.
+- [ ] Text contrast of any new token pair is at least 4.5:1, listed above and added to `TEXT_PAIRS` in `crates/df-web/src/components/mod.rs`.
 - [ ] Forms re-render with values and errors on 422.
 - [ ] HTML unit test for new components; page test for the view.
 - [ ] No third-party host (fonts, icons, scripts).
