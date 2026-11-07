@@ -33,7 +33,7 @@ flowchart TD
     D --> E[helm install values-e2e.yaml]
     I --> E
     E --> F[seed, port-forwards]
-    F --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test webhooks -- --ignored --test-threads=1"]
+    F --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1"]
     G --> H[kind delete cluster]
 ```
 
@@ -88,7 +88,7 @@ All targets come from the environment, so the same tests run against any instanc
 |---|---|---|
 | `E2E_KEEP` | unset | `1` keeps the cluster after the run. |
 | `E2E_TEST_THREADS` | `1` | Tests that run in parallel per test binary. CI uses `2`; each test works on its own task, branch and requests. More than `1` exceeds the [resource budget](#resource-budget). |
-| `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test webhooks`, e.g. a test name. |
+| `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test ui --test webhooks`, e.g. a test name. |
 | `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver installer is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
@@ -97,7 +97,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 
 ## Tests
 
-`cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test webhooks -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
+`cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test ui --test webhooks -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
 
 | Test | Scenarios (`openspec/specs/task-delivery/spec.md`) |
 |---|---|
@@ -157,7 +157,7 @@ Scripts commit with the identity of the runtime-owned `.git/config`; the Git pro
 The suite contains nothing specific to kind. Point the `E2E_*` variables at an instance that has the seed data and run (`webhooks` also needs the repository webhook and a reviewer with write access, as `just e2e-local` sets them up):
 
 ```bash
-cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test webhooks -- --ignored --test-threads=1
+cargo test -p df-e2e --test delegation --test demo --test flow --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
 ```
 
 The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` installs the driver into the user cache with `cargo install playwright-rs` from a directory outside the repository (which does not read that setting); on another machine run `playwright-rs install --driver-only` once.

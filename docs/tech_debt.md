@@ -116,7 +116,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
 | TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
 | TD-103 | low   | `df-e2e` | Follow-up test can see the PR still in draft after `in_review` |
-| TD-104 | low   | `df-web` tab row | Phone tab-row visibility is only checked by hand ([#124]) |
 | TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
 | TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
 | TD-109 | low   | `df-web` tests | Dev-dependency on `df-agent-channel` only for the metric probe |
@@ -869,20 +868,6 @@ The test waits for task status `in_review`, then asserts `draft == false`. Marki
 **Matters when:** CI flakes block merges.
 
 **Fix:** wait on the PR's draft flag (or the event that marks it ready) instead of the task status.
-
-Origin of TD-104: code review of `project-dialog-lifecycle-events` (`df-web`, 2026-11-04). The `TD-n (ID)` heading gives the ID used in that review.
-
-### TD-104 (P6). Phone tab-row visibility is only checked by hand
-
-Tracked in [#124].
-
-`crates/df-web/src/config_pages/push_policy/tests.rs` (`the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view`)
-
-The test checks only the overflow classes and that `tabs.js` calls `scrollIntoView`. The spec scenario "Four tabs at 390 px" (configuration-management, "Form tabs on phones") was checked by hand at 300 px, since three tabs fit at 390 px.
-
-**Matters when:** the "Context" tab (`iter3-project-context`) lands and four tabs overflow at 390 px.
-
-**Fix:** an e2e step at 390 px that chooses the last tab and asserts that its bounding box lies inside the tab list and `document.documentElement.scrollWidth <= innerWidth`.
 
 ### TD-106 (S2). Webhook parsing helpers are copied between the forge plugins
 
