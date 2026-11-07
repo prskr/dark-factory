@@ -213,13 +213,16 @@ install_driver() {
   log "Installing the Playwright driver for the test host"
   # The workspace skips the driver download (.cargo/config.toml). `cargo install` in a directory
   # outside the repository does not read that setting, so the build assembles the driver in the
-  # user cache, where the playwright-rs library looks for it. Reruns find it installed.
-  local version tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
+  # user cache, where the playwright-rs library looks for it. Reruns find it installed. Outside the
+  # repository rustup does not read rust-toolchain.toml either: pin the toolchain explicitly.
+  local version toolchain tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
   version="$(sed -n '/^name = "playwright-rs"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)"
   [[ -n "$version" ]] || { echo "playwright-rs is not in Cargo.lock" >&2; exit 1; }
+  toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+  [[ -n "$toolchain" ]] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
   (
     cd "$scratch"
-    cargo install --quiet --locked --root "$tools" --version "$version" --features cli playwright-rs
+    RUSTUP_TOOLCHAIN="$toolchain" cargo install --quiet --locked --root "$tools" --version "$version" --features cli playwright-rs
     "$tools/bin/playwright-rs" install --driver-only
   )
 }
