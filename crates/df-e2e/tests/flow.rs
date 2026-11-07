@@ -1,7 +1,7 @@
 //! The iteration 1 flow through the web UI (`just e2e-local`): assignment, pull request, tools,
-//! follow-up, completion and the rate limit; and demo steps 2 to 5 of iteration 2 (push checks,
-//! network access request, stop and cancel). Needs the environment of `E2eEnv`, so the tests
-//! are ignored by default.
+//! follow-up, completion and the rate limit; demo steps 2 to 5 of iteration 2 (push checks,
+//! network access request, stop and cancel); and blocking questions. Needs the environment of
+//! `E2eEnv`, so the tests are ignored by default.
 
 use std::time::{Duration, Instant};
 
@@ -22,7 +22,7 @@ const RETRY_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the retry may take after the approval, until the UI shows it.
 const RETRY_BOUND: Duration = Duration::from_secs(10);
 /// What the first turn of the `network-access` script says before it fetches.
-const NEED: &str = "I need the package index from pypi.org.";
+const NEED: &str = data::NETWORK_NEED;
 /// What the fake agent says once the fetch of the first turn got through.
 const FETCHED: &str = "Fetched https://pypi.org/";
 /// What the second turn of the `network-access` script (the decision message) says.
@@ -32,6 +32,14 @@ const QUEUED_FOLLOW_UP: &str = "Please keep this queued follow-up with the quest
 const QUESTION_ANSWER: &str = "Both the queued follow-up and this answer.";
 const HUMAN_AUTHOR: &str = "E2E Admin";
 const COMBINED_INPUT: &str = "Received the queued follow-up and question answer with author lines.";
+const FIRST_BLOCKING_QUESTION: &str = "Which greeting should the file contain?";
+const FIRST_BLOCKING_ANSWER: &str = "Hello, blocking world.";
+/// What the second turn says once the first answer reached it.
+const FIRST_ANSWER_SEEN: &str = "Got the first answer in the same run.";
+const SECOND_BLOCKING_QUESTION: &str = "Should I also add a test?";
+const SECOND_BLOCKING_ANSWER: &str = "Yes, add a test.";
+/// What run 2 says once the second answer started it.
+const SECOND_ANSWER_SEEN: &str = "Continued after the second answer.";
 
 struct World {
     env: E2eEnv,
@@ -83,6 +91,24 @@ impl World {
         self.session
             .expect_region_text(&card, answer, RETRY_TIMEOUT)
             .await
+    }
+
+    /// Waits until the agent asked question `text` on task `key`; returns the request.
+    async fn question(&self, key: &str, text: &str) -> Result<RequestId> {
+        let task_id = TaskId::from_uuid(
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM tasks WHERE key = $1")
+                .bind(key)
+                .fetch_one(&self.pool)
+                .await?,
+        );
+        eventually(&format!("question `{text}`"), RUN_TIMEOUT, || async {
+            Ok(df_db::requests::list_for_task(&self.pool, task_id)
+                .await?
+                .into_iter()
+                .find(|r| r.kind == RequestKind::Question && r.question_text() == text)
+                .map(|r| r.id))
+        })
+        .await
     }
 
     async fn turn_prompt_ids(&self, key: &str) -> Result<Vec<Vec<String>>> {
@@ -564,6 +590,75 @@ async fn queued_follow_up_and_question_answer_share_one_turn_with_author_lines()
         "{key}: one next TurnStarted {:?}; ACP matched {HUMAN_AUTHOR}: and Request decision: with the question answer",
         turns[1]
     );
+    world.session.cancel_task().await?;
+    world.wait_for_status(&key, "cancelled").await?;
+    Ok(())
+}
+
+/// A blocking question answered through the request card while the run holds its turn (the
+/// network gate of the script) continues in the same run. A second one left unanswered ends the
+/// run `blocked` at the idle `Release` (`runs.keepAliveSeconds: 0` in the e2e values), and its
+/// answer starts run 2.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn blocking_question_continues_the_run_and_an_unanswered_one_blocks_until_answered()
+-> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::NETWORK_PROJECT_KEY,
+            "[blocking-question] Ask before fetching.",
+            None,
+        )
+        .await?;
+    let first = world.question(&key, FIRST_BLOCKING_QUESTION).await?;
+    let gate = eventually("the held first-turn fetch", RUN_TIMEOUT, || async {
+        db::network_request(&world.pool, &key, data::NETWORK_HOST, data::NETWORK_PORT).await
+    })
+    .await?;
+
+    world
+        .answer_question(first, FIRST_BLOCKING_QUESTION, FIRST_BLOCKING_ANSWER)
+        .await?;
+    world
+        .session
+        .approve_request(
+            &world.env,
+            &gate.id.to_string(),
+            &format!(
+                "network access to {}:{}",
+                data::NETWORK_HOST,
+                data::NETWORK_PORT
+            ),
+            Some("task"),
+        )
+        .await?;
+    world.session.open_task(&world.env, &key).await?;
+    world
+        .session
+        .expect_region_text("#transcript", FIRST_ANSWER_SEEN, RUN_TIMEOUT)
+        .await?;
+    // Only the second answer can start run 2, so the first one reached run 1.
+    assert_eq!(db::runs(&world.pool, &key).await?.len(), 1);
+
+    let second = world.question(&key, SECOND_BLOCKING_QUESTION).await?;
+    world.wait_for_status(&key, "blocked").await?;
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].outcome.as_deref(), Some("blocked"), "{runs:?}");
+
+    world.session.open_task(&world.env, &key).await?;
+    world
+        .answer_question(second, SECOND_BLOCKING_QUESTION, SECOND_BLOCKING_ANSWER)
+        .await?;
+    world
+        .session
+        .expect_region_text("#transcript", SECOND_ANSWER_SEEN, RUN_TIMEOUT)
+        .await?;
+    let runs = db::runs(&world.pool, &key).await?;
+    assert_eq!(runs.len(), 2, "{runs:?}");
     world.session.cancel_task().await?;
     world.wait_for_status(&key, "cancelled").await?;
     Ok(())

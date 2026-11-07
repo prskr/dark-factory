@@ -68,9 +68,10 @@ fn shipped_scripts_parse() {
             .iter()
             .any(|step| matches!(step, crate::script::Step::Fetch(_)))
     );
-    // The decision message is the next prompt of the same session, not a resumed one.
+    // The decision message is the next prompt of the same session, not a resumed one; only the
+    // second blocking question's answer starts a resumed run.
     assert_eq!(network.sessions.new.len(), 2);
-    assert!(network.sessions.loaded.is_empty());
+    assert_eq!(network.sessions.loaded.len(), 1);
     // The fix turn answers the `push.rejected` message in the same or in a resumed session.
     let secret = Script::from_yaml_str(include_str!("../scripts/push-secret.yaml")).unwrap();
     assert_eq!(secret.sessions.new.len(), 2);
