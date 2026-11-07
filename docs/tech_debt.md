@@ -96,7 +96,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
 | TD-72 | low   | `df-db`, `df-web` requests | Task key and title travel as loose strings with request rows |
-| TD-73 | medium | e2e tests | Blocking-question flow has no end-to-end test (task 6.1) ([#124]) |
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 | TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
@@ -634,18 +633,6 @@ Both take the decider's name from `Principal::Human` and match on `RequestState`
 **Matters when:** a request view needs another task field (status, project).
 
 **Fix:** Add a `TaskRef { key, title }` (or a named list row) and pass it instead of the tuple.
-
-### TD-73 (P4). Blocking-question flow has no end-to-end test
-
-`crates/df-agent-channel/tests/agent_port.rs` (`blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked`)
-
-Tracked in [#124].
-
-The in-process test calls `df_db::requests::decide` directly instead of the `/requests/{id}/answer` handler. It sends `RunReport BLOCKED` itself instead of going through the control-plane `Release` deadline, and it only checks that the task is `queued`, not that a new run starts. The `df-e2e` crate exists, but `crates/df-e2e/tests/flow.rs` has no blocking-question scenario yet, so task 6.1 stays open.
-
-**Matters when:** a change touches requests, `Release` or the follow-up run; nothing end to end catches a break today.
-
-**Fix:** Extend the e2e test as task 6.1 describes. Answer through the UI handler while the run awaits input; leave a second question unanswered until `Release`; check that answering it starts run 2.
 
 ### TD-76 (SP7). Warnings for failed outbox and lock-release calls have no test
 

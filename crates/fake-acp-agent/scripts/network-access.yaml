@@ -1,5 +1,8 @@
 # Script of demo step 4 of iteration 2 (docs/demo.md): the proxy denies pypi.org until the board
 # member approves the `network-access` request; the fetch retries once a second in the same turn.
+# The held fetch also keeps the turn open for the questions of
+# `[conversation-flow]` and `[blocking-question]` tasks
+# (crates/df-e2e/tests/flow.rs).
 sessions:
   new:
     - - say: "I need the package index from pypi.org."
@@ -12,6 +15,15 @@ sessions:
                 args:
                   text: "Which inputs should the next turn receive?"
                   blocking: false
+      - when:
+          prompt_contains: "[blocking-question]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which greeting should the file contain?"
+                  blocking: true
       - fetch:
           url: https://pypi.org/simple/pip/
           timeout_seconds: 240
@@ -26,4 +38,21 @@ sessions:
                 prompt_contains: "Both the queued follow-up and this answer."
                 steps:
                   - say: "Received the queued follow-up and question answer with author lines."
+      - when:
+          prompt_contains: "Hello, blocking world."
+          steps:
+            - say: "Got the first answer in the same run."
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Should I also add a test?"
+                  blocking: true
+      - end: end_turn
+  # Run 2 of the blocking-question flow, started by the second answer.
+  loaded:
+    - - when:
+          prompt_contains: "Yes, add a test."
+          steps:
+            - say: "Continued after the second answer."
       - end: end_turn

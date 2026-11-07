@@ -15,6 +15,9 @@ pub const NETWORK_PROJECT_NAME: &str = "Network Access";
 /// The host the fake agent of project `NA` fetches from, and the port of its `CONNECT`.
 pub const NETWORK_HOST: &str = "pypi.org";
 pub const NETWORK_PORT: u16 = 443;
+/// What the first turn of the `NA` script says before its fetch; the proxy then denies the
+/// fetch, retried once a second for up to 240 s, until the request is decided.
+pub const NETWORK_NEED: &str = "I need the package index from pypi.org.";
 
 /// Project whose fake agent commits a test token (demo step 2 of iteration 2); tasks are `SC-<n>`.
 pub const SECRET_PROJECT_KEY: &str = "SC";
