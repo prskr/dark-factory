@@ -131,8 +131,9 @@ impl Session {
 
     /// Approves request `id` in the `/requests` inbox for `scope` (`task`, `project` or
     /// `instance`) once its card shows `summary`; `None` for a type with a single scope (no
-    /// choice on the card). The decided card leaves the live inbox, so callers check the outcome
-    /// elsewhere.
+    /// choice on the card). Returns once the card no longer offers the approval, so a following
+    /// navigation cannot cancel the request. The decided card leaves the live inbox, so callers
+    /// check the outcome elsewhere.
     pub async fn approve_request(
         &self,
         env: &E2eEnv,
@@ -154,11 +155,15 @@ impl Session {
                 .await
                 .with_context(|| format!("choose scope {scope}"))?;
         }
-        self.page
-            .locator(format!("{card} button:has-text('Approve')"))
-            .click(None)
+        let approve = self
+            .page
+            .locator(format!("{card} button:has-text('Approve')"));
+        approve.click(None).await.context("approve the request")?;
+        expect(approve)
+            .with_timeout(CARD_TIMEOUT)
+            .to_be_hidden()
             .await
-            .context("approve the request")
+            .context("wait for the approval to be recorded")
     }
 
     /// Sends `message` to the open task.
