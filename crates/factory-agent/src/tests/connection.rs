@@ -924,6 +924,7 @@ async fn test_scenario_pending_tool_call_resent_after_reconnect() {
                     call_id: "call-xyz".to_string(),
                     tool_name: "test_tool".to_string(),
                     arguments_json: "{}".to_string(),
+                    attachment: Vec::new().into(),
                 },
             )),
         })

@@ -123,6 +123,9 @@ pub struct ChildEnded {
     /// The completion summary of the child's last run, written by its agent.
     pub summary: String,
     pub pr_url: Option<String>,
+    /// The child's artifacts as `<key>/<name>`, newest first. Those of its descendants are not
+    /// listed.
+    pub artifacts: Vec<String>,
     /// Keys of the tasks that still await a dependency on the child.
     pub waiting_dependents: Vec<String>,
 }
@@ -607,6 +610,11 @@ pub fn child_ended_text(child: &ChildEnded) -> String {
     if let Some(url) = &child.pr_url {
         lines.push(format!("PR: {url}"));
     }
+    lines.push(if child.artifacts.is_empty() {
+        "Artifacts: none".to_string()
+    } else {
+        format!("Artifacts: {}", child.artifacts.join(", "))
+    });
     if !child.waiting_dependents.is_empty() {
         let waiting = child.waiting_dependents.join(", ");
         lines.push(format!("Still waiting on {key}: {waiting}"));

@@ -73,6 +73,8 @@ pub struct InstanceConfig {
     pub plugins: BTreeMap<String, PluginConfig>,
     #[serde(default)]
     pub lifecycle_events: crate::lifecycle::LifecycleEventsConfig,
+    #[serde(default)]
+    pub artifacts: ArtifactsConfig,
 }
 
 impl InstanceConfig {
@@ -85,6 +87,7 @@ impl InstanceConfig {
             ));
         }
         cfg.lifecycle_events.validate()?;
+        cfg.artifacts.validate()?;
         for (name, plugin) in &cfg.plugins {
             if plugin.call_timeout_seconds == 0 {
                 return Err(ConfigError::Invalid(format!(
@@ -642,6 +645,66 @@ impl Default for RunsConfig {
             max_auto_resumes: default_max_auto_resumes(),
         }
     }
+}
+
+/// Limits of task artifacts (spec `task-artifacts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactsConfig {
+    /// Largest text artifact in bytes.
+    #[serde(default = "default_artifact_max_text_bytes")]
+    pub max_text_bytes: u64,
+    /// Largest image artifact in bytes.
+    #[serde(default = "default_artifact_max_image_bytes")]
+    pub max_image_bytes: u64,
+    /// Artifacts per task.
+    #[serde(default = "default_artifact_max_per_task")]
+    pub max_per_task: u32,
+}
+
+impl Default for ArtifactsConfig {
+    fn default() -> Self {
+        Self {
+            max_text_bytes: default_artifact_max_text_bytes(),
+            max_image_bytes: default_artifact_max_image_bytes(),
+            max_per_task: default_artifact_max_per_task(),
+        }
+    }
+}
+
+impl ArtifactsConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let max = crate::artifacts::MAX_ARTIFACT_BYTES;
+        for (option, bytes) in [
+            ("maxTextBytes", self.max_text_bytes),
+            ("maxImageBytes", self.max_image_bytes),
+        ] {
+            if !(1..=max).contains(&bytes) {
+                return Err(ConfigError::Invalid(format!(
+                    "`artifacts.{option}` is {bytes}: it must be between 1 and {max} (8 MiB, the most the runtime sends)"
+                )));
+            }
+        }
+        if self.max_per_task == 0 {
+            return Err(ConfigError::Invalid(
+                "`artifacts.maxPerTask` must be at least 1: with 0 no artifact can be written"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn default_artifact_max_text_bytes() -> u64 {
+    1024 * 1024
+}
+
+fn default_artifact_max_image_bytes() -> u64 {
+    3_932_160
+}
+
+fn default_artifact_max_per_task() -> u32 {
+    50
 }
 
 /// Retention of task volumes.

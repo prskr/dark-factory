@@ -424,6 +424,9 @@ message ToolCallRequest {
   string call_id = 1;
   string tool_name = 2;
   string arguments_json = 3;
+  // File content the runtime read for the call, instead of base64 in
+  // arguments_json: the bytes of the `path` of write_artifact (at most 8 MiB).
+  bytes attachment = 4;
 }
 
 message ToolCallResult {

@@ -5,6 +5,8 @@
 // - `details`: the details panel is open (below 1280 px).
 // - `collapsed`: the details column is collapsed to its strip (from 1280 px); remembered in
 //   `localStorage['df.details.collapsed']`, read and written in `try/catch`.
+// - `listCollapsed`: the task list is collapsed to a strip (from 768 px); remembered in
+//   `localStorage['df.list.collapsed']`, read and written in `try/catch`.
 // - `sheet`: height of the phone details sheet, `'half'` or `'full'`.
 // - `dragging`: the sheet handle is being dragged (the sheet must not animate then).
 // - `drag`: `{ y, h, el, moved }` of the running drag; `dragged`: the last pointer sequence moved,
@@ -14,7 +16,7 @@
 // released sheet closes, `fullAbove` the share over which it becomes full height (otherwise half),
 // `dragSlop` the pixels a press has to move before it counts as a drag.
 //
-// Methods: `setCollapsed(value)`, `sheetToggle()` (tap or keyboard on the handle), and the
+// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `sheetToggle()` (tap or keyboard on the handle), and the
 // pointer sequence `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` (pointerup) and
 // `sheetDragCancel(e)` (pointercancel: no click follows, so `dragged` is reset).
 interface SheetDrag {
@@ -28,6 +30,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('workspace', () => ({
     details: false,
     collapsed: false,
+    listCollapsed: false,
     sheet: 'half' as 'half' | 'full',
     dragging: false,
     drag: null as SheetDrag | null,
@@ -37,10 +40,15 @@ document.addEventListener('alpine:init', () => {
     dragSlop: 4,
     init(): void {
       try { this.collapsed = localStorage.getItem('df.details.collapsed') === '1' } catch (e) {}
+      try { this.listCollapsed = localStorage.getItem('df.list.collapsed') === '1' } catch (e) {}
     },
     setCollapsed(value: boolean): void {
       this.collapsed = value
       try { localStorage.setItem('df.details.collapsed', value ? '1' : '0') } catch (e) {}
+    },
+    setListCollapsed(value: boolean): void {
+      this.listCollapsed = value
+      try { localStorage.setItem('df.list.collapsed', value ? '1' : '0') } catch (e) {}
     },
     sheetToggle(): void {
       if (this.dragged) { this.dragged = false; return }

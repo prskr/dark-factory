@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 use uuid::Uuid;
 
-pub(super) async fn seed_project_and_persona(
+pub(crate) async fn seed_project_and_persona(
     pool: &PgPool,
     project_key: &ProjectKey,
     persona_name: &str,
@@ -332,7 +332,7 @@ async fn database_check_constraints_reject_invalid_project_keys_task_statuses_an
     );
 }
 
-pub(super) fn new_task(
+pub(crate) fn new_task(
     project_id: ProjectId,
     persona_id: PersonaId,
     title: Option<&str>,
@@ -570,7 +570,7 @@ async fn rename_locks_the_title_and_is_audited() {
         .unwrap();
     assert_eq!(changed, Notification::TaskChanged { task_id: task.id });
 }
-pub(super) async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
+pub(crate) async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
     let run_id = RunId::new();
     sqlx::query(
         "INSERT INTO runs (id, task_id, number, state)
@@ -591,7 +591,7 @@ pub(super) fn text(t: &str) -> Vec<ContentBlock> {
     }]
 }
 
-pub(super) fn human() -> Principal {
+pub(crate) fn human() -> Principal {
     Principal::human(UserId::new(), "Ada")
 }
 

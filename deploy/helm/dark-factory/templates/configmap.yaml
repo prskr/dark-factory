@@ -39,6 +39,10 @@ data:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
       maxConcurrent: {{ .Values.runs.maxConcurrent }}
       maxAutoResumes: {{ .Values.runs.maxAutoResumes }}
+    artifacts:
+      maxTextBytes: {{ .Values.artifacts.maxTextBytes | int64 }}
+      maxImageBytes: {{ .Values.artifacts.maxImageBytes | int64 }}
+      maxPerTask: {{ .Values.artifacts.maxPerTask }}
     volumes:
       retainAfterCloseSeconds: {{ .Values.volumes.retainAfterCloseSeconds | int64 }}
       idleTtlSeconds: {{ .Values.volumes.idleTtlSeconds | int64 }}

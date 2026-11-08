@@ -29,6 +29,7 @@ rust_binary(
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
+        "//crates/df-artifact-types:df_artifact_types",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry_slim",
     ],
@@ -60,6 +61,7 @@ rust_test(
         normal = True,
         normal_dev = True,
     ) + [
+        "//crates/df-artifact-types:df_artifact_types",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry_slim_test_util",
     ],

@@ -8,9 +8,9 @@ use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanit
 use df_db::requests::{
     Raise, Raised, RequestError, close_pending_for_task, raise_approval, raise_question,
 };
-use df_db::{NewAuditEntry, Notification, publish, set_task_title, write_audit_entry};
+use df_db::{NewAuditEntry, Notification, PgBlobStore, publish, set_task_title, write_audit_entry};
 use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
-use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+use df_proto::transcript::v1::{BlobData, ContentBlock, TextContent, blob_data, content_block};
 use jsonschema::Validator;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
@@ -19,6 +19,7 @@ use crate::ChannelContext;
 use crate::assign::{RunContext, tool_input_schemas};
 use crate::error::ChannelError;
 
+mod artifacts;
 mod delegation;
 mod feedback;
 
@@ -39,6 +40,8 @@ struct Outcome {
     end_run_after_turn: bool,
     await_input_after_turn: bool,
     structured: Option<Value>,
+    /// Content blocks replacing the single text block built from `text`.
+    content: Option<Vec<ContentBlock>>,
 }
 
 impl Outcome {
@@ -49,6 +52,7 @@ impl Outcome {
             end_run_after_turn: false,
             await_input_after_turn: false,
             structured: None,
+            content: None,
         }
     }
 
@@ -59,6 +63,7 @@ impl Outcome {
             end_run_after_turn: false,
             await_input_after_turn: false,
             structured: None,
+            content: None,
         }
     }
 }
@@ -129,6 +134,17 @@ async fn try_execute(
         ));
     }
 
+    // The bytes of an attachment stay out of the stored row; their hash identifies them.
+    let mut stored_arguments = arguments.clone();
+    if !request.attachment.is_empty()
+        && let Some(object) = stored_arguments.as_object_mut()
+    {
+        object.insert(
+            "attachment_sha256".into(),
+            Value::String(df_db::sha256_hex(&request.attachment)),
+        );
+    }
+
     // Claim the call before executing it, in its own short transaction: no row lock or pool
     // connection is held while the forge is called, and a call is executed at most once.
     let claimed = sqlx::query(
@@ -138,7 +154,7 @@ async fn try_execute(
     .bind(call_uuid)
     .bind(rc.run.id.as_uuid())
     .bind(&request.tool_name)
-    .bind(&arguments)
+    .bind(&stored_arguments)
     .execute(&ctx.pool)
     .await?
     .rows_affected()
@@ -147,7 +163,9 @@ async fn try_execute(
         return answer_repeated_call(ctx, rc, &call_id, call_uuid).await;
     }
 
-    let outcome = match run_handler(ctx, rc, &request.tool_name, &arguments).await {
+    let outcome = match run_handler(ctx, rc, &request.tool_name, &arguments, &request.attachment)
+        .await
+    {
         Ok(outcome) => outcome,
         Err(e) => {
             tracing::error!(error = %e, run_id = %rc.run.id, tool = %request.tool_name, "tool handler failed");
@@ -155,8 +173,10 @@ async fn try_execute(
         }
     };
     let response = result(&call_id, &outcome);
+    let blobs = PgBlobStore::new(ctx.pool.clone());
+    let stored = externalize_images(&blobs, response.clone()).await?;
     let mut tx = ctx.pool.begin().await?;
-    store_result(&mut tx, call_uuid, &response).await?;
+    store_result(&mut tx, call_uuid, &stored).await?;
     let actor = Principal::agent(
         rc.persona.id,
         rc.persona.name.clone(),
@@ -170,12 +190,7 @@ async fn try_execute(
         "tool_call",
         request.call_id,
     )
-    .with_details(&serde_json::json!({
-        "tool": request.tool_name,
-        "run_id": rc.run.id,
-        "task_id": rc.task.id,
-        "is_error": outcome.is_error,
-    }))?;
+    .with_details(&audit_details(rc, &request.tool_name, &arguments, &outcome))?;
     write_audit_entry(&mut *tx, &entry).await?;
     tx.commit().await?;
     Ok(response)
@@ -203,7 +218,8 @@ async fn answer_repeated_call(
         ));
     }
     if let Some(stored) = stored {
-        return Ok(serde_json::from_value(stored)?);
+        let blobs = PgBlobStore::new(ctx.pool.clone());
+        return rehydrate_images(&blobs, serde_json::from_value(stored)?).await;
     }
     if !abandoned {
         return Ok(result(
@@ -240,21 +256,85 @@ async fn store_result(
     Ok(())
 }
 
+/// The details of the `tool_call.execute` audit entry. A call that names another task for an
+/// artifact read records it as `target_task` and `artifact`, refused or not; a refusal also
+/// records its error text.
+fn audit_details(rc: &RunContext, tool: &str, arguments: &Value, outcome: &Outcome) -> Value {
+    let mut details = serde_json::Map::from_iter([
+        ("tool".to_string(), Value::from(tool)),
+        ("run_id".to_string(), serde_json::json!(rc.run.id)),
+        ("task_id".to_string(), serde_json::json!(rc.task.id)),
+        ("is_error".to_string(), Value::from(outcome.is_error)),
+    ]);
+    let target = text_arg(arguments, "task").filter(|t| *t != rc.task.key.to_string());
+    if let (Some(target), "list_artifacts" | "read_artifact") = (target, tool) {
+        details.insert("target_task".into(), Value::String(target));
+        if outcome.is_error {
+            details.insert("error".into(), Value::String(outcome.text.clone()));
+        }
+        if let Some(name) = text_arg(arguments, "name").filter(|_| tool == "read_artifact") {
+            details.insert("artifact".into(), Value::String(name));
+        }
+    }
+    Value::Object(details)
+}
+
+/// Moves inline image data of `response` to the blob store; a stored result refers to it by hash.
+async fn externalize_images(
+    blobs: &PgBlobStore,
+    mut response: ToolCallResult,
+) -> Result<ToolCallResult, ChannelError> {
+    for block in &mut response.content {
+        crate::transcript::externalize_block(blobs, block).await?;
+    }
+    Ok(response)
+}
+
+/// Puts the image data of a stored result back from the blob store.
+async fn rehydrate_images(
+    blobs: &PgBlobStore,
+    mut response: ToolCallResult,
+) -> Result<ToolCallResult, ChannelError> {
+    for block in &mut response.content {
+        let Some(content_block::Kind::Image(image)) = &mut block.kind else {
+            continue;
+        };
+        let Some(blob_data::Source::Sha256(sha)) =
+            image.data.as_ref().and_then(|d| d.source.clone())
+        else {
+            continue;
+        };
+        let blob = blobs.get(&sha).await?.ok_or_else(|| {
+            ChannelError::InvalidData(format!("blob {sha} of a stored tool result is missing"))
+        })?;
+        image.data = Some(BlobData {
+            source: Some(blob_data::Source::Inline(blob.data.into())),
+        });
+    }
+    Ok(response)
+}
+
 /// The answer to a call that arrives after the run ended; nothing is executed.
 pub fn run_ended(call_id: &str) -> ToolCallResult {
     result(call_id, &Outcome::error("the run has ended"))
+}
+
+/// A visible text block.
+pub(crate) fn text_block(text: String) -> ContentBlock {
+    ContentBlock {
+        kind: Some(content_block::Kind::Text(TextContent { text })),
+        hidden: false,
+    }
 }
 
 fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
     ToolCallResult {
         call_id: call_id.to_string(),
         is_error: outcome.is_error,
-        content: vec![ContentBlock {
-            kind: Some(content_block::Kind::Text(TextContent {
-                text: outcome.text.clone(),
-            })),
-            hidden: false,
-        }],
+        content: outcome
+            .content
+            .clone()
+            .unwrap_or_else(|| vec![text_block(outcome.text.clone())]),
         structured_content_json: outcome
             .structured
             .as_ref()
@@ -272,6 +352,7 @@ async fn run_handler(
     rc: &RunContext,
     tool: &str,
     args: &Value,
+    attachment: &[u8],
 ) -> Result<Outcome, ChannelError> {
     match tool {
         "update_pull_request" => update_pull_request(ctx, rc, args).await,
@@ -286,6 +367,9 @@ async fn run_handler(
         "create_task" => delegation::create_task(ctx, rc, args).await,
         "list_personas" => delegation::list_personas(ctx).await,
         "send_message" => delegation::send_message(ctx, rc, args).await,
+        "write_artifact" => artifacts::write_artifact(ctx, rc, args, attachment).await,
+        "list_artifacts" => artifacts::list_artifacts(ctx, rc, args).await,
+        "read_artifact" => artifacts::read_artifact(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -601,6 +685,7 @@ mod tests {
             call_id: uuid::Uuid::now_v7().to_string(),
             tool_name: tool.into(),
             arguments_json: args.to_string(),
+            attachment: Vec::new().into(),
         }
     }
 
@@ -634,7 +719,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 12);
+        assert_eq!(VALIDATORS.len(), 15);
     }
 
     #[tokio::test]

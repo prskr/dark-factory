@@ -1,0 +1,40 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "df_artifact_types",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_artifact_types",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+alias(
+    name = "df-artifact-types",
+    actual = ":df_artifact_types",
+)
+
+rust_test(
+    name = "df_artifact_types_test",
+    crate = ":df_artifact_types",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True),
+)

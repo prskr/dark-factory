@@ -62,6 +62,38 @@ impl From<&df_proto::agent::v1::ToolDescriptor> for McpToolDescriptorWire {
     }
 }
 
+/// One content item of a tool result, as the harness gets it over MCP.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum ToolContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    /// `data` is base64, as MCP image content.
+    #[serde(rename = "image")]
+    Image { mime_type: String, data: String },
+}
+
+impl ToolContent {
+    /// The content of a result block; other block kinds are not offered to the harness.
+    fn from_block(block: &df_proto::transcript::v1::ContentBlock) -> Option<Self> {
+        use base64::Engine;
+        use df_proto::transcript::v1::{blob_data, content_block::Kind};
+        match block.kind.as_ref()? {
+            Kind::Text(t) => Some(Self::Text {
+                text: t.text.clone(),
+            }),
+            Kind::Image(image) => match image.data.as_ref()?.source.as_ref()? {
+                blob_data::Source::Inline(bytes) => Some(Self::Image {
+                    mime_type: image.mime_type.clone(),
+                    data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                }),
+                blob_data::Source::Sha256(_) => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// Responses returned from the runtime Unix socket.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -72,7 +104,7 @@ pub enum RuntimeResponse {
     McpCallTool {
         call_id: String,
         is_error: bool,
-        content: Vec<String>,
+        content: Vec<ToolContent>,
         structured_content_json: Option<String>,
         end_run_after_turn: bool,
         error_message: Option<String>,
@@ -222,15 +254,10 @@ async fn serve_connection(mut stream: UnixStream, handler: Arc<dyn RuntimeHandle
                 arguments_json,
             } => match handler.handle_mcp_call_tool(&name, &arguments_json).await {
                 Ok(result) => {
-                    let content_strings = result
+                    let content = result
                         .content
                         .iter()
-                        .filter_map(|c| match &c.kind {
-                            Some(df_proto::transcript::v1::content_block::Kind::Text(t)) => {
-                                Some(t.text.clone())
-                            }
-                            _ => None,
-                        })
+                        .filter_map(ToolContent::from_block)
                         .collect();
                     let structured_content_json = if result.structured_content_json.is_empty() {
                         None
@@ -240,7 +267,7 @@ async fn serve_connection(mut stream: UnixStream, handler: Arc<dyn RuntimeHandle
                     let resp = RuntimeResponse::McpCallTool {
                         call_id: result.call_id,
                         is_error: result.is_error,
-                        content: content_strings,
+                        content,
                         structured_content_json,
                         end_run_after_turn: result.end_run_after_turn,
                         error_message: None,
@@ -253,7 +280,7 @@ async fn serve_connection(mut stream: UnixStream, handler: Arc<dyn RuntimeHandle
                     let resp = RuntimeResponse::McpCallTool {
                         call_id: String::new(),
                         is_error: true,
-                        content: vec![err.clone()],
+                        content: vec![ToolContent::Text { text: err.clone() }],
                         structured_content_json: None,
                         end_run_after_turn: false,
                         error_message: Some(err),

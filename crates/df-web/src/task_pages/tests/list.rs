@@ -494,7 +494,7 @@ async fn the_scrolling_task_list_leaves_room_for_the_floating_create_button_on_p
 
     let list = &html[html.find("class=\"ws-list\"").unwrap()..];
     assert!(
-        list.contains("class=\"min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0\""),
+        list.contains("class=\"ws-list-full min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0\""),
         "{list}"
     );
 }

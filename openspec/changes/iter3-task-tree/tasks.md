@@ -25,6 +25,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - a `pr.rs` test for "Push of a task with a base task";
   - a `df-gateway` control test: the route's base branch is the base task's branch.
 - [ ] 2.4 Write failing tests, then add `base_task` to `create_task` (contract JSON schema and `delegation.rs`). Verify with `df-agent-channel` tool tests for every scenario of `task-tree` "Base task at creation".
+- [ ] 2.5 Add the `base_task_id` clause to `df_db::artifacts::readable_task` (`iter3-artifacts`, design D5): an agent reads the artifacts of its task's base task. Write a failing `df-db` test first (a reviewer reads its base task's artifacts). Verify with `cargo test -p df-db readable_task`. `iter3-artifacts` does not promise the base task until then: also add it back to the `list_artifacts` description in `contract/mcp/factory-tools.v2.json`, the artifacts bullet of `product/agent-playbook.md` and `docs/content/using/artifacts.md` (rule: "an agent may read ... the tasks it depends on and its base task").
 
 ## 3. Workspace
 

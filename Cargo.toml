@@ -68,6 +68,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 clap = { version = "4", features = ["derive", "env"] }
 comrak = { version = "0.57", default-features = false }
 df-agent-channel = { path = "crates/df-agent-channel" }
+df-artifact-types = { path = "crates/df-artifact-types" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
 df-gateway = { path = "crates/df-gateway" }
@@ -91,6 +92,7 @@ http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 ipnet = "2"
 insta = { version = "1.49", features = ["yaml"] }
 jsonschema = { version = "0.60", default-features = false }
@@ -121,6 +123,7 @@ rpi-agent = "=0.16.0"
 rpi-ai = { version = "=0.16.0", features = ["providers"] }
 rpi-tools = "=0.16.0"
 rsa = { version = "0.9", features = ["pem"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 secrecy = { version = "0.10", features = ["serde"] }

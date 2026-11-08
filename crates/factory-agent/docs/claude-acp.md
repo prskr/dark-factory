@@ -55,6 +55,17 @@ No direct TCP connections outside the configured proxy are permitted in the sand
 - Tools provided by `factory-agent mcp` are registered under server name `factory`.
 - Tool calls emitted by Claude ACP are prefixed as `mcp__factory__<tool_name>`.
 - The runtime maps these calls to `EventOrigin::FACTORY` and correlates `factory_call_id` with `ToolCallRequest` dispatched to the control plane.
+- Text and image content blocks of a `ToolCallResult` reach the harness as MCP text and image content (images with their MIME type); `read_artifact` returns screenshots this way.
+
+### `write_artifact` with `path`
+
+The runtime reads the file itself and sends its bytes as `ToolCallRequest.attachment`, without `path`:
+
+- `path` is absolute and lies under the repository checkout (`$DF_DATA_DIR/repo`) or `/tmp`. Any other path fails with an error naming both roots.
+- The file is opened with `openat2` (`RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`). A symlink in any component, also a directory, or a `..` that leaves the root fails with "the path passes through a symlink or leaves the allowed directory". A kernel without `openat2` (Linux before 5.6) fails the call; `content` still works for text.
+- The file must be a regular file of at most 8 MiB; the size is read from the opened descriptor before the file is read.
+- Before sending, the runtime checks that the content is UTF-8 text without NUL bytes or a PNG, JPEG, WebP or GIF image, and fails the call locally otherwise. The control plane checks again and stays authoritative.
+- `tool_calls.arguments` on the control plane keeps `attachment_sha256` instead of the bytes.
 
 ## 8. Manual Verification with Real Claude ACP Adapter
 

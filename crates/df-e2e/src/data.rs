@@ -37,6 +37,15 @@ pub const WEBHOOK_PROJECT_NAME: &str = "Webhooks";
 pub const DELEGATION_PROJECT_KEY: &str = "DG";
 pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
 
+/// Project whose fake agents hand a result over as an artifact (demo step 5 of iteration 3);
+/// tasks are `RS-<n>`.
+pub const RESEARCH_PROJECT_KEY: &str = "RS";
+pub const RESEARCH_PROJECT_NAME: &str = "Research";
+
+/// The artifact the researcher of project `RS` writes, and a line of it.
+pub const RESEARCH_ARTIFACT: &str = "findings.md";
+pub const RESEARCH_FINDING: &str = "The session cookie is dropped on the redirect.";
+
 /// The file of `push-secret.yaml` with the token, and the line the token is on.
 pub const SECRET_PATH: &str = "config.py";
 pub const SECRET_LINE: u32 = 2;
@@ -102,6 +111,7 @@ pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
+pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

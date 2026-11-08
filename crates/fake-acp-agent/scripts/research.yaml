@@ -1,0 +1,53 @@
+# Script of the artifact scenario of the e2e suite (project `RS`, no webhook): one script serves
+# the coordinator `RS-1` and the researcher `RS-2`, told apart by markers in their prompts. Every
+# turn plays the same `when` blocks, because a woken coordinator may be a live or a resumed session.
+#
+# 1. `[coordinator]` creates the researcher.
+# 2. The researcher writes `findings.md` as an artifact and completes.
+# 3. The coordinator is woken by a message that lists `RS-2/findings.md` and reads the artifact.
+sessions:
+  new:
+    - &turn
+      - when:
+          prompt_contains: "[coordinator]"
+          steps:
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Greeting research
+                  prompt: "[research] Find out why the login loops."
+            - say: "Delegated the research; waiting for it."
+      - when:
+          prompt_contains: "[research]"
+          steps:
+            - say: "Writing down what I found."
+            - mcp:
+                server: factory
+                tool: write_artifact
+                args:
+                  name: findings.md
+                  content: "# Findings\n\nThe session cookie is dropped on the redirect.\n"
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Findings are in findings.md."
+      - when:
+          prompt_contains: "RS-2/findings.md"
+          steps:
+            - mcp:
+                server: factory
+                tool: read_artifact
+                args:
+                  task: RS-2
+                  name: findings.md
+            - say: "Read the findings."
+      - end: end_turn
+    - *turn
+    - *turn
+  loaded:
+    - *turn
+    - *turn
+    - *turn

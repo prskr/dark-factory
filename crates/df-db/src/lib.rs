@@ -2,6 +2,7 @@
 
 use sqlx::migrate::Migrator;
 
+pub mod artifacts;
 pub mod audit;
 pub mod blobs;
 pub mod catalog;

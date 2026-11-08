@@ -14,7 +14,7 @@ bazel run //:bazel_env   # once: puts kind, helm, jq, ... on PATH (needs direnv,
 just e2e-local           # about 10 min the first time, about 5 min with warm caches
 ```
 
-Prerequisites on the host: `kind`, `kubectl`, `helm`, `bazel`, `cargo`, `curl` and Docker or Podman (rootless Podman works, see below). The pinned `kind` and `helm` come from `bazel_env`.
+Prerequisites on the host: `kind`, `kubectl`, `helm`, `bazel`, `cargo`, `curl`, `gh` (signed in, or `GH_TOKEN` set; it downloads the cert-manager manifest) and Docker or Podman (rootless Podman works, see below). The pinned `kind` and `helm` come from `bazel_env`.
 
 ```bash
 just seed          # well-known demo data into the `just serve-local` database
@@ -135,6 +135,7 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 | Project `PP` | "Protected Path", same repository, script `/opt/harness/scripts/push-protected.yaml` |
 | Project `WH` | "Webhooks", same repository, script `/opt/harness/scripts/webhook.yaml` |
 | Project `DG` | "Delegation", same repository, script `/opt/harness/scripts/delegation.yaml` |
+| Project `RS` | "Research", same repository, script `/opt/harness/scripts/research.yaml` |
 
 All projects wake tasks on reviews and mentions of members (`webhook_wake` `members`).
 
@@ -152,6 +153,7 @@ There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git p
 - `push-secret.yaml`: run 1 commits `config.py` with a GitHub token assembled by the shell step (the file holds no string a scanner matches); the turn after the `push.rejected` message (same or resumed session) replaces the token by an environment lookup and amends the commit.
 - `push-protected.yaml`: run 1 commits `.forgejo/workflows/ci.yml`; later prompts have no scripted turn and end at once, so the runtime only pushes the same commit again.
 - `webhook.yaml`: run 1 commits `welcome.txt`, calls `update_pull_request` and `complete_task`; the run after the `webhook` message (loaded session) calls `read_pull_request_feedback` and ends its turn without completing, so the task waits with a draft PR.
+- `research.yaml` (project `RS`, no webhook): one script for the coordinator `RS-1` and the researcher `RS-2`, told apart by `[coordinator]` and `[research]`. The coordinator creates the researcher; the researcher writes `findings.md` with `write_artifact` and completes; the wake-up message of the coordinator lists `RS-2/findings.md`, and the coordinator reads it with `read_artifact`.
 - `delegation.yaml` (project `DG`, no webhook): one script for the coordinator `DG-1`, the implementation `DG-2` and the review `DG-3`, told apart by the markers `[coordinator]`, `[impl]`, `[review]` and `[fix]` in their prompts (`when` steps play their steps only if the prompt contains `prompt_contains`). The coordinator creates the implementation and a review that depends on its completion; each child completes and wakes the coordinator, which relays the review to the implementation with `send_message` for a second round.
 
 Scripts commit with the identity of the runtime-owned `.git/config`; the Git proxy rejects any other (`df:identity`).

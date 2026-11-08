@@ -57,14 +57,14 @@ The MIME type is `text/markdown` for a text artifact named `*.md`, `text/plain` 
 
 ### D2: Sniffing in `df-core`
 
-`df_core::artifacts::sniff(bytes) -> Result<Sniffed, ArtifactError>` checks text first (UTF-8 without NUL), then images:
+`df_artifact_types::sniff(bytes) -> Result<Sniffed, ArtifactError>` (re-exported as `df_core::artifacts::sniff`) checks text first (UTF-8 without NUL), then images:
 
 - the format comes from `image::guess_format`, limited to PNG, JPEG, WebP and GIF;
 - the dimensions come from `ImageReader::with_guessed_format().into_dimensions()`, which reads the header only.
 
-`image` is already in the dependency graph. The workspace adds it with `default-features = false` and the four format features. The same module holds name validation and limit checks against `ArtifactsConfig`.
+`image` is already in the dependency graph. The workspace adds it with `default-features = false` and the four format features. The new leaf crate `df-artifact-types` (dependencies: `image`, `thiserror`) holds name validation, `sniff`, `sniff_kind` (kind and MIME type from the content, no dimensions) and the shared constants (8 MiB, 8000 px). `df-core` re-exports it as `df_core::artifacts` and adds `check_artifact`, the limit checks against `ArtifactsConfig`.
 
-The runtime does a lighter check: UTF-8 without NUL or `image::guess_format`, with no dimensions. It exists only to give an early error. It doesn't depend on `df-core`.
+The runtime does a lighter check with `df_artifact_types::sniff_kind`: no dimensions and no configured limits. It exists only to give an early error. It depends on `df-artifact-types`, not on `df-core`, so the sandbox runtime pulls in no configuration code.
 
 - Alternative: `imagesize`. It's a new crate, and `image` is already in the graph.
 
@@ -137,26 +137,29 @@ An image whose destination is exactly one of the names (byte-equal, no URL decod
 
 All routes are in `task_pages.rs`, behind the existing session:
 
-- **`GET /tasks/{key}/artifacts`:** the Artifacts tab fragment (cards).
+- **`GET /tasks/{key}/artifacts`:** the Artifacts tab fragment (cards) plus the details header out of band (see "Live reload").
 - **`GET /tasks/{key}/artifacts/{name}`:** the artifact page. With `HX-Request` it returns only the view fragment for the split view.
 - **`GET /tasks/{key}/artifacts/{name}/raw`:** image bytes with `ETag: "<sha256>"`, `If-None-Match` → 304, and the headers from the spec.
 
-The view, the cards and the split view are maud components in `crates/df-web/src/artifacts/`, used by the task page now and by `iter3-chats` later.
+The view, the cards and the split view are maud components in `crates/df-web/src/artifacts/`, used by the task page now and by `iter3-chats` later. The design reference is the PenPot page `Tasks - Artifacts` (mapping in `docs/design-workflow.md`).
+
+**Artifact header:** name, type, size and update time; for an image also the stored width × height. Then the Preview/Source toggle (Markdown only), an "Open full page" icon button (icon `Maximize`, a link to `/tasks/{key}/artifacts/{name}`) and Close.
 
 **Card preview:** the first 8 lines (at most 600 bytes) as plain escaped text, or the image scaled by CSS.
 
 **Alpine component** `artifactSplit.js` (in `COMPONENT_SCRIPTS`) holds:
 - the open artifact name;
-- the divider width;
-- the task list collapse state.
+- the pane's share of the split row (a fraction, so the pane and the transcript both grow when the task list collapses).
 
-Widths and the collapse state go to `localStorage` inside `try`/`catch`.
+The collapse state of the task list lives in the workspace component (`workspace.ts`), because the list column sits outside the split view's scope. The split share and the list collapse state go to `localStorage` inside `try`/`catch`.
 
-**Live reload:** the transcript row of a `write_artifact` call carries `data-artifact-written="<name>"`. On the htmx SSE swap that inserts such a row, the component triggers `artifacts-changed`. The tab listens with `hx-trigger="artifacts-changed from:body"`, and the split view reloads if its name matches.
+**Details column while an artifact is open:** opening an artifact collapses the details column to its strip (from 1280 px) or hides an open slide-over (768 to 1279 px); closing restores the state from before. This collapse is temporary and never written to `localStorage`, so the stored choice of the board member stays as it was.
 
-**Text that isn't Markdown** uses the renderer's syntect highlighting by extension, with its 64 KiB plain fallback.
+**Live reload:** the transcript row of a `write_artifact` call carries `data-artifact-written="<name>"`. On the htmx SSE swap that inserts such a row, the component triggers `artifacts-changed`. The details column (always present) listens with `hx-trigger="artifacts-changed from:body"` and loads `GET /tasks/{key}/artifacts`, which returns the cards and, out of band (`hx-swap-oob`), the details header. That way the first artifact turns the "Details" header into the tab bar. The split view reloads if its name matches.
 
-**Details tabs:** if `iter3-task-tree` has landed, add Artifacts as a third tab. Otherwise introduce the tab bar with Overview and Artifacts, and `iter3-task-tree` adds Subtasks.
+**Text that isn't Markdown** uses the renderer's syntect highlighting by extension, with its 64 KiB plain fallback. **Source of a Markdown artifact** uses the same highlighting with the `md` syntax.
+
+**Details tabs:** the Artifacts tab exists only while the task has at least one artifact, and the tab bar only when there are at least two tabs; otherwise the details column keeps its "Details" header. If `iter3-task-tree` has landed, Artifacts is added after Subtasks. Otherwise the tab bar is introduced with Overview and Artifacts, and `iter3-task-tree` adds Subtasks under the same rule.
 
 ### D10: Configuration
 

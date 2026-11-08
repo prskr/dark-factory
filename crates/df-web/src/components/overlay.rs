@@ -81,6 +81,9 @@ pub fn dialog_close() -> Markup {
     }
 }
 
+/// The tab of the details column that is open first (`overview` or `artifacts`).
+pub const INITIAL_DETAILS_TAB: &str = "overview";
+
 /// The details of a workspace. It expects the parent to hold the workspace Alpine state
 /// (`scripts/workspace.ts`): `details` (open or not), `collapsed` with
 /// `setCollapsed(value)` and, for the phone sheet, `sheet`, `dragging` and the `sheetToggle` /
@@ -88,8 +91,19 @@ pub fn dialog_close() -> Markup {
 /// collapses to a strip. The live region inside `body` renders the strip (`ws-strip`) and marks
 /// what the strip hides with `ws-details-full`.
 pub fn details_panel(title: &str, body: Markup) -> Markup {
+    details_panel_with_heading(
+        title,
+        html! { h2 class="text-base font-semibold" { (title) } },
+        body,
+    )
+}
+
+/// Like [`details_panel`] with the content of the header in place of the title, for example a tab
+/// bar. The panel is a `tabs` component (`scripts/tabs.ts`) whose `tab` (`overview` or
+/// `artifacts`) the stylesheet reads from `data-tab`.
+pub fn details_panel_with_heading(title: &str, heading: Markup, body: Markup) -> Markup {
     html! {
-        aside id="ws-details" class="ws-details" aria-label=(title) ":data-open"="details" ":data-size"="sheet" ":data-dragging"="dragging" {
+        aside id="ws-details" class="ws-details" aria-label=(title) ":data-open"="details" ":data-size"="sheet" ":data-dragging"="dragging" ":data-tab"="tab" x-data={"tabs('" (INITIAL_DETAILS_TAB) "')"} {
             // Phones: the grey handle resizes the sheet (drag, or tap / keyboard to toggle).
             button type="button" aria-label="Resize details" ":aria-expanded"="sheet === 'full'"
                 "x-on:click"="sheetToggle()" "x-on:pointerdown"="sheetDragStart($event)" "x-on:pointermove"="sheetDragMove($event)"
@@ -99,7 +113,7 @@ pub fn details_panel(title: &str, body: Markup) -> Markup {
             }
             // No display utility on the header: the stylesheet hides it in the collapsed strip.
             div class="ws-details-head" {
-                h2 class="text-base font-semibold" { (title) }
+                (heading)
                 div class="flex items-center gap-1" {
                     button type="button" class={(ICON_BUTTON_CLASS) " xl:hidden"} aria-label="Close details" "x-on:click"="details = false" { (icon(Icon::Close)) }
                     button type="button" class={(ICON_BUTTON_CLASS) " max-xl:hidden"} aria-label="Hide details" "x-on:click"="setCollapsed(true)" { (icon(Icon::PanelRight)) }

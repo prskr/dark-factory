@@ -241,6 +241,14 @@
         "maxAutoResumes": { "type": "integer", "minimum": 0 }
       }
     },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "maxTextBytes": { "type": "integer", "minimum": 1, "maximum": 8388608 },
+        "maxImageBytes": { "type": "integer", "minimum": 1, "maximum": 8388608 },
+        "maxPerTask": { "type": "integer", "minimum": 1 }
+      }
+    },
     "volumes": {
       "type": "object",
       "properties": {

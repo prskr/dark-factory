@@ -173,6 +173,7 @@ async fn tool_calls_finish_after_the_stream_ended() {
         call_id: uuid::Uuid::now_v7().to_string(),
         tool_name: "report_progress".into(),
         arguments_json: r#"{"summary":"almost done"}"#.into(),
+        attachment: Vec::new().into(),
     };
 
     // The stream ends right after the request, as when the runtime closes after RunReport.
@@ -775,6 +776,7 @@ async fn tool_calls_are_refused_after_the_run_ended() {
         call_id: uuid::Uuid::now_v7().to_string(),
         tool_name: "report_progress".into(),
         arguments_json: r#"{"summary":"too late"}"#.into(),
+        attachment: Vec::new().into(),
     };
 
     let batch = vec![msg(1, agent_message::Body::ToolCallRequest(call))];
@@ -827,6 +829,7 @@ async fn a_tool_call_in_flight_at_shutdown_stores_its_result() {
         call_id: uuid::Uuid::now_v7().to_string(),
         tool_name: "comment_on_issue".into(),
         arguments_json: r#"{"body":"hello"}"#.into(),
+        attachment: Vec::new().into(),
     };
     let row = get_run(&pool, run_id).await.unwrap().unwrap();
     let (inbound_tx, inbound_rx) = mpsc::channel(8);
