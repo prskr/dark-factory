@@ -207,6 +207,16 @@ runs:
   # provisioning before the task fails.
   maxAutoResumes: 3
 
+# Limits of task artifacts (`write_artifact`). Bytes are at most 8388608 (8 MiB, the most the
+# runtime sends). An image is also limited to 8000 px per side.
+artifacts:
+  # Largest text artifact in bytes (1 MiB).
+  maxTextBytes: 1048576
+  # Largest image artifact in bytes (3.75 MiB, below the 5 MB request limit of model APIs).
+  maxImageBytes: 3932160
+  # Artifacts per task; replacing an artifact does not count.
+  maxPerTask: 50
+
 # Retention of task volumes. The leader checks once per hour; a task with an active run keeps its
 # volume, the next run of a task without one clones again.
 volumes:

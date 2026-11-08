@@ -60,6 +60,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Status | Task status `in_review` |
 | Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed |
 | Tasks - Phone | Phone boards of tasks and requests, profile menu (main component `Profile menu`) |
+| Tasks - Artifacts | Artifacts of a task: details tab with cards, split view (Preview, Source, image), task list collapsed, bookmarkable artifact page; phone details sheet and artifact page |
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
@@ -204,6 +205,14 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Personas / Personas · edit modal, claude-code, models filtered | `/personas/<id>/edit` | as above with harness `claude-code`; the select lists only the Anthropic Messages models | 1440 |
 | Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |
+| Tasks - Artifacts / Desktop · artifacts tab | `/tasks/<key>` | manual seed (not built): task DF-12 with artifacts `login-loop.png`, `findings.md`, `cookie-trace.log` and a `write_artifact` call in the transcript; tab Artifacts chosen. Without artifacts the details column has no tab bar (Tasks / Desktop · light) | 1440 |
+| Tasks - Artifacts / Desktop · artifact split view | `/tasks/<key>` | as Desktop · artifacts tab; `findings.md` opened, details collapsed to the strip | 1440 |
+| Tasks - Artifacts / Desktop · task list collapsed, artifact open (1280) | `/tasks/<key>` | as Desktop · artifact split view; task list collapsed | 1280 |
+| Tasks - Artifacts / Desktop · artifact split view, source | `/tasks/<key>` | as Desktop · artifact split view; Source chosen | 1440 |
+| Tasks - Artifacts / Desktop · artifact split view, image | `/tasks/<key>` | as Desktop · artifacts tab; `login-loop.png` opened | 1440 |
+| Tasks - Artifacts / Desktop · artifact page | `/tasks/<key>/artifacts/report.md` | as Desktop · artifacts tab plus `report.md` with `![…](login-loop.png)` | 1440 |
+| Tasks - Artifacts / Phone · details sheet, artifacts tab | `/tasks/<key>` | as Desktop · artifacts tab; details sheet open | 390 |
+| Tasks - Artifacts / Phone · artifact page | `/tasks/<key>/artifacts/findings.md` | as Desktop · artifacts tab | 390 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |
 | Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |
 

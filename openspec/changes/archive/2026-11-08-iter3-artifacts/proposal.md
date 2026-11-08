@@ -29,10 +29,10 @@ With delegation (`iter3-task-dependencies`), results have to travel between task
 - **Web UI** (task page and, through `iter3-chats`, the chat UI):
   - an artifact view: Markdown rendered with the shared renderer (with inline images of the same task), other text highlighted by extension, images shown;
   - artifact cards;
-  - a split view with a draggable divider, Preview/Source toggle and close;
+  - a split view with a draggable divider, Preview/Source toggle (Source highlighted, none for images), an "Open full page" action and close;
   - a bookmarkable page `/tasks/{key}/artifacts/{name}`;
   - the image endpoint `/tasks/{key}/artifacts/{name}/raw` with the stored `Content-Type`, `nosniff`, `inline`, `no-cache` and an `ETag`.
-  - **Task page:** an Artifacts tab in the details column, the split view next to the transcript and a collapsible task list.
+  - **Task page:** an Artifacts tab in the details column once the task has artifacts, the split view next to the transcript (the details column collapses while an artifact is open) and a collapsible task list.
   - **Transcript:** a `write_artifact` call shows as an artifact row that opens the artifact. The Artifacts tab and the open artifact reload when such a row arrives.
 - **Contract:**
   - `ToolCallRequest` gets an optional `attachment` (bytes): the runtime puts a file read for `path` there instead of base64 in the JSON arguments.
@@ -72,7 +72,8 @@ Out of scope:
   - queries for write, list, read and the related-task check;
   - the artifact list in the child-ended message;
   - `.sqlx/`.
-- `crates/df-core`: name validation, sniffing, limits, `ArtifactsConfig` in `InstanceConfig`.
+- `crates/df-artifact-types` (new leaf crate, depends on `image` and `thiserror`): name validation, sniffing, the shared constants; used by `df-core` and `factory-agent`.
+- `crates/df-core`: `check_artifact` (limits), `ArtifactsConfig` in `InstanceConfig`, re-export of the artifact types.
 - `crates/df-agent-channel`:
   - the three tools and the related-task rule;
   - the audit details;

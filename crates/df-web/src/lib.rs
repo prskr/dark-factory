@@ -4,6 +4,7 @@
 //! behind OIDC login. Other crates reuse [`layout`] and [`auth::require_board_member`] for their
 //! own pages.
 
+mod artifacts;
 pub mod assets;
 pub mod auth;
 // The asset staging of `build.rs`, compiled here for its tests.

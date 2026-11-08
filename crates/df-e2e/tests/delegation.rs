@@ -66,6 +66,68 @@ async fn coordinator_delegates_implementation_and_review_and_relays_the_next_rou
     Ok(())
 }
 
+/// Hand-over with an artifact (`iter3-artifacts`, demo step 5): the researcher writes
+/// `findings.md`, its completion wakes the coordinator with the artifact in the message, the
+/// coordinator reads it, and the artifact shows in the UI.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    let pool = db::connect(&env.database_url).await?;
+
+    let coordinator = session
+        .create_task(
+            &env,
+            data::RESEARCH_PROJECT_KEY,
+            "[coordinator] Find out why the login loops.",
+            None,
+        )
+        .await?;
+    assert_eq!(coordinator, "RS-1");
+
+    wait_for_runs(&pool, "RS-2", 1).await?;
+    let artifact = format!("RS-2/{}", data::RESEARCH_ARTIFACT);
+    eventually(
+        "the coordinator to read the findings",
+        RUN_TIMEOUT,
+        || async {
+            let reads: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM tool_calls WHERE tool_name = 'read_artifact' \
+                 AND arguments ->> 'task' = 'RS-2' AND arguments ->> 'name' = $1 \
+                 AND result IS NOT NULL AND COALESCE((result ->> 'isError')::boolean, false) = false",
+            )
+            .bind(data::RESEARCH_ARTIFACT)
+            .fetch_one(&pool)
+            .await?;
+            Ok((reads > 0).then_some(()))
+        },
+    )
+    .await?;
+    let wakeups =
+        db::system_messages(&pool, &coordinator, df_core::system_reason::CHILD_ENDED).await?;
+    assert!(wakeups.iter().any(|m| m.contains(&artifact)), "{wakeups:?}");
+
+    session.open_task(&env, "RS-2").await?;
+    session.expect_text("Artifacts", RUN_TIMEOUT).await?;
+    session
+        .page
+        .goto(
+            &format!(
+                "{}/tasks/RS-2/artifacts/{}",
+                env.base_url,
+                data::RESEARCH_ARTIFACT
+            ),
+            None,
+        )
+        .await?;
+    session
+        .expect_text(data::RESEARCH_FINDING, RUN_TIMEOUT)
+        .await?;
+    Ok(())
+}
+
 /// Waits until task `key` has ended `runs` runs and is in review.
 async fn wait_for_runs(pool: &PgPool, key: &str, runs: i64) -> Result<()> {
     eventually(

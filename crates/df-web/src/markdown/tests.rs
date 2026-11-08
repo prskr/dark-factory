@@ -1,4 +1,4 @@
-use super::render;
+use super::{ImageArtifacts, highlight_by_extension, render, render_with_images};
 
 fn html(source: &str) -> String {
     render(source).into_string()
@@ -212,4 +212,65 @@ fn helm_schema_lists_exactly_the_bundled_themes() {
     bundled.sort_unstable();
     listed.sort_unstable();
     assert_eq!(listed, bundled);
+}
+
+fn with_images(source: &str) -> String {
+    let names = vec!["login.png".to_string()];
+    render_with_images(
+        source,
+        &ImageArtifacts {
+            task_key: "DF-21",
+            names: &names,
+        },
+    )
+    .into_string()
+}
+
+#[test]
+fn an_image_of_the_same_task_is_shown_inline() {
+    let out = with_images("![Login](login.png)");
+    assert!(
+        out.contains(
+            r#"<img loading="lazy" src="/tasks/DF-21/artifacts/login.png/raw" alt="Login""#
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn other_images_stay_links_with_artifact_rendering() {
+    for source in [
+        "![x](../DF-20/shot.png)",
+        "![x](https://example.com/x.png)",
+        "![x](other.png)",
+        "![x](Login.png)",
+        "![x](login%2Epng)",
+        "![x](/tasks/DF-20/artifacts/login.png/raw)",
+    ] {
+        let out = with_images(source);
+        assert!(!out.contains("<img"), "{source}: {out}");
+        assert!(out.contains("<a rel="), "{source}: {out}");
+    }
+}
+
+#[test]
+fn render_still_turns_every_image_into_a_link() {
+    let out = html("![Login](login.png)");
+    assert!(
+        !out.contains("<img") && out.contains(r#"href="login.png""#),
+        "{out}"
+    );
+}
+
+#[test]
+fn text_is_highlighted_by_extension_or_escaped() {
+    let rust = highlight_by_extension("rs", "fn main() {}").into_string();
+    assert!(rust.contains("hl-"), "{rust}");
+    let unknown = highlight_by_extension("zzz", "<b>x</b>").into_string();
+    assert_eq!(
+        unknown,
+        r#"<pre class="hl-code"><code>&lt;b&gt;x&lt;/b&gt;</code></pre>"#
+    );
+    let markdown = highlight_by_extension("md", "# Title\n`code`").into_string();
+    assert!(markdown.contains("hl-"), "{markdown}");
 }

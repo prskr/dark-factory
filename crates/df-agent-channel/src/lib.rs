@@ -48,6 +48,8 @@ pub struct ChannelConfig {
     pub git_proxy: GitProxy,
     /// Receivers of lifecycle events; off by default.
     pub events: EventSinks,
+    /// Limits of task artifacts.
+    pub artifacts: df_core::ArtifactsConfig,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -62,6 +64,7 @@ impl From<&InstanceConfig> for ChannelConfig {
                 port: cfg.gateway.git_port,
             },
             events: EventSinks::new(&cfg.lifecycle_events),
+            artifacts: cfg.artifacts,
         }
     }
 }

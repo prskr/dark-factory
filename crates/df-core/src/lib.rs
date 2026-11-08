@@ -1,5 +1,6 @@
 //! Core domain types, instance configuration, and provider trait seams for Dark Factory.
 
+pub mod artifacts;
 pub mod config;
 pub mod domain;
 pub mod forge;
@@ -20,9 +21,9 @@ pub mod title;
 pub mod webhooks;
 
 pub use config::{
-    AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig, ConfigError, DatabaseConfig,
-    InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig, PluginConfig,
-    SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+    ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,
+    ConfigError, DatabaseConfig, InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig,
+    PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,

@@ -279,7 +279,7 @@ async fn first_connect_receives_ack_assign_and_the_assignment_prompt() -> anyhow
         assign.workspace.as_ref().expect("workspace").task_branch,
         "factory/task/DF-1"
     );
-    assert_eq!(assign.tools.len(), 12);
+    assert_eq!(assign.tools.len(), 15);
     let Some(content_block::Kind::Text(t)) = &prompt.content[0].kind else {
         anyhow::bail!("no text")
     };
@@ -937,6 +937,7 @@ async fn tool_calls_are_answered_on_the_stream() -> anyhow::Result<()> {
             call_id: call_id.clone(),
             tool_name: "report_progress".into(),
             arguments_json: r#"{"summary":"tests pass"}"#.into(),
+            attachment: Vec::new().into(),
         }))
         .await;
     let msgs = runtime
@@ -974,6 +975,7 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
             call_id: uuid::Uuid::now_v7().to_string(),
             tool_name: "ask_question".into(),
             arguments_json: serde_json::json!({"text": text, "blocking": true}).to_string(),
+            attachment: Vec::new().into(),
         })
     };
     let result_of = |msgs: Vec<df_proto::agent::v1::ControlMessage>| match msgs
@@ -1166,6 +1168,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
             call_id: uuid::Uuid::now_v7().to_string(),
             tool_name: "comment_on_issue".into(),
             arguments_json: r#"{"body":"working on it"}"#.into(),
+            attachment: Vec::new().into(),
         }))
         .await;
     runtime

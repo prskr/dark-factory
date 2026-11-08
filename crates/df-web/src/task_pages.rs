@@ -61,6 +61,7 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/tasks/{key}/stop", post(task_stop))
         .route("/tasks/{key}/cancel", post(task_cancel))
         .route("/tasks/{key}/reset-workspace", post(task_reset_workspace))
+        .merge(crate::artifacts::routes())
 }
 
 /// The query of the list pages.
@@ -124,6 +125,7 @@ struct Selected {
     show_hidden: bool,
     max_auto_resumes: u32,
     requests: Vec<crate::requests::CardData>,
+    artifacts: Vec<crate::artifacts::ArtifactCard>,
 }
 
 /// Renders the workspace page; the transcript and details columns exist only for a selected task.
@@ -150,10 +152,10 @@ async fn workspace(
     };
     let body = html! {
         // `collapsed` (the details column of 1280 px and more) is remembered in this browser.
-        div class="ws" ":data-collapsed"="collapsed" "x-on:keydown.escape.window"="details = false"
+        div class="ws" ":data-collapsed"="collapsed" ":data-list-collapsed"="listCollapsed" "x-on:keydown.escape.window"="details = false"
             x-data="workspace" {
             (list_column(&items, &projects, filters, current, &shell))
-            div id="ws-detail" {
+            div id="ws-detail" x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.detail.key))] {
                 @match &selected {
                     Some(s) => (selected_columns(s)),
                     None => section class="ws-main items-center justify-center" aria-label="Task" {
@@ -185,16 +187,21 @@ fn selected_columns(s: &Selected) -> Markup {
         div x-show="details" x-cloak "x-on:click"="details = false" class="fixed inset-0 z-30 bg-black/40 xl:hidden" {}
         section class="ws-main" aria-label="Task" {
             (head_region(&s.detail, None))
-            // Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
-            // messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
-            // re-runs `x-init`, so opening another task lands at the bottom too.
-            div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
-                x-data="{ pinned: true }"
-                x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
-                "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
-                (render_transcript(s.folder.items(), &timeline_cards(&s.requests)))
+            div class="flex min-h-0 flex-1" {
+                div class="flex min-w-0 flex-1 flex-col" {
+                    // Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
+                    // messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
+                    // re-runs `x-init`, so opening another task lands at the bottom too.
+                    div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
+                        x-data="{ pinned: true }"
+                        x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
+                        "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
+                        (render_transcript(s.folder.items(), &timeline_cards(&s.requests)))
+                    }
+                    (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
+                }
+                (crate::artifacts::split_pane())
             }
-            (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
         }
         (details_column(
             &s.detail,
@@ -202,6 +209,7 @@ fn selected_columns(s: &Selected) -> Markup {
             &s.runs,
             &CancelNote::new(&s.runs, &s.pending),
             &ResumeNote::new(&s.detail, &s.runs, s.max_auto_resumes),
+            &s.artifacts,
         ))
     }
 }
@@ -271,6 +279,10 @@ async fn task_detail(
             Ok(requests) => requests,
             Err(e) => return internal_error(&e),
         };
+    let artifacts = match crate::artifacts::load_cards(&state, id).await {
+        Ok(artifacts) => artifacts,
+        Err(e) => return internal_error(&e),
+    };
     let selected = Selected {
         detail: data.task,
         dependencies: data.dependencies,
@@ -280,6 +292,7 @@ async fn task_detail(
         show_hidden: state.show_hidden_blocks,
         max_auto_resumes: state.max_auto_resumes,
         requests,
+        artifacts,
     };
     workspace(&state, &user, &query.filters(), Some(selected)).await
 }

@@ -49,6 +49,7 @@ waits for a human.
 ```text
 DG-3 "Greeting review" completed.
 PR: https://forge.example/acme/app/pulls/12
+Artifacts: DG-3/findings.md
 Still waiting on DG-3: DG-4
 
 Summary from the agent of DG-3:
@@ -56,7 +57,7 @@ Summary from the agent of DG-3:
 ```
 
 The text names the key and title of the child and how it ended (`completed`, `is done`, `failed`
-with its reason, `was cancelled`), the pull request if there is one, the tasks that still wait for
+with its reason, `was cancelled`), the pull request if there is one, the child's [artifacts](artifacts.md) as `<key>/<name>` (`Artifacts: none` if it has none; those of its own children are not listed), the tasks that still wait for
 the child, and the child's own summary, quoted. The summary is the child's output: the parent treats
 it like any untrusted text. The message is authored by the system with the reason
 `task.child_ended`.

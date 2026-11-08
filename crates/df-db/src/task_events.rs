@@ -272,8 +272,18 @@ async fn load_child_ended(
             waiting_dependents.push(key);
         }
     }
+    // Names of the child only; `key` is the prefix agents pass to `read_artifact`.
+    let artifacts: Vec<String> = sqlx::query_scalar(
+        "SELECT $2::text || '/' || name FROM task_artifacts WHERE task_id = $1
+         ORDER BY updated_at DESC, name",
+    )
+    .bind(child.as_uuid())
+    .bind(&facts.key)
+    .fetch_all(&mut **tx)
+    .await?;
     Ok(ChildEnded {
         key: facts.key,
+        artifacts,
         title: facts.title,
         how,
         detail,

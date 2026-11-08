@@ -13,7 +13,8 @@ use crate::components::{CreateAction, bottom_bar, floating_create, rail, setting
 
 /// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
 /// loaded on every page before Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 5] = [
+pub(crate) const COMPONENT_SCRIPTS: [&str; 6] = [
+    "artifactSplit.js",
     "egress-log.js",
     "egress-rule.js",
     "markdown.js",

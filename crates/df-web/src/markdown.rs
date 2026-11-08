@@ -39,6 +39,23 @@ static HIGHLIGHTER: LazyLock<Highlighter> = LazyLock::new(|| Highlighter {
 /// dropped. The text is untrusted, so the browser must not fetch anything by itself: images
 /// become plain links and every link carries `rel="noopener noreferrer nofollow"`.
 pub fn render(source: &str) -> Markup {
+    render_with(source, None)
+}
+
+/// The image artifacts of one task that a Markdown artifact may show inline.
+pub struct ImageArtifacts<'a> {
+    pub task_key: &'a str,
+    pub names: &'a [String],
+}
+
+/// Like [`render`] for an artifact: an image whose destination is byte-equal to the name of an
+/// image artifact of the same task becomes `<img>` of the image endpoint; every other image stays
+/// a link, so the browser fetches nothing an agent names.
+pub fn render_with_images(source: &str, images: &ImageArtifacts<'_>) -> Markup {
+    render_with(source, Some(images))
+}
+
+fn render_with(source: &str, images: Option<&ImageArtifacts<'_>>) -> Markup {
     let mut options = comrak::Options::default();
     options.render.escape = true;
     options.render.r#unsafe = false;
@@ -46,7 +63,15 @@ pub fn render(source: &str) -> Markup {
     let root = comrak::parse_document(&arena, source, &options);
     for node in root.descendants() {
         let mut data = node.data.borrow_mut();
-        if let comrak::nodes::NodeValue::Image(link) = &data.value {
+        let comrak::nodes::NodeValue::Image(link) = &data.value else {
+            continue;
+        };
+        let inline = images.filter(|i| i.names.iter().any(|name| *name == *link.url));
+        if let Some(images) = inline {
+            let mut image = link.clone();
+            image.url = format!("/tasks/{}/artifacts/{}/raw", images.task_key, link.url);
+            data.value = comrak::nodes::NodeValue::Image(image);
+        } else {
             data.value = comrak::nodes::NodeValue::Link(link.clone());
         }
     }
@@ -59,7 +84,21 @@ pub fn render(source: &str) -> Markup {
     let mut html = String::new();
     comrak::format_html_with_plugins(root, &options, &mut html, &plugins)
         .expect("formatting into a String cannot fail");
-    PreEscaped(html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href="))
+    PreEscaped(
+        html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href=")
+            .replace("<img src=", "<img loading=\"lazy\" src="),
+    )
+}
+
+/// Plain text as a code block, highlighted by the file extension (`rs`, `md`, ...) if syntect
+/// knows it and the text is at most 64 KiB; otherwise escaped as it is.
+pub fn highlight_by_extension(extension: &str, text: &str) -> Markup {
+    let highlighted = HIGHLIGHTER.highlight_with(extension, text, true);
+    html! {
+        pre class="hl-code" { code {
+            @if let Some(highlighted) = highlighted { (PreEscaped(highlighted)) } @else { (text) }
+        } }
+    }
 }
 
 /// A configured code theme is not one of syntect's bundled themes.
@@ -179,10 +218,20 @@ struct Highlighter {
 
 impl Highlighter {
     fn highlight(&self, lang: &str, code: &str) -> Option<String> {
+        self.highlight_with(lang, code, false)
+    }
+
+    /// `by_extension`: `token` is a file extension, else a fence language.
+    fn highlight_with(&self, token: &str, code: &str, by_extension: bool) -> Option<String> {
+        let lang = token;
         if lang.is_empty() || code.len() > MAX_HIGHLIGHT_BYTES {
             return None;
         }
-        let syntax = self.syntaxes.find_syntax_by_token(lang)?;
+        let syntax = if by_extension {
+            self.syntaxes.find_syntax_by_extension(lang)?
+        } else {
+            self.syntaxes.find_syntax_by_token(lang)?
+        };
         let mut generator = ClassedHTMLGenerator::new_with_class_style(
             syntax,
             &self.syntaxes,

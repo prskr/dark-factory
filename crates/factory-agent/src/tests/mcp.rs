@@ -204,3 +204,76 @@ async fn test_scenario_mcp_server_initialize_tools_list_and_call() {
         Some(serde_json::json!({"status": "completed"}))
     );
 }
+
+#[tokio::test]
+async fn test_scenario_mcp_image_result_reaches_the_harness_as_image_content() {
+    use crate::runtime_socket::{RuntimeHandler, RuntimeSocketServer};
+    use df_proto::agent::v1::ToolCallResult;
+    use df_proto::transcript::v1::{
+        BlobData, ContentBlock, ImageContent, TextContent, blob_data, content_block::Kind,
+    };
+    use rmcp::ServiceExt;
+    use rmcp::model::ContentBlock as McpContent;
+    use std::sync::Arc;
+
+    struct ImageHandler;
+
+    #[tonic::async_trait]
+    impl RuntimeHandler for ImageHandler {
+        async fn handle_mcp_call_tool(
+            &self,
+            _name: &str,
+            _arguments_json: &str,
+        ) -> Result<ToolCallResult, String> {
+            let block = |kind| ContentBlock {
+                kind: Some(kind),
+                hidden: false,
+            };
+            Ok(ToolCallResult {
+                call_id: uuid::Uuid::now_v7().to_string(),
+                is_error: false,
+                content: vec![
+                    block(Kind::Text(TextContent {
+                        text: "written by another agent".into(),
+                    })),
+                    block(Kind::Image(ImageContent {
+                        mime_type: "image/png".into(),
+                        data: Some(BlobData {
+                            source: Some(blob_data::Source::Inline(vec![1, 2, 3].into())),
+                        }),
+                    })),
+                ],
+                structured_content_json: String::new(),
+                end_run_after_turn: false,
+                await_input_after_turn: false,
+            })
+        }
+    }
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let socket_path = temp_dir.path().join("runtime.sock");
+    let server = RuntimeSocketServer::bind(&socket_path, Arc::new(ImageHandler)).unwrap();
+    let _server_handle = server.spawn();
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_io);
+    let _mcp = tokio::spawn(async move {
+        crate::mcp::run_mcp_stream(server_read, server_write, &socket_path)
+            .await
+            .ok();
+    });
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let client = ().serve((client_read, client_write)).await.unwrap();
+
+    let res = client
+        .call_tool(rmcp::model::CallToolRequestParams::new("read_artifact"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.content.len(), 2);
+    assert!(matches!(&res.content[0], McpContent::Text(_)));
+    let McpContent::Image(image) = &res.content[1] else {
+        panic!("expected image content, got {:?}", res.content[1]);
+    };
+    assert_eq!(image.mime_type, "image/png");
+    assert_eq!(image.data, "AQID");
+}

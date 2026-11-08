@@ -292,3 +292,19 @@ tests:
           path: data["config.yaml"]
           pattern: 'runtimeDelivery'
         documentIndex: 0
+
+  - it: renders the artifact limits with their defaults
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'artifacts:\n  maxTextBytes: 1048576\n  maxImageBytes: 3932160\n  maxPerTask: 50\n'
+        documentIndex: 0
+
+  - it: rejects an image limit above the runtime cap
+    template: configmap.yaml
+    set:
+      artifacts.maxImageBytes: 10485760
+    asserts:
+      - failedTemplate:
+          errorPattern: maxImageBytes

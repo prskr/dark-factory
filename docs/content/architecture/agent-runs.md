@@ -114,6 +114,7 @@ the run's task, and at most once per `call_id`.
 | `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task |
 | `read_pull_request_feedback`, `comment_on_pull_request` | Read and answer reviews |
 | `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project; `send_message` acts only on children of the run's task |
+| `write_artifact`, `list_artifacts`, `read_artifact` | [Artifacts](../using/artifacts.md): write named text and image files on the own task, list and read those of related tasks |
 
 ## Pull request actions
 

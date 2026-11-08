@@ -1581,14 +1581,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "df-artifact-types"
+version = "0.0.0"
+dependencies = [
+ "hex",
+ "image",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "df-core"
 version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "df-artifact-types",
  "df-core",
  "futures",
  "hex",
+ "image",
  "minijinja",
  "regex",
  "secrecy",
@@ -1616,6 +1627,7 @@ dependencies = [
  "futures",
  "globset",
  "hex",
+ "image",
  "opentelemetry",
  "secrecy",
  "serde",
@@ -2222,14 +2234,17 @@ version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
+ "base64 0.23.1",
  "chrono",
  "clap",
+ "df-artifact-types",
  "df-proto",
  "df-telemetry",
  "futures",
  "prost",
  "rcgen",
  "rmcp",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

@@ -1,10 +1,9 @@
-# Spec Delta
+# artifact-ui Specification
 
 ## Purpose
-
 Shows a task's artifacts to board members: cards, the rendered artifact, a split view next to the transcript, a bookmarkable page per artifact and the endpoint serving image bytes, shared by the task page and the chat UI (ADR-0044, ADR-0047, ADR-0048).
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Artifact cards
 A task's artifacts SHALL be listed as cards, newest update first, each with a preview (the first lines of a text artifact, the image scaled down for an image), the name, the update time, the size and the type. Opening a card SHALL open the artifact.
@@ -40,14 +39,14 @@ In a Markdown artifact, an image reference `![…](name)` SHALL be shown inline 
 - **THEN** a link is shown and the browser makes no request to `example.com`
 
 ### Requirement: Preview and source
-A Markdown artifact SHALL offer a Preview/Source toggle; Source SHALL show the raw text, escaped.
+A Markdown artifact SHALL offer a Preview/Source toggle; Source SHALL show the raw text, escaped and highlighted as Markdown. An image artifact SHALL have no toggle.
 
 #### Scenario: Show the source
 - **WHEN** a board member switches `plan.md` to Source
-- **THEN** the Markdown text is shown unrendered
+- **THEN** the Markdown text is shown unrendered, with headings, code spans and code fences highlighted
 
 ### Requirement: Artifact split view
-Opening an artifact next to a transcript SHALL split the center into the transcript and the rendered artifact, with a divider the board member can drag to change the split and a close action. The chosen split SHALL be remembered in the browser; the page SHALL work when browser storage is unavailable.
+Opening an artifact next to a transcript SHALL split the center into the transcript and the rendered artifact, with a divider the board member can drag to change the split. The header of the artifact SHALL show its name, type, size and update time, for an image also its width and height in pixels, an action that opens the artifact page and a close action. The chosen split SHALL be remembered in the browser; the page SHALL work when browser storage is unavailable.
 
 #### Scenario: Open from a card
 - **WHEN** a board member opens `findings.md` from its card
@@ -61,8 +60,12 @@ Opening an artifact next to a transcript SHALL split the center into the transcr
 - **WHEN** the board member closes the artifact
 - **THEN** the transcript takes the full center again
 
+#### Scenario: Full page
+- **WHEN** the board member uses the full-page action of `findings.md` of `DF-22`
+- **THEN** the artifact page `/tasks/DF-22/artifacts/findings.md` is shown
+
 ### Requirement: Artifact page
-Each artifact SHALL have a page at `/tasks/{key}/artifacts/{name}` showing the rendered artifact with the task's key and title, the name, type, size and update time, and a link back to the task. The page SHALL be shown full-screen below 768 px and SHALL NOT update live. An unknown task or name SHALL give a not-found page.
+Each artifact SHALL have a page at `/tasks/{key}/artifacts/{name}` showing the rendered artifact with the task's key and title, the name, type, size and update time (for an image also its width and height in pixels), and a link back to the task. The page SHALL be shown full-screen below 768 px and SHALL NOT update live. An unknown task or name SHALL give a not-found page.
 
 #### Scenario: Bookmark
 - **WHEN** a board member opens `/tasks/DF-22/artifacts/findings.md`

@@ -32,6 +32,8 @@ The task view has three columns: the task list, the transcript and the details.
   [dependencies](delegation.md#in-the-task-view) and the list of runs with model and token usage. The tokens are summed per model from the
   [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
   no usage are counted separately ("2 requests without usage") instead of as zero.
+- **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
+  Artifacts tab with a card per artifact; an artifact opens next to the transcript.
 
 The transcript shows the author of each message. In the queued-message stack, messages from agents and
 the system are prefixed with their name; your own messages have none. System authors use

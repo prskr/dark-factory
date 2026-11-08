@@ -190,6 +190,41 @@
     @apply flex;
   }
 
+  /* The task list collapses to a strip from 768 px (`listCollapsed` of the workspace). */
+  .ws-list-strip {
+    display: none;
+  }
+  @media (min-width: 768px) {
+    .ws[data-list-collapsed="true"] .ws-list {
+      @apply w-14 flex-none;
+    }
+    .ws[data-list-collapsed="true"] .ws-list-full {
+      display: none;
+    }
+    .ws[data-list-collapsed="true"] .ws-list-strip {
+      display: flex;
+    }
+  }
+  /* A column that fills what the body leaves, so the sections inside lay out as if they were
+     children of the body. Not `display: contents`: that wrapper is a tabpanel. */
+  .ws-overview {
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* The Artifacts tab of the details replaces the overview; the strip of a collapsed column
+     (inside the overview) stays. */
+  .ws-details[data-tab="artifacts"] .ws-overview,
+  .ws-details[data-tab="overview"] .ws-artifacts {
+    display: none;
+  }
+  @media (min-width: 1280px) {
+    .ws[data-collapsed="true"] .ws-details[data-tab="artifacts"] .ws-overview {
+      display: flex;
+    }
+  }
+
   /* Details: bottom sheet on phones, slide-over from 768 px, a column from 1280 px. */
   .ws-details {
     @apply invisible fixed inset-x-0 bottom-0 z-40 flex translate-y-full flex-col overflow-hidden rounded-t-[18px] border-t border-line bg-panel;

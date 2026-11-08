@@ -556,3 +556,43 @@ database:
         "expected error to name missing field `passwordFile`, got: {msg}"
     );
 }
+
+const MINIMAL_DB: &str = r"
+database:
+  host: pg
+  database: d
+  user: u
+  passwordFile: /p
+";
+
+#[test]
+fn artifacts_section_defaults_when_missing() {
+    let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
+    assert_eq!(cfg.artifacts.max_text_bytes, 1_048_576);
+    assert_eq!(cfg.artifacts.max_image_bytes, 3_932_160);
+    assert_eq!(cfg.artifacts.max_per_task, 50);
+}
+
+#[test]
+fn artifacts_options_can_be_overridden() {
+    let yaml = format!("{MINIMAL_DB}artifacts:\n  maxTextBytes: 2048\n  maxPerTask: 3\n");
+    let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+    assert_eq!(cfg.artifacts.max_text_bytes, 2048);
+    assert_eq!(cfg.artifacts.max_image_bytes, 3_932_160);
+    assert_eq!(cfg.artifacts.max_per_task, 3);
+}
+
+#[test]
+fn invalid_artifact_limits_are_rejected_naming_the_option() {
+    for (body, option) in [
+        ("maxPerTask: 0", "artifacts.maxPerTask"),
+        ("maxTextBytes: 0", "artifacts.maxTextBytes"),
+        ("maxImageBytes: 8388609", "artifacts.maxImageBytes"),
+    ] {
+        let yaml = format!("{MINIMAL_DB}artifacts:\n  {body}\n");
+        let err = InstanceConfig::from_yaml_str(&yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(option), "{err}");
+    }
+}

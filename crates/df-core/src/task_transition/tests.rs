@@ -586,6 +586,7 @@ fn child(how: ChildEnd) -> ChildEnded {
         detail: String::new(),
         summary: String::new(),
         pr_url: None,
+        artifacts: Vec::new(),
         waiting_dependents: Vec::new(),
     }
 }
@@ -618,6 +619,7 @@ fn the_child_ended_message_says_how_it_ended_and_quotes_the_summary() {
     let completed = ChildEnded {
         pr_url: Some("https://forge.example/acme/app/pulls/12".into()),
         waiting_dependents: vec!["DF-23".into()],
+        artifacts: vec!["DF-21/findings.md".into(), "DF-21/login.png".into()],
         summary: "Review done, two findings.".into(),
         ..child(ChildEnd::Completed)
     };
@@ -625,20 +627,24 @@ fn the_child_ended_message_says_how_it_ended_and_quotes_the_summary() {
         child_ended_text(&completed),
         "DF-21 \"Review DF-20\" completed.\n\
          PR: https://forge.example/acme/app/pulls/12\n\
+         Artifacts: DF-21/findings.md, DF-21/login.png\n\
          Still waiting on DF-21: DF-23\n\
          \n\
          Summary from the agent of DF-21:\n\
          > Review done, two findings."
     );
-    assert!(child_ended_text(&child(ChildEnd::Done)).ends_with("is done."));
-    assert!(child_ended_text(&child(ChildEnd::Cancelled)).ends_with("was cancelled."));
+    assert_eq!(
+        child_ended_text(&child(ChildEnd::Done)),
+        "DF-21 \"Review DF-20\" is done.\nArtifacts: none"
+    );
+    assert!(child_ended_text(&child(ChildEnd::Cancelled)).contains("was cancelled."));
     let failed = ChildEnded {
         detail: "sandbox lost".into(),
         ..child(ChildEnd::Failed)
     };
     assert_eq!(
         child_ended_text(&failed),
-        "DF-21 \"Review DF-20\" failed.\nReason: sandbox lost"
+        "DF-21 \"Review DF-20\" failed.\nReason: sandbox lost\nArtifacts: none"
     );
 }
 

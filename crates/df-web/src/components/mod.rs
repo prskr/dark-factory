@@ -28,7 +28,10 @@ pub use forms::{
 pub use host_icon::{HostIconSize, host_icon};
 pub use icons::{Icon, forge_icon, icon, logo};
 pub use lists::{EmptyPanel, EmptySize, definition_list, empty_panel, empty_state, section};
-pub use overlay::{DialogStyle, details_panel, dialog, dialog_close, dialog_with};
+pub use overlay::{
+    DialogStyle, INITIAL_DETAILS_TAB, details_panel, details_panel_with_heading, dialog,
+    dialog_close, dialog_with,
+};
 pub use project_host::{HostRole, ProjectHosts, issue_role, project_forge_kind, role_icon};
 pub use shell::{
     CreateAction, avatar, bottom_bar, floating_create, initials, page_header, phone_profile_menu,

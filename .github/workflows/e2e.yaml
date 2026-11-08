@@ -87,3 +87,5 @@ jobs:
         env:
           # The runner has the memory for two sandboxes and browser contexts at a time (docs/demo.md)
           E2E_TEST_THREADS: "2"
+          # gh downloads the cert-manager manifest through the API
+          GH_TOKEN: ${{ github.token }}

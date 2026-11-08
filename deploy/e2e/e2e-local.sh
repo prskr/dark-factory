@@ -72,7 +72,7 @@ require() {
 }
 
 prepare_tools() {
-  require kind kubectl helm curl cargo git
+  require kind kubectl helm curl cargo git gh
   read -ra bazel <<<"${BAZEL:-bazel}"
   require "${bazel[0]}"
   case "$(uname -m)" in
@@ -107,7 +107,10 @@ load_images() {
 
 install_infrastructure() {
   log "Installing cert-manager, PostgreSQL, Dex, the browser, the event receiver and the fake model upstream"
-  kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
+  # Through the API: plain `releases/download` URLs time out (504) from some networks.
+  gh release download "$cert_manager_version" --repo cert-manager/cert-manager \
+    --pattern cert-manager.yaml --dir "$scratch" --clobber
+  kc apply -f "$scratch/cert-manager.yaml"
   kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml \
     -f deploy/e2e/receiver.yaml -f deploy/e2e/fake-upstream.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s

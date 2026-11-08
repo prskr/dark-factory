@@ -24,7 +24,7 @@ rust_library(
     edition = "2024",
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + ["//crates/df-artifact-types:df_artifact_types"],
 )
 
 alias(
@@ -47,5 +47,5 @@ rust_test(
         proc_macro = True,
         proc_macro_dev = True,
     ),
-    deps = all_crate_deps(normal_dev = True),
+    deps = all_crate_deps(normal_dev = True) + ["//crates/df-artifact-types:df_artifact_types"],
 )

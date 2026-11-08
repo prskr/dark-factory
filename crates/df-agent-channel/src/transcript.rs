@@ -156,7 +156,7 @@ fn content_blocks_mut(kind: &mut event::Kind) -> Vec<&mut ContentBlock> {
     }
 }
 
-async fn externalize_block(
+pub(crate) async fn externalize_block(
     blobs: &PgBlobStore,
     block: &mut ContentBlock,
 ) -> Result<(), ChannelError> {

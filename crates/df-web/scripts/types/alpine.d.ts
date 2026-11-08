@@ -14,4 +14,6 @@ declare const Alpine: {
     name: string,
     factory: (...args: Args) => State & ThisType<State & AlpineMagics>,
   ): void;
+  /** The state of the closest component of an element. */
+  $data(el: Element): any;
 };

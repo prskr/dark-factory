@@ -18,7 +18,7 @@ use rmcp::{
 use tokio::net::UnixStream;
 
 use crate::runtime_socket::{
-    McpToolDescriptorWire, RuntimeRequest, RuntimeResponse, read_frame, write_frame,
+    McpToolDescriptorWire, RuntimeRequest, RuntimeResponse, ToolContent, read_frame, write_frame,
 };
 
 /// MCP server handler that bridges `tools/list` and `tools/call` over the runtime Unix domain socket.
@@ -104,8 +104,15 @@ impl ServerHandler for McpBridgeServer {
                 structured_content_json,
                 ..
             } => {
-                let content_blocks: Vec<ContentBlock> =
-                    content.into_iter().map(ContentBlock::text).collect();
+                let content_blocks: Vec<ContentBlock> = content
+                    .into_iter()
+                    .map(|item| match item {
+                        ToolContent::Text { text } => ContentBlock::text(text),
+                        ToolContent::Image { mime_type, data } => {
+                            ContentBlock::image(data, mime_type)
+                        }
+                    })
+                    .collect();
                 let mut res = if is_error {
                     CallToolResult::error(content_blocks)
                 } else {

@@ -66,6 +66,14 @@ pub enum Icon {
     GitCommit,
     /// An opened draft pull request in the transcript (Lucide `git-pull-request-draft`).
     PullRequestDraft,
+    /// Open an artifact on its own page (Lucide `maximize`).
+    Maximize,
+    /// A text artifact (Lucide `file-text`).
+    FileText,
+    /// An image artifact (Lucide `image`).
+    ImageFile,
+    /// Collapse or expand the task list (Lucide `panel-left`).
+    PanelLeft,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -116,9 +124,17 @@ impl Icon {
         Self::ExternalLink,
         Self::GitCommit,
         Self::PullRequestDraft,
+        Self::Maximize,
+        Self::FileText,
+        Self::ImageFile,
+        Self::PanelLeft,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per icon; follow-up: move the SVG bodies to assets/icons/*.svg and include_str! them"
+    )]
     const fn body(self) -> &'static str {
         match self {
             Self::Wrench => {
@@ -184,6 +200,18 @@ impl Icon {
             Self::Git => GIT_BODY,
             Self::GitCommit => {
                 "<circle cx=\"12\" cy=\"12\" r=\"3\"/><line x1=\"3\" x2=\"9\" y1=\"12\" y2=\"12\"/><line x1=\"15\" x2=\"21\" y1=\"12\" y2=\"12\"/>"
+            }
+            Self::Maximize => {
+                "<path d=\"M8 3H5a2 2 0 0 0-2 2v3\"/><path d=\"M21 8V5a2 2 0 0 0-2-2h-3\"/><path d=\"M3 16v3a2 2 0 0 0 2 2h3\"/><path d=\"M16 21h3a2 2 0 0 0 2-2v-3\"/>"
+            }
+            Self::FileText => {
+                "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"M10 9H8\"/><path d=\"M16 13H8\"/><path d=\"M16 17H8\"/>"
+            }
+            Self::ImageFile => {
+                "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" ry=\"2\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21\"/>"
+            }
+            Self::PanelLeft => {
+                "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/>"
             }
             Self::PullRequestDraft => {
                 "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M18 6V5\"/><path d=\"M18 11v-1\"/><line x1=\"6\" x2=\"6\" y1=\"9\" y2=\"21\"/>"

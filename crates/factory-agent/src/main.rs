@@ -9,6 +9,7 @@ use clap::Parser;
 use df_telemetry::logging::LogFormat;
 use tokio::sync::Mutex;
 
+pub mod artifact_path;
 pub mod cli;
 pub mod config;
 pub mod connection;

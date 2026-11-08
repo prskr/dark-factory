@@ -82,6 +82,9 @@ fn shipped_scripts_parse() {
     assert_eq!(delegation.sessions.new.len(), 4);
     assert_eq!(delegation.sessions.loaded.len(), 4);
     assert_eq!(delegation.sessions.new[0], delegation.sessions.loaded[3]);
+    let research = Script::from_yaml_str(include_str!("../scripts/research.yaml")).unwrap();
+    assert_eq!(research.sessions.new.len(), 3);
+    assert_eq!(research.sessions.loaded.len(), 3);
     let webhook = Script::from_yaml_str(include_str!("../scripts/webhook.yaml")).unwrap();
     assert_eq!(webhook.sessions.new.len(), 1);
     assert_eq!(webhook.sessions.loaded.len(), 1);

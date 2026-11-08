@@ -688,7 +688,21 @@ fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
     }
 }
 
+/// The artifact a successful `write_artifact` call wrote, from its input.
+fn written_artifact(tool: &ToolItem) -> Option<String> {
+    if !tool.title.contains("write_artifact") || tool.status != "completed" || tool.truncated {
+        return None;
+    }
+    let input: serde_json::Value = serde_json::from_str(&tool.raw_input).ok()?;
+    let name = input.get("name")?.as_str()?;
+    df_core::artifacts::validate_name(name).ok()?;
+    Some(name.to_owned())
+}
+
 fn render_tool(id: &str, tool: &ToolItem) -> Markup {
+    if let Some(name) = written_artifact(tool) {
+        return crate::artifacts::artifact_row(id, &name);
+    }
     let mut blocks: Vec<(String, String)> = Vec::new();
     if !tool.raw_input.is_empty() {
         blocks.push(("Input".into(), tool.raw_input.clone()));

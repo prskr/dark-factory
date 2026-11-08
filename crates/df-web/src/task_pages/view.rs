@@ -14,9 +14,9 @@ use crate::components::forms::{INPUT_CLASS, MenuItem};
 use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
-    action_class, chip, definition_list, details_panel, dialog_close, dialog_with, field_error,
-    filter_chip, form_error, harness_label, icon, phone_profile_menu, search_menu, section,
-    status_badge, tone_badge,
+    action_class, chip, definition_list, details_panel_with_heading, dialog_close, dialog_with,
+    field_error, filter_chip, form_error, harness_label, icon, phone_profile_menu, search_menu,
+    section, status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
 use crate::layout::Shell;
@@ -271,10 +271,15 @@ pub(crate) fn list_column(
     let events = format!("/tasks/events{}", filters.query());
     html! {
         section class="ws-list" aria-label="Tasks" {
-            div class="space-y-3 border-b border-line p-4" {
+            // From 768 px the list collapses to this strip (`listCollapsed` of the workspace).
+            div class="ws-list-strip flex-col items-center py-3" {
+                button type="button" aria-label="Expand task list" "x-on:click"="setListCollapsed(false)" class=(ICON_BUTTON_CLASS) { (icon(Icon::PanelLeft)) }
+            }
+            div class="ws-list-full space-y-3 border-b border-line p-4" {
                 div class="flex items-center justify-between gap-2" {
                     h1 class="text-lg font-semibold" { "Tasks" }
-                    div class="hidden md:block" { (search_menu(menu_label, &menu)) }
+                    div class="ml-auto hidden md:block" { (search_menu(menu_label, &menu)) }
+                    button type="button" aria-label="Collapse task list" "x-on:click"="setListCollapsed(true)" class={(ICON_BUTTON_CLASS) " max-md:hidden"} { (icon(Icon::PanelLeft)) }
                     (phone_profile_menu(shell))
                 }
                 div class="flex flex-wrap items-center gap-2" {
@@ -292,7 +297,7 @@ pub(crate) fn list_column(
                     }
                 }
             }
-            div class="min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0" {
+            div class="ws-list-full min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0" {
                 div hx-sse:connect=(events) hx-swap="none" {}
                 (task_rows(items, current, filters))
             }
@@ -887,10 +892,19 @@ pub(super) fn details_column(
     runs: &[RunView],
     cancel: &CancelNote,
     resume: &ResumeNote,
+    artifacts: &[crate::artifacts::ArtifactCard],
 ) -> Markup {
-    details_panel(
+    let tabbed = !artifacts.is_empty();
+    details_panel_with_heading(
         "Details",
-        html! { (details_region(task, cancel, resume, None)) (super::dependencies::dependencies_region(deps, task.status)) (runs_region(&task.key, runs, task.persona_model.as_deref())) },
+        crate::artifacts::details_heading(artifacts.len(), false),
+        html! {
+            // The stylesheet hides this panel while the Artifacts tab is open.
+            div id="panel-overview" role=[tabbed.then_some("tabpanel")] aria-labelledby=[tabbed.then_some("tab-overview")] class="ws-overview" {
+                (details_region(task, cancel, resume, None)) (super::dependencies::dependencies_region(deps, task.status)) (runs_region(&task.key, runs, task.persona_model.as_deref()))
+            }
+            (crate::artifacts::tab_panel(&task.key, artifacts))
+        },
     )
 }
 

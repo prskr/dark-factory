@@ -548,6 +548,7 @@ fn start_runtime_socket(ctx: &RunContext, shared: &RunShared) -> Result<AbortOnD
         ctx.assign.tools.clone(),
         ctx.outbound_tx.clone(),
         Arc::clone(&shared.pending_tool_calls),
+        vec![ctx.repo_dir.clone(), PathBuf::from("/tmp")],
     ));
     let server = RuntimeSocketServer::bind(&ctx.runtime_sock_path, handler)
         .map_err(|e| format!("Failed to bind runtime socket: {e}"))?;

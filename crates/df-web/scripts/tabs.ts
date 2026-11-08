@@ -3,6 +3,8 @@
 //
 // State: `tab`, the `data-tab` of the open tab; the server passes the one to open first.
 //
+// `adopt()`: sets `role="tabpanel"` and `aria-labelledby` on the panels the tabs control.
+//
 // `init()`: keeps the open tab in view when the tab row scrolls (phones), on init and on every
 // change.
 //
@@ -16,6 +18,18 @@ document.addEventListener('alpine:init', () => {
     init(): void {
       this.$watch('tab', () => this.reveal());
       this.reveal();
+    },
+
+    // Makes the panel each tab controls a tabpanel that points back at the tab. A tablist that
+    // appears later (the details column gets its tab bar with the first artifact) calls it from
+    // `x-init`; panels the server rendered as tabpanels are left as they are.
+    adopt(): void {
+      for (const tab of this.$el.querySelectorAll<HTMLElement>('[role="tab"]')) {
+        const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+        if (!panel) continue;
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-labelledby', tab.id);
+      }
     },
 
     reveal(): void {
