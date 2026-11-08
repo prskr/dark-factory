@@ -650,8 +650,10 @@ async fn streams_end_when_the_session_token_is_due_for_refresh() {
             Some("refresh-0"),
         )
         .await;
-        let mut sse = SseReader::new(f.app.get(uri, &cookie).await);
-        sse.next().await;
+        // The stream may end before its first event on a slow machine; it only has to open.
+        let response = f.app.get(uri, &cookie).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+        let mut sse = SseReader::new(response);
         // The reconnect passes the auth middleware again, which refreshes the token and roles.
         assert!(
             sse.ends_within(Duration::from_secs(5)).await,

@@ -252,7 +252,12 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
     world.wait_for_status(&key, "waiting").await?;
     let first_run = db::runs(&world.pool, &key).await?;
     assert_eq!(first_run.len(), 1, "{first_run:?}");
-    let pulls = world.pulls_of(&branch_of(&key)).await?;
+    // The `pr.sync` outbox job opens the draft PR after the run, so it can lag the status.
+    let pulls = eventually("the draft PR of run 1", RUN_TIMEOUT, || async {
+        let pulls = world.pulls_of(&branch_of(&key)).await?;
+        Ok((!pulls.is_empty()).then_some(pulls))
+    })
+    .await?;
     assert_eq!(pulls.len(), 1, "{pulls:?}");
     let number = pulls[0]["number"].as_u64().context("number")?;
     // The review thread `read_pull_request_feedback` of run 2 returns first.
@@ -298,8 +303,13 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
         runs[1].harness_session_id, first_run[0].harness_session_id,
         "run 2 resumes the session of run 1"
     );
-    // The same pull request, now ready, with the commit of run 2.
-    let pulls = world.pulls_of(&branch_of(&key)).await?;
+    // The same pull request, now ready (the `pr.sync` outbox job), with the commit of run 2.
+    let pulls = eventually("the PR marked ready", RUN_TIMEOUT, || async {
+        let pulls = world.pulls_of(&branch_of(&key)).await?;
+        let ready = pulls.iter().any(|pr| pr["draft"] == false);
+        Ok(ready.then_some(pulls))
+    })
+    .await?;
     assert_eq!(pulls.len(), 1, "no second PR: {pulls:?}");
     assert_eq!(pulls[0]["draft"], false);
     assert_eq!(pulls[0]["title"], "Add a greeting");
