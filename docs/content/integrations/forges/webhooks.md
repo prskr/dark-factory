@@ -55,38 +55,85 @@ even if the fork's branch is named `factory/task/<key>`.
 One secret per plugin signs all its deliveries (HMAC-SHA256). Every repository the plugin serves
 shares it; an event only reaches projects whose repository URL matches the event's repository.
 
-1. Create the Secret in the instance namespace:
+By default the control plane generates the secret. On startup it creates the Secret
+`<fullname>-webhook-<plugin>` in the instance namespace if it does not exist, with key `secret`
+and 32 random bytes as 64 hex characters. An existing Secret is never changed. Nothing to
+configure; the chart's default values do this for every plugin.
+
+1. Read the generated secret and enter it in the forge (next section):
+
+   ```bash
+   kubectl -n dark-factory get secret <fullname>-webhook-forgejo \
+     -o jsonpath='{.data.secret}' | base64 -d
+   ```
+
+   `<fullname>` is `fullnameOverride` if set, else the release name, or
+   `<release>-dark-factory` when the release name does not contain the chart name.
+
+2. To manage the secret yourself, create a Secret and reference it in the Helm values:
 
    ```bash
    kubectl -n dark-factory create secret generic forge-webhooks \
      --from-literal=forgejo="$(openssl rand -hex 32)"
    ```
 
-2. Reference it in the Helm values and run `helm upgrade`:
-
    ```yaml
    plugins:
      forgejo:
        webhookSecret:
-         name: forge-webhooks
-         key: forgejo
+         existingSecret: forge-webhooks
+         key: forgejo   # default: secret
    ```
 
-   The chart mounts the key read-only at `/var/run/dark-factory/webhooks/forgejo/secret` and sets
-   `plugins.forgejo.webhookSecretFile` in the instance configuration. The control plane reads the
-   file once at startup; a missing or empty file stops it
-   ([Startup](configuration.md#startup)).
+   The chart writes `plugins.forgejo.webhookSecret` (`name`, `key`, `generate: false`) into the
+   instance configuration. A missing Secret, a missing key or an empty value stops the control plane
+   at startup ([Startup](configuration.md#startup)).
 
 3. Check the endpoint. Without a valid signature it answers `401`; `404` means the plugin has no
-   secret or is not loaded:
+   `webhookSecret`, exports no webhooks or is not loaded:
 
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' -X POST https://factory.example.org/webhooks/forgejo
    ```
 
 The endpoint `POST /webhooks/<plugin>` is served on the web UI's host without login. Bodies over
-1 MiB are refused with `413`. Rotating the secret means changing it in the Secret and in the forge,
-then restarting the control plane (`kubectl -n dark-factory rollout restart deployment/<release>-control-plane`).
+1 MiB are refused with `413`.
+
+### Rotate the secret
+
+1. Delete the generated Secret (or change the value of your own Secret).
+2. Restart the control plane
+   (`kubectl -n dark-factory rollout restart deployment/<fullname>-control-plane`); a deleted
+   generated Secret is created again with a new value. The secret is read at startup only, there is
+   no hot reload.
+3. Enter the new value in the forge.
+
+While the rollout and the forge update are in progress, old and new replicas and the forge disagree
+about the value, so deliveries can get `401`. When both are done, redeliver the failed events from
+the forge's delivery history.
+
+### Generated Secrets outlive the release
+
+The generated Secret has no owner reference, so `helm uninstall` keeps it (the forge keeps working
+after a reinstall). Remove the Secrets of an instance with:
+
+```bash
+kubectl -n dark-factory delete secret \
+  -l app.kubernetes.io/component=webhook-secret,app.kubernetes.io/instance=<instanceName>
+```
+
+A Secret of a removed plugin stays as well; select it additionally with `dark-factory.io/plugin=<plugin>`.
+
+### Upgrade and rollback
+
+- Chart values that set `plugins.<name>.webhookSecret.name` must rename it to `existingSecret`
+  (keep `key`). The values schema rejects the old field, so `helm upgrade` fails until you do.
+  Values that do not set `webhookSecret` switch to a generated Secret: copy its value into the forge
+  after the upgrade.
+- Rolling back to the previous chart mounts the referenced Secret again. If the forge already holds
+  a generated value, either enter the old value in the forge again, or point the old chart at the
+  generated Secret with `webhookSecret: {name: <fullname>-webhook-<plugin>, key: secret}`. Then
+  redeliver the failed events from the forge.
 
 ## Register the webhook in Forgejo
 
@@ -162,7 +209,7 @@ is not loaded are counted as `plugin="unknown"`; a loaded plugin keeps its name.
 
 | Outcome | Cause |
 | --- | --- |
-| `not_found` | Wrong plugin name in the URL, the plugin did not load, it exports no webhook interface, or it has no `webhookSecret`. |
+| `not_found` | Wrong plugin name in the URL, the plugin did not load, it exports no webhook interface, or it has no `webhookSecret` (the chart always sets one; a hand-written configuration may leave it out). |
 | `unauthorized` | The secret in the forge differs from the Secret, or the request carries no signature (GitHub: only `X-Hub-Signature-256` counts). |
 | `invalid` | The plugin could not parse the payload: content type is not JSON, or the event header is missing. |
 | `too_large` | Body over 1 MiB. |

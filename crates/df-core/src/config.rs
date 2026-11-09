@@ -804,9 +804,23 @@ pub struct PluginConfig {
     /// How the host sends the forge credential.
     #[serde(default)]
     pub auth_scheme: AuthSchemeSetting,
-    /// File with the webhook secret, read at startup. Unset: no webhook endpoint for the plugin.
+    /// Kubernetes Secret with the webhook secret, read at startup. Unset: no webhook endpoint
+    /// for the plugin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webhook_secret_file: Option<PathBuf>,
+    pub webhook_secret: Option<WebhookSecretConfig>,
+}
+
+/// Where a plugin's webhook secret lives: a key of a Secret in the instance namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebhookSecretConfig {
+    /// Secret name.
+    pub name: String,
+    /// Key within the Secret.
+    pub key: String,
+    /// Create the Secret with a random value when it does not exist. Default `false`.
+    #[serde(default)]
+    pub generate: bool,
 }
 
 impl PluginConfig {
@@ -818,7 +832,7 @@ impl PluginConfig {
             settings: BTreeMap::new(),
             hosts: Vec::new(),
             auth_scheme: AuthSchemeSetting::default(),
-            webhook_secret_file: None,
+            webhook_secret: None,
         }
     }
 }

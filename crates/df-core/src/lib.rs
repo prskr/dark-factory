@@ -24,6 +24,7 @@ pub use config::{
     ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,
     ConfigError, DatabaseConfig, InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig,
     PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+    WebhookSecretConfig,
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,
@@ -41,7 +42,7 @@ pub use seams::{
     IssueRef, IssueState, NewPullRequest, PeerIdentity, PrComment, ProviderError, PullRequest,
     PullRequestRef, PullRequestState, PullRequestUpdate, RateLimit, RepoRef, Review, ReviewComment,
     ReviewThread, ReviewVerdict, RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError,
-    SecretStore, TaskVolumeSpec, UpstreamError,
+    SecretKeyRef, SecretStore, TaskVolumeSpec, UpstreamError,
 };
 pub use title::{
     FALLBACK_TITLE, TITLE_MAX_CHARS, TitleSource, placeholder_title, sanitize_title, title_too_long,

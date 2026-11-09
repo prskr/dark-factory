@@ -226,7 +226,7 @@ async fn forge_credentials(
         if !wanted.contains(key.as_str()) || !seen.insert(key.clone()) {
             continue;
         }
-        match secrets.get(reference).await {
+        match secrets.get(&reference.secret).await {
             Ok(token) => {
                 credentials.insert(
                     key,
@@ -474,10 +474,18 @@ mod tests {
     impl SecretStore for CountingSecrets {
         async fn get(
             &self,
-            reference: &df_core::CredentialRef,
+            reference: &df_core::SecretKeyRef,
         ) -> Result<secrecy::SecretString, df_core::SecretError> {
-            self.0.lock().unwrap().push(reference.secret_name.clone());
-            Ok(reference.secret_name.clone().into())
+            self.0.lock().unwrap().push(reference.name.clone());
+            Ok(reference.name.clone().into())
+        }
+
+        async fn get_or_create(
+            &self,
+            reference: &df_core::SecretKeyRef,
+            _labels: &std::collections::BTreeMap<String, String>,
+        ) -> Result<secrecy::SecretString, df_core::SecretError> {
+            self.get(reference).await
         }
     }
 
@@ -485,8 +493,10 @@ mod tests {
         df_core::CredentialRef {
             id: df_core::CredentialRefId::new(),
             name: secret_name.into(),
-            secret_name: secret_name.into(),
-            secret_key: "token".into(),
+            secret: df_core::SecretKeyRef {
+                name: secret_name.into(),
+                key: "token".into(),
+            },
         }
     }
 

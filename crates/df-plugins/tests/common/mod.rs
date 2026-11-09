@@ -17,6 +17,7 @@ use df_core::routing::RoutingTable;
 use df_core::testing::FakeSecretStore;
 use df_core::{
     AuthScheme, CredentialRef, CredentialRefId, IntegrationError, PluginConfig, ProjectId,
+    SecretKeyRef,
 };
 use df_plugins::{
     ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
@@ -78,8 +79,10 @@ impl ProjectDirectory for FixedDirectory {
             credential: Some(CredentialRef {
                 id: CredentialRefId::new(),
                 name: "forge".into(),
-                secret_name: "forge-token".into(),
-                secret_key: "token".into(),
+                secret: SecretKeyRef {
+                    name: "forge-token".into(),
+                    key: "token".into(),
+                },
             }),
         })
     }

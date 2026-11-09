@@ -1,7 +1,7 @@
 //! In-memory fake implementations of [`SandboxProvider`], [`ForgeClient`], and [`SecretStore`]
 //! for unit and integration testing across workstreams.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -13,9 +13,9 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
-    AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
-    NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState,
-    PullRequestUpdate, RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretStore,
+    AuthorRole, Comment, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
+    PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState, PullRequestUpdate,
+    RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretKeyRef, SecretStore,
     TaskVolumeSpec,
 };
 
@@ -685,11 +685,12 @@ impl ForgeClient for FakeForgeClient {
 
 #[derive(Default)]
 struct SecretStoreState {
-    calls: Vec<CredentialRef>,
+    calls: Vec<SecretKeyRef>,
     entries: HashMap<(String, String), Result<SecretString, SecretError>>,
+    created: Vec<(SecretKeyRef, BTreeMap<String, String>)>,
 }
 
-/// In-memory fake [`SecretStore`] that records [`CredentialRef`] lookups and returns seeded secrets.
+/// In-memory fake [`SecretStore`] that records [`SecretKeyRef`] lookups and returns seeded secrets.
 #[derive(Clone, Default)]
 pub struct FakeSecretStore {
     state: Arc<Mutex<SecretStoreState>>,
@@ -700,9 +701,14 @@ impl FakeSecretStore {
         Self::default()
     }
 
-    /// Returns all [`CredentialRef`] lookups recorded so far.
-    pub fn calls(&self) -> Vec<CredentialRef> {
+    /// Returns all [`SecretKeyRef`] lookups recorded so far.
+    pub fn calls(&self) -> Vec<SecretKeyRef> {
         self.state.lock().expect("lock poisoned").calls.clone()
+    }
+
+    /// Returns the Secrets created by `get_or_create` with the labels they were created with.
+    pub fn created(&self) -> Vec<(SecretKeyRef, BTreeMap<String, String>)> {
+        self.state.lock().expect("lock poisoned").created.clone()
     }
 
     /// Seeds a secret value for `(secret_name, secret_key)`.
@@ -731,24 +737,48 @@ impl FakeSecretStore {
             .entries
             .insert((secret_name.into(), secret_key.into()), Err(err));
     }
+
+    /// Deletes the seeded or created entry for `(secret_name, secret_key)`.
+    pub fn remove(&self, secret_name: &str, secret_key: &str) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .entries
+            .remove(&(secret_name.to_string(), secret_key.to_string()));
+    }
 }
 
 #[async_trait]
 impl SecretStore for FakeSecretStore {
-    async fn get(&self, r: &CredentialRef) -> Result<SecretString, SecretError> {
+    async fn get(&self, r: &SecretKeyRef) -> Result<SecretString, SecretError> {
         let mut state = self.state.lock().expect("lock poisoned");
         state.calls.push(r.clone());
-        match state
-            .entries
-            .get(&(r.secret_name.clone(), r.secret_key.clone()))
-        {
+        match state.entries.get(&(r.name.clone(), r.key.clone())) {
             Some(Ok(secret)) => Ok(secret.clone()),
             Some(Err(err)) => Err(err.clone()),
-            None => Err(SecretError::NotFound {
-                secret_name: r.secret_name.clone(),
-                secret_key: r.secret_key.clone(),
-            }),
+            None => Err(SecretError::NotFound(r.clone())),
         }
+    }
+
+    async fn get_or_create(
+        &self,
+        r: &SecretKeyRef,
+        labels: &BTreeMap<String, String>,
+    ) -> Result<SecretString, SecretError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(r.clone());
+        let key = (r.name.clone(), r.key.clone());
+        if let Some(entry) = state.entries.get(&key) {
+            return entry.clone();
+        }
+        // The Secret exists without the key: never patch it (as `K8sSecretStore`).
+        if state.entries.keys().any(|(name, _key)| *name == r.name) {
+            return Err(SecretError::NotFound(r.clone()));
+        }
+        let value = SecretString::from(format!("generated-{}", state.created.len()));
+        state.entries.insert(key, Ok(value.clone()));
+        state.created.push((r.clone(), labels.clone()));
+        Ok(value)
     }
 }
 
@@ -759,7 +789,7 @@ impl SecretStore for FakeSecretStore {
 )]
 mod tests {
     use super::*;
-    use crate::ids::{CredentialRefId, PersonaId};
+    use crate::ids::PersonaId;
     use crate::keys::TaskKey;
     use crate::seams::{IssueRef, IssueState, RepoRef, ReviewThread};
     use secrecy::ExposeSecret;
@@ -1032,29 +1062,56 @@ mod tests {
         let store = FakeSecretStore::new();
         store.insert("claude-sub", "oauth-token", "sk-ant-oat01-secret");
 
-        let cred_ref = CredentialRef {
-            id: CredentialRefId::new(),
-            name: "claude".into(),
-            secret_name: "claude-sub".into(),
-            secret_key: "oauth-token".into(),
+        let cred_ref = SecretKeyRef {
+            name: "claude-sub".into(),
+            key: "oauth-token".into(),
         };
         let secret = store.get(&cred_ref).await.unwrap();
         assert_eq!(secret.expose_secret(), "sk-ant-oat01-secret");
 
-        let missing_ref = CredentialRef {
-            id: CredentialRefId::new(),
-            name: "missing".into(),
-            secret_name: "nope".into(),
-            secret_key: "key".into(),
+        let missing_ref = SecretKeyRef {
+            name: "nope".into(),
+            key: "key".into(),
         };
         assert_eq!(
             store.get(&missing_ref).await.unwrap_err(),
-            SecretError::NotFound {
-                secret_name: "nope".into(),
-                secret_key: "key".into()
-            }
+            SecretError::NotFound(missing_ref.clone())
         );
 
         assert_eq!(store.calls(), vec![cred_ref, missing_ref]);
+    }
+
+    #[tokio::test]
+    async fn fake_secret_store_get_or_create_creates_missing_and_keeps_existing() {
+        let store = FakeSecretStore::new();
+        store.insert("present", "k", "kept");
+        let labels = BTreeMap::from([("a".to_string(), "b".to_string())]);
+        let present = SecretKeyRef {
+            name: "present".into(),
+            key: "k".into(),
+        };
+        let missing = SecretKeyRef {
+            name: "missing".into(),
+            key: "k".into(),
+        };
+
+        let kept = store.get_or_create(&present, &labels).await.unwrap();
+        assert_eq!(kept.expose_secret(), "kept");
+        assert!(store.created().is_empty());
+
+        let other_key = SecretKeyRef {
+            name: "present".into(),
+            key: "other".into(),
+        };
+        let err = store.get_or_create(&other_key, &labels).await.unwrap_err();
+        assert_eq!(err, SecretError::NotFound(other_key));
+        assert!(store.created().is_empty());
+
+        let made = store.get_or_create(&missing, &labels).await.unwrap();
+        assert_eq!(store.created(), vec![(missing.clone(), labels.clone())]);
+        assert_eq!(
+            store.get(&missing).await.unwrap().expose_secret(),
+            made.expose_secret()
+        );
     }
 }

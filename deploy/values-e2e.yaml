@@ -34,7 +34,7 @@ plugins:
       digest: ''
     # Secret created by deploy/e2e/e2e-local.sh; the same value signs the repository webhook.
     webhookSecret:
-      name: forge-webhooks
+      existingSecret: forge-webhooks
       key: forgejo
   github:
     image:

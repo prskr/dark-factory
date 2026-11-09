@@ -12,6 +12,7 @@ templates:
   - netpol.yaml
   - httproute.yaml
   - servicemonitor.yaml
+  - lifecycle-events.yaml
 tests:
   - it: mounts the Forgejo and GitHub plugin images of the app version read-only by default
     template: control-plane-deployment.yaml
@@ -108,7 +109,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n'
+          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-forgejo"\n      key: "secret"\n      generate: true\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-github"\n      key: "secret"\n      generate: true\n'
 
   - it: renders no GitHub plugin volume when the entry is removed
     template: control-plane-deployment.yaml
@@ -223,7 +224,7 @@ tests:
               reference: ghcr.io/prskr/dark-factory/plugin-forgejo:0.2.0
               pullPolicy: IfNotPresent
 
-  - it: mounts no webhook secret by default
+  - it: mounts no webhook secret volume by default
     template: control-plane-deployment.yaml
     asserts:
       - notContains:
@@ -232,64 +233,172 @@ tests:
             name: webhook-forgejo
           any: true
       - notContains:
-          path: spec.template.spec.volumes
+          path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: webhook-github
+            name: webhook-forgejo
           any: true
 
-  - it: writes no webhook secret file into the config by default
+  - it: mounts no webhook secret volume when an existing secret is referenced
+    template: control-plane-deployment.yaml
+    set:
+      plugins.forgejo.webhookSecret:
+        existingSecret: forge-webhooks
+        key: forgejo
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-forgejo
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: webhook-forgejo
+          any: true
+
+  - it: renders a generated reference for a null webhook secret
     template: configmap.yaml
     documentIndex: 0
+    set:
+      fullnameOverride: df
+      plugins.forgejo.webhookSecret: null
     asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '    webhookSecret:\n      name: "df-webhook-forgejo"\n      key: "secret"\n      generate: true\n'
+
+  - it: renders no Secret resource by default, so the generated webhook secret is created at runtime only
+    asserts:
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: certs.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: configmap.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: control-plane-deployment.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: control-plane-service.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: gateway-deployment.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: gateway-service.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: httproute.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: lifecycle-events.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: migrate-job.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: netpol.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: rbac.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: sandbox-namespace.yaml
+        not: true
+      - containsDocument:
+          kind: Secret
+          apiVersion: v1
+        template: servicemonitor.yaml
+        not: true
+
+  - it: rejects an existing webhook secret name that is not a DNS-1123 subdomain
+    template: configmap.yaml
+    set:
+      plugins.forgejo.webhookSecret:
+        existingSecret: forge_webhooks
+    asserts:
+      - failedTemplate:
+          errorPattern: "existingSecret"
+
+  - it: rejects a webhook secret key that is not a valid Secret key
+    template: configmap.yaml
+    set:
+      plugins.forgejo.webhookSecret:
+        existingSecret: forge-webhooks
+        key: signing/key
+    asserts:
+      - failedTemplate:
+          errorPattern: "key"
+
+  - it: references a generated webhook secret per plugin by default
+    template: configmap.yaml
+    documentIndex: 0
+    set:
+      fullnameOverride: df
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '    webhookSecret:\n      name: "df-webhook-forgejo"\n      key: "secret"\n      generate: true\n'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'name: "df-webhook-github"'
       - notMatchRegex:
           path: data["config.yaml"]
           pattern: webhookSecretFile
 
-  - it: mounts the referenced webhook secret key read-only
-    template: control-plane-deployment.yaml
-    set:
-      plugins.forgejo.webhookSecret:
-        name: forge-webhooks
-        key: forgejo
-    asserts:
-      - contains:
-          path: spec.template.spec.volumes
-          content:
-            name: webhook-forgejo
-            secret:
-              secretName: forge-webhooks
-              items:
-                - key: forgejo
-                  path: secret
-      - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: webhook-forgejo
-            mountPath: /var/run/dark-factory/webhooks/forgejo
-            readOnly: true
-      - notContains:
-          path: spec.template.spec.volumes
-          content:
-            name: webhook-github
-          any: true
-
-  - it: writes the mounted webhook secret path into the config
+  - it: references an existing webhook secret without generating it
     template: configmap.yaml
     documentIndex: 0
     set:
       plugins.forgejo.webhookSecret:
-        name: forge-webhooks
+        existingSecret: forge-webhooks
         key: forgejo
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: '  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    webhookSecretFile: "/var/run/dark-factory/webhooks/forgejo/secret"\n'
+          pattern: '    webhookSecret:\n      name: "forge-webhooks"\n      key: "forgejo"\n      generate: false\n'
 
-  - it: rejects a webhook secret reference without a key
+  - it: defaults the key of an existing webhook secret to secret
+    template: configmap.yaml
+    documentIndex: 0
+    set:
+      plugins.forgejo.webhookSecret:
+        existingSecret: forge-webhooks
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'name: "forge-webhooks"\n      key: "secret"\n      generate: false'
+
+  - it: rejects the former name and key reference
     template: configmap.yaml
     set:
       plugins.forgejo.webhookSecret:
         name: forge-webhooks
+        key: forgejo
     asserts:
       - failedTemplate:
           errorPattern: "webhookSecret"

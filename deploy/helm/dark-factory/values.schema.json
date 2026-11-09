@@ -481,10 +481,17 @@
             {
               "type": "object",
               "properties": {
-                "name": { "type": "string", "minLength": 1 },
-                "key": { "type": "string", "minLength": 1 }
+                "existingSecret": {
+                  "type": "string",
+                  "maxLength": 253,
+                  "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+                },
+                "key": {
+                  "type": "string",
+                  "maxLength": 253,
+                  "pattern": "^[-._a-zA-Z0-9]*$"
+                }
               },
-              "required": ["name", "key"],
               "additionalProperties": false
             }
           ]

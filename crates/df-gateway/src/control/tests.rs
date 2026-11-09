@@ -1,5 +1,6 @@
 //! Tests of the control plane side that need PostgreSQL (testcontainers) and mutual TLS.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -8,7 +9,7 @@ use anyhow::Result;
 use df_agent_channel::testing::TestPki;
 use df_agent_channel::{TlsReloader, mtls_incoming};
 use df_core::config::AgentTlsConfig;
-use df_core::{CredentialRef, SecretError, SecretStore};
+use df_core::{SecretError, SecretKeyRef, SecretStore};
 use df_db::{Notification, Notifier, PgPool};
 use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::gateway_policy_client::GatewayPolicyClient;
@@ -50,8 +51,16 @@ impl TestSecrets {
 
 #[async_trait::async_trait]
 impl SecretStore for TestSecrets {
-    async fn get(&self, _reference: &CredentialRef) -> Result<SecretString, SecretError> {
+    async fn get(&self, _reference: &SecretKeyRef) -> Result<SecretString, SecretError> {
         Ok(SecretString::from(self.0.lock().unwrap().clone()))
+    }
+
+    async fn get_or_create(
+        &self,
+        reference: &SecretKeyRef,
+        _labels: &BTreeMap<String, String>,
+    ) -> Result<SecretString, SecretError> {
+        self.get(reference).await
     }
 }
 
@@ -422,14 +431,19 @@ struct SecretsExcept {
 
 #[async_trait::async_trait]
 impl SecretStore for SecretsExcept {
-    async fn get(&self, reference: &CredentialRef) -> Result<SecretString, SecretError> {
-        if reference.secret_name == self.unreadable {
-            return Err(SecretError::NotFound {
-                secret_name: reference.secret_name.clone(),
-                secret_key: reference.secret_key.clone(),
-            });
+    async fn get(&self, reference: &SecretKeyRef) -> Result<SecretString, SecretError> {
+        if reference.name == self.unreadable {
+            return Err(SecretError::NotFound(reference.clone()));
         }
         Ok(SecretString::from(self.value))
+    }
+
+    async fn get_or_create(
+        &self,
+        reference: &SecretKeyRef,
+        _labels: &BTreeMap<String, String>,
+    ) -> Result<SecretString, SecretError> {
+        self.get(reference).await
     }
 }
 

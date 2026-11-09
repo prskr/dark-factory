@@ -302,7 +302,7 @@ impl PluginForgeClient {
     {
         let token = self
             .secrets
-            .get(&target.credential)
+            .get(&target.credential.secret)
             .await
             .map_err(|e| IntegrationError::Config(format!("reading forge credential: {e}")))?;
         with_retries(|| async {
