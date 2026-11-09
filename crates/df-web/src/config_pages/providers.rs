@@ -430,7 +430,7 @@ fn credential_options(credentials: &[CredentialRef]) -> Vec<(String, String)> {
         .map(|c| {
             (
                 c.id.to_string(),
-                format!("{} ({}/{})", c.name, c.secret_name, c.secret_key),
+                format!("{} ({}/{})", c.name, c.secret.name, c.secret.key),
             )
         })
         .collect()
@@ -710,7 +710,7 @@ fn row(entry: &ListEntry, credentials: &[CredentialRef]) -> Markup {
             }))
             (td(Cell::Text, html! { (input.scheme.label()) }))
             (td(Cell::Mono, html! {
-                @if let Some(c) = credential { (c.name) " (" (c.secret_name) "/" (c.secret_key) ")" } @else { "missing" }
+                @if let Some(c) = credential { (c.name) " (" (c.secret.name) "/" (c.secret.key) ")" } @else { "missing" }
             }))
             (td(Cell::Text, html! {
                 @if entry.personas.is_empty() { span class="text-faint" { "no persona" } }

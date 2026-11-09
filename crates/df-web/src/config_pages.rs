@@ -417,8 +417,8 @@ pub(crate) fn tabbed_form(
 fn credential_values(c: &CredentialRef) -> CredentialForm {
     CredentialForm {
         name: c.name.clone(),
-        secret_name: c.secret_name.clone(),
-        secret_key: c.secret_key.clone(),
+        secret_name: c.secret.name.clone(),
+        secret_key: c.secret.key.clone(),
     }
 }
 
@@ -460,8 +460,8 @@ fn credentials_region(refs: &[CredentialRef]) -> Markup {
                         @for c in refs {
                             (tr(html! {
                                 (td(Cell::First, html! { (c.name) }))
-                                (td(Cell::Mono, html! { (c.secret_name) }))
-                                (td(Cell::Mono, html! { (c.secret_key) }))
+                                (td(Cell::Mono, html! { (c.secret.name) }))
+                                (td(Cell::Mono, html! { (c.secret.key) }))
                                 (td(Cell::Actions, edit_button(&format!("/credentials/{}/edit", c.id), &format!("Edit credential reference {}", c.name))))
                             }))
                         }

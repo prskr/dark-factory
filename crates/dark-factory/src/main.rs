@@ -312,7 +312,7 @@ where
     let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
     let delivery = lifecycle_delivery(&cfg, dev.project_targets())?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
-    let forge_plugins =
+    let mut forge_plugins =
         forge::load_forge_plugins(&plugin_engine, &cfg.plugins, cfg.network.allow_plain_http)?;
     let pool = df_db::connect_pool(&cfg.database).await?;
     let notifier = Arc::new(df_db::Notifier::start(&pool).await?);
@@ -329,6 +329,9 @@ where
         .start(&cfg, &pool, &notifier, stop_rx.clone())
         .await?;
 
+    forge_plugins
+        .resolve_webhook_secrets(secrets.as_ref(), &cfg.instance_name)
+        .await?;
     let forge_routes = forge_plugins.forge_routes();
     let forge = forge::forge_client(forge_plugins, pool.clone(), secrets.clone());
     let flows = dev

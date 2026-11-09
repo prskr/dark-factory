@@ -79,6 +79,18 @@ rules:
   - apiGroups: [""]
     resources: ["secrets", "services"]
     verbs: ["get"]
+  {{- $generated := false }}
+  {{- range $name, $plugin := .Values.plugins }}
+  {{- if and $plugin (empty (($plugin.webhookSecret | default dict).existingSecret)) }}
+  {{- $generated = true }}
+  {{- end }}
+  {{- end }}
+  {{- if $generated }}
+  # The control plane creates the generated webhook Secrets; `create` cannot be limited by name.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

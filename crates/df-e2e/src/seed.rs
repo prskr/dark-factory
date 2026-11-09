@@ -123,8 +123,8 @@ async fn ensure_credential(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
         .into_iter()
         .find(|c| c.name == wanted.name);
     if let Some(c) = &existing
-        && c.secret_name == wanted.secret_name
-        && c.secret_key == wanted.secret_key
+        && c.secret.name == wanted.secret_name
+        && c.secret.key == wanted.secret_key
     {
         return Ok(c.id.as_uuid());
     }
@@ -148,8 +148,8 @@ async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> 
         .find(|c| c.name == wanted_credential.name);
     let credential = match existing {
         Some(c)
-            if c.secret_name == wanted_credential.secret_name
-                && c.secret_key == wanted_credential.secret_key =>
+            if c.secret.name == wanted_credential.secret_name
+                && c.secret.key == wanted_credential.secret_key =>
         {
             c
         }

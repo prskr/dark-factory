@@ -25,8 +25,8 @@ impl From<&CredentialRef> for CredentialRefAuditDetails {
     fn from(r: &CredentialRef) -> Self {
         Self {
             name: r.name.clone(),
-            secret_name: r.secret_name.clone(),
-            secret_key: r.secret_key.clone(),
+            secret_name: r.secret.name.clone(),
+            secret_key: r.secret.key.clone(),
         }
     }
 }
@@ -125,7 +125,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use df_core::{CredentialRefId, PersonaId, RunId, TaskId, UserId};
+    use df_core::{CredentialRefId, PersonaId, RunId, SecretKeyRef, TaskId, UserId};
 
     /// Compile-time check that `secrecy::SecretString` does NOT implement `serde::Serialize`,
     /// guaranteeing it can never be passed into `NewAuditEntry::with_details`.
@@ -175,8 +175,10 @@ mod tests {
         let cred_ref = CredentialRef {
             id: CredentialRefId::new(),
             name: "claude-sub".into(),
-            secret_name: "k8s-claude-secret".into(),
-            secret_key: "oauth-token".into(),
+            secret: SecretKeyRef {
+                name: "k8s-claude-secret".into(),
+                key: "oauth-token".into(),
+            },
         };
         let cred_details = CredentialRefAuditDetails::from(&cred_ref);
         let entry3 = NewAuditEntry::new(

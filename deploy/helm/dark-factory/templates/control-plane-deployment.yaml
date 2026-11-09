@@ -108,11 +108,6 @@ spec:
               mountPath: /plugins/{{ $name }}
               readOnly: true
             {{- end }}
-            {{- if $plugin.webhookSecret }}
-            - name: webhook-{{ $name }}
-              mountPath: /var/run/dark-factory/webhooks/{{ $name }}
-              readOnly: true
-            {{- end }}
             {{- end }}
       volumes:
         - name: config
@@ -149,13 +144,5 @@ spec:
           image:
             reference: {{ include "dark-factory.plugin.image" (dict "plugin" $plugin "Chart" $.Chart) | quote }}
             pullPolicy: {{ $.Values.image.pullPolicy }}
-        {{- end }}
-        {{- with $plugin.webhookSecret }}
-        - name: webhook-{{ $name }}
-          secret:
-            secretName: {{ .name }}
-            items:
-              - key: {{ .key }}
-                path: secret
         {{- end }}
         {{- end }}

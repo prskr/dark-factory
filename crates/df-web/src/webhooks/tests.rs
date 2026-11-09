@@ -26,6 +26,7 @@ impl WebhookReceiver for FakeReceiver {
         matches!(plugin, "forgejo" | "github")
     }
 
+    /// `github` is loaded but has no endpoint: no `webhooks` export or no resolved secret.
     fn has_endpoint(&self, plugin: &str) -> bool {
         plugin == "forgejo"
     }

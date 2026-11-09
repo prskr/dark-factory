@@ -397,23 +397,29 @@ pub trait ForgeClient: Send + Sync {
 // SecretStore
 // ---------------------------------------------------------------------------
 
-/// A reference to a secret stored in the cluster (Kubernetes Secret name + key).
+/// A key within a Secret stored in the cluster (Kubernetes Secret name + key).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SecretKeyRef {
+    #[serde(rename = "secret_name")]
+    pub name: String,
+    #[serde(rename = "secret_key")]
+    pub key: String,
+}
+
+/// A named, database-backed reference to a secret stored in the cluster.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CredentialRef {
     pub id: CredentialRefId,
     pub name: String,
-    pub secret_name: String,
-    pub secret_key: String,
+    #[serde(flatten)]
+    pub secret: SecretKeyRef,
 }
 
 /// Errors returned by [`SecretStore`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SecretError {
-    #[error("secret `{secret_name}` (key `{secret_key}`) not found")]
-    NotFound {
-        secret_name: String,
-        secret_key: String,
-    },
+    #[error("secret `{}` (key `{}`) not found", .0.name, .0.key)]
+    NotFound(SecretKeyRef),
     #[error("failed to read secret: {0}")]
     Backend(String),
 }
@@ -421,5 +427,41 @@ pub enum SecretError {
 /// Reads credential values from the backing secret store (Kubernetes Secrets in production).
 #[async_trait]
 pub trait SecretStore: Send + Sync {
-    async fn get(&self, r: &CredentialRef) -> Result<SecretString, SecretError>;
+    async fn get(&self, r: &SecretKeyRef) -> Result<SecretString, SecretError>;
+
+    /// Like [`get`](Self::get), but creates the Secret with a random value (64 hex characters,
+    /// `labels` set, no owner) when it does not exist. Never updates an existing Secret: one
+    /// without the key is [`SecretError::NotFound`].
+    async fn get_or_create(
+        &self,
+        r: &SecretKeyRef,
+        labels: &BTreeMap<String, String>,
+    ) -> Result<SecretString, SecretError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_ref_serializes_secret_fields_flat() {
+        let id = CredentialRefId::new();
+        let r = CredentialRef {
+            id,
+            name: "claude".into(),
+            secret: SecretKeyRef {
+                name: "claude-sub".into(),
+                key: "token".into(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            serde_json::json!({
+                "id": id,
+                "name": "claude",
+                "secret_name": "claude-sub",
+                "secret_key": "token"
+            })
+        );
+    }
 }

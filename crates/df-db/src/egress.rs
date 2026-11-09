@@ -3,7 +3,7 @@
 //! Changes to entries write an audit entry and publish `egress_policy` in the transaction that
 //! changes them, so the notification reaches the gateways only for committed changes.
 
-use df_core::{CredentialRef, CredentialRefId, RequestId};
+use df_core::{CredentialRef, CredentialRefId, RequestId, SecretKeyRef};
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -233,8 +233,10 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
                     Some(CredentialRef {
                         id: CredentialRefId::from_uuid(id),
                         name,
-                        secret_name,
-                        secret_key,
+                        secret: SecretKeyRef {
+                            name: secret_name,
+                            key: secret_key,
+                        },
                     })
                 }
                 _ => None,
@@ -1061,8 +1063,8 @@ mod tests {
         assert_eq!(reference.id, CredentialRefId::from_uuid(credential));
         assert_eq!(
             (
-                reference.secret_name.as_str(),
-                reference.secret_key.as_str()
+                reference.secret.name.as_str(),
+                reference.secret.key.as_str()
             ),
             ("df-forge", "token")
         );

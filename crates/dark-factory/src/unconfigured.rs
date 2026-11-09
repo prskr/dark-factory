@@ -2,15 +2,18 @@
 //! `serve --no-cluster` and tests of the control plane that do not talk to a cluster.
 
 pub(crate) mod sandbox_placeholders {
+    use std::collections::BTreeMap;
+
     use async_trait::async_trait;
     use df_core::{
-        CredentialRef, PeerIdentity, ProviderError, RunId, RunSandboxSpec, SandboxEvent,
-        SandboxProvider, SecretError, SecretStore, TaskVolumeSpec,
+        PeerIdentity, ProviderError, RunId, RunSandboxSpec, SandboxEvent, SandboxProvider,
+        SecretError, SecretKeyRef, SecretStore, TaskVolumeSpec,
     };
     use futures::stream::{self, BoxStream, StreamExt};
     use secrecy::SecretString;
 
     const NOT_CONFIGURED: &str = "no sandbox provider is configured in this build";
+    const NO_SECRET_STORE: &str = "no secret store is configured in this build";
 
     pub(crate) struct UnconfiguredSandboxProvider;
 
@@ -49,10 +52,16 @@ pub(crate) mod sandbox_placeholders {
 
     #[async_trait]
     impl SecretStore for UnconfiguredSecretStore {
-        async fn get(&self, _r: &CredentialRef) -> Result<SecretString, SecretError> {
-            Err(SecretError::Backend(
-                "no secret store is configured in this build".into(),
-            ))
+        async fn get(&self, _r: &SecretKeyRef) -> Result<SecretString, SecretError> {
+            Err(SecretError::Backend(NO_SECRET_STORE.into()))
+        }
+
+        async fn get_or_create(
+            &self,
+            _r: &SecretKeyRef,
+            _labels: &BTreeMap<String, String>,
+        ) -> Result<SecretString, SecretError> {
+            Err(SecretError::Backend(NO_SECRET_STORE.into()))
         }
     }
 }

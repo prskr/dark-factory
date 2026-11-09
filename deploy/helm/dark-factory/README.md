@@ -109,7 +109,8 @@ Every key in `values.yaml` is documented below:
 | `plugins.forgejo.callTimeoutSeconds` | `int` | `30` | Upper bound of one plugin call (`plugins.<name>.callTimeoutSeconds` of the instance config), at most `300`: the feedback tool's `next_since` overlap of 5 minutes assumes a shorter call. The values schema rejects a larger value. |
 | `plugins.forgejo.memoryMib` | `int` | `64` | Linear memory limit of a plugin instance. |
 | `plugins.forgejo.settings` | `map` | `{}` | String map handed to the plugin unchanged (Forgejo: `wip-prefixes`). |
-| `plugins.forgejo.webhookSecret` | `object` | `null` | Optional. `{name, key}` of a `Secret` in the release namespace holding the shared secret the forge signs webhooks with. The key is mounted read-only at `/var/run/dark-factory/webhooks/<name>/secret` and the instance config sets `plugins.<name>.webhookSecretFile` to it. Unset: `POST /webhooks/<name>` answers `404`. See [Forge webhooks](#forge-webhooks). |
+| `plugins.forgejo.webhookSecret.existingSecret` | `string` | `""` | Name of a `Secret` (empty or a DNS-1123 subdomain, at most 253 characters) in the release namespace holding the shared secret the forge signs webhooks with. Empty: the control plane creates `<fullname>-webhook-forgejo` with a random value when it does not exist (`generate: true` in the instance config) and the instance Role gets `create` on `secrets`. See [Forge webhooks](#forge-webhooks). |
+| `plugins.forgejo.webhookSecret.key` | `string` | `""` | Key within the Secret (`[-._a-zA-Z0-9]`, at most 253 characters); empty means `secret`. |
 | `plugins.github.image.repository` | `string` | `"ghcr.io/prskr/dark-factory/plugin-github"` | GitHub plugin image, mounted at `/plugins/github`. Remove the whole entry with `plugins.github: null`, see [GitHub](#github). |
 | `plugins.github.image.tag` | `string` | `""` | Tag when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `plugins.github.image.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding the tag. |
@@ -119,7 +120,8 @@ Every key in `values.yaml` is documented below:
 | `plugins.github.authScheme` | `string` | `"bearer"` | GitHub expects `Authorization: Bearer …`. |
 | `plugins.github.hosts` | `list` | `[{host: github.com, apiUrl: https://api.github.com}]` | Routes of the GitHub plugin; add GitHub Enterprise Server hosts here. |
 | `plugins.github.settings` | `map` | `{}` | String map handed to the plugin unchanged: `draft-mode` (`native` default, `title-prefix`, `auto`), `api-version`, `wip-prefixes` (see `plugins/github/README.md`). |
-| `plugins.github.webhookSecret` | `object` | `null` | As `plugins.forgejo.webhookSecret`, for `POST /webhooks/github`. |
+| `plugins.github.webhookSecret.existingSecret` | `string` | `""` | As `plugins.forgejo.webhookSecret.existingSecret`, for `POST /webhooks/github`. |
+| `plugins.github.webhookSecret.key` | `string` | `""` | As `plugins.forgejo.webhookSecret.key`. |
 | `plugins.<name>.hosts` | `list` | unset | Forge hosts the plugin serves: a host (`ghe.example.org`) or `{host, apiUrl}` with an `https://` API URL. Written to the instance config only when set; an entry without `hosts` is the default plugin and serves every other project. See [Plugins](#plugins) for rollback. |
 | `plugins.<name>.authScheme` | `string` | unset (`token`) | `token` or `bearer`: how the control plane sends the forge credential (`Authorization: token …` / `Bearer …`). Written to the instance config only when set. |
 | `runs.keepAliveSeconds` | `int` | `600` | Seconds a run stays up after a normal turn end before the control plane releases it (`runs.keepAliveSeconds` of the instance config). `0` releases right after the turn. |
@@ -297,21 +299,23 @@ plugins:
 
 ### Forge webhooks
 
-Forge webhooks wake waiting tasks on reviews, mentions, merged or closed pull requests and failed checks. Store one secret per plugin and reference it:
+Forge webhooks wake waiting tasks on reviews, mentions, merged or closed pull requests and failed checks. By default the control plane generates one secret per plugin at startup: Secret `<fullname>-webhook-<plugin>`, key `secret`, 64 hex characters, labelled `app.kubernetes.io/component=webhook-secret`. It never updates an existing Secret and the Secret is not removed by `helm uninstall`. Read it with:
 
 ```sh
-kubectl create secret generic forge-webhooks --from-literal=forgejo="$(openssl rand -hex 32)"
+kubectl -n <namespace> get secret <fullname>-webhook-forgejo -o jsonpath='{.data.secret}' | base64 -d
 ```
+
+To manage the secret yourself, reference an existing one (the chart then renders `generate: false`):
 
 ```yaml
 plugins:
   forgejo:
     webhookSecret:
-      name: forge-webhooks
-      key: forgejo
+      existingSecret: forge-webhooks
+      key: forgejo   # default: secret
 ```
 
-The control plane reads the secret once at startup; after rotating it, restart the control plane (`kubectl rollout restart`). Register the webhook on the forge with the payload URL `https://<host>/webhooks/<name>` and the same secret; events to select and troubleshooting: [Forge webhooks](../../../docs/content/integrations/forges/webhooks.md).
+The control plane reads the secret once at startup; after rotating it, restart the control plane (`kubectl rollout restart`). Register the webhook on the forge with the payload URL `https://<host>/webhooks/<name>` and the same secret; events to select, rotation, upgrade from the former `{name, key}` value and troubleshooting: [Forge webhooks](../../../docs/content/integrations/forges/webhooks.md).
 
 ### Troubleshooting
 

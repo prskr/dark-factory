@@ -108,14 +108,29 @@ fn plugin(yaml_body: &str) -> Result<PluginConfig, ConfigError> {
 }
 
 #[test]
-fn plugin_webhook_secret_file_is_optional() {
-    assert_eq!(plugin("").unwrap().webhook_secret_file, None);
+fn plugin_webhook_secret_reference_is_optional_and_generate_defaults_to_false() {
+    assert_eq!(plugin("").unwrap().webhook_secret, None);
+    let plain = plugin("    webhookSecret:\n      name: wh\n      key: secret\n").unwrap();
     assert_eq!(
-        plugin("    webhookSecretFile: /var/run/dark-factory/webhooks/github\n")
-            .unwrap()
-            .webhook_secret_file,
-        Some(PathBuf::from("/var/run/dark-factory/webhooks/github"))
+        plain.webhook_secret,
+        Some(WebhookSecretConfig {
+            name: "wh".into(),
+            key: "secret".into(),
+            generate: false,
+        })
     );
+    let generated =
+        plugin("    webhookSecret:\n      name: wh\n      key: secret\n      generate: true\n")
+            .unwrap();
+    assert!(generated.webhook_secret.unwrap().generate);
+}
+
+#[test]
+fn plugin_webhook_secret_file_is_rejected_as_unknown_field() {
+    let err = plugin("    webhookSecretFile: /var/run/webhooks/github\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("webhookSecretFile"), "{err}");
 }
 
 #[test]

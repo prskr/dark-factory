@@ -348,9 +348,11 @@ plugins:
     {{- with $plugin.authScheme }}
     authScheme: {{ quote . }}
     {{- end }}
-    {{- if $plugin.webhookSecret }}
-    webhookSecretFile: {{ printf "/var/run/dark-factory/webhooks/%s/secret" $name | quote }}
-    {{- end }}
+    {{- $webhook := $plugin.webhookSecret | default dict }}
+    webhookSecret:
+      name: {{ $webhook.existingSecret | default (printf "%s-webhook-%s" (include "dark-factory.fullname" $) $name) | quote }}
+      key: {{ $webhook.key | default "secret" | quote }}
+      generate: {{ empty $webhook.existingSecret }}
   {{- end }}
 {{- end }}
 {{- end }}

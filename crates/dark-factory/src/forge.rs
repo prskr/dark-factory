@@ -8,15 +8,16 @@ use std::time::Duration;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use df_agent_channel::webhooks::WebhookApplier;
+use df_core::config::WebhookSecretConfig;
 use df_core::routing::{ForgeRoutes, RoutingTable};
-use df_core::{IntegrationError, PluginConfig, ProjectId, SecretStore};
+use df_core::{IntegrationError, PluginConfig, ProjectId, SecretKeyRef, SecretStore};
 use df_db::PgPool;
 use df_plugins::{
     ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
     WebhookError,
 };
 use df_web::webhooks::{WebhookReceiver, WebhookRejection, Webhooks};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret as _, SecretString};
 
 const MIB: u64 = 1024 * 1024;
 /// The plugin entry used when `plugins` is empty: the Forgejo component of the image.
@@ -28,7 +29,7 @@ pub(crate) struct ForgePlugins {
     routes: RoutingTable,
     loaded: BTreeMap<String, (PluginHost, PluginConfig)>,
     failures: Vec<LoadFailure>,
-    /// Webhook secrets by plugin name, for plugins with `webhookSecretFile`.
+    /// Webhook secrets by plugin name, filled by [`ForgePlugins::resolve_webhook_secrets`].
     webhook_secrets: BTreeMap<String, SecretString>,
 }
 
@@ -77,7 +78,6 @@ pub(crate) fn load_forge_plugins(
         RoutingTable::from_plugins(plugins)
     }
     .context("invalid `plugins` configuration")?;
-    let webhook_secrets = read_webhook_secrets(plugins)?;
     if allow_plain_http {
         tracing::warn!(
             setting = "network.allowPlainHttp",
@@ -111,7 +111,7 @@ pub(crate) fn load_forge_plugins(
         routes,
         loaded,
         failures,
-        webhook_secrets,
+        webhook_secrets: BTreeMap::new(),
     };
     if plugins.loaded.is_empty() {
         let errors: Vec<&str> = plugins.failures.iter().map(|f| f.error.as_str()).collect();
@@ -125,6 +125,33 @@ impl ForgePlugins {
     /// The routing table with the loaded plugins, for the web UI (design D7).
     pub(crate) fn forge_routes(&self) -> ForgeRoutes {
         ForgeRoutes::new(self.routes.clone(), self.loaded.keys().cloned())
+    }
+
+    /// Reads (`generate: false`) or get-or-creates (`generate: true`) the webhook secret of every
+    /// loaded plugin that exports `webhooks` and sets `webhookSecret` (design D2). Fails naming
+    /// `plugins.<name>.webhookSecret`, the Secret and the key. Run it once the store is available,
+    /// before [`forge_client`].
+    pub(crate) async fn resolve_webhook_secrets(
+        &mut self,
+        store: &dyn SecretStore,
+        instance_name: &str,
+    ) -> anyhow::Result<()> {
+        let entries: Vec<_> = self
+            .loaded
+            .iter()
+            .filter_map(|(name, (host, config))| {
+                // No fixture component lacks a `webhooks` export (a plugin must export
+                // `pull-requests` to load, and all of ours export `webhooks`), so this filter is
+                // covered only through `resolve_secrets` with `exports_webhooks: false`.
+                Some(WebhookSecretEntry {
+                    plugin: name.as_str(),
+                    config: config.webhook_secret.as_ref()?,
+                    exports_webhooks: host.capabilities().webhooks,
+                })
+            })
+            .collect();
+        self.webhook_secrets = resolve_secrets(&entries, store, instance_name).await?;
+        Ok(())
     }
 
     /// Every host route, ordered by host, then the default route, each with whether its plugin
@@ -168,28 +195,6 @@ impl ForgePlugins {
             tracing::info!("no default forge route");
         }
     }
-}
-
-/// Reads the `webhookSecretFile` of every plugin that sets one; trailing line breaks are dropped.
-/// A missing, unreadable or empty file fails naming the plugin.
-fn read_webhook_secrets(
-    plugins: &BTreeMap<String, PluginConfig>,
-) -> anyhow::Result<BTreeMap<String, SecretString>> {
-    let mut secrets = BTreeMap::new();
-    for (name, config) in plugins {
-        let Some(path) = &config.webhook_secret_file else {
-            continue;
-        };
-        let setting = format!("plugins.{name}.webhookSecretFile");
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("cannot read `{setting}` `{}`", path.display()))?;
-        let secret = content.trim_end_matches(['\r', '\n']);
-        if secret.is_empty() {
-            anyhow::bail!("`{setting}` `{}` is empty", path.display());
-        }
-        secrets.insert(name.clone(), SecretString::from(secret));
-    }
-    Ok(secrets)
 }
 
 /// Loads the forge plugin `name`; fails naming the configured path if the component is missing,
@@ -253,6 +258,78 @@ pub(crate) fn webhooks(forge: &Arc<ForgeRouter>, pool: &PgPool) -> Webhooks {
         Arc::new(receiver),
         &opentelemetry::global::meter("dark-factory"),
     )
+}
+
+/// The `webhookSecret` of one loaded plugin.
+struct WebhookSecretEntry<'a> {
+    plugin: &'a str,
+    config: &'a WebhookSecretConfig,
+    exports_webhooks: bool,
+}
+
+async fn resolve_secrets(
+    entries: &[WebhookSecretEntry<'_>],
+    store: &dyn SecretStore,
+    instance_name: &str,
+) -> anyhow::Result<BTreeMap<String, SecretString>> {
+    let mut secrets = BTreeMap::new();
+    for entry in entries {
+        let WebhookSecretEntry {
+            plugin,
+            config,
+            exports_webhooks,
+        } = *entry;
+        if !exports_webhooks {
+            tracing::info!(
+                plugin,
+                "plugin exports no webhooks: `webhookSecret` ignored"
+            );
+            continue;
+        }
+        let key_ref = SecretKeyRef {
+            name: config.name.clone(),
+            key: config.key.clone(),
+        };
+        let setting = format!("plugins.{plugin}.webhookSecret");
+        let read = if config.generate {
+            store
+                .get_or_create(&key_ref, &generated_secret_labels(plugin, instance_name))
+                .await
+        } else {
+            store.get(&key_ref).await
+        };
+        let secret = read.with_context(|| {
+            format!(
+                "cannot read `{setting}`: Secret `{}`, key `{}`",
+                config.name, config.key
+            )
+        })?;
+        // A value written with `echo` ends in a line break the forge never signs with.
+        let secret = SecretString::from(secret.expose_secret().trim_end_matches(['\r', '\n']));
+        if secret.expose_secret().is_empty() {
+            anyhow::bail!(
+                "`{setting}`: key `{}` of Secret `{}` is empty",
+                config.key,
+                config.name
+            );
+        }
+        secrets.insert(plugin.to_string(), secret);
+    }
+    Ok(secrets)
+}
+
+/// Labels of a Secret the control plane generated (design D5).
+fn generated_secret_labels(plugin: &str, instance_name: &str) -> BTreeMap<String, String> {
+    [
+        ("app.kubernetes.io/name", "dark-factory"),
+        ("app.kubernetes.io/managed-by", "dark-factory"),
+        ("app.kubernetes.io/component", "webhook-secret"),
+        ("app.kubernetes.io/instance", instance_name),
+        ("dark-factory.io/plugin", plugin),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
 }
 
 struct DbProjects {
@@ -335,7 +412,8 @@ impl ProjectDirectory for DbProjects {
 
 #[cfg(test)]
 mod tests {
-    use secrecy::ExposeSecret;
+    use df_core::SecretError;
+    use df_core::testing::FakeSecretStore;
 
     use super::*;
 
@@ -514,37 +592,128 @@ mod tests {
         );
     }
 
-    #[test]
-    fn webhook_secret_file_is_read_at_startup() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("forgejo");
-        std::fs::write(&path, "s3cret\n").expect("write");
-        let mut config = PluginConfig::new(crate::tests::forgejo_component());
-        config.webhook_secret_file = Some(path);
-        let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
-        let loaded = load_forge_plugins(&engine(), &plugins, false).expect("loads");
-        let secret = loaded.webhook_secrets.get("forgejo").expect("secret");
-        assert_eq!(secret.expose_secret(), "s3cret");
+    fn webhook_config(generate: bool) -> WebhookSecretConfig {
+        WebhookSecretConfig {
+            name: "wh-forgejo".into(),
+            key: "secret".into(),
+            generate,
+        }
     }
 
-    #[test]
-    fn missing_or_empty_webhook_secret_file_fails_startup_naming_the_plugin() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let empty = dir.path().join("empty");
-        std::fs::write(&empty, "\n").expect("write");
-        for file in [dir.path().join("missing"), empty] {
-            let mut config = PluginConfig::new(crate::tests::forgejo_component());
-            config.webhook_secret_file = Some(file);
-            let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
-            let err = load_forge_plugins(&engine(), &plugins, false)
-                .err()
-                .expect("must fail");
+    async fn resolve(
+        store: &FakeSecretStore,
+        config: &WebhookSecretConfig,
+        exports_webhooks: bool,
+    ) -> anyhow::Result<BTreeMap<String, SecretString>> {
+        let entry = WebhookSecretEntry {
+            plugin: "forgejo",
+            config,
+            exports_webhooks,
+        };
+        resolve_secrets(&[entry], store, "homelab").await
+    }
+
+    #[tokio::test]
+    async fn generate_creates_the_missing_secret_with_instance_and_plugin_labels() {
+        let store = FakeSecretStore::new();
+        let secrets = resolve(&store, &webhook_config(true), true).await.unwrap();
+        assert!(secrets.contains_key("forgejo"));
+        let [(key_ref, labels)] = store.created().try_into().unwrap();
+        assert_eq!(key_ref.name, "wh-forgejo");
+        assert_eq!(labels["app.kubernetes.io/instance"], "homelab");
+        assert_eq!(labels["dark-factory.io/plugin"], "forgejo");
+        assert_eq!(labels["app.kubernetes.io/component"], "webhook-secret");
+    }
+
+    #[tokio::test]
+    async fn existing_secret_is_read_when_generate_is_false() {
+        let store = FakeSecretStore::new();
+        store.insert("wh-forgejo", "secret", "s3cret");
+        let secrets = resolve(&store, &webhook_config(false), true).await.unwrap();
+        assert_eq!(secrets["forgejo"].expose_secret(), "s3cret");
+        assert!(store.created().is_empty());
+    }
+
+    #[tokio::test]
+    async fn trailing_line_breaks_of_an_existing_secret_are_dropped() {
+        let store = FakeSecretStore::new();
+        store.insert("wh-forgejo", "secret", "s3cret\r\n");
+        let secrets = resolve(&store, &webhook_config(false), true).await.unwrap();
+        assert_eq!(secrets["forgejo"].expose_secret(), "s3cret");
+
+        store.insert("wh-forgejo", "secret", "\n\n");
+        assert!(resolve(&store, &webhook_config(false), true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn missing_or_empty_secret_fails_naming_setting_secret_and_key() {
+        let store = FakeSecretStore::new();
+        let missing = resolve(&store, &webhook_config(false), true).await;
+        store.insert("wh-forgejo", "secret", "");
+        let empty = resolve(&store, &webhook_config(false), true).await;
+        for err in [missing.unwrap_err(), empty.unwrap_err()] {
             let message = format!("{err:#}");
-            assert!(
-                message.contains("plugins.forgejo.webhookSecretFile"),
-                "{message}"
-            );
+            for part in ["plugins.forgejo.webhookSecret", "wh-forgejo", "secret"] {
+                assert!(message.contains(part), "{message}");
+            }
         }
+        assert!(store.created().is_empty());
+    }
+
+    #[tokio::test]
+    async fn plugin_without_webhooks_export_is_skipped_and_creates_nothing() {
+        let store = FakeSecretStore::new();
+        let secrets = resolve(&store, &webhook_config(true), false).await.unwrap();
+        assert!(secrets.is_empty());
+        assert!(store.created().is_empty() && store.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn plugin_without_webhook_secret_reads_and_creates_nothing() {
+        let plugins = BTreeMap::from([(
+            "forgejo".to_string(),
+            PluginConfig::new(crate::tests::forgejo_component()),
+        )]);
+        let mut loaded = load_forge_plugins(&engine(), &plugins, false).expect("loads");
+        let store = FakeSecretStore::new();
+        loaded
+            .resolve_webhook_secrets(&store, "homelab")
+            .await
+            .unwrap();
+        assert!(loaded.webhook_secrets.is_empty());
+        assert!(store.calls().is_empty() && store.created().is_empty());
+    }
+
+    #[tokio::test]
+    async fn secret_store_error_fails_startup_naming_the_setting_and_the_cause() {
+        let store = FakeSecretStore::new();
+        store.insert_error(
+            "wh-forgejo",
+            "secret",
+            SecretError::Backend("secrets is forbidden: cannot create".into()),
+        );
+        let err = resolve(&store, &webhook_config(true), true)
+            .await
+            .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("plugins.forgejo.webhookSecret"),
+            "{message}"
+        );
+        assert!(message.contains("forbidden"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn deleted_generated_secret_is_created_again_with_a_new_value() {
+        let store = FakeSecretStore::new();
+        let first = resolve(&store, &webhook_config(true), true).await.unwrap();
+        store.remove("wh-forgejo", "secret");
+        let second = resolve(&store, &webhook_config(true), true).await.unwrap();
+        assert_eq!(store.created().len(), 2);
+        assert_ne!(
+            first["forgejo"].expose_secret(),
+            second["forgejo"].expose_secret()
+        );
     }
 
     #[test]
@@ -596,13 +765,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("forgejo");
-        std::fs::write(&path, "s3cret").unwrap();
         let mut config = PluginConfig::new(crate::tests::forgejo_component());
-        config.webhook_secret_file = Some(path);
+        config.webhook_secret = Some(webhook_config(false));
         let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
-        let plugins = load_forge_plugins(&engine(), &plugins, true).unwrap();
+        let mut plugins = load_forge_plugins(&engine(), &plugins, true).unwrap();
+        env.secrets.insert("wh-forgejo", "secret", "s3cret");
+        plugins
+            .resolve_webhook_secrets(&env.secrets, "homelab")
+            .await
+            .unwrap();
         let forge = forge_client(plugins, pool.clone(), Arc::new(env.secrets.clone()));
         let receiver = ForgeWebhooks::new(forge, pool.clone());
 
@@ -620,5 +791,66 @@ mod tests {
             .filter(|m| m.author == df_core::Principal::system(df_core::system_reason::WEBHOOK))
             .count();
         assert_eq!(from_webhook, 1);
+    }
+
+    /// The forge router `serve` builds after resolving `webhookSecret` from `store`.
+    async fn forge_with_resolved_secret(
+        store: &FakeSecretStore,
+        generate: bool,
+    ) -> Arc<ForgeRouter> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let mut config = PluginConfig::new(crate::tests::forgejo_component());
+        config.webhook_secret = Some(webhook_config(generate));
+        let plugins = BTreeMap::from([("forgejo".to_string(), config)]);
+        let mut plugins = load_forge_plugins(&engine(), &plugins, true).unwrap();
+        plugins
+            .resolve_webhook_secrets(store, "homelab")
+            .await
+            .unwrap();
+        forge_client(plugins, pool, Arc::new(store.clone()))
+    }
+
+    async fn accepts(forge: &ForgeRouter, signed_with: &str) -> bool {
+        let (headers, body) = closed_pr_delivery(signed_with);
+        match forge.handle_webhook("forgejo", &headers, &body).await {
+            Ok(_) => true,
+            Err(WebhookError::Unverified) => false,
+            Err(error) => panic!("unexpected webhook error: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn running_forge_keeps_verifying_with_the_secret_read_at_startup() {
+        let store = FakeSecretStore::new();
+        store.insert("wh-forgejo", "secret", "original");
+        let forge = forge_with_resolved_secret(&store, false).await;
+
+        store.insert("wh-forgejo", "secret", "changed");
+
+        assert!(accepts(&forge, "original").await);
+        assert!(!accepts(&forge, "changed").await);
+    }
+
+    #[tokio::test]
+    async fn deliveries_signed_with_a_deleted_generated_secret_are_rejected_after_restart() {
+        let store = FakeSecretStore::new();
+        let before = forge_with_resolved_secret(&store, true).await;
+        let old = store.get(&webhook_key_ref()).await.unwrap();
+        assert!(accepts(&before, old.expose_secret()).await);
+
+        store.remove("wh-forgejo", "secret");
+        let after = forge_with_resolved_secret(&store, true).await;
+        let new = store.get(&webhook_key_ref()).await.unwrap();
+
+        assert_ne!(old.expose_secret(), new.expose_secret());
+        assert!(!accepts(&after, old.expose_secret()).await);
+        assert!(accepts(&after, new.expose_secret()).await);
+    }
+
+    fn webhook_key_ref() -> SecretKeyRef {
+        SecretKeyRef {
+            name: "wh-forgejo".into(),
+            key: "secret".into(),
+        }
     }
 }

@@ -173,9 +173,12 @@ plugins:
     memoryMib: 64
     # Handed to the plugin unchanged (Forgejo: wip-prefixes, see plugins/forgejo/README.md).
     settings: {}
-    # Secret the forge signs webhooks with, as `{name, key}` of a Secret in the release namespace.
-    # Unset: `POST /webhooks/forgejo` answers 404.
-    webhookSecret: null
+    # Secret the forge signs webhooks with. Empty `existingSecret`: the control plane creates
+    # `<fullname>-webhook-forgejo` with a random value when it does not exist. Set: a Secret of
+    # the release namespace that you manage. `key` defaults to `secret`.
+    webhookSecret:
+      existingSecret: ''
+      key: ''
   # Serves github.com; add GHES routes to `hosts` or drop the entry with `plugins.github: null`.
   github:
     image:
@@ -194,8 +197,10 @@ plugins:
     # draft-mode: native (default) | title-prefix | auto; api-version; wip-prefixes
     # (see plugins/github/README.md).
     settings: {}
-    # Secret the forge signs webhooks with, as `{name, key}`; unset: `POST /webhooks/github` is 404.
-    webhookSecret: null
+    # Secret the forge signs webhooks with; same fields as `plugins.forgejo.webhookSecret`.
+    webhookSecret:
+      existingSecret: ''
+      key: ''
 
 runs:
   # Seconds a run stays up after a normal turn end (task "waiting") before it is released.

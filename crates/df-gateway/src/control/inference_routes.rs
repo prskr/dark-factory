@@ -84,7 +84,7 @@ pub(super) async fn credentials(
         if !wanted.contains(key.as_str()) {
             continue;
         }
-        match secrets.get(reference).await {
+        match secrets.get(&reference.secret).await {
             Ok(value) => {
                 found.insert(
                     key,

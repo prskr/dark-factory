@@ -1,6 +1,6 @@
 //! Project lookups for the forge integration.
 
-use df_core::{CredentialRef, CredentialRefId, ProjectId};
+use df_core::{CredentialRef, CredentialRefId, ProjectId, SecretKeyRef};
 use sqlx::PgPool;
 
 use crate::pool::DbError;
@@ -38,8 +38,10 @@ pub async fn forge_target(
             (Some(id), Some(name), Some(secret_name), Some(secret_key)) => Some(CredentialRef {
                 id: CredentialRefId::from_uuid(id),
                 name,
-                secret_name,
-                secret_key,
+                secret: SecretKeyRef {
+                    name: secret_name,
+                    key: secret_key,
+                },
             }),
             _ => None,
         },
@@ -85,7 +87,7 @@ mod tests {
         assert_eq!(target.repo_url, "https://git.example.org/o/r.git");
         let c = target.credential.unwrap();
         assert_eq!(
-            (c.secret_name.as_str(), c.secret_key.as_str()),
+            (c.secret.name.as_str(), c.secret.key.as_str()),
             ("forge-token", "token")
         );
 

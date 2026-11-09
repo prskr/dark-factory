@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Least-privilege RBAC
-The chart SHALL grant exactly the permissions in `design/deployment.md` §3: the control plane's write access only in the sandbox namespace, Secret read and Leases in the instance namespace, Secret create in the instance namespace only while at least one plugin uses a generated webhook secret, Service/EndpointSlice read in cluster-target namespaces; no Kubernetes API access for the gateway and sandboxes. `pods/exec`, `pods/attach` and namespace create/delete SHALL never be granted.
+The chart SHALL grant exactly the permissions in `design/deployment.md` §3: the control plane's write access to sandbox resources only in the sandbox namespace, Secret read and Leases in the instance namespace, Secret create there only while a plugin uses a generated webhook secret, Service/EndpointSlice read in cluster-target namespaces; no Kubernetes API access for gateway and sandboxes. `pods/exec`, `pods/attach` and namespace create/delete SHALL never be granted.
 
 #### Scenario: No exec rights
 - **WHEN** `kubectl auth can-i create pods/exec --as=<control plane SA> -n <sandbox ns>` is evaluated

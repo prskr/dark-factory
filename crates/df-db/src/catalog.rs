@@ -5,7 +5,7 @@
 //! value.
 
 use df_core::webhooks::WebhookWake;
-use df_core::{CredentialRef, CredentialRefId, Principal};
+use df_core::{CredentialRef, CredentialRefId, Principal, SecretKeyRef};
 use serde::Serialize;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -102,8 +102,10 @@ impl From<CredentialRow> for CredentialRef {
         Self {
             id: CredentialRefId::from_uuid(r.id),
             name: r.name,
-            secret_name: r.secret_name,
-            secret_key: r.secret_key,
+            secret: SecretKeyRef {
+                name: r.secret_name,
+                key: r.secret_key,
+            },
         }
     }
 }
