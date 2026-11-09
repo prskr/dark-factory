@@ -235,6 +235,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
         inbound_rx,
         outbound_tx,
         cancel_requested: false,
+        timeouts: crate::runner::Timeouts::default(),
     };
     let result = run_session(params)
         .await
@@ -461,6 +462,7 @@ sessions:
         inbound_rx: inbound_rx1,
         outbound_tx: outbound_tx1,
         cancel_requested: false,
+        timeouts: crate::runner::Timeouts::default(),
     };
 
     let result1 = run_session(params1).await.expect("run 1 should succeed");
@@ -623,6 +625,7 @@ sessions:
         inbound_rx: inbound_rx2,
         outbound_tx: outbound_tx2,
         cancel_requested: false,
+        timeouts: crate::runner::Timeouts::default(),
     };
 
     let result2 = run_session(params2).await.expect("run 2 should succeed");
@@ -827,6 +830,7 @@ async fn test_manual_claude_acp_run() {
         inbound_rx,
         outbound_tx,
         cancel_requested: false,
+        timeouts: crate::runner::Timeouts::default(),
     };
 
     let result = run_session(params)
@@ -878,6 +882,7 @@ async fn test_cancel_before_assign_skips_prepare() {
         },
         initial_prompts: vec![],
         cancel_requested: true,
+        timeouts: crate::runner::Timeouts::default(),
         repo_dir: repo_dir.clone(),
         home_dir: data.join("home"),
         runtime_dir: temp.path().join("run"),

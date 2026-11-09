@@ -391,9 +391,11 @@ mod tests {
         let v = assert_roundtrip(&base_event(event::Kind::TurnEnded(TurnEnded {
             stop_reason: StopReason::EndTurn as i32,
             detail: "finished".into(),
+            interrupted_by: "Peter Kurfer".into(),
         })));
         assert_eq!(v["turnEnded"]["stopReason"], "STOP_REASON_END_TURN");
         assert_eq!(v["turnEnded"]["detail"], "finished");
+        assert_eq!(v["turnEnded"]["interruptedBy"], "Peter Kurfer");
 
         // 9. Notice
         let v = assert_roundtrip(&base_event(event::Kind::Notice(Notice {

@@ -259,10 +259,10 @@ pub fn notice(id: &str, level: &str, code: &str, message: &str) -> Markup {
     }
 }
 
-/// A forge activity row (push, pull request): the notice layout in one line, tinted with the
-/// accent (`danger` for a failed push). `link` is the label and URL of a pull request; the label
-/// is only a link for an `http(s)` URL.
-pub fn forge_row(
+/// A one-line system row in the notice layout: forge activity (push, pull request) and the
+/// interrupted-turn row. It is tinted with the accent (`danger` for a failed push). `link` is
+/// the label and URL of a pull request; the label is only a link for an `http(s)` URL.
+pub fn system_row(
     id: &str,
     glyph: Icon,
     danger: bool,

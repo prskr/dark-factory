@@ -37,6 +37,12 @@ sequenceDiagram
     loop each turn
         R->>H: prompt (messages with author lines)
         H-->>R: updates (messages, tool calls)
+        opt board member presses Interrupt during a turn
+            UI->>CP: interrupt (audit run.interrupt)
+            CP->>R: Interrupt (name of the board member)
+            R->>H: session/cancel
+            R->>CP: TurnEnded (CANCELLED, interrupted by)
+        end
         R->>CP: transcript events
         R->>G: push factory/task/<KEY> (push checks)
         R->>CP: push report
@@ -81,6 +87,34 @@ sequenceDiagram
    agent at the next turn boundary without a new run. Messages released together arrive in one
    `Prompts` control message, including after reconnects, so they start one turn. After
    `runs.keepAliveSeconds` (default 600) without a message, the control plane releases the run.
+   **Interrupting a turn.** A board member can end the current turn without ending the run (see
+   [Interrupt](../using/tasks.md#interrupt-stop-mark-done-cancel)). Only a run in state `running`
+   whose last persisted turn event is a `TurnStarted` qualifies: between the persisted `TurnEnded`
+   and the `AWAITING_INPUT` report the run stays `running` while the runtime pushes, but has no turn
+   to interrupt. A run is `preparing` from the runtime's first connect until the runtime reports
+   the `RUNNING` phase just before its first turn, and `running` during every turn after that. The
+   control plane audits `run.interrupt` and notifies all replicas through PostgreSQL with the id of
+   the open turn; the replica that holds the run's stream sends `Interrupt` (name and turn id) if a
+   turn is open. Nothing is stored, so an interrupt that finds no turn, or a runtime that is
+   reconnecting, is lost, and the runtime ignores an interrupt whose turn id is not its current
+   turn. The runtime sends the ACP notification `session/cancel`, completes open Dark Factory tool
+   calls (and those started until the turn ends) with a cancelled result, and waits up to 5 seconds
+   for the response to the outstanding `session/prompt`. If that response has stop reason
+   `cancelled`, the turn ends with `TurnEnded` (stop reason `CANCELLED`, `interrupted_by`). Queued
+   prompts start the next turn, whose input begins with "Your previous turn was interrupted by
+   *name*."; otherwise the run reports `AWAITING_INPUT`. A turn that completed on its own (another
+   stop reason) is not marked interrupted. If the harness fails the cancel or does not answer
+   within 5 seconds, the turn ends as an error without the interrupt marker and the run fails; a
+   rate-limit error as the response ends the turn and the run `RATE_LIMITED`.
+
+   ```mermaid
+   stateDiagram-v2
+       running --> awaiting_input: turn ends, or Interrupt without queued messages
+       awaiting_input --> running: message starts a turn
+       running --> running: Interrupt with queued messages (next turn starts at once)
+       running --> finalizing: Stop run, Cancel, Release
+       awaiting_input --> finalizing: Stop run, Cancel, Release
+   ```
 7. **Finalizing.** The runtime stops the harness, pushes the task branch, writes a WIP snapshot of
    uncommitted files to `factory/wip/<KEY>` and reports the outcome. The control plane deletes the
    pod; the task volume stays for the next run.

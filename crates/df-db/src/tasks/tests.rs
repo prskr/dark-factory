@@ -612,11 +612,11 @@ async fn task_with_queued_message(pool: &PgPool) -> (TaskRow, TaskMessageRow) {
     (task, msg)
 }
 
-async fn status_of(pool: &PgPool, task: TaskId) -> TaskStatus {
+pub(crate) async fn status_of(pool: &PgPool, task: TaskId) -> TaskStatus {
     get_task(pool, task).await.unwrap().unwrap().status
 }
 
-async fn audit_count(pool: &PgPool, action: &str) -> i64 {
+pub(crate) async fn audit_count(pool: &PgPool, action: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
         .bind(action)
         .fetch_one(pool)
@@ -625,7 +625,7 @@ async fn audit_count(pool: &PgPool, action: &str) -> i64 {
 }
 
 /// A task in `status` with a run in `run_state`; its assignment message is delivered.
-async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: &str) -> TaskRow {
+pub(crate) async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: &str) -> TaskRow {
     let key: ProjectKey = "DF".parse().unwrap();
     let (project_id, persona_id) = seed_project_and_persona(pool, &key, "Linus").await.unwrap();
     let (task, assignment) = create_task(pool, new_task(project_id, persona_id, Some("T")))

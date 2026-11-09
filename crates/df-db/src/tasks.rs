@@ -894,6 +894,72 @@ pub async fn stop_run(pool: &PgPool, task_id: TaskId, actor: Principal) -> Resul
     Ok(())
 }
 
+/// A board member interrupts the running turn of the task's active run: audits `run.interrupt`
+/// and notifies `Notification::RunInterrupt` with the actor's name and the open turn's id, which
+/// the replica holding the run's stream turns into `Interrupt`. Nothing is stored, so only a
+/// `running` run whose last persisted turn event is a `TurnStarted` qualifies (the run stays
+/// `running` after `TurnEnded` while the runtime pushes); anything else is
+/// [`DbError::NoTurnRunning`] and changes nothing.
+pub async fn interrupt_turn(
+    pool: &PgPool,
+    task_id: TaskId,
+    actor: Principal,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    lock_runs_then_task(&mut tx, task_id).await?;
+    let run: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM runs WHERE task_id = $1 AND state = 'running'")
+            .bind(task_id.as_uuid())
+            .fetch_optional(&mut *tx)
+            .await?;
+    let run_id = RunId::from_uuid(run.ok_or(DbError::NoTurnRunning)?);
+    // The run stays `running` after `TurnEnded` while the runtime pushes: only a turn that is
+    // open (its `TurnStarted` is the last turn event) can be interrupted, and only that one.
+    let turn_id = open_turn_id(&mut tx, run_id)
+        .await?
+        .ok_or(DbError::NoTurnRunning)?;
+    let by = actor.display_name().to_string();
+    let entry = NewAuditEntry::new(
+        actor,
+        Vec::new(),
+        "run.interrupt",
+        "run",
+        run_id.to_string(),
+    )
+    .with_details(&serde_json::json!({ "task_id": task_id }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    publish(
+        &mut *tx,
+        &Notification::RunInterrupt {
+            run_id,
+            by,
+            turn_id,
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The `turn_id` of the run's last persisted turn event if that is a `TurnStarted`.
+async fn open_turn_id(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_id: RunId,
+) -> Result<Option<String>, DbError> {
+    let last: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT kind, payload ->> 'turnId' FROM transcript_events
+         WHERE run_id = $1 AND kind IN ('turn_started', 'turn_ended')
+         ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(run_id.as_uuid())
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(match last {
+        Some((kind, turn_id)) if kind == "turn_started" => turn_id,
+        _ => None,
+    })
+}
+
 /// A board member cancels a task (design D2): one transaction sets `cancelled`, discards the
 /// undelivered messages, closes the pending requests (`task-cancelled`), stops the active run
 /// as in [`stop_run`] and audits `task.cancel`. A `completed` or `cancelled` task is rejected
@@ -1003,6 +1069,8 @@ async fn set_title_in(
 
 #[cfg(test)]
 mod dependency_tests;
+#[cfg(test)]
+mod interrupt_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]

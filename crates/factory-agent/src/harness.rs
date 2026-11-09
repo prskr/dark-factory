@@ -522,6 +522,8 @@ pub enum RunOutcomeDecision {
 #[derive(Debug, Clone, Default)]
 pub struct TurnOutcomeInput {
     pub cancelled: bool,
+    /// The turn ended because a board member interrupted it; the run goes on.
+    pub interrupted: bool,
     pub end_run_after_turn: bool,
     pub rate_limited: Option<RateLimitInfo>,
     pub wall_clock_exceeded: bool,
@@ -540,6 +542,7 @@ pub struct TurnOutcomeInput {
 /// `LIMIT_REACHED` if a budget or max-token/turn stop reason was hit;
 /// `CANCELLED` on `Cancel`;
 /// `FAILED` if the harness crashed.
+/// An interrupted turn is a normal turn end: its stop reason is no limit.
 /// Otherwise the runtime waits for input and finalizes `END_TURN` on `Release`."
 pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
     // 1. Cancellation from control plane
@@ -583,10 +586,12 @@ pub fn determine_run_outcome(input: &TurnOutcomeInput) -> RunOutcomeDecision {
         };
     }
 
-    if matches!(
-        input.stop_reason,
-        Some(StopReason::MaxTokens | StopReason::MaxTurnRequests)
-    ) {
+    if !input.interrupted
+        && matches!(
+            input.stop_reason,
+            Some(StopReason::MaxTokens | StopReason::MaxTurnRequests)
+        )
+    {
         return RunOutcomeDecision::Finalize {
             outcome: RunOutcome::LimitReached,
             detail: "Stop reason limit reached".to_string(),

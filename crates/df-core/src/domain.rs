@@ -307,6 +307,11 @@ impl RunState {
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
+
+    /// Returns `true` if a board member can still stop the run: it is neither over nor ending.
+    pub const fn can_stop(&self) -> bool {
+        !self.is_terminal() && !matches!(self, Self::Finalizing)
+    }
 }
 
 impl fmt::Display for RunState {

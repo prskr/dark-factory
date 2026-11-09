@@ -666,19 +666,33 @@ async fn play_end(end_step: EndStep, ctx: &TurnContext) -> StepOutcome {
         EndStep::Refusal => StepOutcome::Stop(StopReason::Refusal),
         EndStep::Crash => std::process::exit(1),
         EndStep::Hang => {
-            // Register for the wakeup before checking the flag, so a cancel
-            // arriving in between is not lost.
-            let notified = ctx.cancel_notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if !ctx.cancelled.load(Ordering::SeqCst) {
-                notified.await;
-            }
+            wait_for_cancel(ctx).await;
             StepOutcome::Stop(StopReason::Cancelled)
+        }
+        EndStep::HangThenEndTurn => {
+            wait_for_cancel(ctx).await;
+            StepOutcome::Stop(StopReason::EndTurn)
+        }
+        EndStep::HangForever => std::future::pending().await,
+        EndStep::HangThenCrash => {
+            wait_for_cancel(ctx).await;
+            std::process::exit(1)
         }
         EndStep::RateLimited(rl) => StepOutcome::RateLimited {
             retry_after_seconds: rl.retry_after_seconds.unwrap_or(3600),
         },
+    }
+}
+
+/// Waits until the turn is cancelled.
+async fn wait_for_cancel(ctx: &TurnContext) {
+    // Register for the wakeup before checking the flag, so a cancel
+    // arriving in between is not lost.
+    let notified = ctx.cancel_notify.notified();
+    tokio::pin!(notified);
+    notified.as_mut().enable();
+    if !ctx.cancelled.load(Ordering::SeqCst) {
+        notified.await;
     }
 }
 

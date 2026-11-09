@@ -5,6 +5,7 @@
 # Environment:
 #   E2E_KEEP=1        keep the cluster after the run (delete it with `kind delete cluster --name df-e2e`)
 #   E2E_TOOLS_DIR     where the Playwright driver installer is kept (default: ~/.cache/df-e2e)
+#   E2E_KIND_CONFIG   kind configuration (default: deploy/e2e/kind.yaml), e.g. one that mounts a CA bundle behind a TLS-intercepting proxy
 #   E2E_TEST_THREADS  tests run in parallel per test binary (default: 1, the memory budget of docs/demo.md)
 #   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=$E2E_TEST_THREADS)
 #   BAZEL             Bazel command, e.g. "bazel --bazelrc=.bazelrc.agents" (default: bazel)
@@ -89,7 +90,7 @@ prepare_tools() {
 create_cluster() {
   log "Creating the kind cluster"
   kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
-  kind create cluster --name "$cluster" --config deploy/e2e/kind.yaml --wait 180s
+  kind create cluster --name "$cluster" --config "${E2E_KIND_CONFIG:-deploy/e2e/kind.yaml}" --wait 180s
 }
 
 # Builds the single-platform images with Bazel and imports their tarballs into the node: no registry,
@@ -230,7 +231,7 @@ install_driver() {
   )
 }
 
-suite_tests=(--test delegation --test demo --test flow --test lifecycle_events --test ui --test webhooks)
+suite_tests=(--test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks)
 
 # Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {

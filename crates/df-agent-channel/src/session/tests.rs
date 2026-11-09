@@ -7,14 +7,14 @@ use df_core::testing::SandboxCall;
 use df_proto::agent::v1::{PushStatus, PushTarget, RuntimeOperation, RuntimeTiming};
 use df_proto::transcript::v1 as wire;
 
-fn msg(seq: u64, body: agent_message::Body) -> AgentMessage {
+pub(super) fn msg(seq: u64, body: agent_message::Body) -> AgentMessage {
     AgentMessage {
         seq,
         body: Some(body),
     }
 }
 
-fn hello() -> AgentMessage {
+pub(super) fn hello() -> AgentMessage {
     msg(
         0,
         agent_message::Body::Hello(df_proto::agent::v1::Hello::default()),
@@ -60,7 +60,7 @@ async fn run_session(
 }
 
 /// Like [`run_session`], also returning what the session sent.
-async fn run_session_with_output(
+pub(super) async fn run_session_with_output(
     env: &Env,
     run_id: df_core::RunId,
     messages: Vec<AgentMessage>,
@@ -199,14 +199,14 @@ async fn tool_calls_finish_after_the_stream_ended() {
     assert_eq!(stored, 1);
 }
 
-fn phase(phase: RunPhase) -> agent_message::Body {
+pub(super) fn phase(phase: RunPhase) -> agent_message::Body {
     agent_message::Body::PhaseChanged(df_proto::agent::v1::PhaseChanged {
         phase: phase as i32,
         detail: String::new(),
     })
 }
 
-async fn state_and_status(env: &Env, run_id: df_core::RunId) -> (RunState, String) {
+pub(super) async fn state_and_status(env: &Env, run_id: df_core::RunId) -> (RunState, String) {
     let run = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
     let status = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
         .bind(env.task.id.as_uuid())
@@ -217,7 +217,7 @@ async fn state_and_status(env: &Env, run_id: df_core::RunId) -> (RunState, Strin
 }
 
 /// A run in `state` of a task that is `running`, without undelivered messages.
-async fn run_of_running_task(env: &Env, state: &str) -> df_core::RunId {
+pub(super) async fn run_of_running_task(env: &Env, state: &str) -> df_core::RunId {
     let run_id = env.insert_run(env.task.id, 1, state).await;
     env.bind_pod(run_id);
     sqlx::query("UPDATE tasks SET status = 'running' WHERE id = $1")
@@ -646,7 +646,7 @@ async fn no_prompt_is_sent_to_a_finalizing_run_and_its_end_queues_the_task() {
     assert_eq!(state_and_status(&env, run_id).await.1, "queued");
 }
 
-async fn session_for(
+pub(super) async fn session_for(
     env: &Env,
     run_id: df_core::RunId,
 ) -> (Session, mpsc::Receiver<Result<ControlMessage, Status>>) {
@@ -901,11 +901,11 @@ fn turn_event(kind: event::Kind) -> agent_message::Body {
     })
 }
 
-fn turn_started() -> agent_message::Body {
+pub(super) fn turn_started() -> agent_message::Body {
     turn_event(event::Kind::TurnStarted(wire::TurnStarted::default()))
 }
 
-fn turn_ended() -> agent_message::Body {
+pub(super) fn turn_ended() -> agent_message::Body {
     turn_event(event::Kind::TurnEnded(wire::TurnEnded::default()))
 }
 
@@ -944,7 +944,9 @@ fn sent_prompt_batches(
     batches
 }
 
-fn sent_prompt_ids(rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>) -> Vec<String> {
+pub(super) fn sent_prompt_ids(
+    rx: &mut mpsc::Receiver<Result<ControlMessage, Status>>,
+) -> Vec<String> {
     sent_prompt_batches(rx)
         .into_iter()
         .flatten()

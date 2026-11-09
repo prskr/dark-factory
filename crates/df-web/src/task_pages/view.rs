@@ -441,7 +441,7 @@ pub(super) fn message_area(
                         "x-on:keydown.ctrl.enter.prevent"=(SEND_SHORTCUT)
                         "x-on:keydown.meta.enter.prevent"=(SEND_SHORTCUT)
                         class="min-h-11 w-full min-w-0 flex-1 resize-none bg-transparent py-2 text-base text-ink placeholder:text-faint focus-visible:outline-none" {}
-                    (composer_action(key, stoppable(task_status, runs)))
+                    (composer_action(key, interruptible(runs)))
                     button type="button" x-ref="save" x-show="editing" x-cloak aria-label="Save"
                         hx-patch={(messages) "/_"} ":hx-patch"={"'" (messages) "/' + editing"}
                         hx-include="#message" hx-target="#pending" hx-swap="outerMorph"
@@ -452,28 +452,29 @@ pub(super) fn message_area(
     }
 }
 
-/// Whether the message box offers Stop: the task is `running` and its run is not `finalizing`
-/// (it is ending already).
-pub(crate) fn stoppable(status: TaskStatus, runs: &[RunView]) -> bool {
-    status == TaskStatus::Running && !runs.iter().any(|r| r.state == RunState::Finalizing)
+/// Whether the message box offers Interrupt: a turn is running, which is the run state `running`
+/// (not `awaiting_input`, and not `finalizing`, where the run is ending).
+pub(crate) fn interruptible(runs: &[RunView]) -> bool {
+    runs.iter().any(|r| r.state == RunState::Running)
 }
 
-/// The round action of the message box, updated live: Send; while `stoppable` is true (computed
-/// by [`stoppable`]) and the message box is empty it is a Stop button instead (design D3). The
-/// box is empty while the textarea shows its placeholder, so this is CSS only and needs no draft
-/// state.
-pub(crate) fn composer_action(key: &str, stoppable: bool) -> Markup {
+/// The round action of the message box, updated live: Send; while `interruptible` is true
+/// (computed by [`interruptible`]) and the message box is empty it is an Interrupt button instead
+/// (design D3, change `interrupt-turn`). The box is empty while the textarea shows its
+/// placeholder, so this is CSS only and needs no draft state. "No turn is running" appears in
+/// the `#pending` region.
+pub(crate) fn composer_action(key: &str, interruptible: bool) -> Markup {
     let messages = format!("/tasks/{key}/messages");
-    let stop = format!("/tasks/{key}/stop");
-    let send_class = if stoppable {
+    let interrupt = format!("/tasks/{key}/interrupt");
+    let send_class = if interruptible {
         format!("{ROUND_ACTION_CLASS} group-has-[textarea:placeholder-shown]:hidden")
     } else {
         ROUND_ACTION_CLASS.to_string()
     };
     html! {
         span id="composer-action" class="contents" {
-            @if stoppable {
-                button type="button" aria-label="Stop" hx-post=(stop) hx-swap="none"
+            @if interruptible {
+                button type="button" aria-label="Interrupt" hx-post=(interrupt) hx-target="#pending" hx-swap="outerMorph"
                     class="hidden size-11 shrink-0 items-center justify-center rounded-full bg-ink text-panel hover:brightness-95 group-has-[textarea:placeholder-shown]:inline-flex"
                     x-show="!editing" { (icon(Icon::Stop)) }
             }
@@ -495,6 +496,8 @@ pub(crate) struct CancelNote {
     pub run: Option<i64>,
     /// Undelivered messages that cancelling discards.
     pub queued: usize,
+    /// Whether the active run can be stopped: it is not ending already.
+    pub stoppable: bool,
 }
 
 impl CancelNote {
@@ -505,6 +508,7 @@ impl CancelNote {
                 .find(|r| !r.state.is_terminal())
                 .map(|r| r.number),
             queued: pending.len(),
+            stoppable: runs.iter().any(|r| r.state.can_stop()),
         }
     }
 
@@ -656,6 +660,7 @@ fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
     let closed = !task.status.can_mark_done() && !task.status.can_cancel();
     let active_run = cancel.run.is_some();
     let done = format!("/tasks/{}/done", task.key);
+    let stop = format!("/tasks/{}/stop", task.key);
     let item = "flex min-h-11 w-full items-center rounded-lg px-2 text-left text-sm font-normal lg:min-h-9";
     html! {
         div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
@@ -676,6 +681,12 @@ fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                             } @else {
                                 button type="button" disabled class={(item) " cursor-not-allowed text-faint"} { "Mark done" }
                             }
+                        }
+                    }
+                    @if cancel.stoppable {
+                        li {
+                            button type="button" hx-post=(stop) hx-swap="none"
+                                class={(item) " text-ink hover:bg-sunk"} { "Stop run" }
                         }
                     }
                     li {
@@ -813,9 +824,9 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
             @if let Some(outcome) = &run.outcome { span class="text-xs text-muted" { (outcome_text(outcome)) } }
             time datetime=(run.started_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(run.started_at)) }
             // A run that is already ending cannot be stopped again.
-            @if !run.state.is_terminal() && run.state != RunState::Finalizing {
+            @if run.state.can_stop() {
                 button type="button" hx-post={"/tasks/" (task_key) "/stop"} hx-swap="none"
-                    class="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-line bg-panel px-3 text-sm font-medium text-ink hover:bg-sunk lg:min-h-8" { "Stop" }
+                    class="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-line bg-panel px-3 text-sm font-medium text-ink hover:bg-sunk lg:min-h-8" { "Stop run" }
             }
         }
         @if let Some(retry) = run.retry_after { p class="text-xs text-status-limited-fg" { "retry at " (format_time(retry)) } }

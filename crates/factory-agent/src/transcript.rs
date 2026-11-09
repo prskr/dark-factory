@@ -330,6 +330,7 @@ impl TranscriptTranslator {
         &mut self,
         stop_reason: StopReason,
         detail: &str,
+        interrupted_by: Option<&str>,
     ) -> Event {
         self.last_event_kind = Some(LastEventKind::Other);
 
@@ -340,6 +341,7 @@ impl TranscriptTranslator {
             kind: Some(EventKind::TurnEnded(TurnEnded {
                 stop_reason: stop_reason as i32,
                 detail: detail.to_string(),
+                interrupted_by: interrupted_by.unwrap_or_default().to_string(),
             })),
         }
     }
@@ -348,7 +350,7 @@ impl TranscriptTranslator {
     #[cfg(test)]
     pub fn translate_turn_ended(&mut self, stop_reason: AcpStopReason, detail: &str) -> Event {
         let reason = acp_to_proto_stop_reason(stop_reason);
-        self.translate_turn_ended_with_stop_reason(reason, detail)
+        self.translate_turn_ended_with_stop_reason(reason, detail, None)
     }
 }
 
@@ -364,20 +366,18 @@ pub fn acp_to_proto_stop_reason(stop_reason: AcpStopReason) -> StopReason {
     }
 }
 
+/// A visible text block of the control plane's wire format.
+pub fn text_block(text: impl Into<String>) -> ContentBlock {
+    ContentBlock {
+        kind: Some(ContentBlockKind::Text(TextContent { text: text.into() })),
+        hidden: false,
+    }
+}
+
 fn convert_acp_content_block_to_proto(block: &AcpContentBlock) -> ContentBlock {
     match block {
-        AcpContentBlock::Text(t) => ContentBlock {
-            kind: Some(ContentBlockKind::Text(TextContent {
-                text: t.text.clone(),
-            })),
-            hidden: false,
-        },
-        _ => ContentBlock {
-            kind: Some(ContentBlockKind::Text(TextContent {
-                text: String::new(),
-            })),
-            hidden: false,
-        },
+        AcpContentBlock::Text(t) => text_block(t.text.clone()),
+        _ => text_block(""),
     }
 }
 
@@ -389,10 +389,7 @@ fn convert_acp_tool_content_to_proto(tc: &AcpToolCallContent) -> (ToolCallConten
                 (
                     ToolCallContent {
                         kind: Some(df_proto::transcript::v1::tool_call_content::Kind::Content(
-                            ContentBlock {
-                                kind: Some(ContentBlockKind::Text(TextContent { text })),
-                                hidden: false,
-                            },
+                            text_block(text),
                         )),
                     },
                     trunc,
@@ -410,12 +407,7 @@ fn convert_acp_tool_content_to_proto(tc: &AcpToolCallContent) -> (ToolCallConten
         _ => (
             ToolCallContent {
                 kind: Some(df_proto::transcript::v1::tool_call_content::Kind::Content(
-                    ContentBlock {
-                        kind: Some(ContentBlockKind::Text(TextContent {
-                            text: String::new(),
-                        })),
-                        hidden: false,
-                    },
+                    text_block(""),
                 )),
             },
             false,

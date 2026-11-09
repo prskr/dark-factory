@@ -3,7 +3,7 @@
 use axum::http::StatusCode;
 
 use super::set_status;
-use crate::testkit::{TestApp, insert_run, new_task, seed, text};
+use crate::testkit::{TestApp, insert_run, insert_turn_event, new_task, seed, text};
 
 async fn count(app: &TestApp, sql: &'static str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(&app.pool).await.unwrap()
@@ -17,32 +17,67 @@ async fn an_active_run_card_offers_stop_and_an_ended_one_does_not() {
     let task = new_task(&app.pool, &seed, "t").await;
     insert_run(&app.pool, task.id, 1, "succeeded").await;
     let ended = text(app.get("/tasks/DF-1", &cookie).await).await;
-    assert!(!ended.contains(">Stop<"), "{ended}");
+    assert!(!ended.contains(">Stop run<"), "{ended}");
 
     insert_run(&app.pool, task.id, 2, "running").await;
     let running = text(app.get("/tasks/DF-1", &cookie).await).await;
     let runs = &running[running.find("id=\"runs\"").unwrap()..];
     assert!(runs.contains("hx-post=\"/tasks/DF-1/stop\""), "{runs}");
-    assert_eq!(runs.matches(">Stop<").count(), 1, "{runs}");
+    assert_eq!(runs.matches(">Stop run<").count(), 1, "{runs}");
 }
 
 #[tokio::test]
-async fn send_becomes_stop_for_a_running_task_with_an_empty_message_box() {
+async fn the_status_switch_offers_stop_run_for_an_active_run_that_is_not_ending() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
-    new_task(&app.pool, &seed, "t").await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    let run = insert_run(&app.pool, task.id, 1, "awaiting_input").await;
+    set_status(&app, "waiting").await;
+    let switch = |html: &str| {
+        let dl = &html[html.find("<dl ").unwrap()..];
+        dl[..dl.find("</dl>").unwrap()].to_string()
+    };
+
+    let idle = switch(&text(app.get("/tasks/DF-1", &cookie).await).await);
+    let stop = crate::testkit::tag_around(&idle, ">Stop run<");
+    assert!(stop.contains("hx-post=\"/tasks/DF-1/stop\""), "{idle}");
+
+    sqlx::query("UPDATE runs SET state = 'finalizing' WHERE id = $1")
+        .bind(run)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let ending = switch(&text(app.get("/tasks/DF-1", &cookie).await).await);
+    assert!(!ending.contains(">Stop run<"), "{ending}");
+}
+
+#[tokio::test]
+async fn send_becomes_interrupt_while_a_turn_runs_with_an_empty_message_box() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    let run = insert_run(&app.pool, task.id, 1, "awaiting_input").await;
 
     set_status(&app, "waiting").await;
     let idle = text(app.get("/tasks/DF-1", &cookie).await).await;
-    assert!(!idle.contains("aria-label=\"Stop\""));
+    assert!(!idle.contains("aria-label=\"Interrupt\""));
 
+    sqlx::query("UPDATE runs SET state = 'running' WHERE id = $1")
+        .bind(run)
+        .execute(&app.pool)
+        .await
+        .unwrap();
     set_status(&app, "running").await;
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     let area = &html[html.find("id=\"composer-action\"").unwrap()..];
     let area = &area[..area.find("</span>").unwrap()];
-    // Stop is shown while the box is empty; Send stays for queueing a message during a turn.
-    assert!(area.contains("aria-label=\"Stop\"") && area.contains("hx-post=\"/tasks/DF-1/stop\""));
+    // Interrupt is shown while the box is empty; Send stays for queueing a message during a turn.
+    assert!(
+        area.contains("aria-label=\"Interrupt\"")
+            && area.contains("hx-post=\"/tasks/DF-1/interrupt\"")
+    );
     assert!(area.contains("group-has-[textarea:placeholder-shown]:inline-flex"));
     assert!(
         area.contains("aria-label=\"Send\"") && area.contains("hx-post=\"/tasks/DF-1/messages\"")
@@ -51,18 +86,125 @@ async fn send_becomes_stop_for_a_running_task_with_an_empty_message_box() {
 }
 
 #[tokio::test]
-async fn the_composer_offers_no_stop_while_the_active_run_is_finalizing() {
+async fn the_composer_offers_no_interrupt_while_no_turn_runs() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
     let task = new_task(&app.pool, &seed, "t").await;
-    insert_run(&app.pool, task.id, 1, "finalizing").await;
-    set_status(&app, "running").await;
+    for state in ["finalizing", "awaiting_input"] {
+        sqlx::query("DELETE FROM runs")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        insert_run(&app.pool, task.id, 1, state).await;
+        set_status(&app, "running").await;
 
-    let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+        let html = text(app.get("/tasks/DF-1", &cookie).await).await;
 
-    assert!(!html.contains("aria-label=\"Stop\""), "{html}");
-    assert!(html.contains("aria-label=\"Send\""));
+        assert!(
+            !html.contains("aria-label=\"Interrupt\""),
+            "{state}: {html}"
+        );
+        assert!(html.contains("aria-label=\"Send\""));
+    }
+}
+
+#[tokio::test]
+async fn interrupting_a_running_turn_is_audited_and_answers_without_content() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    let run = insert_run(&app.pool, task.id, 1, "running").await;
+    insert_turn_event(&app.pool, task.id, run, 1, "turn_started", "turn_1").await;
+
+    let response = app.post("/tasks/DF-1/interrupt", "", &cookie).await;
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM audit_log WHERE action = 'run.interrupt'"
+        )
+        .await,
+        1
+    );
+    // The run is not stopped.
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM runs WHERE stop_requested_at IS NOT NULL"
+        )
+        .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn interrupting_a_turn_that_has_ended_shows_the_notice_while_the_run_is_still_running() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    let run = insert_run(&app.pool, task.id, 1, "running").await;
+    insert_turn_event(&app.pool, task.id, run, 1, "turn_started", "turn_1").await;
+    insert_turn_event(&app.pool, task.id, run, 2, "turn_ended", "turn_1").await;
+
+    let response = app.post("/tasks/DF-1/interrupt", "", &cookie).await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(text(response).await.contains("No turn is running"));
+}
+
+#[tokio::test]
+async fn interrupting_without_a_running_turn_shows_the_notice_and_audits_nothing() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    insert_run(&app.pool, task.id, 1, "awaiting_input").await;
+
+    let response = app.post("/tasks/DF-1/interrupt", "", &cookie).await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = text(response).await;
+    assert!(
+        body.contains("id=\"pending\"") && body.contains("No turn is running"),
+        "{body}"
+    );
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM audit_log WHERE action = 'run.interrupt'"
+        )
+        .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn interrupting_needs_the_same_permission_as_stopping() {
+    let app = TestApp::new().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    insert_run(&app.pool, task.id, 1, "running").await;
+    let (no_roles, _) =
+        crate::auth::testing::seed_session(&app.pool, &[], 3600, Some("refresh-0")).await;
+
+    let stop = app.post("/tasks/DF-1/stop", "", &no_roles).await.status();
+    let interrupt = app
+        .post("/tasks/DF-1/interrupt", "", &no_roles)
+        .await
+        .status();
+
+    assert!(!stop.is_success(), "{stop}");
+    assert_eq!(interrupt, stop);
+    assert_eq!(
+        app.post("/tasks/DF-9/interrupt", "", &app.login().await)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]
@@ -94,7 +236,7 @@ async fn stopping_marks_the_run_and_answers_without_content() {
     );
     // The page shows the run as finalizing, so there is nothing to stop twice.
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
-    assert!(!html.contains(">Stop<"), "{html}");
+    assert!(!html.contains(">Stop run<"), "{html}");
 }
 
 #[tokio::test]

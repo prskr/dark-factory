@@ -42,6 +42,17 @@ pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
 pub const RESEARCH_PROJECT_KEY: &str = "RS";
 pub const RESEARCH_PROJECT_NAME: &str = "Research";
 
+/// Project whose fake agent keeps its first turn open until it is interrupted (`interrupt-turn`);
+/// tasks are `IN-<n>`.
+pub const INTERRUPT_PROJECT_KEY: &str = "IN";
+pub const INTERRUPT_PROJECT_NAME: &str = "Interrupt";
+
+/// What the first turn of the `IN` script says before it waits, and what the turn after the
+/// interrupt says about its input.
+pub const INTERRUPT_STARTED: &str = "Starting a long task.";
+pub const INTERRUPT_NOTED: &str = "Noted the interruption.";
+pub const INTERRUPT_SWITCHED: &str = "Switched to the other API.";
+
 /// The artifact the researcher of project `RS` writes, and a line of it.
 pub const RESEARCH_ARTIFACT: &str = "findings.md";
 pub const RESEARCH_FINDING: &str = "The session cookie is dropped on the redirect.";
@@ -112,6 +123,7 @@ pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
+pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

@@ -32,7 +32,7 @@ pub enum Icon {
     PullRequest,
     Issue,
     Send,
-    /// A filled square: stop (the Stop button of a running task).
+    /// A filled square: stop (the Interrupt button of the message box, the interrupted-turn row).
     Stop,
     ArrowUp,
     Link,

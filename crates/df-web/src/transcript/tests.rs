@@ -638,3 +638,37 @@ fn code_is_highlighted_only_after_the_turn_ends() {
     let complete = render_item(&folder.items()[1]).into_string();
     assert!(complete.contains("hl-keyword"), "{complete}");
 }
+
+#[test]
+fn an_interrupted_turn_ends_with_the_row_naming_who_interrupted() {
+    let folder = fold(&[
+        chunk(1, "t1", "m1", "working"),
+        stored(
+            2,
+            "t1",
+            json!({"turnEnded": {"stopReason": "STOP_REASON_CANCELLED",
+                "detail": "Interrupted by Peter Kurfer", "interruptedBy": "Peter Kurfer"}}),
+        ),
+        chunk(3, "t2", "m2", "next turn"),
+    ]);
+
+    let ids: Vec<&str> = folder.items().iter().map(|i| i.dom_id.as_str()).collect();
+    assert_eq!(ids, ["run-1", "msg-r1-m1", "ev-2", "msg-r1-m2"]);
+    let row = render_item(&folder.items()[2]).into_string();
+    assert!(row.contains("Interrupted by Peter Kurfer"), "{row}");
+    assert!(row.contains("data-system"), "{row}");
+}
+
+#[test]
+fn a_turn_that_was_not_interrupted_adds_no_row() {
+    let folder = fold(&[
+        chunk(1, "t1", "m1", "working"),
+        stored(
+            2,
+            "t1",
+            json!({"turnEnded": {"stopReason": "STOP_REASON_CANCELLED"}}),
+        ),
+    ]);
+
+    assert_eq!(folder.items().len(), 2);
+}

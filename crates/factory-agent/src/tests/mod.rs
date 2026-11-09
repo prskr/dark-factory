@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::git::Git;
 use crate::outbox::Outbox;
-use crate::runner::{RunDriverParams, RunExecutionResult, run_session};
+use crate::runner::{RunDriverParams, RunExecutionResult, Timeouts, run_session};
 
 mod cli;
 mod connection;
@@ -181,6 +181,7 @@ pub(crate) struct RunScenario {
     budgets: Option<Budgets>,
     continuation: Option<Continuation>,
     release_up_front: bool,
+    timeouts: Timeouts,
 }
 
 impl RunScenario {
@@ -222,7 +223,14 @@ impl RunScenario {
             budgets: None,
             continuation: None,
             release_up_front: false,
+            timeouts: Timeouts::default(),
         })
+    }
+
+    /// Shorter waits for a harness that does not react.
+    pub(crate) fn timeouts(mut self, timeouts: Timeouts) -> Self {
+        self.timeouts = timeouts;
+        self
     }
 
     /// The text of the initial prompt.
@@ -327,6 +335,7 @@ impl RunScenario {
             inbound_rx,
             outbound_tx,
             cancel_requested: false,
+            timeouts: self.timeouts,
         }
     }
 
