@@ -129,7 +129,8 @@ Added after the spike:
   `AbortError` on every swap of `#ws-detail`. `scripts/sse-cleanup.ts` registers a hook that runs
   first (loaded between htmx and `hx-sse`; htmx calls hooks in registration order) and cancels
   the reader of the still open stream. The e2e test
-  `opening_tasks_from_the_list_leaves_a_clean_console` (`crates/df-e2e/tests/ui.rs`) checks it.
+  `opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab`
+  (`crates/df-e2e/tests/ui.rs`) checks it.
 
 ## Assets and styles
 

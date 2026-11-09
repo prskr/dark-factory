@@ -94,10 +94,11 @@ async fn the_last_tab_of_the_project_dialog_stays_in_view_on_phones() -> Result<
 
 /// Opening tasks from the list swaps `#ws-detail` and with it the task's event stream. The swap
 /// must leave no error in the console: `hx-sse` used to reject an `AbortError` nobody handled
-/// when htmx cleaned up the old stream.
+/// when htmx cleaned up the old stream. The swapped details must keep the attributes Alpine
+/// binds (`data-tab` decides which details panel shows).
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
-async fn opening_tasks_from_the_list_leaves_a_clean_console() -> Result<()> {
+async fn opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab() -> Result<()> {
     let env = E2eEnv::from_env()?;
     let session = Session::start(&env).await?;
     session.login(&env).await?;
@@ -137,6 +138,16 @@ async fn opening_tasks_from_the_list_leaves_a_clean_console() -> Result<()> {
             .to_contain_text(key)
             .await
             .with_context(|| format!("{key} swapped in"))?;
+        // htmx removes `htmx-added` once the swap settled; a settle step used to reset the
+        // swapped elements to the server's attributes, dropping what Alpine bound.
+        expect(session.page.locator(".htmx-added"))
+            .to_have_count(0)
+            .await
+            .with_context(|| format!("{key} settled"))?;
+        expect(session.page.locator("#ws-details"))
+            .to_have_attribute("data-tab", "overview")
+            .await
+            .with_context(|| format!("{key} keeps the open details tab"))?;
     }
     // A round trip after the last swap: a rejection of its cleanup has been reported by then.
     session.page.evaluate_value("1").await?;

@@ -27,8 +27,11 @@ pub(crate) const COMPONENT_SCRIPTS: [&str; 6] = [
 pub(crate) const SSE_CLEANUP_SCRIPT: &str = "sse-cleanup.js";
 
 /// htmx keeps the `open` state of `<details>` (tool calls, the runs list) when it morphs an
-/// updated element.
-const HTMX_CONFIG: &str = r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"]}"#;
+/// updated element. No settle step: after a delay it resets each swapped element that has the
+/// `id` of an old one to the server's attributes, dropping what Alpine bound in the meantime
+/// (`data-tab` of the details after switching tasks).
+const HTMX_CONFIG: &str =
+    r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"],"defaultSettleDelay":0}"#;
 
 /// The navigation entry a page belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +216,14 @@ mod tests {
                 .iter()
                 .any(|a| a == "open")
         );
+    }
+
+    #[test]
+    fn swaps_keep_the_attributes_alpine_binds() {
+        // With a settle delay, htmx resets every swapped element that has the `id` of an old one
+        // to the server's attributes after Alpine bound its own, e.g. `data-tab` of the details.
+        let config: serde_json::Value = serde_json::from_str(HTMX_CONFIG).unwrap();
+        assert_eq!(config["defaultSettleDelay"], 0);
     }
 
     #[test]
