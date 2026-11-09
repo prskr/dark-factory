@@ -118,7 +118,7 @@ rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"]
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
-rmcp = { version = "3.5.1", default-features = false, features = ["client", "server", "transport-async-rw"] }
+rmcp = { version = "3.9.0", default-features = false, features = ["client", "server", "transport-async-rw"] }
 rpi-agent = "=0.16.0"
 rpi-ai = { version = "=0.16.0", features = ["providers"] }
 rpi-tools = "=0.16.0"
