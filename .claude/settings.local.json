@@ -1,6 +1,5 @@
 {
   "enabledMcpjsonServers": [
-    "obscura",
     "codegraph",
     "playwright"
   ]
