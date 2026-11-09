@@ -161,3 +161,44 @@ The control plane SHALL pass the persona's system prompt as a harness file at th
 #### Scenario: Claude Code files
 - **WHEN** a run starts for a `claude-code` persona with a system prompt and `harness.claudeCode.settingsJson` is set
 - **THEN** `Assign` carries `.claude/CLAUDE.md` with the prompt and `.claude/settings.json` with the settings
+
+### Requirement: Interrupting a turn
+On `Interrupt` for the open turn (its `turn_id`), the runtime SHALL send ACP `session/cancel` and wait up to 5 seconds for the `session/prompt` response. If it is `cancelled`, the turn SHALL end `CANCELLED` with `interrupted_by` and the run SHALL stay. Queued prompts SHALL start the next turn, which begins "Your previous turn was interrupted by <name>."; otherwise the runtime SHALL wait for input. An `Interrupt` outside a turn or for another turn SHALL be ignored.
+
+#### Scenario: Interrupt without waiting messages
+- **WHEN** the runtime receives `Interrupt` from "Peter Kurfer" during a turn and no prompt is queued
+- **THEN** the turn ends with stop reason `CANCELLED` and detail "Interrupted by Peter Kurfer", and the runtime reports `RUN_PHASE_AWAITING_INPUT`
+
+#### Scenario: Interrupt with a waiting message
+- **WHEN** a prompt is queued and the runtime then receives `Interrupt` during the turn
+- **THEN** the turn ends and the next turn starts with "Your previous turn was interrupted by Peter Kurfer." followed by the queued prompt
+
+#### Scenario: Interrupt while idle
+- **WHEN** the runtime receives `Interrupt` while it waits for input
+- **THEN** nothing changes and the run keeps waiting
+
+#### Scenario: Interrupt for another turn
+- **WHEN** the runtime receives `Interrupt` whose turn id is not the current turn's
+- **THEN** the turn continues
+
+#### Scenario: Interrupted turn and budgets
+- **WHEN** a turn is interrupted successfully in a run with `max_turns` 3
+- **THEN** the interrupted turn counts as one of the 3 turns and the run does not end with a failure outcome
+
+### Requirement: Tool calls of an interrupted turn
+Dark Factory tool calls of an interrupted turn SHALL complete with a cancelled result, also those the harness starts until the turn ends. A late result for a cancelled call SHALL be dropped, except that `end_run_after_turn` still applies.
+
+#### Scenario: Open Dark Factory tool call
+- **WHEN** the runtime receives `Interrupt` while a Dark Factory tool call of the turn waits for its result
+- **THEN** the tool call gets a cancelled result, and whatever the control plane already did for it stays done; a late `ToolCallResult` for it is dropped, except that `end_run_after_turn` still applies
+
+### Requirement: Interrupt without a clean cancel
+A turn that completes before the cancel takes effect (another stop reason than `cancelled`) SHALL NOT count as interrupted: it keeps its real stop reason, has no `interrupted_by`, and the usual outcome logic applies. If the harness answers with an error, or not within 5 seconds, the turn SHALL end `ERROR` without `interrupted_by` and the run `FAILED`; a rate-limit error ends turn and run `RATE_LIMITED`.
+
+#### Scenario: Turn completes as the cancel arrives
+- **WHEN** the harness answers the cancel with stop reason `end_turn`
+- **THEN** the turn ends with that stop reason and no `interrupted_by`, and the next turn's input has no interrupt line
+
+#### Scenario: Harness does not react to the cancel
+- **WHEN** the harness gives no response to the prompt within 5 seconds after `session/cancel`
+- **THEN** the turn ends with stop reason `ERROR` and no `interrupted_by`, and the run ends `FAILED`

@@ -197,11 +197,21 @@ impl Session {
         Ok(())
     }
 
-    /// Stops the active run of the open task with the "Stop" button of its run card.
+    /// Interrupts the running turn of the open task with the "Interrupt" button of the message
+    /// box, which shows while the box is empty.
+    pub async fn interrupt_turn(&self) -> Result<()> {
+        self.page
+            .locator("#composer-action button[aria-label='Interrupt']")
+            .click(None)
+            .await
+            .context("interrupt the turn")
+    }
+
+    /// Stops the active run of the open task with the "Stop run" button of its run card.
     pub async fn stop_run(&self) -> Result<()> {
         self.open_runs().await?;
         self.page
-            .locator("#runs button:has-text('Stop')")
+            .locator("#runs button:has-text('Stop run')")
             .first()
             .click(None)
             .await

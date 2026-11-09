@@ -190,6 +190,13 @@ pub enum EndStep {
     Refusal,
     Crash,
     Hang,
+    /// Like `hang`, but the agent exits when the turn is cancelled, so the harness fails the
+    /// cancel instead of answering it.
+    HangThenCrash,
+    /// Never ends the turn, not even when it is cancelled: a harness that ignores `session/cancel`.
+    HangForever,
+    /// Like `hang`, but answers the cancel with `end_turn`: the turn completed on its own.
+    HangThenEndTurn,
     RateLimited(RateLimitedStep),
 }
 

@@ -3,7 +3,6 @@
 //! Follows `specs/acp-harness/spec.md`, `specs/workspace-lifecycle/spec.md`,
 //! and `design/agent-run.md` §6.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,16 +10,16 @@ use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, PromptRequest, PromptResponse, RequestPermissionRequest,
-    RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate,
+    RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate, TextContent,
 };
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use df_proto::agent::v1::{
-    AgentMessage, Assign, ControlMessage, PhaseChanged, Prompt, PushReport, PushStatus, RunOutcome,
-    RunPhase, RunReport, RuntimeOperation, RuntimeTiming, ToolCallResult, Workspace, agent_message,
+    AgentMessage, Assign, ControlMessage, Interrupt, PhaseChanged, Prompt, PushReport, PushStatus,
+    RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, Workspace, agent_message,
     control_message,
 };
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason};
-use tokio::sync::{Mutex, Notify, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::git::Git;
 use crate::harness::{
@@ -30,7 +29,7 @@ use crate::harness::{
     setup_session,
 };
 use crate::outbox::Outbox;
-use crate::runtime_handler::DriverRuntimeHandler;
+use crate::runtime_handler::{DriverRuntimeHandler, OpenToolCalls, SharedToolCalls};
 use crate::runtime_socket::RuntimeSocketServer;
 use crate::transcript::{
     TranscriptTranslator, acp_to_proto_stop_reason, notice_event, truncate_utf8,
@@ -137,12 +136,31 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
     }
 }
 
+/// Waits of the runtime for a harness that does not react. Fixed in production; tests shorten them.
+#[derive(Debug, Clone, Copy)]
+pub struct Timeouts {
+    /// How long a cancelled turn waits for the harness' answer to `session/cancel`.
+    pub cancel_response: Duration,
+    /// How long the harness gets to exit on its own before it is killed.
+    pub harness_exit_grace: Duration,
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self {
+            cancel_response: CANCEL_RESPONSE_TIMEOUT,
+            harness_exit_grace: HARNESS_EXIT_GRACE,
+        }
+    }
+}
+
 /// Parameters for running an agent run.
 pub struct RunDriverParams {
     pub assign: Assign,
     pub initial_prompts: Vec<Prompt>,
     /// True if a `Cancel` arrived before `Assign`; the run ends as cancelled without a turn.
     pub cancel_requested: bool,
+    pub timeouts: Timeouts,
     pub repo_dir: PathBuf,
     pub home_dir: PathBuf,
     pub runtime_dir: PathBuf,
@@ -197,6 +215,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         git,
         outbox: params.outbox,
         outbound_tx: params.outbound_tx,
+        timeouts: params.timeouts,
     });
 
     let _socket_guard = match start_runtime_socket(&ctx, &shared) {
@@ -246,7 +265,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
 
     let driver_result =
         drive_session(&ctx, &shared, cancel_rx, &prepare_res, transport, started).await;
-    stop_harness(&mut child).await;
+    stop_harness(&mut child, ctx.timeouts.harness_exit_grace).await;
 
     // `push_after_turn` keeps the outbox state current, so it is right even after a driver error
     let outbox_last_pushed_sha = ctx.outbox.lock().await.run_state().last_pushed_sha.clone();
@@ -384,10 +403,11 @@ async fn fail_run(
     .await
 }
 
-/// Waits for the next cancel signal, or forever once the channel is gone.
-async fn recv_cancel(
-    rx: &mut Option<broadcast::Receiver<String>>,
-) -> Result<String, broadcast::error::RecvError> {
+/// Waits for the next message of a broadcast channel (cancel, interrupt), or forever once the
+/// channel is gone.
+async fn recv_broadcast<T: Clone>(
+    rx: &mut Option<broadcast::Receiver<T>>,
+) -> Result<T, broadcast::error::RecvError> {
     match rx {
         Some(rx) => rx.recv().await,
         None => std::future::pending().await,
@@ -447,7 +467,7 @@ async fn wait_for_input(
         }
         tokio::select! {
             () = &mut notified => {}
-            recv = recv_cancel(cancel_rx) => match recv {
+            recv = recv_broadcast(cancel_rx) => match recv {
                 Ok(_reason) => {
                     cancelled.store(true, Ordering::SeqCst);
                     return IdleWake::Cancel;
@@ -460,7 +480,6 @@ async fn wait_for_input(
     }
 }
 
-type PendingToolCalls = Arc<Mutex<HashMap<String, oneshot::Sender<ToolCallResult>>>>;
 type HarnessTransport = ByteStreams<
     TokioAsyncWriteCompat<tokio::process::ChildStdin>,
     TokioAsyncReadCompat<tokio::process::ChildStdout>,
@@ -481,16 +500,20 @@ struct RunContext {
     git: Git,
     outbox: Arc<Mutex<Outbox>>,
     outbound_tx: mpsc::Sender<AgentMessage>,
+    timeouts: Timeouts,
 }
 
 /// State shared by the inbound control loop, the runtime socket handler and the turn loop.
 #[derive(Clone)]
 struct RunShared {
-    pending_tool_calls: PendingToolCalls,
+    pending_tool_calls: SharedToolCalls,
     end_run_requested: Arc<AtomicBool>,
     /// A blocking request of the current turn (`ToolCallResult.await_input_after_turn`).
     await_input_requested: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
+    /// Carries the name of a board member who interrupts the turn. Not stored: a turn subscribes
+    /// when it starts, so an `Interrupt` outside a turn reaches nobody.
+    interrupt_tx: broadcast::Sender<Interrupt>,
     prompt_queue: Arc<Mutex<PromptQueue>>,
     /// Wakes the idle wait: a prompt was queued or `Release` arrived.
     input_wake: Arc<Notify>,
@@ -503,10 +526,11 @@ struct RunShared {
 impl RunShared {
     fn new(cancel_requested: bool) -> Self {
         Self {
-            pending_tool_calls: Arc::new(Mutex::new(HashMap::new())),
+            pending_tool_calls: Arc::new(Mutex::new(OpenToolCalls::default())),
             end_run_requested: Arc::new(AtomicBool::new(false)),
             await_input_requested: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(cancel_requested)),
+            interrupt_tx: broadcast::channel(16).0,
             prompt_queue: Arc::new(Mutex::new(PromptQueue::new())),
             input_wake: Arc::new(Notify::new()),
             released: Arc::new(AtomicBool::new(false)),
@@ -597,14 +621,21 @@ async fn handle_control_message(
             shared.cancelled.store(true, Ordering::SeqCst);
             cancel_tx.send(c.reason).ok(); // receiver may be gone
         }
+        Some(control_message::Body::Interrupt(i)) => {
+            shared.interrupt_tx.send(i).ok(); // no receiver: no turn is running
+        }
         Some(control_message::Body::ToolCallResult(res)) => {
             if res.end_run_after_turn {
                 shared.end_run_requested.store(true, Ordering::SeqCst);
             }
-            if res.await_input_after_turn {
-                shared.await_input_requested.store(true, Ordering::SeqCst);
-            }
-            if let Some(tx) = shared.pending_tool_calls.lock().await.remove(&res.call_id) {
+            // `end_run_after_turn` holds for a late result too (an interrupt cancelled the call,
+            // but the control plane completed the task). A blocking request that no call waits
+            // for any more is moot, though.
+            let waiting = shared.pending_tool_calls.lock().await.take(&res.call_id);
+            if let Some(tx) = waiting {
+                if res.await_input_after_turn {
+                    shared.await_input_requested.store(true, Ordering::SeqCst);
+                }
                 tx.send(res).ok(); // receiver may be gone
             }
         }
@@ -720,11 +751,8 @@ async fn spawn_harness(ctx: &RunContext) -> Result<HarnessProcess, String> {
 
 /// Stops the harness subprocess: the ACP connection (and with it the harness' stdin) is closed
 /// by now, so it gets time to flush its session state before it is killed.
-async fn stop_harness(child: &mut tokio::process::Child) {
-    if tokio::time::timeout(HARNESS_EXIT_GRACE, child.wait())
-        .await
-        .is_err()
-    {
+async fn stop_harness(child: &mut tokio::process::Child, grace: Duration) {
+    if tokio::time::timeout(grace, child.wait()).await.is_err() {
         child.kill().await.ok();
     }
 }
@@ -911,6 +939,8 @@ struct Turns {
     is_resumed: bool,
     budget: BudgetTracker,
     turn_index: u32,
+    /// Who interrupted the turn that ended last; the next turn's input says so.
+    interrupted_by: Option<String>,
 }
 
 impl Turns {
@@ -933,12 +963,16 @@ impl Turns {
             is_resumed: setup.is_resumed,
             budget,
             turn_index: 0,
+            interrupted_by: None,
         }
     }
 
     /// Runs turns until the run ends: a budget, a cancel, an empty queue, a release or the
     /// outcome of a turn.
     async fn run(&mut self, cx: &ConnectionTo<AcpAgent>) -> LoopEnd {
+        // The control plane keeps the run `preparing` until told otherwise; a turn needs `running`
+        // (Interrupt, the live state of the page). Later turns follow an idle wake, which says so.
+        send_phase(&self.ctx.outbound_tx, RunPhase::Running).await;
         loop {
             if let Some(end) = self.pre_turn_end().await {
                 return end;
@@ -946,6 +980,7 @@ impl Turns {
             let turn = self.run_turn(cx).await;
             let input = TurnOutcomeInput {
                 cancelled: self.shared.cancelled.load(Ordering::SeqCst),
+                interrupted: self.interrupted_by.is_some(),
                 end_run_after_turn: self.shared.end_run_requested.load(Ordering::SeqCst),
                 rate_limited: turn.rate_limited,
                 wall_clock_exceeded: turn.wall_clock_exceeded,
@@ -998,9 +1033,13 @@ impl Turns {
     /// Runs one turn: sends the queued prompts, waits for the answer, records how the turn ended
     /// and pushes new commits.
     async fn run_turn(&mut self, cx: &ConnectionTo<AcpAgent>) -> TurnResult {
+        // Subscribe before the turn-start events go out: the control plane may send `Interrupt`
+        // as soon as it has persisted them, and an interrupt outside a turn reaches nobody.
+        let interrupt_rx = self.shared.interrupt_tx.subscribe();
         let blocks = self.begin_turn().await;
         let turn_started = Instant::now();
-        let (prompt_res, wall_clock_exceeded) = self.await_prompt(cx, blocks).await;
+        let (prompt_res, wall_clock_exceeded) = self.await_prompt(cx, blocks, interrupt_rx).await;
+        self.shared.pending_tool_calls.lock().await.end_interrupt();
         send_timing(
             &self.ctx.outbound_tx,
             RuntimeOperation::Turn,
@@ -1040,7 +1079,16 @@ impl Turns {
         } else {
             None
         };
-        build_acp_prompt_blocks(&prompts, prepend_summary)
+        let mut blocks = build_acp_prompt_blocks(&prompts, prepend_summary);
+        if let Some(by) = self.interrupted_by.take() {
+            blocks.insert(
+                0,
+                ContentBlock::Text(TextContent::new(format!(
+                    "Your previous turn was interrupted by {by}."
+                ))),
+            );
+        }
+        blocks
     }
 
     /// Sends the prompt and waits for the response, a cancel or the wall-clock deadline. A cancel
@@ -1050,6 +1098,7 @@ impl Turns {
         &mut self,
         cx: &ConnectionTo<AcpAgent>,
         blocks: Vec<ContentBlock>,
+        interrupt_rx: broadcast::Receiver<Interrupt>,
     ) -> (Result<PromptResponse, agent_client_protocol::Error>, bool) {
         let prompt_fut = cx
             .send_request(PromptRequest::new(
@@ -1059,6 +1108,7 @@ impl Turns {
             .block_task();
         tokio::pin!(prompt_fut);
 
+        let mut interrupt_rx = Some(interrupt_rx);
         let remaining_wall_clock = self.budget.remaining_wall_clock().unwrap_or(NO_DEADLINE);
         let deadline = tokio::time::sleep(remaining_wall_clock);
         tokio::pin!(deadline);
@@ -1069,10 +1119,12 @@ impl Turns {
         let mut prompt_res = None;
         while prompt_res.is_none() && !needs_cancel {
             tokio::select! {
+                // A response that is ready wins over a cancel or an interrupt that arrives with it.
+                biased;
                 res = &mut prompt_fut => {
                     prompt_res = Some(res);
                 }
-                recv_res = recv_cancel(&mut self.cancel_rx) => match recv_res {
+                recv_res = recv_broadcast(&mut self.cancel_rx) => match recv_res {
                     Ok(_reason) => {
                         self.shared.cancelled.store(true, Ordering::SeqCst);
                         needs_cancel = true;
@@ -1083,6 +1135,17 @@ impl Turns {
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         needs_cancel = self.shared.cancelled.load(Ordering::SeqCst);
                     }
+                },
+                recv_res = recv_broadcast(&mut interrupt_rx) => match recv_res {
+                    // An interrupt names the turn the board member saw; one for another turn
+                    // (its own has ended) is stale.
+                    Ok(interrupt) if interrupt.turn_id == format!("turn_{}", self.turn_index) => {
+                        self.shared.pending_tool_calls.lock().await.interrupt(&interrupt.by);
+                        self.interrupted_by = Some(interrupt.by);
+                        needs_cancel = true;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => interrupt_rx = None,
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                 },
                 () = &mut deadline => {
                     wall_clock_exceeded = true;
@@ -1096,7 +1159,9 @@ impl Turns {
         } else {
             cx.send_notification(CancelNotification::new(SessionId::new(&*self.session_id)))
                 .ok();
-            if let Ok(res) = tokio::time::timeout(CANCEL_RESPONSE_TIMEOUT, &mut prompt_fut).await {
+            if let Ok(res) =
+                tokio::time::timeout(self.ctx.timeouts.cancel_response, &mut prompt_fut).await
+            {
                 res
             } else {
                 let mut err = agent_client_protocol::Error::internal_error();
@@ -1127,9 +1192,22 @@ impl Turns {
                 // queued to `outbound_tx` before `prompt_res` resolved. TurnEnded cannot overtake
                 // them.
                 self.budget.record_turn();
-                (proto_stop_reason, String::new())
+                // Only a harness that took the cancel (stop reason `Cancelled`) was interrupted;
+                // a turn that completed first keeps its real stop reason and ends as usual.
+                match &self.interrupted_by {
+                    Some(by) if proto_stop_reason == StopReason::Cancelled => {
+                        (StopReason::Cancelled, format!("Interrupted by {by}"))
+                    }
+                    _ => {
+                        self.interrupted_by = None;
+                        (proto_stop_reason, String::new())
+                    }
+                }
             }
             Err(e) => {
+                // The harness did not end the turn cleanly (an error, or no answer to
+                // `session/cancel` in time): the transcript does not claim an interrupt.
+                self.interrupted_by = None;
                 let (stop_reason, detail) = if let Some(rl) = parse_rate_limit(&e) {
                     let detail = rl.detail.clone();
                     turn.rate_limited = Some(rl);
@@ -1145,7 +1223,11 @@ impl Turns {
             .translator
             .lock()
             .await
-            .translate_turn_ended_with_stop_reason(stop_reason, &detail);
+            .translate_turn_ended_with_stop_reason(
+                stop_reason,
+                &detail,
+                self.interrupted_by.as_deref(),
+            );
         send_body(
             &self.ctx.outbound_tx,
             agent_message::Body::TranscriptEvent(event),

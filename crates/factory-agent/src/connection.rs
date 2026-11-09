@@ -156,6 +156,7 @@ impl CommandFilter {
             Some(
                 control_message::Body::Cancel(_)
                 | control_message::Body::Release(_)
+                | control_message::Body::Interrupt(_)
                 | control_message::Body::HelloAck(_),
             )
             | None => true,

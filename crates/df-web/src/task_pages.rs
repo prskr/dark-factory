@@ -34,7 +34,7 @@ pub(crate) use dependencies::dependencies_region;
 pub(crate) use resume::ResumeNote;
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
-    list_column, pending_region, runs_region, stoppable, task_rows,
+    interruptible, list_column, pending_region, runs_region, task_rows,
 };
 use view::{composer_dialog, composer_form, details_column, message_area};
 
@@ -59,6 +59,7 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/tasks/{key}/title", post(task_rename))
         .route("/tasks/{key}/done", post(task_done))
         .route("/tasks/{key}/stop", post(task_stop))
+        .route("/tasks/{key}/interrupt", post(task_interrupt))
         .route("/tasks/{key}/cancel", post(task_cancel))
         .route("/tasks/{key}/reset-workspace", post(task_reset_workspace))
         .merge(crate::artifacts::routes())
@@ -509,6 +510,30 @@ async fn task_stop(
     match df_db::stop_run(&state.pool, TaskId::from_uuid(task.id), user.principal()).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(df_db::DbError::Conflict(_)) => StatusCode::CONFLICT.into_response(),
+        Err(e) => internal_error(&e),
+    }
+}
+
+/// `POST /tasks/{key}/interrupt`: a board member interrupts the running turn. The page follows
+/// through the live events, so the answer has no content. Without a running turn nothing
+/// happens and the answer is the pending region with the notice (409).
+async fn task_interrupt(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(key): Path<String>,
+) -> Response {
+    let task = match task_by_key(&state, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    match df_db::interrupt_turn(&state.pool, TaskId::from_uuid(task.id), user.principal()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(df_db::DbError::NoTurnRunning) => {
+            match stack(&state, &task, Some("No turn is running")).await {
+                Ok(body) => (StatusCode::CONFLICT, body).into_response(),
+                Err(response) => *response,
+            }
+        }
         Err(e) => internal_error(&e),
     }
 }

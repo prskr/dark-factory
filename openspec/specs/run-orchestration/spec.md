@@ -327,3 +327,26 @@ If no `RunReport` arrives within 2 minutes after `Cancel` was sent for a human s
 #### Scenario: Runtime hangs
 - **WHEN** the runtime doesn't report within 2 minutes after a stop
 - **THEN** the sandbox is deleted and the run ends `cancelled` with detail `stop-timeout`
+
+### Requirement: Interrupting a turn from the control plane
+A board member allowed to stop a run SHALL be able to interrupt its turn. If the run is `running` and its last persisted turn event is a `TurnStarted`, the control plane SHALL audit `run.interrupt` and the replica holding the run's stream SHALL send `Interrupt` with the board member's name and the turn's id; nothing SHALL be stored. Otherwise nothing changes and the answer is "No turn is running". An interrupt SHALL NOT use an automatic resume or change the task's status.
+
+#### Scenario: Interrupt a running turn
+- **WHEN** a board member interrupts the turn of `DF-9`'s run, which is `running`
+- **THEN** the runtime receives `Interrupt`, an audit entry `run.interrupt` names the board member, and the run stays active
+
+#### Scenario: No turn running
+- **WHEN** a board member interrupts `DF-9` while its run is `awaiting_input`
+- **THEN** the board member sees "No turn is running" and nothing is sent or audited
+
+#### Scenario: Turn ended, run still running
+- **WHEN** a board member interrupts `DF-9` after the turn's `TurnEnded` was stored, while the run is still `running` because the runtime pushes
+- **THEN** the board member sees "No turn is running" and nothing is sent or audited
+
+#### Scenario: Runtime not connected
+- **WHEN** a board member interrupts a `running` run whose runtime is reconnecting
+- **THEN** no `Interrupt` reaches the runtime later, and the turn continues
+
+#### Scenario: Held-back message after an interrupt
+- **WHEN** a board member queues "use the other API" during a turn and then interrupts it
+- **THEN** the message is sent to the runtime at the turn end and starts the next turn of the same run

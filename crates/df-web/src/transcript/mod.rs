@@ -56,6 +56,10 @@ pub enum ItemKind {
     },
     /// Something the control plane did on the forge (push, pull request).
     Forge(ForgeItem),
+    /// The turn ended because a board member interrupted it.
+    Interrupted {
+        by: String,
+    },
     Unreadable,
     /// The start of a run; precedes the run's first item.
     RunStart {
@@ -223,7 +227,16 @@ impl Folder {
             event::Kind::ToolCall(t) => vec![self.apply_tool_call(id, &turn, t)],
             event::Kind::ToolCallUpdate(u) => vec![self.apply_tool_call_update(id, &turn, u)],
             event::Kind::Plan(p) => self.apply_plan(id, turn, p),
-            event::Kind::TurnEnded(_) => self.complete_agent_messages(&turn),
+            event::Kind::TurnEnded(ended) => {
+                let mut changes = self.complete_agent_messages(&turn);
+                if !ended.interrupted_by.is_empty() {
+                    let kind = ItemKind::Interrupted {
+                        by: ended.interrupted_by.clone(),
+                    };
+                    changes.push(self.push(format!("ev-{id}"), turn, kind));
+                }
+                changes
+            }
             event::Kind::ForgeActivity(activity) => forge_item(activity)
                 .map(|item| self.push(format!("ev-{id}"), turn, ItemKind::Forge(item)))
                 .into_iter()
@@ -647,6 +660,9 @@ pub fn render_item(item: &Item) -> Markup {
             message,
         } => c::notice(id, level, code, message),
         ItemKind::Forge(forge) => render_forge(id, forge),
+        ItemKind::Interrupted { by } => {
+            c::system_row(id, Icon::Stop, false, "Interrupted by ", None, by)
+        }
         ItemKind::Unreadable => c::unreadable(id),
     }
 }
@@ -664,7 +680,7 @@ fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
                 None if old_sha.is_empty() => (format!("Pushed {branch} {new_sha}"), false),
                 None => (format!("Pushed {branch} {old_sha}..{new_sha}"), false),
             };
-            c::forge_row(id, Icon::GitCommit, danger, &text, None, "")
+            c::system_row(id, Icon::GitCommit, danger, &text, None, "")
         }
         ForgeItem::PullRequest {
             number,
@@ -676,7 +692,7 @@ fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
                 PullRequestChange::Opened => (Icon::PullRequest, "Opened PR ", ""),
                 PullRequestChange::Ready => (Icon::PullRequest, "PR ", " ready for review"),
             };
-            c::forge_row(
+            c::system_row(
                 id,
                 glyph,
                 false,

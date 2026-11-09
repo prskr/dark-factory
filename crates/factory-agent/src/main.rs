@@ -116,6 +116,7 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
         assign: startup.assign,
         initial_prompts: startup.initial_prompts,
         cancel_requested: startup.cancel_requested,
+        timeouts: runner::Timeouts::default(),
         git: git::Git::new(&dirs.repo).with_ssl_ca_info(&instance_ca),
         runtime_sock_path: dirs.runtime.join("runtime.sock"),
         repo_dir: dirs.repo,

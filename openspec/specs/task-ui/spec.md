@@ -13,7 +13,7 @@ The UI SHALL list tasks newest first with key, title, status, time of the last c
 - **THEN** the list shows `running` within 2 seconds without a page reload
 
 ### Requirement: Live transcript
-The task detail page SHALL show the task's transcript across all runs in order and append new events live via SSE. Agent text SHALL update in place while chunks stream and be rendered as Markdown when the message is complete. Tool calls SHALL be collapsed to title, kind and status, expandable on tap. The end of a turn SHALL NOT be shown as a transcript item.
+The task detail page SHALL show the task's transcript across all runs in order and append new events live via SSE. Agent text SHALL update in place while chunks stream and be rendered as Markdown when the message is complete. Tool calls SHALL be collapsed to title, kind and status, expandable on tap. The end of a turn SHALL NOT be shown as a transcript item, except that a turn ended by an interrupt ends in the row of "Interrupted turns in the transcript".
 
 #### Scenario: Streaming answer
 - **WHEN** the agent streams a message in many chunks
@@ -25,7 +25,7 @@ The task detail page SHALL show the task's transcript across all runs in order a
 
 #### Scenario: Turn ends
 - **WHEN** a turn ends
-- **THEN** no turn-end line appears and the agent's message is rendered as Markdown
+- **THEN** no turn-end line appears (unless an interrupt ended the turn) and the agent's message is rendered as Markdown
 
 ### Requirement: Transcript content is untrusted
 All transcript content SHALL be rendered escaped; Markdown rendering SHALL NOT pass through raw HTML.
@@ -349,11 +349,19 @@ By default, content blocks marked `hidden` SHALL NOT be shown in the transcript 
 - **THEN** all its blocks are shown
 
 ### Requirement: Stop and cancel actions
-The task detail SHALL offer "Stop" for an active run and "Cancel task" for tasks that can be cancelled, on phone and desktop. "Cancel task" SHALL ask for confirmation. Both SHALL update the page live when the run and task change.
+The task detail SHALL offer "Interrupt" in the message box while a turn of the active run is running, "Stop run" for an active run in the status switch and in the run row, and "Cancel task" for tasks that can be cancelled, on phone and desktop. "Cancel task" SHALL ask for confirmation. All SHALL update the page live when the run and task change.
 
 #### Scenario: Stop on a phone
-- **WHEN** a board member taps "Stop" at 390 px width on a running task
+- **WHEN** a board member taps "Stop run" at 390 px width on a running task
 - **THEN** the run shows as finalizing and then `cancelled` without a page reload
+
+#### Scenario: Interrupt only during a turn
+- **WHEN** the agent finishes its turn and waits for input while the task page is open
+- **THEN** the "Interrupt" button disappears from the message box without a page reload
+
+#### Scenario: Interrupt without a turn
+- **WHEN** a board member presses "Interrupt" just after the turn ended
+- **THEN** the page shows the notice "No turn is running"
 
 #### Scenario: Cancel needs confirmation
 - **WHEN** a board member clicks "Cancel task"
@@ -490,3 +498,10 @@ A `write_artifact` call SHALL be shown as a transcript row with an artifact icon
 #### Scenario: Replaced later
 - **WHEN** a board member opens the row of a `findings.md` that has since been replaced
 - **THEN** the current content of `findings.md` is shown
+
+### Requirement: Interrupted turns in the transcript
+A turn that ended because of an interrupt SHALL end in the transcript with a row "Interrupted by <name>", using the name the interrupt was sent with.
+
+#### Scenario: Interrupted turn
+- **WHEN** a board member opens a task whose last turn "Peter Kurfer" interrupted
+- **THEN** the transcript shows "Interrupted by Peter Kurfer" after the agent's last output of that turn

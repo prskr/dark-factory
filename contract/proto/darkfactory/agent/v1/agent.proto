@@ -92,6 +92,7 @@ message ControlMessage {
     ToolCallResult tool_call_result = 15;
     Release release = 17;
     Prompts prompts = 18;
+    Interrupt interrupt = 19;
   }
 }
 
@@ -285,6 +286,17 @@ message Prompts {
 // Stop the current turn, then finalize (push, WIP snapshot, RunReport).
 message Cancel {
   string reason = 1;
+}
+
+// End the current turn only (ACP `session/cancel`); the run and the harness
+// session stay. `by` is the display name of the board member. Best effort: the
+// control plane sends it only while a turn runs, the runtime ignores it outside
+// a turn, and it is never re-sent after a reconnect. `turn_id` is the id of the
+// turn the board member saw open (the `turn_id` of its `TurnStarted`); the
+// runtime ignores an Interrupt for any other turn.
+message Interrupt {
+  string by = 1;
+  string turn_id = 2;
 }
 
 // End a run that waits for input (RUN_PHASE_AWAITING_INPUT): the runtime

@@ -79,6 +79,29 @@ These are compiled in and not configurable.
   `ask_question` with `blocking: true`), `Release` ends the run `BLOCKED` instead; the budget end
   still gives `END_TURN`. `complete_task` in the same turn wins and ends the run `COMPLETED`. The runtime has no idle timer of its own: the control plane decides when to send
   `Release` (`runs.keepAliveSeconds`). A lost stream does not end the wait; the runtime reconnects.
+- **Interrupt.** `Interrupt { by, turn_id }` ends the current turn only. `by` is the display name
+  of the board member, `turn_id` the id of the turn the control plane saw open (`turn_N`, the
+  `turn_id` of its `TurnStarted`). The runtime ignores an `Interrupt` for any other turn, outside a
+  turn, and after a reconnect (it is never re-sent). Otherwise it sends the ACP notification
+  `session/cancel` and waits up to 5 seconds for the response to the outstanding `session/prompt`.
+  Dark Factory tool calls of the turn that wait for a result, and those the harness starts until the
+  turn ends, complete at once with a cancelled result (`Interrupted by <by>`; the latter are not
+  sent to the control plane). A late `ToolCallResult` for a cancelled call is dropped, with one
+  exception: `end_run_after_turn` still applies, because the control plane already completed the
+  task. A late `await_input_after_turn` is ignored.
+  - If the harness answers with stop reason `cancelled`, the runtime records `TurnEnded` with stop
+    reason `CANCELLED`, detail `Interrupted by <by>` and `interrupted_by = <by>`. The run and the
+    harness session stay. With queued prompts the next turn starts, otherwise the runtime reports
+    `AWAITING_INPUT` as after a normal turn end. The next turn's input starts with "Your previous
+    turn was interrupted by <by>." before the prompts, and the interrupted turn counts toward
+    `max_turns`.
+  - If the response is ready when the interrupt arrives, or has another stop reason (for example
+    `end_turn`, `max_tokens`), the turn is not interrupted: it is recorded with its real stop
+    reason, no `interrupted_by`, and the usual outcome logic applies.
+  - If the harness fails the cancel or does not answer within 5 seconds, the turn ends with stop
+    reason `ERROR` and no `interrupted_by`, and the run ends `FAILED`. A rate-limit error as the
+    response ends the turn `RATE_LIMITED` and the run `RATE_LIMITED`.
+  - `Cancel` and the budgets win over an interrupt.
 - **Shutdown.** After the final `RunReport` is queued, the runtime keeps trying to deliver queued
   messages: it flushes them over the open stream, or reconnects with the usual backoff (also when
   the stream drops during the flush, for example by a control plane restart), until all are

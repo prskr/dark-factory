@@ -44,8 +44,9 @@ pub use task_events::apply_task_event;
 pub use tasks::{
     NewDependency, NewTask, TaskMessageRow, TaskRow, cancel_task, claim_held_back_messages,
     create_task, create_task_tx, edit_queued_message, format_assignment_prompt, get_task,
-    list_undelivered_messages, mark_prompt_delivered, mark_task_done, queue_message,
-    queue_message_tx, remove_queued_message, rename_task, set_task_title, stop_run, text_block,
+    interrupt_turn, list_undelivered_messages, mark_prompt_delivered, mark_task_done,
+    queue_message, queue_message_tx, remove_queued_message, rename_task, set_task_title, stop_run,
+    text_block,
 };
 
 /// Embedded database migrations from `crates/df-db/migrations`.

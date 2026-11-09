@@ -72,6 +72,8 @@ message TurnEnded {
   StopReason stop_reason = 1;
   // Human-readable detail, e.g. the provider's rate-limit message.
   string detail = 4;
+  // Display name of the board member who interrupted the turn; empty otherwise.
+  string interrupted_by = 5;
 }
 
 enum StopReason {

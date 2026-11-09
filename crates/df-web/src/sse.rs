@@ -31,7 +31,8 @@ use crate::auth::CurrentUser;
 use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
     CancelNote, Filters, ListQuery, ResumeNote, composer_action, dependencies_region,
-    details_region, head_region, load_detail, pending_region, runs_region, stoppable, task_rows,
+    details_region, head_region, interruptible, load_detail, pending_region, runs_region,
+    task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -252,7 +253,7 @@ impl DetailStream {
                 self.state.show_hidden_blocks,
                 None,
             ),
-            composer_action(&data.task.key, stoppable(data.task.status, &data.runs)),
+            composer_action(&data.task.key, interruptible(&data.runs)),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(

@@ -79,18 +79,46 @@ An agent message is plain text while it streams and is rendered as Markdown when
 The list's filters group them: *Active*, *Waiting* (`awaiting_dependencies`, `waiting`, `blocked`,
 `in_review`, `limit_reached`) and *Done* (`completed`, `failed`).
 
-## Stop, mark done, cancel
+## Interrupt, stop, mark done, cancel
+
+**Interrupt** is the button in the message box while the agent works on a turn (the run is
+`running`). It ends the current turn only; the run, the agent's session and the workspace stay as
+they are. Nothing the turn already did is rolled back: commits, created tasks and raised questions
+stay. The transcript ends the turn with the row "Interrupted by *your name*".
+
+- If messages are queued, they start the next turn right away. To steer the agent, write the
+  message first, then press Interrupt. The button shows while the message box is empty; with text
+  in it, the round button sends.
+- Without queued messages, the run waits for your next message, as after a normal turn end.
+- The next turn's input starts with "Your previous turn was interrupted by *your name*." so the
+  agent knows why it stopped. A Dark Factory tool call that was still open (for example
+  `ask_question`) returns as cancelled.
+- The button interrupts the turn you see running. It only works while a turn is open: after the
+  agent finished its turn but before it reports waiting (it pushes commits first), the page shows
+  "No turn is running".
+- An interrupted turn counts as a normal turn: it is no failure, uses no automatic resume and does
+  not change the task's status by itself. It counts toward the run's turn budget.
+- Exceptions: Interrupt sends a cancel notification (ACP `session/cancel`) and waits up to 5
+  seconds for the harness to end the turn.
+  - If the harness fails the cancel or does not answer within 5 seconds, the turn ends as an
+    error, the run fails and the transcript shows no "Interrupted by" row.
+  - If the answer is a provider rate-limit error, the turn and the run end as rate limited.
+  - If the turn completed on its own as you pressed the button, it counts as an ordinary turn,
+    without the row.
+- It is best effort and not stored. If the turn ended just before, or the agent's runtime is
+  reconnecting, the page shows "No turn is running" (or the turn simply continues) and nothing is
+  sent later. Use **Stop run** if the agent does not react.
 
 From the status menu in the details:
 
 | Action | Effect |
 | --- | --- |
-| **Stop** (also the stop button in the message box) | Ends the current run; the agent finalizes (pushes, snapshots) and the task waits for your next message. |
+| **Stop run** (also the button in the run row under *Runs*) | Ends the current run; the agent finalizes (pushes, snapshots) and the task waits for your next message. |
 | **Mark done** | The task becomes `completed` and its pull request is marked ready for review (a background job, retried if the forge is down). |
 | **Cancel task** | Stops the run, discards queued messages and closes pending requests. The pull request stays as it is. A new message reopens the task. |
 | **Reset workspace** | Deletes the task's volume (not possible while a run is active). Committed work and the WIP snapshot stay in Git; the next run clones again. |
 
-All of them are audited with your name.
+All of them, and Interrupt (`run.interrupt`), are audited with your name and need the same permission.
 
 ## Where the work is
 

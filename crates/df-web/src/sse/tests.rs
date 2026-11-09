@@ -449,7 +449,7 @@ async fn run_changes_rerender_the_runs_region() {
 }
 
 #[tokio::test]
-async fn stopping_the_run_shows_it_finalizing_and_turns_stop_back_into_send() {
+async fn stopping_the_run_shows_it_finalizing_and_turns_interrupt_back_into_send() {
     let f = fixture().await;
     sqlx::query("UPDATE tasks SET status = 'running'")
         .execute(&f.app.pool)
@@ -457,7 +457,11 @@ async fn stopping_the_run_shows_it_finalizing_and_turns_stop_back_into_send() {
         .unwrap();
     let mut sse = f.events("/tasks/DF-1/events?after=0").await;
     let first = sse.next().await;
-    assert!(first.data.contains("aria-label=\"Stop\""), "{}", first.data);
+    assert!(
+        first.data.contains("aria-label=\"Interrupt\""),
+        "{}",
+        first.data
+    );
 
     let (actor, _) = crate::testkit::actor();
     df_db::stop_run(&f.app.pool, f.task, actor).await.unwrap();
@@ -470,7 +474,42 @@ async fn stopping_the_run_shows_it_finalizing_and_turns_stop_back_into_send() {
     );
     assert!(
         frame.data.contains(r##"hx-target="#composer-action""##)
-            && !frame.data.contains("aria-label=\"Stop\""),
+            && !frame.data.contains("aria-label=\"Interrupt\""),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn the_end_of_a_turn_turns_interrupt_back_into_send_without_a_reload() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events?after=0").await;
+    let first = sse.next().await;
+    assert!(
+        first.data.contains("aria-label=\"Interrupt\""),
+        "{}",
+        first.data
+    );
+
+    sqlx::query("UPDATE runs SET state = 'awaiting_input' WHERE id = $1")
+        .bind(f.run)
+        .execute(&f.app.pool)
+        .await
+        .unwrap();
+    df_db::publish(
+        &f.app.pool,
+        &df_db::Notification::RunChanged {
+            run_id: df_core::RunId::from_uuid(f.run),
+            task_id: f.task,
+        },
+    )
+    .await
+    .unwrap();
+
+    let frame = sse.next_within(LIVE).await;
+    assert!(
+        frame.data.contains(r##"hx-target="#composer-action""##)
+            && !frame.data.contains("aria-label=\"Interrupt\""),
         "{}",
         frame.data
     );

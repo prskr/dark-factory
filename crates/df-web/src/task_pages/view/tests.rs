@@ -373,8 +373,8 @@ fn the_send_shortcut_finds_the_button_the_stream_swapped_in() {
 fn a_second_send_while_one_is_in_flight_is_dropped() {
     let area = message_area("DF-1", "Linus", TaskStatus::Waiting, &[], &[], false).into_string();
     assert!(area.contains("id=\"message\""), "{area}");
-    for stoppable in [false, true] {
-        let action = composer_action("DF-1", stoppable).into_string();
+    for interruptible in [false, true] {
+        let action = composer_action("DF-1", interruptible).into_string();
         let send = crate::testkit::tag_around(&action, "aria-label=\"Send\"");
         assert!(send.contains("hx-sync=\"#message:drop\""), "{send}");
     }

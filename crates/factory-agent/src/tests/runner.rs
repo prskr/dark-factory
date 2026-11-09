@@ -146,6 +146,49 @@ fn test_determine_run_outcome_priority() {
     );
 }
 
+#[test]
+fn an_interrupted_turn_continues_with_queued_prompts_or_awaits_input() {
+    use crate::harness::{RunOutcomeDecision, TurnOutcomeInput, determine_run_outcome};
+    use df_proto::agent::v1::RunOutcome;
+    use df_proto::transcript::v1::StopReason;
+
+    let interrupted = TurnOutcomeInput {
+        interrupted: true,
+        stop_reason: Some(StopReason::Cancelled),
+        ..Default::default()
+    };
+    assert_eq!(
+        determine_run_outcome(&TurnOutcomeInput {
+            has_queued_prompts: true,
+            ..interrupted.clone()
+        }),
+        RunOutcomeDecision::ContinueNextTurn
+    );
+    assert_eq!(
+        determine_run_outcome(&interrupted),
+        RunOutcomeDecision::AwaitInput
+    );
+    // The stop reason of an interrupted turn is never a limit.
+    assert_eq!(
+        determine_run_outcome(&TurnOutcomeInput {
+            stop_reason: Some(StopReason::MaxTokens),
+            ..interrupted.clone()
+        }),
+        RunOutcomeDecision::AwaitInput
+    );
+    // A cancel of the run still wins.
+    assert!(matches!(
+        determine_run_outcome(&TurnOutcomeInput {
+            cancelled: true,
+            ..interrupted
+        }),
+        RunOutcomeDecision::Finalize {
+            outcome: RunOutcome::Cancelled,
+            ..
+        }
+    ));
+}
+
 #[tokio::test]
 async fn test_scenario_outcome_end_turn_when_agent_asks_question() {
     use df_proto::agent::v1::RunOutcome;
@@ -488,6 +531,7 @@ async fn run_with_workspace(
         },
         initial_prompts: vec![],
         cancel_requested: false,
+        timeouts: crate::runner::Timeouts::default(),
         repo_dir: repo_dir.clone(),
         home_dir: data.join("home"),
         runtime_dir: temp.path().join("run"),

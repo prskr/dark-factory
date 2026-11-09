@@ -35,6 +35,9 @@ pub enum DbError {
     /// A dependency of a new task names a task that is not in the project, or names one twice.
     #[error("invalid dependency `{0}`")]
     InvalidDependency(String),
+    /// A board member interrupts a task whose run has no turn running.
+    #[error("no turn is running")]
+    NoTurnRunning,
     #[error("permission or role management error: {0}")]
     RoleManagement(String),
 }

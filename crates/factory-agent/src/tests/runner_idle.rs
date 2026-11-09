@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use super::{RunScenario, prompts_body, text_prompt};
 use crate::outbox::Outbox;
-use crate::runner::{RunExecutionResult, run_session};
+use crate::runner::{RunExecutionResult, Timeouts, run_session};
 
 const TWO_TURNS: &str = r#"
 sessions:
@@ -83,18 +83,27 @@ fn scenario(script: &str, max_wall_clock_secs: Option<i64>) -> Option<RunScenari
 
 /// Starts a run with `script` and the control plane's side of its channels.
 fn start(script: &str, max_wall_clock_secs: Option<i64>) -> Option<IdleRun> {
-    let scenario = scenario(script, max_wall_clock_secs)?;
+    Some(launch(scenario(script, max_wall_clock_secs)?))
+}
+
+/// Starts the run of `scenario`.
+fn launch(scenario: RunScenario) -> IdleRun {
+    launch_with_outbound_capacity(scenario, 1000)
+}
+
+/// Starts the run of `scenario` with an outbound channel of `capacity` messages.
+fn launch_with_outbound_capacity(scenario: RunScenario, capacity: usize) -> IdleRun {
     let (control, inbound_rx) = mpsc::channel(100);
-    let (outbound_tx, outbound) = mpsc::channel(1000);
+    let (outbound_tx, outbound) = mpsc::channel(capacity);
     let params = scenario.params(inbound_rx, outbound_tx);
     let run = tokio::spawn(async move { run_session(params).await.unwrap() });
-    Some(IdleRun {
+    IdleRun {
         control,
         outbound,
         run,
         seen: Vec::new(),
         _scenario: scenario,
-    })
+    }
 }
 
 impl IdleRun {
@@ -444,4 +453,395 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
     let result = tokio::time::timeout(wait, run).await.unwrap().unwrap();
     assert_eq!(result.outcome, RunOutcome::EndTurn);
     server.shutdown();
+}
+
+/// A turn that stays open until `session/cancel`, then two turns that report what their prompt
+/// said.
+const INTERRUPTIBLE: &str = r#"
+sessions:
+  new:
+    - - say: "working"
+      - end: hang
+    - - when:
+          prompt_contains: "was interrupted by Peter Kurfer."
+          steps:
+            - say: "saw interrupt line"
+      - when:
+          prompt_contains: "other API"
+          steps:
+            - say: "saw message"
+      - end: end_turn
+"#;
+
+/// An `Interrupt` for the first turn.
+fn interrupt(by: &str) -> control_message::Body {
+    interrupt_of_turn(by, "turn_1")
+}
+
+fn interrupt_of_turn(by: &str, turn_id: &str) -> control_message::Body {
+    control_message::Body::Interrupt(df_proto::agent::v1::Interrupt {
+        by: by.into(),
+        turn_id: turn_id.into(),
+    })
+}
+
+/// The `TurnEnded` events seen so far.
+fn turn_endings(seen: &[AgentMessage]) -> Vec<&df_proto::transcript::v1::TurnEnded> {
+    seen.iter()
+        .filter_map(|message| match &message.body {
+            Some(agent_message::Body::TranscriptEvent(event)) => match &event.kind {
+                Some(EventKind::TurnEnded(ended)) => Some(ended),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Waits until the agent's turn is open ("working" was said).
+async fn turn_is_open(run: &mut IdleRun) {
+    run.next(|b| match b {
+        agent_message::Body::TranscriptEvent(e) => match &e.kind {
+            Some(EventKind::AgentMessageChunk(_)) => Some(()),
+            _ => None,
+        },
+        _ => None,
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn interrupt_ends_the_turn_and_the_run_waits_for_input() {
+    let Some(mut run) = start(INTERRUPTIBLE, None) else {
+        return;
+    };
+    turn_is_open(&mut run).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    let ended = turn_endings(&run.seen);
+    assert_eq!(ended.len(), 1);
+    let ended = ended.first().unwrap();
+    assert_eq!(
+        ended.stop_reason(),
+        df_proto::transcript::v1::StopReason::Cancelled
+    );
+    assert_eq!(ended.detail, "Interrupted by Peter Kurfer");
+    assert_eq!(ended.interrupted_by, "Peter Kurfer");
+
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn the_turn_after_an_interrupt_starts_with_the_interrupt_line_before_the_queued_prompt() {
+    let Some(mut run) = start(INTERRUPTIBLE, None) else {
+        return;
+    };
+    turn_is_open(&mut run).await;
+    run.send(prompts_body(vec![text_prompt(
+        "prompt-2",
+        "use the other API",
+    )]))
+    .await;
+    run.send(interrupt("Peter Kurfer")).await;
+    // The queued prompt starts the next turn right away, without an idle wait.
+    run.turn_ended().await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+    let said: Vec<&str> = run.seen.iter().filter_map(chunk_text).collect();
+    assert_eq!(said, ["working", "saw interrupt line", "saw message"]);
+
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn an_interrupted_turn_counts_toward_max_turns_and_is_no_failure() {
+    let script = r#"
+sessions:
+  new:
+    - - say: "working"
+      - end: hang
+    - - say: "second"
+      - end: end_turn
+"#;
+    let Some(scenario) = scenario(script, None) else {
+        return;
+    };
+    let mut run = launch(scenario.budgets(Budgets {
+        max_turns: Some(1),
+        ..Default::default()
+    }));
+    turn_is_open(&mut run).await;
+    run.send(prompts_body(vec![text_prompt("prompt-2", "go")]))
+        .await;
+    run.send(interrupt("Peter Kurfer")).await;
+    // One turn is the whole budget: the queued prompt does not start another one.
+    assert_eq!(run.finish().await.outcome, RunOutcome::LimitReached);
+}
+
+#[tokio::test]
+async fn interrupt_while_idle_changes_nothing() {
+    let Some(mut run) = start(TWO_TURNS, None) else {
+        return;
+    };
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.send(prompts_body(vec![text_prompt("prompt-2", "go")]))
+        .await;
+    run.phase(RunPhase::Running).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+    let said: Vec<&str> = run.seen.iter().filter_map(chunk_text).collect();
+    assert_eq!(said, ["first answer", "second answer"]);
+    assert!(
+        turn_endings(&run.seen)
+            .iter()
+            .all(|e| e.interrupted_by.is_empty())
+    );
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn an_open_tool_call_gets_a_cancelled_result_and_a_late_result_is_dropped() {
+    let script = r#"
+sessions:
+  new:
+    - - mcp: { server: factory, tool: ask_question, args: { text: "Which?" } }
+      - end: hang
+"#;
+    let Some(mut run) = start(script, None) else {
+        return;
+    };
+    let call_id = run
+        .next(|b| match b {
+            agent_message::Body::ToolCallRequest(r) => Some(r.call_id.clone()),
+            _ => None,
+        })
+        .await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    // The harness's call returned with the cancelled result.
+    let tool_results: Vec<String> = run
+        .seen
+        .iter()
+        .filter_map(|message| match &message.body {
+            Some(agent_message::Body::TranscriptEvent(event))
+                if !matches!(event.kind, Some(EventKind::TurnEnded(_))) =>
+            {
+                Some(format!("{event:?}"))
+            }
+            _ => None,
+        })
+        .filter(|event| event.contains("Interrupted by Peter Kurfer"))
+        .collect();
+    assert!(
+        !tool_results.is_empty(),
+        "no cancelled tool result in the transcript"
+    );
+
+    // The late result finds no open call; the run keeps waiting.
+    run.send(control_message::Body::ToolCallResult(ToolCallResult {
+        call_id,
+        ..Default::default()
+    }))
+    .await;
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn an_interrupt_sent_while_the_turn_start_events_go_out_still_ends_the_turn() {
+    let Some(scenario) = scenario(INTERRUPTIBLE, None) else {
+        return;
+    };
+    // A channel of one message makes the runtime wait for room while it sends the turn-start
+    // events: `TurnStarted` fits after the `RUNNING` phase was read, the `UserMessage` after it
+    // waits. That is the window in which the control plane, which persisted `TurnStarted`
+    // first, can already send `Interrupt`: the runtime is before `await_prompt`.
+    let mut run = launch_with_outbound_capacity(scenario, 1);
+    run.phase(RunPhase::Running).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    // Barrier: the inbound loop has taken the message from the channel (which frees its slot)
+    // and handled it; the runtime has not moved, it still waits for room.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while run.control.capacity() < 100 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the inbound loop takes the interrupt");
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    let ended = turn_endings(&run.seen);
+    assert_eq!(ended.first().unwrap().interrupted_by, "Peter Kurfer");
+    run.send(control_message::Body::Release(Release {})).await;
+    // The small channel needs a reader until the runtime is done.
+    while run.outbound.recv().await.is_some() {}
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn a_harness_that_fails_the_cancel_ends_the_turn_as_an_error_without_claiming_an_interrupt() {
+    let script = r#"
+sessions:
+  new:
+    - - say: "working"
+      - end: hang_then_crash
+"#;
+    let Some(mut run) = start(script, None) else {
+        return;
+    };
+    turn_is_open(&mut run).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+
+    let ended = turn_endings(&run.seen);
+    let ended = ended.first().unwrap();
+    assert_eq!(
+        ended.stop_reason(),
+        df_proto::transcript::v1::StopReason::Error
+    );
+    assert!(ended.interrupted_by.is_empty(), "{ended:?}");
+    assert_eq!(run.finish().await.outcome, RunOutcome::Failed);
+}
+
+#[tokio::test]
+async fn a_harness_that_ignores_the_cancel_ends_the_turn_as_an_error_after_the_timeout() {
+    let script = r#"
+sessions:
+  new:
+    - - say: "working"
+      - end: hang_forever
+"#;
+    let Some(scenario) = scenario(script, None) else {
+        return;
+    };
+    // The harness never answers: shorten the waits that would otherwise take 5 s each.
+    let mut run = launch(scenario.timeouts(Timeouts {
+        cancel_response: Duration::from_millis(100),
+        harness_exit_grace: Duration::from_millis(100),
+    }));
+    turn_is_open(&mut run).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+
+    let ended = turn_endings(&run.seen);
+    let ended = ended.first().unwrap();
+    assert_eq!(
+        ended.stop_reason(),
+        df_proto::transcript::v1::StopReason::Error
+    );
+    assert!(ended.interrupted_by.is_empty(), "{ended:?}");
+    assert_eq!(run.finish().await.outcome, RunOutcome::Failed);
+}
+
+#[tokio::test]
+async fn a_fresh_run_reports_the_running_phase_before_its_first_turn_starts() {
+    let Some(mut run) = start(TWO_TURNS, None) else {
+        return;
+    };
+    run.turn_ended().await;
+
+    let position = |wanted: fn(&agent_message::Body) -> bool| {
+        run.seen
+            .iter()
+            .position(|message| message.body.as_ref().is_some_and(wanted))
+    };
+    let running = position(
+        |b| matches!(b, agent_message::Body::PhaseChanged(p) if p.phase() == RunPhase::Running),
+    );
+    let turn_started = position(
+        |b| matches!(b, agent_message::Body::TranscriptEvent(e) if matches!(e.kind, Some(EventKind::TurnStarted(_)))),
+    );
+    assert!(running.is_some(), "no Running phase was reported");
+    assert!(running < turn_started, "{running:?} {turn_started:?}");
+    run.phase(RunPhase::AwaitingInput).await;
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn an_interrupt_for_another_turn_is_ignored_and_the_turn_goes_on() {
+    let Some(mut run) = start(INTERRUPTIBLE, None) else {
+        return;
+    };
+    turn_is_open(&mut run).await;
+    // Stale: it names a turn that is not the open one. The inbound loop handles the messages in
+    // order, so the turn would end with "Stale" if it were honored.
+    run.send(interrupt_of_turn("Stale", "turn_9")).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    let ended = turn_endings(&run.seen);
+    assert_eq!(ended.len(), 1);
+    assert_eq!(ended.first().unwrap().interrupted_by, "Peter Kurfer");
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn a_late_blocking_question_result_after_an_interrupt_does_not_make_the_release_blocked() {
+    let script = r#"
+sessions:
+  new:
+    - - mcp: { server: factory, tool: ask_question, args: { text: "Which?", blocking: true } }
+      - end: hang
+"#;
+    let Some(mut run) = start(script, None) else {
+        return;
+    };
+    let call_id = run
+        .next(|b| match b {
+            agent_message::Body::ToolCallRequest(r) => Some(r.call_id.clone()),
+            _ => None,
+        })
+        .await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    // The control plane answered the question before it learned of the interrupt.
+    run.send(control_message::Body::ToolCallResult(ToolCallResult {
+        call_id,
+        await_input_after_turn: true,
+        ..Default::default()
+    }))
+    .await;
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
+}
+
+#[tokio::test]
+async fn a_turn_that_completes_as_the_cancel_arrives_is_not_recorded_as_interrupted() {
+    let script = r#"
+sessions:
+  new:
+    - - say: "working"
+      - end: hang_then_end_turn
+"#;
+    let Some(mut run) = start(script, None) else {
+        return;
+    };
+    turn_is_open(&mut run).await;
+    run.send(interrupt("Peter Kurfer")).await;
+    run.turn_ended().await;
+    run.phase(RunPhase::AwaitingInput).await;
+
+    let ended = turn_endings(&run.seen);
+    let ended = ended.first().unwrap();
+    assert_eq!(
+        ended.stop_reason(),
+        df_proto::transcript::v1::StopReason::EndTurn
+    );
+    assert!(ended.interrupted_by.is_empty(), "{ended:?}");
+    run.send(control_message::Body::Release(Release {})).await;
+    assert_eq!(run.finish().await.outcome, RunOutcome::EndTurn);
 }

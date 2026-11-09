@@ -14,8 +14,9 @@ use df_db::transcript::lock_run_and_task;
 use df_db::{Notification, PgBlobStore, publish};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
-    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, Prompts, PushReport, PushStatus,
-    PushTarget, Release, RunPhase, RunReport, ToolCallRequest, agent_message, control_message,
+    AgentMessage, Assign, Cancel, ControlMessage, HelloAck, Interrupt, Prompts, PushReport,
+    PushStatus, PushTarget, Release, RunPhase, RunReport, ToolCallRequest, agent_message,
+    control_message,
 };
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
@@ -247,6 +248,9 @@ impl Session {
                     {
                         return Ok(());
                     }
+                    if !self.forward_interrupt_notification(&note).await {
+                        return Ok(());
+                    }
                     let relevant = match note {
                         Ok(Notification::TaskMessageQueued { task_id }) => task_id == self.rc.task.id,
                         Ok(Notification::Reconnected) | Err(RecvError::Lagged(_)) => true,
@@ -404,6 +408,34 @@ impl Session {
         }
         self.release_sent = true;
         Ok(self.send_release().await)
+    }
+
+    /// Handles a `RunInterrupt` notification; other notifications are not for it. Returns `false`
+    /// once the peer is gone.
+    async fn forward_interrupt_notification(&self, note: &Result<Notification, RecvError>) -> bool {
+        match note {
+            Ok(Notification::RunInterrupt {
+                run_id,
+                by,
+                turn_id,
+            }) => self.interrupt_turn(*run_id, by, turn_id).await,
+            _ => true,
+        }
+    }
+
+    /// Sends `Interrupt` for a board member's interrupt of this run, only while a turn is open
+    /// here. Best effort: nothing is stored or re-sent, and a replica that does not hold the run's
+    /// stream never sees the notification as its own. Returns `false` once the peer is gone.
+    async fn interrupt_turn(&self, run_id: df_core::RunId, by: &str, turn_id: &str) -> bool {
+        if run_id != self.rc.run.id || !self.busy {
+            return true;
+        }
+        let interrupt = Interrupt {
+            by: by.to_string(),
+            turn_id: turn_id.to_string(),
+        };
+        self.send(control(control_message::Body::Interrupt(interrupt)))
+            .await
     }
 
     async fn send_release(&self) -> bool {
@@ -904,7 +936,6 @@ async fn stored_tool_call(
     })
 }
 
-/// Whether the run's last persisted turn event is a `TurnStarted`.
 /// Whether a new stream starts busy: a turn is open, or a prompt was forwarded but not confirmed
 /// yet (the runtime starts a turn for it, its `TurnStarted` may not be persisted).
 async fn busy_on_connect(
@@ -930,6 +961,7 @@ async fn last_turn_event(
     .await?)
 }
 
+/// Whether the run's last persisted turn event is a `TurnStarted`.
 async fn turn_open(pool: &sqlx::PgPool, run_id: df_core::RunId) -> Result<bool, ChannelError> {
     Ok(last_turn_event(pool, run_id)
         .await?
@@ -988,5 +1020,7 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
     }
 }
 
+#[cfg(test)]
+mod interrupt_tests;
 #[cfg(test)]
 mod tests;

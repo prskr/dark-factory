@@ -254,6 +254,7 @@ fn log_outbound_turn_plan_notice_and_reports() {
             Kind::TurnEnded(TurnEnded {
                 stop_reason: StopReason::EndTurn as i32,
                 detail: detail.into(),
+                interrupted_by: String::new(),
             }),
         )
     };

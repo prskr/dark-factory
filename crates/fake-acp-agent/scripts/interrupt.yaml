@@ -1,0 +1,16 @@
+# Script of the interrupt scenario of the e2e suite (project `IN`, `interrupt-turn`): the first
+# turn stays open until the runtime sends `session/cancel` (a board member interrupts it); the
+# next turn reports what its input said.
+sessions:
+  new:
+    - - say: "Starting a long task."
+      - end: hang
+    - - when:
+          prompt_contains: "Your previous turn was interrupted by"
+          steps:
+            - say: "Noted the interruption."
+      - when:
+          prompt_contains: "Use the other API"
+          steps:
+            - say: "Switched to the other API."
+      - end: end_turn

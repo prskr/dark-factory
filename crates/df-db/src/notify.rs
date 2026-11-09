@@ -7,6 +7,7 @@
 //! - `task_message_queued` `{task_id}`
 //! - `task_message_changed` `{task_id}` (a queued message was edited or removed)
 //! - `request_changed` `{task_id, request_id}`
+//! - `run_interrupt` `{run_id, by}` (a board member interrupts the turn of the run)
 //! - `egress_policy` `{}`
 //! - `outbox` `{}` (a job was enqueued)
 
@@ -32,6 +33,7 @@ pub const CHANNEL_TRANSCRIPT_EVENT: &str = "transcript_event";
 pub const CHANNEL_TASK_MESSAGE_QUEUED: &str = "task_message_queued";
 pub const CHANNEL_TASK_MESSAGE_CHANGED: &str = "task_message_changed";
 pub const CHANNEL_REQUEST_CHANGED: &str = "request_changed";
+pub const CHANNEL_RUN_INTERRUPT: &str = "run_interrupt";
 pub const CHANNEL_EGRESS_POLICY: &str = "egress_policy";
 pub const CHANNEL_OUTBOX: &str = "outbox";
 
@@ -42,6 +44,7 @@ pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_TASK_MESSAGE_QUEUED,
     CHANNEL_TASK_MESSAGE_CHANGED,
     CHANNEL_REQUEST_CHANGED,
+    CHANNEL_RUN_INTERRUPT,
     CHANNEL_EGRESS_POLICY,
     CHANNEL_OUTBOX,
 ];
@@ -70,6 +73,14 @@ pub enum Notification {
     RequestChanged {
         task_id: TaskId,
         request_id: RequestId,
+    },
+    /// A board member interrupts the running turn of the run. Best effort: nothing stores it.
+    RunInterrupt {
+        run_id: RunId,
+        /// Display name of the board member.
+        by: String,
+        /// The open turn the interrupt is for (`turn_id` of its `TurnStarted`).
+        turn_id: String,
     },
     EgressPolicy,
     /// An outbox job was enqueued.
@@ -103,6 +114,13 @@ struct RequestChangedPayload {
 }
 
 #[derive(Serialize, Deserialize)]
+struct RunInterruptPayload {
+    run_id: RunId,
+    by: String,
+    turn_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
 struct EmptyPayload {}
 
 impl Notification {
@@ -116,6 +134,7 @@ impl Notification {
             Self::TaskMessageQueued { .. } => Some(CHANNEL_TASK_MESSAGE_QUEUED),
             Self::TaskMessageChanged { .. } => Some(CHANNEL_TASK_MESSAGE_CHANGED),
             Self::RequestChanged { .. } => Some(CHANNEL_REQUEST_CHANGED),
+            Self::RunInterrupt { .. } => Some(CHANNEL_RUN_INTERRUPT),
             Self::EgressPolicy => Some(CHANNEL_EGRESS_POLICY),
             Self::Outbox => Some(CHANNEL_OUTBOX),
             Self::Reconnected => None,
@@ -142,6 +161,15 @@ impl Notification {
             } => serde_json::to_string(&RequestChangedPayload {
                 task_id,
                 request_id,
+            }),
+            Self::RunInterrupt {
+                run_id,
+                ref by,
+                ref turn_id,
+            } => serde_json::to_string(&RunInterruptPayload {
+                run_id,
+                by: by.clone(),
+                turn_id: turn_id.clone(),
             }),
             Self::EgressPolicy | Self::Outbox => serde_json::to_string(&EmptyPayload {}),
             Self::Reconnected => Err(serde::ser::Error::custom(
@@ -187,6 +215,14 @@ impl Notification {
                 Ok(Self::RequestChanged {
                     task_id: p.task_id,
                     request_id: p.request_id,
+                })
+            }
+            CHANNEL_RUN_INTERRUPT => {
+                let p: RunInterruptPayload = serde_json::from_str(payload)?;
+                Ok(Self::RunInterrupt {
+                    run_id: p.run_id,
+                    by: p.by,
+                    turn_id: p.turn_id,
                 })
             }
             CHANNEL_EGRESS_POLICY => {
@@ -365,6 +401,11 @@ mod tests {
             Notification::RequestChanged {
                 task_id,
                 request_id: RequestId::new(),
+            },
+            Notification::RunInterrupt {
+                run_id,
+                by: "Peter Kurfer".into(),
+                turn_id: "turn_1".into(),
             },
             Notification::EgressPolicy,
             Notification::Outbox,

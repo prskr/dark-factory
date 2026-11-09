@@ -239,11 +239,7 @@ impl OidcClient {
         expires_in: Option<Duration>,
     ) -> Identity {
         let payload = jwt_payload(&id_token).unwrap_or_default();
-        let display_name = ["name", "preferred_username", "email"]
-            .iter()
-            .find_map(|k| payload.get(*k).and_then(|v| v.as_str()))
-            .unwrap_or(&subject)
-            .to_string();
+        let display_name = display_name_from(&payload, &subject);
         let lifetime = expires_in.map_or(DEFAULT_TOKEN_LIFETIME, |d| {
             i64::try_from(d.as_secs()).unwrap_or(DEFAULT_TOKEN_LIFETIME)
         });
@@ -313,12 +309,42 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
+/// The first of the claims `name`, `preferred_username` and `email` that holds text, else the
+/// subject. An empty or blank claim is skipped: the name is shown in the UI and quoted to the
+/// agent, so it must not be empty.
+fn display_name_from(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    subject: &str,
+) -> String {
+    ["name", "preferred_username", "email"]
+        .iter()
+        .filter_map(|k| payload.get(*k).and_then(|v| v.as_str()))
+        .map(str::trim)
+        .find(|name| !name.is_empty())
+        .unwrap_or(subject)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn payload(json: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
         json.as_object().cloned().unwrap()
+    }
+
+    #[test]
+    fn an_empty_or_blank_name_claim_falls_back_to_the_next_claim_and_the_subject() {
+        let name = |json| display_name_from(&payload(json), "sub-1");
+        assert_eq!(
+            name(serde_json::json!({"name": "", "preferred_username": "  ", "email": "a@b.c"})),
+            "a@b.c"
+        );
+        assert_eq!(
+            name(serde_json::json!({"name": " Peter ", "email": "a@b.c"})),
+            "Peter"
+        );
+        assert_eq!(name(serde_json::json!({"name": "", "email": ""})), "sub-1");
     }
 
     #[test]

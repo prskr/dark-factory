@@ -678,6 +678,29 @@ pub(crate) async fn set_task_status(
         .unwrap();
 }
 
+/// A persisted turn event (`turn_started` or `turn_ended`) of `turn` as event `seq` of `run`.
+pub(crate) async fn insert_turn_event(
+    pool: &PgPool,
+    task: df_core::TaskId,
+    run: uuid::Uuid,
+    seq: i64,
+    kind: &str,
+    turn: &str,
+) {
+    sqlx::query(
+        "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
+         VALUES ($1, $2, $3, now(), $4, $5)",
+    )
+    .bind(task.as_uuid())
+    .bind(run)
+    .bind(seq)
+    .bind(kind)
+    .bind(serde_json::json!({"schemaVersion": 1, "turnId": turn}))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 pub(crate) async fn insert_run(
     pool: &PgPool,
     task: df_core::TaskId,
