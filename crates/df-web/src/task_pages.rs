@@ -70,11 +70,16 @@ pub(crate) fn routes() -> Router<WebState> {
 pub(crate) struct ListQuery {
     status: Option<String>,
     project: Option<String>,
+    sort: Option<String>,
 }
 
 impl ListQuery {
     pub(crate) fn filters(&self) -> Filters {
-        Filters::new(self.status.as_deref(), self.project.as_deref())
+        Filters::new(
+            self.status.as_deref(),
+            self.project.as_deref(),
+            self.sort.as_deref(),
+        )
     }
 }
 

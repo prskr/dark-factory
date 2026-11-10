@@ -138,23 +138,35 @@ tests:
           pattern: 'blockedCidrs: \["10.42.0.0/16"\]'
         documentIndex: 0
 
-  - it: renders no auth section until oidc.publicUrl is set
+  - it: renders no auth section and no publicUrl until publicUrl is set
     template: configmap.yaml
     asserts:
       - notMatchRegex:
           path: data["config.yaml"]
           pattern: 'auth:'
         documentIndex: 0
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'publicUrl'
+        documentIndex: 0
 
-  - it: configures the web UI login when oidc.publicUrl is set
+  - it: configures the web UI login and the top-level publicUrl when publicUrl is set
     template: configmap.yaml
     set:
-      oidc.publicUrl: https://factory.example.org
+      publicUrl: https://factory.example.org
       oidc.rolesClaim: groups
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'publicUrl: "https://factory.example.org"'
+          pattern: '\npublicUrl: "https://factory.example.org"'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'auth:\n  issuerUrl'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: '\n  publicUrl'
         documentIndex: 0
       - matchRegex:
           path: data["config.yaml"]
@@ -169,10 +181,17 @@ tests:
           pattern: 'auth:'
         documentIndex: 1
 
-  - it: requests the extra OIDC scopes when oidc.extraScopes is set
+  - it: rejects the old oidc.publicUrl value on the schema
     template: configmap.yaml
     set:
       oidc.publicUrl: https://factory.example.org
+    asserts:
+      - failedTemplate: {}
+
+  - it: requests the extra OIDC scopes when oidc.extraScopes is set
+    template: configmap.yaml
+    set:
+      publicUrl: https://factory.example.org
       oidc.extraScopes: [groups, offline_access]
     asserts:
       - matchRegex:
@@ -183,7 +202,7 @@ tests:
   - it: renders no extraScopes by default
     template: configmap.yaml
     set:
-      oidc.publicUrl: https://factory.example.org
+      publicUrl: https://factory.example.org
     asserts:
       - notMatchRegex:
           path: data["config.yaml"]

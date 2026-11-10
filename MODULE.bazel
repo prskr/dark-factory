@@ -279,7 +279,13 @@ npm.npm_translate_lock(
         "@anthropic-ai/claude-agent-sdk-linux-x64-musl": ["deploy/images/claude-harness"],
     },
 )
-use_repo(npm, "npm_claude_harness")
+
+# The third-party scripts of the web UI (`crates/df-web/package.json`): `vendor_scripts` in its BUILD.
+npm.npm_translate_lock(
+    name = "npm_df_web",
+    pnpm_lock = "//crates/df-web:pnpm-lock.yaml",
+)
+use_repo(npm, "npm_claude_harness", "npm_df_web")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 

@@ -46,8 +46,8 @@ strings. The GitHub connector names every team group `<org>:<team>` (for example
 `acme:board-member`), so it cannot provide the group; use Keycloak or another connector instead.
 
 Users who manage the lifecycle event subscriptions of projects also need a group named exactly
-`admin`, provided the same way. They find the subscriptions in the tab "Lifecycle events" of a
-project's edit dialog.
+`admin`, provided the same way. They find the subscriptions and the webhook secret in the tab
+"Integrations" of a project's settings page.
 
 ## 3. Configure the control plane
 
@@ -55,12 +55,12 @@ Dex returns `groups` only for the scope `groups`, and a refresh token only for `
 Without a refresh token the session ends when the ID token expires.
 
 ```yaml
+publicUrl: https://factory.example.org
 oidc:
   issuerUrl: https://dex.example.org/dex
   clientId: dark-factory
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
-  publicUrl: https://factory.example.org
   rolesClaim: groups
   extraScopes: [groups, offline_access]
 ```
@@ -75,7 +75,7 @@ users ([development guide](https://github.com/prskr/dark-factory/blob/main/docs/
 
 | Symptom | Cause |
 | --- | --- |
-| *Unregistered redirect_uri* at Dex | The redirect URI does not match `oidc.publicUrl` + `/auth/callback`. |
+| *Unregistered redirect_uri* at Dex | The redirect URI does not match `publicUrl` + `/auth/callback`. |
 | 403 for a user in the group | `groups` is missing in the scopes (`oidc.extraScopes`), the connector does not pass groups, or the group name is not exactly `board-member`. |
 | *Login unavailable* (502) | The control plane cannot reach `oidc.issuerUrl`, or it differs from the Dex `issuer`. |
 | Logged out when the ID token expires | `offline_access` is missing in `oidc.extraScopes`. |

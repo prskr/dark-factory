@@ -2,7 +2,7 @@
 
 use axum::http::StatusCode;
 
-use super::{REPO, assert_saved, audit, project_form};
+use super::{REPO, assert_project_created, assert_project_saved, audit, project_form};
 use crate::testkit::{TestApp, seed, tag_around, text};
 
 /// The project form of `DF` with `webhook_wake` set to `wake`, or without it for `None`.
@@ -52,12 +52,12 @@ async fn the_wake_setting_is_stored_audited_and_shown_on_the_next_edit() {
         .post("/projects/DF", &with_wake(Some("anyone")), &cookie)
         .await;
 
-    assert_saved(&response);
+    assert_project_saved(&response);
     assert_eq!(stored_wake(&app).await, "anyone");
     let audit = audit(&app, "project.update").await;
     assert_eq!(audit[0]["before"]["webhook_wake"], "members");
     assert_eq!(audit[0]["after"]["webhook_wake"], "anyone");
-    let edit = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    let edit = text(app.get("/projects/DF", &cookie).await).await;
     assert!(
         edit.contains("<option value=\"anyone\" selected>Anyone</option>"),
         "{edit}"
@@ -71,7 +71,7 @@ async fn a_new_project_stores_the_chosen_wake_setting() {
         .post("/projects", &with_wake(Some("none")), &app.login().await)
         .await;
 
-    assert_saved(&response);
+    assert_project_created(&response);
     assert_eq!(stored_wake(&app).await, "none");
 }
 

@@ -60,7 +60,18 @@ By default the control plane generates the secret. On startup it creates the Sec
 and 32 random bytes as 64 hex characters. An existing Secret is never changed. Nothing to
 configure; the chart's default values do this for every plugin.
 
-1. Read the generated secret and enter it in the forge (next section):
+1. Read the secret and enter it in the forge ([Forgejo](#register-the-webhook-in-forgejo),
+   [GitHub](#register-the-webhook-in-github)). Users with the role `admin` find the URL and the
+   secret in the web UI: open **Settings → Projects**, a project of the forge, its tab
+   **Integrations** and the group **Incoming webhook**. The URL is `<publicUrl>/webhooks/<plugin>`
+   (the path alone when the instance has no `publicUrl`). The secret is masked: **Show secret**
+   displays it, **Copy secret** copies it without displaying it. Every read of the secret is written
+   to the audit log (`webhook_secret.read`, with the user, the project and the plugin, never the
+   secret). The copy buttons need HTTPS or a loopback host (the browser offers the clipboard
+   only there); over plain HTTP the group says "Copying needs HTTPS", and you show the secret and copy
+   it by hand. The group says why when no webhook applies: no forge credential on the project, the
+   plugin did not load, it exports no webhooks, or no secret is configured. Alternatively, read the
+   Secret with `kubectl`:
 
    ```bash
    kubectl -n dark-factory get secret <fullname>-webhook-forgejo \
@@ -99,7 +110,21 @@ configure; the chart's default values do this for every plugin.
 The endpoint `POST /webhooks/<plugin>` is served on the web UI's host without login. Bodies over
 1 MiB are refused with `413`.
 
+### Secret endpoint
+
+`GET /projects/<key>/webhook-secret` returns the webhook secret of the plugin that serves the
+project. The web UI calls it for **Show secret** and **Copy secret**.
+
+| Property | Value |
+| --- | --- |
+| Access | role `admin` (`403` otherwise; nothing is audited) |
+| Response | the secret, `Content-Type: text/plain; charset=utf-8`, `Cache-Control: no-store` |
+| Audit | each successful read writes the entry `webhook_secret.read` (resource type `webhook_secret`, actor: the user with their roles; resource the plugin; details: project and plugin, never the secret). If the entry cannot be stored, the request fails with `500` and the secret is not returned. |
+| `404` | the project does not exist, or it has no webhook secret to show: no forge credential, no plugin serves it, the plugin did not load, exports no webhooks or has no secret |
+
 ### Rotate the secret
+
+The web UI shows the secret and does not rotate it.
 
 1. Delete the generated Secret (or change the value of your own Secret).
 2. Restart the control plane
@@ -144,10 +169,10 @@ Forgejo**:
 
 | Field | Value |
 | --- | --- |
-| Target URL | `https://factory.example.org/webhooks/forgejo` |
+| Target URL | the URL of the group **Incoming webhook**, for example `https://factory.example.org/webhooks/forgejo` |
 | HTTP method | `POST` |
 | POST content type | `application/json` |
-| Secret | the value from the Secret |
+| Secret | the secret of the group **Incoming webhook** (or the value from the Secret) |
 | Trigger on | **Custom events…** |
 | Issue events | **Comments** |
 | Pull request events | **Modification**, **Comments**, **Reviews** |
@@ -173,9 +198,9 @@ Webhooks**), with the secret stored under the key of the `github` plugin
 
 | Field | Value |
 | --- | --- |
-| Payload URL | `https://factory.example.org/webhooks/github` |
+| Payload URL | the URL of the group **Incoming webhook**, for example `https://factory.example.org/webhooks/github` |
 | Content type | `application/json` |
-| Secret | the value from the Secret |
+| Secret | the secret of the group **Incoming webhook** (or the value from the Secret) |
 | Events | **Let me select individual events**: **Check suites**, **Issue comments**, **Pull requests**, **Pull request reviews**, **Statuses** |
 | Active | on |
 
@@ -183,7 +208,7 @@ GitHub sends a `ping` after saving; the control plane answers `202` and ignores 
 
 ## Choose who wakes tasks
 
-**Projects → edit a project → General → Wake tasks on reviews and mentions** decides whose reviews
+**Settings → Projects →** the project's settings page **→ General → Forge events → Wake tasks on reviews and mentions** decides whose reviews
 and mentions wake the project's tasks:
 
 | Option | Reviews and mentions from |

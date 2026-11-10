@@ -25,28 +25,48 @@ Two kinds of credentials are referenced:
 
 ## Projects
 
-**Projects → New project**:
+Projects are a section of the settings area: on a desktop open **Settings** in the navigation rail
+(it opens **Projects**), on a phone use **Projects** in the bottom bar. The project list shows the
+number of queued, running, waiting and done tasks per project.
 
-| Field | Meaning |
-| --- | --- |
-| Name, Key | Display name and the task key prefix (`DF` → tasks `DF-1`, `DF-2`, …). The key is 2–10 capital letters or digits, starting with a letter, and cannot change later. |
-| Repository URL | HTTPS clone URL. Its host selects the forge plugin; the hint below the field names it. |
-| Base branch | Where task branches start and pull requests point to. |
-| Issue tracker URL | Optional. |
-| Sandbox image | The image the agent works in. It needs `git` and a shell; the runtime and the harness are mounted into it. |
-| Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). |
-| Forge credential | The credential reference for the forge. |
-| Wake tasks on reviews and mentions | Whose PR reviews and `@mentions` of the bot account wake a task when [forge webhooks](../integrations/forges/webhooks.md) are set up: *Nobody*, *Members with write access* (default) or *Anyone*. Merged or closed pull requests and failed checks apply regardless. |
+**New project** opens a form; **Create project** stores the project and opens its settings page. A
+project is edited on its **settings page** at `/projects/<key>` (the project's name or its edit icon in the
+list). The page has a back link to the list, the project's key, name and forge icon, tabs and one
+**Save project** button. After a save the page stays open and says **Project saved**. The open tab
+is part of the URL (`?tab=push-checks`, `?tab=integrations`), so a tab can be linked.
+
+The **General** tab and the new-project form group the fields:
+
+| Group | Field | Meaning |
+| --- | --- | --- |
+| Project | Key | The task key prefix (`DF` → tasks `DF-1`, `DF-2`, …): 2–10 capital letters or digits, starting with a letter. Typed when the project is created, read-only afterwards. |
+| | Name | Display name. |
+| Repository | Repository URL | HTTPS clone URL. Its host selects the forge plugin; the hint below the field names it. |
+| | Base branch | Where task branches start and pull requests point to. |
+| | Forge credential | The credential reference for the forge. |
+| | Issue tracker URL | Optional. |
+| Sandbox | Sandbox image | The image the agent works in. It needs `git` and a shell; the runtime and the harness are mounted into it. |
+| | Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). |
+| Forge events | Wake tasks on reviews and mentions | Whose PR reviews and `@mentions` of the bot account wake a task when [forge webhooks](../integrations/forges/webhooks.md) are set up: *Nobody*, *Members with write access* (default) or *Anyone*. Merged or closed pull requests and failed checks apply regardless. |
 
 The **Push checks** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
 this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and
-whether merge commits are allowed.
+whether merge commits are allowed. **Save project** saves General and Push checks together.
 
-Users with the role `admin` also see the tab **Lifecycle events**: the instance public key and the
-project's [lifecycle event subscriptions](../integrations/lifecycle-events.md#subscriptions).
-Subscriptions save on their own; **Save project** does not apply to them.
+Users with the role `admin` also see the last tab, **Integrations**, with two groups:
 
-The project list shows the number of queued, running, waiting and done tasks per project.
+- **Lifecycle events**: the instance public key and the project's
+  [lifecycle event subscriptions](../integrations/lifecycle-events.md#subscriptions). Subscriptions
+  save on their own; **Save project** does not apply to them.
+- **Incoming webhook**: the URL the forge sends events to (`<publicUrl>/webhooks/<plugin>`, the
+  path only when the instance has no [`publicUrl`](../authentication/_index.md)) and the webhook
+  secret, to [register the webhook](../integrations/forges/webhooks.md#register-the-webhook-in-forgejo).
+  The secret is shared by every project the forge plugin serves. It is shown masked; **Show secret**
+  fetches it (each read is audited) and **Copy secret** copies it without showing it. The copy
+  buttons work over HTTPS or on a loopback host only; elsewhere the group says so and **Show secret**
+  still works. When no webhook applies, the group says why: no forge credential or no integration
+  serves the project, the integration did not load, it does not support webhooks, or no webhook
+  secret is configured.
 
 ## Personas
 

@@ -59,11 +59,13 @@ database:
   migrate:
     manageAppRole: true
 
+# publicUrl is the control plane Service: plain http is accepted on any host.
+publicUrl: http://dark-factory-control-plane.dark-factory.svc:8080
+
 # Dex is reached through cluster DNS by the control plane and by the browser pod, so both see the
-# same issuer URL. publicUrl is the control plane Service: plain http is accepted on any host.
+# same issuer URL.
 oidc:
   issuerUrl: http://dex.dex.svc:5556/dex
-  publicUrl: http://dark-factory-control-plane.dark-factory.svc:8080
   rolesClaim: groups
   extraScopes: [groups, offline_access]
   clientId: dark-factory

@@ -8,6 +8,9 @@ metadata:
 data:
   config.yaml: |
     instanceName: {{ .Values.instanceName | quote }}
+    {{- if .Values.publicUrl }}
+    publicUrl: {{ .Values.publicUrl | quote }}
+    {{- end }}
     database:
       host: {{ .Values.database.host | quote }}
       port: {{ .Values.database.port }}
@@ -58,12 +61,11 @@ data:
         image: {{ include "dark-factory.harness.claudeCode.image" . | quote }}
       opencode:
         image: {{ include "dark-factory.harness.opencode.image" . | quote }}
-    {{- if .Values.oidc.publicUrl }}
+    {{- if and .Values.publicUrl .Values.oidc.issuerUrl }}
     auth:
       issuerUrl: {{ .Values.oidc.issuerUrl | quote }}
       clientId: {{ .Values.oidc.clientId | quote }}
       clientSecretFile: /run/secrets/oidc/client-secret
-      publicUrl: {{ .Values.oidc.publicUrl | quote }}
       rolesClaim: {{ .Values.oidc.rolesClaim | quote }}
       {{- if .Values.oidc.extraScopes }}
       extraScopes: {{ .Values.oidc.extraScopes | toJson }}

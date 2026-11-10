@@ -1,5 +1,5 @@
 //! Lifecycle events of a project through the web UI (`just e2e-local`): a subscription created on
-//! the "Lifecycle events" tab of the project dialog receives a signed `sandbox.provisioned` event when a task of
+//! the "Lifecycle events" group of the project settings page's Integrations tab receives a signed `sandbox.provisioned` event when a task of
 //! the project starts its first run. The receiver is deploy/e2e/receiver.yaml, reachable over
 //! plain http because the e2e control plane is a `dev-tools` build that runs with
 //! `--unrestricted-project-subscriptions`. Needs the environment of `E2eEnv` and
@@ -24,7 +24,7 @@ const RECEIVER_IN_CLUSTER: &str = "http://receiver.receiver.svc:8080/hook";
 
 const EVENT: &str = "sandbox.provisioned";
 
-/// The content of the project dialog's "Lifecycle events" tab.
+/// The content of the "Lifecycle events" group of the Integrations tab.
 const REGION: &str = "#lifecycle-events";
 
 const UI_TIMEOUT: Duration = Duration::from_secs(30);
@@ -80,14 +80,14 @@ async fn project_subscription_receives_a_signed_sandbox_provisioned_event() -> R
 }
 
 /// Creates a subscription to [`EVENT`] at the receiver by pressing Enter in the URL field, cancels
-/// the project dialog and checks the subscription is still there; returns the public key the tab
-/// shows.
+/// the project settings page and checks the subscription is still there; returns the public key the
+/// group shows.
 async fn subscribe(session: &Session, env: &E2eEnv) -> Result<String> {
     open_subscriptions(session, env).await?;
     let text = session.region_text(REGION).await?;
     let public_key = Regex::new(r"whpk_[A-Za-z0-9+/=]+")?
         .find(&text)
-        .with_context(|| format!("public key in the Lifecycle events tab: {text}"))?
+        .with_context(|| format!("public key in the Lifecycle events group: {text}"))?
         .as_str()
         .to_owned();
     session
@@ -120,14 +120,12 @@ async fn subscribe(session: &Session, env: &E2eEnv) -> Result<String> {
     session
         .expect_region_text(REGION, RECEIVER_IN_CLUSTER, UI_TIMEOUT)
         .await?;
-    // Subscriptions save on their own: cancelling the project dialog keeps it.
+    // Subscriptions save on their own: leaving the page without saving keeps it.
     session
         .page
-        .locator("dialog[open] button:text-is('Cancel'):visible")
-        .last()
-        .click(None)
+        .goto(&format!("{}/projects", env.base_url), None)
         .await
-        .context("cancel the project dialog")?;
+        .context("leave the project settings page")?;
     open_subscriptions(session, env).await?;
     session
         .expect_region_text(REGION, RECEIVER_IN_CLUSTER, UI_TIMEOUT)
@@ -186,29 +184,20 @@ async fn edit_with_the_submit_button(session: &Session) -> Result<()> {
         .await
 }
 
-/// Opens the project dialog of the project list and its "Lifecycle events" tab.
+/// Opens the Integrations tab of the project settings page through its URL.
 async fn open_subscriptions(session: &Session, env: &E2eEnv) -> Result<()> {
     session
         .page
-        .goto(&format!("{}/projects", env.base_url), None)
+        .goto(
+            &format!(
+                "{}/projects/{}?tab=integrations",
+                env.base_url,
+                data::PROJECT_KEY
+            ),
+            None,
+        )
         .await
-        .context("open the project list")?;
-    session
-        .page
-        .locator(format!(
-            "button[aria-label='Edit project {}']:visible",
-            data::PROJECT_KEY
-        ))
-        .first()
-        .click(None)
-        .await
-        .context("open the project dialog")?;
-    session
-        .page
-        .locator("dialog[open] [role=tab]:has-text('Lifecycle events')")
-        .click(None)
-        .await
-        .context("choose the Lifecycle events tab")?;
+        .context("open the Integrations tab of the project")?;
     session
         .expect_region_text(REGION, "Public key endpoint", UI_TIMEOUT)
         .await

@@ -7,12 +7,11 @@ use crate::layout::{Nav, Shell};
 use crate::requests::count_badge;
 
 /// Where the docs of every version live (`docs/` of the repository, published per release).
-const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
+pub(crate) const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
 
-const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 3] = [
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Requests, "/requests", "Requests", Icon::Inbox),
-    (Nav::Projects, "/projects", "Projects", Icon::Projects),
     (
         Nav::EgressLog,
         "/egress/log",
@@ -22,12 +21,13 @@ const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
 ];
 
 /// Where the rail's Settings link goes: the first section of [`SETTINGS_SECTIONS`].
-const SETTINGS_HOME: &str = "/personas";
+const SETTINGS_HOME: &str = "/projects";
 
 /// The sections of the settings area, in the order of the settings sidebar. The rail's Settings
 /// link is current on each of them and opens the first ([`SETTINGS_HOME`]).
-pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 4] = [
-    (Nav::Personas, SETTINGS_HOME, "Personas", Icon::Personas),
+pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 5] = [
+    (Nav::Projects, SETTINGS_HOME, "Projects", Icon::Projects),
+    (Nav::Personas, "/personas", "Personas", Icon::Personas),
     (
         Nav::Credentials,
         "/credentials",
@@ -50,7 +50,10 @@ pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 4] = [
 
 /// Whether `nav` is a page of the settings area.
 pub(crate) fn is_settings(nav: Nav) -> bool {
-    SETTINGS_SECTIONS.iter().any(|(target, ..)| *target == nav)
+    let section = nav.settings_section();
+    SETTINGS_SECTIONS
+        .iter()
+        .any(|(target, ..)| *target == section)
 }
 
 /// A round badge with initials.
@@ -105,6 +108,7 @@ pub fn rail(active: Nav, compose_href: &str, shell: &Shell) -> Markup {
 
 /// The settings sidebar from 768 px: the sections of the settings area with the open one marked.
 pub fn settings_sidebar(active: Nav) -> Markup {
+    let active = active.settings_section();
     html! {
         aside class="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col gap-1 border-r border-line bg-panel px-3 py-8 md:flex" {
             h2 class="mb-3.5 px-3 text-lg font-semibold" { "Settings" }
@@ -265,7 +269,7 @@ mod tests {
         );
         assert!(html.contains("hx-get=\"/tasks/compose\""), "{html}");
         assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
-        for label in ["Tasks", "Projects", "Settings"] {
+        for label in ["Tasks", "Settings"] {
             assert!(
                 html.contains(&format!("aria-label=\"{label}\" title=\"{label}\"")),
                 "{label}"
@@ -274,6 +278,10 @@ mod tests {
             assert!(!html.contains(&format!(">{label}<")), "{label}");
             assert!(!html.contains(&format!("</svg>{label}")), "{label}");
         }
+        assert!(
+            !html.contains("aria-label=\"Projects\""),
+            "Projects is a settings section: {html}"
+        );
         assert!(html.contains("before:bg-accent"), "active bar at the edge");
         assert!(
             html.contains("hidden") && html.contains("md:flex"),
@@ -285,14 +293,16 @@ mod tests {
     fn rail_has_settings_above_the_avatar_and_no_settings_section_links() {
         let html = rail(Nav::Tasks, "/tasks/compose", &shell("Ada", "dev")).into_string();
         let settings = html
-            .find("href=\"/personas\" aria-label=\"Settings\" title=\"Settings\"")
+            .find("href=\"/projects\" aria-label=\"Settings\" title=\"Settings\"")
             .expect("Settings link");
         assert!(settings > html.find("Network traffic").unwrap());
         assert!(settings < html.find("Account menu of").unwrap());
         for hidden in [
+            "/personas",
             "/credentials",
             "/model-providers",
             "/egress/allowlist",
+            "\"Projects\"",
             "\"Personas\"",
             "\"Credentials\"",
             "\"Model providers\"",
@@ -319,7 +329,7 @@ mod tests {
     fn settings_sidebar_links_are_touch_sized_below_1024_px() {
         let html = settings_sidebar(Nav::Personas).into_string();
         let links = html.matches("<a ").count();
-        assert_eq!(links, 4);
+        assert_eq!(links, 5);
         assert_eq!(html.matches("h-11 ").count(), links, "{html}");
         assert_eq!(html.matches("lg:h-9 ").count(), links, "{html}");
     }
@@ -327,6 +337,7 @@ mod tests {
     #[test]
     fn settings_is_current_on_every_settings_section() {
         for nav in [
+            Nav::Projects,
             Nav::Personas,
             Nav::Credentials,
             Nav::ModelProviders,
@@ -334,7 +345,7 @@ mod tests {
         ] {
             let html = rail(nav, "/tasks/compose", &shell("Ada", "dev")).into_string();
             assert_eq!(html.matches("aria-current=\"page\"").count(), 1, "{nav:?}");
-            assert!(html.contains("href=\"/personas\" aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""), "{nav:?}: {html}");
+            assert!(html.contains("href=\"/projects\" aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""), "{nav:?}: {html}");
         }
     }
 

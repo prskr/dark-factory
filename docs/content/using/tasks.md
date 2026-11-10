@@ -77,7 +77,25 @@ An agent message is plain text while it streams and is rendered as Markdown when
 | `failed` | The run failed and automatic retries are exhausted |
 
 The list's filters group them: *Active*, *Waiting* (`awaiting_dependencies`, `waiting`, `blocked`,
-`in_review`, `limit_reached`) and *Done* (`completed`, `failed`).
+`in_review`, `limit_reached`) and *Done* (`completed`, `cancelled`, `failed`).
+
+## Sort order
+
+The sort menu next to the project menu in the title row of the task list (an icon button named after the
+current sort; on a phone it sits left of the avatar) offers:
+
+| Option | Order | URL |
+| --- | --- | --- |
+| Recently updated (default) | last update, newest first | no `sort` |
+| Least recently updated | last update, oldest first | `sort=updated-asc` |
+| Newest created | creation, newest first | `sort=created` |
+
+The sort is part of the URL and stays when you pick a status chip, a project or a task; an unknown
+value uses the default. The list updates live, so a task moves to its new place when it is updated.
+
+A task's last update is its creation, its latest status change or its latest rename. Agent output and
+queued messages that do not change the status do not count, so a task that only works in
+`running` stays where its last status change put it.
 
 ## Interrupt, stop, mark done, cancel
 

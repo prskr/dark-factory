@@ -39,7 +39,7 @@ fn auth_is_optional_and_roles_claim_defaults_to_roles() {
             .is_none()
     );
     let yaml = format!(
-        "{VALID_FIXTURE}auth:\n  issuerUrl: https://kc.example.org/realms/df\n  clientId: dark-factory\n  clientSecretFile: /run/secrets/oidc/secret\n  publicUrl: https://factory.example.org\n"
+        "{VALID_FIXTURE}publicUrl: https://factory.example.org\nauth:\n  issuerUrl: https://kc.example.org/realms/df\n  clientId: dark-factory\n  clientSecretFile: /run/secrets/oidc/secret\n"
     );
     let auth = InstanceConfig::from_yaml_str(&yaml).unwrap().auth.unwrap();
     assert_eq!(auth.roles_claim, "roles");
@@ -50,10 +50,81 @@ fn auth_is_optional_and_roles_claim_defaults_to_roles() {
 #[test]
 fn auth_extra_scopes_are_a_list() {
     let yaml = format!(
-        "{VALID_FIXTURE}auth:\n  issuerUrl: http://127.0.0.1:5556/dex\n  clientId: dark-factory\n  clientSecretFile: /s\n  publicUrl: http://127.0.0.1:8080\n  extraScopes: [groups, offline_access]\n"
+        "{VALID_FIXTURE}publicUrl: http://127.0.0.1:8080\nauth:\n  issuerUrl: http://127.0.0.1:5556/dex\n  clientId: dark-factory\n  clientSecretFile: /s\n  extraScopes: [groups, offline_access]\n"
     );
     let auth = InstanceConfig::from_yaml_str(&yaml).unwrap().auth.unwrap();
     assert_eq!(auth.extra_scopes, ["groups", "offline_access"]);
+}
+
+const AUTH_SECTION: &str = "auth:\n  issuerUrl: https://kc.example.org/realms/df\n  clientId: dark-factory\n  clientSecretFile: /s\n";
+
+#[test]
+fn top_level_public_url_parses() {
+    let yaml = format!("{VALID_FIXTURE}publicUrl: https://factory.example.org\n");
+    let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+    assert_eq!(
+        cfg.public_url.as_ref().map(url::Url::as_str),
+        Some("https://factory.example.org/")
+    );
+    assert!(
+        InstanceConfig::from_yaml_str(VALID_FIXTURE)
+            .unwrap()
+            .public_url
+            .is_none()
+    );
+}
+
+#[test]
+fn a_public_url_that_is_not_a_url_is_rejected_naming_the_setting() {
+    let yaml = format!("{VALID_FIXTURE}publicUrl: not a url\n");
+    let err = InstanceConfig::from_yaml_str(&yaml)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("publicUrl"), "{err}");
+}
+
+#[test]
+fn public_url_inside_auth_is_rejected_as_unknown_field() {
+    let yaml = format!(
+        "{VALID_FIXTURE}publicUrl: https://f.example.org\n{AUTH_SECTION}  publicUrl: https://f.example.org\n"
+    );
+    let err = InstanceConfig::from_yaml_str(&yaml)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("publicUrl"), "{err}");
+}
+
+#[test]
+fn auth_without_public_url_fails_naming_public_url() {
+    let yaml = format!("{VALID_FIXTURE}{AUTH_SECTION}");
+    let err = InstanceConfig::from_yaml_str(&yaml)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("publicUrl"), "{err}");
+}
+
+#[test]
+fn plain_http_public_url_on_a_remote_host_sets_the_warning_flag() {
+    let flag = |url: &str| {
+        let yaml = format!("{VALID_FIXTURE}publicUrl: {url}\n");
+        InstanceConfig::from_yaml_str(&yaml)
+            .unwrap()
+            .public_url_is_plain_http_remote()
+    };
+    assert!(flag("http://factory.internal"));
+    assert!(!flag("https://factory.internal"));
+    for local in [
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://[::1]:8080",
+    ] {
+        assert!(!flag(local), "{local}");
+    }
+    assert!(
+        !InstanceConfig::from_yaml_str(VALID_FIXTURE)
+            .unwrap()
+            .public_url_is_plain_http_remote()
+    );
 }
 
 #[test]

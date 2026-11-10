@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
+use crate::components::forms::{INPUT_CLASS, field, form_group, select_field_with_hint};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, data_table, dialog_with, empty_panel, forge_icon, form_error, icon, issue_role,
@@ -28,10 +28,11 @@ use crate::components::{
     submit_button, td, text_field, th, tr,
 };
 use crate::layout::{Nav, Shell, layout};
-use crate::project_subscriptions;
-use crate::responses::{internal_error, invalid, not_found};
+use crate::responses::{htmx_location, internal_error, invalid, not_found};
+use crate::{project_subscriptions, project_webhook};
 
 mod personas;
+mod project_page;
 mod providers;
 mod push_policy;
 
@@ -52,8 +53,10 @@ pub(crate) fn routes() -> Router<WebState> {
         .route("/projects", get(projects_list).post(project_create))
         .route("/projects/new", get(project_new))
         .route("/projects/forge", get(project_forge))
-        .route("/projects/{key}", axum::routing::post(project_update))
-        .route("/projects/{key}/edit", get(project_edit))
+        .route(
+            "/projects/{key}",
+            get(project_page::page).post(project_update),
+        )
         .merge(personas::routes())
 }
 
@@ -81,6 +84,8 @@ pub(crate) struct ProjectForm {
     adapter_command: String,
     forge_credential_id: String,
     webhook_wake: String,
+    /// The tab the settings page showed when it was saved; it stays open afterwards.
+    tab: String,
     /// The "Push checks" tab of the edit form.
     #[serde(flatten)]
     push: PushPolicyForm,
@@ -370,42 +375,82 @@ pub(crate) struct Tab {
     pub(crate) panel: Markup,
 }
 
-/// A modal form (a wide [`DialogStyle`], chosen by the caller) with its tabs on the left (on top
-/// below 768 px), one panel per tab and the footer across the full width. `open` is the id of the
-/// tab shown first; the Alpine component `tabs` (`scripts/tabs.ts`) switches them.
+/// Where a [`tabbed_form`] sits and how its tabs are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TabsStyle {
+    /// In a wide modal: the tabs on the left (on top below 768 px) and the footer with Cancel
+    /// across the full width.
+    Dialog,
+    /// On a page: the tabs as a row on top with an underline on the open one, the open tab in the
+    /// URL (`?tab=`, see `scripts/tabs.ts`) and posted as `tab`. The submit button of the page's
+    /// header (`form="form"`) saves; below 768 px a full-width one ends the form instead.
+    Page,
+}
+
+/// A form with tabs, one panel per tab; `open` is the id of the tab shown first. The Alpine
+/// component `tabs` (`scripts/tabs.ts`) switches them. `style` is explained on [`TabsStyle`].
 pub(crate) fn tabbed_form(
     action: &str,
     errors: &FormErrors,
     tabs: &[Tab],
     open: &str,
     submit: &str,
+    style: TabsStyle,
 ) -> Markup {
+    let page = style == TabsStyle::Page;
+    let (form_class, list_class, tab_class, content_class) = if page {
+        (
+            "md:rounded-xl md:border md:border-line md:bg-panel",
+            "flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line md:px-4",
+            "group relative flex min-h-11 shrink-0 items-center px-3 text-sm text-muted hover:text-ink aria-selected:font-medium aria-selected:text-ink md:px-4",
+            "min-w-0 flex-1 space-y-4 py-5 md:px-6",
+        )
+    } else {
+        (
+            "",
+            "flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line px-3 py-2 md:w-42 md:flex-col md:overflow-visible md:border-r md:border-b-0 md:py-4",
+            "group relative flex min-h-11 shrink-0 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9",
+            "min-w-0 flex-1 space-y-4 px-4 py-5 md:px-6",
+        )
+    };
+    let marker_class = if page {
+        "absolute inset-x-2 bottom-0 hidden h-0.5 rounded-full bg-accent-text group-aria-selected:block"
+    } else {
+        "absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block"
+    };
     html! {
-        form id="form" hx-post=(action) hx-target="#form" hx-swap="outerHTML" x-data={"tabs(" (serde_json::Value::from(open).to_string()) ")"} {
-            div class="flex flex-col md:flex-row" {
-                div role="tablist" aria-label="Sections" "x-on:keydown"="move($event)"
-                    class="flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line px-3 py-2 md:w-42 md:flex-col md:overflow-visible md:border-r md:border-b-0 md:py-4" {
+        form id="form" class=(form_class) hx-post=(action) hx-target="#form" hx-swap="outerHTML"
+            x-data={"tabs(" (serde_json::Value::from(open).to_string()) ", " (page) ")"} {
+            @if page { input type="hidden" name="tab" value=(open) ":value"="tab"; }
+            div class=(if page { "flex flex-col" } else { "flex flex-col md:flex-row" }) {
+                div role="tablist" aria-label="Sections" "x-on:keydown"="move($event)" class=(list_class) {
                     @for tab in tabs {
                         @let selected = tab.id == open;
                         button type="button" role="tab" id={"tab-" (tab.id)} data-tab=(tab.id) aria-controls={"panel-" (tab.id)}
                             aria-selected=(selected) tabindex=(if selected { "0" } else { "-1" })
                             ":aria-selected"={"tab === '" (tab.id) "'"} ":tabindex"={"tab === '" (tab.id) "' ? 0 : -1"}
                             "x-on:click"={"tab = '" (tab.id) "'"}
-                            class="group relative flex min-h-11 shrink-0 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9" {
-                            span aria-hidden="true" class="absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block" {}
+                            class=(tab_class) {
+                            span aria-hidden="true" class=(marker_class) {}
                             (tab.label)
                         }
                     }
                 }
-                div class="min-w-0 flex-1 space-y-4 px-4 py-5 md:px-6" {
+                div class=(content_class) {
                     (form_error(errors))
                     @for tab in tabs {
-                        div role="tabpanel" id={"panel-" (tab.id)} aria-labelledby={"tab-" (tab.id)} class="space-y-4"
+                        div role="tabpanel" id={"panel-" (tab.id)} aria-labelledby={"tab-" (tab.id)} class="space-y-6"
                             "x-show"={"tab === '" (tab.id) "'"} x-cloak[tab.id != open] { (tab.panel) }
                     }
                 }
             }
-            (footer("border-t border-line px-4 pt-3 pb-5 md:px-6", submit))
+            @if page {
+                div class="pt-2 pb-5 md:hidden" {
+                    button type="submit" class={(action_class(ButtonKind::Primary)) " w-full"} { (submit) }
+                }
+            } @else {
+                (footer("border-t border-line px-4 pt-3 pb-5 md:px-6", submit))
+            }
         }
     }
 }
@@ -603,6 +648,7 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
             .map(|id| id.to_string())
             .unwrap_or_default(),
         webhook_wake: p.webhook_wake.as_str().to_string(),
+        tab: String::new(),
         push: PushPolicyForm::from_policy(push_policy),
     }
 }
@@ -711,11 +757,11 @@ fn url_field(
 /// Who the project form is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Editing {
-    /// A new project: one page without tabs.
+    /// A new project: the groups of "General" in a modal, without tabs.
     No,
-    /// An existing project: the tabs "General" and "Push checks".
+    /// An existing project, on its settings page: the tabs "General" and "Push checks".
     AsMember,
-    /// An existing project, edited by an admin: also the tab "Lifecycle events".
+    /// An existing project, edited by an admin: also the tab "Integrations".
     AsAdmin,
 }
 
@@ -729,49 +775,81 @@ impl Editing {
     }
 }
 
-/// The project form. A re-rendered edit form opens "Push checks" if all its errors are there.
+/// The groups Project, Repository, Sandbox and Forge events: the "General" tab and the new-project
+/// form.
+fn general_groups(
+    values: &ProjectForm,
+    errors: &FormErrors,
+    credentials: &[CredentialRef],
+    state: &WebState,
+    editing: Editing,
+) -> Markup {
+    let feedback = forge_feedback(&state.forges, &values.repo_url, &values.issue_tracker_url);
+    let repo_hint = (!state.allow_plain_http).then_some("HTTPS only.");
+    html! {
+        (form_group("Project", form_grid(html! {
+            (key_field(&values.key, errors, editing != Editing::No))
+            (text_field("Name", "name", &values.name, errors, None))
+        })))
+        (form_group("Repository", form_grid(html! {
+            (full_row(html! {
+                (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
+                p id="forge-hint" aria-live="polite" class="mt-1 text-xs text-muted" { (feedback.hint) }
+            }))
+            (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
+            (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
+                &values.forge_credential_id, Some("None"), errors))
+            (full_row(url_field("Issue tracker URL", "issue_tracker_url", "issue-forge", &values.issue_tracker_url, errors, &feedback.issue_icon, Some("Optional."))))
+        })))
+        (form_group("Sandbox", form_grid(html! {
+            (full_row(text_field("Sandbox image", "image", &values.image, errors, None)))
+            (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
+                Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
+        })))
+        (form_group("Forge events", form_grid(html! {
+            (full_row(select_field_with_hint("Wake tasks on reviews and mentions", "webhook_wake", &wake_options(),
+                &values.webhook_wake, None,
+                Some("Reviews and @mentions of the bot account wake the task. Merged or closed PRs and failed checks apply regardless."),
+                errors)))
+        })))
+    }
+}
+
+/// What the project form is rendered for.
+#[derive(Clone, Copy)]
+struct FormContext<'a> {
+    editing: Editing,
+    /// The stored project; the Integrations tab describes it, not the values typed into the form.
+    project: Option<&'a ProjectRecord>,
+    /// The tab to open (the URL's or the posted one); a re-rendered form with errors opens the tab
+    /// of its first error instead.
+    tab: &'a str,
+}
+
+/// The project form: untabbed for a new project, the tabs of the settings page otherwise.
 fn project_form(
     action: &str,
     values: &ProjectForm,
     errors: &FormErrors,
     credentials: &[CredentialRef],
     state: &WebState,
-    submit: &str,
-    editing: Editing,
+    context: FormContext<'_>,
 ) -> Markup {
-    let editing_project = editing != Editing::No;
-    let feedback = forge_feedback(&state.forges, &values.repo_url, &values.issue_tracker_url);
-    let repo_hint = (!state.allow_plain_http).then_some("HTTPS only.");
-    let general = form_grid(html! {
-        (key_field(&values.key, errors, editing_project))
-        (text_field("Name", "name", &values.name, errors, None))
-        (full_row(html! {
-            (url_field("Repository URL", "repo_url", "repo-forge", &values.repo_url, errors, &feedback.repo_icon, repo_hint))
-            p id="forge-hint" aria-live="polite" class="mt-1 text-xs text-muted" { (feedback.hint) }
-        }))
-        (full_row(url_field("Issue tracker URL", "issue_tracker_url", "issue-forge", &values.issue_tracker_url, errors, &feedback.issue_icon, Some("Optional."))))
-        (full_row(text_field("Sandbox image", "image", &values.image, errors, None)))
-        (text_field("Base branch", "base_branch", &values.base_branch, errors, None))
-        (select_field("Forge credential", "forge_credential_id", &credential_options(credentials),
-            &values.forge_credential_id, Some("None"), errors))
-        (full_row(select_field_with_hint("Wake tasks on reviews and mentions", "webhook_wake", &wake_options(),
-            &values.webhook_wake, None,
-            Some("Reviews and @mentions of the bot account wake the task. Merged or closed PRs and failed checks apply regardless."),
-            errors)))
-        (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
-            Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
-    });
-    if !editing_project {
+    let FormContext {
+        editing,
+        project,
+        tab: requested_tab,
+    } = context;
+    let general = general_groups(values, errors, credentials, state, editing);
+    if editing == Editing::No {
         return html! {
             form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
                 (form_error(errors))
-                (general)
-                (form_footer(submit))
+                div class="space-y-6" { (general) }
+                (form_footer("Create project"))
             }
         };
     }
-    let push_errors_only =
-        !errors.is_empty() && errors.fields().all(|f| push_policy::FIELDS.contains(&f));
     let mut tabs = vec![
         Tab {
             id: "general",
@@ -784,19 +862,26 @@ fn project_form(
             panel: push_policy::panel(&values.push, errors),
         },
     ];
-    if editing == Editing::AsAdmin {
+    if let (Editing::AsAdmin, Some(project)) = (editing, project) {
         tabs.push(Tab {
-            id: "lifecycle-events",
-            label: "Lifecycle events",
-            panel: project_subscriptions::tab_panel(&values.key),
+            id: "integrations",
+            label: "Integrations",
+            panel: html! {
+                (project_subscriptions::lifecycle_group(&values.key))
+                (project_webhook::group(state, project))
+            },
         });
     }
-    let open = if push_errors_only {
+    let open = if errors.is_empty() {
+        tabs.iter()
+            .find(|tab| tab.id == requested_tab)
+            .map_or("general", |tab| tab.id)
+    } else if errors.fields().all(|f| push_policy::FIELDS.contains(&f)) {
         "push-checks"
     } else {
         "general"
     };
-    tabbed_form(action, errors, &tabs, open, submit)
+    tabbed_form(action, errors, &tabs, open, "Save project", TabsStyle::Page)
 }
 
 /// The key: typed when a project is created, shown read-only afterwards (it never changes).
@@ -917,6 +1002,15 @@ fn count_link(project: &str, status: &str, label: &str, count: i64, dot: Option<
     }
 }
 
+/// The edit action of a project in the list: a link to its settings page.
+fn project_link(key: &str, class: &str) -> Markup {
+    html! {
+        a href={"/projects/" (key)} aria-label={"Edit project " (key)} title={"Edit project " (key)} class=(class) {
+            (icon(Icon::Pencil))
+        }
+    }
+}
+
 fn projects_region(
     projects: &[ProjectRecord],
     counts: &[ProjectStatusCount],
@@ -960,7 +1054,7 @@ fn projects_region(
                                     (td(Cell::First, html! {
                                         span class="flex items-center gap-2.5" {
                                             span class="rounded-md bg-sunk px-2 py-0.5 font-mono text-xs font-medium text-muted" { (p.key) }
-                                            span class="font-medium" { (p.name) }
+                                            a href={"/projects/" (p.key)} class="font-medium hover:underline" { (p.name) }
                                         }
                                     }))
                                     (td(Cell::Mono, html! {
@@ -973,7 +1067,7 @@ fn projects_region(
                                     @for (label, status, n) in c.columns() { (td(Cell::Number, count_link(&p.key, status, label, n, None))) }
                                     (td(Cell::Actions, html! {
                                         span class="flex justify-end" {
-                                            (edit_button(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key)))
+                                            (project_link(&p.key, ICON_BUTTON_CLASS))
                                         }
                                     }))
                                 }))
@@ -988,7 +1082,7 @@ fn projects_region(
                             div class="min-w-0 flex-1 space-y-2 py-3.5 pr-1 pl-4" {
                                 div class="flex items-center gap-2.5" {
                                     span class="rounded-md bg-sunk px-2 py-0.5 font-mono text-xs font-medium text-muted" { (p.key) }
-                                    span class="min-w-0 flex-1 truncate text-base font-medium" { (p.name) }
+                                    a href={"/projects/" (p.key)} class="min-w-0 flex-1 truncate text-base font-medium" { (p.name) }
                                     a href={"/tasks?status=all&project=" (p.key)} aria-label={"Tasks of " (p.name)}
                                         class="inline-flex min-h-11 items-center gap-0.5 text-[13px] font-medium text-accent-text" { "Tasks" (icon(Icon::ChevronRight)) }
                                 }
@@ -1000,8 +1094,7 @@ fn projects_region(
                                     @for ((label, status, n), (_, tone)) in c.columns().into_iter().zip(COLUMN_TONES) { (count_link(&p.key, status, label, n, Some(tone))) }
                                 }
                             }
-                            (open_modal(&format!("/projects/{}/edit", p.key), &format!("Edit project {}", p.key),
-                                "flex w-12 shrink-0 items-center justify-center self-stretch text-muted", icon(Icon::Pencil)))
+                            (project_link(&p.key, "flex w-12 shrink-0 items-center justify-center self-stretch text-muted"))
                         }
                     }
                 }
@@ -1055,49 +1148,13 @@ async fn project_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             &FormErrors::default(),
             &credentials,
             &state,
-            "Create project",
-            Editing::No,
+            FormContext {
+                editing: Editing::No,
+                project: None,
+                tab: "",
+            },
         ),
     )
-}
-
-async fn project_edit(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    headers: HeaderMap,
-    Path(key): Path<String>,
-) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to("/projects").into_response();
-    }
-    let (project, credentials) = match tokio::try_join!(
-        df_db::catalog::get_project_by_key(&state.pool, &key),
-        df_db::catalog::list_credential_refs(&state.pool)
-    ) {
-        Ok((Some(project), credentials)) => (project, credentials),
-        Ok((None, _)) => return not_found("The project"),
-        Err(e) => return internal_error(&e),
-    };
-    let push_policy = match df_db::push_checks::push_policy(&state.pool, project.id).await {
-        Ok(policy) => policy,
-        Err(e) => return internal_error(&e),
-    };
-    let editing = Editing::of(true, &user);
-    let form = project_form(
-        &format!("/projects/{key}"),
-        &project_values(&project, &push_policy),
-        &FormErrors::default(),
-        &credentials,
-        &state,
-        "Save project",
-        editing,
-    );
-    // The subscription editor's form cannot sit inside the project form (design D2).
-    let body = html! {
-        (form)
-        @if editing == Editing::AsAdmin { (project_subscriptions::form_anchor()) }
-    };
-    dialog_with("modal", "Edit project", DialogStyle::Wide, body).into_response()
 }
 
 async fn project_create(
@@ -1191,12 +1248,10 @@ async fn save_project(
             df_db::catalog::save_project(&state.pool, actor, id, &input).await
         };
         match stored {
-            Ok(_) => {
-                return match projects_markup(&state, &user).await {
-                    Ok(region) => saved(region),
-                    Err(response) => *response,
-                };
+            Ok(record) if existing.is_some() => {
+                return project_page::saved(&state, &user, &record, &credentials, &form.tab).await;
             }
+            Ok(record) => return htmx_location(&format!("/projects/{}", record.key)),
             Err(e) => {
                 if let Some(response) = conflict(&mut errors, "key", e) {
                     return response;
@@ -1207,19 +1262,17 @@ async fn save_project(
     let action = existing_key
         .as_ref()
         .map_or_else(|| "/projects".to_string(), |k| format!("/projects/{k}"));
-    let submit = if existing.is_some() {
-        "Save project"
-    } else {
-        "Create project"
-    };
     invalid(project_form(
         &action,
         &form,
         &errors,
         &credentials,
         &state,
-        submit,
-        Editing::of(existing.is_some(), &user),
+        FormContext {
+            editing: Editing::of(existing.is_some(), &user),
+            project: existing.as_ref(),
+            tab: &form.tab,
+        },
     ))
 }
 

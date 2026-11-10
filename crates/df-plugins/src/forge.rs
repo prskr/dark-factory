@@ -77,10 +77,17 @@ impl PluginForgeClient {
         self
     }
 
-    /// Whether the plugin exports `webhooks` and has a webhook secret, so it has a webhook
-    /// endpoint.
-    pub fn accepts_webhooks(&self) -> bool {
-        self.webhook_secret.is_some() && self.host.capabilities().webhooks
+    /// Whether the plugin exports `webhooks`.
+    pub fn exports_webhooks(&self) -> bool {
+        self.host.capabilities().webhooks
+    }
+
+    /// The secret webhook deliveries are verified with, only for a plugin that exports
+    /// `webhooks`; the settings page of a project reveals it to admins.
+    pub fn webhook_secret(&self) -> Option<&SecretString> {
+        self.webhook_secret
+            .as_ref()
+            .filter(|_| self.exports_webhooks())
     }
 
     /// Parses one webhook delivery on an instance without project, credential or allowed hosts.
@@ -90,11 +97,7 @@ impl PluginForgeClient {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Vec<ParsedEvent>, WebhookError> {
-        let secret = self
-            .webhook_secret
-            .as_ref()
-            .filter(|_| self.host.capabilities().webhooks)
-            .ok_or(WebhookError::NotFound)?;
+        let secret = self.webhook_secret().ok_or(WebhookError::NotFound)?;
         let spec = InstanceSpec {
             policy: None,
             settings: self.settings.clone().into_iter().collect(),

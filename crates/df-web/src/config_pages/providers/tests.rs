@@ -951,7 +951,7 @@ async fn model_problems_are_shown_under_their_row_on_the_models_tab() {
         let html = text(response).await;
         assert!(html.contains(message), "{message}: {html}");
         assert!(
-            html.contains("tabs(&quot;models&quot;)"),
+            html.contains("tabs(&quot;models&quot;, false)"),
             "{message}: the tab opens"
         );
     }
@@ -1080,7 +1080,7 @@ async fn add_and_remove_render_the_form_again_with_the_row_changed() {
     )
     .await;
     assert!(added.contains("name=\"model_id_2\""), "{added}");
-    assert!(added.contains("tabs(&quot;models&quot;)"));
+    assert!(added.contains("tabs(&quot;models&quot;, false)"));
     assert!(
         added.contains("value=\"Anthropic work\""),
         "typed values stay"
@@ -1123,7 +1123,7 @@ async fn a_model_a_persona_uses_cannot_be_removed() {
         html.contains("claude-sonnet-5-5 cannot be removed: persona Linus uses it."),
         "{html}"
     );
-    assert!(html.contains("tabs(&quot;models&quot;)"));
+    assert!(html.contains("tabs(&quot;models&quot;, false)"));
 }
 
 #[tokio::test]
@@ -1169,7 +1169,7 @@ async fn a_duplicate_provider_name_is_shown_on_the_general_tab_not_the_models_ta
         html.contains("a model provider with this name already exists"),
         "{html}"
     );
-    assert!(!html.contains("tabs(&quot;models&quot;)"), "{html}");
+    assert!(!html.contains("tabs(&quot;models&quot;, false)"), "{html}");
 }
 
 #[tokio::test]
@@ -1203,7 +1203,7 @@ async fn refreshing_the_provider_form_keeps_its_create_or_edit_mode() {
 }
 
 #[tokio::test]
-async fn the_provider_dialog_is_896_px_wide_and_the_project_dialog_768_px() {
+async fn the_provider_dialog_is_896_px_wide() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let provider_id = seed(&app.pool).await.provider;
@@ -1214,7 +1214,6 @@ async fn the_provider_dialog_is_896_px_wide_and_the_project_dialog_768_px() {
             .await,
     )
     .await;
-    let project = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
 
     for html in [&new_provider, &edit_provider] {
         assert!(
@@ -1222,5 +1221,4 @@ async fn the_provider_dialog_is_896_px_wide_and_the_project_dialog_768_px() {
             "{html}"
         );
     }
-    assert!(project.contains("md:max-w-3xl") && !project.contains("md:max-w-4xl"));
 }

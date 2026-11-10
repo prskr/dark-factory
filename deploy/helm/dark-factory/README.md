@@ -20,6 +20,7 @@ Every key in `values.yaml` is documented below:
 | `nameOverride` | `string` | `""` | Override the chart name used in resource labels and names. |
 | `fullnameOverride` | `string` | `""` | Override the full resource name prefix (`<release>-dark-factory`). |
 | `instanceName` | `string` | `"dark-factory"` | Logical Dark Factory instance identifier written to `/etc/dark-factory/config.yaml`. |
+| `publicUrl` | `string` | `""` | Externally visible base URL of the control plane. Required for the web UI. The OIDC redirect URI is `<publicUrl>/auth/callback`, and the web UI builds the webhook URL from it. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. Replaces `oidc.publicUrl`, which the values schema rejects. See `docs/content/authentication/_index.md`. |
 | `image.pullPolicy` | `string` | `"IfNotPresent"` | Image pull policy (`Always`, `IfNotPresent`, `Never`) for control plane, gateway, and migrate pods. |
 | `image.pullSecrets` | `list` | `[]` | List of image pull secret references (`[{ name: "..." }]`). |
 | `image.controlPlane.repository` | `string` | `"ghcr.io/prskr/dark-factory/control-plane"` | OCI repository for the control plane (`dark-factory`) image. |
@@ -57,7 +58,6 @@ Every key in `values.yaml` is documented below:
 | `oidc.clientId` | `string` | `"dark-factory"` | OIDC relying-party client ID. |
 | `oidc.existingSecret` | `string` | `"dark-factory-oidc"` | Name of the Secret in the instance namespace containing the OIDC client secret. |
 | `oidc.clientSecretKey` | `string` | `"client-secret"` | Key within `oidc.existingSecret` holding the OIDC client secret. |
-| `oidc.publicUrl` | `string` | `""` | Externally visible base URL of the UI. The OIDC redirect URI is `<publicUrl>/auth/callback`. Empty renders no `auth` section: `dark-factory serve` then logs a warning and mounts only `/healthz`, `/readyz` and `/assets/*`; the web UI is unavailable. See `docs/content/authentication/_index.md`. |
 | `oidc.rolesClaim` | `string` | `"roles"` | Token claim with the flat role list; the UI requires the role `board-member`. |
 | `oidc.extraScopes` | `list` | `[]` | Scopes requested besides `openid` and `profile`, e.g. `[groups, offline_access]` for Dex (`auth.extraScopes` of the instance config). |
 | `logging.format` | `text`/`json` | `text` | `DF_LOG_FORMAT` of the control plane, gateway and migrate job (`json`: one JSON object per line). The control plane sets the same format in every sandbox. Other values fail schema validation. |
@@ -171,7 +171,7 @@ Every key in `values.yaml` is documented below:
 | `tls.ca.existingIssuer.kind` | `string` | `"ClusterIssuer"` | Kind of the existing issuer. Sandboxes need a `ClusterIssuer`; with `"Issuer"` you must also set `sandboxNamespace.issuerName` and `sandboxNamespace.issuerKind: ClusterIssuer` to a `ClusterIssuer` that trusts the same CA, otherwise the chart refuses to render. |
 | `tls.duration` | `string` | `"2160h"` | Certificate lifetime for control plane and gateway mTLS certificates. |
 | `tls.renewBefore` | `string` | `"360h"` | Renewal window before expiry for control plane and gateway mTLS certificates. |
-| `httpRoute.enabled` | `bool` | `false` | Render a Gateway API `HTTPRoute` (`gateway.networking.k8s.io/v1`) that sends all paths to the control plane UI port. Needs the Gateway API CRDs and an existing `Gateway`. Set `oidc.publicUrl` to the route's URL and allow the Gateway in `networkPolicy.ingressController` (with Cilium: `allowAll: true`). |
+| `httpRoute.enabled` | `bool` | `false` | Render a Gateway API `HTTPRoute` (`gateway.networking.k8s.io/v1`) that sends all paths to the control plane UI port. Needs the Gateway API CRDs and an existing `Gateway`. Set `publicUrl` to the route's URL and allow the Gateway in `networkPolicy.ingressController` (with Cilium: `allowAll: true`). |
 | `httpRoute.parentRefs` | `array` | `[]` | `parentRefs` of the route, e.g. `[{name: public, namespace: gateway-system}]`. At least one is required when `httpRoute.enabled` is `true`. |
 | `httpRoute.hostnames` | `array` | `[]` | Hostnames the route matches. Empty: every hostname of the Gateway listener. |
 | `networkPolicy.enabled` | `bool` | `true` | Render instance namespace `NetworkPolicy` resources restricting control plane and gateway ingress. |
@@ -370,7 +370,7 @@ Installing the chart with `tls.ca.create: true` needs permission to create cert-
 
 ## Lifecycle event signing key
 
-The control plane signs every lifecycle event delivery with an Ed25519 key. Receivers pin its public key (`GET /lifecycle-events/public-key`, also shown in the tab "Lifecycle events" of a project's edit dialog), so the key must stay stable.
+The control plane signs every lifecycle event delivery with an Ed25519 key. Receivers pin its public key (`GET /lifecycle-events/public-key`, also shown on a project's settings page, tab "Integrations", group "Lifecycle events"), so the key must stay stable.
 
 Without `lifecycleEvents.signingKey.existingSecret` the chart creates the `Certificate` `<fullname>-lifecycle-events` from the chart's issuer with `privateKey: {algorithm: Ed25519, encoding: PKCS8, rotationPolicy: Never}`. cert-manager renews the certificate after `tls.duration` but keeps the key. The chart sets `rotationPolicy` explicitly because cert-manager 1.18 and later default to `Always`. Only the private key is used; the certificate is required by the issuer.
 

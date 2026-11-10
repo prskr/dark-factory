@@ -18,6 +18,7 @@ pub mod layout;
 mod lifecycle_events;
 pub mod markdown;
 mod project_subscriptions;
+mod project_webhook;
 mod requests;
 mod responses;
 mod sse;
@@ -90,6 +91,11 @@ pub struct WebState {
     ///
     /// [`ProjectTargets::Unrestricted`]: df_core::public_address::ProjectTargets::Unrestricted
     pub project_targets: df_core::public_address::ProjectTargets,
+    /// `publicUrl`: the base of absolute URLs shown in the UI, such as the webhook URL.
+    pub public_url: Option<url::Url>,
+    /// The webhook endpoints of the forge plugins: the settings page shows their state and
+    /// reveals the secret to admins.
+    pub webhooks: Arc<dyn webhooks::WebhookReceiver>,
 }
 
 /// `/healthz`, `/readyz`, `/assets/*` and `/lifecycle-events/public-key`; no login required.
@@ -124,6 +130,7 @@ pub fn router(state: WebState) -> Router {
         .merge(requests::routes())
         .merge(config_pages::routes())
         .merge(project_subscriptions::routes())
+        .merge(project_webhook::routes())
         .merge(egress::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -6,6 +6,10 @@
 //! otherwise a warning and nothing embedded. A tool that runs and fails is an error. With
 //! `DF_WEB_REQUIRE_ASSETS=1` (Bazel) a missing tool is an error too. A `WEB_SCRIPTS` that lists
 //! no file is an error.
+//!
+//! The third-party scripts (`VENDOR`) come from the npm packages pinned in `package.json` and
+//! `pnpm-lock.yaml`: Bazel's files (`VENDOR_SCRIPTS`), otherwise `node_modules` of the crate
+//! (`pnpm install --frozen-lockfile`). They are staged all or none.
 
 use std::env;
 use std::error::Error;
@@ -32,6 +36,8 @@ pub(crate) struct Config {
     pub(crate) web_scripts: Option<Vec<PathBuf>>,
     /// Bazel's compiled stylesheet.
     pub(crate) tailwind_app_css: Option<PathBuf>,
+    /// Bazel's files of the npm packages of [`VENDOR`].
+    pub(crate) vendor_scripts: Option<Vec<PathBuf>>,
     pub(crate) swc: Tool,
     pub(crate) tailwind: Tool,
 }
@@ -54,6 +60,18 @@ const STYLES: Kind = Kind {
     tool: "tailwindcss",
     missing: "the stylesheet is",
 };
+
+const VENDOR_CFG: &str = "df_web_vendor";
+
+/// The third-party scripts the UI serves: served path, npm package (as in `package.json`) and the
+/// file of the published package. htmx and its SSE extension are one package, so they move
+/// together. The packages are served as published, without our own minification.
+pub(crate) const VENDOR: [(&str, &str, &str); 4] = [
+    ("vendor/mermaid.min.js", "mermaid", "dist/mermaid.min.js"),
+    ("vendor/htmx.min.js", "htmx.org", "dist/htmx.min.js"),
+    ("vendor/hx-sse.min.js", "htmx.org", "dist/ext/hx-sse.min.js"),
+    ("vendor/alpine.min.js", "alpinejs", "dist/cdn.min.js"),
+];
 
 /// Bazel's `$(execpaths)` value of `WEB_SCRIPTS`: space-separated paths, each resolved by
 /// [`resolve_path`].
@@ -104,7 +122,29 @@ pub(crate) fn rerun_inputs(config: &Config, path: Option<&OsStr>) -> Vec<PathBuf
             }
         }
     }
+    if let Some(files) = &config.vendor_scripts {
+        inputs.extend(files.iter().cloned());
+    } else {
+        let installed: Vec<PathBuf> = VENDOR
+            .iter()
+            .map(|(_, package, file)| node_modules_file(config, package, file))
+            .collect();
+        if installed.iter().all(|file| file.is_file()) {
+            inputs.extend(installed);
+        } else {
+            // Not installed yet: an install anywhere in the crate reruns the build.
+            inputs.push(config.manifest_dir.clone());
+        }
+    }
     inputs
+}
+
+fn node_modules_file(config: &Config, package: &str, file: &str) -> PathBuf {
+    config
+        .manifest_dir
+        .join("node_modules")
+        .join(package)
+        .join(file)
 }
 
 /// Rebuilds `staged` from `assets/` and the compiled outputs. Whatever an earlier build left
@@ -136,7 +176,49 @@ pub(crate) fn stage_assets(config: &Config, staged: &Path) -> Result<Report> {
             ));
         }
     }
+    stage_vendor(config, staged, &mut report)?;
     Ok(report)
+}
+
+/// Copies the third-party scripts to their served paths, all or none.
+fn stage_vendor(config: &Config, staged: &Path, report: &mut Report) -> Result<()> {
+    let mut found = Vec::new();
+    let mut missing = Vec::new();
+    for (served, package, file) in VENDOR {
+        let source = match &config.vendor_scripts {
+            Some(files) => files
+                .iter()
+                .find(|path| path.ends_with(Path::new(package).join(file)))
+                .cloned(),
+            None => Some(node_modules_file(config, package, file)).filter(|path| path.is_file()),
+        };
+        match source {
+            Some(source) => found.push((served, source)),
+            None => missing.push(served),
+        }
+    }
+    if !missing.is_empty() {
+        let missing = missing.join(", ");
+        if config.require_assets {
+            return Err(format!(
+                "third-party scripts not found ({missing}), but DF_WEB_REQUIRE_ASSETS is set"
+            )
+            .into());
+        }
+        report.warnings.push(format!(
+            "third-party scripts not found ({missing}): the web UI does not work; run `pnpm install --frozen-lockfile` in crates/df-web or set VENDOR_SCRIPTS"
+        ));
+        return Ok(());
+    }
+    for (served, source) in found {
+        let target = staged.join(served);
+        if let Some(dir) = target.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::copy(source, target)?;
+    }
+    report.cfgs.push(VENDOR_CFG);
+    Ok(())
 }
 
 /// One kind of compiled asset.
@@ -263,7 +345,23 @@ mod tests {
             fs::create_dir_all(root.join("scripts")).unwrap();
             fs::write(root.join("scripts/tabs.ts"), "").unwrap();
             fs::write(root.join("scripts/notes.md"), "").unwrap();
-            Self { dir }
+            let fixture = Self { dir };
+            fixture.install_vendor_packages();
+            fixture
+        }
+
+        /// The packages of `VENDOR` as `pnpm install` leaves them; each file holds its package.
+        fn install_vendor_packages(&self) {
+            for (_, package, file) in VENDOR {
+                let path = self
+                    .dir
+                    .path()
+                    .join("node_modules")
+                    .join(package)
+                    .join(file);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, format!("{package}/{file}")).unwrap();
+            }
         }
 
         fn staged(&self) -> PathBuf {
@@ -276,6 +374,7 @@ mod tests {
                 require_assets: false,
                 web_scripts: None,
                 tailwind_app_css: None,
+                vendor_scripts: None,
                 swc: Tool {
                     program: swc.into(),
                     override_var: None,
@@ -296,7 +395,7 @@ mod tests {
             &fixture.staged(),
         )
         .unwrap();
-        assert!(report.cfgs.is_empty());
+        assert_eq!(report.cfgs, ["df_web_vendor"]);
         assert_eq!(report.warnings.len(), 2);
         assert!(
             report.warnings[0].starts_with("swc not found"),
@@ -325,10 +424,13 @@ mod tests {
         let fixture = Fixture::new();
         let scripts_only =
             stage_assets(&fixture.config("true", NOT_INSTALLED), &fixture.staged()).unwrap();
-        assert_eq!(scripts_only.cfgs, ["df_web_scripts"]);
+        assert_eq!(scripts_only.cfgs, ["df_web_scripts", "df_web_vendor"]);
         assert_eq!(scripts_only.warnings.len(), 1);
         let both = stage_assets(&fixture.config("true", "true"), &fixture.staged()).unwrap();
-        assert_eq!(both.cfgs, ["df_web_scripts", "df_web_styles"]);
+        assert_eq!(
+            both.cfgs,
+            ["df_web_scripts", "df_web_styles", "df_web_vendor"]
+        );
         assert!(both.warnings.is_empty());
     }
 
@@ -355,7 +457,10 @@ mod tests {
         config.web_scripts = Some(vec![built.join("tabs.js")]);
         config.tailwind_app_css = Some(built.join("app.css"));
         let report = stage_assets(&config, &fixture.staged()).unwrap();
-        assert_eq!(report.cfgs, ["df_web_scripts", "df_web_styles"]);
+        assert_eq!(
+            report.cfgs,
+            ["df_web_scripts", "df_web_styles", "df_web_vendor"]
+        );
         assert_eq!(
             fs::read_to_string(fixture.staged().join("tabs.js")).unwrap(),
             "js"
@@ -416,8 +521,9 @@ mod tests {
             override_var: Some("TAILWIND_BIN"),
         };
         let path_dir = fixture.dir.path().to_str().unwrap().to_owned();
+        // The installed packages follow.
         assert_eq!(
-            rerun_inputs(&config, Some(path_dir.as_ref())),
+            rerun_inputs(&config, Some(path_dir.as_ref()))[..2],
             [PathBuf::from("/built/tabs.js"), "/tools/tailwindcss".into()]
         );
     }
@@ -434,7 +540,7 @@ mod tests {
         let missing = fixture.dir.path().join("missing");
         let path = env::join_paths([&bin, &missing, &other, &bin]).unwrap();
         let config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
-        assert_eq!(rerun_inputs(&config, Some(&path)), [bin, other]);
+        assert_eq!(rerun_inputs(&config, Some(&path))[..2], [bin, other]);
     }
 
     #[test]
@@ -460,5 +566,176 @@ mod tests {
             let err = stage_assets(&config, &fixture.staged()).unwrap_err();
             assert!(err.to_string().starts_with("SWC_BIN="), "{err}");
         }
+    }
+
+    fn served(staged: &Path, path: &str) -> String {
+        fs::read_to_string(staged.join(path)).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_vendor_table_maps_every_served_path_to_a_package_file_of_package_json() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("package.json")).unwrap();
+        let dependencies = manifest["dependencies"].as_object().unwrap();
+        let served: Vec<&str> = VENDOR.iter().map(|(served, ..)| *served).collect();
+        assert_eq!(
+            served,
+            [
+                "vendor/mermaid.min.js",
+                "vendor/htmx.min.js",
+                "vendor/hx-sse.min.js",
+                "vendor/alpine.min.js"
+            ]
+        );
+        for (served, package, file) in VENDOR {
+            assert!(dependencies.contains_key(package), "{served}: {package}");
+            assert!(file.starts_with("dist/"), "{served}: {file}");
+        }
+        // The extension ships in the package of htmx, so both move together.
+        assert_eq!(VENDOR[1].1, VENDOR[2].1);
+    }
+
+    #[test]
+    fn installed_packages_are_staged_under_their_served_paths() {
+        let fixture = Fixture::new();
+        let report = stage_assets(
+            &fixture.config(NOT_INSTALLED, NOT_INSTALLED),
+            &fixture.staged(),
+        )
+        .unwrap();
+        assert!(report.cfgs.contains(&"df_web_vendor"), "{report:?}");
+        for (served_path, package, file) in VENDOR {
+            assert_eq!(
+                served(&fixture.staged(), served_path),
+                format!("{package}/{file}")
+            );
+        }
+    }
+
+    #[test]
+    fn vendor_scripts_from_bazel_are_staged_by_their_package_path() {
+        let fixture = Fixture::new();
+        // Bazel's files sit under a repository tree, not under `node_modules` of the crate.
+        let bazel = fixture.dir.path().join("bazel/npm_df_web");
+        for (_, package, file) in VENDOR {
+            let path = bazel.join(package).join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, format!("bazel {package}/{file}")).unwrap();
+        }
+        fs::remove_dir_all(fixture.dir.path().join("node_modules")).unwrap();
+        let mut config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
+        config.vendor_scripts = Some(
+            VENDOR
+                .iter()
+                .rev()
+                .map(|(_, package, file)| bazel.join(package).join(file))
+                .collect(),
+        );
+
+        let report = stage_assets(&config, &fixture.staged()).unwrap();
+
+        assert!(report.cfgs.contains(&"df_web_vendor"), "{report:?}");
+        for (served_path, package, file) in VENDOR {
+            assert_eq!(
+                served(&fixture.staged(), served_path),
+                format!("bazel {package}/{file}")
+            );
+        }
+    }
+
+    #[test]
+    fn one_missing_package_file_stages_none_and_warns_with_the_install_command() {
+        let fixture = Fixture::new();
+        let (_, package, file) = VENDOR[2];
+        fs::remove_file(
+            fixture
+                .dir
+                .path()
+                .join("node_modules")
+                .join(package)
+                .join(file),
+        )
+        .unwrap();
+
+        let report = stage_assets(
+            &fixture.config(NOT_INSTALLED, NOT_INSTALLED),
+            &fixture.staged(),
+        )
+        .unwrap();
+
+        assert!(!report.cfgs.contains(&"df_web_vendor"), "{report:?}");
+        let warning = report
+            .warnings
+            .iter()
+            .find(|w| w.starts_with("third-party scripts not found"))
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert!(warning.contains("vendor/hx-sse.min.js"), "{warning}");
+        assert!(!warning.contains("vendor/htmx.min.js"), "{warning}");
+        assert!(
+            warning.contains("pnpm install --frozen-lockfile"),
+            "{warning}"
+        );
+        assert!(warning.contains("VENDOR_SCRIPTS"), "{warning}");
+        for (served_path, ..) in VENDOR {
+            assert!(
+                !fixture.staged().join(served_path).exists(),
+                "{served_path}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_third_party_scripts_are_an_error_when_the_assets_are_required() {
+        let fixture = Fixture::new();
+        fs::remove_dir_all(fixture.dir.path().join("node_modules")).unwrap();
+        let mut config = fixture.config("true", "true");
+        config.require_assets = true;
+
+        let err = stage_assets(&config, &fixture.staged()).unwrap_err();
+
+        assert!(
+            err.to_string().starts_with("third-party scripts not found"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("vendor/mermaid.min.js"), "{err}");
+    }
+
+    #[test]
+    fn a_vendor_script_list_that_lacks_a_table_row_counts_as_missing() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
+        config.vendor_scripts = Some(vec![fixture.dir.path().join("somewhere/else.js")]);
+
+        let report = stage_assets(&config, &fixture.staged()).unwrap();
+
+        assert!(!report.cfgs.contains(&"df_web_vendor"), "{report:?}");
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("vendor/alpine.min.js"))
+        );
+    }
+
+    #[test]
+    fn installed_package_files_are_rerun_inputs_and_a_missing_install_watches_the_crate() {
+        let fixture = Fixture::new();
+        let config = fixture.config("true", "true");
+        let inputs = rerun_inputs(&config, None);
+        for (_, package, file) in VENDOR {
+            assert!(
+                inputs.contains(
+                    &fixture
+                        .dir
+                        .path()
+                        .join("node_modules")
+                        .join(package)
+                        .join(file)
+                ),
+                "{package}/{file}"
+            );
+        }
+        fs::remove_dir_all(fixture.dir.path().join("node_modules")).unwrap();
+        assert!(rerun_inputs(&config, None).contains(&fixture.dir.path().to_owned()));
     }
 }

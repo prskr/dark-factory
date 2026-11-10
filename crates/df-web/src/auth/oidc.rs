@@ -95,19 +95,13 @@ pub struct OidcClient {
 
 impl OidcClient {
     /// Builds the client from the configuration and reads the client secret file.
-    pub fn new(cfg: &AuthConfig) -> Result<Self, OidcError> {
+    pub fn new(cfg: &AuthConfig, public_url: &str) -> Result<Self, OidcError> {
         let secret = cfg
             .read_client_secret()
             .map_err(|e| OidcError::Config(e.to_string()))?;
-        let public_url = cfg.public_url.trim_end_matches('/').to_string();
+        let public_url = public_url.trim_end_matches('/').to_string();
         let redirect = RedirectUrl::new(format!("{public_url}/auth/callback"))
             .map_err(|e| OidcError::Config(format!("publicUrl: {e}")))?;
-        if redirect.url().scheme() == "http" && !is_loopback(redirect.url()) {
-            tracing::warn!(
-                public_url = %public_url,
-                "publicUrl is plain http on a non-loopback host: session cookies and logins travel unencrypted"
-            );
-        }
         // Following redirects would open the token requests to SSRF.
         let http = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
@@ -128,7 +122,7 @@ impl OidcClient {
     }
 
     /// Whether the session cookie gets the `Secure` flag: always, unless `publicUrl` is plain
-    /// `http://` (TLS is the operator's choice; [`Self::new`] warns for non-loopback hosts).
+    /// `http://` (TLS is the operator's choice; startup warns for non-loopback hosts).
     pub fn secure_cookies(&self) -> bool {
         self.redirect.url().scheme() != "http"
     }
@@ -299,16 +293,6 @@ fn roles_from_payload(
     }
 }
 
-/// Whether the URL points at this machine (`localhost`, `127.0.0.0/8` or `::1`).
-fn is_loopback(url: &Url) -> bool {
-    match url.host() {
-        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
-    }
-}
-
 /// The first of the claims `name`, `preferred_username` and `email` that holds text, else the
 /// subject. An empty or blank claim is skipped: the name is shown in the UI and quoted to the
 /// agent, so it must not be empty.
@@ -365,14 +349,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let secret_file = dir.path().join("secret");
         std::fs::write(&secret_file, "s3cret\n").unwrap();
-        let client = OidcClient::new(&AuthConfig {
-            issuer_url: idp.server.uri(),
-            client_id: "dark-factory".into(),
-            client_secret_file: secret_file,
-            public_url: "https://factory.test".into(),
-            roles_claim: "groups".into(),
-            extra_scopes: vec!["groups".into(), "offline_access".into()],
-        })
+        let client = OidcClient::new(
+            &AuthConfig {
+                issuer_url: idp.server.uri(),
+                client_id: "dark-factory".into(),
+                client_secret_file: secret_file,
+                roles_claim: "groups".into(),
+                extra_scopes: vec!["groups".into(), "offline_access".into()],
+            },
+            "https://factory.test",
+        )
         .unwrap();
 
         let (url, _) = client.authorize("/tasks").await.unwrap();
@@ -391,14 +377,16 @@ mod tests {
         let secret_file = dir.path().join("secret");
         std::fs::write(&secret_file, "s3cret\n").unwrap();
         let client = |public_url: &str| {
-            OidcClient::new(&AuthConfig {
-                issuer_url: "https://idp.test".into(),
-                client_id: "dark-factory".into(),
-                client_secret_file: secret_file.clone(),
-                public_url: public_url.into(),
-                roles_claim: "roles".into(),
-                extra_scopes: Vec::new(),
-            })
+            OidcClient::new(
+                &AuthConfig {
+                    issuer_url: "https://idp.test".into(),
+                    client_id: "dark-factory".into(),
+                    client_secret_file: secret_file.clone(),
+                    roles_claim: "roles".into(),
+                    extra_scopes: Vec::new(),
+                },
+                public_url,
+            )
         };
         assert!(client("https://factory.test").unwrap().secure_cookies());
         assert!(client("HTTPS://factory.test").unwrap().secure_cookies());

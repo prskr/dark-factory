@@ -131,25 +131,57 @@ mod tests {
         not(df_web_styles),
         ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
     )]
-    fn embeds_stylesheet_and_vendored_scripts() {
+    fn embeds_the_stylesheet() {
         assert!(!app_css().expect("app.css is embedded").is_empty());
-        for path in [
-            "vendor/htmx.min.js",
-            "vendor/hx-sse.min.js",
-            "vendor/alpine.min.js",
-            "vendor/mermaid.min.js",
-        ] {
-            assert!(get_asset(path).is_some(), "{path}");
+    }
+
+    /// The file `file` of the npm package `package`: Bazel's copy (`VENDOR_SCRIPTS`, set by the
+    /// test target) or the installed package of the crate.
+    fn package_file(package: &str, file: &str) -> std::path::PathBuf {
+        let suffix = std::path::Path::new(package).join(file);
+        match std::env::var("VENDOR_SCRIPTS") {
+            Ok(list) => list
+                .split_whitespace()
+                .map(std::path::PathBuf::from)
+                .find(|path| path.ends_with(&suffix))
+                .unwrap_or_else(|| panic!("{package}/{file} is not in VENDOR_SCRIPTS")),
+            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("node_modules")
+                .join(suffix),
         }
     }
 
     #[test]
+    #[cfg_attr(
+        not(df_web_vendor),
+        ignore = "needs third-party scripts: pnpm install --frozen-lockfile in crates/df-web, or VENDOR_SCRIPTS"
+    )]
     fn vendored_scripts_are_embedded_byte_for_byte() {
-        let embedded = get_asset("vendor/alpine.min.js").expect("alpine is embedded");
-        assert!(
-            embedded.data.as_ref() == include_bytes!("../assets/vendor/alpine.min.js"),
-            "vendor/alpine.min.js differs from the checked-in file"
-        );
+        for (served, package, file) in crate::build_assets::VENDOR {
+            let embedded = get_asset(served).unwrap_or_else(|| panic!("{served} is embedded"));
+            let published = std::fs::read(package_file(package, file)).unwrap();
+            assert!(
+                embedded.data.as_ref() == published.as_slice(),
+                "{served} differs from {package}/{file}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(df_web_vendor),
+        ignore = "needs third-party scripts: pnpm install --frozen-lockfile in crates/df-web, or VENDOR_SCRIPTS"
+    )]
+    fn installed_packages_have_the_versions_of_package_json() {
+        let read = |path: std::path::PathBuf| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+        };
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../package.json")).unwrap();
+        for (package, pinned) in manifest["dependencies"].as_object().unwrap() {
+            let installed = read(package_file(package, "package.json"));
+            assert_eq!(&installed["version"], pinned, "{package}");
+        }
     }
 
     #[test]
@@ -306,6 +338,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(df_web_vendor),
+        ignore = "needs third-party scripts: pnpm install --frozen-lockfile in crates/df-web, or VENDOR_SCRIPTS"
+    )]
     async fn assets_are_served_with_long_cache_headers() {
         let response = get_path("/assets/vendor/htmx.min.js").await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -350,6 +386,16 @@ mod tests {
             js.contains("removeEventListener"),
             "listener removed in destroy"
         );
+    }
+
+    #[test]
+    fn markdown_component_says_so_when_the_renderer_is_missing_or_fails_to_load() {
+        let js = script_source("markdown.ts");
+        assert!(js.contains("Diagram renderer not available"), "{js}");
+        // No `data-mermaid-src` (a build without Mermaid) fails at once, a failed load the same.
+        assert!(js.contains("dataset.mermaidSrc"), "{js}");
+        assert!(js.contains("script.onerror"), "{js}");
+        assert!(js.contains("RendererUnavailable"), "{js}");
     }
 
     #[test]

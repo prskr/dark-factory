@@ -21,6 +21,7 @@ use openidconnect::{
     Nonce, PrivateSigningKey, StandardClaims, SubjectIdentifier,
 };
 use rsa::pkcs1::EncodeRsaPrivateKey;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tower::ServiceExt;
@@ -28,6 +29,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request as MockRequest, Respond, ResponseTemplate};
 
 use crate::auth::{Clock, OidcClient, SystemClock};
+use crate::webhooks::{WebhookReceiver, WebhookRejection, WebhookSetup};
 use crate::{WebState, router};
 
 pub(crate) const CLIENT_ID: &str = "dark-factory";
@@ -279,7 +281,116 @@ pub(crate) fn default_forge(plugin: &str) -> ForgeRoutes {
     forge_routes(&[(plugin, &[])], &[plugin])
 }
 
+/// The webhook endpoints of the plugins by name: how far each is set up and its secret.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FakeWebhooks(BTreeMap<String, (WebhookSetup, Option<String>)>);
+
+impl FakeWebhooks {
+    /// `plugin` accepts deliveries signed with `secret`.
+    pub(crate) fn ready(plugin: &str, secret: &str) -> Self {
+        Self::with(plugin, WebhookSetup::Ready, Some(secret))
+    }
+
+    pub(crate) fn with(plugin: &str, setup: WebhookSetup, secret: Option<&str>) -> Self {
+        Self(BTreeMap::from([(
+            plugin.to_string(),
+            (setup, secret.map(str::to_string)),
+        )]))
+    }
+}
+
+#[async_trait::async_trait]
+impl WebhookReceiver for FakeWebhooks {
+    fn is_loaded(&self, plugin: &str) -> bool {
+        self.0.contains_key(plugin)
+    }
+
+    fn setup(&self, plugin: &str) -> WebhookSetup {
+        self.0
+            .get(plugin)
+            .map_or(WebhookSetup::NotLoaded, |(setup, _)| *setup)
+    }
+
+    fn secret(&self, plugin: &str) -> Option<SecretString> {
+        self.0
+            .get(plugin)
+            .and_then(|(_, secret)| secret.clone())
+            .map(SecretString::from)
+    }
+
+    async fn receive(
+        &self,
+        _plugin: &str,
+        _headers: &[(String, String)],
+        _body: &[u8],
+    ) -> Result<(), WebhookRejection> {
+        Ok(())
+    }
+}
+
+/// The webhook secret of `forgejo` in the default test app.
+pub(crate) const WEBHOOK_SECRET: &str = "whsec-test-0123456789";
+
+/// Settings of an app that most tests leave at their default.
+pub(crate) struct Extras {
+    /// `publicUrl`; `None` is an instance without one.
+    pub public_url: Option<String>,
+    pub webhooks: FakeWebhooks,
+    /// The `whpk_` key of lifecycle events; `None` is an instance with the feature off.
+    pub lifecycle_public_key: Option<Arc<str>>,
+    pub project_targets: ProjectTargets,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self {
+            public_url: Some("https://factory.test".into()),
+            webhooks: FakeWebhooks::ready("forgejo", WEBHOOK_SECRET),
+            lifecycle_public_key: None,
+            project_targets: ProjectTargets::default(),
+        }
+    }
+}
+
 impl TestApp {
+    /// An app with the given `publicUrl`; the OIDC redirect URI and the session cookie follow it.
+    pub(crate) async fn with_public_url(public_url: &str) -> Self {
+        Self::build(
+            default_forge("forgejo"),
+            None,
+            None,
+            false,
+            false,
+            Extras {
+                public_url: Some(public_url.into()),
+                ..Extras::default()
+            },
+        )
+        .await
+    }
+
+    /// An app whose webhook endpoints are `webhooks`, on an instance with `public_url` (or none)
+    /// and the plugins of `forges`.
+    pub(crate) async fn with_webhooks(
+        forges: ForgeRoutes,
+        public_url: Option<&str>,
+        webhooks: FakeWebhooks,
+    ) -> Self {
+        Self::build(
+            forges,
+            None,
+            None,
+            false,
+            false,
+            Extras {
+                public_url: public_url.map(str::to_string),
+                webhooks,
+                ..Extras::default()
+            },
+        )
+        .await
+    }
+
     pub(crate) async fn new() -> Self {
         Self::with_forges(default_forge("forgejo")).await
     }
@@ -293,16 +404,7 @@ impl TestApp {
         flows: Option<Arc<dyn crate::egress::FlowSource>>,
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
     ) -> Self {
-        Self::build(
-            forges,
-            flows,
-            services,
-            false,
-            false,
-            None,
-            ProjectTargets::default(),
-        )
-        .await
+        Self::build(forges, flows, services, false, false, Extras::default()).await
     }
 
     /// An app of a development build started with `--unrestricted-project-subscriptions`.
@@ -313,8 +415,10 @@ impl TestApp {
             None,
             false,
             false,
-            None,
-            ProjectTargets::Unrestricted,
+            Extras {
+                project_targets: ProjectTargets::Unrestricted,
+                ..Extras::default()
+            },
         )
         .await
     }
@@ -327,8 +431,10 @@ impl TestApp {
             None,
             false,
             false,
-            Some(public_key.into()),
-            ProjectTargets::default(),
+            Extras {
+                lifecycle_public_key: Some(public_key.into()),
+                ..Extras::default()
+            },
         )
         .await
     }
@@ -342,16 +448,7 @@ impl TestApp {
         )]);
         let table = RoutingTable::from_plugins_allowing_plain_http(&configs).unwrap();
         let forges = ForgeRoutes::new(table, ["forgejo".to_string()]);
-        Self::build(
-            forges,
-            None,
-            None,
-            false,
-            true,
-            None,
-            ProjectTargets::default(),
-        )
-        .await
+        Self::build(forges, None, None, false, true, Extras::default()).await
     }
 
     /// An app that shows the hidden transcript blocks (`web.showHiddenBlocks`).
@@ -362,8 +459,7 @@ impl TestApp {
             None,
             true,
             false,
-            None,
-            ProjectTargets::default(),
+            Extras::default(),
         )
         .await
     }
@@ -374,8 +470,7 @@ impl TestApp {
         services: Option<Arc<dyn crate::egress::ServiceLookup>>,
         show_hidden_blocks: bool,
         allow_plain_http: bool,
-        lifecycle_public_key: Option<Arc<str>>,
-        project_targets: ProjectTargets,
+        extras: Extras,
     ) -> Self {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let idp = Idp::start().await;
@@ -386,10 +481,10 @@ impl TestApp {
             issuer_url: idp.server.uri(),
             client_id: CLIENT_ID.into(),
             client_secret_file: secret_file,
-            public_url: "https://factory.test".into(),
             roles_claim: "roles".into(),
             extra_scopes: Vec::new(),
         };
+        let public_url = extras.public_url.clone();
         let forge = df_core::testing::FakeForgeClient::new();
         let provider = df_core::testing::FakeSandboxProvider::new();
         let clock = Arc::new(TestClock::default());
@@ -398,7 +493,13 @@ impl TestApp {
             forge: Arc::new(forge.clone()),
             provider: Arc::new(provider.clone()),
             notifier: Arc::new(df_db::Notifier::start(&pool).await.unwrap()),
-            oidc: Arc::new(OidcClient::new(&cfg).unwrap()),
+            oidc: Arc::new(
+                OidcClient::new(
+                    &cfg,
+                    public_url.as_deref().unwrap_or("https://factory.test"),
+                )
+                .unwrap(),
+            ),
             pool: pool.clone(),
             forges,
             flows,
@@ -410,8 +511,10 @@ impl TestApp {
             approval_types: Self::approval_types(),
             version: "2026.11.0".into(),
             events: df_db::lifecycle_events::EventSinks::default(),
-            lifecycle_public_key,
-            project_targets,
+            lifecycle_public_key: extras.lifecycle_public_key,
+            project_targets: extras.project_targets,
+            public_url: public_url.as_deref().map(|u| url::Url::parse(u).unwrap()),
+            webhooks: Arc::new(extras.webhooks),
         };
         Self {
             router: router(state),

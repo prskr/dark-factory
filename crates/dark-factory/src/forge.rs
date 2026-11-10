@@ -16,7 +16,7 @@ use df_plugins::{
     ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
     WebhookError,
 };
-use df_web::webhooks::{WebhookReceiver, WebhookRejection, Webhooks};
+use df_web::webhooks::{WebhookReceiver, WebhookRejection, WebhookSetup, Webhooks};
 use secrecy::{ExposeSecret as _, SecretString};
 
 const MIB: u64 = 1024 * 1024;
@@ -355,8 +355,16 @@ impl WebhookReceiver for ForgeWebhooks {
         self.forge.has_plugin(plugin)
     }
 
-    fn has_endpoint(&self, plugin: &str) -> bool {
-        self.forge.has_webhook(plugin)
+    fn setup(&self, plugin: &str) -> WebhookSetup {
+        self.forge
+            .client(plugin)
+            .map_or(WebhookSetup::NotLoaded, |client| {
+                webhook_setup(client.exports_webhooks(), client.webhook_secret().is_some())
+            })
+    }
+
+    fn secret(&self, plugin: &str) -> Option<SecretString> {
+        self.forge.client(plugin)?.webhook_secret().cloned()
     }
 
     async fn receive(
@@ -374,6 +382,15 @@ impl WebhookReceiver for ForgeWebhooks {
             tracing::warn!(plugin, error = %error, "applying webhook events failed");
             WebhookRejection::Failed
         })
+    }
+}
+
+/// How far a loaded plugin's incoming webhook is set up; the only place of this rule.
+fn webhook_setup(exports_webhooks: bool, has_secret: bool) -> WebhookSetup {
+    match (exports_webhooks, has_secret) {
+        (false, _) => WebhookSetup::Unsupported,
+        (true, false) => WebhookSetup::NoSecret,
+        (true, true) => WebhookSetup::Ready,
     }
 }
 
@@ -845,6 +862,60 @@ mod tests {
         assert_ne!(old.expose_secret(), new.expose_secret());
         assert!(!accepts(&after, old.expose_secret()).await);
         assert!(accepts(&after, new.expose_secret()).await);
+    }
+
+    #[test]
+    fn a_plugin_without_the_webhooks_export_is_unsupported_whatever_its_secret() {
+        // No fixture component lacks the export, so the rule is checked on its inputs.
+        assert_eq!(webhook_setup(false, false), WebhookSetup::Unsupported);
+        assert_eq!(webhook_setup(false, true), WebhookSetup::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn an_exporting_plugin_without_a_secret_reports_no_secret_and_has_no_endpoint() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let plugins = BTreeMap::from([(
+            "forgejo".to_string(),
+            PluginConfig::new(crate::tests::forgejo_component()),
+        )]);
+        let mut plugins = load_forge_plugins(&engine(), &plugins, true).unwrap();
+        let store = FakeSecretStore::new();
+        plugins
+            .resolve_webhook_secrets(&store, "homelab")
+            .await
+            .unwrap();
+        let receiver =
+            ForgeWebhooks::new(forge_client(plugins, pool.clone(), Arc::new(store)), pool);
+
+        assert_eq!(receiver.setup("forgejo"), WebhookSetup::NoSecret);
+        assert!(receiver.secret("forgejo").is_none());
+        assert!(!receiver.has_endpoint("forgejo"));
+    }
+
+    #[tokio::test]
+    async fn a_plugin_that_did_not_load_reports_not_loaded_and_has_no_secret_or_endpoint() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let store = FakeSecretStore::new();
+        store.insert("wh-forgejo", "secret", "s3cret");
+        let receiver = ForgeWebhooks::new(forge_with_resolved_secret(&store, false).await, pool);
+
+        assert_eq!(receiver.setup("absent"), WebhookSetup::NotLoaded);
+        assert!(receiver.secret("absent").is_none());
+        assert!(!receiver.has_endpoint("absent"));
+    }
+
+    #[tokio::test]
+    async fn an_exporting_plugin_with_a_secret_is_ready_and_returns_it() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let store = FakeSecretStore::new();
+        store.insert("wh-forgejo", "secret", "s3cret");
+        let forge = forge_with_resolved_secret(&store, false).await;
+        let receiver = ForgeWebhooks::new(forge, pool);
+
+        assert_eq!(receiver.setup("forgejo"), WebhookSetup::Ready);
+        assert!(receiver.has_endpoint("forgejo"));
+        let secret = receiver.secret("forgejo").expect("a secret");
+        assert_eq!(secret.expose_secret(), "s3cret");
     }
 
     fn webhook_key_ref() -> SecretKeyRef {

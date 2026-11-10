@@ -383,7 +383,35 @@ async fn health_and_assets_need_no_login() {
     assert_eq!(app.get("/healthz", "").await.status(), StatusCode::OK);
     assert_eq!(app.get("/readyz", "").await.status(), StatusCode::OK);
     assert_eq!(
-        app.get("/assets/vendor/htmx.min.js", "").await.status(),
+        app.get("/assets/logo.svg", "").await.status(),
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn session_cookie_has_no_secure_attribute_for_a_plain_http_public_url() {
+    let app = TestApp::with_public_url("http://factory.internal").await;
+    let (cookie, authorize) = start_login(&app, "%2F").await;
+    app.idp
+        .set(|s| s.nonce = Some(query_param(&authorize, "nonce")));
+    let state = query_param(&authorize, "state");
+    let callback = app
+        .get(
+            &format!("/auth/callback?code=good-code&state={state}"),
+            &cookie,
+        )
+        .await;
+    assert_eq!(callback.status(), StatusCode::SEE_OTHER);
+
+    let set_cookie = callback
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("df_session="))
+        .unwrap()
+        .to_string();
+    assert!(set_cookie.contains("HttpOnly"), "{set_cookie}");
+    assert!(set_cookie.contains("SameSite=Lax"), "{set_cookie}");
+    assert!(!set_cookie.contains("Secure"), "{set_cookie}");
 }

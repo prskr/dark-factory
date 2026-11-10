@@ -147,15 +147,15 @@ fn a_form_without_the_push_check_fields_leaves_the_policy_alone() {
 }
 
 #[tokio::test]
-async fn the_edit_modal_has_a_push_checks_tab_with_the_default_policy() {
+async fn the_settings_page_has_a_push_checks_tab_with_the_default_policy() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
 
-    let html = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    let html = text(app.get("/projects/DF", &cookie).await).await;
 
     assert!(
-        html.contains("x-data=\"tabs(&quot;general&quot;)\""),
+        html.contains("x-data=\"tabs(&quot;general&quot;, true)\""),
         "{html}"
     );
     let general = tag_around(&html, "id=\"tab-general\"");
@@ -234,7 +234,7 @@ async fn a_saved_policy_is_stored_audited_announced_and_shown_again() {
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(header_str(&response, "hx-trigger"), "modal-close");
+    assert_eq!(header_str(&response, "hx-trigger"), "");
     let stored = push_policy(&app.pool, seed.project).await.unwrap();
     assert_eq!(
         stored,
@@ -259,7 +259,7 @@ async fn a_saved_policy_is_stored_audited_announced_and_shown_again() {
     .await
     .unwrap();
 
-    let html = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    let html = text(app.get("/projects/DF", &cookie).await).await;
     assert!(html.contains(&format!(">{globs}</textarea>")), "{html}");
     assert!(tag_around(&html, "id=\"linear_history\"").contains("checked"));
 
@@ -273,21 +273,24 @@ async fn a_saved_policy_is_stored_audited_announced_and_shown_again() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = text(response).await;
     assert!(
-        html.contains("x-data=\"tabs(&quot;general&quot;)\""),
+        html.contains("x-data=\"tabs(&quot;general&quot;, true)\""),
         "{html}"
     );
     assert!(html.contains(&format!(">{globs}</textarea>")), "{html}");
 }
 
 #[tokio::test]
-async fn the_edit_modal_is_wide_and_its_tabs_follow_the_keyboard() {
+async fn the_settings_page_tabs_follow_the_keyboard_and_the_url() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
 
-    let html = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    let html = text(app.get("/projects/DF", &cookie).await).await;
 
-    assert!(tag_around(&html, "dialog id=\"modal\"").contains("md:max-w-3xl"));
+    assert!(
+        !html.contains("<dialog id=\"modal\""),
+        "a page, not a dialog"
+    );
     let tablist = tag_around(&html, "role=\"tablist\"");
     assert!(
         tablist.contains("x-on:keydown=\"move($event)\""),
@@ -305,6 +308,19 @@ async fn the_edit_modal_is_wide_and_its_tabs_follow_the_keyboard() {
     ] {
         assert!(script.contains(key), "{key}");
     }
+    // The open tab is part of the URL on the page, and the form posts it back.
+    for part in [
+        "URLSearchParams",
+        "searchParams.set('tab'",
+        "history.replaceState",
+    ] {
+        assert!(script.contains(part), "{part}");
+    }
+    assert!(
+        html.contains("x-data=\"tabs(&quot;general&quot;, true)\""),
+        "{html}"
+    );
+    assert!(tag_around(&html, "name=\"tab\"").contains("type=\"hidden\""));
     // The new-project form has no tabs.
     let new = text(app.get_htmx("/projects/new", &cookie).await).await;
     assert!(!new.contains("role=\"tablist\"") && !new.contains("protected_globs"));
@@ -334,7 +350,7 @@ async fn an_invalid_glob_reopens_the_push_checks_tab_with_the_error_on_the_field
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = text(response).await;
     assert!(
-        html.contains("x-data=\"tabs(&quot;push-checks&quot;)\""),
+        html.contains("x-data=\"tabs(&quot;push-checks&quot;, true)\""),
         "{html}"
     );
     let textarea = tag_around(&html, "id=\"protected_globs\"");
@@ -363,13 +379,10 @@ async fn the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view() {
     let app = TestApp::new().await;
     seed(&app.pool).await;
 
-    let html = text(app.get_htmx("/projects/DF/edit", &app.login().await).await).await;
+    let html = text(app.get("/projects/DF", &app.login().await).await).await;
 
     let tablist = tag_around(&html, "role=\"tablist\"");
-    assert!(
-        tablist.contains("overflow-x-auto") && tablist.contains("md:overflow-visible"),
-        "{tablist}"
-    );
+    assert!(tablist.contains("overflow-x-auto"), "{tablist}");
     assert!(tag_around(&html, "role=\"tab\"").contains("shrink-0"));
     let script = crate::assets::script_source("tabs.ts");
     assert!(

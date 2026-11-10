@@ -24,6 +24,7 @@
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
     "instanceName": { "type": "string", "minLength": 1 },
+    "publicUrl": { "type": "string" },
     "image": {
       "type": "object",
       "required": ["pullPolicy", "controlPlane", "runtime", "harness", "testProject"],
@@ -77,13 +78,13 @@
     },
     "oidc": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["issuerUrl", "clientId", "existingSecret", "clientSecretKey"],
       "properties": {
         "issuerUrl": { "type": "string", "minLength": 1 },
         "clientId": { "type": "string", "minLength": 1 },
         "existingSecret": { "type": "string", "minLength": 1 },
         "clientSecretKey": { "type": "string", "minLength": 1 },
-        "publicUrl": { "type": "string" },
         "rolesClaim": { "type": "string", "minLength": 1 },
         "extraScopes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }

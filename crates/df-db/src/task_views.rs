@@ -3,7 +3,8 @@
 
 use chrono::{DateTime, Utc};
 use df_core::{
-    DependencyKind, Principal, RunState, StatusSet, TaskId, TaskStatus, TitleSource, is_satisfied,
+    DependencyKind, Principal, RunState, StatusSet, TaskId, TaskSort, TaskStatus, TitleSource,
+    is_satisfied,
 };
 use df_proto::transcript::v1::Event;
 use sqlx::{FromRow, PgPool};
@@ -38,6 +39,8 @@ pub struct TaskFilter {
     pub group: Option<StatusSet>,
     /// Only tasks of the project with this key.
     pub project_key: Option<String>,
+    /// The order of the rows.
+    pub sort: TaskSort,
 }
 
 impl TaskFilter {
@@ -175,7 +178,8 @@ pub struct StoredEvent {
     pub run_started_at: DateTime<Utc>,
 }
 
-/// The tasks matching `filter`, newest first.
+/// The tasks matching `filter` in the order of `filter.sort`. Ties are ordered by task ID in the
+/// direction of the sort, so rows with the same time keep their place between calls.
 pub async fn list_task_items(
     pool: &PgPool,
     filter: &TaskFilter,
@@ -189,12 +193,27 @@ pub async fn list_task_items(
          JOIN personas ps ON ps.id = t.persona_id
          WHERE ($1::text[] IS NULL OR t.status = ANY($1))
            AND ($2::text IS NULL OR p.key = $2)
-         ORDER BY t.created_at DESC, t.id DESC",
+         ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
+                  CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,
+                  CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,
+                  CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,
+                  t.id DESC",
     )
     .bind(filter.statuses())
     .bind(&filter.project_key)
+    .bind(order_key(filter.sort))
     .fetch_all(pool)
     .await?)
+}
+
+/// The key of `sort` in the `ORDER BY` of [`list_task_items`]. It is independent of the URL value
+/// of the sort, and the exhaustive match makes a new `TaskSort` fail to compile here.
+const fn order_key(sort: TaskSort) -> &'static str {
+    match sort {
+        TaskSort::Updated => "updated_desc",
+        TaskSort::UpdatedAsc => "updated_asc",
+        TaskSort::Created => "created_desc",
+    }
 }
 
 /// All projects by name with their number of tasks in `group` (all tasks without a group).
@@ -656,6 +675,103 @@ mod tests {
         assert_eq!(numbers, [2, 1]);
     }
 
+    /// Three tasks with chosen times: DF-1 updated last, DF-2 and DF-3 with the same update time,
+    /// and a creation order (DF-3, DF-1, DF-2) unlike the order of the IDs, so that the sorts
+    /// and the tie breaker (ID) can be told apart.
+    async fn seed_sorted_tasks(pool: &PgPool) {
+        seed(pool).await;
+        let (project, persona): (Uuid, Uuid) =
+            sqlx::query_as("SELECT project_id, persona_id FROM tasks")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        for title in ["Second", "Third"] {
+            crate::create_task(
+                pool,
+                crate::NewTask {
+                    project_id: df_core::ProjectId::from_uuid(project),
+                    persona_id: df_core::PersonaId::from_uuid(persona),
+                    title: Some(title.into()),
+                    description: String::new(),
+                    issue_number: None,
+                    created_by: Principal::system("test"),
+                    parent_id: None,
+                    depends_on: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        for (key, created, updated) in [("DF-1", 10, 50), ("DF-2", 20, 20), ("DF-3", 0, 20)] {
+            sqlx::query(
+                "UPDATE tasks SET created_at = '2026-11-01T00:00:00Z'::timestamptz + make_interval(mins => $2::int),
+                                  updated_at = '2026-11-01T00:00:00Z'::timestamptz + make_interval(mins => $3::int)
+                 WHERE key = $1",
+            )
+            .bind(key)
+            .bind(created)
+            .bind(updated)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn lists_tasks_in_each_sort_with_a_stable_tie_order() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        seed_sorted_tasks(&pool).await;
+        let keys = |sort| {
+            let pool = pool.clone();
+            async move {
+                list_task_items(
+                    &pool,
+                    &TaskFilter {
+                        sort,
+                        ..TaskFilter::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|t| t.key)
+                .collect::<Vec<_>>()
+            }
+        };
+
+        // The default is the last update, newest first.
+        assert_eq!(TaskFilter::default().sort, TaskSort::Updated);
+        // Every variant, so a sort whose key the query does not know cannot pass: it would fall
+        // through to the tie breaker alone (newest ID first).
+        for sort in TaskSort::ALL {
+            let expected = match sort {
+                // DF-2 and DF-3 tie on the update time; the tie breaks by ID, newest first.
+                TaskSort::Updated => ["DF-1", "DF-3", "DF-2"],
+                TaskSort::UpdatedAsc => ["DF-2", "DF-3", "DF-1"],
+                TaskSort::Created => ["DF-2", "DF-1", "DF-3"],
+            };
+            assert_eq!(keys(sort).await, expected, "{sort:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_sort_keeps_the_status_and_project_filters() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        seed_sorted_tasks(&pool).await;
+        let filter = TaskFilter {
+            group: Some(StatusSet::Active),
+            project_key: Some("DF".into()),
+            sort: TaskSort::UpdatedAsc,
+        };
+        let keys: Vec<_> = list_task_items(&pool, &filter)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.key)
+            .collect();
+        assert_eq!(keys, ["DF-2", "DF-3", "DF-1"]);
+    }
+
     #[tokio::test]
     async fn filters_tasks_by_status_group_and_project_and_counts_per_project() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
@@ -668,6 +784,7 @@ mod tests {
         let by = |group, project: Option<&str>| TaskFilter {
             group,
             project_key: project.map(str::to_string),
+            ..TaskFilter::default()
         };
 
         let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
@@ -713,6 +830,7 @@ mod tests {
         let by = |set| TaskFilter {
             group: Some(set),
             project_key: None,
+            ..TaskFilter::default()
         };
         crate::task_events::set_status_for_test(&pool, task, TaskStatus::RateLimited).await;
         let running = list_task_items(&pool, &by(StatusSet::Running))

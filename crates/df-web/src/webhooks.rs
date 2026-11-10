@@ -13,6 +13,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Meter};
+use secrecy::SecretString;
 
 /// Largest accepted body (spec "Webhook endpoint").
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -25,8 +26,17 @@ pub trait WebhookReceiver: Send + Sync {
     /// Whether `plugin` (the name under `plugins`) loaded.
     fn is_loaded(&self, plugin: &str) -> bool;
 
+    /// How far the incoming webhook of `plugin` is set up.
+    fn setup(&self, plugin: &str) -> WebhookSetup;
+
+    /// The webhook secret of `plugin` (`Some` only when [`Self::setup`] is
+    /// [`WebhookSetup::Ready`]), for an admin who reads it on the settings page.
+    fn secret(&self, plugin: &str) -> Option<SecretString>;
+
     /// Whether `plugin` loaded, exports `webhooks` and has a webhook secret.
-    fn has_endpoint(&self, plugin: &str) -> bool;
+    fn has_endpoint(&self, plugin: &str) -> bool {
+        self.setup(plugin) == WebhookSetup::Ready
+    }
 
     /// Handles one delivery to `plugin`.
     async fn receive(
@@ -35,6 +45,19 @@ pub trait WebhookReceiver: Send + Sync {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<(), WebhookRejection>;
+}
+
+/// How far the incoming webhook of a plugin is set up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebhookSetup {
+    /// The plugin did not load (or does not exist).
+    NotLoaded,
+    /// The plugin exports no `webhooks`.
+    Unsupported,
+    /// The plugin exports `webhooks` and has no secret configured.
+    NoSecret,
+    /// Deliveries are accepted.
+    Ready,
 }
 
 /// Why a delivery is not accepted.
@@ -58,6 +81,11 @@ pub struct Webhooks {
 }
 
 impl Webhooks {
+    /// The receiver, for what the UI shows of the endpoints.
+    pub fn receiver(&self) -> Arc<dyn WebhookReceiver> {
+        self.receiver.clone()
+    }
+
     /// Counts requests as `df.webhook.requests` on `meter`.
     pub fn new(receiver: Arc<dyn WebhookReceiver>, meter: &Meter) -> Self {
         let requests = meter

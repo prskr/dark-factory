@@ -118,11 +118,11 @@ Saving SHALL keep the project settings page open with the stored values and conf
 - **THEN** the page shows the General tab with the error at Repository URL and all entered values kept
 
 ### Requirement: Grouped project form
-The General tab of the project settings page and the new-project form SHALL show their fields in the groups "Project", "Repository", "Sandbox" and "Forge events", in this order, subject to the approved PenPot board (see the design). Each group SHALL have a heading and SHALL be a region named by it, with a horizontal separator between consecutive groups. Grouping SHALL NOT change field names, validation or what saving stores.
+The General tab of the project settings page and the new-project form SHALL show their fields in the groups "Project", "Repository", "Sandbox" and "Forge events", in this order, as on the approved PenPot boards ("Projects · settings page, general", "Projects · new project"). Each group SHALL have a heading and SHALL be a region named by it, with a horizontal separator between consecutive groups. Grouping SHALL NOT change field names, validation or what saving stores.
 
 #### Scenario: Groups on the settings page
 - **WHEN** a board member opens the settings page of project `DF` on the General tab
-- **THEN** "Project" holds Name and Key, "Repository" holds Repository URL, Base branch, Forge credential and Issue tracker URL, "Sandbox" holds Sandbox image and Adapter command, and "Forge events" holds Wake tasks on reviews and mentions, with a separator between consecutive groups and none above the first
+- **THEN** "Project" holds Key and Name, "Repository" holds Repository URL, Base branch, Forge credential and Issue tracker URL (in this order), "Sandbox" holds Sandbox image and Adapter command, and "Forge events" holds Wake tasks on reviews and mentions, with a separator between consecutive groups and none above the first
 
 #### Scenario: Groups in the new-project form
 - **WHEN** a board member opens "New project"
