@@ -21,7 +21,8 @@ The task view has three columns: the task list, the transcript and the details.
 - **Transcript**: the agent's messages and tool calls (commands, file reads and edits) live, as they
   happen. Forge activity appears in between: pushes to the task branch (with the commit range, or
   the reason if the push was rejected), and the pull request being opened and marked ready, with a
-  link to it. These rows come from the control plane and
+  link to it. Stored artifacts appear as a row with the artifact name (see
+  [Artifacts](artifacts.md)). These rows come from the control plane and
   the gateway, not from the agent, and are never sent to the agent.
 - **Messages**: type into the message box at any time. A message reaches the agent at the next
   turn boundary, without restarting anything; while it waits it is shown as queued and can be

@@ -39,6 +39,7 @@ message Event {
     TurnEnded turn_ended = 17;
     Notice notice = 18;
     ForgeActivity forge_activity = 19;
+    FactoryActivity factory_activity = 20;
   }
 }
 
@@ -376,4 +377,34 @@ message BlobData {
     // Hex-encoded SHA-256 of the content in the blob store.
     string sha256 = 2;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Factory activity
+// ---------------------------------------------------------------------------
+
+// What the control plane did for the task, besides forge activity (ForgeActivity).
+// Written by the control plane only, never by the runtime (the control plane drops
+// it from the runtime's channel). Display-only: never sent to the agent. Has no
+// turn_id. Later control-plane events (an agent woken by another task, an
+// incoming webhook event) join this oneof.
+message FactoryActivity {
+  oneof kind {
+    ArtifactWritten artifact_written = 1;
+  }
+}
+
+// An artifact stored by write_artifact. Never carries the content.
+message ArtifactWritten {
+  string name = 1;
+  ArtifactKind kind = 2;
+  string mime_type = 3;
+  // Bytes.
+  uint64 size = 4;
+}
+
+enum ArtifactKind {
+  ARTIFACT_KIND_UNSPECIFIED = 0;
+  ARTIFACT_KIND_TEXT = 1;
+  ARTIFACT_KIND_IMAGE = 2;
 }

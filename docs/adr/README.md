@@ -60,3 +60,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0054](0054-filesystem-isolation-in-the-sandbox.md) | Filesystem isolation in the sandbox | Accepted (planned for iteration 3) |
 | [ADR-0055](0055-task-transitions-through-one-transition-function.md) | Task transitions through one transition function | Accepted (planned for iteration 3) |
 | [ADR-0056](0056-control-plane-generates-missing-instance-secrets.md) | The control plane generates missing instance secrets | Accepted |
+| [ADR-0057](0057-factory-activity-in-the-transcript.md) | Factory activity in the transcript | Accepted |

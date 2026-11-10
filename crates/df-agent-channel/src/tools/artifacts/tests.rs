@@ -48,10 +48,19 @@ async fn child_with_artifact(env: &Env, rc: &RunContext, name: &str, bytes: &[u8
     let (child, _) = df_db::create_task(&env.ctx.pool, input).await.unwrap();
     let limits = df_core::ArtifactsConfig::default();
     let sniffed = df_core::artifacts::check_artifact(name, bytes, &limits).unwrap();
+    let run_id = df_core::RunId::new();
+    sqlx::query("INSERT INTO runs (id, task_id, number) VALUES ($1, $2, 1)")
+        .bind(run_id.as_uuid())
+        .bind(child.id.as_uuid())
+        .execute(&env.ctx.pool)
+        .await
+        .unwrap();
     df_db::artifacts::write_artifact(
         &env.ctx.pool,
         df_db::artifacts::NewArtifact {
             task_id: child.id,
+            run_id,
+            call_id: "seed",
             name,
             sniffed: &sniffed,
             content: bytes,
@@ -91,6 +100,31 @@ async fn write_artifact_stores_text_on_the_own_task() {
         json!({"name": "findings.md", "type": "text", "mime_type": "text/markdown", "size": 10})
     );
     assert_eq!(db_list(&env.ctx.pool, rc.task.id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn write_artifact_leaves_one_written_event_in_the_run_transcript_even_when_retried() {
+    let (env, rc) = setup_run().await;
+    let request = call(
+        "write_artifact",
+        json!({"name": "findings.md", "content": "# F"}),
+    );
+
+    let call_id = request.call_id.clone();
+    execute(&env.ctx, &rc, request.clone()).await;
+    execute(&env.ctx, &rc, request).await;
+
+    let events: Vec<(Option<String>, Value)> = sqlx::query_as(
+        "SELECT source_key, payload #> '{factoryActivity,artifactWritten}' FROM transcript_events
+         WHERE run_id = $1 AND kind = 'factory_activity'",
+    )
+    .bind(rc.run.id.as_uuid())
+    .fetch_all(&env.ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].0, Some(format!("artifact:{call_id}")));
+    assert_eq!(events[0].1["name"], "findings.md");
 }
 
 #[tokio::test]

@@ -163,9 +163,7 @@ async fn try_execute(
         return answer_repeated_call(ctx, rc, &call_id, call_uuid).await;
     }
 
-    let outcome = match run_handler(ctx, rc, &request.tool_name, &arguments, &request.attachment)
-        .await
-    {
+    let outcome = match run_handler(ctx, rc, &request, &arguments).await {
         Ok(outcome) => outcome,
         Err(e) => {
             tracing::error!(error = %e, run_id = %rc.run.id, tool = %request.tool_name, "tool handler failed");
@@ -350,11 +348,10 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
 async fn run_handler(
     ctx: &ChannelContext,
     rc: &RunContext,
-    tool: &str,
+    request: &ToolCallRequest,
     args: &Value,
-    attachment: &[u8],
 ) -> Result<Outcome, ChannelError> {
-    match tool {
+    match request.tool_name.as_str() {
         "update_pull_request" => update_pull_request(ctx, rc, args).await,
         "comment_on_issue" => comment_on_issue(ctx, rc, args).await,
         "report_progress" => report_progress(ctx, rc, args).await,
@@ -367,7 +364,9 @@ async fn run_handler(
         "create_task" => delegation::create_task(ctx, rc, args).await,
         "list_personas" => delegation::list_personas(ctx).await,
         "send_message" => delegation::send_message(ctx, rc, args).await,
-        "write_artifact" => artifacts::write_artifact(ctx, rc, args, attachment).await,
+        "write_artifact" => {
+            artifacts::write_artifact(ctx, rc, args, &request.attachment, &request.call_id).await
+        }
         "list_artifacts" => artifacts::list_artifacts(ctx, rc, args).await,
         "read_artifact" => artifacts::read_artifact(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),

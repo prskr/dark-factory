@@ -4,13 +4,15 @@
 //! what they detected and enforces the per-task count.
 
 use chrono::{DateTime, Utc};
-use df_core::TaskId;
-use df_core::artifacts::{ArtifactError, Sniffed};
+use df_core::artifacts::{ArtifactError, ArtifactKind, Sniffed};
+use df_core::{RunId, TaskId};
+use df_proto::transcript::v1::{self as pb, ArtifactWritten, FactoryActivity, factory_activity};
 use sqlx::{FromRow, PgPool};
 use thiserror::Error;
 
 use crate::blobs::sha256_hex;
 use crate::pool::DbError;
+use crate::transcript::{append_control_event, factory_event, lock_run_and_task};
 
 /// An artifact without its content.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -37,6 +39,10 @@ pub struct Artifact {
 #[derive(Debug, Clone, Copy)]
 pub struct NewArtifact<'a> {
     pub task_id: TaskId,
+    /// The run whose transcript gets the artifact-written event.
+    pub run_id: RunId,
+    /// The tool call id; the event is stored once per call.
+    pub call_id: &'a str,
     pub name: &'a str,
     pub sniffed: &'a Sniffed,
     pub content: &'a [u8],
@@ -58,18 +64,15 @@ impl From<sqlx::Error> for WriteArtifactError {
     }
 }
 
-/// Stores `new` on its task, replacing an artifact of the same name. The task row is locked, so
-/// concurrent writes of one task cannot exceed the count.
+/// Stores `new` on its task, replacing an artifact of the same name, and appends an
+/// artifact-written event to the run's transcript in the same transaction (ADR-0057). The run and
+/// task rows are locked, so concurrent writes of one task cannot exceed the count.
 pub async fn write_artifact(
     pool: &PgPool,
     new: NewArtifact<'_>,
 ) -> Result<ArtifactMeta, WriteArtifactError> {
     let mut tx = pool.begin().await?;
-    sqlx::query_scalar::<_, i32>("SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE")
-        .bind(new.task_id.as_uuid())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("task {}", new.task_id)))?;
+    let lock = lock_run_and_task(&mut tx, new.run_id, new.task_id).await?;
     let (count, exists): (i64, bool) = sqlx::query_as(
         "SELECT count(*), COALESCE(bool_or(name = $2), false) FROM task_artifacts WHERE task_id = $1",
     )
@@ -103,6 +106,25 @@ pub async fn write_artifact(
     .bind(new.content)
     .bind(sha256_hex(new.content))
     .fetch_one(&mut *tx)
+    .await?;
+    let written = factory_event(FactoryActivity {
+        kind: Some(factory_activity::Kind::ArtifactWritten(ArtifactWritten {
+            name: meta.name.clone(),
+            kind: match new.sniffed.kind {
+                ArtifactKind::Text => pb::ArtifactKind::Text,
+                ArtifactKind::Image => pb::ArtifactKind::Image,
+            }
+            .into(),
+            mime_type: meta.mime_type.clone(),
+            size: meta.size.unsigned_abs(),
+        })),
+    });
+    append_control_event(
+        &mut tx,
+        &lock,
+        &format!("artifact:{}", new.call_id),
+        &written,
+    )
     .await?;
     tx.commit().await?;
     Ok(meta)

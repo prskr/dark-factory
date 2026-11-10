@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (planned for iteration 3; amended by [ADR-0048](0048-image-artifacts.md): image artifacts, and on 2026-11-03: tool details, UI)
 - **Date:** 2026-10-27
-- **Related:** [ADR-0012](0012-postgresql-and-blob-store.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md)
+- **Related:** [ADR-0012](0012-postgresql-and-blob-store.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0041](0041-tasks-based-on-another-tasks-branch.md), [ADR-0043](0043-delegation-chain-chats-as-tasks.md), [ADR-0057](0057-factory-activity-in-the-transcript.md)
 
 ## Context
 

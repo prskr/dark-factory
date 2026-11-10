@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
-    ContentBlock, ForgeActivity, NoticeLevel, Plan, PlanEntryStatus, PushVerdict, ToolCall,
-    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, UserMessage, content_block, event,
-    tool_call_content,
+    ArtifactWritten, ContentBlock, FactoryActivity, ForgeActivity, NoticeLevel, Plan,
+    PlanEntryStatus, PushVerdict, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+    ToolKind, UserMessage, content_block, event, tool_call_content,
 };
 use maud::{Markup, html};
 
@@ -56,6 +56,8 @@ pub enum ItemKind {
     },
     /// Something the control plane did on the forge (push, pull request).
     Forge(ForgeItem),
+    /// An artifact the control plane stored for a `write_artifact` call (ADR-0057).
+    ArtifactWritten(ArtifactWritten),
     /// The turn ended because a board member interrupted it.
     Interrupted {
         by: String,
@@ -239,6 +241,10 @@ impl Folder {
             }
             event::Kind::ForgeActivity(activity) => forge_item(activity)
                 .map(|item| self.push(format!("ev-{id}"), turn, ItemKind::Forge(item)))
+                .into_iter()
+                .collect(),
+            event::Kind::FactoryActivity(activity) => factory_item(activity)
+                .map(|item| self.push(format!("ev-{id}"), turn, item))
                 .into_iter()
                 .collect(),
             event::Kind::Notice(n) => vec![self.push(
@@ -586,6 +592,18 @@ fn forge_item(activity: &ForgeActivity) -> Option<ForgeItem> {
     })
 }
 
+/// The row of a factory activity; `None` for an artifact name that is not valid (it is written
+/// into an attribute and a script string).
+fn factory_item(activity: &FactoryActivity) -> Option<ItemKind> {
+    use df_proto::transcript::v1::factory_activity::Kind;
+    match activity.kind.as_ref()? {
+        Kind::ArtifactWritten(a) => {
+            df_core::artifacts::validate_name(&a.name).ok()?;
+            Some(ItemKind::ArtifactWritten(a.clone()))
+        }
+    }
+}
+
 fn short_sha(sha: &str) -> String {
     sha.chars().take(7).collect()
 }
@@ -660,6 +678,7 @@ pub fn render_item(item: &Item) -> Markup {
             message,
         } => c::notice(id, level, code, message),
         ItemKind::Forge(forge) => render_forge(id, forge),
+        ItemKind::ArtifactWritten(written) => crate::artifacts::artifact_row(id, written),
         ItemKind::Interrupted { by } => {
             c::system_row(id, Icon::Stop, false, "Interrupted by ", None, by)
         }
@@ -704,21 +723,7 @@ fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
     }
 }
 
-/// The artifact a successful `write_artifact` call wrote, from its input.
-fn written_artifact(tool: &ToolItem) -> Option<String> {
-    if !tool.title.contains("write_artifact") || tool.status != "completed" || tool.truncated {
-        return None;
-    }
-    let input: serde_json::Value = serde_json::from_str(&tool.raw_input).ok()?;
-    let name = input.get("name")?.as_str()?;
-    df_core::artifacts::validate_name(name).ok()?;
-    Some(name.to_owned())
-}
-
 fn render_tool(id: &str, tool: &ToolItem) -> Markup {
-    if let Some(name) = written_artifact(tool) {
-        return crate::artifacts::artifact_row(id, &name);
-    }
     let mut blocks: Vec<(String, String)> = Vec::new();
     if !tool.raw_input.is_empty() {
         blocks.push(("Input".into(), tool.raw_input.clone()));

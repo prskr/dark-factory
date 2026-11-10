@@ -1,7 +1,8 @@
 //! Tests of the transcript writes of the control plane (container-backed).
 
 use df_proto::transcript::v1::{
-    BranchPushed, ForgeActivity, PushVerdict, event::Kind, forge_activity,
+    ArtifactKind, ArtifactWritten, BranchPushed, FactoryActivity, ForgeActivity, PushVerdict,
+    event::Kind, factory_activity, forge_activity,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -217,4 +218,63 @@ async fn control_event_waits_for_the_task_lock_so_ids_become_visible_in_order() 
 
     assert!(writer.await.unwrap().is_some());
     assert_eq!(count(&pool).await, 1);
+}
+
+fn artifact_written() -> Event {
+    factory_event(FactoryActivity {
+        kind: Some(factory_activity::Kind::ArtifactWritten(ArtifactWritten {
+            name: "findings.md".into(),
+            kind: ArtifactKind::Text.into(),
+            mime_type: "text/markdown".into(),
+            size: 12,
+        })),
+    })
+}
+
+#[tokio::test]
+async fn factory_activity_is_stored_once_per_source_key_and_published() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = seed_task(&pool).await;
+    let run = seed_run(&pool, task, 1).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    let lock = lock_run_and_task(&mut tx, run, task).await.unwrap();
+    let first = append_control_event(&mut tx, &lock, "artifact:1", &artifact_written())
+        .await
+        .unwrap();
+    let again = append_control_event(&mut tx, &lock, "artifact:1", &artifact_written())
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    assert!(first.is_some());
+    assert_eq!(again, None);
+    let (kind, key, payload): (String, Option<String>, serde_json::Value) =
+        sqlx::query_as("SELECT kind, source_key, payload FROM transcript_events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (kind.as_str(), key.as_deref()),
+        ("factory_activity", Some("artifact:1"))
+    );
+    let stored: Event = serde_json::from_value(payload).unwrap();
+    assert!(matches!(stored.kind, Some(Kind::FactoryActivity(_))));
+}
+
+#[tokio::test]
+async fn control_event_of_another_kind_is_refused() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task = seed_task(&pool).await;
+    let run = seed_run(&pool, task, 1).await;
+    let event = Event {
+        kind: Some(Kind::Notice(df_proto::transcript::v1::Notice::default())),
+        ..Default::default()
+    };
+
+    let mut tx = pool.begin().await.unwrap();
+    let lock = lock_run_and_task(&mut tx, run, task).await.unwrap();
+    let refused = append_control_event(&mut tx, &lock, "x", &event).await;
+
+    assert!(matches!(refused, Err(DbError::InvalidData(_))));
 }

@@ -205,6 +205,53 @@ async fn forge_activity_written_by_the_control_plane_reaches_the_stream_in_order
 }
 
 #[tokio::test]
+async fn an_artifact_written_event_reaches_the_stream_as_a_row_in_order_with_the_agent_output() {
+    use df_proto::transcript::v1::{
+        ArtifactKind, ArtifactWritten, FactoryActivity, factory_activity,
+    };
+
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events").await;
+    let before = f.add(1, "t1", chunk("m1", "A")).await;
+    sse.next().await;
+    let written = df_db::transcript::factory_event(FactoryActivity {
+        kind: Some(factory_activity::Kind::ArtifactWritten(ArtifactWritten {
+            name: "findings.md".into(),
+            kind: ArtifactKind::Text.into(),
+            mime_type: "text/markdown".into(),
+            size: 12,
+        })),
+    });
+    let mut tx = f.app.pool.begin().await.unwrap();
+    let lock =
+        df_db::transcript::lock_run_and_task(&mut tx, df_core::RunId::from_uuid(f.run), f.task)
+            .await
+            .unwrap();
+    let id = df_db::transcript::append_control_event(&mut tx, &lock, "artifact:c1", &written)
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let frame = tokio::time::timeout(LIVE, sse.next())
+        .await
+        .expect("the event reaches the stream without waiting for the poll");
+
+    assert!(before < id);
+    assert_eq!(frame.id.as_deref(), Some(id.to_string().as_str()));
+    assert!(
+        frame.data.contains("data-artifact-written=\"findings.md\""),
+        "{}",
+        frame.data
+    );
+
+    let after = f.add(2, "t1", chunk("m2", "B")).await;
+    let next = sse.next().await;
+    assert!(after > id);
+    assert_eq!(next.id.as_deref(), Some(after.to_string().as_str()));
+}
+
+#[tokio::test]
 async fn last_event_id_header_takes_precedence_over_the_query() {
     let f = fixture().await;
     let e1 = f.add(1, "t1", chunk("m1", "one")).await;

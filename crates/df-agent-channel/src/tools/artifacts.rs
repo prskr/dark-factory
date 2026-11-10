@@ -26,6 +26,7 @@ pub(super) async fn write_artifact(
     rc: &RunContext,
     args: &Value,
     attachment: &[u8],
+    call_id: &str,
 ) -> Result<Outcome, ChannelError> {
     if args.get("path").is_some() {
         return Ok(Outcome::error(
@@ -54,6 +55,8 @@ pub(super) async fn write_artifact(
     };
     let new = NewArtifact {
         task_id: rc.task.id,
+        run_id: rc.run.id,
+        call_id,
         name: &name,
         sniffed: &sniffed,
         content: bytes,

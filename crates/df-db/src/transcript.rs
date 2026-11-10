@@ -4,7 +4,7 @@
 //! plane have no `seq`; they are keyed by `(run, source_key)` and share the task-wide `id` order.
 
 use df_core::{RunId, TaskId};
-use df_proto::transcript::v1::{Event, ForgeActivity, event};
+use df_proto::transcript::v1::{Event, FactoryActivity, ForgeActivity, event};
 use sqlx::{Postgres, Transaction};
 
 use crate::notify::{Notification, publish};
@@ -13,16 +13,28 @@ use crate::pool::DbError;
 /// The `transcript_events.kind` of forge activity.
 const KIND_FORGE_ACTIVITY: &str = "forge_activity";
 
-/// Schema version of the events [`forge_event`] builds and of the stored row.
+/// The `transcript_events.kind` of factory activity.
+const KIND_FACTORY_ACTIVITY: &str = "factory_activity";
+
+/// Schema version of the events [`forge_event`] and [`factory_event`] build and of the stored row.
 const SCHEMA_VERSION: i32 = 1;
 
 /// Wraps `activity` into a transcript event (schema version 1, no turn).
 pub fn forge_event(activity: ForgeActivity) -> Event {
+    control_event(event::Kind::ForgeActivity(activity))
+}
+
+/// Wraps `activity` into a transcript event (schema version 1, no turn).
+pub fn factory_event(activity: FactoryActivity) -> Event {
+    control_event(event::Kind::FactoryActivity(activity))
+}
+
+fn control_event(kind: event::Kind) -> Event {
     Event {
         schema_version: SCHEMA_VERSION.unsigned_abs(),
         occurred_at: None,
         turn_id: String::new(),
-        kind: Some(event::Kind::ForgeActivity(activity)),
+        kind: Some(kind),
     }
 }
 
@@ -55,20 +67,24 @@ pub async fn lock_run_and_task(
     Ok(RunTaskLock { run_id, task_id })
 }
 
-/// Stores a forge activity `event` once per `(run, source_key)` of the locked run and publishes
-/// `transcript_event` with its id (delivered when `tx` commits). Returns the task-wide id, `None`
-/// for a duplicate.
+/// Stores a forge or factory activity `event` once per `(run, source_key)` of the locked run and
+/// publishes `transcript_event` with its id (delivered when `tx` commits). Returns the task-wide
+/// id, `None` for a duplicate.
 pub async fn append_control_event(
     tx: &mut Transaction<'_, Postgres>,
     lock: &RunTaskLock,
     source_key: &str,
     event: &Event,
 ) -> Result<Option<i64>, DbError> {
-    if !matches!(event.kind, Some(event::Kind::ForgeActivity(_))) {
-        return Err(DbError::InvalidData(
-            "only forge activity is a control-plane transcript event".into(),
-        ));
-    }
+    let kind = match event.kind {
+        Some(event::Kind::ForgeActivity(_)) => KIND_FORGE_ACTIVITY,
+        Some(event::Kind::FactoryActivity(_)) => KIND_FACTORY_ACTIVITY,
+        _ => {
+            return Err(DbError::InvalidData(
+                "only forge and factory activity are control-plane transcript events".into(),
+            ));
+        }
+    };
     let payload = serde_json::to_value(event)?;
     let id: Option<i64> = sqlx::query_scalar(
         "INSERT INTO transcript_events
@@ -81,7 +97,7 @@ pub async fn append_control_event(
     .bind(lock.run_id.as_uuid())
     .bind(source_key)
     .bind(SCHEMA_VERSION)
-    .bind(KIND_FORGE_ACTIVITY)
+    .bind(kind)
     .bind(payload)
     .fetch_optional(&mut **tx)
     .await?;

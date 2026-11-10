@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-02
-- **Related:** [ADR-0017](0017-transcript-schema-and-versioning.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md)
+- **Related:** [ADR-0017](0017-transcript-schema-and-versioning.md), [ADR-0025](0025-pr-and-branch-handling.md), [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md), [ADR-0057](0057-factory-activity-in-the-transcript.md)
 
 ## Context
 

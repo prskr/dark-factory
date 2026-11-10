@@ -56,10 +56,14 @@ pub async fn prepare(
     })
 }
 
-/// Whether the runtime may send `event`. Forge activity is written by the control plane only
-/// (design D6): it is neither stored nor ever shown as coming from the run.
+/// Whether the runtime may send `event`. Forge and factory activity are written by the control
+/// plane only (design D6, ADR-0057): they are neither stored nor ever shown as coming from the
+/// run.
 pub fn allowed_from_runtime(event: &Event) -> bool {
-    !matches!(event.kind, Some(event::Kind::ForgeActivity(_)))
+    !matches!(
+        event.kind,
+        Some(event::Kind::ForgeActivity(_) | event::Kind::FactoryActivity(_))
+    )
 }
 
 /// Stores `event` once per (run, seq). Returns the task-wide id of a newly stored event, `None`
@@ -123,6 +127,7 @@ const fn kind_name(kind: &event::Kind) -> &'static str {
         event::Kind::TurnEnded(_) => "turn_ended",
         event::Kind::Notice(_) => "notice",
         event::Kind::ForgeActivity(_) => "forge_activity",
+        event::Kind::FactoryActivity(_) => "factory_activity",
     }
 }
 
@@ -152,7 +157,8 @@ fn content_blocks_mut(kind: &mut event::Kind) -> Vec<&mut ContentBlock> {
         | event::Kind::Plan(_)
         | event::Kind::TurnEnded(_)
         | event::Kind::Notice(_)
-        | event::Kind::ForgeActivity(_) => Vec::new(),
+        | event::Kind::ForgeActivity(_)
+        | event::Kind::FactoryActivity(_) => Vec::new(),
     }
 }
 

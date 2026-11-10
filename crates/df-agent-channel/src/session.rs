@@ -702,7 +702,7 @@ async fn prepare_transcript_events(
         {
             if !transcript::allowed_from_runtime(event) {
                 // The sequence number is still acknowledged; the event is not stored.
-                tracing::warn!(run_id = %rc.run.id, seq = msg.seq, "dropping forge activity sent by the runtime");
+                tracing::warn!(run_id = %rc.run.id, seq = msg.seq, "dropping control-plane activity sent by the runtime");
                 continue;
             }
             prepared.insert(
