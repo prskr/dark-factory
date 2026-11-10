@@ -672,3 +672,115 @@ fn a_turn_that_was_not_interrupted_adds_no_row() {
 
     assert_eq!(folder.items().len(), 2);
 }
+
+/// An artifact-written event as the control plane stores it (no turn).
+fn artifact_written(id: i64, name: &str, mime_type: &str) -> StoredEvent {
+    stored(
+        id,
+        "",
+        json!({"factoryActivity": {"artifactWritten": {
+            "name": name, "kind": "ARTIFACT_KIND_TEXT", "mimeType": mime_type, "size": "12"}}}),
+    )
+}
+
+#[test]
+fn an_artifact_written_event_renders_the_artifact_row_with_the_label_of_its_mime_type() {
+    let folder = fold(&[artifact_written(1, "findings.md", "text/markdown")]);
+
+    let html = render_item(folder.items().last().unwrap()).into_string();
+
+    assert!(html.contains("id=\"ev-1\""), "{html}");
+    assert!(
+        html.contains("data-artifact-written=\"findings.md\""),
+        "{html}"
+    );
+    assert!(
+        html.contains("x-on:click=\"open('findings.md')\""),
+        "{html}"
+    );
+    assert!(html.contains("\u{b7} Markdown"), "{html}");
+}
+
+#[test]
+fn an_artifact_written_event_of_an_unknown_kind_renders_as_a_text_row() {
+    let folder = fold(&[stored(
+        1,
+        "",
+        json!({"factoryActivity": {"artifactWritten": {
+            "name": "notes.txt", "kind": "ARTIFACT_KIND_UNSPECIFIED", "mimeType": "text/plain"}}}),
+    )]);
+
+    let html = render_item(folder.items().last().unwrap()).into_string();
+
+    assert!(
+        html.contains("data-artifact-written=\"notes.txt\""),
+        "{html}"
+    );
+    assert!(!html.contains("<circle"), "{html}");
+}
+
+#[test]
+fn an_artifact_written_event_with_an_invalid_name_adds_no_row() {
+    let folder = fold(&[artifact_written(1, "x');alert(1);('", "text/markdown")]);
+
+    assert!(
+        folder
+            .items()
+            .iter()
+            .all(|i| !matches!(i.kind, ItemKind::ArtifactWritten(_)))
+    );
+}
+
+/// The `write_artifact` call as Claude Code and `OpenCode` (inside its `execute` tool) report it.
+fn write_artifact_harness_calls() -> [(&'static str, String); 2] {
+    [
+        (
+            "mcp__factory__write_artifact",
+            json!({"name": "findings.md", "content": "x"}).to_string(),
+        ),
+        (
+            "execute",
+            json!({"code": "await tools.factory.write_artifact({name: 'findings.md'})"})
+                .to_string(),
+        ),
+    ]
+}
+
+fn write_artifact_tool_call(title: &str, input: &str, status: &str) -> StoredEvent {
+    stored(
+        1,
+        "t1",
+        json!({"toolCall": {"toolCallId": "c1", "title": title, "kind": "TOOL_KIND_OTHER",
+            "status": status, "rawInputJson": input}}),
+    )
+}
+
+#[test]
+fn a_failed_write_artifact_call_shows_only_its_tool_row() {
+    for (title, input) in write_artifact_harness_calls() {
+        let html = render_all(&fold(&[write_artifact_tool_call(
+            title,
+            &input,
+            "TOOL_CALL_STATUS_FAILED",
+        )]));
+
+        assert!(html.contains(title), "{html}");
+        assert!(!html.contains("data-artifact-written"), "{html}");
+    }
+}
+
+#[test]
+fn write_artifact_tool_calls_of_every_harness_keep_their_tool_row_above_the_artifact_row() {
+    for (title, input) in write_artifact_harness_calls() {
+        let written = render_all(&fold(&[
+            write_artifact_tool_call(title, &input, "TOOL_CALL_STATUS_COMPLETED"),
+            artifact_written(2, "findings.md", "text/markdown"),
+        ]));
+        let tool_at = written.find(title).expect("tool row");
+        let artifact_at = written
+            .find("data-artifact-written=\"findings.md\"")
+            .expect("artifact row");
+        assert!(tool_at < artifact_at, "{written}");
+        assert!(written.contains("\u{b7} Markdown"), "{written}");
+    }
+}

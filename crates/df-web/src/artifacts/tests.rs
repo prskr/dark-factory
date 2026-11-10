@@ -1,9 +1,8 @@
 //! Tests of the artifact cards, view, routes and their place on the task page.
 
 use axum::http::StatusCode;
-use serde_json::json;
 
-use crate::testkit::{TestApp, add_event, header_str, insert_run, new_task, seed, text};
+use crate::testkit::{TestApp, header_str, insert_run, new_task, seed, text};
 
 /// A PNG of 3 x 2 px.
 const PNG_HEX: &str = "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000001049444154789c63f8cfc000410c70160041d205fb87f0b9480000000049454e44ae426082";
@@ -20,10 +19,24 @@ async fn write(app: &TestApp, key: &str, name: &str, bytes: &[u8]) {
         .unwrap();
     let limits = df_core::ArtifactsConfig::default();
     let sniffed = df_core::artifacts::check_artifact(name, bytes, &limits).unwrap();
+    let task_id = df_core::TaskId::from_uuid(task);
+    // A task has at most one active run, so later writes reuse the first one.
+    let active: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT id FROM runs WHERE task_id = $1 AND state = 'running'")
+            .bind(task)
+            .fetch_optional(&app.pool)
+            .await
+            .unwrap();
+    let run = match active {
+        Some(run) => run,
+        None => insert_run(&app.pool, task_id, 1, "running").await,
+    };
     df_db::artifacts::write_artifact(
         &app.pool,
         df_db::artifacts::NewArtifact {
-            task_id: df_core::TaskId::from_uuid(task),
+            task_id,
+            run_id: df_core::RunId::from_uuid(run),
+            call_id: &uuid::Uuid::now_v7().to_string(),
             name,
             sniffed: &sniffed,
             content: bytes,
@@ -292,33 +305,12 @@ async fn the_image_endpoint_needs_a_session_and_refuses_text() {
     );
 }
 
-async fn tool_row(app: &TestApp, status: &str, name: &str) -> String {
-    let seed_task: uuid::Uuid = sqlx::query_scalar("SELECT id FROM tasks WHERE key = 'DF-1'")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
-    let task = df_core::TaskId::from_uuid(seed_task);
-    let run = insert_run(&app.pool, task, 1, "running").await;
-    add_event(
-        &app.pool,
-        task,
-        run,
-        1,
-        "t1",
-        json!({"toolCall": {"toolCallId": "c1", "title": "mcp__factory__write_artifact",
-            "kind": "TOOL_KIND_OTHER", "status": status,
-            "rawInputJson": json!({"name": name, "content": "x"}).to_string()}}),
-    )
-    .await;
-    let cookie = app.login().await;
-    text(app.get("/tasks/DF-1", &cookie).await).await
-}
-
 #[tokio::test]
 async fn a_written_artifact_is_a_transcript_row_that_opens_it() {
-    let (app, _cookie) = app_with_task().await;
+    let (app, cookie) = app_with_task().await;
+    write(&app, "DF-1", "findings.md", b"x").await;
 
-    let html = tool_row(&app, "TOOL_CALL_STATUS_COMPLETED", "findings.md").await;
+    let html = text(app.get("/tasks/DF-1", &cookie).await).await;
 
     assert!(
         html.contains("data-artifact-written=\"findings.md\""),
@@ -329,16 +321,6 @@ async fn a_written_artifact_is_a_transcript_row_that_opens_it() {
         "{html}"
     );
     assert!(html.contains("\u{b7} Markdown"), "{html}");
-}
-
-#[tokio::test]
-async fn a_failed_write_stays_an_ordinary_tool_row() {
-    let (app, _cookie) = app_with_task().await;
-
-    let html = tool_row(&app, "TOOL_CALL_STATUS_FAILED", "findings.md").await;
-
-    assert!(!html.contains("data-artifact-written"), "{html}");
-    assert!(html.contains("mcp__factory__write_artifact"), "{html}");
 }
 
 #[test]
@@ -487,8 +469,18 @@ async fn a_markdown_artifact_with_a_mermaid_fence_renders_the_diagram_markup() {
 
 #[test]
 fn image_rows_get_the_image_icon_and_text_rows_the_file_icon() {
-    let image = super::artifact_row("ev-1", "login.png").into_string();
-    let doc = super::artifact_row("ev-2", "findings.md").into_string();
+    use df_proto::transcript::v1::{ArtifactKind, ArtifactWritten};
+    let row = |name: &str, kind: ArtifactKind, mime_type: &str| {
+        let written = ArtifactWritten {
+            name: name.into(),
+            kind: kind.into(),
+            mime_type: mime_type.into(),
+            size: 1,
+        };
+        super::artifact_row("ev-1", &written).into_string()
+    };
+    let image = row("login.png", ArtifactKind::Image, "image/png");
+    let doc = row("findings.md", ArtifactKind::Text, "text/markdown");
     // The image icon has a circle; the file icon does not.
     assert!(
         image.contains("<circle") && !doc.contains("<circle"),

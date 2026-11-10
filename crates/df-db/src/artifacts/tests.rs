@@ -4,7 +4,7 @@
 use std::io::Cursor;
 
 use df_core::artifacts::{ArtifactError, check_artifact};
-use df_core::{ArtifactsConfig, DependencyKind, PersonaId, ProjectId, TaskId};
+use df_core::{ArtifactsConfig, DependencyKind, PersonaId, ProjectId, RunId, TaskId};
 use image::{ImageFormat, RgbImage};
 use sqlx::PgPool;
 
@@ -52,6 +52,24 @@ impl Env {
         create_task(&self.pool, input).await.unwrap().0
     }
 
+    /// The run `write` records its events under; created on first use.
+    async fn run(&self, task: TaskId) -> RunId {
+        sqlx::query(
+            "INSERT INTO runs (id, task_id, number) VALUES ($1, $2, 1) ON CONFLICT DO NOTHING",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(task.as_uuid())
+        .execute(&self.pool)
+        .await
+        .unwrap();
+        let id = sqlx::query_scalar("SELECT id FROM runs WHERE task_id = $1 AND number = 1")
+            .bind(task.as_uuid())
+            .fetch_one(&self.pool)
+            .await
+            .unwrap();
+        RunId::from_uuid(id)
+    }
+
     async fn write(
         &self,
         task: TaskId,
@@ -59,12 +77,32 @@ impl Env {
         bytes: &[u8],
         max_per_task: u32,
     ) -> Result<super::ArtifactMeta, WriteArtifactError> {
+        self.write_call(
+            task,
+            name,
+            bytes,
+            max_per_task,
+            &uuid::Uuid::now_v7().to_string(),
+        )
+        .await
+    }
+
+    async fn write_call(
+        &self,
+        task: TaskId,
+        name: &str,
+        bytes: &[u8],
+        max_per_task: u32,
+        call_id: &str,
+    ) -> Result<super::ArtifactMeta, WriteArtifactError> {
         let limits = ArtifactsConfig::default();
         let sniffed = check_artifact(name, bytes, &limits).unwrap();
         write_artifact(
             &self.pool,
             NewArtifact {
                 task_id: task,
+                run_id: self.run(task).await,
+                call_id,
                 name,
                 sniffed: &sniffed,
                 content: bytes,
@@ -72,6 +110,18 @@ impl Env {
             },
         )
         .await
+    }
+
+    /// The artifact-written payloads of the task's transcript, oldest first.
+    async fn written_events(&self, task: TaskId) -> Vec<serde_json::Value> {
+        sqlx::query_scalar(
+            "SELECT payload #> '{factoryActivity,artifactWritten}' FROM transcript_events
+             WHERE task_id = $1 AND kind = 'factory_activity' ORDER BY id",
+        )
+        .bind(task.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
     }
 }
 
@@ -84,7 +134,7 @@ fn png() -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn replacing_a_text_artifact_by_an_image_drops_the_text() {
+async fn replacing_a_text_artifact_by_an_image_drops_the_text_and_records_the_image_event() {
     let env = env().await;
     let task = env.task(None, &[]).await;
     env.write(task.id, "result.md", b"# text", 50)
@@ -102,6 +152,11 @@ async fn replacing_a_text_artifact_by_an_image_drops_the_text() {
         .unwrap();
     assert_eq!(stored.content, png());
     assert_eq!(stored.meta.mime_type, "image/png");
+    let events = env.written_events(task.id).await;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["kind"], "ARTIFACT_KIND_TEXT");
+    assert_eq!(events[1]["kind"], "ARTIFACT_KIND_IMAGE");
+    assert_eq!(events[1]["mimeType"], "image/png");
     assert!(
         read_artifact_content(&env.pool, task.id, "other.md")
             .await
@@ -243,4 +298,64 @@ async fn the_child_ended_message_lists_the_artifacts_of_the_child_only() {
     assert!(!with.contains("raw.md"), "{with}");
     let without = messages.iter().find(|m| m.contains("DF-4 ")).unwrap();
     assert!(without.contains("Artifacts: none"), "{without}");
+}
+
+#[tokio::test]
+async fn a_stored_artifact_appends_one_written_event_to_the_runs_transcript() {
+    let env = env().await;
+    let task = env.task(None, &[]).await;
+    env.write(task.id, "findings.md", b"# Findings", 50)
+        .await
+        .unwrap();
+
+    let events = env.written_events(task.id).await;
+
+    assert_eq!(
+        events,
+        vec![serde_json::json!({
+            "name": "findings.md", "kind": "ARTIFACT_KIND_TEXT", "mimeType": "text/markdown", "size": "10"
+        })]
+    );
+}
+
+#[tokio::test]
+async fn replacing_an_artifact_appends_a_second_event_with_the_new_size() {
+    let env = env().await;
+    let task = env.task(None, &[]).await;
+    env.write(task.id, "findings.md", b"# Findings", 50)
+        .await
+        .unwrap();
+    env.write(task.id, "findings.md", b"# Findings 2", 50)
+        .await
+        .unwrap();
+
+    let events = env.written_events(task.id).await;
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1]["size"], "12");
+}
+
+#[tokio::test]
+async fn the_same_call_id_stores_one_event() {
+    let env = env().await;
+    let task = env.task(None, &[]).await;
+    let call = uuid::Uuid::now_v7().to_string();
+    env.write_call(task.id, "a.md", b"x", 50, &call)
+        .await
+        .unwrap();
+    env.write_call(task.id, "a.md", b"x", 50, &call)
+        .await
+        .unwrap();
+
+    assert_eq!(env.written_events(task.id).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_write_rejected_by_the_count_limit_stores_no_event() {
+    let env = env().await;
+    let task = env.task(None, &[]).await;
+    env.write(task.id, "a.md", b"x", 1).await.unwrap();
+    env.write(task.id, "b.md", b"x", 1).await.unwrap_err();
+
+    assert_eq!(env.written_events(task.id).await.len(), 1);
 }

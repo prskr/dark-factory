@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use df_db::artifacts::ArtifactMeta;
+use df_proto::transcript::v1::{ArtifactKind, ArtifactWritten};
 use maud::{Markup, html};
 
 use crate::components::{ICON_BUTTON_CLASS, INITIAL_DETAILS_TAB, Icon, icon};
@@ -39,8 +40,8 @@ fn is_markdown(meta: &ArtifactMeta) -> bool {
 }
 
 /// The label of an artifact's type: `Markdown`, `Text`, or the image format.
-pub(super) fn type_label(meta: &ArtifactMeta) -> &'static str {
-    match meta.mime_type.as_str() {
+pub(super) fn type_label(mime_type: &str) -> &'static str {
+    match mime_type {
         "text/markdown" => "Markdown",
         "image/png" => "PNG",
         "image/jpeg" => "JPEG",
@@ -121,7 +122,7 @@ pub(crate) fn cards(task_key: &str, artifacts: &[ArtifactCard]) -> Markup {
                                 span class="min-w-0 flex-1 truncate" { (meta.name) }
                             }
                             div class="text-xs text-faint" {
-                                (type_label(meta)) " \u{b7} " (size_label(meta.size)) " \u{b7} " (time(meta.updated_at))
+                                (type_label(&meta.mime_type)) " \u{b7} " (size_label(meta.size)) " \u{b7} " (time(meta.updated_at))
                             }
                         }
                     }
@@ -192,7 +193,7 @@ pub(super) fn artifact_view(
                 div class="min-w-0 flex-1" {
                     h2 class="truncate text-base font-semibold" { (meta.name) }
                     p class="truncate text-xs text-faint" {
-                        (type_label(meta)) " \u{b7} " (size_label(meta.size)) " \u{b7} "
+                        (type_label(&meta.mime_type)) " \u{b7} " (size_label(meta.size)) " \u{b7} "
                         @if let Some(size) = dimensions(meta) { (size) " \u{b7} " }
                         "updated " (time(meta.updated_at))
                     }
@@ -253,14 +254,17 @@ pub(crate) fn split_pane() -> Markup {
     }
 }
 
-/// The transcript row of a successful `write_artifact` call; it opens the artifact's current
-/// version. `name` must be a valid artifact name (it is written into an attribute and a script
-/// string). `data-artifact-written` makes the page reload the tab and an open artifact.
-pub(crate) fn artifact_row(id: &str, name: &str) -> Markup {
-    let (label, glyph) = match extension(name) {
-        "md" => ("Markdown", Icon::FileText),
-        "png" | "jpg" | "jpeg" | "webp" | "gif" => ("Image", Icon::ImageFile),
-        _ => ("Text", Icon::FileText),
+/// The transcript row of an artifact-written event; it opens the artifact's current version.
+/// `written.name` must be a valid artifact name (it is written into an attribute and a script
+/// string). `data-artifact-written` makes the page reload the tab and an open artifact. An
+/// unspecified kind is shown as text.
+pub(crate) fn artifact_row(id: &str, written: &ArtifactWritten) -> Markup {
+    let name = written.name.as_str();
+    let label = type_label(&written.mime_type);
+    let glyph = if written.kind() == ArtifactKind::Image {
+        Icon::ImageFile
+    } else {
+        Icon::FileText
     };
     html! {
         div id=(id) data-author="agent" data-tool data-artifact-written=(name) class="ml-11" {

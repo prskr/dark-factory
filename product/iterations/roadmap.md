@@ -167,6 +167,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Shared crate for forge plugins (HTTP transport, draft prefixes), once a third forge plugin exists | idea | `openspec/changes/archive/2026-11-01-iter2-github-plugin` (D4) |
 | Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
 | Forge activity outside runs: PR merged or closed, review submitted, CI failed after the run ended; needs transcript rows without a run | idea | ADR-0046, `openspec/changes/archive/2026-11-04-forge-activity-transcript` |
+| Further factory activity in the transcript: an agent woken by another task, an incoming webhook event; and factory activity outside runs (needs transcript rows without a run) | idea | ADR-0057, `openspec/changes/artifact-written-transcript-events` |
 | Commit links in forge activity: commit or compare URL from the forge integration (WIT) for push rows | idea | ADR-0046, `openspec/changes/archive/2026-11-04-forge-activity-transcript` |
 | WASI 0.3 guests for plugins | idea | ADR-0002 |
 | Hide hidden-path content from the repository history: the Git proxy refuses blob fetches for hidden paths (blobless clones fetch them lazily today) | idea | ADR-0054, `openspec/changes/iter3-hidden-paths` (out of scope) |

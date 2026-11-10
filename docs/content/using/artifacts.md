@@ -64,8 +64,11 @@ sequenceDiagram
 - **Artifacts tab**: appears in the details once the task has an artifact, with the number of
   artifacts and a card each (newest first, with the first lines of a text or the image). Without
   artifacts the details keep the title "Details".
-- **Transcript**: a successful `write_artifact` shows as a row with the name and type; it opens
-  the current version. A failed call stays an ordinary tool row.
+- **Transcript**: after every stored artifact the control plane adds a row with the name and
+  type ("findings.md · Markdown") under the agent's tool row; it opens the current version. A
+  failed write shows only the tool row. It works the same for every harness, also when the harness
+  wraps the tool (OpenCode's `execute`). Transcripts from before this row existed show only the
+  tool rows.
 - **Split view** (from 768 px): opening an artifact shows it next to the transcript, with the message
   box below the transcript. From 1280 px the details column collapses to its strip while an
   artifact is open; from 768 to 1279 px an open details slide-over closes. Closing the artifact
@@ -75,8 +78,8 @@ sequenceDiagram
   Preview/Source toggle for Markdown (Source shows the highlighted text); "Open full page"; Close.
 - **Rendering**: Markdown with code highlighting and Mermaid diagrams, other text highlighted by its
   extension, images as images.
-- **Live**: when a `write_artifact` row arrives in the transcript, the tab and an open artifact of
-  that name reload, and the first artifact brings the tab in without a reload.
+- **Live**: when that row arrives in the live transcript, the tab and an open artifact of that
+  name reload, and the first artifact brings the tab in without a reload.
 - **Task list**: from 768 px a button collapses the task list to a strip to make room; the browser
   remembers the choice.
 - **Artifact page**: `/tasks/<key>/artifacts/<name>` is a page of its own that you can bookmark; it

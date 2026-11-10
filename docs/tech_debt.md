@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-122.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-123.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -41,6 +41,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-119: code review of `conversation-flow` (`df-agent-channel`, `factory-agent`, 2026-11-06). The `TD-n (ID)` heading gives the IDs used in that review.
 - Origin of TD-120: full `just e2e-local` run while closing #124 (2026-11-07).
 - Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
+- Origin of TD-122: code review of `artifact-written-transcript-events` (`df-web`, 2026-11-10). The `TD-n (ID)` heading gives the ID used in that review.
 
 ## Summary
 
@@ -124,6 +125,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-119 | low   | `df-agent-channel` tests | Repeated single-prompt extraction and `TurnEnded` test fixtures ([#141]) |
 | TD-120 | medium | `df-gateway` relay, `df-web` egress log | Live rows of the traffic page stopped once; live delivery has no e2e test |
 | TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
+| TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
 
 ## Entries
 
@@ -917,6 +919,16 @@ If a cluster service rule fails transiently and has no earlier resolution, recon
 **Matters when:** a named `targetPort` has no matching EndpointSlice port for a long time after a control plane restart (empty cache), and an operator removes another rule in that window.
 
 **Fix:** render the resolved targets, plus the current policy's entries only for the unavailable rules.
+
+### TD-122 (P3). The live appearance of the Artifacts tab has no browser test
+
+`crates/df-web/scripts/artifactSplit.ts`, `crates/df-web/src/artifacts/` (out-of-band tab bar), `crates/df-e2e/tests/delegation.rs`
+
+The chain from an artifact-written event to the Artifacts tab appearing and reloading is tested only in pieces: the live stream delivers the row with `data-artifact-written` (`crates/df-web/src/sse/tests.rs`), the tab bar renders out of band, and the script contains the `artifacts-changed` trigger. No test runs the script in a browser. The e2e test opens the task after the researcher has written its artifact.
+
+**Matters when:** `artifactSplit.ts`, the out-of-band tab bar or the row attribute changes; the tab can stop appearing live without a failing test.
+
+**Fix:** in `delegation.rs`, open the task page before the researcher writes and assert that the Artifacts tab appears with count 1 without a reload.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

@@ -116,7 +116,7 @@ async fn page(
         "{} {} ({})",
         task.key,
         artifact.meta.name,
-        type_label(&artifact.meta)
+        type_label(&artifact.meta.mime_type)
     );
     layout(&title, Nav::Tasks, &Shell::new(&user, &state), body).into_response()
 }

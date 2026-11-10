@@ -122,8 +122,8 @@ pub(crate) fn log_outbound(body: &agent_message::Body) {
                     }
                     _ => tracing::info!(code = %n.code, message = %n.message, "notice"),
                 },
-                // The runtime never emits forge activity; the control plane drops it.
-                Some(Kind::ForgeActivity(_)) | None => {}
+                // The runtime never emits forge or factory activity; the control plane drops it.
+                Some(Kind::ForgeActivity(_) | Kind::FactoryActivity(_)) | None => {}
             }
         }
         agent_message::Body::PushReport(r) => {
