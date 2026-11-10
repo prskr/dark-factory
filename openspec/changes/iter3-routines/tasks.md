@@ -54,7 +54,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - the outcome cell shows "created DF-n" or "skipped: DF-n still open" with the key linked;
   - next firing is empty while disabled;
   - delete removes the row.
-- [ ] 4.5 Write failing tests, then add Routines to the navigation rail below Projects (not in the phone bottom bar), and show "Routine · \<name\>" as creator in the task details, linked only while the routine exists (spec `task-ui`). Verify with `df-web` tests for the rail on `/routines`, a routine-created task, and the same task after the routine is deleted.
+- [ ] 4.5 Write failing tests, then add Routines to the navigation rail below Requests (not in the phone bottom bar), and show "Routine · \<name\>" as creator in the task details, linked only while the routine exists (spec `task-ui`). Verify with `df-web` tests for the rail on `/routines`, a routine-created task, and the same task after the routine is deleted.
 
 ## 5. Documentation
 
@@ -75,7 +75,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 ## 6. Integration
 
-- [ ] 6.1 If `iter3-chats` was archived before this change, rebase the `web-ui-shell` "Desktop navigation rail" MODIFIED block on the archived text (Chats, Tasks, Requests, Projects, Routines, Network traffic, Settings). Verify with `openspec validate iter3-routines --strict`.
+- [ ] 6.1 If `iter3-chats` was archived before this change, rebase the `web-ui-shell` "Desktop navigation rail" MODIFIED block on the archived text (Chats, Tasks, Requests, Routines, Network traffic, Settings). Verify with `openspec validate iter3-routines --strict`.
 - [ ] 6.2 Extend the e2e suite (`crates/df-e2e`). Verify with `just e2e-local`. The test:
   - creates a routine in the UI;
   - presses Run now;
