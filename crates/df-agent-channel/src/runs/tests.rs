@@ -356,6 +356,41 @@ async fn only_due_tasks_start_and_a_rate_limited_one_needs_no_message() {
 }
 
 #[tokio::test]
+async fn a_start_attempt_at_the_limit_releases_the_start_lock_at_once() {
+    use sqlx::Connection as _;
+
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    park_seed_task(&env).await;
+    due_task(&env, "waiting for a slot", "queued", "-1 hour").await;
+    let busy = due_task(&env, "busy", "running", "0 seconds").await;
+    env.insert_run(busy, 1, "running").await;
+
+    // A pool whose connections never get back to idle: sqlx queues the rollback of a dropped
+    // transaction and sends it only when the connection is used again, so a transaction that
+    // the code did not end itself keeps its lock here.
+    let stuck = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .after_release(|_, _| Box::pin(std::future::pending()))
+        .connect_with(pool.connect_options().as_ref().clone())
+        .await
+        .unwrap();
+
+    assert!(start_queued_runs(&stuck, 10, 1).await.unwrap().is_empty());
+
+    let mut other = sqlx::PgConnection::connect_with(&pool.connect_options())
+        .await
+        .unwrap();
+    let mut tx = other.begin().await.unwrap();
+    let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(START_LOCK_KEY)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert!(locked, "the start lock is still held after the attempt");
+}
+
+#[tokio::test]
 async fn the_concurrency_limit_holds_further_tasks_and_the_oldest_resume_time_goes_first() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
