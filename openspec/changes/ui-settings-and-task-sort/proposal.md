@@ -8,17 +8,12 @@ The desktop rail gives Projects, which is configuration, the same rank as the da
 
 - **Projects in the settings area (desktop):** from 768 px, Projects becomes the first section of the settings sidebar (Projects, Personas, Credentials, Model providers, Egress rules). The rail loses its Projects link, and its Settings link opens `/projects`. Below 768 px nothing changes: Projects stays in the bottom bar, there is no settings sidebar, and the floating button still reads "New project".
 - **Task list sort:** the task list gets a sort menu with three options:
-  - "Newest activity", the default: last activity, newest first
-  - "Oldest activity": last activity, oldest first
+  - "Recently updated", the default: last update, newest first
+  - "Least recently updated": last update, oldest first
   - "Newest created": creation time, newest first
 
   The sort is part of the URL (`sort=`; the default is left out). It applies to live updates, and task links carry it along like the filters.
-- **Last activity of a task:** a new column `tasks.last_activity_at`, backfilled from `updated_at`. It is updated by:
-  - status changes and renames
-  - queued messages
-  - transcript events (agent output and forge activity), throttled to one write per task every 10 s
-
-  The list row shows this time instead of `updated_at`.
+- **Last update of a task:** the existing `tasks.updated_at`, which status changes and renames set. The list row already shows it. No schema change.
 - **BREAKING (UI):** editing a project moves from a modal to a **project settings page** `/projects/{key}`. At every width it holds the tabs of today's edit form: General, Push checks and, for `admin`, Integrations. The tab is part of the URL (`?tab=push-checks`, `?tab=integrations`), so docs and links can point to it.
   - From 768 px the page sits in the settings area, next to the settings sidebar with Projects marked current.
   - The page has a back link to the project list, a header with the project name and key, and one "Save project" button.
@@ -41,6 +36,7 @@ The desktop rail gives Projects, which is configuration, the same rank as the da
 Out of scope:
 - Rotating or regenerating the webhook secret from the UI: backlog (needs `create`/`update` on Secrets and a hot reload, which `generate-webhook-secrets` rejected for now).
 - A per-project webhook secret override: already in the backlog ("Webhook secret override per project").
+- Ordering by agent output and queued messages (a throttled `last_activity_at` column): deferred. Revisit only if ordering by status changes proves too coarse (design D2).
 - Sort options beyond the three above (by key, by project, by status): rejected (the status chips and the project filter cover those).
 - Grouping the "Push checks" tab: rejected (it already has one topic).
 - A settings entry on phones: rejected (phones keep only Tasks, Requests and Projects, as `Configuration pages on phones` requires).
@@ -54,7 +50,7 @@ None.
 
 - `web-ui-shell`: the desktop rail no longer links Projects, and Settings is marked current on `/projects`.
 - `configuration-management`: "Projects" names the settings page instead of the edit form. Projects joins the settings area as its first section, and the Settings link opens `/projects`. A new requirement covers the project settings page, and "Configuration forms as modals" no longer covers editing a project. The General tab and the new-project form are grouped under headings. "Form tabs on phones" is reworded for the page.
-- `task-ui`: the task list is ordered by the chosen sort (default: last activity, newest first) and shows the last activity time; a new requirement covers the sort menu.
+- `task-ui`: the task list is ordered by the chosen sort (default: last update, newest first); a new requirement covers the sort menu.
 - `event-subscriptions`: the tab is called "Integrations". Lifecycle events are its first group; project subscriptions, position, public key and delivery status are reworded. The requirement "No separate subscription page" (the redirect of `/projects/{key}/subscriptions`) is removed.
 - `forge-webhooks`: a new requirement covers the "Incoming webhook" group (URL, masked secret, show, copy, audit, unavailable states).
 - `human-auth`: a new requirement makes `publicUrl` a top-level setting that OIDC uses.
@@ -73,13 +69,11 @@ None.
     - `project_subscriptions.rs`: tab rename and groups
     - new webhook group and secret endpoint
     - `task_pages/view.rs`: sort menu and `Filters`
-    - `sse.rs`: list stream with sort, and re-render on activity
+    - `sse.rs`: list stream with sort
     - `components/icons.rs`: Eye, EyeOff, Copy and ArrowDownUp from Lucide
     - a small TS module for reveal and copy
   - `df-db`:
-    - migration adding `last_activity_at`
     - `task_views.rs` sort
-    - throttled activity update in `transcript.rs`, `tasks.rs` and `task_events.rs`
     - `.sqlx/` metadata
   - `df-core`: `Config.public_url`, `AuthConfig` without `public_url`, and a new audit action
   - `dark-factory`: wiring `publicUrl` and the webhook secrets into `WebState`

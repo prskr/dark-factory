@@ -26,7 +26,7 @@ Current state:
 
 **Goals:**
 - Desktop navigation that separates daily views from configuration.
-- A task list that surfaces tasks with recent activity by default.
+- A task list that surfaces recently updated tasks by default.
 - One place in the UI where an admin finds everything needed to register a forge webhook.
 - A General tab that reads as a few labelled groups.
 
@@ -46,34 +46,15 @@ Current state:
 
 Alternative: a real modal "settings dialog" with all sections inside. Rejected: every settings page already has its own modals, and nesting modals is what the project form avoided for subscriptions. Editing a project becomes a page inside the settings area instead (D8).
 
-### D2: `last_activity_at` with a throttled write
-- **Migration:**
-  ```sql
-  ALTER TABLE tasks ADD COLUMN last_activity_at timestamptz NOT NULL DEFAULT now();
-  UPDATE tasks t SET last_activity_at = GREATEST(
-    t.updated_at,
-    (SELECT max(e.occurred_at) FROM transcript_events e WHERE e.task_id = t.id),
-    (SELECT max(m.queued_at) FROM task_messages m WHERE m.task_id = t.id)
-  );  -- GREATEST ignores NULLs, so tasks without events or messages keep updated_at
-  CREATE INDEX tasks_last_activity_idx ON tasks (last_activity_at DESC, id DESC);
-  ```
-- **Writers:**
-  - Status changes and renames set it with `updated_at`, in the same statement.
-  - Queued messages (`tasks.rs`, the `task_messages` inserts) set it in their transaction.
-  - Transcript appends (`transcript.rs`, agent events and `append_control_event`) run one throttled update in the same transaction:
-    ```sql
-    UPDATE tasks SET last_activity_at = now()
-    WHERE id = $1 AND last_activity_at < now() - interval '10 seconds'
-    ```
-    It publishes `Notification::TaskChanged` only when a row was updated.
-- **Why throttle:** streaming agents append many events per second. The throttle bounds the extra writes to one row update per task every 10 s and keeps the list stream from re-rendering on every token.
-- **Precision:** an event inside the window is not written, so the stored time can lag the latest event by up to 10 s, and two tasks active within the same 10 s can be ordered by their previous write. That is the accepted bound (spec "Task list"). Recording the suppressed event later would need a timer or a deferred write per task, which costs more than a 10 s error is worth in a human-facing list.
-- One helper in `df-db` (`touch_activity(tx, task_id)`) holds the statement, so all writers share it.
+### D2: Sort by `updated_at`
+- The "updated" sorts order by the existing `tasks.updated_at`. Status changes (`task_events.rs`) and renames (`tasks.rs`) already set it, and they already publish `Notification::TaskChanged`, so the list stream re-renders on them. Rows already show `updated_at`.
+- No migration, no new column, no extra writes. No index either: the `CASE` `ORDER BY` of D3 cannot use one, and task lists are small pre-MVP.
+- **Limit:** agent output and queued messages that do not change the status do not move a task up. That is accepted for a first iteration.
 
-Alternative: compute the time on read (`GREATEST(updated_at, max(transcript_events.occurred_at), …)`). Rejected: a sort over an aggregate per task does not use an index and grows with transcript size.
+Alternative (deferred, revisit only if status-only ordering proves too coarse): a `tasks.last_activity_at` column, backfilled from `updated_at`, the newest transcript event and the newest queued message, and written by status changes, renames, queued messages and transcript appends (throttled to one write per task every 10 s, `UPDATE … WHERE last_activity_at < now() - interval '10 seconds'`). It costs a migration, a write hook in every transcript append and a lag of up to 10 s.
 
 ### D3: Sort in the URL
-- `TaskSort` enum in `df-core` next to `StatusSet` (`Activity`, `ActivityAsc`, `Created`). The URL values are `sort=activity` (default, left out), `sort=oldest` and `sort=created`.
+- `TaskSort` enum in `df-core` next to `StatusSet` (`Updated`, `UpdatedAsc`, `Created`). The URL values are `sort=updated` (default, left out), `sort=updated-asc` and `sort=created`.
 - `Filters` gains the field, so `query()`, row links, the SSE URL and `to_db()` carry it.
 - `list_task_items` keeps one query. `ORDER BY` uses `CASE` branches on a bound parameter, with `t.id` as the tie breaker in each. This keeps a single `sqlx::query!` with checked metadata. Two extra statement variants would duplicate the query for no readability gain.
 - **The sort menu:**
@@ -205,8 +186,8 @@ Alternative: download the scripts in `build.rs`. Rejected: network access in a b
 
 ## Risks / Trade-offs
 
-- Lists re-order while you look at them (activity sort with live updates) → bounded by the 10 s throttle and the existing debounce; `outerMorph` keeps focus and scroll position.
-- An extra `UPDATE tasks` in transcript append transactions → one indexed row update per task every 10 s at most; it takes the task row lock briefly, which the run already holds through `RunTaskLock`.
+- Lists re-order while you look at them (updated sort with live updates) → only on status changes and renames, with the existing debounce; `outerMorph` keeps focus and scroll position.
+- A long-running task that only produces output stays where its last status change put it → accepted for this iteration (D2, deferred alternative).
 - Showing an instance-wide secret in a project tab → admin-only, fetched on demand, audited, `no-store`. The copy text states that it is shared.
 - A plain `cargo` build without `pnpm install` has no htmx, Alpine or Mermaid, so the UI does not work. That is the same as a build without `swc`: the build warns, `cargo test` lists the affected tests as ignored, and diagrams fall back to their source. Release builds go through Bazel, which fails without the files.
 - An htmx bump changes the core and `hx-sse` together. That is wanted, since the extension is written for its htmx version. The SSE behavior the UI relies on (README spike: `Last-Event-ID`, cleanup) is covered by the e2e suite (`crates/df-e2e`), so a bump PR runs it before merging.
@@ -214,8 +195,6 @@ Alternative: download the scripts in `build.rs`. Rejected: network access in a b
 
 ## Migration Plan
 
-- The database migration is additive (new column, backfill, index), so it is safe to roll forward. A rollback of the binary leaves an unused column.
-- During a rolling upgrade, or after a rollback and a later re-upgrade, an older binary changes tasks without touching `last_activity_at`. Those tasks show a stale activity time until their next activity. That is accepted: pre-MVP, there are no production installations, and the error corrects itself with the next event. No reconciliation job.
 - Operators rename `oidc.publicUrl` → `publicUrl` before upgrading. With the old key, `helm upgrade` fails on the schema and the running release is untouched.
 - Old links to `/tasks` without `sort` get the new default order, and links to `/projects` keep working (now inside the settings area). Links to `/projects/{key}/edit` and `/projects/{key}/subscriptions` break (no redirects, D8).
 

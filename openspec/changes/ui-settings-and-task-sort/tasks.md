@@ -6,7 +6,7 @@ Prerequisite: `generate-webhook-secrets` is implemented and archived (webhook se
 
 - [ ] 1.1 PenPot (page "Config - Personas"): add the Projects state to the variant set `Settings nav` as the first entry. On page "Config - Projects", put the projects table board inside the settings area (rail without Projects, Settings marked current). Export the boards and get the user's approval.
 - [ ] 1.2 PenPot (page "Config - Projects"): turn the edit modal into the project settings page (design D8). It shows the settings sidebar, a back link "Projects", a header with name, key and forge icon, the tabs, "Save project" and the "Project saved" status. Draw it at 1440 and 390 px in two variants, vertical and horizontal tabs. Settle the orientation with the user in the design session. Export the boards and get the user's approval.
-- [ ] 1.3 PenPot (task list page): add the sort menu to the list title row (closed, and open with "Newest activity" checked) at 1440 and 390 px. Export the boards and get the user's approval.
+- [ ] 1.3 PenPot (task list page): add the sort menu to the list title row (closed, and open with "Recently updated" checked) at 1440 and 390 px. Export the boards and get the user's approval.
 - [ ] 1.4 PenPot (page "Config - Projects"): on the approved page layout of 1.2, turn the "edit modal, lifecycle events" boards into an "Integrations" tab with two groups (heading and separator):
   - "Lifecycle events" with the current content
   - "Incoming webhook" with the URL, a copy button, the secret masked, revealed and just copied (check icon, "Copied")
@@ -59,25 +59,18 @@ Prerequisite: `generate-webhook-secrets` is implemented and archived (webhook se
 
   Verify `cargo test -p df-web config_pages` passes.
 
-## 4. Last activity and task list sort (design D2, D3)
+## 4. Task list sort (design D2, D3)
 
-- [ ] 4.1 Add the migration for `tasks.last_activity_at`: column, a backfill with the latest of `updated_at`, the task's newest transcript event and its newest queued message (design D2), and the index. Write a migration test first: a task with a transcript event newer than `updated_at` is backfilled with the event's time, and a task without events keeps `updated_at`. Add `df_db::tasks::touch_activity` (the throttled update, returns whether a row changed). Write failing `df-db` tests:
-  - status change and rename set `last_activity_at`
-  - a queued message sets it
-  - two transcript appends within 10 s update it once
-  - forge activity (`append_control_event`) updates it
-
-  Then call it from the writers in `task_events.rs`, `tasks.rs` and `transcript.rs`, and publish `TaskChanged` when it changed. Regenerate `.sqlx/`. Verify with `cargo test -p df-db` (container-backed; state if no socket is available and CI runs them).
-- [ ] 4.2 Add `TaskSort` to `df-core` (`domain.rs`) with URL parsing (default for unknown values). Write failing `df-db` tests for `list_task_items` in each sort, including a stable tie order. Then change the query and regenerate `.sqlx/`. Verify `cargo test -p df-core` and `cargo test -p df-db task_views` pass (the latter container-backed).
-- [ ] 4.3 Write failing tests in `crates/df-web/src/task_pages/tests/list.rs`:
-  - the default list is ordered by last activity and rows show its time
+- [ ] 4.1 Add `TaskSort` to `df-core` (`domain.rs`) with URL parsing (`updated`, `updated-asc`, `created`; default for unknown values). Write failing `df-db` tests for `list_task_items` in each sort (the updated sorts by `updated_at`), including a stable tie order. Then change the query and regenerate `.sqlx/`. Verify `cargo test -p df-core` and `cargo test -p df-db task_views` pass (the latter container-backed; state if no socket is available and CI runs them).
+- [ ] 4.2 Write failing tests in `crates/df-web/src/task_pages/tests/list.rs`:
+  - the default list is ordered by `updated_at`, newest first
   - `sort=created` orders by creation and appears in chip, project and row links
   - an unknown `sort` falls back to the default
   - the sort menu marks the current option and names it on the button
   - the SSE URL carries the sort
 
   Rename `task_list_shows_newest_first_with_status_and_status_line` to match the new behavior. Then extend `Filters`, add the sort menu to `list_column` (Lucide `arrow-down-up` added to `Icon`) and pass the sort through `sse.rs`. Verify `cargo test -p df-web task_pages` passes.
-- [ ] 4.4 Write a failing `sse.rs` test: a `TaskChanged` from `touch_activity` re-renders the list in the new order. Verify `cargo test -p df-web sse` passes.
+- [ ] 4.3 Write a failing `sse.rs` test: a `TaskChanged` from a status change re-renders the list in the new order. Verify `cargo test -p df-web sse` passes.
 
 ## 5. Grouped project form (design D6)
 
@@ -147,7 +140,7 @@ Prerequisite: `generate-webhook-secrets` is implemented and archived (webhook se
   - the admin tab is "Integrations", with both groups described
 
   `docs/content/using/tasks.md`:
-  - sort options and default, and what counts as last activity
+  - sort options and default, and that only status changes and renames count as an update
   - fix the Done group to include `cancelled`
 
   Verify with `just docs-build`.
