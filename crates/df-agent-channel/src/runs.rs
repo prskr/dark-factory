@@ -173,7 +173,10 @@ pub async fn start_queued_runs(
         .bind(START_LOCK_KEY)
         .fetch_one(&mut *tx)
         .await?;
+    // Every exit ends the transaction itself: a dropped one only queues its rollback, which a
+    // pooled connection sends when it is used again, and until then the lock stays held.
     if !locked {
+        tx.rollback().await?;
         return Ok(Vec::new());
     }
     let active: i64 = sqlx::query_scalar(concat!(
@@ -184,6 +187,7 @@ pub async fn start_queued_runs(
     .await?;
     let free = i64::from(max_concurrent).saturating_sub(active);
     if free <= 0 {
+        tx.rollback().await?;
         return Ok(Vec::new());
     }
     // ponytail: `updated_at` approximates the time a task became queued; add a status change
