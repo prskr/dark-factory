@@ -4,7 +4,7 @@ use super::set_status;
 use crate::testkit::{TestApp, new_task, seed, tag_around, text};
 
 #[tokio::test]
-async fn task_list_shows_newest_first_with_status_and_status_line() {
+async fn task_list_shows_status_and_status_line_in_the_default_order() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -18,16 +18,160 @@ async fn task_list_shows_newest_first_with_status_and_status_line() {
 
     let html = text(app.get("/tasks", &cookie).await).await;
     assert!(
-        html.find("DF-2").unwrap() < html.find("DF-1").unwrap(),
-        "newest first"
-    );
-    assert!(
         html.contains("compiling")
             && html.contains("running")
             && html.contains("Linus")
             && html.contains("Dark Factory")
     );
     assert!(html.contains("hx-sse:connect=\"/tasks/events\""));
+}
+
+/// Keys of the rows in the order the page shows them.
+fn row_keys(html: &str) -> Vec<String> {
+    let rows = &html[html.find("<ul id=\"task-rows\"").unwrap()..];
+    let rows = &rows[..rows.find("</ul>").unwrap()];
+    rows.split("<li id=\"row-")
+        .skip(1)
+        .map(|r| r[..r.find('"').unwrap()].to_string())
+        .collect()
+}
+
+/// Three tasks; DF-1, the oldest, was updated last.
+async fn tasks_with_the_oldest_updated_last(app: &TestApp) {
+    let seed = seed(&app.pool).await;
+    for title in ["a", "b", "c"] {
+        new_task(&app.pool, &seed, title).await;
+    }
+    sqlx::query("UPDATE tasks SET updated_at = now() + interval '1 hour' WHERE key = 'DF-1'")
+        .execute(&app.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_default_list_is_ordered_by_last_update_newest_first() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    tasks_with_the_oldest_updated_last(&app).await;
+
+    let html = text(app.get("/tasks", &cookie).await).await;
+
+    assert_eq!(row_keys(&html), ["DF-1", "DF-3", "DF-2"]);
+    let oldest = text(app.get("/tasks?sort=updated-asc", &cookie).await).await;
+    assert_eq!(row_keys(&oldest), ["DF-2", "DF-3", "DF-1"]);
+}
+
+#[tokio::test]
+async fn sort_created_orders_by_creation_and_appears_in_chip_project_and_row_links() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    tasks_with_the_oldest_updated_last(&app).await;
+
+    let html = text(app.get("/tasks?sort=created", &cookie).await).await;
+
+    assert_eq!(row_keys(&html), ["DF-3", "DF-2", "DF-1"]);
+    assert!(
+        html.contains("hx-get=\"/tasks/DF-3?sort=created\""),
+        "{html}"
+    );
+    // Status chips and the project menu keep it; the default sort is left out of links.
+    assert!(
+        html.contains("href=\"/tasks?status=done&amp;sort=created\""),
+        "{html}"
+    );
+    assert!(
+        html.contains("href=\"/tasks?project=DF&amp;sort=created\""),
+        "{html}"
+    );
+    let default = text(app.get("/tasks?sort=updated&status=done", &cookie).await).await;
+    assert!(
+        default.contains("href=\"/tasks?status=waiting\""),
+        "{default}"
+    );
+    assert!(!default.contains("sort=updated\""), "{default}");
+    assert!(!default.contains("sort=updated&"), "{default}");
+}
+
+#[tokio::test]
+async fn an_unknown_sort_falls_back_to_the_default() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    tasks_with_the_oldest_updated_last(&app).await;
+
+    let html = text(app.get("/tasks?sort=bogus", &cookie).await).await;
+
+    assert_eq!(row_keys(&html), ["DF-1", "DF-3", "DF-2"]);
+    assert!(!html.contains("sort=bogus"), "{html}");
+}
+
+#[tokio::test]
+async fn the_sort_menu_marks_the_current_option_and_names_it_on_the_button() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    tasks_with_the_oldest_updated_last(&app).await;
+
+    for (uri, current) in [
+        ("/tasks", "Recently updated"),
+        ("/tasks?sort=updated-asc", "Least recently updated"),
+        ("/tasks?sort=created", "Newest created"),
+    ] {
+        let html = text(app.get(uri, &cookie).await).await;
+        let button = tag_around(&html, &format!("aria-label=\"{current}\""));
+        assert!(
+            button.starts_with("<button") && button.contains(&format!("title=\"{current}\"")),
+            "{uri}: {button}"
+        );
+        let menu = &html[html.find("role=\"menu\"").unwrap()..];
+        let menu = &menu[..menu.find("</div>").unwrap()];
+        assert_eq!(menu.matches("role=\"menuitemradio\"").count(), 3, "{menu}");
+        assert_eq!(menu.matches("aria-checked=\"true\"").count(), 1, "{menu}");
+        let checked = tag_around(menu, "aria-checked=\"true\"");
+        assert!(
+            menu[menu.find(checked).unwrap()..].contains(current),
+            "{uri}: {menu}"
+        );
+        assert_eq!(menu.matches("<svg").count(), 1, "one check icon: {menu}");
+    }
+    // Options link to the same list with the other sort; the default is left out.
+    let html = text(app.get("/tasks?status=done&sort=created", &cookie).await).await;
+    for href in [
+        "href=\"/tasks?status=done\"",
+        "href=\"/tasks?status=done&amp;sort=updated-asc\"",
+    ] {
+        assert!(html.contains(href), "{href}: {html}");
+    }
+}
+
+#[tokio::test]
+async fn the_sort_menu_sits_in_the_title_row_at_every_width_before_the_project_menu() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let html = text(app.get("/tasks", &cookie).await).await;
+
+    let list = &html[html.find("class=\"ws-list\"").unwrap()..];
+    let title_row = &list[..list.find("flex flex-wrap items-center gap-2").unwrap()];
+    let sort = title_row
+        .find("aria-label=\"Recently updated\"")
+        .expect("sort button");
+    let projects = title_row.find("All projects").expect("project menu");
+    assert!(
+        title_row.find(">Tasks</h1>").unwrap() < sort && sort < projects,
+        "{title_row}"
+    );
+    // Only the project menu is desktop-only.
+    let button = tag_around(title_row, "aria-label=\"Recently updated\"");
+    assert!(!button.contains("hidden"), "{button}");
+}
+
+#[tokio::test]
+async fn the_event_stream_url_carries_the_sort() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let html = text(app.get("/tasks?sort=created&status=all", &cookie).await).await;
+    assert!(
+        html.contains("hx-sse:connect=\"/tasks/events?status=all&amp;sort=created\""),
+        "{html}"
+    );
 }
 
 #[tokio::test]

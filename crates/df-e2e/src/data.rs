@@ -32,6 +32,10 @@ pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
 pub const WEBHOOK_PROJECT_KEY: &str = "WH";
 pub const WEBHOOK_PROJECT_NAME: &str = "Webhooks";
 
+/// The webhook secret of the `forgejo` plugin and of the repository webhook (`webhook_secret` of
+/// `deploy/e2e/e2e-local.sh`).
+pub const WEBHOOK_SECRET: &str = "e2e-webhook-secret";
+
 /// Project whose fake agent delegates (`create_task`, `send_message`) without any webhook; tasks
 /// are `DG-<n>`.
 pub const DELEGATION_PROJECT_KEY: &str = "DG";

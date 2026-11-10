@@ -6,21 +6,25 @@ use axum::http::request::Parts;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::WebState;
-use crate::assets::asset_url;
+use crate::assets::{asset_url, get_asset};
 use crate::auth::CurrentUser;
 use crate::components::shell::is_settings;
 use crate::components::{CreateAction, bottom_bar, floating_create, rail, settings_sidebar};
 
 /// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
 /// loaded on every page before Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 6] = [
+pub(crate) const COMPONENT_SCRIPTS: [&str; 7] = [
     "artifactSplit.js",
     "egress-log.js",
     "egress-rule.js",
     "markdown.js",
+    "secret-field.js",
     "tabs.js",
     "workspace.js",
 ];
+
+/// The diagram renderer, loaded by the `mermaidDiagram` component when a page has a diagram.
+const MERMAID_ASSET: &str = "vendor/mermaid.min.js";
 
 /// htmx extension in `scripts/sse-cleanup.ts`; loaded between htmx and `hx-sse`, so its cleanup
 /// hook runs before the one of `hx-sse`.
@@ -38,6 +42,9 @@ const HTMX_CONFIG: &str =
 pub enum Nav {
     Tasks,
     Projects,
+    /// The settings page of one project: a page of the settings area (sidebar marks Projects), and
+    /// on phones a full page without the bottom bar and the create button.
+    ProjectSettings,
     Personas,
     Credentials,
     ModelProviders,
@@ -49,6 +56,17 @@ pub enum Nav {
     EgressLog,
     /// Pages outside the navigation (login errors, 403).
     None,
+}
+
+impl Nav {
+    /// The entry of the settings sidebar this page belongs to: a project's settings page is part
+    /// of Projects, every other entry is its own.
+    pub(crate) const fn settings_section(self) -> Self {
+        match self {
+            Self::ProjectSettings => Self::Projects,
+            other => other,
+        }
+    }
 }
 
 /// Which screen of the task workspace a phone shows; larger screens show both.
@@ -157,7 +175,9 @@ fn document(
             // On a phone, browser Back must show the screen of the URL again: the row click set
             // `data-view` to `task`, and history navigation does not undo that.
             body class="bg-app font-sans text-ink antialiased" data-view=[view.map(View::as_str)]
-                data-mermaid-src=(asset_url("vendor/mermaid.min.js"))
+                // Without the renderer (a `cargo` build without the npm packages) the component
+                // leaves each diagram as source and says so.
+                data-mermaid-src=[get_asset(MERMAID_ASSET).map(|_| asset_url(MERMAID_ASSET))]
                 x-data=[view.map(|_| "")]
                 "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
@@ -168,8 +188,10 @@ fn document(
                     }
                 }
                 @if nav != Nav::None {
-                    (bottom_bar(nav))
-                    (floating_create(&create_action(nav, compose_href)))
+                    @if nav != Nav::ProjectSettings {
+                        (bottom_bar(nav))
+                        (floating_create(&create_action(nav, compose_href)))
+                    }
                     // Live pending count of the navigation (and the inbox list on its page).
                     div hx-sse:connect=(if nav == Nav::Requests { "/requests/events?list=1" } else { "/requests/events" }) hx-swap="none" {}
                 }
@@ -237,10 +259,15 @@ mod tests {
             assert!(!mobile.contains(hidden), "{hidden} in mobile menu");
         }
         let desktop = nav_html(&page, "desktop-menu");
-        for shown in ["/tasks", "/requests", "/projects", "/egress/log"] {
+        for shown in ["/tasks", "/requests", "/egress/log"] {
             assert!(desktop.contains(shown), "{shown} missing on desktop");
         }
-        for moved in ["/credentials", "/model-providers", "/egress/allowlist"] {
+        for moved in [
+            "/projects",
+            "/credentials",
+            "/model-providers",
+            "/egress/allowlist",
+        ] {
             assert!(!desktop.contains(moved), "{moved} left in the rail");
         }
         assert!(page.contains("aria-label=\"Settings\""), "{page}");
@@ -256,6 +283,7 @@ mod tests {
     #[test]
     fn settings_pages_show_the_sidebar_with_the_open_section_marked() {
         let cases = [
+            (Nav::Projects, "/projects"),
             (Nav::Personas, "/personas"),
             (Nav::Credentials, "/credentials"),
             (Nav::ModelProviders, "/model-providers"),
@@ -267,14 +295,20 @@ mod tests {
             for (_, href) in cases {
                 assert!(sidebar.contains(&format!("href=\"{href}\"")), "{href}");
             }
-            for label in ["Personas", "Credentials", "Model providers", "Egress rules"] {
+            for label in [
+                "Projects",
+                "Personas",
+                "Credentials",
+                "Model providers",
+                "Egress rules",
+            ] {
                 assert!(
                     sidebar.contains(&format!(">{label}</a>"))
                         || sidebar.contains(&format!("</svg>{label}")),
                     "{label}"
                 );
             }
-            assert_eq!(sidebar.matches("<svg").count(), 4, "an icon per entry");
+            assert_eq!(sidebar.matches("<svg").count(), 5, "an icon per entry");
             assert_eq!(sidebar.matches("aria-current=\"page\"").count(), 1);
             let marked = &sidebar[sidebar.find("aria-current").unwrap()..];
             assert!(marked.contains("before:bg-accent"), "{sidebar}");
@@ -287,6 +321,40 @@ mod tests {
     }
 
     #[test]
+    fn projects_page_has_the_settings_sidebar_and_marks_settings_in_the_rail() {
+        let page = layout("P", Nav::Projects, &Shell::default(), html! {}).into_string();
+        let sidebar = sidebar_html(Nav::Projects).expect("sidebar");
+        let first = &sidebar[sidebar.find("<a ").unwrap()..];
+        assert!(
+            first.starts_with("<a href=\"/projects\" aria-current=\"page\""),
+            "{sidebar}"
+        );
+        assert!(
+            page.contains("href=\"/projects\" aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""),
+            "{page}"
+        );
+        let bar = nav_html(&page, "mobile-menu");
+        for label in ["Tasks", "Requests", "Projects"] {
+            assert!(bar.contains(label), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_project_settings_page_has_the_sidebar_but_no_bottom_bar_and_no_create_button() {
+        let page = layout("DF", Nav::ProjectSettings, &Shell::default(), html! {}).into_string();
+        let sidebar = sidebar_html(Nav::ProjectSettings).expect("sidebar");
+        let marked = &sidebar[..sidebar.find("aria-current").unwrap()];
+        assert!(marked.ends_with("<a href=\"/projects\" "), "{sidebar}");
+        assert!(
+            page.contains("href=\"/projects\" aria-label=\"Settings\" title=\"Settings\" aria-current=\"page\""),
+            "{page}"
+        );
+        assert!(!page.contains("id=\"mobile-menu\""), "{page}");
+        assert!(!page.contains("fixed bottom-20"), "{page}");
+        assert!(!page.contains("aria-label=\"New project\""), "{page}");
+    }
+
+    #[test]
     fn the_sidebar_is_desktop_only_and_other_pages_have_none() {
         let page = layout("T", Nav::Personas, &Shell::default(), html! {}).into_string();
         let aside = &page[..page.find("id=\"settings-menu\"").unwrap()];
@@ -295,13 +363,7 @@ mod tests {
             aside.contains("hidden") && aside.contains("md:flex"),
             "{aside}"
         );
-        for nav in [
-            Nav::Tasks,
-            Nav::Requests,
-            Nav::Projects,
-            Nav::EgressLog,
-            Nav::None,
-        ] {
+        for nav in [Nav::Tasks, Nav::Requests, Nav::EgressLog, Nav::None] {
             assert!(sidebar_html(nav).is_none(), "{nav:?}");
         }
     }
@@ -402,8 +464,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(df_web_styles),
-        ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+        not(all(df_web_styles, df_web_vendor)),
+        ignore = "needs compiled app.css and the third-party scripts: tailwindcss on PATH, pnpm install --frozen-lockfile in crates/df-web"
     )]
     fn page_loads_vendored_scripts_stylesheet_and_fonts_with_hashes() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
@@ -419,6 +481,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(df_web_vendor)]
     fn body_names_the_diagram_renderer_for_the_mermaid_component() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         assert!(
@@ -433,9 +496,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(df_web_vendor))]
+    fn body_has_no_renderer_source_without_the_mermaid_asset() {
+        let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
+        assert!(!page.contains("data-mermaid-src"), "{page}");
+        assert!(!page.contains("vendor/mermaid"), "{page}");
+    }
+
+    #[test]
     #[cfg_attr(
-        not(df_web_scripts),
-        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+        not(all(df_web_scripts, df_web_vendor)),
+        ignore = "needs compiled scripts and the third-party scripts: swc on PATH, pnpm install --frozen-lockfile in crates/df-web"
     )]
     fn sse_cleanup_extension_loads_between_htmx_and_hx_sse() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
@@ -459,8 +530,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(df_web_scripts),
-        ignore = "needs compiled scripts: swc on PATH (bazel run //:bazel_env)"
+        not(all(df_web_scripts, df_web_vendor)),
+        ignore = "needs compiled scripts and the third-party scripts: swc on PATH, pnpm install --frozen-lockfile in crates/df-web"
     )]
     fn component_scripts_load_before_alpine_starts() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
@@ -510,13 +581,13 @@ mod tests {
             page.contains("x-on:popstate.window=\"document.body.dataset.view"),
             "{page}"
         );
+        // Other pages carry no view: the body has only its classes (and the renderer URL).
+        let plain = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         assert!(
-            layout("T", Nav::Tasks, &Shell::default(), html! {})
-                .into_string()
-                .contains(
-                    "<body class=\"bg-app font-sans text-ink antialiased\" data-mermaid-src="
-                )
+            plain.contains("<body class=\"bg-app font-sans text-ink antialiased\""),
+            "{plain}"
         );
+        assert!(!plain.contains("data-view=\"") && !plain.contains("x-on:popstate"));
     }
 
     #[test]

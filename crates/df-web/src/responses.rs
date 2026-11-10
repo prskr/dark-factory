@@ -13,6 +13,16 @@ pub(crate) fn htmx_redirect(location: &str) -> Response {
     response
 }
 
+/// Response telling htmx to navigate to `location` like a boosted link, without a full page load
+/// (a created entity's page after a successful form post).
+pub(crate) fn htmx_location(location: &str) -> Response {
+    let mut response = StatusCode::OK.into_response();
+    if let Ok(value) = HeaderValue::from_str(location) {
+        response.headers_mut().insert("HX-Location", value);
+    }
+    response
+}
+
 /// An HTML fragment that htmx swaps although the request failed validation (htmx 4 swaps
 /// every status except 204 and 304).
 pub(crate) fn invalid(fragment: Markup) -> Response {

@@ -64,7 +64,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
-| Config - Projects | Projects: table, edit modal and its tabs (push checks, context); phone |
+| Config - Projects | Projects: table in the settings area, new-project modal, project settings page and its tabs (general, push checks, context, integrations with its states); phone |
 | Config - Personas | Personas: cards, edit modal; phone edit sheet; settings area; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
 | Config - Credentials | Credentials: table, new with validation error; error page (not found) |
 | Config - Model providers | Model providers: table, new provider modal per credential scheme |
@@ -122,8 +122,8 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
-- The tab "Context" of the "Lifecycle events" boards is not built (`iter3-project-context`); the dialog has three tabs, and the phone board's four-tab row scrolls only where the tabs do not fit.
-- The key panel of the "Lifecycle events" tab uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the dialog footer; the boards draw it dark.
+- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has three tabs (General, Push checks, Integrations).
+- The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
@@ -180,18 +180,33 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Phone / Phone · rate limited, resumes | `/tasks/<id>` | as Desktop · rate limited, resumes; details sheet open | 390 |
 | Tasks - Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
 | Tasks - Phone / Phone · requests, deny always | `/requests` | as Requests · deny always | 390 |
-| Config - Projects / Projects · edit modal, push checks | `/projects/<key>/edit` | projects (not built); tab "Push checks" with the default policy | 1440 |
-| Config - Projects / Projects · edit modal, push checks, invalid glob | `/projects/<key>/edit` | as above; `deploy/[` added as fifth glob and saved | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events | `/projects/<key>/edit` | `just serve-local`, login as `admin@example.com`; tab "Lifecycle events"; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); the board shows the planned tab "Context" before it (not built) | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, new subscription | `/projects/<key>/edit` | as above with one subscription; "New subscription" clicked, URL and event types filled | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, invalid URL | `/projects/<key>/edit` | as above; `https://10.0.4.12/hooks/df` submitted | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, delete subscription | `/projects/<key>/edit` | as the first board; trash icon of the second subscription clicked | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, empty | `/projects/<key>/edit` | as the first board without subscriptions | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, feature off | `/projects/<key>/edit` | control plane without `lifecycleEvents.signingKeyFile` (no key panel), with subscriptions | 1440 |
-| Config - Projects / Projects · edit modal, lifecycle events, unrestricted URLs | `/projects/<key>/edit` | control plane started with `--unrestricted-project-subscriptions` (`dev-tools` build) | 1440 |
-| Config - Projects / Projects · edit modal, webhook wake | `/projects/<key>/edit` | `just serve-local`, login as `admin@example.com`; tab "General", wake setting `members` (default); the board shows the planned tab "Context" (not built) | 1440 |
-| Config - Projects / Phone · edit project sheet, lifecycle events | `/projects/<key>/edit` | as the first board; tab "Lifecycle events" chosen | 390 |
+| Config - Projects / Settings · projects | `/projects` | projects (not built) | 1440 |
+| Config - Projects / Projects · new project | `/projects` | as Settings · projects; "New project" clicked | 1440 |
+| Config - Projects / Projects · settings page, general | `/projects/<key>` | `just serve-local`, login as `admin@example.com`; project `DF` with a forge credential; wake setting `members` (default) | 1440 |
+| Config - Projects / Projects · settings page, saved | `/projects/<key>` | as above; "Save project" clicked without changes | 1440 |
+| Config - Projects / Projects · settings page, push checks | `/projects/<key>?tab=push-checks` | as Projects · settings page, general; default policy | 1440 |
+| Config - Projects / Projects · settings page, push checks, invalid glob | `/projects/<key>?tab=push-checks` | as above; `deploy/[` added as fifth glob and saved | 1440 |
+| Config - Projects / Projects · settings page, context | `/projects/<key>` | not built (`iter3-project-context`) | 1440 |
+| Config - Projects / Projects · settings page, integrations | `/projects/<key>?tab=integrations` | `just serve-local`, login as `admin@example.com`; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); `publicUrl` set, forgejo plugin with a webhook secret | 1440 |
+| Config - Projects / Projects · settings page, integrations, secret revealed | `/projects/<key>?tab=integrations` | as above; "Show secret" clicked | 1440 |
+| Config - Projects / Projects · settings page, integrations, secret copied | `/projects/<key>?tab=integrations` | as above over HTTPS or a loopback host; "Copy secret" clicked (within 2 s) | 1440 |
+| Config - Projects / Projects · settings page, integrations, copying needs HTTPS | `/projects/<key>?tab=integrations` | as above, opened over plain `http://` on a non-loopback host | 1440 |
+| Config - Projects / Projects · settings page, integrations, no forge integration | `/projects/<key>?tab=integrations` | project whose repository host matches no forge integration, or without a forge credential | 1440 |
+| Config - Projects / Projects · settings page, integrations, no webhook support | `/projects/<key>?tab=integrations` | serving plugin without a `webhooks` export (manual seed, not built) | 1440 |
+| Config - Projects / Projects · settings page, integrations, no publicUrl | `/projects/<key>?tab=integrations` | control plane without `publicUrl` (`serve --no-cluster` without auth) | 1440 |
+| Config - Projects / Projects · settings page, integrations, new subscription | `/projects/<key>?tab=integrations` | as Projects · settings page, integrations with one subscription; "New subscription" clicked, URL and event types filled | 1440 |
+| Config - Projects / Projects · settings page, integrations, invalid URL | `/projects/<key>?tab=integrations` | as above; `https://10.0.4.12/hooks/df` submitted | 1440 |
+| Config - Projects / Projects · settings page, integrations, delete subscription | `/projects/<key>?tab=integrations` | as Projects · settings page, integrations; trash icon of the second subscription clicked | 1440 |
+| Config - Projects / Projects · settings page, integrations, empty | `/projects/<key>?tab=integrations` | as Projects · settings page, integrations without subscriptions | 1440 |
+| Config - Projects / Projects · settings page, integrations, feature off | `/projects/<key>?tab=integrations` | control plane without `lifecycleEvents.signingKeyFile` (no key panel), with subscriptions | 1440 |
+| Config - Projects / Projects · settings page, integrations, unrestricted URLs | `/projects/<key>?tab=integrations` | control plane started with `--unrestricted-project-subscriptions` (`dev-tools` build) | 1440 |
+| Config - Projects / Phone · project settings page, general | `/projects/<key>` | as Projects · settings page, general | 390 |
+| Config - Projects / Phone · project settings page, integrations | `/projects/<key>?tab=integrations` | as Projects · settings page, integrations | 390 |
 | Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
+| Flows (filter, new task) / Desktop · task list sort | `/tasks` | fixture tasks (not built); pointer on the sort button (tooltip) | 1440 |
+| Flows (filter, new task) / Desktop · task list sort open | `/tasks` | as above; sort button clicked | 1440 |
+| Tasks - Phone / Phone · task list sort | `/tasks` | fixture tasks (not built) | 390 |
+| Tasks - Phone / Phone · task list sort open | `/tasks` | as above; sort button tapped | 390 |
 | Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
 | Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |
 | Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |

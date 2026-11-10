@@ -12,13 +12,13 @@ Typical receivers: wake a GPU or build node before a sandbox needs it, track san
 | | Instance subscription | Project subscription |
 |---|---|---|
 | Receives | events of every project | events of one project |
-| Managed in | control plane configuration (Helm `lifecycleEvents.subscriptions`), restart to apply | UI: Projects → edit a project → tab "Lifecycle events"; needs the role `admin`, other users do not see the tab |
+| Managed in | control plane configuration (Helm `lifecycleEvents.subscriptions`), restart to apply | UI: Settings → Projects → the project's settings page → tab "Integrations" › "Lifecycle events"; needs the role `admin`, other users do not see the tab |
 | URL | `http://` or `https://`, any address including cluster-internal services | `https://` only; the host must resolve to public addresses ([Address filter](#address-filter)); no username or password in the URL (it is written to the audit log) |
-| Delivery status | control plane logs | last attempt (time, HTTP status or error) in the tab "Lifecycle events" |
+| Delivery status | control plane logs | last attempt (time, HTTP status or error) in the group "Lifecycle events" |
 
 Each subscription lists the event types it receives. An empty list means all types, including types added later.
 
-The instance public key is served without authentication at `GET /lifecycle-events/public-key` (`text/plain`, `whpk_<base64>`) and shown at the top of every project's tab "Lifecycle events". Without a signing key the feature is off: nothing is recorded, the endpoint returns 404 and the tab says so (existing subscriptions stay listed).
+The instance public key is served without authentication at `GET /lifecycle-events/public-key` (`text/plain`, `whpk_<base64>`) and shown at the top of the group "Lifecycle events" of every project's tab "Integrations". Without a signing key the feature is off: nothing is recorded, the endpoint returns 404 and the tab says so (existing subscriptions stay listed).
 
 Instance subscriptions in the Helm values (reference: [chart README](https://github.com/prskr/dark-factory/blob/main/deploy/helm/dark-factory/README.md#values-reference), `lifecycleEvents.*`):
 
@@ -42,15 +42,15 @@ With subscriptions configured but no `signingKeyFile`, the control plane refuses
 ## How-to: add a project subscription and verify its events
 
 1. Get the role `admin` ([Authentication](../authentication/_index.md); Keycloak: [client role](../authentication/keycloak.md), Dex: [group](../authentication/dex.md)).
-2. Open **Projects**, click the edit icon of the project and choose the tab **Lifecycle events**, then **New subscription**. The form opens inside the tab.
+2. Open **Settings → Projects**, the project's settings page (`/projects/<key>?tab=integrations`) and the tab **Integrations**. In the group **Lifecycle events** choose **New subscription**. The form opens inside the group.
 3. Enter the receiver URL (`https://`, public host), check the event types (none: all) and click **Create subscription** or press Enter in the URL field. An invalid URL keeps the form open with an error at the field.
-4. Copy the public key `whpk_…` from the tab into the receiver's configuration.
+4. Copy the public key `whpk_…` from the group into the receiver's configuration.
 5. In the receiver, verify every delivery ([Verifying signatures](#verifying-signatures)) and drop duplicates by `webhook-id`.
-6. Start a task in the project. Its first run sends `sandbox.provisioning`, `volume.provisioned` and `sandbox.provisioned`. The tab then shows the last attempt, for example `HTTP 204`.
+6. Start a task in the project. Its first run sends `sandbox.provisioning`, `volume.provisioned` and `sandbox.provisioned`. The group then shows the last attempt, for example `HTTP 204`.
 
 Subscriptions save on their own: creating, editing and deleting take effect at once, "Save project" does not apply to them, and cancelling the project dialog keeps them. The pencil icon of a row edits it in place. One form is open at a time: opening another discards the unsaved values of the first. The trash icon asks "Delete this subscription? Deliveries to it stop at once." in the row; only **Delete** removes the subscription.
 
-A failing receiver shows the error or status of its last attempt in the tab (`address refused: …`, `timed out`, `connection failed: …`, `HTTP 503`). Delivery is retried in the background ([Delivery](#delivery)).
+A failing receiver shows the error or status of its last attempt in the group (`address refused: …`, `timed out`, `connection failed: …`, `HTTP 503`). Delivery is retried in the background ([Delivery](#delivery)).
 
 ## How-to: wake a node before a sandbox starts
 

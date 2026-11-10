@@ -60,12 +60,12 @@ The issuer URL is the provider URL with the application slug. It must include it
 Helm values (all settings: [Control plane settings](_index.md#control-plane-settings)):
 
 ```yaml
+publicUrl: https://factory.example.org
 oidc:
   issuerUrl: https://auth.example.org/application/o/dark-factory/
   clientId: dark-factory
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
-  publicUrl: https://factory.example.org
   rolesClaim: groups
   extraScopes: [groups]
 ```
@@ -80,7 +80,7 @@ Then check the login as in [Verify](_index.md#verify).
 
 | Symptom | Cause |
 | --- | --- |
-| Authentik rejects the redirect URI | The authorization callback does not exactly match `oidc.publicUrl` + `/auth/callback`, or a pre-2026.5 provider also has a post-logout URI. |
+| Authentik rejects the redirect URI | The authorization callback does not exactly match `publicUrl` + `/auth/callback`, or a pre-2026.5 provider also has a post-logout URI. |
 | 403 for a user in the group | The `groups` claim is absent from the ID token, `oidc.rolesClaim` differs from the claim name, or the user is not in a group named exactly `board-member`. |
 | *Login unavailable* (502) | The control plane cannot reach `oidc.issuerUrl`; check the NetworkPolicy and issuer URL. |
 | Logged out when the ID token expires | `offline_access` is not requested or its scope mapping is missing, so Authentik did not issue a refresh token. |

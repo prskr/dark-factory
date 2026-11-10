@@ -34,10 +34,10 @@ plugins:
     hosts:
       - host: github.com
         apiUrl: https://api.github.com
+publicUrl: http://127.0.0.1:8080
 auth:
   issuerUrl: http://127.0.0.1:5556/dex
   clientId: dark-factory
   clientSecretFile: target/local-dev/oidc-client-secret
-  publicUrl: http://127.0.0.1:8080
   rolesClaim: groups
   extraScopes: [groups, offline_access]

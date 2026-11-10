@@ -256,6 +256,12 @@ async fn run_serve_command(
     signalled: Signalled,
 ) -> anyhow::Result<()> {
     let cfg = InstanceConfig::from_file(config_path)?;
+    if cfg.public_url_is_plain_http_remote() {
+        tracing::warn!(
+            public_url = cfg.public_url.as_ref().map_or("", |url| url.as_str()),
+            "publicUrl is plain http on a non-loopback host: session cookies and logins travel unencrypted"
+        );
+    }
     let http_listener = bind_listener(cfg.server.http_port).await?;
     let agent_listener = bind_listener(cfg.server.agent_port).await?;
     let internal_listener = bind_listener(cfg.server.internal_grpc_port).await?;
@@ -667,12 +673,19 @@ fn web_router(
         .signing_key
         .as_ref()
         .map(|key| Arc::from(key.public_key()));
+    let webhook_receiver = backends.webhooks.receiver();
     let webhooks = df_web::webhooks::routes(backends.webhooks);
     let Some(auth) = &cfg.auth else {
         tracing::warn!("`auth` is not configured; the web UI is disabled");
         return Ok(df_web::base_router(pool.clone(), lifecycle_public_key).merge(webhooks));
     };
-    let oidc = df_web::auth::OidcClient::new(auth).context("invalid `auth` configuration")?;
+    // `InstanceConfig::from_yaml_str` guarantees `publicUrl` next to `auth`.
+    let public_url = cfg
+        .public_url
+        .clone()
+        .context("`publicUrl` is required when `auth` is set")?;
+    let oidc = df_web::auth::OidcClient::new(auth, public_url.as_str())
+        .context("invalid `auth` configuration")?;
     Ok(df_web::router(df_web::WebState {
         pool: pool.clone(),
         notifier: notifier.clone(),
@@ -692,6 +705,8 @@ fn web_router(
         events: df_db::lifecycle_events::EventSinks::new(&cfg.lifecycle_events),
         lifecycle_public_key,
         project_targets: delivery.project_targets,
+        public_url: Some(public_url),
+        webhooks: webhook_receiver,
     })
     .merge(webhooks))
 }
@@ -985,11 +1000,11 @@ mod tests {
         let dir = tempfile::tempdir()?;
         std::fs::write(dir.path().join("oidc-secret"), "s3cret\n")?;
         let mut cfg = serve_config(&pool, dir.path(), None);
+        cfg.public_url = Some("https://factory.example.org".parse()?);
         cfg.auth = Some(df_core::AuthConfig {
             issuer_url: "https://idp.example.org/realms/df".into(),
             client_id: "dark-factory".into(),
             client_secret_file: dir.path().join("oidc-secret"),
-            public_url: "https://factory.example.org".into(),
             roles_claim: "roles".into(),
             extra_scopes: Vec::new(),
         });
@@ -1135,8 +1150,16 @@ mod tests {
             plugin == "forgejo"
         }
 
-        fn has_endpoint(&self, plugin: &str) -> bool {
-            plugin == "forgejo"
+        fn setup(&self, plugin: &str) -> df_web::webhooks::WebhookSetup {
+            if plugin == "forgejo" {
+                df_web::webhooks::WebhookSetup::Ready
+            } else {
+                df_web::webhooks::WebhookSetup::NotLoaded
+            }
+        }
+
+        fn secret(&self, _plugin: &str) -> Option<secrecy::SecretString> {
+            None
         }
 
         async fn receive(

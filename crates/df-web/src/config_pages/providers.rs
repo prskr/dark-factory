@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 use self::models::{ModelRow, PresetModel};
 use super::{
-    FormTarget, Tab, conflict, create_button, edit_button, form_grid, full_row, list_header,
-    list_page, saved, tabbed_form, wider_modal,
+    FormTarget, Tab, TabsStyle, conflict, create_button, edit_button, form_grid, full_row,
+    list_header, list_page, saved, tabbed_form, wider_modal,
 };
 use crate::WebState;
 use crate::auth::CurrentUser;
@@ -508,7 +508,14 @@ fn provider_form(
     } else {
         "general"
     };
-    tabbed_form(&target.action(), errors, &tabs, open, submit)
+    tabbed_form(
+        &target.action(),
+        errors,
+        &tabs,
+        open,
+        submit,
+        TabsStyle::Dialog,
+    )
 }
 
 /// Whether the form has errors and all of them are in the model list.

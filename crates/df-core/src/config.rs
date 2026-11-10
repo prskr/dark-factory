@@ -45,6 +45,15 @@ pub struct InstanceConfig {
     #[serde(default = "default_instance_name")]
     pub instance_name: String,
     pub database: DatabaseConfig,
+    /// Externally visible base URL of the control plane, e.g. `https://factory.example.org`.
+    /// The OIDC redirect URI is `<publicUrl>/auth/callback`; the web UI shows absolute URLs
+    /// (such as the webhook URL) below it. Required with `auth`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_public_url",
+        serialize_with = "serialize_public_url"
+    )]
+    pub public_url: Option<url::Url>,
     #[serde(default)]
     pub server: ServerConfig,
     /// OIDC login of the web UI. Without it `serve` mounts only health checks and assets.
@@ -88,6 +97,12 @@ impl InstanceConfig {
         }
         cfg.lifecycle_events.validate()?;
         cfg.artifacts.validate()?;
+        if cfg.auth.is_some() && cfg.public_url.is_none() {
+            return Err(ConfigError::Invalid(
+                "`publicUrl` is required when `auth` is set: the OIDC redirect URI is `<publicUrl>/auth/callback`"
+                    .into(),
+            ));
+        }
         for (name, plugin) in &cfg.plugins {
             if plugin.call_timeout_seconds == 0 {
                 return Err(ConfigError::Invalid(format!(
@@ -105,6 +120,21 @@ impl InstanceConfig {
         Ok(cfg)
     }
 
+    /// Whether `publicUrl` is plain `http://` on a host other than this machine: logins and
+    /// session cookies then travel unencrypted, and startup warns about it.
+    pub fn public_url_is_plain_http_remote(&self) -> bool {
+        let Some(url) = &self.public_url else {
+            return false;
+        };
+        let local = match url.host() {
+            Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        url.scheme() == "http" && !local
+    }
+
     /// Reads and parses an [`InstanceConfig`] from a file path.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
@@ -113,6 +143,33 @@ impl InstanceConfig {
             source,
         })?;
         Self::from_yaml_str(&contents)
+    }
+}
+
+/// Parses `publicUrl` once, at load; the error names the setting.
+fn deserialize_public_url<'de, D>(deserializer: D) -> Result<Option<url::Url>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    raw.map(|raw| {
+        url::Url::parse(&raw)
+            .map_err(|e| serde::de::Error::custom(format!("`publicUrl` is not a URL: {e}")))
+    })
+    .transpose()
+}
+
+#[expect(
+    clippy::ref_option,
+    reason = "the signature serde's `serialize_with` calls"
+)]
+fn serialize_public_url<S>(url: &Option<url::Url>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match url {
+        Some(url) => serializer.serialize_str(url.as_str()),
+        None => serializer.serialize_none(),
     }
 }
 
@@ -204,9 +261,6 @@ pub struct AuthConfig {
     pub client_id: String,
     /// File holding the client secret (confidential client).
     pub client_secret_file: PathBuf,
-    /// Externally visible base URL of the UI, e.g. `https://factory.example.org`. The OIDC
-    /// redirect URI is `<publicUrl>/auth/callback`.
-    pub public_url: String,
     /// Name of the top-level token claim holding a flat list of roles.
     #[serde(default = "default_roles_claim")]
     pub roles_claim: String,

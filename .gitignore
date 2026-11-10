@@ -50,3 +50,6 @@ execution_log.binpb.zst
 /docs/public/
 /docs/resources/
 .hugo_build.lock
+
+# Third-party scripts of the web UI (`pnpm install --frozen-lockfile` in crates/df-web)
+/crates/df-web/node_modules/

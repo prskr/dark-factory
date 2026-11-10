@@ -9,6 +9,7 @@ use df_e2e::browser::Session;
 use df_e2e::forgejo::Forgejo;
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data, db};
+use playwright_rs::expect;
 use serde_json::Value;
 use sqlx::PgPool;
 
@@ -73,6 +74,89 @@ async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() ->
     assert_eq!(pull["draft"], true, "{:?}", pull["title"]);
     assert_eq!(pull["state"], "open");
     Ok(())
+}
+
+/// forge-webhooks, "Incoming webhook URL in project settings" and "Masked webhook secret": the URL of
+/// the group is the one the repository webhook of the suite delivers to, and the secret is the one
+/// it signs with. Where the page is a secure context (HTTPS or a loopback host) "Copy secret" puts
+/// the secret on the clipboard; otherwise the group says that copying needs HTTPS and "Show secret"
+/// reveals it.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn the_integrations_tab_shows_the_webhook_url_and_the_secret_of_the_repository_webhook()
+-> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session
+        .page
+        .context()?
+        .grant_permissions(&["clipboard-read", "clipboard-write"], None)
+        .await
+        .context("grant the clipboard permissions")?;
+    session
+        .page
+        .goto(
+            &format!(
+                "{}/projects/{}?tab=integrations",
+                env.base_url,
+                data::WEBHOOK_PROJECT_KEY
+            ),
+            None,
+        )
+        .await?;
+
+    let url = session.page.locator("#webhook-url");
+    expect(url.clone())
+        .to_have_value(&format!("{}/webhooks/forgejo", env.base_url))
+        .await
+        .context("the webhook URL of the plugin")?;
+    // The page holds a mask only.
+    let secret_field = session.page.locator("#webhook-secret");
+    assert_ne!(secret_field.input_value(None).await?, data::WEBHOOK_SECRET);
+
+    let can_copy = session
+        .page
+        .evaluate_value("window.isSecureContext && !!navigator.clipboard")
+        .await?
+        == "true";
+    if can_copy {
+        session
+            .page
+            .locator("button[aria-label='Copy secret']")
+            .click(None)
+            .await
+            .context("copy the secret")?;
+        expect(session.page.locator("[role=status]:has-text('Copied')"))
+            .to_be_visible()
+            .await
+            .context("the copy is confirmed")?;
+        let clipboard = session
+            .page
+            .evaluate_value("navigator.clipboard.readText()")
+            .await?;
+        assert_eq!(clipboard, data::WEBHOOK_SECRET);
+        assert_ne!(
+            secret_field.input_value(None).await?,
+            data::WEBHOOK_SECRET,
+            "copying does not show it"
+        );
+    } else {
+        expect(session.page.locator("text=Copying needs HTTPS"))
+            .to_be_visible()
+            .await
+            .context("the group says why there is no copy button")?;
+    }
+    session
+        .page
+        .locator("button[aria-label='Show secret']")
+        .click(None)
+        .await
+        .context("show the secret")?;
+    expect(secret_field)
+        .to_have_value(data::WEBHOOK_SECRET)
+        .await
+        .context("the revealed secret is the one of the repository webhook")
 }
 
 async fn wait_for_status(pool: &PgPool, key: &str, status: &str) -> Result<()> {

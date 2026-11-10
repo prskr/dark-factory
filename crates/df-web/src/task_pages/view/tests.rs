@@ -5,13 +5,25 @@ use df_core::Principal;
 
 #[test]
 fn filters_parse_and_serialize_without_defaults() {
-    assert_eq!(Filters::new(None, None).query(), "");
-    assert_eq!(Filters::new(Some("nonsense"), Some("")).query(), "");
-    let f = Filters::new(Some("done"), Some("WEB"));
-    assert_eq!(f.query(), "?status=done&project=WEB");
+    assert_eq!(Filters::new(None, None, None).query(), "");
+    assert_eq!(
+        Filters::new(Some("nonsense"), Some(""), Some("bogus")).query(),
+        ""
+    );
+    let f = Filters::new(Some("done"), Some("WEB"), Some("created"));
+    assert_eq!(f.query(), "?status=done&project=WEB&sort=created");
     assert_eq!(f.status.group(), Some(StatusSet::Done));
+    assert_eq!(f.to_db().sort, TaskSort::Created);
+    assert_eq!(Filters::new(None, None, Some("updated")).query(), "");
+    assert_eq!(
+        Filters::new(None, None, Some("updated-asc")).query(),
+        "?sort=updated-asc"
+    );
     assert_eq!(StatusFilter::parse(Some("all")).group(), None);
-    assert_eq!(Filters::new(None, Some("A B")).query(), "?project=A+B");
+    assert_eq!(
+        Filters::new(None, Some("A B"), None).query(),
+        "?project=A+B"
+    );
 }
 
 #[test]

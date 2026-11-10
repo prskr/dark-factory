@@ -3,7 +3,7 @@
 //! `#task-details`, `#runs`, `#pending`, `#task-rows`) are re-rendered by `crate::sse`.
 
 use chrono::{DateTime, Utc};
-use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskKey, TaskStatus, TitleSource};
+use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskKey, TaskSort, TaskStatus, TitleSource};
 use df_db::TaskMessageRow;
 use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail, TaskListItem};
 use maud::{Markup, html};
@@ -15,8 +15,8 @@ use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, chip, definition_list, details_panel_with_heading, dialog_close, dialog_with,
-    field_error, filter_chip, form_error, harness_label, icon, phone_profile_menu, search_menu,
-    section, status_badge, tone_badge,
+    field_error, filter_chip, form_error, harness_label, icon, icon_menu, phone_profile_menu,
+    search_menu, section, status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
 use crate::layout::Shell;
@@ -106,13 +106,15 @@ impl StatusFilter {
 pub(crate) struct Filters {
     pub status: StatusFilter,
     pub project: Option<String>,
+    pub sort: TaskSort,
 }
 
 impl Filters {
-    pub(crate) fn new(status: Option<&str>, project: Option<&str>) -> Self {
+    pub(crate) fn new(status: Option<&str>, project: Option<&str>, sort: Option<&str>) -> Self {
         Self {
             status: StatusFilter::parse(status),
             project: project.filter(|p| !p.is_empty()).map(str::to_string),
+            sort: sort.map(TaskSort::from_query).unwrap_or_default(),
         }
     }
 
@@ -120,6 +122,7 @@ impl Filters {
         df_db::task_views::TaskFilter {
             group: self.status.group(),
             project_key: self.project.clone(),
+            sort: self.sort,
         }
     }
 
@@ -131,6 +134,9 @@ impl Filters {
         }
         if let Some(project) = &self.project {
             parts.push(format!("project={}", url_encode(project)));
+        }
+        if self.sort != TaskSort::default() {
+            parts.push(format!("sort={}", self.sort.as_query()));
         }
         if parts.is_empty() {
             String::new()
@@ -157,6 +163,13 @@ impl Filters {
     fn with_project(&self, project: Option<&str>) -> Self {
         Self {
             project: project.map(str::to_string),
+            ..self.clone()
+        }
+    }
+
+    fn with_sort(&self, sort: TaskSort) -> Self {
+        Self {
+            sort,
             ..self.clone()
         }
     }
@@ -268,6 +281,15 @@ pub(crate) fn list_column(
         hint: format!("{} · {}", p.key, p.task_count),
         current: filters.project.as_deref() == Some(p.key.as_str()),
     }));
+    let sorts: Vec<MenuItem> = TaskSort::ALL
+        .into_iter()
+        .map(|sort| MenuItem {
+            href: href(&filters.with_sort(sort)),
+            label: sort.label().into(),
+            hint: String::new(),
+            current: filters.sort == sort,
+        })
+        .collect();
     let events = format!("/tasks/events{}", filters.query());
     html! {
         section class="ws-list" aria-label="Tasks" {
@@ -278,7 +300,10 @@ pub(crate) fn list_column(
             div class="ws-list-full space-y-3 border-b border-line p-4" {
                 div class="flex items-center justify-between gap-2" {
                     h1 class="text-lg font-semibold" { "Tasks" }
-                    div class="ml-auto hidden md:block" { (search_menu(menu_label, &menu)) }
+                    div class="ml-auto flex items-center gap-1" {
+                        (icon_menu(Icon::ArrowDownUp, filters.sort.label(), &sorts))
+                        div class="hidden md:block" { (search_menu(menu_label, &menu)) }
+                    }
                     button type="button" aria-label="Collapse task list" "x-on:click"="setListCollapsed(true)" class={(ICON_BUTTON_CLASS) " max-md:hidden"} { (icon(Icon::PanelLeft)) }
                     (phone_profile_menu(shell))
                 }

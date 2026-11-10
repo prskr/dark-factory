@@ -12,6 +12,20 @@ async fn audit(app: &TestApp, action: &str) -> Vec<serde_json::Value> {
         .unwrap()
 }
 
+/// Creating a project answers with a navigation to its settings page.
+fn assert_project_created(response: &axum::http::Response<axum::body::Body>) {
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(header_str(response, "hx-location").starts_with("/projects/"));
+    assert_eq!(header_str(response, "hx-trigger"), "");
+}
+
+/// Saving a project's settings page answers with the form again, not with a closing modal.
+fn assert_project_saved(response: &axum::http::Response<axum::body::Body>) {
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header_str(response, "hx-trigger"), "");
+    assert_eq!(header_str(response, "hx-retarget"), "");
+}
+
 /// A successful save answers with the updated list for `#config-list` and closes the modal.
 fn assert_saved(response: &axum::http::Response<axum::body::Body>) {
     assert_eq!(response.status(), StatusCode::OK);
@@ -71,12 +85,12 @@ async fn project_adapter_command_is_stored_shown_again_and_clearable() {
             &cookie,
         )
         .await;
-    assert_saved(&response);
+    assert_project_saved(&response);
     assert_eq!(
         stored_adapter_command(&app).await,
         ["/usr/local/bin/my-acp-adapter", "--flag"]
     );
-    let edit = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+    let edit = text(app.get("/projects/DF", &cookie).await).await;
     assert!(
         edit.contains("value=\"/usr/local/bin/my-acp-adapter --flag\""),
         "{edit}"
@@ -85,7 +99,7 @@ async fn project_adapter_command_is_stored_shown_again_and_clearable() {
     assert!(edit.contains("Leave empty to use the instance"));
 
     let response = app.post("/projects/DF", &body(""), &cookie).await;
-    assert_saved(&response);
+    assert_project_saved(&response);
     assert!(stored_adapter_command(&app).await.is_empty());
 }
 
@@ -201,7 +215,7 @@ async fn project_is_created_and_listed() {
             &cookie,
         )
         .await;
-    assert_saved(&response);
+    assert_project_created(&response);
     let list = text(app.get("/projects", &cookie).await).await;
     assert!(list.contains("DF") && list.contains("dark-factory.git"));
     assert_eq!(audit(&app, "project.create").await[0]["after"]["key"], "DF");
@@ -218,7 +232,7 @@ async fn http_repository_is_accepted_when_the_instance_allows_plain_http() {
             &cookie,
         )
         .await;
-    assert_saved(&response);
+    assert_project_created(&response);
     // Other schemes stay refused.
     let response = app
         .post(
@@ -258,7 +272,7 @@ async fn http_issue_tracker_is_accepted_only_when_the_instance_allows_plain_http
             &cookie,
         )
         .await;
-    assert_saved(&response);
+    assert_project_created(&response);
 
     let strict = TestApp::new().await;
     let cookie = strict.login().await;
@@ -342,7 +356,7 @@ async fn the_edit_form_shows_the_key_read_only_with_and_without_tasks() {
         if with_tasks {
             new_task(&app.pool, &seed, "first").await;
         }
-        let html = text(app.get_htmx("/projects/DF/edit", &cookie).await).await;
+        let html = text(app.get("/projects/DF", &cookie).await).await;
         let at = html.find("id=\"key\"").unwrap();
         let input = &html[html[..at].rfind("<input").unwrap()..];
         let input = &input[..input.find('>').unwrap()];
@@ -394,7 +408,7 @@ async fn changing_the_key_of_a_project_is_rejected_with_or_without_tasks() {
     let ok = app
         .post("/projects/DF", &project_form("DF", REPO), &cookie)
         .await;
-    assert_saved(&ok);
+    assert_project_saved(&ok);
     assert_eq!(audit(&app, "project.update").await.len(), 1);
 }
 
@@ -468,7 +482,7 @@ async fn unknown_resources_are_404() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     for path in [
-        "/projects/NOPE/edit",
+        "/projects/NOPE",
         "/personas/00000000-0000-0000-0000-000000000000/edit",
         "/credentials/00000000-0000-0000-0000-000000000000/edit",
     ] {
@@ -491,7 +505,7 @@ async fn configuration_tables_scroll_inside_their_own_box_and_projects_is_on_the
             &cookie,
         )
         .await;
-    assert_saved(&created);
+    assert_project_created(&created);
 
     let html = text(app.get("/projects", &cookie).await).await;
     // The table sits in a box that scrolls horizontally, so the page itself does not.
@@ -547,7 +561,7 @@ async fn project_rows_show_forge_key_name_repository_branch_and_counts_as_links(
     let html = text(app.get("/projects", &cookie).await).await;
     let table = &html[html.find("<table").unwrap()..html.find("</table>").unwrap()];
     for part in [
-        ">DF</span><span class=\"font-medium\">Dark Factory</span>",
+        ">DF</span><a href=\"/projects/DF\" class=\"font-medium hover:underline\">Dark Factory</a>",
         "https://git.example.org/peter/dark-factory.git",
         "text-muted\">main</td>",
         "data-forge=\"git\"",
@@ -648,7 +662,7 @@ async fn project_forge_follows_the_configured_integration_and_the_credential() {
     let html = text(app.get("/projects", &cookie).await).await;
     let row = |key: &str| {
         let at = html
-            .find(&format!(">{key}</span><span class=\"font-medium\">"))
+            .find(&format!(">{key}</span><a href=\"/projects/{key}\""))
             .unwrap();
         let start = html[..at].rfind("<tr").unwrap();
         html[start..start + html[start..].find("</tr>").unwrap()].to_string()
@@ -725,7 +739,7 @@ async fn project_list(
 /// The table row of project `key`.
 fn project_row(html: &str, key: &str) -> String {
     let at = html
-        .find(&format!(">{key}</span><span class=\"font-medium\">"))
+        .find(&format!(">{key}</span><a href=\"/projects/{key}\""))
         .unwrap_or_else(|| panic!("{key}: {html}"));
     let start = html[..at].rfind("<tr").unwrap();
     html[start..start + html[start..].find("</tr>").unwrap()].to_string()
@@ -969,14 +983,7 @@ async fn forms_are_modal_fragments_and_plain_requests_go_to_the_list() {
 async fn the_full_page_form_routes_are_gone() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
-    app.post(
-        "/projects",
-        &project_form("DF", "https://git.example.org/o/r.git"),
-        &cookie,
-    )
-    .await;
     for path in [
-        "/projects/DF",
         "/personas/00000000-0000-0000-0000-000000000000",
         "/credentials/00000000-0000-0000-0000-000000000000",
     ] {
@@ -1010,29 +1017,6 @@ async fn a_validation_error_keeps_the_modal_open_with_values_and_the_error_at_th
     );
     let key_error = html.find("id=\"secret_key-error\"").unwrap();
     assert!(html.find("id=\"secret_key\"").unwrap() < key_error);
-}
-
-#[tokio::test]
-async fn a_saved_project_updates_the_list_and_closes_the_modal() {
-    let app = TestApp::new().await;
-    let cookie = app.login().await;
-    let response = app
-        .post(
-            "/projects",
-            &project_form("DF", "https://git.example.org/o/r.git"),
-            &cookie,
-        )
-        .await;
-
-    assert_saved(&response);
-    let html = text(response).await;
-    assert!(
-        html.starts_with("<div id=\"config-list\">") && html.contains("Dark Factory"),
-        "{html}"
-    );
-    // The list page and the answer render the same region.
-    let page = text(app.get("/projects", &cookie).await).await;
-    assert!(page.contains(&html));
 }
 
 #[tokio::test]
@@ -1146,8 +1130,9 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
                 &cookie,
             )
             .await;
-        assert_saved(&response);
-        assert_eq!(count(&text(response).await, "Projects"), n.to_string());
+        assert_project_created(&response);
+        let page = text(app.get("/projects", &cookie).await).await;
+        assert_eq!(count(&page, "Projects"), n.to_string());
     }
     let persona = form(&[
         ("name", "Ada"),
@@ -1175,7 +1160,7 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
 async fn projects_and_credentials_share_the_table_card_that_scrolls_inside_itself() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
-    assert_saved(
+    assert_project_created(
         &app.post(
             "/projects",
             &project_form("DF", "https://g.example/o/r.git"),
@@ -1228,7 +1213,7 @@ async fn projects_and_credentials_share_the_table_card_that_scrolls_inside_itsel
 }
 
 #[tokio::test]
-async fn the_project_form_groups_key_and_name_and_branch_and_credential_in_rows() {
+async fn the_project_form_pairs_key_with_name_and_base_branch_with_credential() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let html = text(app.get_htmx("/projects/new", &cookie).await).await;
@@ -1242,7 +1227,13 @@ async fn the_project_form_groups_key_and_name_and_branch_and_credential_in_rows(
             "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{name}\""
         ))
     };
-    for full in ["repo_url", "issue_tracker_url", "image", "webhook_wake"] {
+    for full in [
+        "repo_url",
+        "issue_tracker_url",
+        "image",
+        "adapter_command",
+        "webhook_wake",
+    ] {
         assert!(spans_two(full), "{full} is full width");
     }
     for half in ["key", "name", "base_branch", "forge_credential_id"] {
@@ -1252,17 +1243,17 @@ async fn the_project_form_groups_key_and_name_and_branch_and_credential_in_rows(
             "{half}"
         );
     }
-    // Rows in the order of the mockup.
+    // Rows in the order of the approved board.
     let order = [
         "key",
         "name",
         "repo_url",
-        "issue_tracker_url",
-        "image",
         "base_branch",
         "forge_credential_id",
-        "webhook_wake",
+        "issue_tracker_url",
+        "image",
         "adapter_command",
+        "webhook_wake",
     ];
     let at: Vec<usize> = order
         .iter()
@@ -1328,7 +1319,6 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
         .unwrap();
     for (uri, label) in [
         ("/projects/new".to_string(), "Create project"),
-        ("/projects/DF/edit".to_string(), "Save project"),
         ("/personas/new".to_string(), "Create persona"),
         (format!("/personas/{persona_id}/edit"), "Save persona"),
         (
@@ -1381,7 +1371,7 @@ async fn the_phone_project_list_follows_the_mockup() {
 
     // Top line: key chip, name, "Tasks" link on the right.
     let key = phone.find(">DF</span>").unwrap();
-    let name = phone.find(">Dark Factory</span>").unwrap();
+    let name = phone.find(">Dark Factory</a>").unwrap();
     let tasks = phone.find("aria-label=\"Tasks of Dark Factory\"").unwrap();
     assert!(key < name && name < tasks, "{phone}");
     assert!(phone.contains("href=\"/tasks?status=all&amp;project=DF\""));
@@ -1474,5 +1464,6 @@ async fn the_rail_menu_shows_the_version_of_the_instance() {
     assert!(html.contains("Dark Factory 2026.11.0"), "{html}");
 }
 
-mod lifecycle_tab;
+mod integrations_tab;
+mod project_page;
 mod webhook_wake;

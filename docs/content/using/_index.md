@@ -19,10 +19,11 @@ flowchart LR
   T --> PR[Draft pull request]
 ```
 
-On a desktop screen (768 px and wider), the navigation rail on the left holds Tasks, Requests,
-Projects and Network traffic. The **Settings** link (gear) at its bottom opens the settings area
-with a sidebar for **Personas**, **Credentials**, **Model providers** and **Egress rules**. On a
-phone the settings area is not available.
+On a desktop screen (768 px and wider), the navigation rail on the left holds Tasks, Requests
+and Network traffic. The **Settings** link (gear) at its bottom opens the projects page inside the
+settings area, whose sidebar lists **Projects**, **Personas**, **Credentials**, **Model providers**
+and **Egress rules**, in this order. A project is edited on its settings page at `/projects/<key>`.
+On a phone the settings sidebar is not available; **Projects** is in the bottom bar.
 
 Set up in this order:
 

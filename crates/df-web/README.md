@@ -1,7 +1,7 @@
 # df-web
 
-Server-rendered web UI of the control plane: maud templates, htmx 4 and Alpine (vendored in
-`assets/vendor/`), TypeScript (`swc`) and Tailwind (standalone binaries, `build.rs` / Bazel genrules). Design: ADR-0004,
+Server-rendered web UI of the control plane: maud templates, htmx 4 and Alpine (npm packages pinned
+in `package.json`, see "Third-party scripts"), TypeScript (`swc`) and Tailwind (standalone binaries, `build.rs` / Bazel genrules). Design: ADR-0004,
 ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 
 **Design system:** tokens, components, patterns and the review checklist for new views are in
@@ -15,20 +15,22 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `GET /assets/*` | Embedded assets, content-hashed URLs, `Cache-Control: immutable`. No login. |
 | `GET /lifecycle-events/public-key` | Public key of the lifecycle event signatures (`whpk_<base64>`, `text/plain`); `404` without `lifecycleEvents.signingKeyFile`. No login. |
 | `GET /login`, `GET /auth/callback`, `POST /logout` | OIDC login (`docs/content/authentication/_index.md`). |
-| `/tasks?status=&project=`, `/tasks/{key}` | Task workspace: list with filters, transcript, details (one template). |
+| `/tasks?status=&project=&sort=`, `/tasks/{key}` | Task workspace: list with filters and sort (`sort=updated-asc` or `created`; the default `updated` and unknown values are left out of links), transcript, details (one template). |
 | `GET /tasks/compose?project=`, `POST /tasks` | New-task composer (dialog), creation. |
 | `POST /tasks/{key}/title`, `POST /tasks/{key}/messages` | Rename, message input. |
 | `POST /tasks/{key}/done`, `POST /tasks/{key}/stop`, `POST /tasks/{key}/cancel` | Mark done (the PR is marked ready; answers the details region, 409 if not allowed), stop the active run (204; 409 without an active run), cancel the task (answers the details region, 409 for a `completed` or `cancelled` task). Stop and cancel are audited (`run.stop`, `task.cancel`). |
 | `POST /tasks/{key}/reset-workspace` | Delete the task's volume (answers the details region, 409 while the task has a non-terminal run). Holds the task row lock during the deletion (30 s timeout), so no run starts meanwhile; audited as `task.reset_workspace`. |
 | `PATCH /tasks/{key}/messages/{id}`, `DELETE /tasks/{key}/messages/{id}` | Edit or remove a queued message the agent has not received (409 after forwarding, 422 for an empty text). |
-| `GET /tasks/events?status=&project=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
-| `/projects`, `/personas`, `/credentials` | Configuration lists (`POST` creates). |
+| `GET /tasks/events?status=&project=&sort=`, `GET /tasks/{key}/events` | SSE streams for the (filtered) list and the open task. |
+| `/projects`, `/personas`, `/credentials` | Configuration lists (`POST` creates; creating a project answers `HX-Location` to its page). `/projects` is the first section of the settings area. |
+| `GET /projects/{key}?tab=`, `POST /projects/{key}` | The project settings page (full page; tabs General, Push checks and, for `admin`, Integrations; an unknown or forbidden `tab` opens General) and its save (answers the form with the stored values and, as htmx partials, the heading and the "Project saved" status; a validation error answers `422` with the form). `GET /projects/{key}/edit` no longer exists. |
+| `GET /projects/{key}/webhook-secret` | The webhook secret of the plugin serving the project as `text/plain`, `Cache-Control: no-store` (role `admin`; `404` when the Incoming webhook group is unavailable). Each read is audited as `webhook_secret.read` (user, project, plugin; never the secret). |
 | `/egress/allowlist` | Egress rules (`?highlight=host:port` marks rows; the Scope column shows "Everywhere", "Project <KEY>" or "Task <KEY>"; `POST /egress/allowlist/host` and `/service` add instance and project entries, `DELETE /egress/allowlist/{id}` removes an entry of any scope). Cluster services are checked against the cluster when saved, but only in the namespaces of `clusterTargets` (the control plane's RBAC); other namespaces are rejected. Desktop navigation only. |
 | `/egress/log`, `/egress/log/events` | Network traffic (SSE): connection graph, events table, filters (`q`, `verdict`, `sandbox`, `persona`, `project`, `task`; `denied` and `host` still work) and a request details panel; see `docs/design-system.md`, "Network traffic page". The panel cannot show URL, query or headers: TLS tunnels are not inspected. Needs `gateway.headlessService`. Desktop navigation only. |
 | `GET /egress/log/allow?host=&port=&task=&project=`, `POST /egress/log/allow` | "Allow egress" dialog of a blocked row or graph node (modal fragment; a plain request redirects to the log) and the entry it creates. The form posts `host`, `port` and `scope` (`task`, `project` or `instance`) with the `task` and `project` keys. The handler checks the scope itself (the task or project must exist), accepts only an exact host (no wildcard) and creates the entry like the allowlist form: validated, audited, announced to the gateways, and pending `network-access` requests it covers are approved. Answers 422 with the dialog and its error otherwise. |
-| `GET .../new`, `GET .../{key or id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. |
+| `GET .../new`, `GET .../{id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. `/projects/new` is a modal; a project is edited on its page. |
 | `GET /projects/forge?repo_url=&issue_tracker_url=` | Forge icons and hint of the project form (htmx partials). |
-| `/projects/{key}/subscriptions` | Lifecycle event subscriptions of the project (role `admin` as well; others get `403` naming it). The page shows the instance public key with a link to `/lifecycle-events/public-key` and per subscription the last delivery (time, HTTP status or error). `GET .../new`, `GET .../{id}/edit` (modal), `POST` (create), `POST .../{id}` (update) and `DELETE .../{id}`; each change is audited as `event_subscription.create`, `.update` or `.delete` with URL and event types. The form accepts only `https` URLs whose host is not a literal loopback, private, link-local, unique-local or unspecified address, and known event types (none checked: all). The project list links the page for admins only. |
+| `/projects/{key}/subscriptions` | Lifecycle event subscriptions of the project (role `admin` as well; others get `403` naming it). The group "Lifecycle events" of the Integrations tab shows the instance public key with a link to `/lifecycle-events/public-key` and per subscription the last delivery (time, HTTP status or error). `GET .../new`, `GET .../{id}/edit` (modal), `POST` (create), `POST .../{id}` (update) and `DELETE .../{id}`; each change is audited as `event_subscription.create`, `.update` or `.delete` with URL and event types. The form accepts only `https` URLs whose host is not a literal loopback, private, link-local, unique-local or unspecified address, and known event types (none checked: all). The routes answer fragments (a plain browser request gets the fragment as well); the project list has no action for them. |
 
 Everything except health, assets, login and the public key requires the role `board-member`;
 the project subscription routes require `admin` in addition (`auth::require_admin`). Non-GET
@@ -90,14 +92,31 @@ cards; artifacts will reuse it). comrak runs with raw HTML escaped, images rewri
   also inside agent bubbles. `values.schema.json` lists the same theme names; a test compares the
   two.
 - **Diagrams**: a `mermaid` fence is `<pre class="hl-code" x-data="mermaidDiagram">` with the
-  escaped source. `scripts/markdown.ts` (served as `markdown.js`) loads `assets/vendor/mermaid.min.js` (URL from
+  escaped source. `scripts/markdown.ts` (served as `markdown.js`) loads `/assets/vendor/mermaid.min.js` (URL from
   `data-mermaid-src` on `<body>`) on the first diagram of a page and draws with
   `securityLevel: 'sandbox'` (iframe; kept in Mermaid's `secure` list so `%%{init}%%` cannot lower
   it). It redraws when `prefers-color-scheme` changes. A parse error leaves the source and adds a
   one-line error.
 
-Vendored Mermaid: version 11.17.2, `dist/mermaid.min.js` (IIFE) from the npm package,
-SHA-256 `581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8`.
+## Third-party scripts
+
+Mermaid, htmx with its SSE extension and Alpine are npm packages: `package.json` pins them,
+`pnpm-lock.yaml` locks them (its `integrity` hashes replace a checked-in checksum), and
+`pnpm-workspace.yaml` runs no install script. Files are served as published:
+
+| Served path | Package | File |
+|---|---|---|
+| `/assets/vendor/mermaid.min.js` | `mermaid` | `dist/mermaid.min.js` (IIFE) |
+| `/assets/vendor/htmx.min.js` | `htmx.org` | `dist/htmx.min.js` |
+| `/assets/vendor/hx-sse.min.js` | `htmx.org` (same version as htmx) | `dist/ext/hx-sse.min.js` |
+| `/assets/vendor/alpine.min.js` | `alpinejs` | `dist/cdn.min.js` |
+
+The table is `VENDOR` in `build_assets.rs`. Bazel copies the files from the lockfile (`:vendor_scripts`) and
+passes them as `VENDOR_SCRIPTS`; a Bazel build fails without them. Plain `cargo` reads `node_modules`: run
+`pnpm install --frozen-lockfile` in `crates/df-web`. Without it the build warns and embeds none of them
+(`df_web_vendor` is not set, the UI does not work and diagrams stay source with the error "Diagram renderer
+not available"). The versions at the switch (2026-11) equal the files checked in before: Mermaid 11.17.2,
+`htmx.org` 4.0.0, `alpinejs` 3.17.5.
 
 ## Spike: htmx 4 SSE (task 1.1, htmx 4.0.0, `hx-sse.js`)
 

@@ -55,7 +55,6 @@ excessive_nesting = "warn"
 max-lines = 1500
 
 [workspace.metadata.file-length.allow]
-"crates/df-web/assets/vendor/mermaid.min.js" = "vendored third-party build (Mermaid 11.17.2), not edited here"
 
 [workspace.dependencies]
 agent-client-protocol = { version = "3.4.0", features = ["stdio"] }

@@ -36,8 +36,8 @@ kubectl -n dark-factory create secret generic dark-factory-oidc \
 1. **Clients > dark-factory > Roles > Create role**: name `board-member`. Assign it to the users (or
    a group) who may operate the factory.
 2. **Create role** again: name `admin`. Assign it to the users who manage the lifecycle event
-   subscriptions of projects. They find them in the tab "Lifecycle events" of a project's edit
-   dialog, which other users do not see. They need `board-member` as well; `admin` alone opens no
+   subscriptions of projects and read their webhook secret. They find them in the tab "Integrations"
+   of a project's settings page, which other users do not see. They need `board-member` as well; `admin` alone opens no
    page.
 3. **Clients > dark-factory > Client scopes > dark-factory-dedicated > Configure a new mapper >
    User Client Role** (one mapper; it puts every client role of the user into the claim):
@@ -66,12 +66,12 @@ session once, even when several requests arrive with an expired token at the sam
 Helm values (all settings: [Control plane settings](_index.md#control-plane-settings)):
 
 ```yaml
+publicUrl: https://factory.example.org
 oidc:
   issuerUrl: https://id.example.org/realms/dark-factory
   clientId: dark-factory
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
-  publicUrl: https://factory.example.org
   rolesClaim: roles
 ```
 
@@ -81,7 +81,7 @@ Then check the login as in [Verify](_index.md#verify).
 
 | Symptom | Cause |
 | --- | --- |
-| *Invalid parameter: redirect_uri* at Keycloak | The redirect URI does not match `auth.publicUrl` + `/auth/callback`. |
+| *Invalid parameter: redirect_uri* at Keycloak | The redirect URI does not match `publicUrl` + `/auth/callback`. |
 | 403 for a user who has the role | The mapper does not add the claim to the ID token, or `auth.rolesClaim` differs from *Token Claim Name*. |
 | *Login unavailable* (502) | The control plane cannot reach `auth.issuerUrl`; check the NetworkPolicy and the issuer URL. |
 | *Login failed* (400) | The login state does not match, e.g. the login page was opened in another browser or the cookie was blocked. |

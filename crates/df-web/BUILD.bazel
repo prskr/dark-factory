@@ -1,4 +1,5 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@npm_df_web//:defs.bzl", "npm_link_all_packages")
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
@@ -11,6 +12,59 @@ extract_cargo_lints(
 )
 
 exports_files(["Cargo.toml"])
+
+npm_link_all_packages(name = "node_modules")
+
+# The files of the npm packages that `build_assets.rs` serves (its `VENDOR` table), copied to
+# `vendor_scripts/<package>/<file>`; the build script matches them by that suffix. No label carries
+# a version, so a Renovate bump touches only `package.json` and `pnpm-lock.yaml`.
+# `package.json` of each package is for the test that compares the installed versions with ours.
+VENDOR_FILES = {
+    "alpinejs": [
+        "dist/cdn.min.js",
+        "package.json",
+    ],
+    "htmx.org": [
+        "dist/htmx.min.js",
+        "dist/ext/hx-sse.min.js",
+        "package.json",
+    ],
+    "mermaid": [
+        "dist/mermaid.min.js",
+        "package.json",
+    ],
+}
+
+[
+    filegroup(
+        name = "pkg_" + package.replace(".", "_"),
+        srcs = [":node_modules/" + package],
+        output_group = "package_directory",
+    )
+    for package in VENDOR_FILES
+]
+
+genrule(
+    name = "vendor_scripts",
+    srcs = [":pkg_" + package.replace(".", "_") for package in VENDOR_FILES],
+    outs = [
+        "vendor_scripts/" + package + "/" + file
+        for package, files in VENDOR_FILES.items()
+        for file in files
+    ],
+    cmd = "\n".join([
+        "mkdir -p $(RULEDIR)/vendor_scripts/%s/%s && cp $(location :pkg_%s)/%s $(RULEDIR)/vendor_scripts/%s/%s" % (
+            package,
+            file.rpartition("/")[0],
+            package.replace(".", "_"),
+            file,
+            package,
+            file,
+        )
+        for package, files in VENDOR_FILES.items()
+        for file in files
+    ]),
+)
 
 filegroup(
     name = "rs_srcs",
@@ -77,11 +131,13 @@ cargo_build_script(
     build_script_env = {
         "DF_WEB_REQUIRE_ASSETS": "1",
         "TAILWIND_APP_CSS": "$(execpath :app_css)",
+        "VENDOR_SCRIPTS": "$(execpaths :vendor_scripts)",
         "WEB_SCRIPTS": "$(execpaths :web_scripts)",
     },
     crate_root = "build.rs",
     data = glob(["assets/**"]) + [
         ":app_css",
+        ":vendor_scripts",
         ":web_scripts",
     ],
     edition = "2024",
@@ -96,11 +152,15 @@ rust_library(
         ":rs_srcs",
     ],
     aliases = aliases(),
-    # `scripts/**`: the tests embed the TypeScript sources (`assets::script_source`).
+    # `scripts/**`: the tests embed the TypeScript sources (`assets::script_source`);
+    # `package.json`: a test compares the vendor table with it.
     compile_data = glob([
         "assets/**",
         "scripts/**",
-    ]) + ["src/components/brands.json"],
+    ]) + [
+        "package.json",
+        "src/components/brands.json",
+    ],
     crate_name = "df_web",
     edition = "2024",
     lint_config = ":lints",
@@ -126,10 +186,11 @@ rust_test(
         "//docs:design-system.md",
     ],
     crate = ":df_web",
-    data = glob(["src/**/snapshots/*.snap"]),
+    data = glob(["src/**/snapshots/*.snap"]) + [":vendor_scripts"],
     env = {
         "INSTA_UPDATE": "no",
         "INSTA_WORKSPACE_ROOT": ".",
+        "VENDOR_SCRIPTS": "$(rootpaths :vendor_scripts)",
     },
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(

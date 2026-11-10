@@ -2,7 +2,9 @@
 //! compiled from `scripts/*.ts` and the Tailwind stylesheet `app.css`. The decisions are in
 //! `build_assets.rs`, which has the tests.
 //!
-//! The cfgs `df_web_scripts` and `df_web_styles` tell the tests which kinds were compiled.
+//! The third-party scripts come from the npm packages of `package.json` (`node_modules` or Bazel's
+//! `VENDOR_SCRIPTS`). The cfgs `df_web_scripts`, `df_web_styles` and `df_web_vendor` tell the tests
+//! which kinds were staged.
 
 mod build_assets;
 
@@ -52,6 +54,7 @@ fn main() -> Result<()> {
     for var in [
         "WEB_SCRIPTS",
         "TAILWIND_APP_CSS",
+        "VENDOR_SCRIPTS",
         "SWC_BIN",
         "TAILWIND_BIN",
         "DF_WEB_REQUIRE_ASSETS",
@@ -61,6 +64,7 @@ fn main() -> Result<()> {
     }
     println!("cargo:rustc-check-cfg=cfg(df_web_scripts)");
     println!("cargo:rustc-check-cfg=cfg(df_web_styles)");
+    println!("cargo:rustc-check-cfg=cfg(df_web_vendor)");
 
     // Only a lookup hint for `resolve_path`, so any value (even non-UTF-8) is fine.
     let pwd = env::var_os("PWD").map(PathBuf::from);
@@ -71,6 +75,8 @@ fn main() -> Result<()> {
             .map(|files| parse_web_scripts(&files, &manifest_dir, pwd)),
         tailwind_app_css: optional_env("TAILWIND_APP_CSS")?
             .map(|file| resolve_path(&file, &manifest_dir, pwd)),
+        vendor_scripts: optional_env("VENDOR_SCRIPTS")?
+            .map(|files| parse_web_scripts(&files, &manifest_dir, pwd)),
         swc: tool("SWC_BIN", "swc", &manifest_dir, pwd)?,
         tailwind: tool("TAILWIND_BIN", "tailwindcss", &manifest_dir, pwd)?,
         manifest_dir,

@@ -72,9 +72,10 @@ database:
   host: postgres.databases.svc
   database: dark_factory
 
+publicUrl: https://factory.example.org
+
 oidc:
   issuerUrl: https://id.example.org/realms/dark-factory
-  publicUrl: https://factory.example.org
 
 sandboxNamespace:
   runtimeClassName: kata
@@ -95,7 +96,7 @@ networkPolicy:
 ```
 
 Everything else has a default; the [chart README](https://github.com/prskr/dark-factory/blob/main/deploy/helm/dark-factory/README.md#values-reference)
-lists every key. Set `oidc.publicUrl` to the URL the browser uses: without it the web UI stays
+lists every key. Set `publicUrl` (top level) to the URL the browser uses: without it the web UI stays
 unavailable.
 
 ## 4. Install
@@ -123,7 +124,7 @@ The images default to the chart's `appVersion`, so the images match the chart ve
 ## 5. First login
 
 1. Give your user the `board-member` role or group described by your provider's guide.
-2. Open the `oidc.publicUrl`. You are redirected to the provider and, after the login, to the task list.
+2. Open the `publicUrl`. You are redirected to the provider and, after the login, to the task list.
 3. The profile menu (your initials) shows the version of the running instance and links to the docs
    of exactly that version.
 

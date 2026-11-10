@@ -164,7 +164,7 @@ Limits of `serve --no-cluster` (local development only):
 - Project host icons: the script connects to `intranet.example.com` and `ghcr.io`. Create a credential reference, then a project with repository `https://intranet.example.com/org/df.git`, issue tracker `https://ghcr.io/org/df/issues` and that credential, and reload `/egress/log` (the lookup is built per connection) and `/egress/allowlist`: `intranet.example.com` shows the Forgejo icon and `ghcr.io` the issue icon instead of the GitHub glyph. Without the credential it shows the generic Git icon.
 - The agent port (`9443`) and the internal port (`9444`, `PolicyWatch` for the gateway) use the throwaway certificate; no sandbox or gateway connects.
 
-Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because `auth.publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is accepted on any host (TLS is the operator's choice, for example the throwaway e2e cluster); on a non-loopback host the control plane logs a startup warning. With an `https://` URL the cookie always carries `Secure`.
+Dex cannot add custom claims, so the local configuration reads the role from the `groups` claim: `auth.rolesClaim: groups` and `auth.extraScopes: [groups, offline_access]` (`offline_access` returns a refresh token). Because the top-level `publicUrl` is `http://` on loopback, the session cookie is sent without `Secure`. Plain `http://` is accepted on any host (TLS is the operator's choice, for example the throwaway e2e cluster); on a non-loopback host the control plane logs a startup warning. With an `https://` URL the cookie always carries `Secure`.
 
 ```mermaid
 sequenceDiagram
@@ -241,14 +241,14 @@ lefthook hooks use the same versions on every machine. The exceptions run throug
 
 ## Web assets (TypeScript and Tailwind)
 
-`crates/df-web` serves scripts compiled from `crates/df-web/scripts/*.ts` (one minified `<name>.js` each, by `swc` with `crates/df-web/.swcrc`) and a stylesheet compiled from `crates/df-web/styles/input.css` (`tailwindcss`). Neither output is checked in.
+`crates/df-web` serves scripts compiled from `crates/df-web/scripts/*.ts` (one minified `<name>.js` each, by `swc` with `crates/df-web/.swcrc`), a stylesheet compiled from `crates/df-web/styles/input.css` (`tailwindcss`) and the third-party scripts Mermaid, htmx (with its SSE extension) and Alpine from the npm packages pinned in `crates/df-web/package.json`. None of them is checked in.
 
 | Build | How the assets are built |
 |-------|--------------------------|
-| Bazel (CI, images, releases) | The genrules `:web_scripts` and `:app_css` of `//crates/df-web` use the pinned tools. The build script gets the outputs through `WEB_SCRIPTS` and `TAILWIND_APP_CSS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
-| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. Installing or updating a tool in a `PATH` directory reruns the build script on the next build. |
+| Bazel (CI, images, releases) | The genrules `:web_scripts` and `:app_css` of `//crates/df-web` use the pinned tools; `:vendor_scripts` copies the files of the npm packages from `pnpm-lock.yaml`. The build script gets the outputs through `WEB_SCRIPTS`, `TAILWIND_APP_CSS` and `VENDOR_SCRIPTS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
+| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. Installing or updating a tool in a `PATH` directory reruns the build script on the next build. The third-party scripts come from `crates/df-web/node_modules`: run `pnpm install --frozen-lockfile` there (pnpm as in `packageManager`; `npx pnpm@<version>` works too). Without it the build warns and embeds none of them; the UI does not work. |
 
-`build.rs` sets the cfgs `df_web_scripts` and `df_web_styles` for the kinds it compiled. Tests that read compiled output are ignored without the matching cfg, so `cargo test -p df-web` without the tools passes and lists them as `ignored`. Bazel always compiles both, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing.
+`build.rs` sets the cfgs `df_web_scripts`, `df_web_styles` and `df_web_vendor` for the kinds it staged. Tests that read them are ignored without the matching cfg, so `cargo test -p df-web` without the tools or the npm packages passes and lists them as `ignored`. Bazel always provides all three, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing.
 
 Type check (strict `tsc`, no emit; Node.js needed). Use the version pinned in the `web-typecheck` command of `lefthook.yml`:
 
@@ -283,7 +283,7 @@ action's container: the post-upgrade task `bazel mod tidy` needs Bazel and keeps
 step with Bazel module, Cargo and pnpm updates. The harness adapter is bumped in one PR together with
 every copy of its image tag (`deploy/README.md`, "What the harness image is built from"). The run time
 falls into the window of the weekly lock file maintenance (before 04:00 UTC on Monday); Rust toolchain
-updates change `rust-toolchain.toml` and `RUST_VERSION` in `MODULE.bazel` in one PR.
+updates change `rust-toolchain.toml` and `RUST_VERSION` in `MODULE.bazel` in one PR. Renovate's npm manager finds `crates/df-web/package.json` and bumps it with `crates/df-web/pnpm-lock.yaml` (Mermaid, htmx, Alpine), next to `deploy/images/claude-harness`; the e2e suite covers the SSE behavior an htmx bump can change.
 
 | Setting | Required | Default | Effect |
 |---|---|---|---|

@@ -12,6 +12,10 @@ use crate::domain::ParseEnumError;
 use crate::keys::TaskKey;
 use crate::seams::ReviewVerdict;
 
+/// The audit action of an admin reading the webhook secret on a project's settings page
+/// (`resource_type` `webhook_secret`; the details name actor, project and plugin, never the secret).
+pub const WEBHOOK_SECRET_READ_ACTION: &str = "webhook_secret.read";
+
 /// One event a plugin parsed from a webhook delivery, with the repository it names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedEvent {

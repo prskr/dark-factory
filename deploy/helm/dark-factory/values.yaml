@@ -4,6 +4,13 @@ fullnameOverride: ''
 
 instanceName: 'dark-factory'
 
+# Externally visible base URL of the control plane, e.g. https://factory.example.org. The redirect
+# URI registered in the OIDC provider is <publicUrl>/auth/callback, and the web UI builds absolute
+# URLs (the webhook URL) from it. Plain `http://` is accepted on any host (warning at startup,
+# session cookie without `Secure`). Empty: no `auth` section is rendered: `serve` logs a warning
+# and mounts only /healthz, /readyz and /assets/* (no web UI).
+publicUrl: ''
+
 image:
   pullPolicy: IfNotPresent
   pullSecrets: []
@@ -64,11 +71,6 @@ oidc:
   clientId: dark-factory
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
-  # Externally visible base URL of the UI, e.g. https://factory.example.org. The redirect URI
-  # registered in the OIDC provider is <publicUrl>/auth/callback. Plain `http://` is accepted on
-  # any host (warning at startup, session cookie without `Secure`). Empty: no `auth` section is
-  # rendered: `serve` logs a warning and mounts only /healthz, /readyz and /assets/* (no web UI).
-  publicUrl: ''
   # Token claim holding a flat list of roles; the UI requires `board-member` in it.
   rolesClaim: roles
   # Scopes requested besides `openid` and `profile`, e.g. [groups, offline_access] for Dex.
@@ -337,7 +339,7 @@ tls:
   renewBefore: 360h
 
 # Gateway API HTTPRoute to the control plane UI. Requires the Gateway API CRDs and an existing
-# Gateway. Also set oidc.publicUrl to the route's URL and allow the Gateway's namespace in
+# Gateway. Also set publicUrl to the route's URL and allow the Gateway's namespace in
 # networkPolicy.ingressController.
 httpRoute:
   enabled: false

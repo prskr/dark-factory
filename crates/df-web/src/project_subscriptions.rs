@@ -1,14 +1,15 @@
-//! The "Lifecycle events" tab of the project edit form (`event-subscriptions` spec): lists and
-//! changes the subscriptions of a project, for users with the `admin` role only.
+//! The "Lifecycle events" group of the "Integrations" tab on the project settings page
+//! (`event-subscriptions` spec): lists and changes the subscriptions of a project, for users with
+//! the `admin` role only.
 //!
-//! The tab loads its content when it is first shown ([`tab_panel`]). The editor sits in the tab
-//! and posts to its own `<form id="subscription-form">` ([`form_anchor`]) because the project form
-//! around the tab cannot be nested. Every change takes effect at once, independent of saving the
+//! The group loads its content when the tab is first shown ([`tab_panel`]). The editor sits in the
+//! group and posts to its own `<form id="subscription-form">` ([`form_anchor`]) because the project
+//! form around the tab cannot be nested. Every change takes effect at once, independent of saving the
 //! project.
 
 use axum::extract::{Path, RawForm, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::http::{HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router, middleware};
 use df_core::EventType;
@@ -21,10 +22,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::WebState;
-use crate::auth::{CurrentUser, is_htmx, require_admin};
+use crate::auth::{CurrentUser, require_admin};
 use crate::components::{
     ButtonKind, FormErrors, ICON_BUTTON_CLASS, Icon, action_class, empty_panel, field_error,
-    form_error, icon, mono_text_field_of_form,
+    form_error, form_group, icon, mono_text_field_of_form,
 };
 use crate::responses::{internal_error, invalid, not_found};
 
@@ -46,13 +47,17 @@ pub(crate) fn routes() -> Router<WebState> {
         .route_layer(middleware::from_fn(require_admin))
 }
 
-/// Panel of the tab in the project form: a placeholder that fetches the tab on first display.
-pub(crate) fn tab_panel(key: &str) -> Markup {
-    html! {
-        div hx-get=(base_path(key)) hx-trigger="intersect once" hx-swap="outerHTML" class="text-sm text-muted" {
-            "Loading lifecycle events…"
-        }
-    }
+/// The "Lifecycle events" group of the Integrations tab: a placeholder that fetches the region on
+/// first display.
+pub(crate) fn lifecycle_group(key: &str) -> Markup {
+    form_group(
+        "Lifecycle events",
+        html! {
+            div hx-get=(base_path(key)) hx-trigger="intersect once" hx-swap="outerHTML" class="text-sm text-muted" {
+                "Loading lifecycle events…"
+            }
+        },
+    )
 }
 
 /// The empty form the editor's inputs are associated with. It sits next to the project form,
@@ -409,15 +414,8 @@ async fn region_response(state: &WebState, project: &ProjectRecord, open: Open) 
     }
 }
 
-/// Fragment of the tab. A plain browser request (the old page URL) goes to the project list.
-async fn tab(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Path(key): Path<String>,
-) -> Response {
-    if !is_htmx(&headers) {
-        return Redirect::to("/projects").into_response();
-    }
+/// Fragment of the tab.
+async fn tab(State(state): State<WebState>, Path(key): Path<String>) -> Response {
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,
@@ -425,14 +423,7 @@ async fn tab(
     region_response(&state, &project, Open::Closed).await
 }
 
-async fn new_form(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Path(key): Path<String>,
-) -> Response {
-    if !is_htmx(&headers) {
-        return Redirect::to("/projects").into_response();
-    }
+async fn new_form(State(state): State<WebState>, Path(key): Path<String>) -> Response {
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,
@@ -442,12 +433,8 @@ async fn new_form(
 
 async fn edit_form(
     State(state): State<WebState>,
-    headers: HeaderMap,
     Path((key, id)): Path<(String, Uuid)>,
 ) -> Response {
-    if !is_htmx(&headers) {
-        return Redirect::to("/projects").into_response();
-    }
     let project = match project(&state, &key).await {
         Ok(project) => project,
         Err(response) => return *response,

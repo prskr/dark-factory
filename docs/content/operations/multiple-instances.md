@@ -14,7 +14,7 @@ same.
 | Release namespace | `--namespace` | The chart names its cluster-scoped objects after it. |
 | Sandbox namespace | `sandboxNamespace.name` | A shared sandbox namespace collides on the namespace and its policies, and each control plane would see the other's sandboxes. The chart cannot detect it. |
 | Database | `database.host`, `database.database` | Each instance migrates and owns its schema. |
-| URL and OIDC client | `oidc.publicUrl`, `oidc.*`, `httpRoute.hostnames` | Logins and redirects go to one instance. |
+| URL and OIDC client | `publicUrl`, `oidc.*`, `httpRoute.hostnames` | Logins and redirects go to one instance. |
 
 Cluster-scoped objects (RBAC for reading the sandbox namespace and cluster targets, the CA issuer)
 and the reader roles in shared `clusterTargets.namespaces` carry the release namespace in their
@@ -31,9 +31,10 @@ database:
   host: postgres.databases.svc
   database: dark_factory_dev
 
+publicUrl: https://factory-dev.example.org
+
 oidc:
   issuerUrl: https://id.example.org/realms/dark-factory-dev
-  publicUrl: https://factory-dev.example.org
 
 sandboxNamespace:
   name: dark-factory-dev-sandboxes

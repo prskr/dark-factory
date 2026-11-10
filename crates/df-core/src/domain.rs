@@ -85,6 +85,49 @@ impl From<StatusGroup> for StatusSet {
     }
 }
 
+/// The order of the task list. The URL carries it as `sort` (`updated` is the default and left
+/// out).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum TaskSort {
+    /// Last update, newest first (`tasks.updated_at`: creation, status changes and renames).
+    #[default]
+    Updated,
+    /// Last update, oldest first.
+    UpdatedAsc,
+    /// Creation, newest first.
+    Created,
+}
+
+impl TaskSort {
+    pub const ALL: [Self; 3] = [Self::Updated, Self::UpdatedAsc, Self::Created];
+
+    /// The sort of a `sort` query value; an unknown value (a stale link) is the default.
+    pub fn from_query(value: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|sort| sort.as_query() == value)
+            .unwrap_or_default()
+    }
+
+    /// The `sort` query value.
+    pub const fn as_query(self) -> &'static str {
+        match self {
+            Self::Updated => "updated",
+            Self::UpdatedAsc => "updated-asc",
+            Self::Created => "created",
+        }
+    }
+
+    /// The name of the option in the sort menu.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Updated => "Recently updated",
+            Self::UpdatedAsc => "Least recently updated",
+            Self::Created => "Newest created",
+        }
+    }
+}
+
 /// Shared task status vocabulary (`tasks.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -559,6 +602,19 @@ mod tests {
         }
 
         assert!(TaskStatus::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn task_sorts_parse_from_the_url_and_unknown_values_are_the_default() {
+        assert_eq!(TaskSort::default(), TaskSort::Updated);
+        for sort in TaskSort::ALL {
+            assert_eq!(TaskSort::from_query(sort.as_query()), sort);
+        }
+        assert_eq!(TaskSort::from_query("updated-asc"), TaskSort::UpdatedAsc);
+        assert_eq!(TaskSort::from_query("created"), TaskSort::Created);
+        for stale in ["", "bogus", "Created", "created-asc"] {
+            assert_eq!(TaskSort::from_query(stale), TaskSort::Updated, "{stale}");
+        }
     }
 
     #[test]

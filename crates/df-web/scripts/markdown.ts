@@ -3,7 +3,9 @@
 //
 // Without JavaScript, or when the diagram cannot be drawn, the `<pre>` stays a plain code block.
 // With it, the component loads Mermaid once per page (the URL is `data-mermaid-src` of `<body>`),
-// draws the source into a sibling `<div>` and hides the `<pre>`.
+// draws the source into a sibling `<div>` and hides the `<pre>`. A build without Mermaid has no
+// `data-mermaid-src`, and a failed load is the same: the source stays and "Diagram renderer not
+// available" follows it.
 //
 // Isolation: `securityLevel: 'sandbox'` makes Mermaid return an iframe without script access to
 // the page. `securityLevel` is also in `secure`, so `%%{init}%%` in the (untrusted) source cannot
@@ -17,6 +19,13 @@
   /** The sibling elements added after the `<pre>`. */
   type Slot = 'diagram' | 'error';
 
+  /** Mermaid is missing from this build or did not load. */
+  class RendererUnavailable extends Error {
+    constructor() {
+      super('Diagram renderer not available');
+    }
+  }
+
   const SECURE = ['secure', 'securityLevel', 'startOnLoad', 'suppressErrorRendering', 'maxTextSize', 'maxEdges'];
   const scheme = window.matchMedia('(prefers-color-scheme: dark)');
   let loading: Promise<MermaidApi> | null = null;
@@ -25,13 +34,19 @@
   // Loads Mermaid on first use; a failed load can be retried by the next diagram.
   function loadMermaid() {
     loading ??= new Promise<MermaidApi>((resolve, reject) => {
+      const src = document.body.dataset.mermaidSrc;
+      if (!src) {
+        loading = null;
+        reject(new RendererUnavailable());
+        return;
+      }
       const script = document.createElement('script');
-      script.src = document.body.dataset.mermaidSrc ?? '';
+      script.src = src;
       script.onload = () => resolve(window.mermaid);
       script.onerror = () => {
         loading = null;
         script.remove();
-        reject(new Error('The diagram renderer could not be loaded'));
+        reject(new RendererUnavailable());
       };
       document.head.append(script);
     });
@@ -96,7 +111,8 @@
           if (run === this.drawing) this.show({ svg });
         } catch (err) {
           const message = String((err as Error | undefined)?.message ?? err).split('\n')[0];
-          if (run === this.drawing) this.show({ message: `Diagram error: ${message}` });
+          const text = err instanceof RendererUnavailable ? message : `Diagram error: ${message}`;
+          if (run === this.drawing) this.show({ message: text });
         }
       },
 

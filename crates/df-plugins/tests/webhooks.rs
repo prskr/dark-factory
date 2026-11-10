@@ -134,12 +134,21 @@ async fn plugin_without_webhook_secret_has_no_endpoint() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn router_has_an_endpoint_only_for_a_loaded_plugin_with_secret() -> anyhow::Result<()> {
+async fn router_exposes_a_webhook_secret_only_for_a_loaded_plugin_that_has_one()
+-> anyhow::Result<()> {
     let with_secret = common::router(webhook_client()?, "https://forge.test/o/r")?;
-    assert!(with_secret.has_webhook("forgejo"));
-    assert!(!with_secret.has_webhook("github"));
+    assert!(
+        with_secret
+            .client("forgejo")
+            .is_some_and(|client| client.webhook_secret().is_some())
+    );
+    assert!(with_secret.client("github").is_none());
     let without_secret = common::router(probe_client()?, "https://forge.test/o/r")?;
-    assert!(!without_secret.has_webhook("forgejo"));
+    assert!(
+        without_secret
+            .client("forgejo")
+            .is_some_and(|client| client.webhook_secret().is_none())
+    );
     Ok(())
 }
 

@@ -62,12 +62,9 @@ impl ForgeRouter {
         self.clients.contains_key(plugin)
     }
 
-    /// Whether `plugin` (the name under `plugins`) loaded, exports `webhooks` and has a webhook
-    /// secret.
-    pub fn has_webhook(&self, plugin: &str) -> bool {
-        self.clients
-            .get(plugin)
-            .is_some_and(PluginForgeClient::accepts_webhooks)
+    /// The loaded plugin `plugin`, the name under `plugins`.
+    pub fn client(&self, plugin: &str) -> Option<&PluginForgeClient> {
+        self.clients.get(plugin)
     }
 
     /// Parses a webhook delivery with the plugin `plugin`, the name under `plugins`.

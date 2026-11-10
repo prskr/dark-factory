@@ -1,0 +1,2 @@
+# The packages only provide the third-party scripts the UI serves; none runs install scripts.
+allowBuilds: {}

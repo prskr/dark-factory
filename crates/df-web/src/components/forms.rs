@@ -2,6 +2,7 @@
 
 use maud::{Markup, html};
 
+use super::actions::ICON_BUTTON_CLASS;
 use super::icons::{Icon, icon};
 
 /// Validation errors by field name; the empty name is a message for the whole form.
@@ -52,7 +53,7 @@ impl FormErrors {
 pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-base text-ink placeholder:text-faint disabled:border-line disabled:bg-sunk disabled:text-faint lg:min-h-10";
 
 /// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
-const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";
+pub(crate) const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";
 
 /// Classes of the compact read-only value of a dialog.
 const READONLY_COMPACT_CLASS: &str =
@@ -300,6 +301,47 @@ pub fn search_menu(button_label: &str, items: &[MenuItem]) -> Markup {
     }
 }
 
+/// An icon button that opens a menu of radio options (links); the one marked `current` has a
+/// check. `label` names the current option: it is the button's accessible name and tooltip.
+pub fn icon_menu(glyph: Icon, label: &str, items: &[MenuItem]) -> Markup {
+    html! {
+        div class="relative" x-data="{ open: false }" "x-on:keydown.escape"="open = false" "x-on:click.outside"="open = false" {
+            button type="button" aria-haspopup="menu" ":aria-expanded"="open" "x-on:click"="open = !open"
+                aria-label=(label) title=(label) class=(ICON_BUTTON_CLASS) {
+                (icon(glyph))
+            }
+            div x-show="open" x-cloak role="menu" aria-label=(label)
+                class="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-line bg-panel p-2 shadow-lg md:left-0 md:right-auto" {
+                @for item in items {
+                    a href=(item.href) role="menuitemradio" aria-checked=(item.current)
+                        class={"flex min-h-11 items-center justify-between gap-2 rounded-lg px-2 text-sm hover:bg-sunk lg:min-h-9 " (if item.current { "font-medium text-ink" } else { "text-muted" })} {
+                        (item.label)
+                        @if item.current { span class="text-accent-text" { (icon(Icon::Check)) } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A titled group of fields of a tab or form: a region named by its heading, separated from the
+/// group above by a line (none above the first group of its parent). The heading id is derived
+/// from `title`, so a page holds each title once.
+pub fn form_group(title: &str, body: Markup) -> Markup {
+    let heading_id = format!(
+        "group-{}",
+        title
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "-")
+    );
+    html! {
+        section aria-labelledby=(heading_id) class="space-y-4 border-t border-line pt-5 first:border-t-0 first:pt-0" {
+            h3 id=(heading_id) class="text-[15px] font-semibold" { (title) }
+            (body)
+        }
+    }
+}
+
 /// `aria-invalid` of a control: set while the field has an error.
 pub(crate) fn invalid(name: &str, errors: &FormErrors) -> Option<&'static str> {
     errors.get(name).map(|_| "true")
@@ -340,6 +382,44 @@ mod tests {
         assert!(html.contains("value=\"x&lt;y\"") && html.contains("Short."));
         assert!(html.contains("role=\"alert\"") && html.contains("Name is required."));
         assert!(html.contains("min-h-11"));
+    }
+
+    #[test]
+    fn an_icon_menu_opens_leftwards_on_phones_and_from_the_button_edge_from_768_px() {
+        let item = MenuItem {
+            href: "/x".into(),
+            label: "A".into(),
+            hint: String::new(),
+            current: true,
+        };
+        let html = icon_menu(Icon::ArrowDownUp, "A", &[item]).into_string();
+        let panel = &html[html.find("role=\"menu\"").unwrap()..];
+        assert!(
+            panel.contains("right-0") && panel.contains("md:left-0 md:right-auto"),
+            "{panel}"
+        );
+    }
+
+    #[test]
+    fn a_form_group_is_a_region_named_by_its_heading_with_a_separator_below_the_first() {
+        let html = form_group("Forge events", html! { p { "body" } }).into_string();
+        assert!(
+            html.starts_with("<section aria-labelledby=\"group-forge-events\""),
+            "{html}"
+        );
+        assert!(
+            html.contains("<h3 id=\"group-forge-events\" class=\"text-[15px] font-semibold\">Forge events</h3>"),
+            "{html}"
+        );
+        assert!(html.contains("<p>body</p>"), "{html}");
+        // The separator is a top border, removed on the first child of the parent.
+        let classes = html.split("class=\"").nth(1).unwrap();
+        for class in ["border-t", "border-line", "first:border-t-0", "first:pt-0"] {
+            assert!(
+                classes.split(' ').any(|c| c.starts_with(class)),
+                "{class}: {html}"
+            );
+        }
     }
 
     #[test]

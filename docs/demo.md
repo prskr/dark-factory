@@ -52,7 +52,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | Setting | Value | Why |
 |---|---|---|
 | `image.*.tag` | `e2e`, `pullPolicy: IfNotPresent` | Images are loaded into the node. |
-| `oidc.issuerUrl`, `oidc.publicUrl` | `http://dex.dex.svc:5556/dex`, `http://dark-factory-control-plane.dark-factory.svc:8080` | Plain `http://` is accepted on any host; the control plane logs a startup warning. |
+| `oidc.issuerUrl`, `publicUrl` | `http://dex.dex.svc:5556/dex`, `http://dark-factory-control-plane.dark-factory.svc:8080` | Plain `http://` is accepted on any host; the control plane logs a startup warning. |
 | `oidc.rolesClaim`, `oidc.extraScopes` | `groups`, `[groups, offline_access]` | Dex returns the role as `groups`, as in local development. |
 | `controlPlane.extraArgs` | `[--unrestricted-project-subscriptions]` | The project subscription of the lifecycle event test targets the plain-http receiver in the cluster. Only the `dev-tools` image has the flag. |
 | `network.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy, the inference endpoint's upstreams and the project form accept `http://` URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |

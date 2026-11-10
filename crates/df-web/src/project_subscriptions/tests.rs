@@ -1,4 +1,4 @@
-//! Tests of the "Lifecycle events" tab of the project edit form (`event-subscriptions` spec).
+//! Tests of the "Lifecycle events" group of the project settings page (`event-subscriptions` spec).
 
 use axum::http::StatusCode;
 use df_core::EventType;
@@ -7,7 +7,7 @@ use df_db::event_subscriptions::{self, Subscription};
 use crate::testkit::{TestApp, form, header_str, seed, tag_around, text};
 
 const PAGE: &str = "/projects/DF/subscriptions";
-const EDIT_DIALOG: &str = "/projects/DF/edit";
+const SETTINGS_PAGE: &str = "/projects/DF";
 
 /// The tab fragment an admin's htmx request gets.
 async fn tab(app: &TestApp, cookie: &str) -> String {
@@ -365,18 +365,6 @@ async fn the_tab_fragment_has_key_panel_list_and_new_action_without_a_page_frame
 }
 
 #[tokio::test]
-async fn a_plain_browser_request_for_the_old_page_redirects_to_the_project_list() {
-    let app = TestApp::new().await;
-    seed(&app.pool).await;
-
-    let admin = app.get(PAGE, &app.login_admin().await).await;
-    assert_eq!(admin.status(), StatusCode::SEE_OTHER);
-    assert_eq!(header_str(&admin, "location"), "/projects");
-    let member = app.get(PAGE, &app.login().await).await;
-    assert_eq!(member.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn the_editor_binds_its_inputs_to_the_separate_subscription_form() {
     let app = TestApp::new().await;
     seed(&app.pool).await;
@@ -402,11 +390,11 @@ async fn the_editor_binds_its_inputs_to_the_separate_subscription_form() {
 }
 
 #[tokio::test]
-async fn the_admins_edit_dialog_has_one_subscription_form_outside_the_project_form() {
+async fn the_admins_settings_page_has_one_subscription_form_outside_the_project_form() {
     let app = TestApp::new().await;
     seed(&app.pool).await;
 
-    let admin = text(app.get_htmx(EDIT_DIALOG, &app.login_admin().await).await).await;
+    let admin = text(app.get(SETTINGS_PAGE, &app.login_admin().await).await).await;
     assert_eq!(
         admin.matches("id=\"subscription-form\"").count(),
         1,
@@ -414,7 +402,7 @@ async fn the_admins_edit_dialog_has_one_subscription_form_outside_the_project_fo
     );
     let project_form_end = admin.find("</form>").unwrap();
     assert!(admin.find("id=\"subscription-form\"").unwrap() > project_form_end);
-    let member = text(app.get_htmx(EDIT_DIALOG, &app.login().await).await).await;
+    let member = text(app.get(SETTINGS_PAGE, &app.login().await).await).await;
     assert!(!member.contains("subscription-form"), "{member}");
 }
 

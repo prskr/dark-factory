@@ -106,7 +106,7 @@ async fn pages_use_tokens_only_and_load_nothing_from_third_parties() {
         "/tasks/compose",
         "/projects",
         "/projects/new",
-        "/projects/DF/edit",
+        "/projects/DF",
         "/personas",
         "/personas/new",
         "/credentials",

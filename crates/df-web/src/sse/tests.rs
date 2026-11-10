@@ -578,6 +578,111 @@ async fn task_list_stream_shows_status_changes_within_two_seconds() {
     );
 }
 
+/// Adds tasks DF-2, DF-3, … to the project of the fixture's task, in this order.
+async fn add_tasks(f: &Fixture, titles: &[&str]) {
+    let (project, persona): (uuid::Uuid, uuid::Uuid) =
+        sqlx::query_as("SELECT project_id, persona_id FROM tasks")
+            .fetch_one(&f.app.pool)
+            .await
+            .unwrap();
+    for title in titles {
+        df_db::create_task(
+            &f.app.pool,
+            df_db::NewTask {
+                project_id: df_core::ProjectId::from_uuid(project),
+                persona_id: df_core::PersonaId::from_uuid(persona),
+                title: Some((*title).into()),
+                description: String::new(),
+                issue_number: None,
+                created_by: df_core::Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
+/// Where the row of task `key` starts in a rendered list.
+fn row_position(html: &str, key: &str) -> usize {
+    html.find(&format!("id=\"row-{key}\""))
+        .unwrap_or_else(|| panic!("no row {key}: {html}"))
+}
+
+#[tokio::test]
+async fn a_status_change_of_an_older_task_keeps_its_place_in_a_list_sorted_by_creation() {
+    let f = fixture().await;
+    add_tasks(&f, &["newer", "newest"]).await;
+    let mut sse = f.events("/tasks/events?sort=created").await;
+    let first = sse.next().await;
+    let order = |html: &str| {
+        let mut keys = ["DF-1", "DF-2", "DF-3"];
+        keys.sort_by_key(|key| row_position(html, key));
+        keys
+    };
+    assert_eq!(
+        order(&first.data),
+        ["DF-3", "DF-2", "DF-1"],
+        "{}",
+        first.data
+    );
+
+    // The oldest task is updated last; the default sort would move it to the top.
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(frame.data.contains(">running<"), "{}", frame.data);
+    assert_eq!(
+        order(&frame.data),
+        ["DF-3", "DF-2", "DF-1"],
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn a_status_change_moves_the_task_to_the_top_of_the_live_list() {
+    let f = fixture().await;
+    add_tasks(&f, &["newer", "newest"]).await;
+    let position = row_position;
+    let mut sse = f.events("/tasks/events").await;
+    let first = sse.next().await;
+    assert!(
+        position(&first.data, "DF-3") < position(&first.data, "DF-1"),
+        "{}",
+        first.data
+    );
+
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(
+        position(&frame.data, "DF-1") < position(&frame.data, "DF-3")
+            && position(&frame.data, "DF-1") < position(&frame.data, "DF-2"),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn the_live_list_keeps_the_chosen_sort() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/events?sort=updated-asc&status=all").await;
+    sse.next().await;
+
+    crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(
+        frame
+            .data
+            .contains("/tasks/DF-1?status=all&amp;sort=updated-asc"),
+        "{}",
+        frame.data
+    );
+}
+
 #[tokio::test]
 async fn filtered_list_stream_drops_a_task_that_leaves_the_filter() {
     let f = fixture().await;

@@ -26,9 +26,17 @@ impl WebhookReceiver for FakeReceiver {
         matches!(plugin, "forgejo" | "github")
     }
 
-    /// `github` is loaded but has no endpoint: no `webhooks` export or no resolved secret.
-    fn has_endpoint(&self, plugin: &str) -> bool {
-        plugin == "forgejo"
+    /// `github` is loaded but has no endpoint: no resolved secret.
+    fn setup(&self, plugin: &str) -> WebhookSetup {
+        match plugin {
+            "forgejo" => WebhookSetup::Ready,
+            "github" => WebhookSetup::NoSecret,
+            _ => WebhookSetup::NotLoaded,
+        }
+    }
+
+    fn secret(&self, _plugin: &str) -> Option<SecretString> {
+        None
     }
 
     async fn receive(

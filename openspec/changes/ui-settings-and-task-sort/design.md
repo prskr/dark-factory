@@ -110,6 +110,8 @@ The design tasks come before the UI tasks, following `docs/design-workflow.md`:
 
 The grouping of the General tab is decided on the board. The proposal to start from is in the proposal: Project, Repository, Sandbox, Forge events. Moving the wake policy into Integrations › Incoming webhook is an option the board should try, because it only matters with incoming webhooks; it stays on General if the user prefers that. After approval the `configuration-management` delta ("Grouped project form") is updated to the approved groups before the UI task starts.
 
+**Settled (2026-11-10):** the wake policy stays on General in the group "Forge events". Integrations is an admin-only tab, and the wake policy is a board-member setting saved with "Save project".
+
 ### D8: Project settings page instead of the edit modal
 - **Route:** `GET /projects/{key}` renders a full page with the existing `tabbed_form` (General, Push checks, Integrations for `admin`).
   - From 768 px it renders inside the settings area (`Nav::Projects`, sidebar with Projects current).
@@ -125,6 +127,7 @@ The grouping of the General tab is decided on the board. The proposal to start f
   - The server also renders the requested tab as the open one, so it works before JavaScript runs.
   - The tab ids `general`, `push-checks` and `integrations` become the URL values (the panel id `lifecycle-events` is renamed).
 - **Tab orientation:** vertical (left column, as in today's modal from 768 px) or horizontal (top row) is decided on the PenPot board (D7). `tabbed_form` gets a layout parameter only if the page and the model provider modal end up different; otherwise the page uses whatever the board settles for both.
+  - **Settled (2026-11-10): horizontal.** From 768 px the page shows the tabs as a top row with an underline on the current tab; the model provider modal keeps its vertical tabs, so `tabbed_form` gets a layout parameter. Below 768 px both keep the scrolling tab row.
 - **Entry points:**
   - The project list row's edit icon button and the project name become links to `/projects/{key}`.
   - "New project" stays a modal (`/projects/new`). After creation, `HX-Location` sends the browser to the new project's page instead of refreshing the list.
@@ -200,5 +203,4 @@ Alternative: download the scripts in `build.rs`. Rejected: network access in a b
 
 ## Open Questions
 
-- The exact General tab grouping, and whether the wake policy moves to Integrations: settled in the PenPot task (D7).
-- Vertical or horizontal tabs on the project settings page: settled in the PenPot task (D7, D8).
+None. Settled in the PenPot tasks: General is grouped Project / Repository / Sandbox / Forge events with the wake policy on General (D7); the project settings page uses horizontal tabs (D8).
