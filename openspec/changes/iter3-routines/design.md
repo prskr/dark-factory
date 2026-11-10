@@ -125,7 +125,7 @@ D4 and D5 share one function, `fire_locked(tx, routine, now) -> Outcome`. They d
 - **Form**: fields project (select, fixed after creation), name, persona (select), prompt (textarea), schedule (text, placeholder `0 2 * * *`), timezone (text with a `datalist` of `chrono_tz::TZ_VARIANTS`, default `UTC`) and enabled.
 - **Next-firing preview**: uses the `/projects/forge` pattern. Schedule and timezone trigger `hx-get` to the preview fragment, which shows either the next firing in the routine's timezone or the field error.
 - **List row**: name, project key, persona, schedule and timezone, an enabled toggle, next firing, last firing, last outcome with the task link, Run now, Edit and Delete. Run now and the toggle re-render the row.
-- **Rail**: the Routines icon goes below Projects.
+- **Rail**: the Routines icon goes below Requests (Projects left the rail with `ui-settings-and-task-sort`).
 - **Task details**: for `Principal::Routine` they show "Routine · \<name\>". The link to `/routines?project=<key>` is shown only while a routine with that id exists, found by one lookup when the page is rendered.
 
 ## Risks / Trade-offs
