@@ -93,7 +93,7 @@ The project settings page SHALL show to admins a last tab "Integrations", so tha
 
 #### Scenario: Tab order for an admin
 - **WHEN** an admin opens the settings page of project `DF`
-- **THEN** the tabs are "General", "Push checks" and "Integrations" in this order, and no tab is called "Lifecycle events"
+- **THEN** the tabs are "General", "Security" and "Integrations" in this order, and no tab is called "Lifecycle events"
 
 #### Scenario: Groups in the tab
 - **WHEN** an admin opens the "Integrations" tab of project `DF`
@@ -101,7 +101,7 @@ The project settings page SHALL show to admins a last tab "Integrations", so tha
 
 #### Scenario: Tab hidden without admin
 - **WHEN** a user with only `board-member` opens the settings page of project `DF`
-- **THEN** the tabs are "General" and "Push checks"
+- **THEN** the tabs are "General" and "Security"
 
 ### Requirement: Subscriptions save on their own
 Creating, editing and deleting a subscription SHALL take effect when its own action is confirmed, independent of saving the project. Leaving the project settings page without saving SHALL NOT undo a subscription change, and saving the project SHALL NOT change subscriptions. The tab SHALL say so.

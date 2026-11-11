@@ -36,6 +36,17 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 - **WHEN** a board member saves a project with an empty adapter command
 - **THEN** the project uses the instance's harness image and adapter
 
+### Requirement: Adapter command quoting
+The adapter command field of a project SHALL use shell-style quoting: arguments are separated by whitespace, single or double quotes keep whitespace inside an argument, and the stored command SHALL be shown quoted so that saving it again stores the same arguments. An unclosed quote SHALL be a validation error.
+
+#### Scenario: Argument with a space
+- **WHEN** a board member sets the adapter command `/opt/adapter '--config=/workspace/my config.json'` on project `DF` and later saves the settings page without changing it
+- **THEN** the command is stored both times as the two arguments `/opt/adapter` and `--config=/workspace/my config.json`
+
+#### Scenario: Unclosed quote
+- **WHEN** a board member saves the adapter command `/opt/adapter "--config=a b`
+- **THEN** the form shows a validation error at Adapter command and nothing is stored
+
 ### Requirement: Personas
 Board members SHALL list, create and edit personas with name, system prompt, harness (`claude-code` or `opencode`), a required model provider and a required model of that provider, both compatible with the harness. A persona SHALL NOT have an adapter command.
 
@@ -150,7 +161,7 @@ The persona list SHALL show each persona as a card with its name, harness, model
 - **THEN** its card shows "Linus", "Claude Code · opus", the first lines of its prompt and `anthropic-api`
 
 ### Requirement: Configuration forms as modals
-Creating a project, and creating and editing a persona or credential reference, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona or credential reference SHALL close the modal and update the list without a full page load. Creating a project SHALL close the modal and open the new project's settings page.
+Creating a project or a model provider, and creating and editing a persona or credential reference, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona or credential reference SHALL close the modal and update the list without a full page load. Creating a project or a model provider SHALL close the modal and open the new item's settings page.
 
 #### Scenario: Validation error in the modal
 - **WHEN** a credential reference is submitted without a key
@@ -159,6 +170,10 @@ Creating a project, and creating and editing a persona or credential reference, 
 #### Scenario: Saved project
 - **WHEN** a board member creates project `WEB` in the "New project" modal
 - **THEN** the modal closes and the settings page of `WEB` opens
+
+#### Scenario: Saved model provider
+- **WHEN** a board member creates provider "Anthropic work" in the "New model provider" modal
+- **THEN** the modal closes and the settings page of "Anthropic work" opens
 
 ### Requirement: Empty configuration lists
 When there are no projects, personas or credential references, the corresponding list SHALL explain in one sentence what the item is for and offer its create action. The empty project list SHALL also point to credential references for private repositories.
@@ -231,7 +246,7 @@ A persona SHALL have an optional plain-text description of its role and strength
 - **THEN** the form shows a validation error and the persona is unchanged
 
 ### Requirement: Project settings page
-Each project SHALL have a settings page at `/projects/{key}`, inside the settings area from 768 px and a full page below. It SHALL show a back link to the project list, the project's name, key and forge icon, the tabs General, Push checks and, for `admin`, Integrations, and one "Save project" button for General and Push checks. The project list's name and edit action SHALL link to it, and an unknown key SHALL answer `404`. The tab orientation follows the approved PenPot board.
+Each project SHALL have a settings page at `/projects/{key}`, inside the settings area from 768 px and a full page below. It SHALL show a back link to the project list, the project's name, key and forge icon, the tabs General, Security (push checks and hidden paths) and, for `admin`, Integrations, and one "Save project" button for General and Security. The project list's name and edit action SHALL link to it, and an unknown key SHALL answer `404`. The tabs follow the approved PenPot board.
 
 #### Scenario: Open a project from the list
 - **WHEN** a board member at 1440 px width chooses the edit action of project `DF` on `/projects`
@@ -246,7 +261,7 @@ Each project SHALL have a settings page at `/projects/{key}`, inside the setting
 - **THEN** the page shows the back link, the header and the tabs without a settings sidebar and without horizontal page scrolling
 
 ### Requirement: Project settings tab in the URL
-The open tab of the project settings page SHALL be part of the URL as `tab=push-checks` or `tab=integrations`, and left out for General. Opening such a URL SHALL show that tab, choosing a tab SHALL update the URL without a page load, and an unknown or non-permitted value SHALL show General.
+The open tab of the project settings page SHALL be part of the URL as `tab=security` or `tab=integrations`, and left out for General. Opening such a URL SHALL show that tab, choosing a tab SHALL update the URL without a page load, and an unknown or non-permitted value SHALL show General.
 
 #### Scenario: Link to a tab
 - **WHEN** an admin opens `/projects/DF?tab=integrations`
@@ -257,19 +272,23 @@ The open tab of the project settings page SHALL be part of the URL as `tab=push-
 - **THEN** the page opens with the General tab open and shows no Integrations tab
 
 #### Scenario: Choosing a tab updates the URL
-- **WHEN** a board member on `/projects/DF` chooses Push checks
-- **THEN** the URL becomes `/projects/DF?tab=push-checks` without a page load
+- **WHEN** a board member on `/projects/DF` chooses Security
+- **THEN** the URL becomes `/projects/DF?tab=security` without a page load
+
+#### Scenario: Old tab value
+- **WHEN** a board member opens `/projects/DF?tab=push-checks`
+- **THEN** the page opens with the General tab open
 
 ### Requirement: Saving the project settings page
-Saving SHALL keep the project settings page open with the stored values and confirm the save visibly and to screen readers. A validation error SHALL keep the entered values and open the tab with the first error.
+Saving SHALL keep the project settings page open with the stored values and confirm the save visibly and to screen readers. A validation error SHALL keep the entered values and open the tab with the first error, and the URL SHALL name that tab.
 
 #### Scenario: Save stays on the page
 - **WHEN** a board member changes the base branch of `DF` and saves
 - **THEN** the page stays open with the new value, and a "Project saved" status is shown and announced
 
 #### Scenario: Validation error on another tab
-- **WHEN** a board member on the Push checks tab saves `DF` with an `ssh://` repository URL entered on General
-- **THEN** the page shows the General tab with the error at Repository URL and all entered values kept
+- **WHEN** a board member on `/projects/DF?tab=security` saves `DF` with an `ssh://` repository URL entered on General
+- **THEN** the page shows the General tab with the error at Repository URL, all entered values kept, and the URL becomes `/projects/DF`
 
 ### Requirement: Grouped project form
 The General tab of the project settings page and the new-project form SHALL show their fields in the groups "Project", "Repository", "Sandbox" and "Forge events", in this order, as on the approved PenPot boards ("Projects · settings page, general", "Projects · new project"). Each group SHALL have a heading and SHALL be a region named by it, with a horizontal separator between consecutive groups. Grouping SHALL NOT change field names, validation or what saving stores.
