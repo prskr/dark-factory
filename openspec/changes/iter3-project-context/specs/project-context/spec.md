@@ -18,7 +18,7 @@ Every project SHALL have a project context: Markdown text, empty by default, at 
 - **THEN** the form shows a validation error and the stored context is unchanged
 
 ### Requirement: Editing the project context
-The project edit form SHALL have a Context tab with a textarea for the project context, saved with the other tabs of the form. Only board members SHALL edit it. A change SHALL be audited like other project changes, with the text before and after.
+The project settings page SHALL have a Context tab, after Security and before Integrations, with a textarea for the project context. "Save project" SHALL save it together with General and Security, and `/projects/{key}?tab=context` SHALL open it. Only board members SHALL edit it. A change SHALL be audited like other project changes, with the text before and after.
 
 #### Scenario: Board member edits the context
 - **WHEN** a board member writes "Release train: every second Tuesday" into the Context tab of `DF` and saves
@@ -26,7 +26,11 @@ The project edit form SHALL have a Context tab with a textarea for the project c
 
 #### Scenario: Opened from a chat
 - **WHEN** a board member follows the project context link of `DF-12-CHAT`
-- **THEN** the edit form of `DF` opens on the Context tab
+- **THEN** `/projects/DF?tab=context` opens with the Context tab open
+
+#### Scenario: Tab order
+- **WHEN** an admin opens the settings page of `DF`
+- **THEN** the tabs are "General", "Security", "Context" and "Integrations" in this order
 
 ### Requirement: Chat runs receive the project context
 A chat run SHALL receive its project's context, as read when the run starts, in its system prompt under the heading `## Project context`. An empty context SHALL be left out, heading included. An edit SHALL apply from the next run on. Task runs SHALL NOT receive the project context.
