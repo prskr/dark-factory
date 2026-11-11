@@ -98,10 +98,3 @@ Saving SHALL keep the project settings page open with the stored values and conf
 #### Scenario: Validation error on another tab
 - **WHEN** a board member on `/projects/DF?tab=security` saves `DF` with an `ssh://` repository URL entered on General
 - **THEN** the page shows the General tab with the error at Repository URL, all entered values kept, and the URL becomes `/projects/DF`
-
-### Requirement: Form tabs on phones
-Below 768 px the tab row of a configuration form, the project settings page or the model provider settings page SHALL scroll horizontally when its tabs do not fit, without scrolling the page, and SHALL keep the open tab fully visible when the form opens or a tab is chosen.
-
-#### Scenario: Four tabs at 390 px
-- **WHEN** an admin opens the settings page of project `DF` at 390 px width and chooses "Integrations", the last of its tabs
-- **THEN** the tab row scrolls so that "Integrations" is fully visible, and the page has no horizontal scrollbar

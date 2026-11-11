@@ -2,7 +2,7 @@
 
 - [ ] 1.1 PenPot (page "Config - Model providers"): turn the "Model providers · edit, …" boards into the model provider settings page:
   - settings sidebar with Model providers current, back link "Model providers", header with the name, horizontal tabs General / Models, "Save model provider", "Model provider saved" status
-  - General, Models with many models, and model errors, at 1440 and 390 px
+  - General, Models with many models, and model errors, at 1440 px
   - try the Models tab with one line per model (ID, wire API, limits, remove) on the wide page
 
   Settle the layout with the user in the design session, export the boards and get approval. Update the `model-providers` delta if the approved layout changes it.
@@ -88,7 +88,7 @@
 ## 7. Verification
 
 - [ ] 7.1 `cargo test -p df-web`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo xtask check-file-length`, and `cargo machete`.
-- [ ] 7.2 Check the provider settings page, the description header, a user message with code and the project settings Security tab at 1440 and 390 px against the approved boards (`just serve-local`, if a container socket is available). Attach screenshots to the review, or state that this check was skipped.
+- [ ] 7.2 Check the provider settings page at 1440 px, and the description header, a user message with code and the project settings Security tab at 1440 and 390 px, against the approved boards (`just serve-local`, if a container socket is available). Attach screenshots to the review, or state that this check was skipped.
 
 ## 8. Docs
 
