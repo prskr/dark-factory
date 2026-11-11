@@ -167,6 +167,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
             commit_identity: None,
             git_hooks: Vec::new(),
             git_config: Vec::new(),
+            hidden_paths: Vec::new(),
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -409,6 +410,7 @@ sessions:
                 key: "http.sslCAInfo".to_string(),
                 value: ca_path.to_str().unwrap().to_string(),
             }],
+            hidden_paths: Vec::new(),
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -538,6 +540,7 @@ sessions:
                 key: "http.sslCAInfo".to_string(),
                 value: ca_path.to_str().unwrap().to_string(),
             }],
+            hidden_paths: Vec::new(),
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -753,6 +756,7 @@ async fn test_manual_claude_acp_run() {
             commit_identity: None,
             git_hooks: Vec::new(),
             git_config: Vec::new(),
+            hidden_paths: Vec::new(),
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -874,6 +878,7 @@ async fn test_cancel_before_assign_skips_prepare() {
                 commit_identity: None,
                 git_hooks: vec![],
                 git_config: vec![],
+                hidden_paths: Vec::new(),
             }),
             harness: None,
             tools: vec![],

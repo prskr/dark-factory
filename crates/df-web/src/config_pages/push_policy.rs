@@ -1,7 +1,8 @@
 //! The "Push checks" tab of the project form: the project's push policy (iter2-push-checks design
 //! D4, `specs/push-checks/spec.md`, "Per-project push policy").
 
-use df_db::push_checks::{CheckMode, PushPolicy, protected_glob};
+use df_core::glob::{Glob, GlobError, hidden_glob, protected_glob};
+use df_db::push_checks::{CheckMode, PushPolicy};
 use maud::{Markup, html};
 use serde::Deserialize;
 
@@ -9,8 +10,9 @@ use crate::components::FormErrors;
 use crate::components::forms::INPUT_CLASS;
 
 /// Fields of the tab, so a re-rendered form opens the tab with the error.
-pub(crate) const FIELDS: [&str; 6] = [
+pub(crate) const FIELDS: [&str; 7] = [
     "protected_globs",
+    "hidden_globs",
     "protected_mode",
     "secret_mode",
     "size_mode",
@@ -34,6 +36,8 @@ const MIN_GLOB_ROWS: usize = 4;
 pub(crate) struct PushPolicyForm {
     /// One glob per line.
     protected_globs: String,
+    /// One glob per line.
+    hidden_globs: String,
     /// The modes are missing in a form without the tab.
     protected_mode: Option<String>,
     secret_mode: Option<String>,
@@ -48,6 +52,7 @@ impl PushPolicyForm {
         let mode = |mode: CheckMode| Some(mode.as_str().to_owned());
         Self {
             protected_globs: policy.protected_globs.join("\n"),
+            hidden_globs: policy.hidden_globs.join("\n"),
             protected_mode: mode(policy.protected_mode),
             secret_mode: mode(policy.secret_mode),
             size_mode: mode(policy.size_mode),
@@ -63,7 +68,18 @@ pub(crate) fn validate(form: &PushPolicyForm) -> Result<Option<PushPolicy>, Form
         return Ok(None);
     }
     let mut errors = FormErrors::default();
-    let protected_globs = globs(&mut errors, &form.protected_globs);
+    let protected_globs = globs(
+        &mut errors,
+        &GlobsField::PROTECTED,
+        &form.protected_globs,
+        protected_glob,
+    );
+    let hidden_globs = globs(
+        &mut errors,
+        &GlobsField::HIDDEN,
+        &form.hidden_globs,
+        hidden_glob,
+    );
     let protected_mode = mode(
         &mut errors,
         "protected_mode",
@@ -86,6 +102,7 @@ pub(crate) fn validate(form: &PushPolicyForm) -> Result<Option<PushPolicy>, Form
     errors.into_result(Some(PushPolicy {
         protected_globs,
         protected_mode,
+        hidden_globs,
         secret_mode,
         size_mode,
         max_blob_bytes: max_blob_mib.unwrap_or_default() * MIB,
@@ -97,7 +114,7 @@ pub(crate) fn validate(form: &PushPolicyForm) -> Result<Option<PushPolicy>, Form
 pub(crate) fn panel(values: &PushPolicyForm, errors: &FormErrors) -> Markup {
     html! {
         p class="text-[13px] text-muted" { "Checked on every push of this project's tasks, before it reaches the forge." }
-        (globs_field(&values.protected_globs, errors))
+        (globs_field(&GlobsField::PROTECTED, &values.protected_globs, errors))
         div class="divide-y divide-line rounded-[10px] border border-line" {
             (check_row(&Check {
                 name: "protected_mode",
@@ -125,30 +142,34 @@ pub(crate) fn panel(values: &PushPolicyForm, errors: &FormErrors) -> Markup {
             }))
             (linear_history_row(values.linear_history == "on"))
         }
+        (globs_field(&GlobsField::HIDDEN, &values.hidden_globs, errors))
         p class="text-xs text-faint" {
             "Always rejected, whatever the policy: commits whose author or committer is not the instance's bot identity, and changes to .dark-factory/**."
         }
     }
 }
 
-/// The non-blank lines of `text`, trimmed. Reports the first one that is not a valid glob with its
-/// line number and `globset`'s reason, compiled like the Git proxy does ([`protected_glob`]).
-fn globs(errors: &mut FormErrors, text: &str) -> Vec<String> {
+/// The non-blank lines of `text`, trimmed. Reports the first one `check` refuses, with its line
+/// number and the reason, compiled like the Git proxy does.
+fn globs(
+    errors: &mut FormErrors,
+    field: &GlobsField,
+    text: &str,
+    check: fn(&str) -> Result<Glob, GlobError>,
+) -> Vec<String> {
     let mut globs = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let glob = line.trim();
         if glob.is_empty() {
             continue;
         }
-        if let Err(error) = protected_glob(glob) {
-            // `unclosed character class; missing ']'`: the part before the `;` reads as a reason.
-            let kind = error.kind().to_string();
-            let reason = kind.split(';').next().unwrap_or_default();
+        if let Err(error) = check(glob) {
             errors.add(
-                "protected_globs",
+                field.name,
                 format!(
-                    "Line {}: \"{glob}\" is not a valid glob ({reason}).",
-                    index + 1
+                    "Line {}: \"{glob}\" is not a valid glob ({}).",
+                    index + 1,
+                    reason(&error)
                 ),
             );
             break;
@@ -156,6 +177,18 @@ fn globs(errors: &mut FormErrors, text: &str) -> Vec<String> {
         globs.push(glob.to_owned());
     }
     globs
+}
+
+/// Why a glob is invalid, as a short phrase.
+fn reason(error: &GlobError) -> String {
+    match error {
+        // `unclosed character class; missing ']'`: the part before the `;` reads as a reason.
+        GlobError::Syntax(error) => {
+            let kind = error.kind().to_string();
+            kind.split(';').next().unwrap_or_default().to_owned()
+        }
+        GlobError::Alternation => error.to_string(),
+    }
 }
 
 fn mode(errors: &mut FormErrors, field: &'static str, value: Option<&str>) -> CheckMode {
@@ -166,27 +199,47 @@ fn mode(errors: &mut FormErrors, field: &'static str, value: Option<&str>) -> Ch
     CheckMode::Approval
 }
 
+/// A textarea of globs: its field name, label and hint.
+struct GlobsField {
+    name: &'static str,
+    label: &'static str,
+    hint: &'static str,
+}
+
+impl GlobsField {
+    const PROTECTED: Self = Self {
+        name: "protected_globs",
+        label: "Protected paths",
+        hint: "One glob per line. A commit that adds, changes, deletes or renames a matching path is a finding.",
+    };
+
+    const HIDDEN: Self = Self {
+        name: "hidden_globs",
+        label: "Hidden paths",
+        hint: "One glob per line, without {a,b}. Matching files are left out of the agent's workspace, and a push that changes one is always rejected. Their content stays reachable through Git history.",
+    };
+}
+
 /// The textarea of the globs, high enough to show every line (at least [`MIN_GLOB_ROWS`]).
-fn globs_field(value: &str, errors: &FormErrors) -> Markup {
-    let error = errors.get("protected_globs");
+fn globs_field(field: &GlobsField, value: &str, errors: &FormErrors) -> Markup {
+    let name = field.name;
+    let error = errors.get(name);
     let describedby = if error.is_some() {
-        "protected_globs-error protected_globs-hint"
+        format!("{name}-error {name}-hint")
     } else {
-        "protected_globs-hint"
+        format!("{name}-hint")
     };
     let rows = value.lines().count().max(MIN_GLOB_ROWS);
     html! {
         div class="space-y-1.5" {
-            label for="protected_globs" class="block text-sm font-medium text-muted" { "Protected paths" }
-            textarea id="protected_globs" name="protected_globs" rows=(rows) spellcheck="false"
+            label for=(name) class="block text-sm font-medium text-muted" { (field.label) }
+            textarea id=(name) name=(name) rows=(rows) spellcheck="false"
                 class="block w-full rounded-[10px] border border-line-strong bg-panel px-3 py-2.5 font-mono text-base text-ink aria-invalid:border-danger md:text-[13px]"
                 aria-invalid=[error.map(|_| "true")] aria-describedby=(describedby) { (value) }
             @if let Some(error) = error {
-                p id="protected_globs-error" class="text-sm text-danger" role="alert" { (error) }
+                p id={(name) "-error"} class="text-sm text-danger" role="alert" { (error) }
             }
-            p id="protected_globs-hint" class="text-xs text-faint" {
-                "One glob per line. A commit that adds, changes, deletes or renames a matching path is a finding."
-            }
+            p id={(name) "-hint"} class="text-xs text-faint" { (field.hint) }
         }
     }
 }

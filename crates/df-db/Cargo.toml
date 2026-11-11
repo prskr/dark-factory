@@ -14,7 +14,6 @@ chrono.workspace = true
 df-core.workspace = true
 df-proto.workspace = true
 futures.workspace = true
-globset.workspace = true
 hex.workspace = true
 opentelemetry.workspace = true
 secrecy.workspace = true

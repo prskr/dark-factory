@@ -1,8 +1,13 @@
 //! Workspace lifecycle management for Dark Factory tasks.
 //!
 //! Follows `design/agent-run.md` §6 and `specs/workspace-lifecycle/spec.md`.
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::Path;
 
+use anyhow::Context as _;
+
+use df_core::glob::{GlobSet, hidden_glob_set};
 use df_proto::agent::v1::{
     PushReport, PushStatus, PushTarget, RunOutcome, RunReport, Workspace, WorkspaceState,
 };
@@ -11,9 +16,10 @@ use df_proto::push_reasons::{NON_FAST_FORWARD, PUSH_TOO_LARGE};
 use df_proto::transcript::v1::{Notice, NoticeLevel};
 
 use crate::git::{
-    DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Git, GitConfigParams,
-    proxy_ca_override, rewrite_git_config,
+    DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Git, GitConfigParams, nul_separated,
+    proxy_ca_override, rewrite_git_config, shown_args,
 };
+use crate::hidden_paths;
 
 /// Result of preparing a workspace.
 #[derive(Debug, Clone)]
@@ -44,6 +50,7 @@ fn config_params<'a>(
         hooks_path,
         ssl_ca_info,
         extra_config: &workspace.git_config,
+        hidden_paths: &workspace.hidden_paths,
     }
 }
 
@@ -153,29 +160,44 @@ async fn clone_workspace(
     Ok(PrepareResult::clean(head_sha))
 }
 
-/// Restores the files of `origin/<wip branch>` into the work tree if that branch exists.
+/// Restores the files of `origin/<wip branch>` into the work tree if that branch exists: the
+/// paths that differ between HEAD and the snapshot, except those below a hidden glob. A restore
+/// of the whole tree would fetch the blobs of hidden paths too.
 async fn restore_wip_snapshot(git: &Git, workspace: &Workspace) -> anyhow::Result<()> {
     let wip_remote_ref = format!("origin/{}", workspace.wip_branch);
     if !ref_exists(git, &wip_remote_ref).await {
         return Ok(());
     }
-    // Failing here must fail prepare: otherwise the tree looks clean and finalize deletes
+    let hidden = hidden_glob_set(&workspace.hidden_paths)?;
+    // A failure here must fail prepare: otherwise the tree looks clean and finalize deletes
     // the remote WIP branch, the only copy of the previous run's uncommitted work.
-    let restore_out = git
-        .run_cmd(&[
+    let changed = git
+        .run_ok(&[
+            "diff",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            "HEAD",
+            &wip_remote_ref,
+        ])
+        .await
+        .with_context(|| format!("listing the changes of WIP snapshot {wip_remote_ref}"))?;
+    let paths: Vec<&OsStr> = nul_separated(&changed.stdout)
+        .filter(|path| !hidden.is_match(Path::new(path)))
+        .collect();
+    let source = format!("--source={wip_remote_ref}");
+    git.run_ok_chunked(
+        &[
+            "--literal-pathspecs",
             "restore",
-            &format!("--source={wip_remote_ref}"),
+            &source,
             "--worktree",
             "--",
-            ".",
-        ])
-        .await?;
-    if !restore_out.status.success() {
-        anyhow::bail!(
-            "restoring WIP snapshot {wip_remote_ref} failed: {}",
-            String::from_utf8_lossy(&restore_out.stderr).trim()
-        );
-    }
+        ],
+        &paths,
+    )
+    .await
+    .with_context(|| format!("restoring WIP snapshot {wip_remote_ref} failed"))?;
     Ok(())
 }
 
@@ -188,6 +210,7 @@ async fn sync_existing_workspace(
     config_params: &GitConfigParams<'_>,
 ) -> anyhow::Result<PrepareResult> {
     rewrite_git_config(repo_dir, config_params)?;
+    let removed = hidden_paths::enforce(git, repo_dir, &workspace.hidden_paths).await?;
 
     // Fetch base and task branch from remote (Finding 17)
     let fetch_out = git.run_network_cmd(&["fetch", "origin"]).await?;
@@ -215,11 +238,15 @@ async fn sync_existing_workspace(
             .await?;
     }
 
-    if has_remote_task {
-        sync_with_remote_task_branch(git, workspace, &task_remote_ref).await
+    let mut result = if has_remote_task {
+        sync_with_remote_task_branch(git, workspace, &task_remote_ref).await?
     } else {
-        push_new_task_branch(git, workspace).await
-    }
+        push_new_task_branch(git, workspace).await?
+    };
+    result
+        .notices
+        .extend(hidden_paths::removed_notice(&removed));
+    Ok(result)
 }
 
 /// The remote has the task branch: push local-only commits, fast-forward, or detect divergence.
@@ -498,6 +525,17 @@ pub fn compute_dir_size(dir: &Path) -> u64 {
 }
 
 async fn run_with_wip_index(git: &Git, wip_index: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let stdout = wip_index_output(git, wip_index, args).await?;
+    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+/// Runs Git against the WIP index and returns its raw stdout, so `-z` path lists keep names
+/// that are not UTF-8.
+async fn wip_index_output<S: AsRef<OsStr>>(
+    git: &Git,
+    wip_index: &Path,
+    args: &[S],
+) -> anyhow::Result<Vec<u8>> {
     let mut cmd = git.build_command();
     cmd.env("GIT_INDEX_FILE", wip_index);
     // File names like `prod[1].key` are paths, not globs
@@ -506,12 +544,12 @@ async fn run_with_wip_index(git: &Git, wip_index: &Path, args: &[&str]) -> anyho
     let out = cmd
         .output()
         .await
-        .map_err(|e| anyhow::anyhow!("git {} failed: {e}", args.join(" ")))?;
+        .with_context(|| format!("git {} failed", shown_args(args)))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
+        anyhow::bail!("git {} failed: {}", shown_args(args), stderr.trim());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Ok(out.stdout)
 }
 
 /// Parameters for workspace finalization.
@@ -610,7 +648,8 @@ async fn snapshot_wip(
         push_reports: Vec::new(),
         notices: Vec::new(),
     };
-    let tree = write_wip_tree(git, wip_index).await?;
+    let hidden = hidden_glob_set(&params.workspace.hidden_paths)?;
+    let tree = write_wip_tree(git, wip_index, &hidden).await?;
     let head_tree = git.git_output(&["rev-parse", "HEAD^{tree}"]).await?;
     if tree == head_tree {
         wip.push_reports
@@ -620,8 +659,12 @@ async fn snapshot_wip(
 
     // Uncommitted work: check size cap
     let mut total_wip_bytes: u64 = 0;
-    let diff_files =
-        run_with_wip_index(git, wip_index, &["diff", "-z", "--name-only", "HEAD"]).await?;
+    let diff_files = run_with_wip_index(
+        git,
+        wip_index,
+        &["diff", "-z", "--name-only", "--no-renames", "HEAD"],
+    )
+    .await?;
     for f in diff_files.split('\0').filter(|f| !f.is_empty()) {
         if let Ok(meta) = params.repo_dir.join(f).metadata() {
             total_wip_bytes += meta.len();
@@ -649,42 +692,76 @@ async fn snapshot_wip(
 
 /// Writes a tree of HEAD plus all modifications and untracked files (respecting .gitignore,
 /// without secret files) using the separate WIP index.
-async fn write_wip_tree(git: &Git, wip_index: &Path) -> anyhow::Result<String> {
+async fn write_wip_tree(git: &Git, wip_index: &Path, hidden: &GlobSet) -> anyhow::Result<String> {
     // Read current HEAD into separate index
     let _ = run_with_wip_index(git, wip_index, &["read-tree", "HEAD"]).await?;
-    // Add all modifications and untracked files respecting .gitignore
-    let _ = run_with_wip_index(git, wip_index, &["add", "-A"]).await?;
+    // Add all modifications and untracked files respecting .gitignore. `--sparse`: without it
+    // `add` fails for a file the agent created below a hidden path; the hidden paths are reset
+    // below.
+    let _ = run_with_wip_index(git, wip_index, &["add", "-A", "--sparse"]).await?;
 
     // Get list of tracked files in HEAD so we don't drop files already committed in HEAD (Finding 6).
-    // `-z` keeps names unquoted; non-ASCII names would otherwise come back as `"cl\303\251.pem"`.
+    // `-z` keeps names unquoted and verbatim; the paths stay raw bytes so names that are not
+    // UTF-8 reach Git unchanged.
     let head_files_out = git
-        .git_output(&["ls-tree", "-r", "-z", "--name-only", "HEAD"])
+        .run_ok(&["ls-tree", "-r", "-z", "--name-only", "HEAD"])
         .await
+        .map(|out| out.stdout)
         .unwrap_or_default();
-    let head_tracked_files: std::collections::HashSet<&str> = head_files_out
-        .split('\0')
-        .filter(|l| !l.is_empty())
-        .collect();
+    let head_tracked_files: HashSet<&OsStr> = nul_separated(&head_files_out).collect();
 
     // Drop secret files from wip.index
-    let ls_files = run_with_wip_index(git, wip_index, &["ls-files", "-z"]).await?;
-    for f in ls_files.split('\0').filter(|f| !f.is_empty()) {
-        if !is_secret_file(f) {
-            continue;
+    let ls_files = wip_index_output(git, wip_index, &["ls-files", "-z"]).await?;
+    for f in nul_separated(&ls_files) {
+        if is_secret_file(&f.to_string_lossy()) {
+            reset_to_head(git, wip_index, &head_tracked_files, f).await?;
         }
-        if head_tracked_files.contains(f) {
-            // If it was already committed in HEAD, restore HEAD's version in the WIP index
-            // rather than deleting it, so tracked files aren't wiped out on restore.
-            // `reset` only touches the WIP index; `checkout` would overwrite the worktree.
-            run_with_wip_index(git, wip_index, &["reset", "-q", "HEAD", "--", f]).await?;
-        } else {
-            // Untracked secret file: drop completely from the WIP index. A failure must abort
-            // the snapshot, otherwise the secret would be pushed.
-            run_with_wip_index(git, wip_index, &["rm", "--cached", "--quiet", "--", f]).await?;
+    }
+
+    // Leave hidden paths as they are in HEAD: the push check rejects any change to them, and
+    // `add -A` stages files the agent created there and deletions of files that are absent.
+    let staged = wip_index_output(
+        git,
+        wip_index,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            "HEAD",
+        ],
+    )
+    .await?;
+    for f in nul_separated(&staged) {
+        if hidden.is_match(Path::new(f)) {
+            reset_to_head(git, wip_index, &head_tracked_files, f).await?;
         }
     }
 
     run_with_wip_index(git, wip_index, &["write-tree"]).await
+}
+
+/// Sets `path` in the WIP index back to HEAD's version, or drops it if HEAD has none. A failure
+/// must abort the snapshot, otherwise the path would be pushed.
+async fn reset_to_head(
+    git: &Git,
+    wip_index: &Path,
+    head_tracked_files: &HashSet<&OsStr>,
+    path: &OsStr,
+) -> anyhow::Result<()> {
+    if head_tracked_files.contains(path) {
+        // If it was already committed in HEAD, restore HEAD's version in the WIP index
+        // rather than deleting it, so tracked files aren't wiped out on restore.
+        // `reset` only touches the WIP index; `checkout` would overwrite the worktree.
+        let args = ["reset", "-q", "HEAD", "--"].map(OsStr::new);
+        wip_index_output(git, wip_index, &[&args[..], &[path]].concat()).await?;
+    } else {
+        // `--sparse`: the path may lie outside the sparse patterns (a hidden path)
+        let args = ["rm", "--cached", "--sparse", "--quiet", "--"].map(OsStr::new);
+        wip_index_output(git, wip_index, &[&args[..], &[path]].concat()).await?;
+    }
+    Ok(())
 }
 
 /// Clean work tree: deletes the remote WIP branch if it exists. The report is `None` if there was

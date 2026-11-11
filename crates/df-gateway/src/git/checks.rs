@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use df_db::push_checks::protected_glob;
+use df_core::glob::{GlobError, hidden_glob_set, protected_glob};
 use df_proto::gateway::v1::{CheckMode, MaskedSecret, PushCheck, PushPolicy};
 use globset::{GlobMatcher, GlobSet, GlobSetBuilder};
 
@@ -21,6 +21,7 @@ pub enum Check {
     ProtectedPath,
     BlobTooLarge,
     MergeCommit,
+    HiddenPath,
 }
 
 impl From<Check> for PushCheck {
@@ -31,6 +32,7 @@ impl From<Check> for PushCheck {
             Check::ProtectedPath => Self::ProtectedPath,
             Check::BlobTooLarge => Self::BlobTooLarge,
             Check::MergeCommit => Self::MergeCommit,
+            Check::HiddenPath => Self::HiddenPath,
         }
     }
 }
@@ -99,6 +101,8 @@ pub struct CheckPolicy {
     always_protected: GlobMatcher,
     protected: GlobSet,
     globs: Vec<String>,
+    hidden: GlobSet,
+    hidden_globs: Vec<String>,
     protected_mode: Mode,
     secret_mode: Mode,
     size_mode: Mode,
@@ -108,7 +112,7 @@ pub struct CheckPolicy {
 
 impl CheckPolicy {
     /// Compiles the globs of `policy`; `*` does not match `/`.
-    pub fn new(policy: &PushPolicy) -> Result<Self, globset::Error> {
+    pub fn new(policy: &PushPolicy) -> Result<Self, GlobError> {
         let mut protected = GlobSetBuilder::new();
         for text in &policy.protected_globs {
             protected.add(protected_glob(text)?);
@@ -117,12 +121,20 @@ impl CheckPolicy {
             always_protected: protected_glob(DARK_FACTORY_GLOB)?.compile_matcher(),
             protected: protected.build()?,
             globs: policy.protected_globs.clone(),
+            hidden: hidden_glob_set(&policy.hidden_globs)?,
+            hidden_globs: policy.hidden_globs.clone(),
             protected_mode: policy.protected_mode().into(),
             secret_mode: policy.secret_mode().into(),
             size_mode: policy.size_mode().into(),
             max_blob_bytes: policy.max_blob_bytes,
             linear_history: policy.linear_history,
         })
+    }
+
+    /// The first hidden glob that matches `path`.
+    fn hidden_by(&self, path: &str) -> Option<&str> {
+        let first = self.hidden.matches(path).into_iter().next()?;
+        self.hidden_globs.get(first).map(String::as_str)
     }
 
     /// The mode and the matching glob if `path` is protected.
@@ -188,6 +200,11 @@ pub fn check_push(
         if policy.linear_history {
             findings.extend(merge_findings(view));
         }
+    }
+    // Before the protected paths: both use the fingerprint `path:<path>`, so a path that is
+    // both yields only the hidden finding.
+    findings.extend(hidden_path_findings(view, policy));
+    if target == Target::TaskBranch {
         findings.extend(protected_path_findings(view, policy));
     }
     findings.extend(size_findings(view, policy));
@@ -270,6 +287,27 @@ fn merge_findings(view: &PushView) -> impl Iterator<Item = Finding> + '_ {
             line: None,
             detail: format!("commit {} has {} parents", commit.id, commit.parents.len()),
             secret: None,
+        })
+}
+
+fn hidden_path_findings<'a>(
+    view: &'a PushView,
+    policy: &'a CheckPolicy,
+) -> impl Iterator<Item = Finding> + 'a {
+    view.commits
+        .iter()
+        .flat_map(|commit| &commit.changes)
+        .filter_map(|change| {
+            let glob = policy.hidden_by(&change.path)?;
+            Some(Finding {
+                check: Check::HiddenPath,
+                mode: Mode::Reject,
+                fingerprint: Some(format!("path:{}", change.path)),
+                path: change.path.clone(),
+                line: None,
+                detail: format!("matches {glob}"),
+                secret: None,
+            })
         })
 }
 

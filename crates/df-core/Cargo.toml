@@ -17,6 +17,7 @@ async-trait.workspace = true
 chrono.workspace = true
 df-artifact-types.workspace = true
 futures.workspace = true
+globset.workspace = true
 hex.workspace = true
 minijinja.workspace = true
 regex.workspace = true

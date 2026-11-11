@@ -27,6 +27,16 @@ pub const SECRET_PROJECT_NAME: &str = "Secret Scan";
 pub const PROTECTED_PROJECT_KEY: &str = "PP";
 pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
 
+/// Project that hides `secret/**` and whose fake agent tries to delete `secret/value.txt` (demo
+/// step 6 of iteration 3); tasks are `HP-<n>`.
+pub const HIDDEN_PROJECT_KEY: &str = "HP";
+pub const HIDDEN_PROJECT_NAME: &str = "Hidden Path";
+
+/// The hidden glob of project `HP` and the file of the repository below it
+/// (`deploy/e2e/e2e-local.sh` commits it to `main`).
+pub const HIDDEN_GLOB: &str = "secret/**";
+pub const HIDDEN_PATH: &str = "secret/value.txt";
+
 /// Project whose fake agent completes the task in its first run and only reads feedback in the
 /// next (forge webhooks); tasks are `WH-<n>`.
 pub const WEBHOOK_PROJECT_KEY: &str = "WH";
@@ -124,6 +134,7 @@ pub const RATE_LIMIT_SCRIPT: &str = "/opt/harness/scripts/rate-limit.yaml";
 pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
+pub const HIDDEN_SCRIPT: &str = "/opt/harness/scripts/push-hidden.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use df_db::MIGRATOR;
 use df_db::catalog::{get_project_by_key, list_credential_refs, list_personas};
 use df_db::model_providers::list_model_providers;
+use df_db::push_checks::push_policy;
 use df_e2e::{data, seed};
 
 async fn audit_entries(pool: &df_db::PgPool) -> Result<i64> {
@@ -71,6 +72,23 @@ async fn seed_writes_the_demo_data() -> Result<()> {
             .with_context(|| format!("project {key}"))?;
         assert_eq!(project.adapter_command, data::adapter_command(script));
     }
+    let hidden = get_project_by_key(&pool, data::HIDDEN_PROJECT_KEY)
+        .await?
+        .context("project HP")?;
+    assert_eq!(
+        hidden.adapter_command,
+        data::adapter_command(data::HIDDEN_SCRIPT)
+    );
+    assert_eq!(
+        push_policy(&pool, hidden.id).await?.hidden_globs,
+        [data::HIDDEN_GLOB]
+    );
+    assert!(
+        push_policy(&pool, project.id)
+            .await?
+            .hidden_globs
+            .is_empty()
+    );
     // Sandboxes reach Forgejo through the gateway's Git proxy: no allowlist entry.
     assert!(df_db::list_entries(&pool).await?.is_empty());
     Ok(())

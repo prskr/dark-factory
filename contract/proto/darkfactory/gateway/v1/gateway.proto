@@ -192,6 +192,9 @@ message PushPolicy {
   uint64 max_blob_bytes = 5;
   // Merge commits are rejected (`df:merge-commit`, mode `REJECT`).
   bool linear_history = 6;
+  // Hidden path globs (same syntax as `protected_globs`, no `{}`). A push touching one is a
+  // `df:hidden-path` finding with mode `REJECT`, on the task and the WIP branch.
+  repeated string hidden_globs = 7;
 }
 
 // What a finding of a check does to a push on the task branch. Pushes to the WIP branch treat
@@ -381,6 +384,8 @@ enum PushCheck {
   PUSH_CHECK_BLOB_TOO_LARGE = 4;
   // `df:merge-commit`
   PUSH_CHECK_MERGE_COMMIT = 5;
+  // `df:hidden-path`
+  PUSH_CHECK_HIDDEN_PATH = 6;
 }
 
 message RefUpdate {

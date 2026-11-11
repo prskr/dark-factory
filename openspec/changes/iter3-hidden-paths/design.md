@@ -9,7 +9,7 @@ ADR-0054 decides that hidden paths use sparse checkout plus the push check, and 
   - The gateway compiles them in `CheckPolicy::new` (`df-gateway/src/git/checks.rs`) and checks every `PathChange` of every added commit, but only for `Target::TaskBranch`.
   - WIP pushes get only the secret scan and the size limit.
 - **Workspace** (`factory-agent/src/workspace.rs`):
-  - `clone_workspace` runs `clone --filter=blob:none --no-checkout`, `rewrite_git_config`, `checkout -B`, then `restore --source=<wip> --worktree -- .`.
+  - `clone_workspace` runs `clone --filter=blob:none --no-checkout`, `rewrite_git_config`, `checkout -B`, then the WIP restore (`restore --source=<wip> --worktree` of the paths that differ between HEAD and the snapshot).
   - `sync_existing_workspace` rewrites the config, fetches, checks out and fast-forwards.
   - `rewrite_git_config` (`git.rs`) writes a fixed `[core]` section and deletes `.git/config.worktree`.
 - **WIP tree**: `write_wip_tree` builds the tree in a fresh `GIT_INDEX_FILE=/run/factory/wip.index` with `GIT_LITERAL_PATHSPECS=1`:
@@ -65,7 +65,7 @@ Alternative: cone mode. Rejected: it can only include directories, so hiding `ta
 
 ### D3: Clone and reuse
 
-- **Fresh workspace:** the sparse file is written between `clone --no-checkout` and `checkout -B`. Checkout then fetches only blobs inside the sparse set. The WIP restore (`git restore --worktree`) respects the skip-worktree bits by default.
+- **Fresh workspace:** the sparse file is written between `clone --no-checkout` and `checkout -B`. Checkout then fetches only blobs inside the sparse set. The WIP restore does not respect the skip-worktree bits when it is given a whole-tree pathspec (checked with Git 2.54: `restore --source=<wip> -- .` rewrites hidden files and fetches their blobs). So it restores only the paths from `diff --name-only --no-renames -z HEAD <wip>` that match no hidden glob, with literal pathspecs and in chunks. No blob below a hidden path is fetched, and the changes of an old snapshot to hidden paths are not restored.
 - **Reused workspace:** after the config rewrite, `git sparse-checkout reapply` updates the working tree. A path that is no longer hidden comes back. Git refuses to drop modified files, which D4 handles.
 
 ### D4: Removing files under newly hidden paths

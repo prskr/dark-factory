@@ -14,12 +14,13 @@ pub const NON_FAST_FORWARD: &str = "df:non-fast-forward";
 
 impl PushCheck {
     /// Every check, without [`PushCheck::Unspecified`].
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SecretScan,
         Self::Identity,
         Self::ProtectedPath,
         Self::BlobTooLarge,
         Self::MergeCommit,
+        Self::HiddenPath,
     ];
 
     /// The `df:` reason of a ref this check rejected; `None` for [`PushCheck::Unspecified`].
@@ -31,6 +32,7 @@ impl PushCheck {
             Self::ProtectedPath => Some("df:protected-path"),
             Self::BlobTooLarge => Some("df:blob-too-large"),
             Self::MergeCommit => Some("df:merge-commit"),
+            Self::HiddenPath => Some("df:hidden-path"),
         }
     }
 

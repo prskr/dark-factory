@@ -115,6 +115,21 @@ These are compiled in and not configurable.
   store; git runs with `GIT_TERMINAL_PROMPT=0`, so a
   rejected request fails at once instead of prompting. `credential.*` and `http.*` entries from the
   repository or `Workspace.git_config` are dropped.
+- **Hidden paths.** `Workspace.hidden_paths` (globs of the project's push policy, `globset` syntax
+  without `{}`) are applied as a non-cone sparse checkout. The generated `.git/config` always sets
+  `core.sparseCheckout = true` and `core.sparseCheckoutCone = false`, and `.git/info/sparse-checkout`
+  is rewritten at prepare and at finalize: `/*`, then `!/<glob>` per hidden glob and, unless the
+  glob ends in `/**`, `/<glob>/` to bring directories that the glob does not name back. Without
+  hidden paths the file is `/*`, a full checkout. A fresh clone writes the file before the first
+  checkout, so no blob below a hidden path is fetched; a reused workspace runs
+  `git sparse-checkout reapply`. Then prepare removes the files below hidden globs that are still in
+  the working tree: tracked files whether or not `reapply` kept them (it keeps modified ones),
+  untracked and ignored files. It resets their index entries, runs `reapply` again and emits one
+  `workspace.hidden_paths_removed` notice (level `WARNING`) listing the paths, truncated after 50.
+  A path with a symlink among its parent directories is skipped. Restoring the WIP snapshot of a
+  fresh workspace restores only the paths that differ between `HEAD` and the snapshot and match no
+  hidden glob, so no blob below a hidden path is fetched. The WIP snapshot resets hidden paths to
+  `HEAD`. An invalid glob fails prepare. Requires Git 2.27 or newer.
 - **Git retries.** A clone, fetch or push whose output shows HTTP 503 (`returned error: 503`) or a
   connection error (`Failed to connect to`, `Connection refused`, `Connection reset by peer`,
   `Empty reply from server`, and mid-transfer `Operation timed out`,

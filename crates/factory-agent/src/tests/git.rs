@@ -98,6 +98,7 @@ async fn test_planted_configuration_scenario() {
 
     let hooks_path = std::path::Path::new("/opt/factory/hooks-empty");
     let params = GitConfigParams {
+        hidden_paths: &[],
         repo_url: "https://git.example.org/peter/dark-factory.git",
         commit_author_name: "Agent Bot",
         commit_author_email: "bot@darkfactory.local",
@@ -185,6 +186,7 @@ fn test_repo_url_cannot_break_out_of_the_config_subsection() {
     ];
     for url in urls {
         let params = GitConfigParams {
+            hidden_paths: &[],
             repo_url: url,
             commit_author_name: "Agent Bot",
             commit_author_email: "bot@darkfactory.local",
@@ -208,6 +210,8 @@ fn test_repo_url_cannot_break_out_of_the_config_subsection() {
                 "bare",
                 "logallrefupdates",
                 "hooksPath",
+                "sparseCheckout",
+                "sparseCheckoutCone",
                 "url",
                 "fetch",
                 "promisor",
@@ -413,6 +417,7 @@ fn test_render_git_config_rejects_injection() {
         value: "evil\n[url \"https://evil/\"]\ninsteadOf = https://github.com/".to_string(),
     }];
     let params = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -429,6 +434,7 @@ fn test_render_git_config_rejects_injection() {
         value: "test".to_string(),
     }];
     let params2 = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries2,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -445,6 +451,7 @@ fn test_render_git_config_rejects_injection() {
         value: "test".to_string(),
     }];
     let params3 = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries3,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -496,6 +503,7 @@ fn test_render_skips_unsafe_keys_and_quotes_values() {
         },
     ];
     let params = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -557,6 +565,7 @@ fn test_rewrite_git_config_requires_real_git_dir() {
 
     let temp = tempfile::tempdir().unwrap();
     let params = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &[],
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -597,6 +606,7 @@ fn test_runtime_owned_values_are_quoted_and_validated() {
     use crate::git::{GitConfigParams, render_git_config, rewrite_git_config};
 
     let params = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://git.example.org/a.git",
@@ -609,6 +619,7 @@ fn test_runtime_owned_values_are_quoted_and_validated() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join(".git")).unwrap();
     let evil = GitConfigParams {
+        hidden_paths: &[],
         commit_author_name: "Bot\n[core]\nhooksPath = /x",
         ..params
     };

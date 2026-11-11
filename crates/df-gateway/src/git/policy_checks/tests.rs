@@ -105,6 +105,7 @@ fn default_policy() -> PushPolicy {
         secret_mode: CheckMode::Approval.into(),
         size_mode: CheckMode::Approval.into(),
         max_blob_bytes: 5 << 20,
+        hidden_globs: Vec::new(),
         linear_history: false,
     }
 }

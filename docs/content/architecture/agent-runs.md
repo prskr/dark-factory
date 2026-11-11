@@ -70,12 +70,14 @@ sequenceDiagram
    NetworkPolicy for the run.
 3. **Connecting.** The runtime dials the control plane with its pod certificate. The control plane
    resolves the certificate to the run and sends the `Assign`: repository URL through the Git proxy,
-   branches, commit identity, system prompt, harness settings, the harness environment (the gateway's
+   branches, the project's hidden paths, commit identity, system prompt (with a `Sandbox` section when paths are hidden), harness settings, the harness environment (the gateway's
    [inference endpoint](../security/inference-endpoint.md) as base URL, a placeholder API key and the
    instance CA; no credential), budgets and the continuation of earlier runs (harness session id and
    a transcript summary).
 4. **Preparing.** The runtime clones or updates the workspace through the Git proxy and writes its
-   own `.git/config`; anything left on the volume is treated as untrusted.
+   own `.git/config` and sparse checkout patterns; files below [hidden
+   paths](../using/hidden-paths.md) are left out or removed. Anything left on the volume is treated
+   as untrusted.
 5. **Turns.** The harness works on the prompt. Every message and tool call is streamed to the
    control plane and stored as the task's transcript. After a turn with new commits the runtime
    pushes the task branch. The first push ahead of the base branch enqueues the draft pull request;

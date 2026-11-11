@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT project_id, protected_globs, protected_mode, secret_mode, size_mode,\n                max_blob_bytes, linear_history\n         FROM project_push_policies WHERE project_id = ANY($1)",
+  "query": "SELECT project_id, protected_globs, protected_mode, hidden_globs, secret_mode, size_mode,\n                max_blob_bytes, linear_history\n         FROM project_push_policies WHERE project_id = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "hidden_globs",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "project_push_policies",
+            "name": "hidden_globs"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "secret_mode",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "size_mode",
         "type_info": "Text",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "max_blob_bytes",
         "type_info": "Int8",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "linear_history",
         "type_info": "Bool",
         "origin": {
@@ -93,8 +104,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "4a59bf2d06dadef18aad5d2370992e8f78bb7af3dc3fe1a87922c904c302dd6f"
+  "hash": "6a05f88cc91019280a5ae89d25f498a31d8688965e96bb7737901c5370605bfd"
 }

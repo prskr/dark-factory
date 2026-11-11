@@ -35,3 +35,4 @@ Set up in this order:
 4. [Requests](requests.md): answer questions and decide approvals.
 5. [Network access](network-access.md): allow the hosts agents need.
 6. [Delegation](delegation.md): agents that create tasks for other agents and wake when they end.
+7. [Hidden paths](hidden-paths.md): keep files out of the agent's workspace.

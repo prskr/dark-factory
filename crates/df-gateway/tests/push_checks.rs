@@ -183,6 +183,7 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
         secret_mode: CheckMode::Approval.into(),
         size_mode: CheckMode::Approval.into(),
         max_blob_bytes: 5 << 20,
+        hidden_globs: Vec::new(),
         linear_history: false,
     };
     let localhost: IpAddr = "127.0.0.1".parse()?;

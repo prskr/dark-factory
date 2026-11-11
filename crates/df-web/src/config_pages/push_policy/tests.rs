@@ -53,6 +53,40 @@ fn globs_are_one_per_line_trimmed_without_blank_lines() {
 }
 
 #[test]
+fn hidden_globs_are_one_per_line_trimmed_without_blank_lines() {
+    let form = PushPolicyForm {
+        hidden_globs: " talos/**\r\n\r\nsecrets/*  \n".into(),
+        ..default_form()
+    };
+
+    let policy = validate(&form).unwrap().unwrap();
+
+    assert_eq!(policy.hidden_globs, ["talos/**", "secrets/*"]);
+    assert_eq!(
+        policy.protected_globs,
+        DEFAULT_GLOBS.lines().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn alternation_in_a_hidden_glob_names_its_line() {
+    let form = PushPolicyForm {
+        hidden_globs: "talos/**\n{talos,secrets}/**".into(),
+        ..default_form()
+    };
+
+    let errors = validate(&form).unwrap_err();
+
+    assert_eq!(
+        errors.get("hidden_globs"),
+        Some(
+            "Line 2: \"{talos,secrets}/**\" is not a valid glob (alternation with {} is not supported)."
+        )
+    );
+    assert_eq!(errors.get("protected_globs"), None);
+}
+
+#[test]
 fn an_invalid_glob_names_its_line_and_the_reason() {
     let errors = validate(&with_globs(&format!("{DEFAULT_GLOBS}\ndeploy/[\nsrc/{{a"))).unwrap_err();
     assert_eq!(
@@ -390,4 +424,60 @@ async fn the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view() {
         "{script}"
     );
     assert!(script.contains("init()") && script.contains("$watch('tab'"));
+}
+
+#[tokio::test]
+async fn hidden_paths_are_saved_audited_and_shown_in_their_own_field() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let hidden = "talos/**\nconfigs/*";
+    let fields = |hidden: &str| {
+        edit_body(&[
+            ("protected_globs", DEFAULT_GLOBS),
+            ("hidden_globs", hidden),
+            ("protected_mode", "approval"),
+            ("secret_mode", "approval"),
+            ("size_mode", "approval"),
+            ("max_blob_mib", "5"),
+        ])
+    };
+
+    let response = app.post("/projects/DF", &fields(hidden), &cookie).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = push_policy(&app.pool, seed.project).await.unwrap();
+    assert_eq!(stored.hidden_globs, ["talos/**", "configs/*"]);
+    let audit: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'push_policy.create'")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(audit[0]["after"]["hidden_globs"][0], "talos/**");
+    let html = text(app.get("/projects/DF", &cookie).await).await;
+    assert!(html.contains(&format!(">{hidden}</textarea>")), "{html}");
+    assert!(html.contains("Hidden paths"), "{html}");
+    assert!(html.contains("Git history"), "{html}");
+
+    let response = app
+        .post("/projects/DF", &fields("{talos,secrets}/**"), &cookie)
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = text(response).await;
+    assert!(
+        html.contains("x-data=\"tabs(&quot;push-checks&quot;, true)\""),
+        "{html}"
+    );
+    let textarea = tag_around(&html, "id=\"hidden_globs\"");
+    assert!(
+        textarea.contains("aria-invalid=\"true\"")
+            && textarea.contains("aria-describedby=\"hidden_globs-error hidden_globs-hint\""),
+        "{textarea}"
+    );
+    assert!(
+        html.contains("Line 1: &quot;{talos,secrets}/**&quot; is not a valid glob (alternation with {} is not supported)."),
+        "{html}"
+    );
+    assert_eq!(push_policy(&app.pool, seed.project).await.unwrap(), stored);
 }

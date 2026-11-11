@@ -11,11 +11,21 @@ use df_db::PgPool;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, ProjectInput, get_project_by_key,
     list_credential_refs, list_personas, save_credential_ref, save_persona, save_project,
+    update_project_with_push_policy,
 };
 use df_db::model_providers::{ModelProviderInput, list_model_providers, save_model_provider};
+use df_db::push_checks::push_policy;
 use uuid::Uuid;
 
 use crate::data;
+
+/// A project of the demo: the fake agent script it runs and the paths it hides.
+struct SeedProject {
+    key: &'static str,
+    name: &'static str,
+    script: &'static str,
+    hidden: &'static [&'static str],
+}
 
 /// Writes the well-known data into the database behind `pool`.
 pub async fn run(pool: &PgPool) -> Result<()> {
@@ -28,87 +38,66 @@ pub async fn run(pool: &PgPool) -> Result<()> {
     let credential = ensure_credential(pool, actor).await?;
     let provider = ensure_model_provider(pool, actor).await?;
     ensure_persona(pool, actor, provider).await?;
-    ensure_project(
-        pool,
-        actor,
-        data::PROJECT_KEY,
-        data::PROJECT_NAME,
-        data::DEMO_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::RATE_LIMIT_PROJECT_KEY,
-        data::RATE_LIMIT_PROJECT_NAME,
-        data::RATE_LIMIT_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::NETWORK_PROJECT_KEY,
-        data::NETWORK_PROJECT_NAME,
-        data::NETWORK_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::SECRET_PROJECT_KEY,
-        data::SECRET_PROJECT_NAME,
-        data::SECRET_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::PROTECTED_PROJECT_KEY,
-        data::PROTECTED_PROJECT_NAME,
-        data::PROTECTED_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::WEBHOOK_PROJECT_KEY,
-        data::WEBHOOK_PROJECT_NAME,
-        data::WEBHOOK_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::DELEGATION_PROJECT_KEY,
-        data::DELEGATION_PROJECT_NAME,
-        data::DELEGATION_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::RESEARCH_PROJECT_KEY,
-        data::RESEARCH_PROJECT_NAME,
-        data::RESEARCH_SCRIPT,
-        credential,
-    )
-    .await?;
-    ensure_project(
-        pool,
-        actor,
-        data::INTERRUPT_PROJECT_KEY,
-        data::INTERRUPT_PROJECT_NAME,
-        data::INTERRUPT_SCRIPT,
-        credential,
-    )
-    .await?;
+    let project = |key, name, script| SeedProject {
+        key,
+        name,
+        script,
+        hidden: &[],
+    };
+    let projects = [
+        project(data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
+        project(
+            data::RATE_LIMIT_PROJECT_KEY,
+            data::RATE_LIMIT_PROJECT_NAME,
+            data::RATE_LIMIT_SCRIPT,
+        ),
+        project(
+            data::NETWORK_PROJECT_KEY,
+            data::NETWORK_PROJECT_NAME,
+            data::NETWORK_SCRIPT,
+        ),
+        project(
+            data::SECRET_PROJECT_KEY,
+            data::SECRET_PROJECT_NAME,
+            data::SECRET_SCRIPT,
+        ),
+        project(
+            data::PROTECTED_PROJECT_KEY,
+            data::PROTECTED_PROJECT_NAME,
+            data::PROTECTED_SCRIPT,
+        ),
+        SeedProject {
+            hidden: &[data::HIDDEN_GLOB],
+            ..project(
+                data::HIDDEN_PROJECT_KEY,
+                data::HIDDEN_PROJECT_NAME,
+                data::HIDDEN_SCRIPT,
+            )
+        },
+        project(
+            data::WEBHOOK_PROJECT_KEY,
+            data::WEBHOOK_PROJECT_NAME,
+            data::WEBHOOK_SCRIPT,
+        ),
+        project(
+            data::DELEGATION_PROJECT_KEY,
+            data::DELEGATION_PROJECT_NAME,
+            data::DELEGATION_SCRIPT,
+        ),
+        project(
+            data::RESEARCH_PROJECT_KEY,
+            data::RESEARCH_PROJECT_NAME,
+            data::RESEARCH_SCRIPT,
+        ),
+        project(
+            data::INTERRUPT_PROJECT_KEY,
+            data::INTERRUPT_PROJECT_NAME,
+            data::INTERRUPT_SCRIPT,
+        ),
+    ];
+    for seed in projects {
+        ensure_project(pool, actor, &seed, credential).await?;
+    }
     Ok(())
 }
 
@@ -226,11 +215,15 @@ async fn ensure_persona(pool: &PgPool, actor: Actor<'_>, provider: Uuid) -> Resu
 async fn ensure_project(
     pool: &PgPool,
     actor: Actor<'_>,
-    key: &str,
-    name: &str,
-    script: &str,
+    seed: &SeedProject,
     credential: Uuid,
 ) -> Result<()> {
+    let SeedProject {
+        key,
+        name,
+        script,
+        hidden,
+    } = *seed;
     let wanted = ProjectInput {
         key: key.into(),
         name: name.into(),
@@ -243,21 +236,32 @@ async fn ensure_project(
         webhook_wake: df_core::webhooks::WebhookWake::Members,
     };
     let existing = get_project_by_key(pool, key).await?;
-    if let Some(p) = &existing
-        && p.name == wanted.name
-        && p.repo_url == wanted.repo_url
-        && p.issue_tracker_url == wanted.issue_tracker_url
-        && p.image == wanted.image
-        && p.base_branch == wanted.base_branch
-        && p.adapter_command == wanted.adapter_command
-        && p.forge_credential_id == wanted.forge_credential_id
-        && p.webhook_wake == wanted.webhook_wake
-    {
-        return Ok(());
+    let id = match &existing {
+        Some(p)
+            if p.name == wanted.name
+                && p.repo_url == wanted.repo_url
+                && p.issue_tracker_url == wanted.issue_tracker_url
+                && p.image == wanted.image
+                && p.base_branch == wanted.base_branch
+                && p.adapter_command == wanted.adapter_command
+                && p.forge_credential_id == wanted.forge_credential_id
+                && p.webhook_wake == wanted.webhook_wake =>
+        {
+            p.id
+        }
+        other => {
+            save_project(pool, actor, other.as_ref().map(|p| p.id), &wanted)
+                .await
+                .with_context(|| format!("save project {key}"))?
+                .id
+        }
+    };
+    let mut policy = push_policy(pool, id).await?;
+    if policy.hidden_globs != hidden {
+        policy.hidden_globs = hidden.iter().map(|glob| (*glob).to_owned()).collect();
+        update_project_with_push_policy(pool, actor, id, &wanted, &policy)
+            .await
+            .with_context(|| format!("save push policy of project {key}"))?;
     }
-    let id = existing.map(|p| p.id);
-    save_project(pool, actor, id, &wanted)
-        .await
-        .with_context(|| format!("save project {key}"))?;
     Ok(())
 }

@@ -175,6 +175,9 @@ setup_forgejo() {
   forward forgejo forgejo-http "$forgejo_port" 3000
   forgejo_api POST user/repos '{"name":"demo","auto_init":true,"default_branch":"main"}'
   forgejo_api POST "repos/$forgejo_user/demo/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
+  # The file the hidden-path demo project (`HP`) hides from its agent.
+  forgejo_api POST "repos/$forgejo_user/demo/contents/secret/value.txt" \
+    '{"content":"c2VjcmV0Cg==","message":"Add a secret file"}'
   forgejo_api PUT "repos/$forgejo_user/demo/collaborators/$forgejo_reviewer" '{"permission":"write"}'
   # The events of docs/content/integrations/forges/webhooks.md; `pull_request_only` is the
   # "Modification" checkbox of the form.

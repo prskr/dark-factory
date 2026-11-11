@@ -168,6 +168,10 @@ message Workspace {
   // appear several times. The runtime re-validates them against its denylist
   // and applies them between the fresh-clone template and its own keys.
   repeated GitConfigEntry git_config = 7;
+  // Globs of repository paths hidden from the workspace (`globset` syntax, no `{}`), as
+  // configured. The runtime leaves them out of the checkout with non-cone sparse patterns and
+  // removes existing files below them. Empty: nothing is hidden.
+  repeated string hidden_paths = 8;
 }
 
 message GitHookCommand {
@@ -361,7 +365,7 @@ enum PushStatus {
   // WIP branch removed because there was no uncommitted work.
   PUSH_STATUS_DELETED = 5;
   // Another push check of the Git proxy rejected the push (`df:identity`, `df:protected-path`,
-  // `df:blob-too-large`, `df:merge-commit`, `df:push-too-large`).
+  // `df:blob-too-large`, `df:merge-commit`, `df:hidden-path`, `df:push-too-large`).
   PUSH_STATUS_REJECTED_BY_CHECK = 6;
 }
 

@@ -149,6 +149,7 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
@@ -334,6 +335,7 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     // 1. Create uncommitted modifications, an untracked normal file, and untracked secret files (.env, id_rsa)
@@ -525,6 +527,7 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
@@ -684,6 +687,7 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     // Create a large uncommitted file exceeding size cap of 500 bytes
@@ -896,6 +900,7 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
     let params = FinalizeParams {
@@ -955,6 +960,7 @@ async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
     let params = FinalizeParams {
@@ -1019,11 +1025,18 @@ fn test_runtime_writes_do_not_follow_planted_symlinks() {
             .is_symlink()
     );
 
+    // a regular file in the place of a directory is replaced as well
+    let dir_file = temp.path().join(".config");
+    std::fs::write(&dir_file, "not a directory").unwrap();
+    create_real_dir(&dir_file).unwrap();
+    assert!(dir_file.is_dir());
+
     // .git/config planted as a symlink
     let repo = temp.path().join("repo");
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     std::os::unix::fs::symlink(&victim, repo.join(".git").join("config")).unwrap();
     let params = GitConfigParams {
+        hidden_paths: &[],
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://github.com/org/repo.git",

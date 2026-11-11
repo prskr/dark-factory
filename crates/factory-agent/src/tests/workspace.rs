@@ -142,6 +142,7 @@ async fn test_fetch_trusts_the_proxy_through_the_scoped_ca_in_git_config() {
     rewrite_git_config(
         &local,
         &GitConfigParams {
+            hidden_paths: &[],
             repo_url: &url,
             commit_author_name: "Bot",
             commit_author_email: "bot@example.com",
@@ -250,6 +251,7 @@ async fn test_scenario_prepare_first_run() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
@@ -416,6 +418,7 @@ async fn test_scenario_prepare_volume_lost_restore_wip() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
@@ -523,6 +526,7 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     // First prepare (fresh clone)
@@ -712,6 +716,7 @@ async fn test_scenario_prepare_diverged() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     // Prepare fresh workspace
@@ -804,6 +809,7 @@ async fn test_prepare_recreates_missing_task_branch() {
         commit_identity: None,
         git_hooks: vec![],
         git_config: vec![],
+        hidden_paths: Vec::new(),
     };
 
     let res = prepare_workspace(&git, &local, &workspace, &hooks, None)

@@ -5,11 +5,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 
+use df_core::glob::hidden_glob;
 use df_core::system_reason::PUSH_REJECTED;
 use df_core::{Principal, RequestId, TaskId, TaskStatus};
 use df_proto::gateway::v1 as pb;
 use df_proto::push_reasons::{PUSH_TOO_LARGE, finding_reason};
-use globset::{Glob, GlobBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -89,6 +89,8 @@ impl FromStr for CheckMode {
 pub struct PushPolicy {
     pub protected_globs: Vec<String>,
     pub protected_mode: CheckMode,
+    /// Paths hidden from the agent's workspace; a push touching one is always rejected.
+    pub hidden_globs: Vec<String>,
     pub secret_mode: CheckMode,
     pub size_mode: CheckMode,
     pub max_blob_bytes: u64,
@@ -101,17 +103,13 @@ impl Default for PushPolicy {
         Self {
             protected_globs: DEFAULT_PROTECTED_GLOBS.map(str::to_owned).to_vec(),
             protected_mode: CheckMode::Approval,
+            hidden_globs: Vec::new(),
             secret_mode: CheckMode::Approval,
             size_mode: CheckMode::Approval,
             max_blob_bytes: DEFAULT_MAX_BLOB_BYTES,
             linear_history: false,
         }
     }
-}
-
-/// A protected path glob of a push policy, as the Git proxy matches it: `*` does not match `/`.
-pub fn protected_glob(text: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(text).literal_separator(true).build()
 }
 
 /// The stored push policies of `project_ids`, by project id. A project without a stored policy
@@ -121,7 +119,7 @@ pub async fn push_policies(
     project_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, PushPolicy>, DbError> {
     let rows = sqlx::query!(
-        "SELECT project_id, protected_globs, protected_mode, secret_mode, size_mode,
+        "SELECT project_id, protected_globs, protected_mode, hidden_globs, secret_mode, size_mode,
                 max_blob_bytes, linear_history
          FROM project_push_policies WHERE project_id = ANY($1)",
         project_ids
@@ -136,6 +134,7 @@ pub async fn push_policies(
             let policy = PushPolicy {
                 protected_globs: row.protected_globs,
                 protected_mode: row.protected_mode.parse()?,
+                hidden_globs: row.hidden_globs,
                 secret_mode: row.secret_mode.parse()?,
                 size_mode: row.size_mode.parse()?,
                 max_blob_bytes,
@@ -164,6 +163,10 @@ pub(crate) async fn save_push_policy(
     key: &str,
     policy: &PushPolicy,
 ) -> Result<(), DbError> {
+    for glob in &policy.hidden_globs {
+        hidden_glob(glob)
+            .map_err(|error| DbError::InvalidData(format!("hidden path `{glob}`: {error}")))?;
+    }
     let before = push_policies(&mut **tx, &[project_id])
         .await?
         .remove(&project_id);
@@ -175,12 +178,13 @@ pub(crate) async fn save_push_policy(
     })?;
     sqlx::query!(
         "INSERT INTO project_push_policies
-             (project_id, protected_globs, protected_mode, secret_mode, size_mode,
+             (project_id, protected_globs, protected_mode, hidden_globs, secret_mode, size_mode,
               max_blob_bytes, linear_history)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (project_id) DO UPDATE SET
              protected_globs = EXCLUDED.protected_globs,
              protected_mode = EXCLUDED.protected_mode,
+             hidden_globs = EXCLUDED.hidden_globs,
              secret_mode = EXCLUDED.secret_mode,
              size_mode = EXCLUDED.size_mode,
              max_blob_bytes = EXCLUDED.max_blob_bytes,
@@ -189,6 +193,7 @@ pub(crate) async fn save_push_policy(
         project_id,
         &policy.protected_globs,
         policy.protected_mode.as_str(),
+        &policy.hidden_globs,
         policy.secret_mode.as_str(),
         policy.size_mode.as_str(),
         max_blob_bytes,
@@ -262,6 +267,7 @@ pub enum PushCheck {
     ProtectedPath,
     BlobTooLarge,
     MergeCommit,
+    HiddenPath,
 }
 
 impl PushCheck {
@@ -273,6 +279,7 @@ impl PushCheck {
             Self::ProtectedPath => "protected-path",
             Self::BlobTooLarge => "blob-too-large",
             Self::MergeCommit => "merge-commit",
+            Self::HiddenPath => "hidden-path",
         }
     }
 }
@@ -285,6 +292,7 @@ impl From<PushCheck> for pb::PushCheck {
             PushCheck::ProtectedPath => Self::ProtectedPath,
             PushCheck::BlobTooLarge => Self::BlobTooLarge,
             PushCheck::MergeCommit => Self::MergeCommit,
+            PushCheck::HiddenPath => Self::HiddenPath,
         }
     }
 }
@@ -345,7 +353,7 @@ impl ExceptionFinding {
     pub fn from_finding(finding: &PushFinding) -> Option<Self> {
         let (rule, preview) = match (&finding.secret, finding.check) {
             (Some(secret), _) => (Some(secret.rule.clone()), secret.masked.clone()),
-            (None, PushCheck::ProtectedPath) => (None, String::new()),
+            (None, PushCheck::ProtectedPath | PushCheck::HiddenPath) => (None, String::new()),
             (None, _) => (None, finding.detail.clone()),
         };
         Some(Self {

@@ -2,9 +2,13 @@
 //!
 //! Follows `design/agent-run.md` §7 and `specs/git-hardening/spec.md`.
 
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
+use anyhow::Context as _;
+use df_core::glob::hidden_glob_set;
 use df_proto::agent::v1::GitConfigEntry;
 
 pub const PROXY_ENV_VARS: &[&str] = &[
@@ -15,6 +19,13 @@ pub const PROXY_ENV_VARS: &[&str] = &[
     "http_proxy",
     "no_proxy",
 ];
+
+/// Paths per Git call that takes a list of paths, to stay below the argument limit (small in
+/// tests, so they cover several calls).
+#[cfg(not(test))]
+pub const PATHSPEC_CHUNK: usize = 256;
+#[cfg(test)]
+pub const PATHSPEC_CHUNK: usize = 2;
 
 /// Upper bound for a single git invocation (clone, fetch and push talk to a remote peer).
 pub const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -93,6 +104,9 @@ pub struct GitConfigParams<'a> {
     /// CA bundle that verifies the gateway's Git proxy certificate (`http.sslCAInfo`).
     pub ssl_ca_info: Option<&'a Path>,
     pub extra_config: &'a [GitConfigEntry],
+    /// Globs of the paths hidden from the workspace; [`rewrite_git_config`] writes them as
+    /// sparse patterns.
+    pub hidden_paths: &'a [String],
 }
 
 /// Returns true if a Git config key or value is denied.
@@ -259,6 +273,9 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
         &params.hooks_path.display().to_string(),
         "\n",
     ]);
+    // Always on, so a path that is no longer hidden comes back with the next `reapply`
+    out.push_str("\tsparseCheckout = true\n");
+    out.push_str("\tsparseCheckoutCone = false\n");
 
     // 2. Extra allowed config entries (filtered through denylist)
     for entry in params.extra_config {
@@ -332,6 +349,14 @@ pub fn proxy_ca_override(repo_url: &str, ca: Option<&Path>) -> Option<String> {
     Some(format!("http.{prefix}.sslCAInfo={}", ca?.display()))
 }
 
+/// The entries of the `-z` output `stdout`: NUL-separated, without empty ones.
+pub fn nul_separated(stdout: &[u8]) -> impl Iterator<Item = &OsStr> {
+    stdout
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(OsStr::from_bytes)
+}
+
 /// `scheme://host[:port]/` of `url` (user info dropped), or `None` if `url` has no authority or
 /// contains characters that would need escaping in a config subsection.
 fn url_prefix(url: &str) -> Option<String> {
@@ -378,7 +403,10 @@ pub fn rewrite_git_config(repo_dir: &Path, params: &GitConfigParams<'_>) -> std:
         ));
     }
 
+    let sparse_checkout = sparse_checkout_file(params.hidden_paths)?;
+
     crate::fs_util::write_fresh(&git_dir.join("config"), render_git_config(params))?;
+    write_sparse_checkout(&git_dir, &sparse_checkout)?;
 
     let worktree_path = git_dir.join("config.worktree");
     if worktree_path.exists() {
@@ -386,6 +414,28 @@ pub fn rewrite_git_config(repo_dir: &Path, params: &GitConfigParams<'_>) -> std:
     }
 
     Ok(())
+}
+
+/// The content of `.git/info/sparse-checkout` for `hidden_paths`. An invalid glob is an error:
+/// it can only come from a contract mismatch, and skipping it would expose the path.
+fn sparse_checkout_file(hidden_paths: &[String]) -> std::io::Result<String> {
+    hidden_glob_set(hidden_paths).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid hidden path: {error}"),
+        )
+    })?;
+    let mut patterns = df_core::glob::sparse_patterns(hidden_paths).join("\n");
+    patterns.push('\n');
+    Ok(patterns)
+}
+
+/// Replaces `.git/info/sparse-checkout`; the agent may have swapped `.git/info` for a link or
+/// a file.
+fn write_sparse_checkout(git_dir: &Path, patterns: &str) -> std::io::Result<()> {
+    let info_dir = git_dir.join("info");
+    crate::fs_util::create_real_dir(&info_dir)?;
+    crate::fs_util::write_fresh(&info_dir.join("sparse-checkout"), patterns)
 }
 
 /// Hardened Git command builder and runner.
@@ -513,17 +563,49 @@ impl Git {
         self.run_cmd_in(&self.repo_dir, args).await
     }
 
-    /// Runs a Git command in a specific directory and returns the raw `Output`.
-    pub async fn run_cmd_in(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<Output> {
+    /// Runs a Git command in a specific directory and returns the raw `Output`. Takes `OsStr`
+    /// arguments, so a path that is not UTF-8 can be passed.
+    pub async fn run_cmd_in<S: AsRef<OsStr>>(
+        &self,
+        cwd: &Path,
+        args: &[S],
+    ) -> anyhow::Result<Output> {
+        let shown = shown_args(args);
         let mut cmd = self.build_command_in(cwd);
         cmd.args(args);
-        let output = tokio::time::timeout(GIT_TIMEOUT, cmd.output())
+        tokio::time::timeout(GIT_TIMEOUT, cmd.output())
             .await
-            .map_err(|_elapsed| {
-                anyhow::anyhow!("git {} timed out after {GIT_TIMEOUT:?}", args.join(" "))
-            })?
-            .map_err(|e| anyhow::anyhow!("failed to execute git {}: {e}", args.join(" ")))?;
+            .map_err(|_elapsed| anyhow::anyhow!("git {shown} timed out after {GIT_TIMEOUT:?}"))?
+            .with_context(|| format!("failed to execute git {shown}"))
+    }
+
+    /// Runs a Git command in `self.repo_dir` and fails with its stderr unless it succeeds.
+    pub async fn run_ok<S: AsRef<OsStr>>(&self, args: &[S]) -> anyhow::Result<Output> {
+        let output = self.run_cmd_in(&self.repo_dir, args).await?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git {} failed (status {:?}): {}",
+                shown_args(args),
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
         Ok(output)
+    }
+
+    /// Runs `prefix` followed by `paths` with [`run_ok`](Self::run_ok), in calls of at most
+    /// [`PATHSPEC_CHUNK`] paths to stay below the argument limit. Pass `--` last in `prefix`.
+    pub async fn run_ok_chunked<P: AsRef<OsStr>>(
+        &self,
+        prefix: &[&str],
+        paths: &[P],
+    ) -> anyhow::Result<()> {
+        for chunk in paths.chunks(PATHSPEC_CHUNK) {
+            let mut args: Vec<&OsStr> = prefix.iter().map(OsStr::new).collect();
+            args.extend(chunk.iter().map(AsRef::as_ref));
+            self.run_ok(&args).await?;
+        }
+        Ok(())
     }
 
     /// Runs a Git network operation (clone, fetch) in `cwd`, retrying transient failures.
@@ -652,6 +734,14 @@ impl Git {
         self.run_with_retry(&self.repo_dir, &args, Some((remote, refspec)))
             .await
     }
+}
+
+/// `args` as one line, for error messages.
+pub(crate) fn shown_args<S: AsRef<OsStr>>(args: &[S]) -> String {
+    args.iter()
+        .map(|arg| arg.as_ref().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Stdout and stderr of a git invocation (`push --porcelain` reports rejections on stdout).

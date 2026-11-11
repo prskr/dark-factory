@@ -151,6 +151,7 @@ async fn only_stored_policies_of_the_asked_projects_are_returned() {
             PushPolicy {
                 protected_globs: vec!["deploy/**".into()],
                 protected_mode: CheckMode::Reject,
+                hidden_globs: Vec::new(),
                 secret_mode: CheckMode::Approval,
                 size_mode: CheckMode::Reject,
                 max_blob_bytes: 1024,
@@ -203,7 +204,9 @@ fn finding(check: PushCheck, mode: CheckMode, path: &str, detail: &str) -> PushF
             }),
         ),
         PushCheck::BlobTooLarge => (None, Some(format!("size:{path}:cd34")), None),
-        PushCheck::ProtectedPath => (None, Some(format!("path:{path}")), None),
+        PushCheck::ProtectedPath | PushCheck::HiddenPath => {
+            (None, Some(format!("path:{path}")), None)
+        }
         PushCheck::Identity | PushCheck::MergeCommit => (None, None, None),
     };
     PushFinding {
