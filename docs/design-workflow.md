@@ -55,19 +55,19 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 |---|---|
 | Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance) |
 | Chat | Chats, new chat with persona picker, chat artifacts, archive; desktop and phone |
-| Tasks | Main task workspace and its variants (status menu, stop, cancel, reset, rename, blocked question, rate limited), profile menu, Requests · deny always |
+| Tasks | Main task workspace and its variants (status menu, stop, cancel, reset, rename, blocked question, rate limited, user message with code and its dark preview), profile menu, Requests · deny always |
 | Tasks - Queue | Queued messages: many, editing one |
 | Tasks - Status | Task status `in_review` |
-| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed |
+| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed, description collapsed and expanded |
 | Tasks - Phone | Phone boards of tasks and requests, profile menu (main component `Profile menu`) |
 | Tasks - Artifacts | Artifacts of a task: details tab with cards, split view (Preview, Source, image), task list collapsed, bookmarkable artifact page; phone details sheet and artifact page |
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
-| Config - Projects | Projects: table in the settings area, new-project modal, project settings page and its tabs (general, push checks, context, integrations with its states); phone |
+| Config - Projects | Projects: table in the settings area, new-project modal, project settings page and its tabs (general, security, context, integrations with its states); phone |
 | Config - Personas | Personas: cards, edit modal; phone edit sheet; settings area; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
 | Config - Credentials | Credentials: table, new with validation error; error page (not found) |
-| Config - Model providers | Model providers: table, new provider modal per credential scheme |
+| Config - Model providers | Model providers: table, new provider modal per credential scheme, provider settings page (general, models, model errors) |
 | Empty states | One board per empty state |
 | Network | Egress rules: table, search, new and edit modals, empty state |
 | Network - Graph | Traffic view: graph, table, allow and deny flows |
@@ -122,7 +122,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
-- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has three tabs (General, Push checks, Integrations).
+- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has three tabs (General, Security, Integrations).
 - The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
@@ -184,8 +184,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Projects / Projects · new project | `/projects` | as Settings · projects; "New project" clicked | 1440 |
 | Config - Projects / Projects · settings page, general | `/projects/<key>` | `just serve-local`, login as `admin@example.com`; project `DF` with a forge credential; wake setting `members` (default) | 1440 |
 | Config - Projects / Projects · settings page, saved | `/projects/<key>` | as above; "Save project" clicked without changes | 1440 |
-| Config - Projects / Projects · settings page, push checks | `/projects/<key>?tab=push-checks` | as Projects · settings page, general; default policy | 1440 |
-| Config - Projects / Projects · settings page, push checks, invalid glob | `/projects/<key>?tab=push-checks` | as above; `deploy/[` added as fifth glob and saved | 1440 |
+| Config - Projects / Projects · settings page, security | `/projects/<key>?tab=security` | as Projects · settings page, general; default policy | 1440 |
+| Config - Projects / Projects · settings page, security, invalid glob | `/projects/<key>?tab=security` | as above; `deploy/[` added as fifth glob and saved | 1440 |
 | Config - Projects / Projects · settings page, context | `/projects/<key>` | not built (`iter3-project-context`) | 1440 |
 | Config - Projects / Projects · settings page, integrations | `/projects/<key>?tab=integrations` | `just serve-local`, login as `admin@example.com`; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); `publicUrl` set, forgejo plugin with a webhook secret | 1440 |
 | Config - Projects / Projects · settings page, integrations, secret revealed | `/projects/<key>?tab=integrations` | as above; "Show secret" clicked | 1440 |
@@ -212,8 +212,13 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |
 | Config - Model providers / Model providers · new, OpenCode Go preset | `/model-providers/new` | "New model provider" clicked, preset OpenCode Go chosen; tab General | 1440 |
 | Config - Model providers / Model providers · new, OpenCode Go preset, models | `/model-providers/new` | as above; tab Models with the seven preset models | 1440 |
-| Config - Model providers / Model providers · edit, many models, scrolled | `/model-providers/<id>/edit` | manual seed (not built): provider with 15 models; tab Models, list scrolls below fixed column labels | 1440 |
-| Config - Model providers / Model providers · edit, model errors | `/model-providers/<id>/edit` | as above; OpenAI Responses unchecked, one model with one limit, a duplicate ID, `minimax-m3` (used by Ada) removed, saved | 1440 |
+| Config - Model providers / Model providers · settings page, general | `/model-providers/<id>` | manual seed (not built): provider OpenCode Go (preset values, 15 models) | 1440 |
+| Config - Model providers / Model providers · settings page, models, saved | `/model-providers/<id>?tab=models` | as above; saved unchanged. One line per model across the panel, the page scrolls | 1440 |
+| Config - Model providers / Model providers · settings page, model errors | `/model-providers/<id>?tab=models` | as above; OpenAI Responses unchecked, one model with one limit, a duplicate ID, `minimax-m3` (used by Ada) removed, saved | 1440 |
+| Tasks - Details Sidebar / Desktop · description collapsed | `/tasks/<id>` | as Desktop · many runs; Project and Persona values are links | 1440 |
+| Tasks - Details Sidebar / Desktop · description expanded | `/tasks/<id>` | as above; Description opened (three-line clamp) | 1440 |
+| Tasks / Desktop · user message with code | `/tasks/<id>` | manual seed (not built): first user message of DF-12 with three lines, a `rust` fence and inline code | 1440 |
+| Tasks / Preview only · user message with code · dark | `/tasks/<id>` | as above, dark theme (token values and the dark code theme resolved on the board) | 1440 |
 | Config - Personas / Settings · personas | `/personas` | manual seed (not built): four personas with model providers; Linus, Grace and Ada with a description, Ken without | 1440 |
 | Config - Personas / Personas · edit modal | `/personas/<id>/edit` | as Settings · personas; edit of Linus clicked | 1440 |
 | Config - Personas / Personas · edit modal, OpenCode, model select open | `/personas/<id>/edit` | persona Ada (with description) with harness `opencode` and provider OpenCode Go (preset models); model select open, opening upward | 1440 |

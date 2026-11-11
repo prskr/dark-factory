@@ -20,7 +20,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-56: code review of `network-management-ui-polish` (`df-web`, 2026-10-25). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-57 to TD-58 (both resolved the same day): code review of `harness-images` (`df-k8s`, `df-agent-channel`, `deploy/images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-59: dev cluster verification of `harness-images` (2026-10-26), task 7.4 carried over from `iter1-egress-gateway`.
-- Origin of TD-60: CodeRabbit review of PR #26 (`harness-images`, 2026-10-26). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
@@ -42,7 +41,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-120: full `just e2e-local` run while closing #124 (2026-11-07).
 - Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-122: code review of `artifact-written-transcript-events` (`df-web`, 2026-11-10). The `TD-n (ID)` heading gives the ID used in that review.
-- Origin of TD-123 to TD-124: implementation and browser check of `iter3-hidden-paths` (2026-11-11), not review findings.
+- Origin of TD-123: implementation and browser check of `iter3-hidden-paths` (2026-11-11), not review findings.
 
 ## Summary
 
@@ -82,7 +81,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-50 | low   | `df-gateway` tests | Proxy shutdown tests wait on the origin without a timeout |
 | TD-51 | low   | `df-gateway` resolver | IP family preference is fixed to IPv4 first |
 | TD-55 | low   | `factory-agent` timings | `RuntimeTiming` measurement boilerplate repeated per operation |
-| TD-60 | low   | `df-web` project form | Adapter command is split on whitespace; an argument containing a space does not survive an edit |
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
@@ -128,7 +126,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
 | TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
 | TD-123 | medium | `df-test-postgres` | Test databases are never dropped; repeated runs fill the container volume |
-| TD-124 | low   | `df-web` project page | A validation error on a hidden tab of the project page is not shown |
 
 ## Entries
 
@@ -442,16 +439,6 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 **Matters when:** more operations are timed, or the timing message changes; a missed `send_timing` goes unnoticed.
 
 **Fix:** One `async fn timed<T, E>(tx, op, fut) -> Result<T, E>` that sends the timing and returns the result; keep explicit calls only where the result needs extra handling (push).
-
-### TD-60 (CR3). Adapter command loses argument boundaries
-
-`crates/df-web/src/config_pages.rs` (`validate_project`, `project_values`)
-
-The project form shows the stored `adapter_command` joined with spaces and parses the field with `split_whitespace`. An argument containing whitespace (`/workspace/my config.json`) is split into two arguments on save, and every later edit keeps it split. The persona field this replaces behaved the same way.
-
-**Matters when:** a project adapter needs an argument with whitespace.
-
-**Fix:** Use a reversible format for the field (one argument per line, or shell-style quoting with a small parser) and add a test that an edit keeps an argument containing a space.
 
 ### TD-61 (S4). `FlowLog` and `Merged` repeat the age-prune steps
 
@@ -942,16 +929,6 @@ Every test creates a `df_test_*` database in the shared container `df-test-postg
 **Matters when:** the suite runs more than once on one machine (agent sandboxes, local Bazel or cargo runs).
 
 **Fix:** drop the database `WITH (FORCE)` when the test's pool guard is dropped. On server start, remove leftover `df_test_*` databases from earlier runs.
-
-### TD-124. A validation error on a hidden tab of the project page is not shown
-
-`crates/df-web/src/config_pages/` (project settings tabs)
-
-Saving the project form with an invalid field on another tab (for example `repo_url` on General) answers 422 and re-renders the tab that is open, such as Push checks. The error is only on the tab that isn't shown, so the user sees no message.
-
-**Matters when:** a board member saves push checks while a General field is invalid.
-
-**Fix:** after a failed save, switch to the first tab with an error, or show an error summary above the tabs.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

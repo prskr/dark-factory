@@ -28,11 +28,14 @@ The task view has three columns: the task list, the transcript and the details.
   turn boundary, without restarting anything; while it waits it is shown as queued and can be
   edited or removed. A message to a finished task reopens it. A message to a task that awaits its dependencies is
   delivered in its first run.
-- **Details**: what the agent is doing now, the pull request and issue links, project, persona,
+- **Details**: what the agent is doing now, the pull request and issue links, project, persona
+  (the project links to its [settings page](setup.md#projects), the persona to the persona list),
   branch, who created the task and its parent (for a task an agent created), the
   [dependencies](delegation.md#in-the-task-view) and the list of runs with model and token usage. The tokens are summed per model from the
   [gateway's usage records](../security/inference-endpoint.md#usage); requests whose response carried
-  no usage are counted separately ("2 requests without usage") instead of as zero.
+  no usage are counted separately ("2 requests without usage") instead of as zero. The task
+  description is a collapsible section: **Description** with a chevron shows only its header while
+  closed, and the first three lines of the text when opened.
 - **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
   Artifacts tab with a card per artifact; an artifact opens next to the transcript.
 
@@ -60,6 +63,15 @@ An agent message is plain text while it streams and is rendered as Markdown when
   its source cannot run script in the page. A diagram that cannot be parsed stays a code block
   with a one-line error. The diagram renderer (about 3 MB) is loaded only on pages that contain a
   diagram. Without JavaScript the diagram source is shown as a code block.
+
+## Your messages: Markdown
+
+The visible text of your messages is rendered as Markdown with the same safety rules and code
+highlighting as agent messages (fenced code, ` ```mermaid ` diagrams). A single line break in
+your text stays a line break; blank lines separate paragraphs, and several in a row count as
+one. Text that looks like Markdown (`*`, `_`, a `#` at the start of a line, a list) is formatted as
+Markdown. Hidden blocks ("Instruction for the agent") and the stack of queued messages stay plain
+text.
 
 ## Status
 

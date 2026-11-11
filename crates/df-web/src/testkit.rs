@@ -994,6 +994,36 @@ pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
     &html[start..=(start + html[start..].find('>').unwrap())]
 }
 
+/// The `data-tab` of the tab marked open in `html`.
+pub(crate) fn open_tab(html: &str) -> String {
+    let open: Vec<&str> = html
+        .match_indices("role=\"tab\"")
+        .map(|(at, _)| {
+            let start = html[..at].rfind('<').unwrap();
+            &html[start..at + html[at..].find('>').unwrap()]
+        })
+        .filter(|tag| tag.contains("aria-selected=\"true\""))
+        .collect();
+    assert_eq!(open.len(), 1, "{open:?}");
+    let at = open[0].find("data-tab=\"").unwrap() + "data-tab=\"".len();
+    open[0][at..at + open[0][at..].find('"').unwrap()].to_string()
+}
+
+/// The labels of the tabs of `html`, in order.
+pub(crate) fn tab_labels(html: &str) -> Vec<&str> {
+    html.match_indices("role=\"tab\"")
+        .map(|(at, _)| {
+            let tag_end = at + html[at..].find('>').unwrap();
+            let text_end = tag_end + html[tag_end..].find("</button>").unwrap();
+            html[tag_end + 1..text_end]
+                .rsplit('>')
+                .next()
+                .unwrap()
+                .trim()
+        })
+        .collect()
+}
+
 /// Whether the tag has the `disabled` attribute (not just a `disabled:` class variant).
 pub(crate) fn has_disabled_attribute(tag: &str) -> bool {
     tag.contains(" disabled>") || tag.contains(" disabled ")

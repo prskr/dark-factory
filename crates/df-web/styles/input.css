@@ -368,6 +368,12 @@
   .md-body :not(pre) > code {
     @apply rounded bg-code-on-agent px-1 py-0.5;
   }
+  /* User bubbles are light in the light theme and dark in the dark one, the reverse of the agent
+     bubbles: inline code takes the panel color (white on light, near black on dark) instead of
+     `code-on-agent`, which would be dark on dark. */
+  .md-user :not(pre) > code {
+    @apply bg-panel;
+  }
   /* Mermaid fences: the drawn diagram is an iframe; the error line shows under the source. It keeps
      the bubble's text color: the danger color has no contrast on the inverted bubble. */
   .md-body .diagram-error {

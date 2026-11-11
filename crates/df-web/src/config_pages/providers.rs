@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 use self::models::{ModelRow, PresetModel};
 use super::{
-    FormTarget, Tab, TabsStyle, conflict, create_button, edit_button, form_grid, full_row,
-    list_header, list_page, saved, tabbed_form, wider_modal,
+    FormTarget, Tab, TabsStyle, conflict, create_button, form_grid, full_row, list_header,
+    list_page, tabbed_form, wider_modal,
 };
 use crate::WebState;
 use crate::auth::CurrentUser;
@@ -33,9 +33,10 @@ use crate::components::{
     text_field, th, tr,
 };
 use crate::layout::{Nav, Shell};
-use crate::responses::{internal_error, invalid, not_found};
+use crate::responses::{htmx_location, internal_error, invalid, not_found};
 
 mod models;
+mod page;
 
 pub(super) fn routes() -> Router<WebState> {
     Router::new()
@@ -43,8 +44,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route("/model-providers/new", get(new))
         .route("/model-providers/preset", get(preset_form))
         .route("/model-providers/refresh", post(refresh))
-        .route("/model-providers/{id}", post(update).merge(delete(remove)))
-        .route("/model-providers/{id}/edit", get(edit))
+        .route(
+            "/model-providers/{id}",
+            get(page::page).post(update).merge(delete(remove)),
+        )
 }
 
 /// The compatible providers for the persona form: id and name.
@@ -84,6 +87,8 @@ pub(super) struct ProviderForm {
     url_openai_responses: String,
     /// The provider being edited; empty when creating.
     entity_id: String,
+    /// The open tab of the settings page (posted by the page style of the form).
+    tab: String,
     /// The model rows (`model_id_<n>` and so on), see [`ProviderForm::with_models`].
     #[serde(flatten)]
     fields: BTreeMap<String, String>,
@@ -100,6 +105,8 @@ struct Preset {
     headers: &'static [(&'static str, &'static str)],
     models: &'static [PresetModel],
 }
+
+const MODELS_TAB: &str = "models";
 
 /// The text an example token shows next to the prefix. A fixed text, never derived from the
 /// credential: the control plane does not read the Secret for this form.
@@ -460,7 +467,7 @@ fn provider_form(
     values: &ProviderForm,
     errors: &FormErrors,
     credentials: &[CredentialRef],
-    open_models: bool,
+    requested_tab: &str,
 ) -> Markup {
     let create = target.is_create();
     let submit = if create {
@@ -498,24 +505,24 @@ fn provider_form(
             panel: general,
         },
         Tab {
-            id: "models",
+            id: MODELS_TAB,
             label: "Models",
-            panel: models::panel(&values.models, errors),
+            panel: models::panel(&values.models, errors, !create),
         },
     ];
-    let open = if open_models || models_only(errors) {
-        "models"
+    // A re-rendered form with errors opens the tab of its first error.
+    let open = if models_only(errors) || (errors.is_empty() && requested_tab == MODELS_TAB) {
+        MODELS_TAB
     } else {
         "general"
     };
-    tabbed_form(
-        &target.action(),
-        errors,
-        &tabs,
-        open,
-        submit,
-        TabsStyle::Dialog,
-    )
+    // Creating happens in a modal, editing on the settings page.
+    let style = if create {
+        TabsStyle::Dialog
+    } else {
+        TabsStyle::Page
+    };
+    tabbed_form(&target.action(), errors, &tabs, open, submit, style)
 }
 
 /// Whether the form has errors and all of them are in the model list.
@@ -711,7 +718,7 @@ fn row(entry: &ListEntry, credentials: &[CredentialRef]) -> Markup {
         .find(|c| c.id.as_uuid() == input.credential_ref_id);
     html! {
         (tr(html! {
-            (td(Cell::First, html! { (input.name) }))
+            (td(Cell::First, html! { a href={"/model-providers/" (id)} class="font-medium hover:underline" { (input.name) } }))
             (td(Cell::Text, html! {
                 (input.apis.iter().map(|api| api.wire_api.label()).collect::<Vec<_>>().join(", "))
             }))
@@ -725,7 +732,8 @@ fn row(entry: &ListEntry, credentials: &[CredentialRef]) -> Markup {
             }))
             (td(Cell::Actions, html! {
                 div class="flex items-center gap-1" {
-                    (edit_button(&format!("/model-providers/{id}/edit"), &format!("Edit model provider {}", input.name)))
+                    a href={"/model-providers/" (id)} aria-label={"Edit model provider " (input.name)}
+                        title={"Edit model provider " (input.name)} class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                     button type="button" hx-delete={"/model-providers/" (id)} hx-target="#config-list" hx-swap="outerHTML"
                         hx-confirm={"Delete model provider " (input.name) "?"}
                         aria-label={"Delete model provider " (input.name)} title="Delete" class=(ICON_BUTTON_CLASS) {
@@ -780,7 +788,7 @@ async fn new(State(state): State<WebState>, headers: HeaderMap) -> Response {
                 &ProviderForm::default(),
                 &FormErrors::default(),
                 &credentials,
-                false,
+                "",
             ),
         ),
         Err(e) => internal_error(&e),
@@ -815,33 +823,9 @@ async fn preset_form(State(state): State<WebState>, Query(query): Query<PresetQu
         &values,
         &FormErrors::default(),
         &credentials,
-        false,
+        "",
     )
     .into_response()
-}
-
-async fn edit(State(state): State<WebState>, headers: HeaderMap, Path(id): Path<Uuid>) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to("/model-providers").into_response();
-    }
-    let (record, credentials) = match tokio::try_join!(
-        df_db::model_providers::get_model_provider(&state.pool, id),
-        df_db::catalog::list_credential_refs(&state.pool)
-    ) {
-        Ok((Some(record), credentials)) => (record, credentials),
-        Ok((None, _)) => return not_found("The model provider"),
-        Err(e) => return internal_error(&e),
-    };
-    wider_modal(
-        "Edit model provider",
-        provider_form(
-            FormTarget::new("/model-providers", Some(id)),
-            &ProviderForm::from_record(&record),
-            &FormErrors::default(),
-            &credentials,
-            false,
-        ),
-    )
 }
 
 async fn create(
@@ -862,7 +846,7 @@ async fn update(
 }
 
 /// "+ Add model" and the trash buttons: the form as typed, rendered again with the row added or
-/// removed, on the tab "Models".
+/// removed, on the tab "Models" (the only tab that has them).
 async fn refresh(State(state): State<WebState>, Form(form): Form<RefreshForm>) -> Response {
     let credentials = match df_db::catalog::list_credential_refs(&state.pool).await {
         Ok(credentials) => credentials,
@@ -884,7 +868,7 @@ async fn refresh(State(state): State<WebState>, Form(form): Form<RefreshForm>) -
         &values,
         &FormErrors::default(),
         &credentials,
-        true,
+        MODELS_TAB,
     )
     .into_response()
 }
@@ -936,11 +920,12 @@ async fn save(
     let known: Vec<Uuid> = credentials.iter().map(|c| c.id.as_uuid()).collect();
     let errors = match validate(&form, &known) {
         Ok(input) => match store(&state, &user, id, &input).await {
-            Ok(Some(errors)) => errors,
-            Ok(None) => {
-                return match list_markup(&state, None).await {
-                    Ok(markup) => saved(markup),
-                    Err(response) => *response,
+            Ok(Stored::Refused(errors)) => errors,
+            Ok(Stored::Saved(record)) => {
+                return if id.is_some() {
+                    page::saved(&record, &credentials, &form.tab)
+                } else {
+                    htmx_location(&format!("/model-providers/{}", record.id))
                 };
             }
             Err(response) => return *response,
@@ -952,18 +937,24 @@ async fn save(
         &form,
         &errors,
         &credentials,
-        false,
+        &form.tab,
     ))
 }
 
-/// Stores a valid provider: `Ok(None)` when saved, form errors when a rule of the database or of
-/// the personas that use it refuses it.
+/// The outcome of [`store`].
+enum Stored {
+    Saved(ModelProviderRecord),
+    /// A rule of the database or of the personas that use the provider refuses it.
+    Refused(FormErrors),
+}
+
+/// Stores a valid provider.
 async fn store(
     state: &WebState,
     user: &CurrentUser,
     id: Option<Uuid>,
     input: &ModelProviderInput,
-) -> Result<Option<FormErrors>, Box<Response>> {
+) -> Result<Stored, Box<Response>> {
     let mut errors = FormErrors::default();
     if let Some(id) = id {
         let problems = persona_conflicts(state, id, input)
@@ -971,7 +962,7 @@ async fn store(
             .map_err(|e| Box::new(internal_error(&e)))?;
         if !problems.is_empty() {
             errors.add("", problems.join(" "));
-            return Ok(Some(errors));
+            return Ok(Stored::Refused(errors));
         }
     }
     let principal = user.principal();
@@ -980,15 +971,15 @@ async fn store(
         roles: &user.roles,
     };
     match df_db::model_providers::save_model_provider(&state.pool, actor, id, input).await {
-        Ok(_) => Ok(None),
+        Ok(record) => Ok(Stored::Saved(record)),
         Err(DbError::NotFound(_)) => Err(Box::new(not_found("The model provider"))),
         Err(DbError::ModelConflict(message)) => {
             errors.add("models", message);
-            Ok(Some(errors))
+            Ok(Stored::Refused(errors))
         }
         Err(e) => match conflict(&mut errors, "name", e) {
             Some(response) => Err(Box::new(response)),
-            None => Ok(Some(errors)),
+            None => Ok(Stored::Refused(errors)),
         },
     }
 }

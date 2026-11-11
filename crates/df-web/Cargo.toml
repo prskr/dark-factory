@@ -27,6 +27,7 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+shlex.workspace = true
 sqlx.workspace = true
 syntect.workspace = true
 thiserror.workspace = true

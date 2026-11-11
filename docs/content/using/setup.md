@@ -33,7 +33,7 @@ number of queued, running, waiting and done tasks per project.
 project is edited on its **settings page** at `/projects/<key>` (the project's name or its edit icon in the
 list). The page has a back link to the list, the project's key, name and forge icon, tabs and one
 **Save project** button. After a save the page stays open and says **Project saved**. The open tab
-is part of the URL (`?tab=push-checks`, `?tab=integrations`), so a tab can be linked.
+is part of the URL (`?tab=security`, `?tab=integrations`), so a tab can be linked. After a save with an error the tab with the first error opens and the URL follows it.
 
 The **General** tab and the new-project form group the fields:
 
@@ -46,13 +46,13 @@ The **General** tab and the new-project form group the fields:
 | | Forge credential | The credential reference for the forge. |
 | | Issue tracker URL | Optional. |
 | Sandbox | Sandbox image | The image the agent works in. It needs `git` and a shell; the runtime and the harness are mounted into it. |
-| | Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). |
+| | Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). Arguments use shell-style quoting: `/opt/adapter '--config=/workspace/my config.json'` is two arguments, the second with a space. Nothing is expanded (`$HOME` stays literal). A word that starts with `#` must be quoted (`'#fff'`), otherwise it starts a comment and the rest of the field is dropped. A literal backslash is written `\\`. An unclosed quote is refused. The field shows the stored arguments quoted the same way. |
 | Forge events | Wake tasks on reviews and mentions | Whose PR reviews and `@mentions` of the bot account wake a task when [forge webhooks](../integrations/forges/webhooks.md) are set up: *Nobody*, *Members with write access* (default) or *Anyone*. Merged or closed pull requests and failed checks apply regardless. |
 
-The **Push checks** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
+The **Security** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
 this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and
 whether merge commits are allowed. The **Hidden paths** field lists files that are left out of the
-agent's workspace and never pushable ([Hide files from agents](hidden-paths.md)). **Save project** saves General and Push checks together.
+agent's workspace and never pushable ([Hide files from agents](hidden-paths.md)). **Save project** saves General and Security together.
 
 Users with the role `admin` also see the last tab, **Integrations**, with two groups:
 

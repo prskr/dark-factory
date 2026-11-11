@@ -166,8 +166,32 @@ pub(super) fn core_error(error: &ProviderError, rows: &[ModelRow]) -> Option<(St
     position(id, last).map(|index| (row_field(index), message))
 }
 
-/// The panel of the tab.
-pub(super) fn panel(rows: &[ModelRow], errors: &FormErrors) -> Markup {
+/// The widths of the Wire API and the limit columns and the class of the list of rows. The
+/// settings page has room for a one-line row; the create modal keeps narrower columns and a
+/// scrolling list.
+#[derive(Clone, Copy)]
+struct Layout {
+    api_width: &'static str,
+    limit_width: &'static str,
+    list_class: &'static str,
+}
+
+impl Layout {
+    const PAGE: Self = Self {
+        api_width: "w-55",
+        limit_width: "w-35",
+        list_class: "space-y-2",
+    };
+    const DIALOG: Self = Self {
+        api_width: "w-48",
+        limit_width: "w-21",
+        list_class: "max-h-96 space-y-2 overflow-y-auto",
+    };
+}
+
+/// The panel of the tab. `wide` is the layout of the settings page, see [`Layout`].
+pub(super) fn panel(rows: &[ModelRow], errors: &FormErrors, wide: bool) -> Markup {
+    let layout = if wide { Layout::PAGE } else { Layout::DIALOG };
     html! {
         div class="flex items-start justify-between gap-4" {
             p class="text-sm text-muted" { "Personas of this provider pick one of these models. Each model uses one of the provider's wire APIs." }
@@ -176,17 +200,17 @@ pub(super) fn panel(rows: &[ModelRow], errors: &FormErrors) -> Markup {
         }
         @if let Some(error) = errors.get("models") { p class="text-sm text-danger" role="alert" { (error) } }
         div class="flex gap-2 text-xs text-muted" aria-hidden="true" {
-            span class="min-w-0 flex-1" { "Model ID" } span class="w-48 shrink-0" { "Wire API" }
-            span class="w-21 shrink-0" { "Context" } span class="w-21 shrink-0" { "Max output" } span class="w-11 shrink-0 lg:w-9" {}
+            span class="min-w-0 flex-1" { "Model ID" } span class={(layout.api_width) " shrink-0"} { "Wire API" }
+            span class={(layout.limit_width) " shrink-0"} { "Context" } span class={(layout.limit_width) " shrink-0"} { "Max output" } span class="w-11 shrink-0 lg:w-9" {}
         }
-        div class="max-h-96 space-y-2 overflow-y-auto" {
-            @for (index, row) in rows.iter().enumerate() { (row_markup(index, row, errors)) }
+        div class=(layout.list_class) {
+            @for (index, row) in rows.iter().enumerate() { (row_markup(index, row, errors, layout)) }
         }
         p class="text-xs text-faint" { (HINT) }
     }
 }
 
-fn row_markup(index: usize, row: &ModelRow, errors: &FormErrors) -> Markup {
+fn row_markup(index: usize, row: &ModelRow, errors: &FormErrors, layout: Layout) -> Markup {
     let error = errors.get(&row_field(index));
     let invalid = error.map(|_| "true");
     let selected = row.wire_api.parse().unwrap_or(WireApi::ALL[0]);
@@ -194,7 +218,7 @@ fn row_markup(index: usize, row: &ModelRow, errors: &FormErrors) -> Markup {
     // the field itself and stretch every field to the width of the row.
     let number = |name: &str, label: &str, value: &str| {
         html! {
-            div class="w-21 shrink-0" {
+            div class={(layout.limit_width) " shrink-0"} {
                 input name={(name) "_" (index)} type="text" inputmode="numeric" value=(value) aria-label=(label) aria-invalid=[invalid]
                     class={(INPUT_CLASS) " font-mono"};
             }
@@ -207,7 +231,7 @@ fn row_markup(index: usize, row: &ModelRow, errors: &FormErrors) -> Markup {
                     input name={"model_id_" (index)} type="text" value=(row.id) aria-label="Model ID" aria-invalid=[invalid]
                         class={(INPUT_CLASS) " font-mono"};
                 }
-                div class="w-48 shrink-0" {
+                div class={(layout.api_width) " shrink-0"} {
                     select name={"model_api_" (index)} aria-label="Wire API" aria-invalid=[invalid] class=(INPUT_CLASS) {
                         @for api in WireApi::ALL { option value=(api.as_str()) selected[api == selected] { (api.label()) } }
                     }

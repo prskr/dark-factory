@@ -39,7 +39,15 @@ static HIGHLIGHTER: LazyLock<Highlighter> = LazyLock::new(|| Highlighter {
 /// dropped. The text is untrusted, so the browser must not fetch anything by itself: images
 /// become plain links and every link carries `rel="noopener noreferrer nofollow"`.
 pub fn render(source: &str) -> Markup {
-    render_with(source, None)
+    render_with(source, None, &options())
+}
+
+/// Like [`render`] for text a person typed (a user message): a single newline stays a line break.
+/// Blank lines still separate paragraphs, and several in a row count as one.
+pub fn render_with_hard_breaks(source: &str) -> Markup {
+    let mut options = options();
+    options.render.hardbreaks = true;
+    render_with(source, None, &options)
 }
 
 /// The image artifacts of one task that a Markdown artifact may show inline.
@@ -52,15 +60,25 @@ pub struct ImageArtifacts<'a> {
 /// image artifact of the same task becomes `<img>` of the image endpoint; every other image stays
 /// a link, so the browser fetches nothing an agent names.
 pub fn render_with_images(source: &str, images: &ImageArtifacts<'_>) -> Markup {
-    render_with(source, Some(images))
+    render_with(source, Some(images), &options())
 }
 
-fn render_with(source: &str, images: Option<&ImageArtifacts<'_>>) -> Markup {
+/// The options of every render: raw HTML is escaped, never passed through. One place, so that the
+/// settings for untrusted input cannot diverge between the variants.
+fn options() -> comrak::Options<'static> {
     let mut options = comrak::Options::default();
     options.render.escape = true;
     options.render.r#unsafe = false;
+    options
+}
+
+fn render_with(
+    source: &str,
+    images: Option<&ImageArtifacts<'_>>,
+    options: &comrak::Options<'_>,
+) -> Markup {
     let arena = comrak::Arena::new();
-    let root = comrak::parse_document(&arena, source, &options);
+    let root = comrak::parse_document(&arena, source, options);
     for node in root.descendants() {
         let mut data = node.data.borrow_mut();
         let comrak::nodes::NodeValue::Image(link) = &data.value else {
@@ -82,7 +100,7 @@ fn render_with(source: &str, images: Option<&ImageArtifacts<'_>>) -> Markup {
         .codefence_renderers
         .insert(MERMAID.to_owned(), &MermaidFence);
     let mut html = String::new();
-    comrak::format_html_with_plugins(root, &options, &mut html, &plugins)
+    comrak::format_html_with_plugins(root, options, &mut html, &plugins)
         .expect("formatting into a String cannot fail");
     PreEscaped(
         html.replace("<a href=", "<a rel=\"noopener noreferrer nofollow\" href=")

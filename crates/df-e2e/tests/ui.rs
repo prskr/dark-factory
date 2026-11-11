@@ -1,7 +1,7 @@
 //! Client-side behaviour of the web UI in a real browser (`just e2e-local`): the settings area,
-//! the project settings page and its tabs, the task list sort menu, tab rows on phones, task swaps
-//! without console errors and the network traffic page. Needs the environment of
-//! `E2eEnv`, so the tests are ignored by default.
+//! the project and model provider settings pages and their tabs, the task list sort menu, tab rows
+//! on phones, task swaps without console errors and the network traffic page. Needs the
+//! environment of `E2eEnv`, so the tests are ignored by default.
 
 use anyhow::{Context, Result};
 use df_e2e::browser::Session;
@@ -151,9 +151,9 @@ async fn saving_a_project_stays_on_its_page_and_tabs_follow_the_url() -> Result<
         .context("the save is confirmed")?;
     assert_eq!(session.page.url(), page_url, "the page stays open");
 
-    session.page.locator("#tab-push-checks").click(None).await?;
+    session.page.locator("#tab-security").click(None).await?;
     expect_page(&session.page)
-        .to_have_url_regex("\\?tab=push-checks$")
+        .to_have_url_regex("\\?tab=security$")
         .await
         .context("choosing a tab updates the URL")?;
     session
@@ -171,6 +171,149 @@ async fn saving_a_project_stays_on_its_page_and_tabs_follow_the_url() -> Result<
         .to_have_attribute("aria-selected", "true")
         .await
         .context("the URL opens the Integrations tab")
+}
+
+/// Opens the settings page of the seeded provider with an HTTPS upstream from the edit action of the list.
+async fn open_provider_page(session: &Session, env: &E2eEnv) -> Result<()> {
+    session
+        .page
+        .goto(&format!("{}/model-providers", env.base_url), None)
+        .await?;
+    session
+        .page
+        .locator(format!(
+            "[aria-label='Edit model provider {}']:visible",
+            data::SETTINGS_PROVIDER_NAME
+        ))
+        .first()
+        .click(None)
+        .await
+        .context("open the settings page of the model provider")?;
+    expect(session.page.locator("[role=tablist]"))
+        .to_be_visible()
+        .await
+        .context("tab row of the model provider page")?;
+    expect_page(&session.page)
+        .to_have_url_regex("/model-providers/[0-9a-f-]+$")
+        .await
+        .context("URL of the model provider page")
+}
+
+/// Fills `field` on General, goes to the tab `last` and saves: the form comes back with the error
+/// on General although the user was on `last` (design D3 of `ui-model-provider-page`).
+async fn save_with_a_general_error(
+    session: &Session,
+    field: &str,
+    bad: &str,
+    last: &str,
+    save: &str,
+) -> Result<()> {
+    session.page.locator("#tab-general").click(None).await?;
+    session.page.locator(field).fill(bad, None).await?;
+    session
+        .page
+        .locator(format!("#tab-{last}"))
+        .click(None)
+        .await?;
+    expect_page(&session.page)
+        .to_have_url_regex(&format!("\\?tab={last}$"))
+        .await
+        .context("the user is on the last tab")?;
+    session
+        .page
+        .locator(format!("button:has-text('{save}'):visible"))
+        .click(None)
+        .await?;
+    expect(session.page.locator("#tab-general"))
+        .to_have_attribute("aria-selected", "true")
+        .await
+        .context("General opens with the error")?;
+    expect(session.page.locator("[role=alert]:visible"))
+        .to_be_visible()
+        .await
+        .context("the error is shown")?;
+    expect_page(&session.page)
+        .to_have_url_regex("/[^?]+$")
+        .await
+        .context("the URL loses ?tab")
+}
+
+/// model-providers, "Model provider settings page" and configuration-management, "Saving the
+/// project settings page": a model provider is edited on its page, a save stays on it, and after
+/// a failed save the tab with the error is open and named by the URL, on both settings pages.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session.page.set_viewport_size(WIDE).await?;
+    open_provider_page(&session, &env).await?;
+    let page_url = session.page.url();
+
+    session.page.locator("#tab-models").click(None).await?;
+    expect_page(&session.page)
+        .to_have_url_regex("\\?tab=models$")
+        .await
+        .context("choosing Models updates the URL")?;
+    session
+        .page
+        .locator("button:has-text('+ Add model'):visible")
+        .click(None)
+        .await?;
+    session
+        .page
+        .locator("input[name=model_id_1]")
+        .fill("e2e-extra-model", None)
+        .await?;
+    session
+        .page
+        .locator("button:has-text('Save model provider'):visible")
+        .click(None)
+        .await?;
+    expect(session.page.locator("#save-status"))
+        .to_contain_text("Model provider saved")
+        .await
+        .context("the save is confirmed")?;
+    expect(session.page.locator("input[name=model_id_1]"))
+        .to_have_value("e2e-extra-model")
+        .await
+        .context("the added model is in the form after the save")?;
+    assert_eq!(
+        session.page.url(),
+        format!("{page_url}?tab=models"),
+        "the page stays open on the Models tab"
+    );
+
+    save_with_a_general_error(
+        &session,
+        "#url_anthropic_messages",
+        "http://insecure.example.org",
+        "models",
+        "Save model provider",
+    )
+    .await
+}
+
+/// configuration-management, "Saving the project settings page": the same for the project page
+/// (TD-124): on `?tab=security` a save with an invalid repository URL opens General.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_failed_project_save_opens_the_general_tab_and_the_url_follows() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session.page.set_viewport_size(WIDE).await?;
+    open_project_page(&session, &env, data::PROJECT_KEY).await?;
+
+    save_with_a_general_error(
+        &session,
+        "#repo_url",
+        "ssh://git.example.org/o/r.git",
+        "security",
+        "Save project",
+    )
+    .await
 }
 
 /// task-ui, "Task list sort": the sort menu changes the order and the URL.
@@ -249,28 +392,29 @@ async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
 
 /// configuration-management, "Form tabs on phones": the chosen last tab ("Integrations", for an
 /// admin) lies inside the tab row of the project settings page and the page does not scroll
-/// sideways. At 300 px the row overflows, so the tab has to scroll into view. The click is
-/// dispatched, not performed: Playwright would scroll the tab into view itself before a real click.
+/// sideways. The three tabs of an admin need 266 px, so the row overflows below 298 px; at 280 px
+/// it does (248 px wide), and the tab has to scroll into view. The click is dispatched, not
+/// performed: Playwright would scroll the tab into view itself before a real click.
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_last_tab_of_the_project_page_stays_in_view_on_phones() -> Result<()> {
     let env = E2eEnv::from_env()?;
     let session = Session::start(&env).await?;
     session.login(&env).await?;
-    for width in [390, 300] {
+    for width in [390, 280] {
         session
             .page
             .set_viewport_size(Viewport { width, height: 800 })
             .await?;
         open_project_page(&session, &env, data::PROJECT_KEY).await?;
-        if width == 300 {
+        if width == 280 {
             let overflows = session
                 .page
                 .evaluate_value(
                     "(l => l.scrollWidth > l.clientWidth)(document.querySelector('[role=tablist]'))",
                 )
                 .await?;
-            assert_eq!(overflows, "true", "the tab row fits at 300 px");
+            assert_eq!(overflows, "true", "the tab row fits at 280 px");
         }
         let last = session.page.locator("[role=tab]:visible").last();
         last.dispatch_event("click", None).await?;

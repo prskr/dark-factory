@@ -24,7 +24,13 @@ a model provider.
 
 ## Create a provider
 
-**Settings → Model providers → New model provider**. The dialog has two tabs: **General** (the form below) and **Models** (the [model list](#models)). A preset prefills both; it is not stored, the provider keeps the values you save. Every change is audited.
+**Settings → Model providers → New model provider**. The dialog has two tabs: **General** (the form below) and **Models** (the [model list](#models)). A preset prefills both; it is not stored, the provider keeps the values you save. **Create model provider** stores the provider and opens its [settings page](#edit-a-provider). Every change is audited.
+
+## Edit a provider
+
+A provider is edited on its **settings page** at `/model-providers/<id>` (the provider's name or its edit icon in the list). The page has a back link to the list, the provider's name, the tabs **General** and **Models** and one **Save model provider** button. The General tab is the form below without the Preset field. After a save the page stays open and says **Model provider saved**; a validation error opens the tab of the first error and keeps what you typed. The open tab is part of the URL (`?tab=models` links to the Models tab; General has no `tab`). The Models tab shows one line per model across the width of the page, and the whole list scrolls with the page.
+
+**Delete** stays on the list row: it removes a provider no persona uses. The settings page is for desktop widths; it is not part of the phone navigation.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -73,7 +79,7 @@ The tab **Models** lists the models personas of this provider can select. A mode
 | Wire API | yes | The API the model is served over. A model uses one API; if the upstream serves it over two, add it twice under different IDs. The select lists all three APIs, but the save is refused for an API the General tab does not offer ("gpt-6-luna uses OpenAI Responses, which this provider does not offer (tab General)."). |
 | Context, Max output | both or neither | Context window and maximum output in tokens, positive whole numbers. OpenCode uses them to track the context and to compact it; without them it assumes none. |
 
-**+ Add model** appends a row, the trash button removes one. The list is not stored in the order
+**+ Add model** appends a row, the trash button removes one. Both rebuild the form on the Models tab; nothing is stored until **Save model provider**. The list is not stored in the order
 you typed it: after saving it is sorted by model ID. Problems show under the row (a limit without the
 other, a model ID twice, an API the provider does not offer) and on the list (a removed model that
 a persona uses: "minimax-m3 cannot be removed: persona Ada uses it."). A removed wire API that a model

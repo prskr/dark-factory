@@ -26,17 +26,29 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         .find(|c| c.name == data::CREDENTIAL_NAME)
         .context("forge credential")?;
     let providers = list_model_providers(&pool).await?;
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].input.name, data::MODEL_PROVIDER_NAME);
     assert_eq!(
-        providers[0].input.apis[0].upstream_url,
-        data::fake_upstream_url()
+        providers.len(),
+        2,
+        "the fake upstream and the settings provider"
+    );
+    let fake = providers
+        .iter()
+        .find(|p| p.input.name == data::MODEL_PROVIDER_NAME)
+        .context("fake upstream provider")?;
+    assert_eq!(fake.input.apis[0].upstream_url, data::fake_upstream_url());
+    let settings = providers
+        .iter()
+        .find(|p| p.input.name == data::SETTINGS_PROVIDER_NAME)
+        .context("settings provider")?;
+    assert_eq!(
+        settings.input.apis[0].upstream_url,
+        data::SETTINGS_PROVIDER_URL
     );
     let personas = list_personas(&pool).await?;
     assert_eq!(personas[0].name, data::PERSONA_NAME);
-    assert_eq!(personas[0].model_provider_id, providers[0].id);
+    assert_eq!(personas[0].model_provider_id, fake.id);
     assert_eq!(personas[0].model, data::PERSONA_MODEL);
-    assert_eq!(providers[0].input.models.len(), 1);
+    assert_eq!(fake.input.models.len(), 1);
     let project = get_project_by_key(&pool, data::PROJECT_KEY)
         .await?
         .context("project DF")?;

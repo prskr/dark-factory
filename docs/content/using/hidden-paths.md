@@ -24,7 +24,7 @@ Example: the repository has `talos/controlplane.yaml` and `talos/worker.yaml`; t
 on everything else.
 
 1. Open **Settings → Projects** and the project (`/projects/<key>`).
-2. On the **Push checks** tab, enter `talos/**` in **Hidden paths**, one glob per line.
+2. On the **Security** tab, enter `talos/**` in **Hidden paths**, one glob per line.
 3. **Save project**.
 
 The next run of any task of the project has no `talos/` directory. Runs that are already running

@@ -608,11 +608,11 @@ pub(crate) fn details_region(
         ("Status", status_select(task, cancel)),
         (
             "Project",
-            html! { (task.project_name) " " (chip(&task.project_key)) },
+            html! { a href={"/projects/" (task.project_key)} class="text-accent-text underline" { (task.project_name) " " (chip(&task.project_key)) } },
         ),
         (
             "Persona",
-            html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } },
+            html! { a href="/personas" class="text-accent-text underline" { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } } },
         ),
         (
             "Branch",
@@ -664,12 +664,24 @@ pub(crate) fn details_region(
                     (definition_list(&properties))
                     @if error.is_some() { div class="mt-3" { (field_error(error)) } }
                 }
-                @if !task.description.is_empty() {
-                    details class="border-b border-line px-5 py-4 text-sm" {
-                        summary class="flex min-h-11 cursor-pointer items-center text-xs font-medium uppercase tracking-wide text-faint" { "Description" }
-                        div class="line-clamp-3 whitespace-pre-wrap break-words text-muted" title=(task.description) { (task.description) }
-                    }
+                (description_section(&task.description))
+            }
+        }
+    }
+}
+
+/// The collapsible description of the details: closed, only the header with a chevron; open, the
+/// first three lines of the text, the whole text as tooltip. Nothing for an empty description.
+fn description_section(description: &str) -> Markup {
+    html! {
+        @if !description.is_empty() {
+            details class="group border-b border-line px-5 py-4 text-sm" {
+                summary class="flex min-h-11 cursor-pointer list-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-faint [&::-webkit-details-marker]:hidden" {
+                    span class="group-open:hidden" { (icon(Icon::ChevronRight)) }
+                    span class="hidden group-open:inline" { (icon(Icon::ChevronDown)) }
+                    "Description"
                 }
+                div class="line-clamp-3 whitespace-pre-wrap break-words text-muted" title=(description) { (description) }
             }
         }
     }

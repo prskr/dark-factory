@@ -1,10 +1,11 @@
-//! The persona form: harness, model provider and the model of that provider.
+//! Tests of the persona form, creating and editing personas, and the persona cards.
 
 use axum::http::StatusCode;
 use df_db::DbError;
 
+use super::{assert_saved, audit};
 use crate::config_pages::personas::save_error;
-use crate::testkit::{TestApp, form, seed_provider, tag_around, text};
+use crate::testkit::{TestApp, form, seed, seed_provider, tag_around, text};
 
 /// A provider "Go" with `glm-5.3` on Chat Completions, `minimax-m3` on Anthropic Messages and
 /// `gpt-6-luna` on Responses; returns its id.
@@ -365,4 +366,139 @@ async fn the_form_has_a_description_with_a_counter_between_name_and_system_promp
     assert!(html.contains(">11</span> / 500"), "{html}");
     let new_form = text(app.get_htmx("/personas/new", &cookie).await).await;
     assert!(new_form.contains(">0</span> / 500"), "{new_form}");
+}
+
+#[tokio::test]
+async fn persona_is_created_selectable_and_edits_are_audited() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    seed(&app.pool).await;
+    let body = form(&[
+        ("name", "Torvalds"),
+        ("system_prompt", "old prompt"),
+        ("model", "claude-sonnet-5-5"),
+        ("model_provider_id", &provider),
+    ]);
+    let response = app.post("/personas", &body, &cookie).await;
+    assert_saved(&response);
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE name = 'Torvalds'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    let new_task_page = text(app.get("/tasks/compose", &cookie).await).await;
+    assert!(new_task_page.contains("Torvalds") && new_task_page.contains("Linus"));
+
+    let edited = form(&[
+        ("name", "Torvalds"),
+        ("system_prompt", "new prompt"),
+        ("model", "claude-sonnet-5-5"),
+        ("model_provider_id", &provider),
+    ]);
+    let response = app.post(&format!("/personas/{id}"), &edited, &cookie).await;
+    assert_saved(&response);
+    let updates = audit(&app, "persona.update").await;
+    assert_eq!(updates[0]["before"]["system_prompt"], "old prompt");
+    assert_eq!(updates[0]["after"]["system_prompt"], "new prompt");
+}
+
+#[tokio::test]
+async fn the_persona_form_says_which_model_providers_it_offers() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    seed_provider(&app.pool).await;
+
+    let html = text(app.get_htmx("/personas/new", &cookie).await).await;
+
+    assert!(
+        html.contains("Only providers that offer a wire API of the harness."),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn persona_requires_name_prompt_and_a_known_model_provider() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let body = form(&[
+        ("name", ""),
+        ("system_prompt", ""),
+        ("model_provider_id", &uuid::Uuid::now_v7().to_string()),
+    ]);
+    let html = text(app.post("/personas", &body, &cookie).await).await;
+    assert!(
+        html.contains("Name is required.")
+            && html.contains("System prompt is required.")
+            && html.contains("Choose a model provider.")
+    );
+}
+
+#[tokio::test]
+async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    let linus = form(&[
+        ("name", "Linus"),
+        (
+            "system_prompt",
+            "Be Linus.\nReview carefully.\nShip small changes.\nNever skip tests.",
+        ),
+        ("model", "claude-sonnet-5-5"),
+        ("model_provider_id", &provider),
+    ]);
+    app.post("/personas", &linus, &cookie).await;
+    let plain = form(&[
+        ("name", "Ada"),
+        ("system_prompt", "Be Ada."),
+        ("model", "claude-sonnet-5-5"),
+        ("model_provider_id", &provider),
+    ]);
+    app.post("/personas", &plain, &cookie).await;
+
+    let html = text(app.get("/personas", &cookie).await).await;
+    let card = |name: &str| {
+        let at = html.find(&format!(">{name}</h2>")).unwrap();
+        let start = html[..at].rfind("<li ").unwrap();
+        html[start..start + html[start..].find("</li>").unwrap()].to_string()
+    };
+    let linus = card("Linus");
+    assert!(linus.contains(">L</span>"), "initial: {linus}");
+    assert!(linus.contains("Claude Code · claude-sonnet-5-5"), "{linus}");
+    assert!(linus.contains("line-clamp-3") && linus.contains("Be Linus."));
+    assert!(linus.contains(">Claude subscription<"), "{linus}");
+    assert!(linus.contains("aria-label=\"Edit persona Linus\"") && linus.contains("/edit\""));
+    let ada = card("Ada");
+    assert!(
+        ada.contains("Claude Code · claude-sonnet-5-5") && ada.contains(">Claude subscription<"),
+        "{ada}"
+    );
+}
+
+#[tokio::test]
+async fn the_persona_form_pairs_harness_and_model() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let html = text(app.get_htmx("/personas/new", &cookie).await).await;
+    assert!(html.contains("md:grid-cols-2"));
+    for full in ["name", "system_prompt", "model"] {
+        assert!(
+            html.contains(&format!(
+                "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{full}\""
+            )),
+            "{full}"
+        );
+    }
+    for half in ["harness", "model_provider_id"] {
+        assert!(!html.contains(&format!("<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label class=\"block text-sm font-medium text-muted\" for=\"{half}\"")), "{half}");
+        assert!(html.contains(&format!("for=\"{half}\"")));
+    }
+    assert!(
+        html.find("for=\"harness\"").unwrap() < html.find("for=\"model_provider_id\"").unwrap()
+    );
+    assert!(html.find("for=\"model_provider_id\"").unwrap() < html.find("for=\"model\"").unwrap());
+    assert!(
+        !html.contains("adapter_command"),
+        "persona form has no adapter command"
+    );
 }

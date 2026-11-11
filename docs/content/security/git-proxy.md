@@ -65,7 +65,7 @@ Pushes to the WIP branch get only the secret scan, the size limit and the hidden
 `push-check-exception` request in the inbox, listing the findings. Approving it creates exceptions
 for exactly these findings, and the agent's next push passes them; findings in `reject` mode stay
 rejected. The agent gets a message with the masked findings either way. Board members change the
-modes on the project's **Push checks** tab.
+modes on the project's **Security** tab.
 
 ## Push records
 

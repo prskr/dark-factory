@@ -1,6 +1,6 @@
 //! The settings page of a project, `/projects/{key}` (`configuration-management`, "Project
 //! settings page"): a back link, the project's heading, the tabs of [`super::project_form`] and one
-//! "Save project" for General and Push checks.
+//! "Save project" for General and Security.
 //!
 //! A save swaps only the form and, out of band, the heading and the status line of the header, so
 //! the live region exists before its text changes and screen readers announce "Project saved".
@@ -13,12 +13,13 @@ use df_db::catalog::ProjectRecord;
 use maud::{Markup, html};
 use serde::Deserialize;
 
-use super::{Editing, FormContext, project_form, project_values};
+use super::{
+    Editing, FormContext, SettingsBack, project_form, project_values, saved_response,
+    settings_page_frame,
+};
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::{
-    ButtonKind, FormErrors, Icon, action_class, forge_icon, icon, project_forge_kind,
-};
+use crate::components::{FormErrors, forge_icon, project_forge_kind};
 use crate::layout::{Nav, Shell, layout};
 use crate::project_subscriptions;
 use crate::responses::{internal_error, not_found};
@@ -56,25 +57,20 @@ pub(super) async fn page(
         Ok(form) => form,
         Err(response) => return *response,
     };
-    let body = html! {
-        div id="project-settings" class="mx-auto max-w-5xl" {
-            a href="/projects" class="mb-3 inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-ink lg:min-h-9" {
-                (icon(Icon::ChevronLeft)) "Projects"
-            }
-            div class="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2" {
-                (heading(&project, &state))
-                div class="flex items-center gap-3" {
-                    div id="save-status" role="status" aria-live="polite" class="text-sm" {}
-                    span class="hidden md:block" {
-                        button type="submit" form="form" class=(action_class(ButtonKind::Primary)) { "Save project" }
-                    }
-                }
-            }
+    let body = settings_page_frame(
+        "project-settings",
+        SettingsBack {
+            href: "/projects",
+            label: "Projects",
+        },
+        heading(&project, &state),
+        "Save project",
+        html! {
             (form)
             // The subscription editor's form cannot sit inside the project form.
             @if editing == Editing::AsAdmin { (project_subscriptions::form_anchor()) }
-        }
-    };
+        },
+    );
     layout(
         &project.name,
         Nav::ProjectSettings,
@@ -105,14 +101,12 @@ pub(super) async fn saved(
         Ok(form) => form,
         Err(response) => return *response,
     };
-    html! {
-        (form)
-        template hx type="partial" hx-target="#project-heading" hx-swap="outerHTML" { (heading(project, state)) }
-        template hx type="partial" hx-target="#save-status" hx-swap="innerHTML" {
-            span class="inline-flex items-center gap-1.5 text-accent-text" { (icon(Icon::Check)) "Project saved" }
-        }
-    }
-    .into_response()
+    saved_response(
+        form,
+        "project-heading",
+        heading(project, state),
+        "Project saved",
+    )
 }
 
 /// The project form with the stored values, opened on `tab`.
