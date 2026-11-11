@@ -251,7 +251,7 @@ The chart mounts an `emptyDir` there, so mirrors are rebuilt after a pod restart
 
 #### Push policy (per project)
 
-Board members set the policy in the web UI: **Projects → Edit (pencil) → Push checks**. "Save project" stores it together with the general fields in one transaction (table `project_push_policies`); a project without a row uses the defaults below.
+Board members set the policy in the web UI: **Projects → Edit (pencil) → Security**. "Save project" stores it together with the general fields in one transaction (table `project_push_policies`); a project without a row uses the defaults below.
 
 | Setting | Default | Effect |
 |---|---|---|

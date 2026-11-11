@@ -3,37 +3,7 @@
 use axum::http::StatusCode;
 
 use super::{REPO, audit, project_form, stored_key};
-use crate::testkit::{TestApp, header_str, seed, tag_around, text};
-
-/// The `data-tab` of the tab marked open in `html`.
-fn open_tab(html: &str) -> String {
-    let tags: Vec<&str> = html
-        .match_indices("role=\"tab\"")
-        .map(|(at, _)| {
-            let start = html[..at].rfind('<').unwrap();
-            &html[start..start + html[start..].find('>').unwrap()]
-        })
-        .collect();
-    let open: Vec<&&str> = tags
-        .iter()
-        .filter(|t| t.contains("aria-selected=\"true\""))
-        .collect();
-    assert_eq!(open.len(), 1, "{tags:?}");
-    let tag = open[0];
-    let at = tag.find("data-tab=\"").unwrap() + "data-tab=\"".len();
-    tag[at..at + tag[at..].find('"').unwrap()].to_string()
-}
-
-fn tab_labels(html: &str) -> Vec<&str> {
-    let mut labels = vec![];
-    for (at, _) in html.match_indices("role=\"tab\"") {
-        let tag_end = at + html[at..].find('>').unwrap();
-        let text_end = tag_end + html[tag_end..].find("</button>").unwrap();
-        let inner = &html[tag_end + 1..text_end];
-        labels.push(inner.rsplit('>').next().unwrap().trim());
-    }
-    labels
-}
+use crate::testkit::{TestApp, header_str, open_tab, seed, tab_labels, tag_around, text};
 
 #[tokio::test]
 async fn the_page_shows_sidebar_back_link_header_tabs_and_save() {
@@ -64,12 +34,26 @@ async fn the_page_shows_sidebar_back_link_header_tabs_and_save() {
             && heading.contains("data-forge=\"git\""),
         "{heading}"
     );
-    assert_eq!(tab_labels(&html), ["General", "Push checks"]);
+    assert_eq!(tab_labels(&html), ["General", "Security"]);
     assert_eq!(open_tab(&html), "general");
     assert!(html.contains(">Save project</button>"), "{html}");
     // On phones no bottom bar and no create button.
     assert!(!html.contains("id=\"mobile-menu\""), "{html}");
     assert!(!html.contains("aria-label=\"New project\""), "{html}");
+}
+
+#[tokio::test]
+async fn the_page_starts_next_to_the_settings_sidebar_and_is_at_most_1280_px_wide() {
+    let app = TestApp::new().await;
+    seed(&app.pool).await;
+    let html = text(app.get("/projects/DF", &app.login().await).await).await;
+
+    let frame = tag_around(&html, "id=\"project-settings\"");
+    assert!(frame.contains("max-w-7xl"), "capped at 1280 px: {frame}");
+    assert!(
+        !frame.contains("mx-auto"),
+        "left-aligned, not centered: {frame}"
+    );
 }
 
 #[tokio::test]
@@ -84,9 +68,11 @@ async fn the_query_chooses_the_open_tab_and_unknown_or_forbidden_values_open_gen
         async move { open_tab(&text(app.get(uri, &cookie).await).await) }
     };
 
+    assert_eq!(tab("/projects/DF?tab=security", &member).await, "security");
+    // The former id of the tab is an unknown value.
     assert_eq!(
         tab("/projects/DF?tab=push-checks", &member).await,
-        "push-checks"
+        "general"
     );
     assert_eq!(
         tab("/projects/DF?tab=integrations", &admin).await,
@@ -169,11 +155,11 @@ async fn a_save_keeps_the_tab_the_user_was_on() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
-    let body = format!("{}&tab=push-checks", project_form("DF", REPO));
+    let body = format!("{}&tab=security", project_form("DF", REPO));
 
     let html = text(app.post("/projects/DF", &body, &cookie).await).await;
 
-    assert_eq!(open_tab(&html), "push-checks");
+    assert_eq!(open_tab(&html), "security");
 }
 
 #[tokio::test]
@@ -181,9 +167,9 @@ async fn a_validation_error_opens_the_tab_of_the_first_error_and_keeps_the_value
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
-    // The user is on Push checks; the error is on General.
+    // The user is on Security; the error is on General.
     let body = format!(
-        "{}&tab=push-checks",
+        "{}&tab=security",
         project_form("DF", "ssh://git.example.org/o/r.git")
     );
 

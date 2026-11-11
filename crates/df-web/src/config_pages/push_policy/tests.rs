@@ -181,7 +181,7 @@ fn a_form_without_the_push_check_fields_leaves_the_policy_alone() {
 }
 
 #[tokio::test]
-async fn the_settings_page_has_a_push_checks_tab_with_the_default_policy() {
+async fn the_settings_page_has_a_security_tab_with_the_default_policy() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     seed(&app.pool).await;
@@ -197,16 +197,16 @@ async fn the_settings_page_has_a_push_checks_tab_with_the_default_policy() {
         general.contains("role=\"tab\"") && general.contains("aria-selected=\"true\""),
         "{general}"
     );
-    let push = tag_around(&html, "id=\"tab-push-checks\"");
+    let push = tag_around(&html, "id=\"tab-security\"");
     assert!(
         push.contains("aria-selected=\"false\"")
-            && push.contains("aria-controls=\"panel-push-checks\""),
+            && push.contains("aria-controls=\"panel-security\""),
         "{push}"
     );
-    assert!(tag_around(&html, "id=\"panel-push-checks\"").contains("x-cloak"));
+    assert!(tag_around(&html, "id=\"panel-security\"").contains("x-cloak"));
     for text in [
         ">General<",
-        ">Push checks<",
+        ">Security<",
         "Checked on every push of this project's tasks, before it reaches the forge.",
         "One glob per line. A commit that adds, changes, deletes or renames a matching path is a finding.",
         "Changes to the paths above.",
@@ -344,7 +344,7 @@ async fn the_settings_page_tabs_follow_the_keyboard_and_the_url() {
     }
     // The open tab is part of the URL on the page, and the form posts it back.
     for part in [
-        "URLSearchParams",
+        "searchParams.delete('tab'",
         "searchParams.set('tab'",
         "history.replaceState",
     ] {
@@ -361,7 +361,7 @@ async fn the_settings_page_tabs_follow_the_keyboard_and_the_url() {
 }
 
 #[tokio::test]
-async fn an_invalid_glob_reopens_the_push_checks_tab_with_the_error_on_the_field() {
+async fn an_invalid_glob_reopens_the_security_tab_with_the_error_on_the_field() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -384,7 +384,7 @@ async fn an_invalid_glob_reopens_the_push_checks_tab_with_the_error_on_the_field
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = text(response).await;
     assert!(
-        html.contains("x-data=\"tabs(&quot;push-checks&quot;, true)\""),
+        html.contains("x-data=\"tabs(&quot;security&quot;, true)\""),
         "{html}"
     );
     let textarea = tag_around(&html, "id=\"protected_globs\"");
@@ -424,6 +424,18 @@ async fn the_tab_row_scrolls_on_phones_and_keeps_the_open_tab_in_view() {
         "{script}"
     );
     assert!(script.contains("init()") && script.contains("$watch('tab'"));
+}
+
+#[test]
+fn the_tab_the_server_opened_wins_over_the_url_and_the_url_follows_it() {
+    let script = crate::assets::script_source("tabs.ts");
+    let init = &script[script.find("init(): void {").unwrap()..];
+    let init = &init[..init.find("tabIds()").unwrap()];
+    assert!(!init.contains("URLSearchParams"), "{init}");
+    assert!(
+        init.contains("if (syncUrl) this.writeUrl();"),
+        "init writes the open tab to the URL: {init}"
+    );
 }
 
 #[tokio::test]
@@ -466,7 +478,7 @@ async fn hidden_paths_are_saved_audited_and_shown_in_their_own_field() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = text(response).await;
     assert!(
-        html.contains("x-data=\"tabs(&quot;push-checks&quot;, true)\""),
+        html.contains("x-data=\"tabs(&quot;security&quot;, true)\""),
         "{html}"
     );
     let textarea = tag_around(&html, "id=\"hidden_globs\"");

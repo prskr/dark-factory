@@ -86,7 +86,7 @@ pub(crate) struct ProjectForm {
     webhook_wake: String,
     /// The tab the settings page showed when it was saved; it stays open afterwards.
     tab: String,
-    /// The "Push checks" tab of the edit form.
+    /// The push policy of the "Security" tab of the edit form.
     #[serde(flatten)]
     push: PushPolicyForm,
 }
@@ -206,6 +206,10 @@ fn validate_project(
         &form.forge_credential_id,
         credentials,
     );
+    let adapter_command = shlex::split(&form.adapter_command).unwrap_or_else(|| {
+        errors.add("adapter_command", "The quotes are not closed.");
+        Vec::new()
+    });
     let webhook_wake = form.webhook_wake.parse().unwrap_or_else(|_unknown| {
         errors.add("webhook_wake", "Choose who wakes tasks.");
         WebhookWake::default()
@@ -218,11 +222,7 @@ fn validate_project(
         image,
         base_branch,
         // Empty means the instance's harness image and adapter.
-        adapter_command: form
-            .adapter_command
-            .split_whitespace()
-            .map(str::to_string)
-            .collect(),
+        adapter_command,
         forge_credential_id,
         webhook_wake,
     })
@@ -342,6 +342,62 @@ pub(crate) fn list_header(
             }
         },
     )
+}
+
+/// The back link of a settings page: the list it belongs to.
+pub(crate) struct SettingsBack<'a> {
+    pub(crate) href: &'a str,
+    pub(crate) label: &'a str,
+}
+
+/// The frame of a settings page (project, model provider): the back link, the header row with the
+/// `heading` markup, the `#save-status` live region and the save button bound to `form="form"`,
+/// then `body` (the form). `id` is the id of the page's root element. The frame starts next to the
+/// settings sidebar and is at most 1280 px wide, so the save button stays near the fields on wide
+/// screens.
+pub(crate) fn settings_page_frame(
+    id: &str,
+    back: SettingsBack<'_>,
+    heading: Markup,
+    save_label: &str,
+    body: Markup,
+) -> Markup {
+    html! {
+        div id=(id) class="max-w-7xl" {
+            a href=(back.href) class="mb-3 inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-ink lg:min-h-9" {
+                (icon(Icon::ChevronLeft)) (back.label)
+            }
+            div class="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2" {
+                (heading)
+                div class="flex items-center gap-3" {
+                    div id="save-status" role="status" aria-live="polite" class="text-sm" {}
+                    span class="hidden md:block" {
+                        button type="submit" form="form" class=(action_class(ButtonKind::Primary)) { (save_label) }
+                    }
+                }
+            }
+            (body)
+        }
+    }
+}
+
+/// The answer of a successful save on a settings page: the re-rendered `form` and, out of band,
+/// the `heading` (the name may have changed; `heading_id` is its id) and the `message` in the
+/// `#save-status` live region of [`settings_page_frame`].
+pub(crate) fn saved_response(
+    form: Markup,
+    heading_id: &str,
+    heading: Markup,
+    message: &str,
+) -> Response {
+    html! {
+        (form)
+        template hx type="partial" hx-target={"#" (heading_id)} hx-swap="outerHTML" { (heading) }
+        template hx type="partial" hx-target="#save-status" hx-swap="innerHTML" {
+            span class="inline-flex items-center gap-1.5 text-accent-text" { (icon(Icon::Check)) (message) }
+        }
+    }
+    .into_response()
 }
 
 /// The rows of a modal form: one column on phones, two from 768 px.
@@ -634,6 +690,14 @@ async fn save_credential(
 // Projects
 // ---------------------------------------------------------------------------------------------
 
+/// The adapter command as the field shows it: arguments with whitespace or quotes are quoted, so
+/// that saving the field unchanged stores the same arguments.
+fn adapter_command_text(arguments: &[String]) -> String {
+    shlex::try_join(arguments.iter().map(String::as_str))
+        // Only an argument with a NUL byte fails, and parsing never produces one.
+        .unwrap_or_else(|_nul| arguments.join(" "))
+}
+
 fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
     ProjectForm {
         key: p.key.clone(),
@@ -642,7 +706,7 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
         issue_tracker_url: p.issue_tracker_url.clone().unwrap_or_default(),
         image: p.image.clone(),
         base_branch: p.base_branch.clone(),
-        adapter_command: p.adapter_command.join(" "),
+        adapter_command: adapter_command_text(&p.adapter_command),
         forge_credential_id: p
             .forge_credential_id
             .map(|id| id.to_string())
@@ -759,7 +823,7 @@ fn url_field(
 enum Editing {
     /// A new project: the groups of "General" in a modal, without tabs.
     No,
-    /// An existing project, on its settings page: the tabs "General" and "Push checks".
+    /// An existing project, on its settings page: the tabs "General" and "Security".
     AsMember,
     /// An existing project, edited by an admin: also the tab "Integrations".
     AsAdmin,
@@ -804,7 +868,7 @@ fn general_groups(
         (form_group("Sandbox", form_grid(html! {
             (full_row(text_field("Sandbox image", "image", &values.image, errors, None)))
             (full_row(text_field("Adapter command (optional)", "adapter_command", &values.adapter_command, errors,
-                Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter."))))
+                Some("Leave empty to use the instance's harness image. Set it when the project image already contains the adapter. Arguments use shell-style quoting: 'two words' is one argument."))))
         })))
         (form_group("Forge events", form_grid(html! {
             (full_row(select_field_with_hint("Wake tasks on reviews and mentions", "webhook_wake", &wake_options(),
@@ -857,8 +921,8 @@ fn project_form(
             panel: general,
         },
         Tab {
-            id: "push-checks",
-            label: "Push checks",
+            id: "security",
+            label: "Security",
             panel: push_policy::panel(&values.push, errors),
         },
     ];
@@ -877,7 +941,7 @@ fn project_form(
             .find(|tab| tab.id == requested_tab)
             .map_or("general", |tab| tab.id)
     } else if errors.fields().all(|f| push_policy::FIELDS.contains(&f)) {
-        "push-checks"
+        "security"
     } else {
         "general"
     };

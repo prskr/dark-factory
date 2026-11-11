@@ -48,6 +48,9 @@ pub enum Nav {
     Personas,
     Credentials,
     ModelProviders,
+    /// The settings page of one model provider: a page of the settings area (sidebar marks Model
+    /// providers) without the phone navigation, like [`Nav::ProjectSettings`].
+    ModelProviderSettings,
     /// Pending questions and approval requests.
     Requests,
     /// Egress rules (desktop only).
@@ -60,10 +63,11 @@ pub enum Nav {
 
 impl Nav {
     /// The entry of the settings sidebar this page belongs to: a project's settings page is part
-    /// of Projects, every other entry is its own.
+    /// of Projects, a model provider's of Model providers, every other entry is its own.
     pub(crate) const fn settings_section(self) -> Self {
         match self {
             Self::ProjectSettings => Self::Projects,
+            Self::ModelProviderSettings => Self::ModelProviders,
             other => other,
         }
     }
@@ -188,7 +192,7 @@ fn document(
                     }
                 }
                 @if nav != Nav::None {
-                    @if nav != Nav::ProjectSettings {
+                    @if !matches!(nav, Nav::ProjectSettings | Nav::ModelProviderSettings) {
                         (bottom_bar(nav))
                         (floating_create(&create_action(nav, compose_href)))
                     }
@@ -352,6 +356,20 @@ mod tests {
         assert!(!page.contains("id=\"mobile-menu\""), "{page}");
         assert!(!page.contains("fixed bottom-20"), "{page}");
         assert!(!page.contains("aria-label=\"New project\""), "{page}");
+    }
+
+    #[test]
+    fn a_model_provider_settings_page_marks_model_providers_and_has_no_bottom_bar() {
+        let page =
+            layout("P", Nav::ModelProviderSettings, &Shell::default(), html! {}).into_string();
+        let sidebar = sidebar_html(Nav::ModelProviderSettings).expect("sidebar");
+        let marked = &sidebar[..sidebar.find("aria-current").unwrap()];
+        assert!(
+            marked.ends_with("<a href=\"/model-providers\" "),
+            "{sidebar}"
+        );
+        assert!(!page.contains("id=\"mobile-menu\""), "{page}");
+        assert!(!page.contains("fixed bottom-20"), "{page}");
     }
 
     #[test]

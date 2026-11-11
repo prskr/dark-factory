@@ -5,8 +5,8 @@
 //! run changes nothing (and writes no audit entries).
 
 use anyhow::{Context, Result};
-use df_core::Principal;
 use df_core::model_provider::{CredentialScheme, ProviderApi, ProviderModel, WireApi};
+use df_core::{CredentialRef, Principal};
 use df_db::PgPool;
 use df_db::catalog::{
     Actor, CredentialRefInput, PersonaInput, ProjectInput, get_project_by_key,
@@ -36,7 +36,23 @@ pub async fn run(pool: &PgPool) -> Result<()> {
     };
 
     let credential = ensure_credential(pool, actor).await?;
-    let provider = ensure_model_provider(pool, actor).await?;
+    let model_credential = ensure_model_credential(pool, actor).await?;
+    let provider = ensure_model_provider(
+        pool,
+        actor,
+        &model_credential,
+        data::MODEL_PROVIDER_NAME,
+        &data::fake_upstream_url(),
+    )
+    .await?;
+    ensure_model_provider(
+        pool,
+        actor,
+        &model_credential,
+        data::SETTINGS_PROVIDER_NAME,
+        data::SETTINGS_PROVIDER_URL,
+    )
+    .await?;
     ensure_persona(pool, actor, provider).await?;
     let project = |key, name, script| SeedProject {
         key,
@@ -124,8 +140,8 @@ async fn ensure_credential(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
     Ok(saved.id.as_uuid())
 }
 
-/// The fake Anthropic upstream with its credential reference.
-async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> {
+/// The credential reference of the model providers.
+async fn ensure_model_credential(pool: &PgPool, actor: Actor<'_>) -> Result<CredentialRef> {
     let wanted_credential = CredentialRefInput {
         name: data::MODEL_CREDENTIAL_NAME.into(),
         secret_name: data::MODEL_CREDENTIAL_SECRET.into(),
@@ -151,8 +167,19 @@ async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> 
         .await
         .context("save model credential reference")?,
     };
+    Ok(credential)
+}
+
+/// The Anthropic Messages provider `name` with the upstream `upstream_url` and the persona model.
+async fn ensure_model_provider(
+    pool: &PgPool,
+    actor: Actor<'_>,
+    credential: &CredentialRef,
+    name: &str,
+    upstream_url: &str,
+) -> Result<Uuid> {
     let wanted = ModelProviderInput {
-        name: data::MODEL_PROVIDER_NAME.into(),
+        name: name.into(),
         credential_ref_id: credential.id.as_uuid(),
         scheme: CredentialScheme::XApiKey,
         credential_header: None,
@@ -160,7 +187,7 @@ async fn ensure_model_provider(pool: &PgPool, actor: Actor<'_>) -> Result<Uuid> 
         headers: Vec::new(),
         apis: vec![ProviderApi {
             wire_api: WireApi::AnthropicMessages,
-            upstream_url: data::fake_upstream_url(),
+            upstream_url: upstream_url.into(),
         }],
         models: vec![ProviderModel {
             model_id: data::PERSONA_MODEL.into(),

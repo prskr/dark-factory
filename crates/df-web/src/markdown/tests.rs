@@ -1,4 +1,6 @@
-use super::{ImageArtifacts, highlight_by_extension, render, render_with_images};
+use super::{
+    ImageArtifacts, highlight_by_extension, render, render_with_hard_breaks, render_with_images,
+};
 
 fn html(source: &str) -> String {
     render(source).into_string()
@@ -273,4 +275,40 @@ fn text_is_highlighted_by_extension_or_escaped() {
     );
     let markdown = highlight_by_extension("md", "# Title\n`code`").into_string();
     assert!(markdown.contains("hl-"), "{markdown}");
+}
+
+fn typed(source: &str) -> String {
+    render_with_hard_breaks(source).into_string()
+}
+
+#[test]
+fn a_single_newline_becomes_a_line_break_only_with_hard_breaks() {
+    let out = typed("first\nsecond");
+    assert!(out.contains("first<br />\nsecond"), "{out}");
+    assert!(!html("first\nsecond").contains("<br"));
+}
+
+#[test]
+fn several_blank_lines_are_one_paragraph_break() {
+    let out = typed("a\n\n\n\nb");
+    assert_eq!(out.matches("<p>").count(), 2, "{out}");
+    assert!(!out.contains("<br"), "{out}");
+}
+
+#[test]
+fn hard_breaks_keep_the_untrusted_input_rules() {
+    let out = typed("<b>x</b> [click](javascript:alert(1)) ![logo](https://example.com/l.png)");
+    assert!(
+        out.contains("&lt;b&gt;x&lt;/b&gt;") && !out.contains("<b>"),
+        "{out}"
+    );
+    assert!(!out.contains("javascript:"), "{out}");
+    assert!(
+        !out.contains("<img") && out.contains(r#"href="https://example.com/l.png""#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"<a rel="noopener noreferrer nofollow" href=""#),
+        "{out}"
+    );
 }

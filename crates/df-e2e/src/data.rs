@@ -110,6 +110,10 @@ pub const CREDENTIAL_KEY: &str = "token";
 /// namespace (plain HTTP, the cluster allows it like for Forgejo), and the credential reference
 /// the gateway sends to it (Secret `fake-llm-key`, key `key`).
 pub const MODEL_PROVIDER_NAME: &str = "Fake Anthropic";
+/// A second provider no persona uses, for the tests of the settings page: the provider form
+/// requires HTTPS upstream URLs, so a save works only on a provider that has one. Never called.
+pub const SETTINGS_PROVIDER_NAME: &str = "Settings Anthropic";
+pub const SETTINGS_PROVIDER_URL: &str = "https://anthropic.example.org";
 pub const MODEL_CREDENTIAL_NAME: &str = "fake-llm";
 pub const MODEL_CREDENTIAL_SECRET: &str = "fake-llm-key";
 pub const MODEL_CREDENTIAL_KEY: &str = "key";

@@ -13,7 +13,11 @@ expression: render_all(&folder)
 </div>
 <div id="ev-2" data-prompt-id="p1" data-author="human" class="flex items-end justify-end gap-2">
 <div class="min-w-0 max-w-[85%] md:max-w-[75%]">
-<div class="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink">please fix &lt;b&gt;login&lt;/b&gt;</div>
+<div class="break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink">
+<div class="md-body md-user">
+<p>please fix &lt;b&gt;login&lt;/b&gt;</p>
+</div>
+</div>
 <div class="mt-1 text-xs text-faint text-right">Peter · <time datetime="2026-10-23T10:02:00+00:00">10:02</time>
 </div>
 </div>

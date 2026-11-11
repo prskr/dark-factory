@@ -12,7 +12,7 @@ async fn an_admins_page_ends_with_a_tab_called_integrations_with_two_groups() {
     seed(&app.pool).await;
 
     let html = text(app.get("/projects/DF", &app.login_admin().await).await).await;
-    let order: Vec<usize> = [">General<", ">Push checks<", ">Integrations<"]
+    let order: Vec<usize> = [">General<", ">Security<", ">Integrations<"]
         .iter()
         .map(|label| html.find(label).expect(label))
         .collect();
@@ -45,7 +45,7 @@ async fn a_board_members_page_has_no_integrations_tab() {
     seed(&app.pool).await;
 
     let html = text(app.get("/projects/DF", &app.login().await).await).await;
-    assert!(html.contains(">Push checks<"), "{html}");
+    assert!(html.contains(">Security<"), "{html}");
     assert!(!html.contains("Integrations"), "{html}");
     assert!(!html.contains("Lifecycle events"), "{html}");
     assert!(!html.contains("/subscriptions"), "{html}");

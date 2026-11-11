@@ -4,9 +4,10 @@
 // State: `tab`, the `data-tab` of the open tab; the server passes the one to open first.
 //
 // `syncUrl` (a tabbed page, not a dialog): the open tab is part of the URL as `?tab=<id>`, left
-// out for the first tab. Init opens the tab of the URL if the page has it (the server already
-// renders it open, so this only matters for a restored page); choosing a tab updates the URL with
-// `history.replaceState`, without a page load.
+// out for the first tab. The tab the server opened wins and the URL follows it: init writes it to
+// the URL, so a form swapped in after a failed save (which opens the tab of the first error) also
+// corrects the URL. The URL is not read, because the server already opens the tab it names.
+// Choosing a tab updates the URL with `history.replaceState`, without a page load.
 //
 // `adopt()`: sets `role="tabpanel"` and `aria-labelledby` on the panels the tabs control.
 //
@@ -21,10 +22,7 @@ document.addEventListener('alpine:init', () => {
     tab: initial,
 
     init(): void {
-      if (syncUrl) {
-        const wanted = new URLSearchParams(location.search).get('tab');
-        if (wanted && this.tabIds().includes(wanted)) this.tab = wanted;
-      }
+      if (syncUrl) this.writeUrl();
       this.$watch('tab', () => {
         this.reveal();
         if (syncUrl) this.writeUrl();

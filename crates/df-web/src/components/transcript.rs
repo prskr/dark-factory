@@ -8,6 +8,7 @@ use maud::{Markup, html};
 use super::actions::ICON_BUTTON_CLASS;
 use super::icons::{Icon, icon};
 use super::shell::{avatar, initials};
+use crate::markdown;
 
 /// Time shown under a bubble.
 fn clock(at: DateTime<Utc>) -> String {
@@ -16,7 +17,8 @@ fn clock(at: DateTime<Utc>) -> String {
 
 /// A message of a board member: a bubble on the right with name and time below it. The avatar is
 /// shown for the last message of a group only (CSS, `data-author`). `parts` are `(text, hidden)`;
-/// hidden parts are shown muted and labeled below the visible text.
+/// the visible text is Markdown (like an agent message, typed line breaks kept), hidden parts are
+/// plain text, muted and labeled below it.
 pub fn user_message(
     id: &str,
     prompt_id: &str,
@@ -33,8 +35,10 @@ pub fn user_message(
     html! {
         div id=(id) data-prompt-id=(prompt_id) data-author="human" class="flex items-end justify-end gap-2" {
             div class="min-w-0 max-w-[85%] md:max-w-[75%]" {
-                div class="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink" {
-                    (visible)
+                div class="break-words rounded-2xl rounded-br-md bg-bubble-me px-3 py-2 text-ink" {
+                    @if !visible.is_empty() {
+                        div class="md-body md-user" { (markdown::render_with_hard_breaks(&visible)) }
+                    }
                     @for (text, _) in parts.iter().filter(|(_, hidden)| *hidden) {
                         div data-hidden class="mt-2 border-t border-line pt-2 text-sm text-muted" {
                             div class="text-xs text-faint" { "Instruction for the agent" }
@@ -304,6 +308,8 @@ mod tests {
 
     use chrono::TimeZone;
 
+    use crate::testkit::tag_around;
+
     fn at() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 23, 10, 42, 0).unwrap()
     }
@@ -317,6 +323,61 @@ mod tests {
     }
 
     #[test]
+    fn a_user_message_is_markdown_with_highlighted_code_and_kept_line_breaks() {
+        let text = "one\ntwo\n\n```rust\nfn main() {}\n```";
+        let html = user_message("ev-1", "p1", "Peter", at(), &[(text.into(), false)]).into_string();
+
+        let body = &html[html.find("md-body").expect("markdown body")..];
+        assert!(body.contains("one<br />\ntwo"), "{body}");
+        let pre = &body[body.find("<pre class=\"hl-code\">").expect("pre block")..];
+        assert!(
+            pre[..pre.find("</pre>").unwrap()].contains("<span class=\"hl-"),
+            "{pre}"
+        );
+        assert!(!html.contains("whitespace-pre-wrap"), "{html}");
+        // The bubble is light in both themes: inline code takes the panel color there.
+        assert!(tag_around(&html, "md-body").contains("md-user"), "{html}");
+    }
+
+    #[test]
+    fn a_user_message_keeps_hidden_parts_plain_text() {
+        let parts = [
+            ("visible".to_string(), false),
+            ("**not bold** `x`".to_string(), true),
+        ];
+        let html = user_message("ev-1", "p1", "Peter", at(), &parts).into_string();
+
+        let hidden = &html[html.find("data-hidden").unwrap()..];
+        assert!(hidden.contains("**not bold** `x`"), "{hidden}");
+        assert!(
+            !hidden.contains("<strong>") && !hidden.contains("<code>"),
+            "{hidden}"
+        );
+        let body = &html[html.find("md-body").unwrap()..];
+        assert!(
+            body.find("</div>").unwrap() < body.find("data-hidden").unwrap(),
+            "the hidden part is outside the Markdown body: {html}"
+        );
+    }
+
+    #[test]
+    fn the_queued_stack_stays_plain_text() {
+        let held = queued_message(
+            "DF-1",
+            "abc",
+            None,
+            &[("**bold** `x`".into(), false)],
+            at(),
+            QueuedState::Editable,
+        )
+        .into_string();
+        assert!(
+            held.contains("**bold** `x`") && !held.contains("md-body"),
+            "{held}"
+        );
+    }
+
+    #[test]
     fn user_message_is_a_right_aligned_bubble_with_meta_below_and_an_avatar() {
         let html =
             user_message("ev-1", "p1", "Peter Test", at(), &[("hi".into(), false)]).into_string();
@@ -325,7 +386,7 @@ mod tests {
             "{html}"
         );
         assert!(html.contains("bg-bubble-me"));
-        let bubble = html.find("hi</div>").unwrap();
+        let bubble = html.find("hi</p>").unwrap();
         let meta = html.find("Peter Test · <time").unwrap();
         assert!(bubble < meta, "name and time below the bubble");
         assert!(html.contains(">10:42<") && html.contains("class=\"avatar "));
@@ -402,7 +463,7 @@ mod tests {
                 && held.contains("aria-label=\"Remove queued message\"")
         );
         for label in ["Edit queued message", "Remove queued message"] {
-            let button = crate::testkit::tag_around(&held, &format!("aria-label=\"{label}\""));
+            let button = tag_around(&held, &format!("aria-label=\"{label}\""));
             assert!(button.contains(ICON_BUTTON_CLASS), "{button}");
         }
         assert!(

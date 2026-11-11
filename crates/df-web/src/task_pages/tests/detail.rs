@@ -590,6 +590,65 @@ async fn the_description_is_cut_after_three_lines_with_the_full_text_as_title() 
 }
 
 #[tokio::test]
+async fn the_description_header_has_the_chevrons_of_the_runs_header() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    sqlx::query("UPDATE tasks SET description = 'Do it' WHERE id = $1")
+        .bind(task.id.as_uuid())
+        .execute(&app.pool)
+        .await
+        .unwrap();
+
+    let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+
+    let details = &html[..html.find(">Description<").unwrap()];
+    let details = &details[details.rfind("<details").unwrap()..];
+    let (opening, summary) = details.split_once("<summary").unwrap();
+    assert!(opening.contains("class=\"group "), "{opening}");
+    let summary_tag = &summary[..summary.find('>').unwrap()];
+    assert!(
+        summary_tag.contains("list-none") && summary_tag.contains("-webkit-details-marker]:hidden"),
+        "{summary_tag}"
+    );
+    // Right while closed, down while open.
+    let right = &summary[summary.find("group-open:hidden").unwrap()..];
+    let down = &summary[summary.find("hidden group-open:inline").unwrap()..];
+    assert!(right.find("<svg").unwrap() < right.find("hidden group-open:inline").unwrap());
+    assert!(down.contains("<svg"), "{down}");
+    assert_ne!(
+        right[right.find("<svg").unwrap()..].split("</svg>").next(),
+        down[down.find("<svg").unwrap()..].split("</svg>").next(),
+        "two different chevrons"
+    );
+}
+
+#[tokio::test]
+async fn the_details_link_the_project_to_its_settings_and_the_persona_to_the_list() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "t").await;
+
+    let html = text(app.get("/tasks/DF-1", &cookie).await).await;
+
+    let details = &html[html.find("id=\"task-details\"").unwrap()..];
+    let project = tag_around(details, "href=\"/projects/DF\"");
+    assert!(project.starts_with("<a "), "{project}");
+    let after_project = &details[details.find("href=\"/projects/DF\"").unwrap()..];
+    assert!(
+        after_project[..after_project.find("</a>").unwrap()].contains("Dark Factory"),
+        "{after_project}"
+    );
+    let persona = &details[details.find("href=\"/personas\"").unwrap()..];
+    assert!(
+        persona[..persona.find("</a>").unwrap()].contains("Linus"),
+        "{persona}"
+    );
+}
+
+#[tokio::test]
 async fn the_details_overview_has_the_sections_of_the_mockup_in_order() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
@@ -701,7 +760,7 @@ async fn the_description_header_matches_the_other_sections_and_runs_has_no_botto
         .await
         .unwrap();
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
-    let summary = tag_around(&html, ">Description<");
+    let summary = tag_around(&html, "summary class=\"flex min-h-11");
     for class in ["uppercase", "tracking-wide", "text-xs", "text-faint"] {
         assert!(summary.contains(class), "{class}: {summary}");
     }
