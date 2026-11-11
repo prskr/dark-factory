@@ -32,6 +32,7 @@ The design tasks come before the UI tasks, following `docs/design-workflow.md`, 
 - the existing "Model providers · edit, …" boards become "settings page" boards. The "new …" boards stay modals.
 - the description header, collapsed and expanded, with the chevron
 - a user message with a highlighted fence and a multi-line paragraph, light and dark
+- the project settings boards on "Config - Projects" show the tab label "Security", and the boards "Projects · settings page, push checks" and "…, push checks, invalid glob" are renamed to "…, security" (D7)
 
 The user approves the boards in the design session. If the approved layout changes anything in the spec deltas, the deltas are updated before the UI tasks start.
 
@@ -48,7 +49,7 @@ Alternative: copy the 30 lines into the provider page. Rejected, because two cop
 - `refresh` keeps its create or edit mode (existing test). In edit mode it now renders `Page` style and keeps the current tab.
 - The tab the server opens wins over the URL, and the URL follows it.
   - Today, `init()` in `scripts/tabs.ts` opens the tab named by `?tab=` when `syncUrl` is set. After a failed save from `?tab=models` with an error on General, the swapped-in form opens Models again and hides the error.
-  - The project settings page has the same bug.
+  - The project settings page has the same bug (TD-124: after a failed save from `?tab=push-checks` the General error stays hidden).
   - Fix in the shared code: `init()` stops reading `?tab=` and calls `writeUrl()` for the server's tab instead. Reading the URL is redundant, because the server already opens the tab from the query on `GET`.
   - Both pages get the fix.
 - `create` answers `HX-Location: /model-providers/{id}` instead of swapping the list.
@@ -59,6 +60,13 @@ Alternative: copy the 30 lines into the provider page. Rejected, because two cop
 
 ### D5: Description chevron
 Copy the Runs pattern onto the description `details`: `group` on `details`, `list-none [&::-webkit-details-marker]:hidden` on the summary, a `ChevronRight` span shown while closed and a `ChevronDown` span shown while open. The default stays collapsed, and the three-line clamp and tooltip are unchanged.
+
+### D5a: Project and persona links
+- In `details_region` (`task_pages/view.rs`), the "Project" and "Persona" property values become links in the style of the parent link: `/projects/{project_key}` and `/personas`. The key chip and the harness label stay inside the link.
+- `TaskDetail` already has `project_key`. The persona link needs no id, so the query is unchanged.
+- The bottom sheet on phones renders the same properties, so it gets the links too.
+
+Alternative: open the persona's edit modal through `/personas?edit={id}`. Rejected by the user: the list is enough, and it needs no change on the personas page.
 
 ### D6: User messages as Markdown with hard breaks
 - `markdown.rs` gets `render_with_hard_breaks(source)`: the same options as `render`, plus comrak's `render.hardbreaks = true`. Both build their options in one shared function, so that the untrusted-input settings cannot diverge.
@@ -73,11 +81,29 @@ Alternatives:
 - Keeping runs of blank lines as extra vertical space: rejected. `hardbreaks` only affects soft breaks, and comrak collapses consecutive blank lines into one paragraph break. Keeping them would mean preprocessing the source outside fences. The spec promises line breaks for single newlines and paragraphs for blank lines, which is what comrak does.
 - Highlighting only the fences: rejected. It needs a custom splitter and would differ from agent messages.
 
+### D7: Rename "Push checks" to "Security"
+- Since `iter3-hidden-paths`, the tab holds the push checks and the hidden paths. Hidden paths are not a push check, so the tab is renamed "Security".
+- The tab id in `config_pages.rs` becomes `security`, so the URL is `?tab=security`. There is no alias for `push-checks`: an unknown value already opens General (pre-MVP).
+- `config_pages/push_policy.rs` keeps its name, because it still renders the project's push policy. Only its doc comment and the comments that name the tab change.
+
+Alternative: keep "Push checks". Rejected, because the label hides the hidden paths.
+
+### D8: Adapter command with shell quoting (TD-60)
+- `validate_project` parses the field with `shlex::split`. `None` (an unclosed quote) is a validation error at `adapter_command`. An empty or whitespace-only field gives no arguments, as today.
+- `project_values` shows the stored arguments with `shlex::try_join`, so an argument with whitespace is quoted and survives the next save. `try_join` only fails on a NUL byte, which `shlex::split` never produces. In that case the field falls back to the arguments joined with spaces.
+- `shlex` 2.0.1 is already in `Cargo.lock` as a transitive dependency. It becomes a direct dependency of `df-web` through `[workspace.dependencies]` (skill `rust`).
+- The field stays a single-line text input. The hint mentions quoting.
+- The stored format (a list of arguments) is unchanged, so there is no migration.
+
+Alternative: one argument per line in a textarea. Rejected by the user in favor of the familiar shell syntax.
+
 ## Risks / Trade-offs
 
 - [Markdown syntax in plain user text changes its look: `*`, `_`, `#` at a line start, and lists] → Accepted. It is the same behavior as agent messages and request texts, and hard breaks keep the line structure.
 - [`TabsStyle::Dialog` is left with one user, the "New model provider" modal] → Accepted. No change to `tabbed_form`.
 - [Old `/model-providers/{id}/edit` bookmarks break] → Accepted pre-MVP. The 404 is covered by a test.
+- [Old `?tab=push-checks` links open General] → Accepted pre-MVP. Covered by a test.
+- [An adapter command with a literal quote or backslash, saved before the change, is parsed differently on its next save] → Accepted pre-MVP. On display it is quoted by `try_join`, so saving it unchanged keeps it.
 
 ## Open Questions
 
