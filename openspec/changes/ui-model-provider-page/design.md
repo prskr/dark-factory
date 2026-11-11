@@ -23,12 +23,13 @@
 - A page for creating a provider: rejected ("New model provider" stays a modal, as "New project" does).
 - Markdown in the queued stack or in the details column's description: rejected (both are short previews).
 - Pages for personas and credential references: rejected (short, untabbed forms).
+- A phone layout for the provider settings page: rejected (not reachable from the phone navigation).
 
 ## Decisions
 
 ### D1: PenPot first
 The design tasks come before the UI tasks, following `docs/design-workflow.md`, on the boards "Config - Model providers" and "Tasks - Details Sidebar" (and the transcript board that holds user messages):
-- the provider settings page at 1440 and 390 px: General, Models (many models), model errors, saved status. The board settles how the Models tab uses the width. The proposal to start from: one line per model (ID, wire API, limits, remove) from 1024 px.
+- the provider settings page at 1440 px: General, Models (many models), model errors, saved status. The board settles how the Models tab uses the width. The proposal to start from: one line per model (ID, wire API, limits, remove) from 1024 px.
 - the existing "Model providers · edit, …" boards become "settings page" boards. The "new …" boards stay modals.
 - the description header, collapsed and expanded, with the chevron
 - a user message with a highlighted fence and a multi-line paragraph, light and dark
@@ -56,7 +57,7 @@ Alternative: copy the 30 lines into the provider page. Rejected, because two cop
 - List row: the name and the edit icon become links to the page (no `hx-get`/modal).
 
 ### D4: Layout and navigation
-`Nav::ModelProviderSettings` maps through `settings_section()` to Model providers, so the sidebar marks it. Like `Nav::ProjectSettings`, it hides the bottom bar and the floating create button. Below 768 px the page is a plain full page, reachable from links only (Model providers is not in the phone navigation, unchanged).
+`Nav::ModelProviderSettings` maps through `settings_section()` to Model providers, so the sidebar marks it. Like `Nav::ProjectSettings`, it hides the bottom bar and the floating create button. There is no phone design: Model providers is not in the phone navigation, so the page gets no 390 px boards, layout work or tests.
 
 ### D5: Description chevron
 Copy the Runs pattern onto the description `details`: `group` on `details`, `list-none [&::-webkit-details-marker]:hidden` on the summary, a `ChevronRight` span shown while closed and a `ChevronDown` span shown while open. The default stays collapsed, and the three-line clamp and tooltip are unchanged.

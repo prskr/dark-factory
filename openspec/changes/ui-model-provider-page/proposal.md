@@ -5,7 +5,7 @@
 ## What Changes
 
 - **BREAKING (UI):** editing a model provider moves from a modal to a **model provider settings page** at `/model-providers/{id}`, built like the project settings page:
-  - From 768 px it sits in the settings area, next to the settings sidebar with Model providers marked current. Below 768 px it is a full page.
+  - It sits in the settings area, next to the settings sidebar with Model providers marked current. There is no phone layout (not in the phone navigation).
   - It has a back link "Model providers", a header with the provider name, the tabs General and Models, and one "Save model provider" button.
   - The tab is part of the URL (`?tab=models`; General is left out).
   - Saving keeps the page open and confirms with "Model provider saved". A validation error opens the tab of the first error.
@@ -34,7 +34,7 @@ None.
 ### Modified Capabilities
 
 - `model-providers`: new requirement for the model provider settings page (page, tab in the URL, saving).
-- `configuration-management`: "Configuration forms as modals" covers creating a model provider, which opens its settings page. "Form tabs on phones" covers the model provider settings page. "Saving the project settings page": after a validation error the URL names the tab with the error (bug fix in the shared tab script; fixes TD-124). "Projects": the adapter command uses shell-style quoting (TD-60). "Project settings page" and "Project settings tab in the URL": the tab "Push checks" becomes "Security" (`tab=security`).
+- `configuration-management`: "Configuration forms as modals" covers creating a model provider, which opens its settings page. "Saving the project settings page": after a validation error the URL names the tab with the error (bug fix in the shared tab script; fixes TD-124). "Projects": the adapter command uses shell-style quoting (TD-60). "Project settings page" and "Project settings tab in the URL": the tab "Push checks" becomes "Security" (`tab=security`).
 - `event-subscriptions`: "Lifecycle events tab position" names the tabs "General", "Security" and "Integrations".
 - `task-ui`: new requirements for the chevron of the collapsible description and for the project and persona links in the task details.
 - `markdown-rendering`: new requirement for Markdown in user messages (hard line breaks, plain hidden blocks and queued stack).
@@ -54,6 +54,6 @@ None.
 - Dependencies: `shlex` (already in `Cargo.lock` as a transitive dependency) becomes a direct dependency of `df-web`.
 - Tech debt: TD-60 and TD-124 are fixed and removed from `docs/tech_debt.md`.
 - Tests: `config_pages/providers/tests.rs`, `components/transcript.rs`, `transcript/tests.rs`, `task_pages/tests/detail.rs`, `markdown.rs`, `config_pages/tests/project_page.rs`, `config_pages/tests/integrations_tab.rs`, `config_pages/push_policy/tests.rs`, the project form tests in `config_pages/tests/`; e2e in `crates/df-e2e/tests/ui.rs`.
-- Design: PenPot boards for the provider settings page (General, Models, model errors, 1440 and 390 px), the description header with chevron, and a user message with a code block; the "Security" label on the project settings boards; mapping rows in `docs/design-workflow.md`.
+- Design: PenPot boards for the provider settings page (General, Models, model errors, 1440 px), the description header with chevron, and a user message with a code block; the "Security" label on the project settings boards; mapping rows in `docs/design-workflow.md`.
 - Docs: `docs/content/using/model-providers.md`, `docs/content/using/tasks.md`, `docs/content/using/setup.md`, `docs/content/using/hidden-paths.md`, `docs/content/security/git-proxy.md`.
 - No database, API, configuration or Helm change.

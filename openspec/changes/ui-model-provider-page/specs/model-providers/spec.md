@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Model provider settings page
-Each model provider SHALL have a settings page at `/model-providers/{id}`, inside the settings area from 768 px and a full page below. It SHALL show a back link to the provider list, the provider's name, the tabs General and Models, and one "Save model provider" button. The provider list's name and edit action SHALL link to it. An unknown id and `/model-providers/{id}/edit` SHALL answer `404`. The layout follows the approved PenPot boards.
+Each model provider SHALL have a settings page at `/model-providers/{id}`, inside the settings area. It SHALL show a back link to the provider list, the provider's name, the tabs General and Models, and one "Save model provider" button. The provider list's name and edit action SHALL link to it. An unknown id and `/model-providers/{id}/edit` SHALL answer `404`. The layout follows the approved PenPot boards.
 
 #### Scenario: Open a provider from the list
 - **WHEN** a board member at 1440 px width chooses the edit action of provider "Anthropic work" on `/model-providers`
@@ -10,10 +10,6 @@ Each model provider SHALL have a settings page at `/model-providers/{id}`, insid
 #### Scenario: Unknown provider and old route
 - **WHEN** `/model-providers/<unknown id>` or `/model-providers/<id>/edit` is opened
 - **THEN** the response is `404`
-
-#### Scenario: Page on a phone
-- **WHEN** a board member opens `/model-providers/<id>` at 390 px width
-- **THEN** the page shows the back link, the header and the tabs without a settings sidebar and without horizontal page scrolling
 
 ### Requirement: Model provider settings tab in the URL
 The open tab of the model provider settings page SHALL be part of the URL as `tab=models`, and left out for General. Opening such a URL SHALL show that tab, choosing a tab SHALL update the URL without a page load, and an unknown value SHALL show General.
