@@ -12,6 +12,10 @@ use crate::env::E2eEnv;
 /// How long a page waits for a card that already exists in the database.
 const CARD_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the login waits to land on the UI. The first logins after the cluster starts take
+/// longer than the default 5 s (Dex password check, code exchange, first user upsert).
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A page of the remote browser. Keeps the local Playwright driver alive.
 pub struct Session {
     _playwright: Playwright,
@@ -58,6 +62,7 @@ impl Session {
             .await
             .context("submit the login")?;
         expect_page(&self.page)
+            .with_timeout(LOGIN_TIMEOUT)
             .to_have_url_regex(&format!("^{}", regex::escape(&env.base_url)))
             .await
             .context("land on the UI after the login")
