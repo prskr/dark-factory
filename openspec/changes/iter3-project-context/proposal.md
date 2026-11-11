@@ -10,7 +10,7 @@ A chat plans work in a project, and its runs start from nothing but the persona'
   - A Markdown text per project, empty by default, at most 32 KiB.
   - Stored in Dark Factory only. It is never synced with `AGENTS.md` and never written into the workspace.
 - **Editing**:
-  - A "Context" tab in the project edit form with a textarea, saved together with the other tabs.
+  - A "Context" tab on the project settings page (between Security and Integrations, `?tab=context`) with a textarea, saved with "Save project".
   - Board members edit it (`project:context:write` once ADR-0011 is implemented).
   - Changes are audited with before and after values, like other project settings. There is no separate revision history.
 - **Injection, chats only**:
@@ -61,8 +61,9 @@ Out of scope:
   - project read and update, audit;
   - `.sqlx/`.
 - `crates/df-agent-channel`: `build_assign` adds the context to chat runs and records its version; `request_approval` rejects `project-context` outside chats.
-- `crates/df-web`: the Context tab in the project form, the diff in request cards, the Overview link in the chat page.
+- `crates/df-web`: the Context tab on the project settings page, the diff in request cards, the Overview link in the chat page.
 - `contract/mcp/factory-tools.v2.json`: `project-context` in the `request_approval` type enum.
 - Dependencies: `similar` becomes a direct workspace dependency (already in `Cargo.lock`).
 - `crates/fake-acp-agent`, `crates/df-e2e`: a chat proposes a context, a board member approves it, and the next chat run receives it.
 - Depends on `iter3-chats` (task kind `chat`, chat instructions, the archive check, the Overview tab).
+- Depends on `ui-model-provider-page` (the tab "Security", the tab script fix for the tab of the first error).

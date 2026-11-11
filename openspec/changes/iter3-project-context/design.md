@@ -10,7 +10,7 @@
 - **Approvals**:
   - Types implement `ApprovalType` (`crates/df-db/src/requests.rs`): payload validation, fingerprint, scopes, `lock`, and `apply` in the decision's transaction.
   - Every request belongs to a task, and `raised_by` names the run.
-- **Project form**: `tabbed_form` (General, Push checks) in `config_pages.rs`. `push_policy.rs` is the module pattern to copy: `panel`, `validate`, `FIELDS`. The open tab is chosen by the server (`tabs("general")`).
+- **Project settings page**: `/projects/{key}` (`config_pages/project_page.rs`) with the tabs General, Security and, for `admin`, Integrations, built with `tabbed_form` in `config_pages.rs`. "Save project" saves General and Security. `push_policy.rs` (the Security tab) is the module pattern to copy: `panel`, `validate`, `FIELDS`. The server opens the tab named by `?tab=` (or the tab of the first error), and the tab script writes it to the URL (`ui-model-provider-page`).
 - **Authorization**: there is no permission model in code yet. Board members do everything, so `project:context:write` stays the documented target of ADR-0011.
 
 ## Goals / Non-Goals
@@ -20,7 +20,7 @@
 - A stale check that can't be bypassed by what the agent sends.
 
 **Non-Goals:**
-- Optimistic locking for the project form. Two board members saving the form at once still means last write wins, as for every other project field.
+- Optimistic locking for the project settings page. Two board members saving the page at once still means last write wins, as for every other project field.
 
 ## Decisions
 
@@ -92,7 +92,9 @@ The diff is computed at render time against the current context. A stale proposa
 - `ProjectForm` flattens it;
 - `save_project` bumps `context_version` only when the text differs.
 
-`GET /projects/{key}/edit?tab=context` passes `"context"` as the initial tab, and the chat Overview link points there.
+- The tab id is `context`, so `GET /projects/{key}?tab=context` opens it, and the chat Overview link points there.
+- Tab order: General, Security, Context, Integrations. Every board member sees Context, so it comes before the admin-only last tab (`event-subscriptions`, "Lifecycle events tab position").
+- "Save project" saves Context together with General and Security. An error in the context opens the Context tab, like an error on Security opens Security.
 
 ## Risks / Trade-offs
 

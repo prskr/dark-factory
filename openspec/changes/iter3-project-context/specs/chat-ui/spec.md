@@ -15,4 +15,4 @@ The right column SHALL have the tabs Overview, Subtasks and Artifacts, the latte
 
 #### Scenario: Project context link
 - **WHEN** a board member clicks the project context link in the Overview of `DF-12-CHAT`
-- **THEN** the edit form of project `DF` opens on the Context tab
+- **THEN** `/projects/DF?tab=context` opens with the Context tab open

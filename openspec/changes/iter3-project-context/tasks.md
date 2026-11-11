@@ -1,6 +1,6 @@
 # Tasks
 
-Prerequisite, merged before this change: `iter3-chats` (task kind `chat`, `CHAT_INSTRUCTIONS`, the archive check, the chat Overview tab). Its `chats` and `chat-ui` specs must be archived so that the MODIFIED deltas here apply.
+Prerequisite, merged before this change: `iter3-chats` (task kind `chat`, `CHAT_INSTRUCTIONS`, the archive check, the chat Overview tab). Its `chats` and `chat-ui` specs must be archived so that the MODIFIED deltas here apply. Also merged before: `ui-model-provider-page` (tab "Security", tab script fix).
 
 Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS.md`.
 
@@ -49,11 +49,12 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 - [ ] 4.1 Write failing `df-web` tests, then add the Context tab (design D7):
   - `config_pages/project_context.rs` with panel, validation and the `AGENTS.md` hint;
   - `ProjectForm` flatten, `save_project`;
-  - `?tab=context` selects the initial tab.
+  - `/projects/{key}?tab=context` opens the tab;
+  - tab order General, Security, Context, Integrations (Integrations for `admin` only).
 
-  Verify with `df-web` handler tests: saving the context, the 32 KiB error shown in the tab, and the tab opened by the query parameter.
+  Verify with `df-web` handler tests: saving the context with "Save project", the 32 KiB error opening the Context tab, the tab opened by the query parameter, and the tab order for an admin and a board member. Add the Context tab to the PenPot project settings boards ("Config - Projects") and to `docs/design-workflow.md` if the board "Projects · settings page, context" does not match.
 - [ ] 4.2 Write failing tests, then render the unified diff in `project-context` request cards in the inbox and on the chat timeline (design D6), with Approve disabled on a stale version. Add `similar` to `[workspace.dependencies]` (default features off) and to `df-web`. Verify with `df-web` tests (an escaped `<script>` line, added/removed classes, disabled Approve when stale), then `cargo deny check` and `cargo machete`.
-- [ ] 4.3 Point the chat Overview's project context link at `/projects/<KEY>/edit?tab=context`. Verify with a `df-web` test of the Overview markup.
+- [ ] 4.3 Point the chat Overview's project context link at `/projects/<KEY>?tab=context`. Verify with a `df-web` test of the Overview markup.
 
 ## 5. Docs
 
