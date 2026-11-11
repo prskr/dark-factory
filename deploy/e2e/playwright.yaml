@@ -22,6 +22,10 @@ spec:
         - name: playwright
           image: mcr.microsoft.com/playwright:v1.64.0-noble
           command: [npx, -y, playwright@1.64.0, run-server, --port, "3000", --host, 0.0.0.0]
+          # CA of a TLS-intercepting proxy for the npm download, mounted into the node by
+          # e2e-local.sh when it exists; without the file Node warns and uses its default roots.
+          env:
+            - {name: NODE_EXTRA_CA_CERTS, value: /etc/node-certs/e2e-proxy-ca.pem}
           ports:
             - containerPort: 3000
           readinessProbe:
@@ -32,7 +36,10 @@ spec:
             limits: {memory: 1536Mi}
           volumeMounts:
             - {name: shm, mountPath: /dev/shm}
+            - {name: node-certs, mountPath: /etc/node-certs, readOnly: true}
       volumes:
+        - name: node-certs
+          hostPath: {path: /etc/ssl/certs, type: Directory}
         - name: shm
           emptyDir: {medium: Memory, sizeLimit: 512Mi}
 ---

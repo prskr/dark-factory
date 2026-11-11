@@ -16,6 +16,9 @@ use sqlx::PgPool;
 /// From the review to the message on the task page: delivery, the message and the page update.
 const WEBHOOK_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long reading the clipboard after "Copy secret" may take.
+const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() -> Result<()> {
@@ -131,10 +134,15 @@ async fn the_integrations_tab_shows_the_webhook_url_and_the_secret_of_the_reposi
             .to_be_visible()
             .await
             .context("the copy is confirmed")?;
-        let clipboard = session
-            .page
-            .evaluate_value("navigator.clipboard.readText()")
-            .await?;
+        // A clipboard read can wait for focus indefinitely; bound it so the test fails instead.
+        let clipboard = tokio::time::timeout(
+            CLIPBOARD_TIMEOUT,
+            session
+                .page
+                .evaluate_value("navigator.clipboard.readText()"),
+        )
+        .await
+        .context("read the clipboard")??;
         assert_eq!(clipboard, data::WEBHOOK_SECRET);
         assert_ne!(
             secret_field.input_value(None).await?,

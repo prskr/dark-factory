@@ -4,8 +4,8 @@
 #
 # Environment:
 #   E2E_KEEP=1        keep the cluster after the run (delete it with `kind delete cluster --name df-e2e`)
-#   E2E_TOOLS_DIR     where the Playwright driver installer is kept (default: ~/.cache/df-e2e)
-#   E2E_KIND_CONFIG   kind configuration (default: deploy/e2e/kind.yaml), e.g. one that mounts a CA bundle behind a TLS-intercepting proxy
+#   E2E_TOOLS_DIR     where the Playwright driver is kept (default: ~/.cache/df-e2e)
+#   E2E_KIND_CONFIG   kind configuration (default: deploy/e2e/kind.yaml, plus a mount of /.msb/tls/ca.pem into the node when that file exists)
 #   E2E_TEST_THREADS  tests run in parallel per test binary (default: 1, the memory budget of docs/demo.md)
 #   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=$E2E_TEST_THREADS)
 #   BAZEL             Bazel command, e.g. "bazel --bazelrc=.bazelrc.agents" (default: bazel)
@@ -51,11 +51,22 @@ pids=()
 cleanup() {
   local status=$?
   trap - EXIT
-  for pid in "${pids[@]}"; do
+  # `${a[@]+…}`: an empty array is unbound under `set -u` in Bash < 4.4 (macOS /bin/bash).
+  for pid in ${pids[@]+"${pids[@]}"}; do
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
   rm -rf "$scratch"
+  # Diagnostics are bounded: a hung API server must not keep the cluster from being deleted.
+  diag() { kc --request-timeout=5s "$@"; }
+  if [[ $status -ne 0 ]] && diag get nodes >/dev/null 2>&1; then
+    log "Cluster state after the failure"
+    diag get pods -A -o wide || true
+    diag -n playwright describe pods || true
+    diag -n playwright logs deployment/playwright --tail=200 --previous 2>/dev/null ||
+      diag -n playwright logs deployment/playwright --tail=200 || true
+    diag get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -40 || true
+  fi
   if [[ "${E2E_KEEP:-0}" == 1 ]]; then
     log "E2E_KEEP=1: cluster kept; delete it with: kind delete cluster --name $cluster"
   else
@@ -65,6 +76,10 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+# A cancelled CI job sends INT/TERM: exit through the EXIT trap, so the state is printed and the
+# cluster deleted.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 require() {
   for tool in "$@"; do
@@ -73,7 +88,7 @@ require() {
 }
 
 prepare_tools() {
-  require kind kubectl helm curl cargo git gh
+  require kind kubectl helm curl cargo git gh jq
   read -ra bazel <<<"${BAZEL:-bazel}"
   require "${bazel[0]}"
   case "$(uname -m)" in
@@ -90,7 +105,47 @@ prepare_tools() {
 create_cluster() {
   log "Creating the kind cluster"
   kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
-  kind create cluster --name "$cluster" --config "${E2E_KIND_CONFIG:-deploy/e2e/kind.yaml}" --wait 180s
+  kind create cluster --name "$cluster" --config "$(kind_config)" --wait 180s
+  if ! has_iptables_statistic; then
+    log "The node's kernel lacks the iptables statistic match: one CoreDNS and one gateway replica"
+    kc -n kube-system scale deployment/coredns --replicas=1
+    kc -n kube-system rollout status deployment/coredns --timeout=120s
+    # The chart requires two gateways (openspec/specs/helm-deployment).
+    release_overrides=(--skip-schema-validation --set gateway.replicas=1)
+  fi
+}
+
+# kube-proxy balances a Service over several endpoints with the iptables `statistic` match. Some
+# sandbox kernels lack it; then one such Service fails every sync and no ClusterIP works, cluster
+# DNS included. Probes the match in a throwaway chain of the node.
+release_overrides=()
+has_iptables_statistic() {
+  # shellcheck disable=SC2016 # expands in the node's shell
+  "${KIND_EXPERIMENTAL_PROVIDER:-docker}" exec "$cluster-control-plane" sh -c '
+    iptables -t nat -N df-e2e-probe
+    iptables -t nat -A df-e2e-probe -m statistic --mode random --probability 0.5 -j RETURN
+    status=$?
+    iptables -t nat -F df-e2e-probe; iptables -t nat -X df-e2e-probe
+    exit $status' >/dev/null 2>&1
+}
+
+# Prints the kind configuration: E2E_KIND_CONFIG, else deploy/e2e/kind.yaml. Behind a TLS-intercepting
+# proxy (CA at $ca_cert) the default gets the CA mounted into /etc/ssl/certs of the node, which the
+# node's containerd (Go) reads in addition to the CA bundle, so image pulls trust the proxy.
+ca_cert=/.msb/tls/ca.pem
+kind_config() {
+  if [[ -n "${E2E_KIND_CONFIG:-}" || ! -f "$ca_cert" ]]; then
+    printf '%s' "${E2E_KIND_CONFIG:-deploy/e2e/kind.yaml}"
+    return
+  fi
+  # Appends to the last (only) node of kind.yaml.
+  cat deploy/e2e/kind.yaml - >"$scratch/kind.yaml" <<EOF
+    extraMounts:
+      - hostPath: $ca_cert
+        containerPath: /etc/ssl/certs/e2e-proxy-ca.pem
+        readOnly: true
+EOF
+  printf '%s' "$scratch/kind.yaml"
 }
 
 # Builds the single-platform images with Bazel and imports their tarballs into the node: no registry,
@@ -213,25 +268,33 @@ install_release() {
 
 helm_install_release() {
   hc upgrade --install "$release" deploy/helm/dark-factory --namespace "$namespace" \
-    --values deploy/values-e2e.yaml --wait --timeout 5m
+    --values deploy/values-e2e.yaml ${release_overrides[@]+"${release_overrides[@]}"} --wait --timeout 5m
 }
 
 install_driver() {
   log "Installing the Playwright driver for the test host"
-  # The workspace skips the driver download (.cargo/config.toml). `cargo install` in a directory
-  # outside the repository does not read that setting, so the build assembles the driver in the
-  # user cache, where the playwright-rs library looks for it. Reruns find it installed. Outside the
-  # repository rustup does not read rust-toolchain.toml either: pin the toolchain explicitly.
-  local version toolchain tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
-  version="$(sed -n '/^name = "playwright-rs"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)"
-  [[ -n "$version" ]] || { echo "playwright-rs is not in Cargo.lock" >&2; exit 1; }
-  toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
-  [[ -n "$toolchain" ]] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
-  (
-    cd "$scratch"
-    RUSTUP_TOOLCHAIN="$toolchain" cargo install --quiet --locked --root "$tools" --version "$version" --features cli playwright-rs
-    "$tools/bin/playwright-rs" install --driver-only
-  )
+  # The workspace skips the driver download (.cargo/config.toml). The driver is what playwright-rs
+  # assembles itself: the playwright-core npm package next to a pinned Node binary. Its installer
+  # trusts only built-in roots, curl the system CA store (needed behind a TLS-intercepting proxy).
+  # The versions come from the source of the locked playwright-rs. Reruns find the driver installed.
+  local src pw node os node_arch driver tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
+  src="$(dirname "$(cargo metadata --quiet --format-version 1 --locked |
+    jq -r '.packages[] | select(.name == "playwright-rs") | .manifest_path')")"
+  pw="$(sed -n 's/^const PLAYWRIGHT_VERSION: &str = "\(.*\)";$/\1/p' "$src/build.rs")"
+  node="$(sed -n 's/^const NODE_VERSION: &str = "\(.*\)";$/\1/p' "$src/src/build_support/driver_urls.rs")"
+  [[ -n "$pw" && -n "$node" ]] || { echo "no Playwright or Node version in $src" >&2; exit 1; }
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  node_arch="${arch/amd64/x64}"
+  driver="$tools/playwright-$pw-node$node-$os-$node_arch"
+  if [[ ! -f "$driver/package/cli.js" ]]; then
+    rm -rf "$driver.tmp"
+    mkdir -p "$driver.tmp"
+    curl -sSfL "https://registry.npmjs.org/playwright-core/-/playwright-core-$pw.tgz" | tar -xz -C "$driver.tmp"
+    curl -sSfL "https://nodejs.org/dist/v$node/node-v$node-$os-$node_arch.tar.gz" |
+      tar -xz -C "$driver.tmp" --strip-components=2 "node-v$node-$os-$node_arch/bin/node"
+    mv "$driver.tmp" "$driver"
+  fi
+  export PLAYWRIGHT_DRIVER_PATH="$driver"
 }
 
 suite_tests=(--test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks)

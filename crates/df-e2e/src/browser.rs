@@ -1,9 +1,10 @@
 //! The browser of the suite: a Playwright server in the cluster, and the login at the identity
 //! provider.
 
+use std::future::Future;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use playwright_rs::protocol::Page;
 use playwright_rs::{Playwright, expect, expect_page};
 
@@ -16,6 +17,11 @@ const CARD_TIMEOUT: Duration = Duration::from_secs(30);
 /// longer than the default 5 s (Dex password check, code exchange, first user upsert).
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long starting the driver, connecting to the Playwright server and opening a page may take.
+/// Without a bound a server that stops answering (for example a restarted pod) blocks a test
+/// forever instead of failing it.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// A page of the remote browser. Keeps the local Playwright driver alive.
 pub struct Session {
     _playwright: Playwright,
@@ -25,15 +31,17 @@ pub struct Session {
 impl Session {
     /// Connects to the Playwright server and opens a page.
     pub async fn start(env: &E2eEnv) -> Result<Self> {
-        let playwright = Playwright::launch()
-            .await
-            .context("start the local Playwright driver (`just e2e-local` installs it)")?;
-        let browser = playwright
-            .chromium()
-            .connect(&env.playwright_ws, None)
-            .await
-            .with_context(|| format!("connect to {}", env.playwright_ws))?;
-        let page = browser.new_page().await.context("open a page")?;
+        let playwright = within(
+            "start the local Playwright driver (`just e2e-local` installs it)",
+            Playwright::launch(),
+        )
+        .await?;
+        let browser = within(
+            &format!("connect to {}", env.playwright_ws),
+            playwright.chromium().connect(&env.playwright_ws, None),
+        )
+        .await?;
+        let page = within("open a page", browser.new_page()).await?;
         Ok(Self {
             _playwright: playwright,
             page,
@@ -291,5 +299,67 @@ impl Session {
             .to_be_visible()
             .await
             .with_context(|| format!("wait for `{text}` in the UI"))
+    }
+}
+
+/// Runs `step` of the browser setup with [`CONNECT_TIMEOUT`], so that a server that does not
+/// answer fails the test with `what` instead of blocking it.
+async fn within<T, E>(what: &str, step: impl Future<Output = Result<T, E>>) -> Result<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    within_for(CONNECT_TIMEOUT, what, step).await
+}
+
+async fn within_for<T, E>(
+    limit: Duration,
+    what: &str,
+    step: impl Future<Output = Result<T, E>>,
+) -> Result<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    tokio::time::timeout(limit, step)
+        .await
+        .map_err(|_elapsed| anyhow!("{what}: no answer within {limit:?}"))?
+        .with_context(|| what.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+    use std::time::Duration;
+
+    use super::{within, within_for};
+
+    #[tokio::test]
+    async fn a_setup_step_that_never_answers_fails_with_its_description() {
+        let step = pending::<Result<(), std::io::Error>>();
+
+        let error = within_for(
+            Duration::from_millis(10),
+            "connect to ws://playwright",
+            step,
+        )
+        .await
+        .expect_err("the step times out");
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("connect to ws://playwright: no answer within"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_setup_step_keeps_its_error_with_the_description() {
+        let step = async { Err::<(), _>(std::io::Error::other("refused")) };
+
+        let error = within("open a page", step)
+            .await
+            .expect_err("the step fails");
+
+        assert_eq!(format!("{error:#}"), "open a page: refused");
     }
 }
