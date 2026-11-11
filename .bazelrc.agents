@@ -7,3 +7,8 @@ common --repo_contents_cache=
 
 # Share build outputs through the BuildBuddy remote cache (builds and tests run locally)
 build --config=cache
+
+# Cap local parallelism to keep sandboxes from running out of memory
+build --jobs=4
+build --local_resources=memory=HOST_RAM*.5
+test --local_test_jobs=4
