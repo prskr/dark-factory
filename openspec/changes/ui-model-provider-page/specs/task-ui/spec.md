@@ -10,3 +10,14 @@ The "Description" section of the task details SHALL be collapsible by its header
 #### Scenario: Expanded description
 - **WHEN** a board member activates the "Description" header
 - **THEN** the description is shown and the chevron points down
+
+### Requirement: Project and persona links in the task details
+In the task details (the details column and the bottom sheet on phones), the project value SHALL link to the project's settings page `/projects/{key}`, and the persona value SHALL link to the persona list `/personas`.
+
+#### Scenario: Open the project from a task
+- **WHEN** a board member on `DF-21` chooses the project "Dark Factory" in the task details
+- **THEN** `/projects/DF` opens
+
+#### Scenario: Open the personas from a task
+- **WHEN** a board member on `DF-21` chooses the persona "Linus" in the task details
+- **THEN** `/personas` opens
