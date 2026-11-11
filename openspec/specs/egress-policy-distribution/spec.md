@@ -46,11 +46,15 @@ Each sandbox entry of the policy snapshot SHALL carry the run's Git route (proje
 - **THEN** gateways receive the new value with the next snapshot, within one minute
 
 ### Requirement: Push policies and exceptions in the snapshot
-The policy snapshot SHALL carry each active run's project push policy and the run's task exceptions, and SHALL be updated within one second after a policy change or an approved exception.
+The policy snapshot SHALL carry each active run's project push policy, including its hidden path globs, and the run's task exceptions, and SHALL be updated within one second after a policy change or an approved exception.
 
 #### Scenario: Exception reaches the gateway
 - **WHEN** a `push-check-exception` request of `DF-7` is approved through replica A
 - **THEN** a gateway connected to replica B has the exception for `DF-7` within one second
+
+#### Scenario: Hidden path reaches the gateway
+- **WHEN** a board member adds `talos/**` as hidden path of project `HL`
+- **THEN** every gateway rejects a push of an `HL` task touching `talos/` within one second
 
 ### Requirement: Inference routes in the snapshot
 Each sandbox entry of the policy snapshot SHALL carry the run's inference route: chosen wire API, upstream URL per offered wire API, credential reference and scheme, and the provider headers rendered for the run. The snapshot SHALL carry the referenced provider credentials once each. Gateways SHALL keep them in memory only and never log them.

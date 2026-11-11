@@ -18,6 +18,13 @@ Before using the repository and again at finalize, the runtime SHALL replace `.g
 - **THEN** TLS verification succeeds with the instance CA from the pod's certificate volume and fails for any other issuer
 - **AND** HTTPS URLs on any other host keep the system trust store
 
+### Requirement: Runtime-owned sparse checkout
+With every rewrite of `.git/config`, the runtime SHALL enable sparse checkout in non-cone mode, also without hidden paths, and SHALL replace `.git/info/sparse-checkout` with patterns generated from the hidden paths of `Assign.workspace`; without hidden paths the patterns include every path.
+
+#### Scenario: Sparse checkout disabled by the agent
+- **WHEN** the agent set `core.sparseCheckout=false` and emptied `.git/info/sparse-checkout`
+- **THEN** after the next rewrite sparse checkout is enabled and the patterns match `Assign.workspace` again
+
 ### Requirement: Hardened Git invocations
 Every Git command the runtime runs SHALL use the empty hooks directory, disable fsmonitor and submodule recursion, allow only the HTTPS protocol, reset credential helpers to none, ignore system and user Git config in favour of the read-only `/opt/factory/gitconfig`, and disable terminal prompts. It SHALL NOT set `GIT_SSL_CAINFO` (it overrides the scoped `http.<url>.sslCAInfo`); the clone, which runs before `.git/config` exists, gets the instance CA as `-c http.<proxy URL>.sslCAInfo=<ca>`.
 
