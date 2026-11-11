@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Fresh workspace
-If `/data/repo/.git` doesn't exist, the runtime SHALL make a blobless clone of `Assign.workspace.repo_url`, write its own `.git/config`, check out the task branch from `origin/<task branch>` if it exists or else from `origin/<base>`, and restore files from the WIP branch if it exists. For a task on an existing branch, a missing `origin/<task branch>` SHALL fail prepare with a reason naming the branch instead of creating it from the base.
+If `/data/repo/.git` doesn't exist, the runtime SHALL make a blobless clone of `Assign.workspace.repo_url`, write its own `.git/config`, apply the hidden paths of `Assign.workspace` as sparse patterns, check out the task branch from `origin/<task branch>` if it exists or else from `origin/<base>`, and restore files from the WIP branch if it exists, except files under hidden paths. For a task on an existing branch, a missing `origin/<task branch>` SHALL fail prepare with a reason naming the branch instead of creating it from the base.
 
 #### Scenario: First run
 - **WHEN** run 1 of `DF-1` prepares an empty volume
@@ -12,6 +12,10 @@ If `/data/repo/.git` doesn't exist, the runtime SHALL make a blobless clone of `
 #### Scenario: Volume lost after earlier runs
 - **WHEN** the volume is empty but `factory/task/DF-1` and `factory/wip/DF-1` exist on the remote
 - **THEN** the task branch is checked out and the WIP files are restored into the working tree
+
+#### Scenario: Hidden path in a fresh workspace
+- **WHEN** run 1 of `HL-1` prepares an empty volume and the project hides `talos/**`
+- **THEN** no blob below `talos/` is fetched and `/data/repo/talos` doesn't exist
 
 #### Scenario: First run on an existing branch
 - **WHEN** run 1 of `DF-13` on the existing branch `renovate/serde-1.x` prepares an empty volume
@@ -22,7 +26,7 @@ If `/data/repo/.git` doesn't exist, the runtime SHALL make a blobless clone of `
 - **THEN** prepare fails with a reason naming `fix/login` and no branch is pushed
 
 ### Requirement: Existing workspace
-If the workspace exists, the runtime SHALL rewrite `.git/config`, fetch base and task branch, push local commits missing on the remote, fast-forward if the remote is ahead, and on divergence leave both untouched and emit a `workspace.diverged` notice. It SHALL NOT run `git clean`. Under the `with-lease` policy, a local branch whose history was rewritten while the remote still points to the commit the runtime last pushed or fetched SHALL be pushed with lease instead of counting as diverged.
+If the workspace exists, the runtime SHALL rewrite `.git/config`, re-apply the hidden paths of `Assign.workspace` as sparse patterns (removing files under newly hidden paths), fetch base and task branch, push local commits missing on the remote, fast-forward if the remote is ahead, and on divergence leave both untouched and emit a `workspace.diverged` notice. It SHALL NOT run `git clean`. Under the `with-lease` policy, a local branch whose history was rewritten while the remote still points to the commit the runtime last pushed or fetched SHALL be pushed with lease instead of counting as diverged.
 
 #### Scenario: Unpushed commits from a killed run
 - **WHEN** the previous run was killed after committing but before pushing
@@ -31,6 +35,10 @@ If the workspace exists, the runtime SHALL rewrite `.git/config`, fetch base and
 #### Scenario: Diverged
 - **WHEN** local and remote task branches both have commits the other lacks, and the remote moved since the runtime last pushed or fetched it
 - **THEN** nothing is reset, a `workspace.diverged` notice is emitted and the run report marks the workspace diverged
+
+#### Scenario: Hidden path removed from the policy
+- **WHEN** run 2 starts and `talos/**` is no longer hidden
+- **THEN** `talos/` is checked out again
 
 #### Scenario: Unpushed rebase from a killed run
 - **WHEN** the policy is `with-lease`, the previous run was killed after a rebase but before pushing, and the remote is still at the commit the runtime last pushed
