@@ -250,7 +250,13 @@ async fn follow_up_resumes_the_session_and_completing_marks_the_pr_ready() -> Re
         )
         .await?;
     world.wait_for_status(&key, "waiting").await?;
-    let first_run = db::runs(&world.pool, &key).await?;
+    // The task is `waiting` once the turn ends; the run ends (and records the harness session)
+    // shortly after.
+    let first_run = eventually("run 1 to end", RUN_TIMEOUT, || async {
+        let runs = db::runs(&world.pool, &key).await?;
+        Ok(runs.iter().all(|run| run.outcome.is_some()).then_some(runs))
+    })
+    .await?;
     assert_eq!(first_run.len(), 1, "{first_run:?}");
     // The `pr.sync` outbox job opens the draft PR after the run, so it can lag the status.
     let pulls = eventually("the draft PR of run 1", RUN_TIMEOUT, || async {

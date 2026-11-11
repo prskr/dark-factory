@@ -87,10 +87,10 @@ All targets come from the environment, so the same tests run against any instanc
 | Variable | Default | Effect |
 |---|---|---|
 | `E2E_KEEP` | unset | `1` keeps the cluster after the run. |
-| `E2E_KIND_CONFIG` | `deploy/e2e/kind.yaml` | kind configuration for the cluster, e.g. one with `extraMounts` of a CA bundle when a TLS-intercepting proxy sits between the node and the image registries. |
+| `E2E_KIND_CONFIG` | `deploy/e2e/kind.yaml` | kind configuration for the cluster. Without it, when `/.msb/tls/ca.pem` exists (CA of a TLS-intercepting proxy in the sandbox), the script mounts that file into the node (see [Sandboxes behind a TLS-intercepting proxy](#sandboxes-behind-a-tls-intercepting-proxy)). A custom configuration gets no mount. |
 | `E2E_TEST_THREADS` | `1` | Tests that run in parallel per test binary. CI uses `2`; each test works on its own task, branch and requests. More than `1` exceeds the [resource budget](#resource-budget). |
 | `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks`, e.g. a test name. |
-| `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver installer is kept. |
+| `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
 
@@ -172,7 +172,18 @@ The suite contains nothing specific to kind. Point the `E2E_*` variables at an i
 cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
 ```
 
-The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` installs the driver into the user cache with `cargo install playwright-rs` from a directory outside the repository (which does not read that setting); on another machine run `playwright-rs install --driver-only` once.
+The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` assembles the driver the way `playwright-rs` does (the `playwright-core` npm package next to the Node binary, versions read from the locked `playwright-rs` source), but downloads it with `curl`, which trusts the system CA store. It keeps the driver in `E2E_TOOLS_DIR` and points `PLAYWRIGHT_DRIVER_PATH` at it. On another machine run `playwright-rs install --driver-only` once, or set `PLAYWRIGHT_DRIVER_PATH` to such a directory.
+
+## Sandboxes behind a TLS-intercepting proxy
+
+`just e2e-local` runs inside agent sandboxes with these adaptations, each applied only when it is needed:
+
+| Condition | Adaptation |
+|---|---|
+| `/.msb/tls/ca.pem` exists (CA of the sandbox's TLS-intercepting proxy) | Mounted to `/etc/ssl/certs/e2e-proxy-ca.pem` of the node: containerd trusts it for image pulls. The Playwright pod reads it through `NODE_EXTRA_CA_CERTS` for its npm download. |
+| The node's kernel lacks the iptables `statistic` match | kube-proxy needs it for a Service with several endpoints; without it every sync fails and no ClusterIP works, cluster DNS included. The script scales CoreDNS to one replica and installs the release with one gateway replica (`--skip-schema-validation`, the chart requires two). |
+
+The host's own downloads (`gh`, `helm`, `curl`, `cargo`) use the host's CA store. Bazel's remote cache (gRPC) may not pass such a proxy; then disable it with an extra rc file: `BAZEL="bazel --bazelrc=.bazelrc.agents --bazelrc=<file>"` with `build --remote_cache=` and `build --bes_backend=`.
 
 ## Rootless Podman
 

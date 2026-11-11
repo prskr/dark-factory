@@ -75,7 +75,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # The Playwright driver and its installer (E2E_TOOLS_DIR of the script); the version comes from Cargo.lock
+      # The Playwright driver (E2E_TOOLS_DIR of the script); the version comes from Cargo.lock
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/df-e2e
