@@ -78,6 +78,8 @@ fn shipped_scripts_parse() {
     assert_eq!(secret.sessions.loaded, secret.sessions.new[1..]);
     let protected = Script::from_yaml_str(include_str!("../scripts/push-protected.yaml")).unwrap();
     assert_eq!(protected.sessions.new.len(), 1);
+    let hidden = Script::from_yaml_str(include_str!("../scripts/push-hidden.yaml")).unwrap();
+    assert_eq!(hidden.sessions.new.len(), 1);
     let delegation = Script::from_yaml_str(include_str!("../scripts/delegation.yaml")).unwrap();
     assert_eq!(delegation.sessions.new.len(), 4);
     assert_eq!(delegation.sessions.loaded.len(), 4);
@@ -88,6 +90,38 @@ fn shipped_scripts_parse() {
     let webhook = Script::from_yaml_str(include_str!("../scripts/webhook.yaml")).unwrap();
     assert_eq!(webhook.sessions.new.len(), 1);
     assert_eq!(webhook.sessions.loaded.len(), 1);
+}
+
+#[tokio::test]
+async fn a_shell_command_returns_its_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        crate::agent::run_shell("echo found", dir.path()).await,
+        "found\n"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_shell_command_returns_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        crate::agent::run_shell("echo no; exit 1", dir.path()).await,
+        ""
+    );
+}
+
+#[test]
+fn the_hidden_path_script_has_a_say_shell_step() {
+    let script = Script::from_yaml_str(include_str!("../scripts/push-hidden.yaml")).unwrap();
+
+    assert!(
+        script.sessions.new[0]
+            .steps
+            .iter()
+            .any(|step| matches!(step, crate::script::Step::SayShell(_)))
+    );
 }
 
 #[tokio::test]

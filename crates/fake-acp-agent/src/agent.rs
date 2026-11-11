@@ -345,7 +345,13 @@ async fn play_step(step: Step, ctx: &mut TurnContext, cx: &ConnectionTo<Client>)
         Step::Think(thought) => send_update(cx, &ctx.session_id, text_chunk_update(thought, true)),
         Step::ToolCall(tool_step) => play_tool_call(tool_step, ctx, cx),
         Step::Plan(plan_step) => play_plan(plan_step, ctx, cx),
-        Step::Shell(cmd) => run_shell(&cmd, &ctx.cwd).await,
+        Step::Shell(cmd) => {
+            run_shell(&cmd, &ctx.cwd).await;
+        }
+        Step::SayShell(cmd) => {
+            let output = run_shell(&cmd, &ctx.cwd).await;
+            send_update(cx, &ctx.session_id, text_chunk_update(output, false));
+        }
         Step::Fetch(fetch) => play_fetch(&fetch, ctx, cx).await,
         Step::Model(model) => play_model(&model, ctx, cx).await,
         Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
@@ -398,12 +404,13 @@ fn play_plan(plan_step: PlanStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) 
     send_update(cx, &ctx.session_id, SessionUpdate::Plan(Plan::new(entries)));
 }
 
-/// Runs a shell command in the session's working directory; failures are only logged.
+/// Runs a shell command in the session's working directory and returns its stdout; failures are
+/// only logged and return nothing.
 #[expect(
     clippy::print_stderr,
     reason = "the fake agent reports failures on stderr, the harness captures it"
 )]
-async fn run_shell(cmd: &str, cwd: &Path) {
+pub(crate) async fn run_shell(cmd: &str, cwd: &Path) -> String {
     let output = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(cmd)
@@ -417,10 +424,12 @@ async fn run_shell(cmd: &str, cwd: &Path) {
                 "fake-acp-agent: shell command '{cmd}' exited with {}: {stderr}",
                 out.status
             );
+            String::new()
         }
-        Ok(_) => {}
+        Ok(out) => String::from_utf8_lossy(&out.stdout).into_owned(),
         Err(e) => {
             eprintln!("fake-acp-agent: failed to execute shell command '{cmd}': {e}");
+            String::new()
         }
     }
 }

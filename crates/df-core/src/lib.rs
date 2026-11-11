@@ -4,6 +4,7 @@ pub mod artifacts;
 pub mod config;
 pub mod domain;
 pub mod forge;
+pub mod glob;
 pub mod harness;
 pub mod header_template;
 pub mod host;

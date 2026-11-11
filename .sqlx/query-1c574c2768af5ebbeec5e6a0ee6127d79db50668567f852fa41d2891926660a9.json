@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO project_push_policies\n             (project_id, protected_globs, protected_mode, hidden_globs, secret_mode, size_mode,\n              max_blob_bytes, linear_history)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n         ON CONFLICT (project_id) DO UPDATE SET\n             protected_globs = EXCLUDED.protected_globs,\n             protected_mode = EXCLUDED.protected_mode,\n             hidden_globs = EXCLUDED.hidden_globs,\n             secret_mode = EXCLUDED.secret_mode,\n             size_mode = EXCLUDED.size_mode,\n             max_blob_bytes = EXCLUDED.max_blob_bytes,\n             linear_history = EXCLUDED.linear_history,\n             updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Text",
+        "TextArray",
+        "Text",
+        "Text",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c574c2768af5ebbeec5e6a0ee6127d79db50668567f852fa41d2891926660a9"
+}

@@ -27,6 +27,7 @@ fn default_policy() -> PushPolicy {
         secret_mode: CheckMode::Approval.into(),
         size_mode: CheckMode::Approval.into(),
         max_blob_bytes: 5 * MIB,
+        hidden_globs: Vec::new(),
         linear_history: false,
     }
 }
@@ -254,6 +255,131 @@ fn deleting_a_protected_path_is_reported() {
 
     let paths: Vec<&str> = findings.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, [".github/workflows/ci.yml"]);
+}
+
+fn hidden_policy(mode: CheckMode) -> PushPolicy {
+    PushPolicy {
+        hidden_globs: vec!["talos/**".to_owned()],
+        protected_mode: mode.into(),
+        ..default_policy()
+    }
+}
+
+#[test]
+fn add_modify_delete_and_rename_under_a_hidden_path_are_rejected() {
+    let mut changed = commit(2, &["talos/added.yaml", "README.md"]);
+    changed.changes.extend([
+        PathChange {
+            path: "talos/modified.yaml".to_owned(),
+            old: Some(id(50)),
+            new: Some(id(51)),
+        },
+        PathChange {
+            path: "talos/deleted.yaml".to_owned(),
+            old: Some(id(52)),
+            new: None,
+        },
+        PathChange {
+            path: "talos/old-name.yaml".to_owned(),
+            old: Some(id(53)),
+            new: None,
+        },
+        PathChange {
+            path: "docs/new-name.yaml".to_owned(),
+            old: None,
+            new: Some(id(53)),
+        },
+    ]);
+
+    let findings = check(
+        &view(vec![changed], vec![]),
+        &hidden_policy(CheckMode::Approval),
+    );
+
+    let paths: Vec<&str> = findings.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "talos/added.yaml",
+            "talos/modified.yaml",
+            "talos/deleted.yaml",
+            "talos/old-name.yaml"
+        ]
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|f| (f.check, f.mode) == (Check::HiddenPath, Mode::Reject))
+    );
+    assert_eq!(
+        findings[0].fingerprint.as_deref(),
+        Some("path:talos/added.yaml")
+    );
+}
+
+#[test]
+fn a_wip_push_changing_a_hidden_path_is_rejected() {
+    let view = view(vec![commit(2, &["talos/cp.yaml"])], vec![]);
+
+    let findings = check_with(
+        &view,
+        &hidden_policy(CheckMode::Approval),
+        Target::Wip,
+        &FakeSecrets::default(),
+    );
+
+    assert_eq!(kinds(&findings), [(Check::HiddenPath, Mode::Reject)]);
+    assert!(matches!(
+        verdict(findings, &[]),
+        Verdict::Reject {
+            approval_requested: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_hidden_path_is_rejected_in_approval_mode_without_an_exception_request() {
+    let view = view(vec![commit(2, &["talos/cp.yaml"])], vec![]);
+
+    let findings = check(&view, &hidden_policy(CheckMode::Approval));
+
+    assert!(matches!(
+        verdict(findings, &["path:talos/cp.yaml".to_owned()]),
+        Verdict::Reject {
+            approval_requested: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_path_both_protected_and_hidden_is_reported_only_as_hidden() {
+    let mut policy = hidden_policy(CheckMode::Approval);
+    policy.hidden_globs.push("CODEOWNERS".to_owned());
+    let view = view(
+        vec![commit(2, &["CODEOWNERS", ".github/workflows/ci.yml"])],
+        vec![],
+    );
+
+    let findings = check(&view, &policy);
+
+    assert_eq!(
+        kinds(&findings),
+        [
+            (Check::HiddenPath, Mode::Reject),
+            (Check::ProtectedPath, Mode::Approval)
+        ]
+    );
+    assert_eq!(findings[0].path, "CODEOWNERS");
+}
+
+#[test]
+fn an_alternation_in_a_hidden_glob_is_an_error() {
+    let mut policy = default_policy();
+    policy.hidden_globs.push("{a,b}/**".to_owned());
+
+    assert!(CheckPolicy::new(&policy).is_err());
 }
 
 #[test]
@@ -543,6 +669,7 @@ fn checks_and_modes_map_to_their_contract_values() {
         (Check::ProtectedPath, PushCheck::ProtectedPath),
         (Check::BlobTooLarge, PushCheck::BlobTooLarge),
         (Check::MergeCommit, PushCheck::MergeCommit),
+        (Check::HiddenPath, PushCheck::HiddenPath),
     ];
     for (check, expected) in checks {
         assert_eq!(PushCheck::from(check), expected);

@@ -696,6 +696,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hidden_globs_round_trip_with_an_audit_entry_and_reject_alternation() {
+        use crate::push_checks::{PushPolicy, push_policy};
+
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+
+        let policy = PushPolicy {
+            hidden_globs: vec!["talos/**".into(), "configs/*".into()],
+            ..PushPolicy::default()
+        };
+        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &policy)
+            .await
+            .unwrap();
+        assert_eq!(push_policy(&pool, p.id).await.unwrap(), policy);
+        let created = audit_details(&pool, "push_policy.create").await;
+        assert!(created[0]["before"].is_null());
+        assert_eq!(created[0]["after"]["hidden_globs"][0], "talos/**");
+
+        let mut changed = policy.clone();
+        changed.hidden_globs = vec!["secret/**".into()];
+        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &changed)
+            .await
+            .unwrap();
+        let updated = audit_details(&pool, "push_policy.update").await;
+        assert_eq!(updated[0]["before"]["hidden_globs"][0], "talos/**");
+        assert_eq!(updated[0]["after"]["hidden_globs"][0], "secret/**");
+
+        let mut invalid = changed.clone();
+        invalid.hidden_globs = vec!["{a,b}/**".into()];
+        let saved =
+            update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &invalid)
+                .await;
+        assert!(matches!(saved, Err(DbError::InvalidData(_))), "{saved:?}");
+        assert_eq!(push_policy(&pool, p.id).await.unwrap(), changed);
+    }
+
+    #[tokio::test]
     async fn project_key_is_immutable_after_creation() {
         let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
         let provider = crate::model_providers::tests::seed_provider(&pool).await;

@@ -10,6 +10,7 @@ use df_core::harness::{
 use df_core::model_provider::ProviderModel;
 use df_core::{PersonaId, Principal, ProjectId, TaskId};
 use df_db::model_providers::ModelProviderRecord;
+use df_db::push_checks::push_policy;
 use df_db::{
     TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
 };
@@ -233,6 +234,9 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         .flatten()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
+    let hidden_paths = push_policy(&ctx.pool, rc.project.id.as_uuid())
+        .await?
+        .hidden_globs;
     env.extend(inference_env(ctx, profile, &provider, &model));
     if rc.project.mounts_harness() {
         // Paths into the harness image: absent with the project's own adapter.
@@ -262,13 +266,14 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             }),
             git_hooks: Vec::new(),
             git_config: Vec::new(),
+            hidden_paths: hidden_paths.clone(),
         }),
         harness: Some(Harness {
             kind: Some(harness_kind::Kind::Acp(AcpHarness {
                 command,
                 env,
                 model: Some(rc.persona.model.clone()),
-                files: harness_files(ctx, rc, profile),
+                files: harness_files(ctx, rc, profile, &hidden_paths),
             })),
         }),
         tools: tool_descriptors(),
@@ -289,12 +294,14 @@ fn harness_files(
     ctx: &ChannelContext,
     rc: &RunContext,
     profile: &HarnessProfile,
+    hidden_paths: &[String],
 ) -> Vec<HarnessFile> {
     let mut files = Vec::new();
-    if !rc.persona.system_prompt.is_empty() {
+    let prompt = system_prompt(&rc.persona.system_prompt, hidden_paths);
+    if !prompt.is_empty() {
         files.push(HarnessFile {
             path: profile.system_prompt_path.to_string(),
-            content: rc.persona.system_prompt.clone(),
+            content: prompt,
         });
     }
     let settings = ctx.config.harness.settings_json(profile.name);
@@ -307,6 +314,20 @@ fn harness_files(
         });
     }
     files
+}
+
+/// The persona's `prompt`, followed by the sandbox section when paths are hidden (design D8).
+fn system_prompt(prompt: &str, hidden_paths: &[String]) -> String {
+    if hidden_paths.is_empty() {
+        return prompt.to_owned();
+    }
+    let separator = if prompt.is_empty() { "" } else { "\n\n" };
+    format!(
+        "{prompt}{separator}## Sandbox\n\nThese repository paths are hidden from your workspace \
+         on purpose: {}. Do not restore, check out or read them through Git (`git show`, \
+         `git checkout`, `git sparse-checkout`); pushes changing them are rejected.\n",
+        hidden_paths.join(", ")
+    )
 }
 
 /// The persona's model provider and the model it selects.
@@ -706,6 +727,99 @@ mod tests {
             anyhow::bail!("expected ACP harness");
         };
         assert_eq!(acp.command, ["/opt/harness/bin/fake-acp-agent"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_project_with_hidden_paths_gets_them_and_the_sandbox_prompt_section()
+    -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        sqlx::query(
+            "INSERT INTO project_push_policies
+                 (project_id, protected_globs, protected_mode, hidden_globs, secret_mode,
+                  size_mode, max_blob_bytes)
+             SELECT id, '{}', 'approval', ARRAY['talos/**', 'CODEOWNERS'], 'approval',
+                    'approval', 1024
+             FROM projects",
+        )
+        .execute(&pool)
+        .await?;
+        let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&pool, run_id).await?.expect("run");
+        let rc = load_run_context(&pool, run).await?;
+
+        let assign = build_assign(&env.ctx, &rc).await?;
+
+        assert_eq!(
+            assign.workspace.expect("workspace").hidden_paths,
+            ["talos/**", "CODEOWNERS"]
+        );
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
+            anyhow::bail!("expected ACP harness");
+        };
+        let prompt = &acp.files[0].content;
+        assert!(prompt.starts_with("You are Linus."), "{prompt}");
+        assert!(
+            prompt.ends_with(
+                "\n\n## Sandbox\n\nThese repository paths are hidden from your workspace on \
+                 purpose: talos/**, CODEOWNERS. Do not restore, check out or read them through \
+                 Git (`git show`, `git checkout`, `git sparse-checkout`); pushes changing them \
+                 are rejected.\n"
+            ),
+            "{prompt}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_policy_change_between_runs_reaches_the_next_run_only() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run1 = env.insert_run(env.task.id, 1, "running").await;
+        let rc1 = load_run_context(&pool, get_run(&pool, run1).await?.expect("run")).await?;
+        let first = build_assign(&env.ctx, &rc1).await?;
+
+        sqlx::query(
+            "INSERT INTO project_push_policies
+                 (project_id, protected_globs, protected_mode, hidden_globs, secret_mode,
+                  size_mode, max_blob_bytes)
+             SELECT id, '{}', 'approval', ARRAY['talos/**'], 'approval', 'approval', 1024
+             FROM projects",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("UPDATE runs SET state = 'succeeded' WHERE id = $1")
+            .bind(run1.as_uuid())
+            .execute(&pool)
+            .await?;
+        let run2 = env.insert_run(env.task.id, 2, "connecting").await;
+        let rc2 = load_run_context(&pool, get_run(&pool, run2).await?.expect("run")).await?;
+        let second = build_assign(&env.ctx, &rc2).await?;
+
+        assert!(first.workspace.expect("workspace").hidden_paths.is_empty());
+        assert_eq!(
+            second.workspace.expect("workspace").hidden_paths,
+            ["talos/**"]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_project_without_hidden_paths_gets_neither_field_nor_section() -> anyhow::Result<()> {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let env = Env::new(pool.clone()).await;
+        let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+        let run = get_run(&pool, run_id).await?.expect("run");
+        let rc = load_run_context(&pool, run).await?;
+
+        let assign = build_assign(&env.ctx, &rc).await?;
+
+        assert!(assign.workspace.expect("workspace").hidden_paths.is_empty());
+        let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
+            anyhow::bail!("expected ACP harness");
+        };
+        assert_eq!(acp.files[0].content, "You are Linus.");
         Ok(())
     }
 

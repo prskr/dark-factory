@@ -255,6 +255,7 @@ Board members set the policy in the web UI: **Projects → Edit (pencil) → Pus
 
 | Setting | Default | Effect |
 |---|---|---|
+| Hidden paths | none | Same glob syntax as protected paths, without `{` and `}` (rejected on save); blank lines are dropped. A commit that adds, changes, deletes or renames a matching path is a `df:hidden-path` finding with mode `Reject`, on the task and on the WIP branch, before the protected path check; a path that is both is only a `df:hidden-path` finding. No exception request is raised. `Snapshot.push_policies[<project key>].hidden_globs` carries them. |
 | Protected paths | `.forgejo/workflows/**`, `.github/workflows/**`, `.gitea/workflows/**`, `CODEOWNERS` | One `globset` glob per line, `*` does not match `/`; blank lines are dropped. A commit that adds, changes, deletes or renames a matching path is a `df:protected-path` finding. |
 | Protected paths: mode | Ask for approval | `Ask for approval` (`approval`): the push is rejected and a `push-check-exception` request raised; `Reject`: rejected, no request. |
 | Secret scan: mode | Ask for approval | As above, for `df:secret-scan` findings. |

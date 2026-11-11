@@ -79,6 +79,8 @@ pub enum Step {
     Think(String),
     ToolCall(ToolCallStep),
     Shell(String),
+    /// Runs the command like `shell` and says its stdout, so a test can see what it found.
+    SayShell(String),
     Fetch(FetchStep),
     Mcp(McpStep),
     Plan(PlanStep),

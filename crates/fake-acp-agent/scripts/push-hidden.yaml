@@ -1,0 +1,17 @@
+# Script of demo step 6 of iteration 3 (docs/demo.md): the project hides `secret/**`, so
+# `secret/value.txt` is not in the workspace. Run 1 looks for it, then removes it from the index
+# (`--sparse`: Git refuses entries outside the sparse set without it) and commits. The Git proxy
+# rejects every push of the commit with `df:hidden-path`. Later prompts (`push.rejected`
+# messages) find no scripted turn and end at once; the runtime pushes the same commit again after
+# each of them.
+sessions:
+  new:
+    - - say: "Looking for secret/value.txt."
+      - say_shell: |
+          if [ -e secret/value.txt ]; then echo "found secret/value.txt"; else echo "secret/value.txt is missing"; fi
+      - say: "The file is not in my workspace; removing it from the repository."
+      - shell: |
+          git rm --cached --sparse -q secret/value.txt
+          git commit -q -m 'Remove the secret file'
+      - say: "Committed the removal of secret/value.txt."
+      - end: end_turn

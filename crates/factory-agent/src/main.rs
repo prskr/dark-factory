@@ -16,6 +16,7 @@ pub mod connection;
 pub mod fs_util;
 pub mod git;
 pub mod harness;
+pub mod hidden_paths;
 pub mod mcp;
 pub mod outbox;
 pub mod runner;

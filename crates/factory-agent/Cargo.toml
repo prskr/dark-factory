@@ -15,6 +15,7 @@ base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 df-artifact-types.workspace = true
+df-core.workspace = true
 df-proto.workspace = true
 df-telemetry = { workspace = true, features = ["clap"] }
 futures.workspace = true

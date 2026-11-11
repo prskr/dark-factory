@@ -132,6 +132,7 @@ fn finding(finding: pb::PushFinding) -> Result<PushFinding, Status> {
         pb::PushCheck::ProtectedPath => PushCheck::ProtectedPath,
         pb::PushCheck::BlobTooLarge => PushCheck::BlobTooLarge,
         pb::PushCheck::MergeCommit => PushCheck::MergeCommit,
+        pb::PushCheck::HiddenPath => PushCheck::HiddenPath,
     };
     let mode = match finding.mode() {
         pb::CheckMode::Approval => CheckMode::Approval,

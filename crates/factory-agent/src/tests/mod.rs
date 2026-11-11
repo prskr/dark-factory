@@ -19,6 +19,7 @@ mod connection;
 mod git;
 mod git_retry;
 mod harness;
+mod hidden_paths;
 mod mcp;
 mod outbox;
 mod push_rejections;
@@ -300,6 +301,7 @@ impl RunScenario {
                 commit_identity: None,
                 git_hooks: Vec::new(),
                 git_config: Vec::new(),
+                hidden_paths: Vec::new(),
             }),
             harness: Some(Harness {
                 kind: Some(df_proto::agent::v1::harness::Kind::Acp(AcpHarness {

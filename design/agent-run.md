@@ -207,7 +207,7 @@ if /data/repo/.git does not exist:
                                        git checkout -B factory/task/<key> origin/factory/task/<key>
     else:                              git checkout -B factory/task/<key> origin/<base>
     if origin has factory/wip/<key>:   restore WIP files into the worktree
-                                       (git restore --source=<wip> --worktree -- .)
+                                       (git restore --source=<wip> --worktree -- <paths that differ from HEAD, except hidden paths>)
 else:
     sanitize: rewrite .git/config (§7), regenerate harness config (§6.3)
     git fetch origin <base> factory/task/<key>

@@ -159,6 +159,7 @@ fn push_policy(policy: PushPolicy) -> pb::PushPolicy {
     pb::PushPolicy {
         protected_globs: policy.protected_globs,
         protected_mode: mode(policy.protected_mode),
+        hidden_globs: policy.hidden_globs,
         secret_mode: mode(policy.secret_mode),
         size_mode: mode(policy.size_mode),
         max_blob_bytes: policy.max_blob_bytes,
@@ -402,6 +403,7 @@ mod tests {
         let stored = PushPolicy {
             protected_globs: vec!["deploy/**".into()],
             protected_mode: CheckMode::Reject,
+            hidden_globs: vec!["talos/**".into()],
             max_blob_bytes: 1024,
             linear_history: true,
             ..PushPolicy::default()
@@ -436,6 +438,8 @@ mod tests {
         assert!(!defaults.linear_history);
         let web = &policies["WEB"];
         assert_eq!(web.protected_globs, ["deploy/**"]);
+        assert_eq!(web.hidden_globs, ["talos/**"]);
+        assert!(defaults.hidden_globs.is_empty());
         assert_eq!(
             (web.protected_mode(), web.secret_mode()),
             (pb::CheckMode::Reject, pb::CheckMode::Approval)

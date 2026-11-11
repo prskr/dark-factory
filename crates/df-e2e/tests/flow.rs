@@ -848,6 +848,76 @@ async fn committed_secret_is_rejected_and_the_amended_commit_closes_the_request(
     Ok(())
 }
 
+/// Demo step 6 of iteration 3: project `HP` hides `secret/**`. The agent does not find
+/// `secret/value.txt`, commits its removal from the index anyway, and the Git proxy rejects every
+/// push with `df:hidden-path`, which the agent's transcript shows.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_push_changing_a_hidden_path_is_rejected_and_the_agent_is_told() -> Result<()> {
+    let world = World::start().await?;
+    let key = world
+        .session
+        .create_task(
+            &world.env,
+            data::HIDDEN_PROJECT_KEY,
+            "Clean up secrets",
+            None,
+        )
+        .await?;
+    let branch = branch_of(&key);
+
+    let rejected = eventually("a push rejected as hidden path", RUN_TIMEOUT, || async {
+        let pushes = db::pushes(&world.pool, &key).await?;
+        Ok(pushes
+            .into_iter()
+            .flat_map(|p| p.refs)
+            .find(|r| r.reason.starts_with("df:hidden-path")))
+    })
+    .await?;
+    assert!(rejected.reason.contains(data::HIDDEN_PATH), "{rejected:?}");
+    let messages = eventually("the rejection message", RUN_TIMEOUT, || async {
+        let messages = db::push_rejected_messages(&world.pool, &key).await?;
+        Ok((!messages.is_empty()).then_some(messages))
+    })
+    .await?;
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("df:hidden-path") && m.contains(data::HIDDEN_PATH)),
+        "{messages:?}"
+    );
+    // The agent looked for the file first and did not find it, and was told about the rejection.
+    for text in [
+        format!("{} is missing", data::HIDDEN_PATH),
+        "df:hidden-path".to_owned(),
+    ] {
+        eventually(
+            &format!("transcript event containing `{text}`"),
+            RUN_TIMEOUT,
+            || async {
+                let events = db::transcript_events_containing(&world.pool, &key, &text).await?;
+                Ok((events >= 1).then_some(()))
+            },
+        )
+        .await?;
+    }
+    // No exception can pass it: no request, and the forge still has the file.
+    assert!(db::exception_requests(&world.pool, &key).await?.is_empty());
+    assert!(
+        db::pushes(&world.pool, &key)
+            .await?
+            .iter()
+            .all(|p| p.verdict != "accepted")
+    );
+    let file = world
+        .forgejo
+        .file(data::BASE_BRANCH, data::HIDDEN_PATH)
+        .await?;
+    assert_eq!(file, "secret\n");
+    assert!(!world.forgejo.branch_exists(&branch).await?);
+    Ok(())
+}
+
 /// Demo step 3 of iteration 2: the agent edits the CI workflow, a protected path in mode
 /// `approval`. Every push of the commit is rejected until the board member approves the
 /// `push-check-exception` request; after the next turn the same commit passes.

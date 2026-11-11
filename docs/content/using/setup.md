@@ -51,7 +51,8 @@ The **General** tab and the new-project form group the fields:
 
 The **Push checks** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
 this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and
-whether merge commits are allowed. **Save project** saves General and Push checks together.
+whether merge commits are allowed. The **Hidden paths** field lists files that are left out of the
+agent's workspace and never pushable ([Hide files from agents](hidden-paths.md)). **Save project** saves General and Push checks together.
 
 Users with the role `admin` also see the last tab, **Integrations**, with two groups:
 

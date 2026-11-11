@@ -52,13 +52,14 @@ checked again):
 | --- | --- | --- |
 | Secret scan | `df:secret-scan`: rule, path, line and a masked preview; the secret itself is never stored or logged | mode `approval` (default) or `reject` |
 | Commit identity | `df:identity`: author and committer must be the instance's commit identity | no, always enforced |
+| Hidden paths | `df:hidden-path`: a change to a path below a hidden glob (see [Hide files from agents](../using/hidden-paths.md)); also on the WIP branch | globs (default none); always `reject`, no exception request |
 | Protected paths | `df:protected-path`: a change below a protected glob; `.dark-factory/**` is always protected | globs (default CI workflow directories and `CODEOWNERS`) and mode |
 | Blob size | `df:blob-too-large`: a file larger than the limit | limit (default 5 MiB) and mode |
 | Linear history | `df:merge-commit` | on or off (default off) |
 | Commit limit | `df:push-too-large`: more than 10,000 commits | no |
 | Push size | `df:push-too-large` (HTTP 413): a push body above the maximum (default 256 MiB) | instance setting |
 
-Pushes to the WIP branch get only the secret scan and the size limit, always rejecting.
+Pushes to the WIP branch get only the secret scan, the size limit and the hidden path check, always rejecting.
 
 **Approval mode.** A task-branch push rejected only by approval-mode findings raises a
 `push-check-exception` request in the inbox, listing the findings. Approving it creates exceptions

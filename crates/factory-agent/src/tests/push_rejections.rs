@@ -69,6 +69,7 @@ impl RejectingRemote {
             commit_identity: None,
             git_hooks: vec![],
             git_config: vec![],
+            hidden_paths: Vec::new(),
         };
         Self {
             _temp: temp,
@@ -163,6 +164,10 @@ fn df_reasons_map_to_push_statuses_and_a_secret_among_findings_wins() {
             PushStatus::RejectedByCheck,
         ),
         ("df:merge-commit", PushStatus::RejectedByCheck),
+        (
+            "df:hidden-path talos/a.yaml (matches talos/**)",
+            PushStatus::RejectedByCheck,
+        ),
         ("df:push-too-large", PushStatus::RejectedByCheck),
         ("df:non-fast-forward", PushStatus::RejectedNonFastForward),
         ("df:audit-unavailable", PushStatus::Failed),

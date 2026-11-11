@@ -20,9 +20,9 @@ pub fn write_fresh(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<(
     file.write_all(contents.as_ref())
 }
 
-/// Creates `dir` (and parents) as a real directory; a symlink at `dir` is replaced.
+/// Creates `dir` (and parents) as a real directory; a symlink or a file at `dir` is replaced.
 pub fn create_real_dir(dir: &Path) -> std::io::Result<()> {
-    if std::fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink()) {
+    if std::fs::symlink_metadata(dir).is_ok_and(|m| !m.file_type().is_dir()) {
         std::fs::remove_file(dir)?;
     }
     std::fs::create_dir_all(dir)
