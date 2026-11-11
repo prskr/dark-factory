@@ -3,15 +3,19 @@
 ## MODIFIED Requirements
 
 ### Requirement: Configuration forms as modals
-Creating and editing a project, persona, credential reference or routine SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving SHALL close the modal and update the list without a full page load.
+Creating a project or a model provider, and creating and editing a persona, credential reference or routine, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona, credential reference or routine SHALL close the modal and update the list without a full page load. Creating a project or a model provider SHALL close the modal and open the new item's settings page.
 
 #### Scenario: Validation error in the modal
 - **WHEN** a credential reference is submitted without a key
 - **THEN** the modal stays open with "Key is required." at the Key field and the other values kept
 
 #### Scenario: Saved project
-- **WHEN** a board member saves a new project in the modal
-- **THEN** the modal closes and the project appears in the list
+- **WHEN** a board member creates project `WEB` in the "New project" modal
+- **THEN** the modal closes and the settings page of `WEB` opens
+
+#### Scenario: Saved model provider
+- **WHEN** a board member creates provider "Anthropic work" in the "New model provider" modal
+- **THEN** the modal closes and the settings page of "Anthropic work" opens
 
 #### Scenario: Invalid routine schedule
 - **WHEN** a routine is submitted with schedule `every night`
