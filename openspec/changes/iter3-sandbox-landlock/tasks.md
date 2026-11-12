@@ -20,14 +20,14 @@ Kernel-backed tests need Landlock ABI 6 (Linux 6.12+ with `landlock` in `/sys/ke
   - read on `<run dir>/ca/` and nothing from the TLS dir;
   - every top-level symlink skipped (`/x → /`, `/var/run → /run`, `/bin → usr/bin`);
   - a missing `/tmp`.
-- [x] 2.2a Write failing tests, then copy `ca.crt` into `<run dir>/ca/` (temporary file plus rename) at startup and on every TLS reload, point `sslCAInfo` in `render_git_config` and `NODE_EXTRA_CA_CERTS` (`df-core/src/harness.rs`, the path asserted in `df-agent-channel/src/assign.rs`) at the copy, and break hard links under `<data dir>/runtime` before every run (design D2). Verify with tests: the copy follows a renamed `ca.crt`, and a file with link count 2 is replaced while its content stays.
+- [x] 2.2a Write failing tests, then copy `ca.crt` into `<run dir>/ca/` (temporary file plus rename) at startup and on every TLS reload, point `sslCAInfo` in `render_git_config` and `NODE_EXTRA_CA_CERTS` (`df-core/src/harness.rs`, the path asserted in `df-agent-channel/src/assign.rs`) at the copy, and, at runtime start, refuse a symlinked `<data dir>/runtime`, remove symlinks inside it and break hard links under it (design D2). Verify with tests: the copy follows a renamed `ca.crt`, a file with link count 2 is replaced while its content stays, a symlinked runtime directory is refused, and a symlink inside it is removed while its target stays.
 - [x] 2.3 Write failing kernel-backed tests, then implement the `sandbox` subcommand: read the layout from the environment, take the hidden `--root` flag, apply the ABI 6 ruleset with a hard requirement and signal plus abstract-socket scoping, then `exec` (design D1, D3). Verify with tests against the built binary that:
   - a fake `tls.key` is unreadable;
   - the CA copy is readable, also after it was replaced by rename;
   - a symlinked `home` exits with 125;
   - `runtime/` is not writable;
-  - `kill` of the parent fails with `EPERM`;
-  - `exec` of a binary under a fake `/opt` works;
+  - `kill` of the parent fails with `EPERM`, and reads of the parent's `/proc/<pid>/environ` and `mem` fail;
+  - `exec` of a binary under a top-level directory other than `/usr` works;
   - `env` of the command has no `DF_CONTROL_PLANE_ADDR`, `DF_TLS_DIR` or `DF_LANDLOCK`, but keeps `DF_RUNTIME_SOCK`, `DF_RUN_DIR`, `DF_LOG_FORMAT` and `PATH`;
   - `/proc/self/fd` of the command holds only 0, 1 and 2, also when the parent has other descriptors open;
   - a setup failure, including a status other than `FullyEnforced`, exits with code 125 without running the command.
@@ -44,7 +44,7 @@ Kernel-backed tests need Landlock ABI 6 (Linux 6.12+ with `landlock` in `/sys/ke
   - the ruleset table from design D2;
   - signal and ptrace scoping;
   - kernel requirements per runtime (runc: node kernel; Kata: guest kernel, Landlock enabled in the stock guest kernel since Kata 3.32.0; Linux 6.12+, `landlock` in the LSM list);
-  - the probe pod from the design session as a check;
+  - check commands: `kubectl debug node` for runc, and for Kata a pod with the configured runtime class and a security context the `restricted` policy accepts;
   - `sandbox.landlock: disabled` and what it gives up.
 - [x] 4.2 Add a `sandbox.landlock_unavailable` entry to `docs/content/operations/troubleshooting.md` and the kernel requirement plus opt-out to `docs/content/operations/upgrades.md`. Verify with `just docs-build`.
 

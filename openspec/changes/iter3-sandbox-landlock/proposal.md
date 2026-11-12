@@ -19,11 +19,11 @@ ADR-0054 decides to restrict the harness with Landlock. Landlock ABI 7 is availa
   - read and execute: every top-level directory except the ones holding `/data` and `/run`;
   - full access: `/data/repo`, `/data/home`, `/tmp` and `/dev`;
   - read only: a copy of the CA certificate in `/run/factory/ca/`, refreshed by the runtime when the CSI driver rotates `tls/` (a rule on the original file would break at the first renewal);
-  - top-level symlinks are skipped, writable paths with a symlink component make the run fail, and hard links into the runtime directory left by unrestricted runs are broken before every run;
+  - top-level symlinks are skipped, writable paths with a symlink component make the run fail, a symlinked runtime directory makes the runtime exit at startup, symlinks inside it are removed, and hard links into it left by unrestricted runs are broken at runtime start;
   - no access: everything else, including `tls.key`, `tls.crt`, `/data/runtime` and the rest of `/run/factory`;
   - Landlock signal and abstract-socket scoping, so the harness can't signal the runtime or connect to abstract Unix sockets outside its domain;
   - no Landlock network rules.
-- **Environment and descriptors**: the wrapper removes the runtime's own `DF_*` variables, except those the factory MCP server needs, before `exec`. The harness inherits only stdin, stdout and stderr.
+- **Environment and descriptors**: the runtime's own `DF_*` variables, except those the factory MCP server needs, are removed before the harness starts (by the wrapper before `exec` with Landlock enforced, by the runtime itself with `disabled`). The harness inherits only stdin, stdout and stderr.
 - **Fail closed**: the runtime requires Landlock ABI 6 or higher. Below that it fails the run with a `sandbox.landlock_unavailable` notice and outcome `FAILED`, before the harness starts.
 - **Opt-out**:
   - The Helm value `sandbox.landlock: enforce | disabled` (default `enforce`) reaches the instance config and the sandbox pod as `DF_LANDLOCK`.
