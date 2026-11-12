@@ -13,6 +13,9 @@ use agent_client_protocol::schema::v1::{
     RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate, TextContent,
 };
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
+use std::ffi::OsString;
+
+use df_core::LandlockMode;
 use df_proto::agent::v1::{
     AgentMessage, Assign, ControlMessage, Interrupt, PhaseChanged, Prompt, PushReport, PushStatus,
     RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, Workspace, agent_message,
@@ -31,6 +34,7 @@ use crate::harness::{
 use crate::outbox::Outbox;
 use crate::runtime_handler::{DriverRuntimeHandler, OpenToolCalls, SharedToolCalls};
 use crate::runtime_socket::RuntimeSocketServer;
+use crate::sandbox::probe::{KernelProbe, LandlockProbe};
 use crate::transcript::{
     TranscriptTranslator, acp_to_proto_stop_reason, notice_event, truncate_utf8,
 };
@@ -154,8 +158,29 @@ impl Default for Timeouts {
     }
 }
 
+/// How the harness is confined: the instance setting and what the kernel offers.
+#[derive(Clone)]
+pub struct Confinement {
+    pub mode: LandlockMode,
+    pub probe: Arc<dyn LandlockProbe>,
+}
+
+impl Confinement {
+    /// Confinement per `mode`, checked against the running kernel (the probe is only asked when
+    /// enforcing), for the environment of this process.
+    pub fn new(mode: LandlockMode) -> Self {
+        Self {
+            mode,
+            probe: Arc::new(KernelProbe),
+        }
+    }
+}
+
 /// Parameters for running an agent run.
 pub struct RunDriverParams {
+    pub confinement: Confinement,
+    /// The environment the harness starts from: the runtime's own, as of startup.
+    pub harness_base_env: Vec<(OsString, OsString)>,
     pub assign: Assign,
     pub initial_prompts: Vec<Prompt>,
     /// True if a `Cancel` arrived before `Assign`; the run ends as cancelled without a turn.
@@ -165,7 +190,8 @@ pub struct RunDriverParams {
     pub home_dir: PathBuf,
     pub runtime_dir: PathBuf,
     pub hooks_path: PathBuf,
-    pub mcp_command: PathBuf,
+    /// The runtime's own binary: starts the sandbox wrapper and is the harness's MCP server.
+    pub runtime_exe: PathBuf,
     pub runtime_sock_path: PathBuf,
     pub git: Git,
     pub outbox: Arc<Mutex<Outbox>>,
@@ -204,13 +230,15 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let git = params.git;
     let inbound_rx = params.inbound_rx;
     let ctx = Arc::new(RunContext {
+        confinement: params.confinement,
+        harness_base_env: params.harness_base_env,
         assign: params.assign,
         workspace,
         repo_dir: params.repo_dir,
         home_dir: params.home_dir,
         runtime_dir: params.runtime_dir,
         hooks_path: params.hooks_path,
-        mcp_command: params.mcp_command,
+        runtime_exe: params.runtime_exe,
         runtime_sock_path: params.runtime_sock_path,
         git,
         outbox: params.outbox,
@@ -242,6 +270,12 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
         .await);
     }
 
+    // Before the workspace is prepared: a kernel without Landlock must not get a clone or a push.
+    if let Err(detail) = check_confinement(&ctx, &mut collected).await {
+        return Ok(collected
+            .fail(&ctx.outbound_tx, detail, String::new())
+            .await);
+    }
     let prepare_res = match prepare_phase(&ctx, &mut collected).await {
         Ok(res) => res,
         Err(detail) => {
@@ -488,13 +522,15 @@ type AcpAgent = agent_client_protocol::role::acp::Agent;
 
 /// Values that every phase of a run reads and none changes.
 struct RunContext {
+    confinement: Confinement,
+    harness_base_env: Vec<(OsString, OsString)>,
     assign: Assign,
     workspace: Workspace,
     repo_dir: PathBuf,
     home_dir: PathBuf,
     runtime_dir: PathBuf,
     hooks_path: PathBuf,
-    mcp_command: PathBuf,
+    runtime_exe: PathBuf,
     runtime_sock_path: PathBuf,
     /// Hardened Git for the workspace, trusting the instance CA.
     git: Git,
@@ -698,31 +734,72 @@ fn harness_command(assign: &Assign) -> (String, Vec<String>) {
     }
 }
 
+/// Checks, before the harness is prepared, that the kernel can confine it, or logs that it will
+/// run unrestricted. The error is the failure detail of the run, after the
+/// `sandbox.landlock_unavailable` notice.
+async fn check_confinement(ctx: &RunContext, collected: &mut Collected) -> Result<(), String> {
+    if ctx.confinement.mode == LandlockMode::Disabled {
+        tracing::warn!(
+            run_id = %ctx.assign.run_id,
+            "Landlock disabled by instance configuration; harness runs unrestricted"
+        );
+        return Ok(());
+    }
+    let support = ctx.confinement.probe.support();
+    if support.is_sufficient() {
+        return Ok(());
+    }
+    let message = support.unavailable_message();
+    let notice = Notice {
+        level: NoticeLevel::Error as i32,
+        code: "sandbox.landlock_unavailable".to_string(),
+        message: message.clone(),
+    };
+    collected.notices.push(notice.clone());
+    emit_notice(&ctx.outbound_tx, notice).await;
+    Err(message)
+}
+
 /// Builds the harness environment and spawns the harness.
 /// The error is the failure detail of the run.
 async fn spawn_harness(ctx: &RunContext) -> Result<HarnessProcess, String> {
     let mut env = prepare_harness_environment(&ctx.assign, &ctx.home_dir)
         .map_err(|e| format!("Harness environment preparation failed: {e}"))?;
     env.insert(
-        "DF_RUNTIME_SOCK".to_string(),
+        crate::config::ENV_RUNTIME_SOCK.to_string(),
         ctx.runtime_sock_path.to_string_lossy().to_string(),
     );
     env.insert(
-        "DF_RUN_DIR".to_string(),
+        crate::config::ENV_RUN_DIR.to_string(),
         ctx.runtime_dir.to_string_lossy().to_string(),
     );
 
     let (harness_cmd, harness_args) = harness_command(&ctx.assign);
-    let started = Instant::now();
-    let mut child = match tokio::process::Command::new(&harness_cmd)
-        .args(&harness_args)
-        .envs(&env)
+    let (program, args) = match ctx.confinement.mode {
+        LandlockMode::Enforce => {
+            crate::sandbox::wrap_command(&ctx.runtime_exe, &harness_cmd, &harness_args)
+        }
+        LandlockMode::Disabled => (PathBuf::from(&harness_cmd), harness_args),
+    };
+    let mut command = tokio::process::Command::new(&program);
+    command
+        .args(&args)
         .current_dir(&ctx.repo_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-    {
+        .stderr(std::process::Stdio::inherit());
+    // The wrapper removes the runtime's variables before it starts the harness and needs them
+    // itself (the layout), so only without it the runtime hides them.
+    let hide = ctx.confinement.mode == LandlockMode::Disabled;
+    command.env_clear();
+    for (name, value) in &ctx.harness_base_env {
+        if !(hide && crate::sandbox::is_hidden_runtime_var(name)) {
+            command.env(name, value);
+        }
+    }
+    command.envs(&env);
+    let started = Instant::now();
+    let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
             send_timing(
@@ -888,7 +965,7 @@ async fn setup_harness_session(
         cx,
         &ctx.repo_dir,
         ctx.assign.continuation.as_ref(),
-        &ctx.mcp_command,
+        &ctx.runtime_exe,
         &ctx.runtime_sock_path,
     )
     .await;

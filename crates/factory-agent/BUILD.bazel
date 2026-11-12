@@ -77,3 +77,17 @@ rust_test(
     env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
     lint_config = ":lints",
 )
+
+# Needs a kernel with Landlock ABI 6; fails with a message naming that requirement without it.
+rust_test(
+    name = "sandbox_test",
+    srcs = ["tests/sandbox.rs"],
+    data = [":factory-agent"],
+    edition = "2024",
+    env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
+    lint_config = ":lints",
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)

@@ -520,6 +520,8 @@ async fn run_with_workspace(
     let (_inbound_tx, inbound_rx) = tokio::sync::mpsc::channel(10);
     let (outbound_tx, _outbound_rx) = tokio::sync::mpsc::channel(100);
     let params = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign: Assign {
             run_id: "run-early-failure".to_string(),
             task: None,
@@ -536,7 +538,7 @@ async fn run_with_workspace(
         home_dir: data.join("home"),
         runtime_dir: temp.path().join("run"),
         hooks_path: temp.path().join("hooks"),
-        mcp_command: std::path::PathBuf::from("factory-agent"),
+        runtime_exe: std::path::PathBuf::from("factory-agent"),
         runtime_sock_path: temp.path().join("run").join("runtime.sock"),
         git: Git::new(&repo_dir),
         outbox,

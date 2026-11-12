@@ -116,6 +116,11 @@ sandbox:
   # RUST_LOG (EnvFilter syntax) of the sandbox runtime; rendered as sandbox.logLevel in the
   # instance config.
   logLevel: info
+  # Landlock confinement of the harness: `enforce` or `disabled`. `enforce` needs Linux 6.12+ with
+  # Landlock in the LSM list on the node (runc) or in the guest kernel (Kata); a run fails
+  # otherwise. `disabled` runs the harness unrestricted. Rendered as sandbox.landlock in the
+  # instance config.
+  landlock: enforce
 
 sandboxNamespace:
   create: true

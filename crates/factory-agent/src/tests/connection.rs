@@ -236,6 +236,99 @@ async fn test_mtls_connect_fails_on_untrusted_client() {
 }
 
 #[tokio::test]
+async fn every_connection_attempt_refreshes_the_ca_copy_for_the_harness() {
+    let server_name = "control-plane.darkfactory.local";
+    let pki = TestPki::generate(server_name).expect("pki");
+    let mut server =
+        MockControlPlane::start(&pki.server_cert_pem, &pki.server_key_pem, &pki.ca_cert_pem)
+            .await
+            .expect("server start");
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let tls_dir = temp_dir.path().join("tls");
+    pki.write_client_tls_dir(&tls_dir).expect("write certs");
+    let run_dir = temp_dir.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::outbox::Outbox::open(&run_dir, "run-ca", 1024 * 1024, 64 * 1024).expect("outbox"),
+    ));
+    let config = crate::config::RuntimeConfig {
+        control_plane_addr: format!("https://{}", server.addr),
+        server_name: server_name.to_string(),
+        layout: crate::config::Layout {
+            tls_dir: tls_dir.clone(),
+            data_dir: temp_dir.path().join("data"),
+            run_dir: run_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
+    };
+
+    let handle = crate::connection::ConnectionManager::new(
+        config,
+        outbox,
+        crate::connection::ReconnectPolicy::default(),
+    )
+    .spawn();
+    server.recv_agent_message().await.expect("recv hello");
+
+    assert_eq!(
+        std::fs::read(run_dir.join("ca/ca.crt")).unwrap(),
+        std::fs::read(tls_dir.join("ca.crt")).unwrap()
+    );
+    handle.shutdown();
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn a_failed_ca_copy_makes_the_connection_attempt_back_off_instead_of_connecting() {
+    let server_name = "control-plane.darkfactory.local";
+    let pki = TestPki::generate(server_name).expect("pki");
+    let mut server =
+        MockControlPlane::start(&pki.server_cert_pem, &pki.server_key_pem, &pki.ca_cert_pem)
+            .await
+            .expect("server start");
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let tls_dir = temp_dir.path().join("tls");
+    pki.write_client_tls_dir(&tls_dir).expect("write certs");
+    let run_dir = temp_dir.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    // A file where the CA directory belongs: the copy can't be written.
+    std::fs::write(run_dir.join("ca"), "not a directory").unwrap();
+    let outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::outbox::Outbox::open(&run_dir, "run-ca-fail", 1024 * 1024, 64 * 1024)
+            .expect("outbox"),
+    ));
+    let config = crate::config::RuntimeConfig {
+        control_plane_addr: format!("https://{}", server.addr),
+        server_name: server_name.to_string(),
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp_dir.path().join("data"),
+            run_dir,
+        },
+        landlock: df_core::LandlockMode::Enforce,
+    };
+    let manager = crate::connection::ConnectionManager::new(
+        config,
+        outbox,
+        crate::connection::ReconnectPolicy::default(),
+    );
+
+    assert!(manager.connect_and_handshake().await.is_none());
+    // The attempt never opened the stream: without the back-off it would have sent `Hello` and
+    // waited for the acknowledgement that this server never sends.
+    let hello = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        server.recv_agent_message(),
+    )
+    .await;
+    assert!(
+        hello.is_err(),
+        "the runtime connected despite the failed CA copy"
+    );
+    server.shutdown();
+}
+
+#[tokio::test]
 async fn test_scenario_control_plane_restart_and_outbox_replay() {
     let server_name = "control-plane.darkfactory.local";
     let pki = TestPki::generate(server_name).expect("pki");
@@ -272,9 +365,12 @@ async fn test_scenario_control_plane_restart_and_outbox_replay() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir,
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -368,9 +464,12 @@ async fn test_scenario_leftover_from_crashed_run_emits_notice() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir,
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -474,9 +573,12 @@ async fn test_scenario_fully_acknowledged_leftover_is_discarded_silently() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir,
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -556,9 +658,12 @@ async fn test_scenario_certificate_rotated() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir: tls_dir.clone(),
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir: tls_dir.clone(),
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -639,9 +744,12 @@ async fn test_scenario_short_outage_events_queue_in_outbox() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir: tls_dir.clone(),
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir: tls_dir.clone(),
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -757,9 +865,12 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir: tls_dir.clone(),
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir: tls_dir.clone(),
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -887,9 +998,12 @@ async fn test_scenario_pending_tool_call_resent_after_reconnect() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir: tls_dir.clone(),
-        data_dir: temp_dir.path().join("data"),
-        run_dir: runtime_dir.clone(),
+        layout: crate::config::Layout {
+            tls_dir: tls_dir.clone(),
+            data_dir: temp_dir.path().join("data"),
+            run_dir: runtime_dir.clone(),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -1065,9 +1179,12 @@ async fn start_flush_test_connection_with(
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir,
-        data_dir: temp.path().join("data"),
-        run_dir: runtime_dir,
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp.path().join("data"),
+            run_dir: runtime_dir,
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
     let handle = crate::connection::ConnectionManager::new(config, outbox, policy).spawn();
     let _ = server.recv_agent_message().await.expect("hello");

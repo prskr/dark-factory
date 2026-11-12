@@ -1,0 +1,20 @@
+# Script of the Landlock check of the e2e suite (project `LL`, docs/demo.md): inside the Landlock
+# domain of the sandbox, the runtime's private key is unreadable and `/opt/probe-writable` (owned
+# by the sandbox user in the test project image, so file permissions allow the write) is not
+# writable, while a factory tool call still reaches the runtime over its socket.
+sessions:
+  new:
+    - - say: "Probing the sandbox."
+      - say_shell: |
+          out=$(cat /run/factory/tls/tls.key 2>&1 >/dev/null) || true
+          case "$out" in *"Permission denied"*) echo "tls.key: EACCES" ;; *) echo "tls.key: not denied" ;; esac
+          out=$(sh -c 'echo x > /opt/probe-writable/x' 2>&1) || true
+          case "$out" in *"Permission denied"*) echo "probe-writable: EACCES" ;; *) echo "probe-writable: not denied" ;; esac
+      - mcp:
+          server: factory
+          tool: ask_question
+          args:
+            text: "Landlock probe finished?"
+            blocking: false
+      - say: "Probe finished."
+      - end: end_turn

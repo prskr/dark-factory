@@ -12,10 +12,11 @@ startup (`config.rs`).
 |----------|----------|---------|--------|
 | `DF_CONTROL_PLANE_ADDR` | yes | none | Address of the control plane gRPC endpoint. `host:port` is accepted; `https://` is prepended when no `http://` or `https://` scheme is given. |
 | `DF_CONTROL_PLANE_SERVER_NAME` | yes | none | TLS server name checked against the control plane certificate. |
-| `DF_TLS_DIR` | no | `/run/factory/tls` | Directory with `ca.crt` (instance CA), `tls.crt` and `tls.key` (pod identity). Re-read on every connection attempt, so rotated certificates are picked up on reconnect. Git trusts `ca.crt` only for the gateway's Git proxy (`http.<proxy URL>.sslCAInfo`: `-c` on the clone, then `.git/config`); other hosts keep the system trust store. |
-| `DF_DATA_DIR` | no | `/data` | Persistent volume. The runtime uses `repo/` (workspace checkout), `home/` (harness `$HOME`, session logs) and `runtime/` (outbox segments, `run.json`). |
-| `DF_RUN_DIR` | no | `/run/factory` | Ephemeral runtime directory. Holds `runtime.sock` and the `wip.index` scratch file. Also exported to the harness. |
+| `DF_TLS_DIR` | no | `/run/factory/tls` | Directory with `ca.crt` (instance CA), `tls.crt` and `tls.key` (pod identity). Re-read on every connection attempt, so rotated certificates are picked up on reconnect; each read also refreshes the copy of `ca.crt` in `$DF_RUN_DIR/ca/`; if the copy fails, the attempt backs off and retries instead of connecting. With `DF_LANDLOCK=enforce` the harness can't read this directory. Git trusts the copy of `ca.crt` only for the gateway's Git proxy (`http.<proxy URL>.sslCAInfo`: `-c` on the clone, then `.git/config`); other hosts keep the system trust store. |
+| `DF_DATA_DIR` | no | `/data` | Persistent volume. The runtime uses `repo/` (workspace checkout), `home/` (harness `$HOME`, session logs) and `runtime/` (outbox segments, `run.json`). Under Landlock the harness gets full access to `repo/` and `home/` and none to `runtime/`. |
+| `DF_RUN_DIR` | no | `/run/factory` | Ephemeral runtime directory. Holds `runtime.sock`, the `wip.index` scratch file and `ca/ca.crt` (copy of the instance CA, the only file of the directory the harness reads under Landlock). Also exported to the harness. |
 | `DF_RUNTIME_SOCK` | no | `/run/factory/runtime.sock` | Path of the runtime Unix socket. Read by the `mcp` subcommand (also available as `--socket`), which the harness starts as a child process. `run` creates the socket at `$DF_RUN_DIR/runtime.sock` and exports that path to its children. |
+| `DF_LANDLOCK` | no | `enforce` | Filesystem isolation of the harness: `enforce` starts every harness through `factory-agent sandbox` in a Landlock domain and fails the run (notice `sandbox.landlock_unavailable`) on a kernel below Landlock ABI 6; `disabled` starts the harness unrestricted and logs a warning at every run start. Any other value makes `run` exit with an error naming the variable. The control plane sets it from `sandbox.landlock`. Like every `DF_*` variable except `DF_RUNTIME_SOCK`, `DF_RUN_DIR` and `DF_LOG_FORMAT`, it is removed from the harness environment in both modes. See [Sandbox filesystem isolation](../../security/sandbox.md). |
 | `DF_LOG_FORMAT` | no | `text` | Log format of `run`: `text` (human-readable) or `json` (one JSON object per line). Also available as `--log-format`. Any other value makes the process exit before it starts. The control plane sets it to its own format. |
 | `RUST_LOG` | no | `info` | Log level in `EnvFilter` syntax, for example `info` or `info,factory_agent=debug`. Unset, empty or invalid values log at `info`; an invalid value also logs a warning naming `RUST_LOG`. The control plane sets it from `sandbox.logLevel`. DEBUG adds agent message and thought chunks. |
 
@@ -61,9 +62,24 @@ These are compiled in and not configurable.
   instance CA file, or, for `opencode`, a configuration document in `OPENCODE_CONFIG_CONTENT` and
   the CA in `NODE_EXTRA_CA_CERTS`; for `claude-code` that is `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN` (provider
   scheme `claude-subscription`) or `ANTHROPIC_API_KEY` (other schemes), `ANTHROPIC_MODEL` (the persona's model ID), and `NODE_EXTRA_CA_CERTS`
-  (`/run/factory/tls/ca.crt`), plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so Claude Code sends
+  (`/run/factory/ca/ca.crt`), plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so Claude Code sends
   no telemetry or update checks past the endpoint. The runtime holds no model credential and reports no token usage: the
   gateway measures it, and usage the harness reports over ACP is not forwarded.
+- **Harness confinement.** With `DF_LANDLOCK=enforce`, the runtime probes the kernel before it writes
+  the harness files; below Landlock ABI 6 it ends the run `FAILED` with a `sandbox.landlock_unavailable`
+  notice and starts nothing. Otherwise it starts the adapter command as
+  `factory-agent sandbox -- <command>`, which applies the Landlock domain to itself and replaces
+  itself with the command (exit status 125, command not run, on any setup failure, including a
+  symlink in the path of `repo/` or `home/`). The domain grants read and execute on every top-level
+  directory that is not a symlink, except those holding `$DF_DATA_DIR`, `$DF_RUN_DIR` and
+  `$DF_TLS_DIR`; full access to `repo/`, `home/`, `/tmp` and `/dev`; read access to
+  `$DF_RUN_DIR/ca/`; and scopes signals and abstract Unix sockets. In both modes the harness
+  environment has no `DF_*` variable except `DF_RUNTIME_SOCK`, `DF_RUN_DIR` and `DF_LOG_FORMAT`
+  (the wrapper removes them with `enforce`, the runtime itself with `disabled`); the harness
+  inherits only stdin, stdout and stderr. At startup, before anything below `$DF_DATA_DIR` is
+  created or the outbox opens, the runtime fails if `$DF_DATA_DIR/runtime` is a symlink or has a
+  symlink in its path, removes symlinks below it, and replaces files that have more than one hard
+  link with a copy. Full description: [Sandbox filesystem isolation](../../security/sandbox.md).
 - **Prompt input.** The control plane releases queued messages together in one `Prompts` control
   message, in queue order, also after a reconnect. The runtime queues the whole batch before waking
   and starts one turn with every waiting prompt. Each message starts with its `author_name` and a

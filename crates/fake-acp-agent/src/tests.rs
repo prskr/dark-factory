@@ -80,6 +80,8 @@ fn shipped_scripts_parse() {
     assert_eq!(protected.sessions.new.len(), 1);
     let hidden = Script::from_yaml_str(include_str!("../scripts/push-hidden.yaml")).unwrap();
     assert_eq!(hidden.sessions.new.len(), 1);
+    let landlock = Script::from_yaml_str(include_str!("../scripts/landlock.yaml")).unwrap();
+    assert_eq!(landlock.sessions.new.len(), 1);
     let delegation = Script::from_yaml_str(include_str!("../scripts/delegation.yaml")).unwrap();
     assert_eq!(delegation.sessions.new.len(), 4);
     assert_eq!(delegation.sessions.loaded.len(), 4);

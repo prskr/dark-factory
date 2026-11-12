@@ -23,9 +23,9 @@ pub mod webhooks;
 
 pub use config::{
     ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,
-    ConfigError, DatabaseConfig, InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig,
-    PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
-    WebhookSecretConfig,
+    ConfigError, DatabaseConfig, InstanceConfig, LandlockMode, MAX_PLUGIN_CALL_TIMEOUT_SECONDS,
+    NetworkConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
+    SandboxSectionConfig, WebhookSecretConfig,
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,

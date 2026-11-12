@@ -74,6 +74,7 @@ Every key in `values.yaml` is documented below:
 | `telemetry.otlp.insecure` | `bool` | `false` | `OTEL_EXPORTER_OTLP_INSECURE`: connect without TLS. |
 | `telemetry.otlp.headersSecret` | `string` | `''` | Name of an existing Secret in the release namespace whose key `headers` becomes `OTEL_EXPORTER_OTLP_HEADERS` (gRPC metadata, e.g. `authorization=Bearer ...`). |
 | `sandbox.logLevel` | `string` | `info` | Rendered as `sandbox.logLevel` in the instance config; the control plane sets it as `RUST_LOG` of every sandbox. DEBUG adds agent message chunks. |
+| `sandbox.landlock` | `enforce` or `disabled` | `enforce` | Rendered as `sandbox.landlock` in the instance config; the control plane sets it as `DF_LANDLOCK` of every sandbox. `enforce` confines the harness with Landlock and needs Linux 6.12+ with Landlock enabled (a run on an older kernel fails with `sandbox.landlock_unavailable`); `disabled` runs the harness unrestricted. See [Sandbox filesystem isolation](../../../docs/content/security/sandbox.md). |
 | `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. |
 | `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. |

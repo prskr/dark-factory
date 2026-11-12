@@ -55,7 +55,7 @@ model. The wire API is the one of the model; the harness has no order of prefere
 | Base URL | `ANTHROPIC_BASE_URL` = `<gateway>/inference` | none; in the configuration document |
 | Persona's model | `ANTHROPIC_MODEL` = the model ID (`ANTHROPIC_SMALL_FAST_MODEL` stays unset) | none; `model` and `small_model` in the configuration document |
 | Placeholder key `df-placeholder` | `CLAUDE_CODE_OAUTH_TOKEN` (provider scheme `claude-subscription`), otherwise `ANTHROPIC_API_KEY` | none; in the configuration document |
-| CA file `/run/factory/tls/ca.crt` | `NODE_EXTRA_CA_CERTS` | `NODE_EXTRA_CA_CERTS` |
+| CA file `/run/factory/ca/ca.crt` | `NODE_EXTRA_CA_CERTS` | `NODE_EXTRA_CA_CERTS` |
 | Fixed variables | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`; `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude` only when the run mounts the harness image | `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` |
 | Configuration document | none | `OPENCODE_CONFIG_CONTENT` (below) |
 | System prompt file (below `HOME`) | `.claude/CLAUDE.md` | `.config/opencode/AGENTS.md` |

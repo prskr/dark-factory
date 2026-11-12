@@ -22,6 +22,7 @@ pub mod outbox;
 pub mod runner;
 pub mod runtime_handler;
 pub mod runtime_socket;
+pub mod sandbox;
 pub mod transcript;
 pub mod workspace;
 
@@ -41,16 +42,37 @@ const ASSIGN_TIMEOUT: Duration = Duration::from_mins(10);
 /// `core.hooksPath` for the agent's git: the empty, read-only hooks directory from the image.
 const HARNESS_HOOKS_PATH: &str = "/opt/factory/hooks-empty";
 
-#[tokio::main]
+#[expect(
+    clippy::print_stderr,
+    reason = "the mcp and sandbox subcommands report errors on stderr"
+)]
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    if let Command::Sandbox { root, command } = cli.command {
+        // Without an async runtime: the wrapper closes every inherited descriptor, which would
+        // include the runtime's own, and a runtime that lost them hangs when it shuts down.
+        // `run` only returns when the command did not start.
+        eprintln!("sandbox: {:#}", sandbox::run(&root, &command));
+        return ExitCode::from(sandbox::SETUP_FAILED);
+    }
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("cannot start the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run_command(cli))
+}
+
 #[expect(
     clippy::print_stderr,
     reason = "the mcp subcommand reports errors on stderr"
 )]
-async fn main() -> ExitCode {
+async fn run_command(cli: Cli) -> ExitCode {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(cli.log_format).await,
         Command::Mcp { socket } => {
@@ -60,6 +82,7 @@ async fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        Command::Sandbox { .. } => ExitCode::FAILURE,
     }
 }
 
@@ -85,18 +108,30 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     let config = match config::RuntimeConfig::from_env() {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(error = %e, "invalid configuration");
+            tracing::error!(error = format!("{e:#}"), "invalid configuration");
             return ExitCode::FAILURE;
         }
     };
-    let Some(dirs) = create_run_dirs(&config) else {
+    let layout = config.layout.clone();
+    // Before anything is created or opened below the data directory: aliases that an unrestricted
+    // run left on the task volume must not redirect or reach the outbox.
+    if !clean_outbox_aliases(&layout.outbox_dir()) {
+        return ExitCode::FAILURE;
+    }
+    let Some(dirs) = create_run_dirs(&layout) else {
         return ExitCode::FAILURE;
     };
     let Some(outbox) = open_outbox(&dirs.outbox_data) else {
         return ExitCode::FAILURE;
     };
-    // The gateway's Git proxy presents a certificate of the instance CA
-    let instance_ca = config.tls_dir.join("ca.crt");
+    // The gateway's Git proxy presents a certificate of the instance CA. The runtime keeps a copy
+    // that the harness may read (the TLS directory holds the private key).
+    if let Err(e) = sandbox::aliases::publish_ca(&layout.tls_dir, &layout.ca_dir()) {
+        tracing::error!(error = %e, "failed to copy the instance CA");
+        return ExitCode::FAILURE;
+    }
+    let instance_ca = layout.ca_file();
+    let confinement = runner::Confinement::new(config.landlock);
 
     let mut conn_handle = connection::ConnectionManager::new(
         config,
@@ -114,6 +149,8 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     let shutdown_tx = conn_handle.shutdown_tx();
     let conn_task = conn_handle.task.take();
     let driver_params = runner::RunDriverParams {
+        confinement,
+        harness_base_env: std::env::vars_os().collect(),
         assign: startup.assign,
         initial_prompts: startup.initial_prompts,
         cancel_requested: startup.cancel_requested,
@@ -125,7 +162,7 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
         runtime_dir: dirs.runtime,
         // Read-only empty hooks directory from the image, never a path the project or agent can write
         hooks_path: PathBuf::from(HARNESS_HOOKS_PATH),
-        mcp_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("factory-agent")),
+        runtime_exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("factory-agent")),
         outbox,
         inbound_rx: conn_handle.inbound_rx,
         outbound_tx: conn_handle.outbound_tx.clone(),
@@ -159,13 +196,36 @@ async fn run_agent(log_format: LogFormat) -> ExitCode {
     }
 }
 
+/// Makes the outbox directory safe to open: refuses a symlinked directory, removes symlinks below
+/// it and replaces hard-linked files by copies. `false` after a logged failure.
+fn clean_outbox_aliases(dir: &Path) -> bool {
+    let links = match sandbox::aliases::secure_outbox_dir(dir) {
+        Ok(links) => links,
+        Err(e) => {
+            tracing::error!(error = format!("{e:#}"), "refusing the runtime directory");
+            return false;
+        }
+    };
+    let copies = match sandbox::aliases::break_hard_links(dir) {
+        Ok(copies) => copies,
+        Err(e) => {
+            tracing::error!(error = %e, dir = %dir.display(), "failed to break hard links");
+            return false;
+        }
+    };
+    if links + copies > 0 {
+        tracing::warn!(links, copies, "removed aliases below the runtime directory");
+    }
+    true
+}
+
 /// Creates the directories of the run. `None` after a logged failure.
-fn create_run_dirs(config: &config::RuntimeConfig) -> Option<RunDirs> {
+fn create_run_dirs(layout: &config::Layout) -> Option<RunDirs> {
     let dirs = RunDirs {
-        runtime: config.run_dir.clone(),
-        outbox_data: config.data_dir.join("runtime"),
-        repo: config.data_dir.join("repo"),
-        home: config.data_dir.join("home"),
+        runtime: layout.run_dir.clone(),
+        outbox_data: layout.outbox_dir(),
+        repo: layout.repo_dir(),
+        home: layout.home_dir(),
     };
     for dir in [&dirs.runtime, &dirs.outbox_data, &dirs.repo, &dirs.home] {
         if let Err(e) = std::fs::create_dir_all(dir) {

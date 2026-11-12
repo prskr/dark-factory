@@ -104,8 +104,8 @@ async fn test_df_harness_complete_task_ends_run_completed() {
 
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let harness_bin = root.join("target/debug/df-harness");
-    let mcp_bin = root.join("target/debug/factory-agent");
-    if !harness_bin.exists() || !mcp_bin.exists() {
+    let runtime_exe = root.join("target/debug/factory-agent");
+    if !harness_bin.exists() || !runtime_exe.exists() {
         eprintln!("Skipping integration test: binaries not present");
         return;
     }
@@ -223,13 +223,15 @@ async fn test_df_harness_complete_task_ends_run_completed() {
     });
 
     let params = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign,
         initial_prompts,
         repo_dir: repo_dir.clone(),
         home_dir,
         runtime_dir,
         hooks_path,
-        mcp_command: mcp_bin,
+        runtime_exe,
         runtime_sock_path: runtime_sock,
         git: Git::new(&repo_dir).allow_protocols(["file", "https"]),
         outbox,
@@ -265,14 +267,14 @@ async fn test_scenario_full_runtime_two_runs_on_single_data_dir() {
         .parent()
         .unwrap()
         .join("target/debug/fake-acp-agent");
-    let mcp_bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let runtime_exe = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .join("target/debug/factory-agent");
 
-    if !fake_bin.exists() || !mcp_bin.exists() {
+    if !fake_bin.exists() || !runtime_exe.exists() {
         eprintln!("Skipping test: binaries not present");
         return;
     }
@@ -451,13 +453,15 @@ sessions:
         .with_ssl_ca_info(&ca_path);
 
     let params1 = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign: assign1,
         initial_prompts: initial_prompts1,
         repo_dir: repo_dir.clone(),
         home_dir: home_dir.clone(),
         runtime_dir: runtime_dir.clone(),
         hooks_path: hooks_path.clone(),
-        mcp_command: mcp_bin.clone(),
+        runtime_exe: runtime_exe.clone(),
         runtime_sock_path: runtime_sock.clone(),
         git: git1,
         outbox: outbox1,
@@ -615,13 +619,15 @@ sessions:
         .with_ssl_ca_info(&ca_path);
 
     let params2 = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign: assign2,
         initial_prompts: initial_prompts2,
         repo_dir: repo_dir.clone(),
         home_dir: home_dir.clone(),
         runtime_dir: runtime_dir.clone(),
         hooks_path: hooks_path.clone(),
-        mcp_command: mcp_bin.clone(),
+        runtime_exe: runtime_exe.clone(),
         runtime_sock_path: runtime_sock.clone(),
         git: git2,
         outbox: outbox2,
@@ -728,7 +734,7 @@ async fn test_manual_claude_acp_run() {
     let runtime_sock = temp.path().join("runtime.sock");
     std::fs::create_dir_all(&hooks_path).unwrap();
 
-    let mcp_bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let runtime_exe = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
@@ -821,13 +827,15 @@ async fn test_manual_claude_acp_run() {
     let git = Git::new(&repo_dir).allow_protocols(["file", "https"]);
 
     let params = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign,
         initial_prompts,
         repo_dir,
         home_dir,
         runtime_dir,
         hooks_path,
-        mcp_command: mcp_bin,
+        runtime_exe,
         runtime_sock_path: runtime_sock,
         git,
         outbox,
@@ -867,6 +875,8 @@ async fn test_cancel_before_assign_skips_prepare() {
     let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel(100);
 
     let params = RunDriverParams {
+        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        harness_base_env: std::env::vars_os().collect(),
         assign: Assign {
             run_id: "run-cancel-before-assign".to_string(),
             task: None,
@@ -892,7 +902,7 @@ async fn test_cancel_before_assign_skips_prepare() {
         home_dir: data.join("home"),
         runtime_dir: temp.path().join("run"),
         hooks_path: temp.path().join("hooks"),
-        mcp_command: std::path::PathBuf::from("factory-agent"),
+        runtime_exe: std::path::PathBuf::from("factory-agent"),
         runtime_sock_path: temp.path().join("run").join("runtime.sock"),
         git: Git::new(&repo_dir),
         outbox,

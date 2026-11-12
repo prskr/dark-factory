@@ -40,6 +40,7 @@ boundary of the sandbox instead of inside it.
 | Kubernetes API | No service account token (`automountServiceAccountToken: false`); the sandbox namespace holds no Secrets |
 | Network | A generated NetworkPolicy per run: egress only to the control plane agent port, the gateway and allowed cluster services; no ingress; no DNS |
 | Images | The runtime and the harness are mounted as read-only image volumes; no container daemon, no nested containers |
+| Filesystem | With `sandbox.landlock: enforce` (the default), the harness runs in a Landlock domain: no access to the runtime's TLS key and outbox, no writes to system directories, no signals to the runtime (`disabled` gives this up, see [opting out](sandbox.md#opting-out); [details](sandbox.md)) |
 
 ## Identity
 

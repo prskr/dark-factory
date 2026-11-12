@@ -15,8 +15,8 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
-        env = "DF_LOG_FORMAT",
-        value_name = "DF_LOG_FORMAT",
+        env = crate::config::ENV_LOG_FORMAT,
+        value_name = crate::config::ENV_LOG_FORMAT,
         value_enum,
         default_value = "text"
     )]
@@ -35,9 +35,19 @@ pub enum Command {
         /// Path to runtime Unix domain socket.
         #[arg(
             long,
-            env = "DF_RUNTIME_SOCK",
-            default_value = "/run/factory/runtime.sock"
+            env = crate::config::ENV_RUNTIME_SOCK,
+            default_value = df_core::harness::SANDBOX_RUNTIME_SOCK
         )]
         socket: std::path::PathBuf,
+    },
+    /// Applies the harness's Landlock domain to itself, then replaces itself with the command.
+    /// Started by `run`; exits with 125 when the domain can't be applied.
+    Sandbox {
+        /// Directory whose entries get read and execute access (tests use a fake root).
+        #[arg(long, hide = true, default_value = "/")]
+        root: std::path::PathBuf,
+        /// The command to run inside the domain, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<std::ffi::OsString>,
     },
 }

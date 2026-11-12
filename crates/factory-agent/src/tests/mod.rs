@@ -12,9 +12,10 @@ use tokio::sync::mpsc;
 
 use crate::git::Git;
 use crate::outbox::Outbox;
-use crate::runner::{RunDriverParams, RunExecutionResult, Timeouts, run_session};
+use crate::runner::{Confinement, RunDriverParams, RunExecutionResult, Timeouts, run_session};
 
 mod cli;
+mod confinement;
 mod connection;
 mod git;
 mod git_retry;
@@ -176,13 +177,16 @@ pub(crate) struct RunScenario {
     upstream: PathBuf,
     script_file: PathBuf,
     fake_bin: PathBuf,
-    mcp_bin: PathBuf,
+    runtime_exe: PathBuf,
     prompt: Option<String>,
     tools: Vec<ToolDescriptor>,
     budgets: Option<Budgets>,
     continuation: Option<Continuation>,
     release_up_front: bool,
     timeouts: Timeouts,
+    confinement: Confinement,
+    harness_bin: Option<PathBuf>,
+    base_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
 }
 
 impl RunScenario {
@@ -196,16 +200,16 @@ impl RunScenario {
         };
         let fake_bin = std::env::var_os("FAKE_ACP_AGENT_BIN")
             .map_or_else(|| bin("fake-acp-agent"), PathBuf::from);
-        let mcp_bin =
+        let runtime_exe =
             std::env::var_os("DF_TEST_BIN").map_or_else(|| bin("factory-agent"), PathBuf::from);
-        if !fake_bin.exists() || !mcp_bin.exists() {
+        if !fake_bin.exists() || !runtime_exe.exists() {
             eprintln!("Skipping integration test: binaries not present");
             return None;
         }
         let fake_bin = fake_bin
             .canonicalize()
             .expect("resolve fake-acp-agent test binary");
-        let mcp_bin = mcp_bin
+        let runtime_exe = runtime_exe
             .canonicalize()
             .expect("resolve factory-agent test binary");
         let temp = tempfile::tempdir().unwrap();
@@ -218,14 +222,46 @@ impl RunScenario {
             upstream,
             script_file,
             fake_bin,
-            mcp_bin,
+            runtime_exe,
             prompt: Some("Start working".to_string()),
             tools: Vec::new(),
             budgets: None,
             continuation: None,
             release_up_front: false,
             timeouts: Timeouts::default(),
+            confinement: Confinement::new(df_core::LandlockMode::Disabled),
+            harness_bin: None,
+            base_env: std::env::vars_os().collect(),
         })
+    }
+
+    /// The fake ACP agent binary the run starts.
+    pub(crate) fn fake_bin(&self) -> PathBuf {
+        self.fake_bin.clone()
+    }
+
+    /// Start the harness through `wrapper` (the runtime's own binary in production) when the
+    /// confinement is enforced.
+    pub(crate) fn wrapper(mut self, wrapper: PathBuf) -> Self {
+        self.runtime_exe = wrapper;
+        self
+    }
+
+    /// Start `bin` instead of the fake ACP agent; it receives the agent's arguments.
+    pub(crate) fn harness_bin(mut self, bin: PathBuf) -> Self {
+        self.harness_bin = Some(bin);
+        self
+    }
+
+    /// An extra variable in the environment the runtime was started with.
+    pub(crate) fn runtime_var(mut self, name: &str, value: &str) -> Self {
+        self.base_env.push((name.into(), value.into()));
+        self
+    }
+
+    pub(crate) fn confinement(mut self, confinement: Confinement) -> Self {
+        self.confinement = confinement;
+        self
     }
 
     /// Shorter waits for a harness that does not react.
@@ -306,7 +342,11 @@ impl RunScenario {
             harness: Some(Harness {
                 kind: Some(df_proto::agent::v1::harness::Kind::Acp(AcpHarness {
                     command: vec![
-                        self.fake_bin.to_string_lossy().to_string(),
+                        self.harness_bin
+                            .as_ref()
+                            .unwrap_or(&self.fake_bin)
+                            .to_string_lossy()
+                            .to_string(),
                         "--script".to_string(),
                         self.script_file.to_string_lossy().to_string(),
                     ],
@@ -324,12 +364,14 @@ impl RunScenario {
             |text| text_prompt("prompt-1", text),
         );
         RunDriverParams {
+            confinement: self.confinement.clone(),
+            harness_base_env: self.base_env.clone(),
             assign,
             initial_prompts: vec![initial_prompt],
             home_dir: self.home_dir(),
             runtime_dir,
             hooks_path,
-            mcp_command: self.mcp_bin.clone(),
+            runtime_exe: self.runtime_exe.clone(),
             runtime_sock_path: temp.join("runtime.sock"),
             git: Git::new(&repo_dir).allow_protocols(["file", "https"]),
             repo_dir,

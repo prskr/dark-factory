@@ -50,6 +50,8 @@ pub struct ChannelConfig {
     pub events: EventSinks,
     /// Limits of task artifacts.
     pub artifacts: df_core::ArtifactsConfig,
+    /// Whether the sandboxes confine the harness; the system prompt tells the agent.
+    pub landlock: df_core::LandlockMode,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -65,6 +67,7 @@ impl From<&InstanceConfig> for ChannelConfig {
             },
             events: EventSinks::new(&cfg.lifecycle_events),
             artifacts: cfg.artifacts,
+            landlock: cfg.sandbox.provisioning.landlock,
         }
     }
 }
@@ -99,4 +102,23 @@ pub struct ChannelContext {
     /// The approval types of this instance, shared with the web UI. Empty until a change adds
     /// types; the tools that raise approvals (`request_approval`) resolve them here.
     pub approval_types: df_db::requests::ApprovalTypes,
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn channel_config_takes_the_landlock_mode_from_the_sandbox_section() {
+        let database = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+        let landlock = |extra: &str| {
+            let cfg = InstanceConfig::from_yaml_str(&format!("{database}{extra}")).unwrap();
+            ChannelConfig::from(&cfg).landlock
+        };
+        assert_eq!(landlock(""), df_core::LandlockMode::Enforce);
+        assert_eq!(
+            landlock("sandbox:\n  landlock: disabled\n"),
+            df_core::LandlockMode::Disabled
+        );
+    }
 }

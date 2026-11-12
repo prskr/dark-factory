@@ -110,6 +110,11 @@ pub async fn run(pool: &PgPool) -> Result<()> {
             data::INTERRUPT_PROJECT_NAME,
             data::INTERRUPT_SCRIPT,
         ),
+        project(
+            data::LANDLOCK_PROJECT_KEY,
+            data::LANDLOCK_PROJECT_NAME,
+            data::LANDLOCK_SCRIPT,
+        ),
     ];
     for seed in projects {
         ensure_project(pool, actor, &seed, credential).await?;
