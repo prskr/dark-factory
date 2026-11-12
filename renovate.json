@@ -111,6 +111,18 @@
     },
     {
       "customType": "regex",
+      "description": "Playwright base image (tag and digest) of the e2e Playwright server image; playwright-core in deploy/images/playwright-server/package.json and playwright-rs move with it (group \"Playwright\")",
+      "managerFilePatterns": [
+        "/^MODULE\\.bazel$/"
+      ],
+      "matchStrings": [
+        "digest = \"(?<currentDigest>sha256:[a-f0-9]{64})\",[^)]*?repository = \"playwright\",\\s+tag = \"(?<currentValue>v[^\"]+)\""
+      ],
+      "depNameTemplate": "mcr.microsoft.com/playwright",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
       "description": "Rust version of the Bazel toolchains; must equal `channel` in rust-toolchain.toml (rust-toolchain manager)",
       "managerFilePatterns": [
         "/^MODULE\\.bazel$/"
@@ -172,6 +184,15 @@
         "ghcr.io/prskr/dark-factory/**"
       ],
       "enabled": false
+    },
+    {
+      "description": "One PR for Playwright: the server package, the base image of the e2e Playwright server and the driver of the test host must share one version (e2e-local.sh checks)",
+      "matchPackageNames": [
+        "playwright-core",
+        "mcr.microsoft.com/playwright",
+        "playwright-rs"
+      ],
+      "groupName": "Playwright"
     },
     {
       "description": "One PR for the Rust toolchain: rust-toolchain.toml and RUST_VERSION in MODULE.bazel",

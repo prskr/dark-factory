@@ -265,6 +265,21 @@ pull(
     repository = "library/buildpack-deps",
 )
 
+# Browsers and system libraries for the Playwright server of the e2e cluster (load_e2e_playwright). The
+# tag is the Playwright version (Renovate updates tag and digest together).
+pull(
+    name = "playwright_base",
+    digest = "sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+    downloader = "bazel",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+    registry = "mcr.microsoft.com",
+    repository = "playwright",
+    tag = "v1.64.0-noble",
+)
+
 # Claude harness image (deploy/images/claude-harness): the ACP adapter and its npm dependencies from
 # the pnpm lockfile, Node.js from the unofficial musl builds and the musl runtime libraries (loader,
 # libstdc++, libgcc_s) from the Bootlin toolchains. Node's libstdc++ needs GCC >= 13, so the GCC 11
@@ -285,7 +300,14 @@ npm.npm_translate_lock(
     name = "npm_df_web",
     pnpm_lock = "//crates/df-web:pnpm-lock.yaml",
 )
-use_repo(npm, "npm_claude_harness", "npm_df_web")
+# The Playwright server of the e2e cluster (`deploy/images/playwright-server`): playwright-core on top
+# of the Playwright base image. Its version must equal the base image tag and the locked `playwright-rs`
+# (`deploy/e2e/e2e-local.sh` checks).
+npm.npm_translate_lock(
+    name = "npm_playwright_server",
+    pnpm_lock = "//deploy/images/playwright-server:pnpm-lock.yaml",
+)
+use_repo(npm, "npm_claude_harness", "npm_df_web", "npm_playwright_server")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 

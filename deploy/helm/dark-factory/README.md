@@ -2,7 +2,7 @@
 
 Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031), including:
 - Control plane `Deployment` and `Service` (`8080` UI/health, `9443` agent mTLS gRPC, `9444` internal `PolicyWatch` mTLS gRPC)
-- Egress gateway `Deployment` (`>= 2` replicas), `PodDisruptionBudget`, `Service` (`3128` proxy, `8443` Git proxy), mirror `emptyDir`, and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
+- Egress gateway `Deployment` (`gateway.replicas`, default `1`), `PodDisruptionBudget` (only for more than one replica), `Service` (`3128` proxy, `8443` Git proxy), mirror `emptyDir`, and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
 - `migrate` pre-install/pre-upgrade hook `Job`
 - Least-privilege Kubernetes RBAC (`design/deployment.md` §3)
 - Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota`, `LimitRange`, and tokenless `ServiceAccount`
@@ -149,9 +149,10 @@ Every key in `values.yaml` is documented below:
 | `lifecycleEvents.signingKey.existingSecret` | `string` | `""` | Optional. `Secret` with the Ed25519 private key (PKCS#8 PEM) that signs lifecycle event deliveries. Empty: the chart creates the `Certificate` `<fullname>-lifecycle-events` (Secret `<fullname>-lifecycle-events-key`), see [Lifecycle event signing key](#lifecycle-event-signing-key). |
 | `lifecycleEvents.signingKey.key` | `string` | `tls.key` | Key of the private key in the `Secret`. It is mounted read-only at `/run/secrets/lifecycle-events/tls.key`. |
 | `lifecycleEvents.subscriptions` | `list` | `[]` | Optional. Instance subscriptions: receive the events of every project. Each entry has `url` (required, `http://` or `https://`, cluster-internal addresses allowed) and `events` (optional list of `volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`; empty or missing: all types, including later ones). The schema rejects unknown types and entries without `url`. Receiver guide: [`docs/content/integrations/lifecycle-events.md`](../../../docs/content/integrations/lifecycle-events.md). |
-| `gateway.replicas` | `int` | `2` | Number of egress gateway pod replicas (minimum `2`). |
+| `gateway.replicas` | `int` | `1` | Number of egress gateway pod replicas (minimum `1`). Set `2` or more for high availability; a restart of a single gateway briefly interrupts sandbox egress. |
 | `gateway.serviceAccountName` | `string` | `""` | Optional override for the gateway `ServiceAccount` name (`automountServiceAccountToken: false`). |
-| `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget`. |
+| `gateway.pdb.enabled` | `bool` | `true` | Render the gateway `PodDisruptionBudget`. It exists only with `gateway.replicas` greater than `1`. |
+| `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget` (only applies when the budget is rendered). |
 | `gateway.ports.proxy` | `int` | `3128` | Egress HTTP/CONNECT proxy port for sandboxes. |
 | `gateway.ports.git` | `int` | `8443` | Git proxy (HTTPS) port for sandboxes, on the gateway container and `Service` (port name `git`). Sandboxes clone and push through `https://<fullname>-gateway.<namespace>.svc:<port>/git/<task>.git`; the gateway certificate carries that name. |
 | `gateway.git.mirrorSizeLimit` | `string` | `"10Gi"` | `sizeLimit` of the gateway `emptyDir` mounted at `/var/lib/dark-factory/git-mirrors` (repository mirrors and push spools). The kubelet evicts a pod that exceeds it; mirrors are refetched after a restart. |

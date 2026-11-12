@@ -206,7 +206,7 @@ tests:
             targetPort: metrics
             protocol: TCP
         template: gateway-service.yaml
-        documentIndex: 1
+        documentIndex: 0
 
   - it: reads OTLP auth headers from a Secret and exposes no metrics port with only the otlp exporter
     set:

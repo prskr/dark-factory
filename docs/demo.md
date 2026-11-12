@@ -26,20 +26,24 @@ kind delete cluster --name df-e2e
 
 ```mermaid
 flowchart TD
-    A[kind create cluster df-e2e] --> B[cert-manager, CSI driver]
+    V[check the Playwright versions] --> A[kind create cluster df-e2e]
+    A --> B[cert-manager, CSI driver]
     A --> I[bazel run //deploy:load_e2e_*, kind load image-archive]
-    B --> C[PostgreSQL, Dex, Playwright server, event receiver, Forgejo]
+    B --> C[PostgreSQL, Dex, event receiver, Forgejo]
     C --> D[Forgejo users factory and reviewer, token, factory/demo, issue 1, webhook, Secrets]
-    D --> E[helm install values-e2e.yaml]
-    I --> E
+    D --> P[Playwright server]
+    I --> P
+    P --> E[helm install values-e2e.yaml]
     E --> F[seed, port-forwards]
-    F --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1"]
+    F --> X["egress probe: skip the internet test (fail in CI)"]
+    X --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1"]
     G --> H[kind delete cluster]
 ```
 
 1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`). Meanwhile cargo compiles the seed program and the suite.
-2. Builds the control plane, runtime, test project and Forgejo plugin images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL, Playwright). The Claude images are not needed.
-3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), a Playwright server, the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET), the fake Anthropic upstream (`deploy/e2e/fake-upstream.yaml`: `fake-acp-agent --serve-fake-anthropic` from the test project image; it answers `401` unless the request carries the key `e2e-model-api-key`, which only the gateway knows) and Forgejo (Helm chart, SQLite, no persistence).
+2. Builds the control plane, runtime, test project, plugin and Playwright server images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL) and the Playwright base image, which Bazel downloads into its repository cache. The Claude images are not needed.
+   The Playwright server image (`//deploy:load_e2e_playwright`) is the `mcr.microsoft.com/playwright` base image plus the pinned `playwright-core` package (`deploy/images/playwright-server`), so the pod needs no npm access at runtime. The script first checks that the `playwright-core` version, the base image tag in `MODULE.bazel` and the driver version of the locked `playwright-rs` are equal and stops with the three values otherwise.
+3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), the Playwright server (after the images are loaded), the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET), the fake Anthropic upstream (`deploy/e2e/fake-upstream.yaml`: `fake-acp-agent --serve-fake-anthropic` from the test project image; it answers `401` unless the request carries the key `e2e-model-api-key`, which only the gateway knows) and Forgejo (Helm chart, SQLite, no persistence).
 4. Creates the Forgejo users `factory` (the bot) and `reviewer` (collaborator with write access) with their tokens, the repository `factory/demo` with issue 1 and a repository webhook to `http://dark-factory-control-plane.dark-factory.svc:8080/webhooks/forgejo` (the events of [Forge webhooks](content/integrations/forges/webhooks.md), secret `e2e-webhook-secret`; `deploy/e2e/forgejo-values.yaml` allows the host in `webhook.ALLOWED_HOST_LIST`), and the Secret `forgejo-token` for the credential reference.
 5. Creates the Secrets `fake-llm-key` for the model provider's credential reference and `forge-webhooks` (key `forgejo`, the webhook secret), and installs the chart with `deploy/values-e2e.yaml`.
 6. Seeds the database, port-forwards PostgreSQL, Forgejo, the Playwright server and the receiver, and runs the ignored tests of `crates/df-e2e` one at a time.
@@ -107,7 +111,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 | `follow_up_resumes_the_session_and_completing_marks_the_pr_ready` | line comment on the PR, follow-up message; `read_pull_request_feedback` and a reply in the review thread (`comment_on_pull_request`), `complete_task` in run 2 (the task is `in_review`, run 2 ends `completed`) |
 | `rate_limited_run_shows_the_limit_and_the_next_message_continues` | rate-limited run (the UI shows "rate limited"; the retry time is checked on the run in the database) |
 | `rate_limited_task_resumes_at_the_retry_time_without_a_message` | the rate-limited task resumes at the retry time (60 s in the script) and run 2 starts without a message |
-| `denied_host_is_requested_and_the_approval_lets_the_retry_through` | demo step 4 of iteration 2 (`openspec/changes/archive/2026-11-02-iter2-egress-approvals`): the proxy denies `pypi.org:443`, the control plane raises a non-blocking `network-access` request, the test approves it for the task in `/requests`, and the agent's retry in the same turn succeeds within 10 s of the approval (UI included). Needs internet access from the cluster: the gateway never connects to private or cluster addresses, so no in-cluster host can stand in |
+| `denied_host_is_requested_and_the_approval_lets_the_retry_through` | demo step 4 of iteration 2 (`openspec/changes/archive/2026-11-02-iter2-egress-approvals`): the proxy denies `pypi.org:443`, the control plane raises a non-blocking `network-access` request, the test approves it for the task in `/requests`, and the agent's retry in the same turn succeeds within 10 s of the approval (UI included). Needs a verified HTTPS connection from a pod to the internet: the gateway never connects to private or cluster addresses, so no in-cluster host can stand in. Behind a TLS-intercepting proxy the sandbox does not trust, `just e2e-local` skips it and logs `pods cannot fetch https://pypi.org ...: skipping <test>` (see [Sandboxes behind a TLS-intercepting proxy](#sandboxes-behind-a-tls-intercepting-proxy)) |
 | `committed_secret_is_rejected_and_the_amended_commit_closes_the_request` | demo step 2 of iteration 2 (`openspec/changes/iter2-push-checks`): the Git proxy rejects the commit with a test GitHub token (`df:secret-scan`, masked `ghp_********`), the control plane raises a `push-check-exception` request and queues `push.rejected`; the agent amends its unpushed commit, the next push passes and closes the request (`push-accepted`). No push record, message or forge file holds the token |
 | `protected_path_passes_after_the_exception_is_approved` | demo step 3 of iteration 2 without the agent's question: every push of the `.forgejo/workflows/ci.yml` change is rejected (`df:protected-path`) until the test approves the request in `/requests`; the commit reaches Forgejo after the next turn |
 | `a_push_changing_a_hidden_path_is_rejected_and_the_agent_is_told` | demo step 6 of iteration 3 (`openspec/changes/iter3-hidden-paths`): project `HP` hides `secret/**`; the agent does not find `secret/value.txt`, commits its removal with `git rm --cached --sparse`, and the Git proxy rejects every push with `df:hidden-path` (no approval request); the agent's `push.rejected` messages name the rule and the path, and the forge keeps the file |
@@ -176,14 +180,25 @@ The test host needs the Playwright driver (about 130 MB). The workspace sets `PL
 
 ## Sandboxes behind a TLS-intercepting proxy
 
-`just e2e-local` runs inside agent sandboxes with these adaptations, each applied only when it is needed:
+`just e2e-local` runs inside agent sandboxes with these adaptations:
 
 | Condition | Adaptation |
 |---|---|
-| `/.msb/tls/ca.pem` exists (CA of the sandbox's TLS-intercepting proxy) | Mounted to `/etc/ssl/certs/e2e-proxy-ca.pem` of the node: containerd trusts it for image pulls. The Playwright pod reads it through `NODE_EXTRA_CA_CERTS` for its npm download. |
-| The node's kernel lacks the iptables `statistic` match | kube-proxy needs it for a Service with several endpoints; without it every sync fails and no ClusterIP works, cluster DNS included. The script scales CoreDNS to one replica and installs the release with one gateway replica (`--skip-schema-validation`, the chart requires two). |
+| `/.msb/tls/ca.pem` exists (CA of the sandbox's TLS-intercepting proxy) | Mounted to `/etc/ssl/certs/e2e-proxy-ca.pem` of the node: containerd trusts it for image pulls. |
+| Always (the node's kernel may lack the iptables `statistic` match) | kube-proxy needs it for a Service with several endpoints; without it every sync fails and no ClusterIP works, cluster DNS included. The script always scales CoreDNS to one replica. The chart's default of one gateway replica needs no override. |
+| Pods reach the internet, but HTTPS is intercepted and the CA is not in the sandbox image | Pods have egress (DNS, TCP and NAT work), but the certificate of `pypi.org` comes from the proxy's CA, so `curl` in a pod fails verification. Just before the tests (in `run_suite`) the script runs a probe pod from the test project image that fetches `https://pypi.org/simple/pip/`; when it fails, the script appends `--skip` for every test of `internet_tests` (today `denied_host_is_requested_and_the_approval_lets_the_retry_through`) to the test arguments, including `E2E_TEST_ARGS`, and logs the names. CI has no interception and runs all tests: when `CI` is set (GitHub Actions does), a failed probe fails the script instead of skipping. |
 
 The host's own downloads (`gh`, `helm`, `curl`, `cargo`) use the host's CA store. Bazel's remote cache (gRPC) may not pass such a proxy; then disable it with an extra rc file: `BAZEL="bazel --bazelrc=.bazelrc.agents --bazelrc=<file>"` with `build --remote_cache=` and `build --bes_backend=`.
+
+## Bump Playwright
+
+The test driver (`playwright-rs`) and the server image must run the same Playwright version. It appears in three places:
+
+1. `playwright-core` in `deploy/images/playwright-server/package.json` (and its `pnpm-lock.yaml`: `pnpm install --lockfile-only` in that directory),
+2. the tag `v<version>-noble` and the digest of `playwright_base` in `MODULE.bazel`,
+3. `PLAYWRIGHT_VERSION` of the locked `playwright-rs` (a `cargo update -p playwright-rs` to a release that ships the version).
+
+Renovate groups the three in one PR ("Playwright" in `renovate.json`). A `playwright-rs` release can lag behind; `just e2e-local` stops at the start when the versions differ and prints all three.
 
 ## Rootless Podman
 

@@ -9,7 +9,7 @@
 | Component | Runs as | Language | Talks to |
 |---|---|---|---|
 | Control plane | Kubernetes Deployment (1..n replicas) | Rust | PostgreSQL, Kubernetes API, Keycloak, WASI plugins → forge/tracker, agent runtimes, gateway |
-| Gateway | Kubernetes Deployment (≥ 2 replicas), same binary in `gateway` mode | Rust | Control plane (policy stream, log relay), sandboxes (proxy), the internet |
+| Gateway | Kubernetes Deployment (1 replica by default, ≥ 2 for HA), same binary in `gateway` mode | Rust | Control plane (policy stream, log relay), sandboxes (proxy), the internet |
 | Agent runtime | Static binary in every sandbox pod (image volume) | Rust | Control plane (gRPC, mTLS), harness (ACP over stdio), Git remote and other hosts via the gateway |
 | Harness | Subprocess of the runtime | — (Claude Code: Node) | Model provider, runtime (ACP, MCP over stdio) |
 | Integration plugins | WebAssembly components inside the control plane | Any language with Component Model support (Rust first) | Forge/tracker HTTP APIs via the host |

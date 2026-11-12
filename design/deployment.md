@@ -84,7 +84,7 @@ CREATE ROLE dark_factory_app LOGIN PASSWORD '<app-password>';
 ## 5. Helm chart (ADR-0031)
 
 One release = one instance. The chart contains:
-- Control plane Deployment (`serve`), gateway Deployment (`gateway`, ≥ 2 replicas, PodDisruptionBudget), Services (incl. a headless Service for gateway pod discovery).
+- Control plane Deployment (`serve`), gateway Deployment (`gateway`, 1 replica by default, `gateway.replicas` ≥ 2 for high availability with a PodDisruptionBudget), Services (incl. a headless Service for gateway pod discovery).
 - `migrate` Job as a pre-install/pre-upgrade hook, with the owner credentials Secret and the optional application password Secret.
 - ServiceAccounts, Roles and RoleBindings from §3; release-prefixed cluster-scoped objects only where enabled.
 - The sandbox namespace with the objects from §2 (`sandboxNamespace.create`, default `true`), or a reference to an existing one.

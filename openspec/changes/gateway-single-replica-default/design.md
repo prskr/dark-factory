@@ -7,7 +7,7 @@
 - The Playwright pod (`deploy/e2e/playwright.yaml`) runs `npx -y playwright@1.64.0 run-server` on `mcr.microsoft.com/playwright:v1.64.0-noble`; the npm download needs the proxy CA in agent sandboxes (`NODE_EXTRA_CA_CERTS`, hostPath of the node's `/etc/ssl/certs`).
 - The other e2e images are Bazel `rules_img` builds loaded with `kind load image-archive` (`//deploy:load_e2e_<name>`). The Claude harness image takes its npm package from a pnpm lockfile (`npm_translate_lock`, `deploy/images/claude-harness`), which Renovate updates.
 - The host's test driver (`playwright-rs`) and the server must share the Playwright version; `install_driver` reads it from the locked `playwright-rs` source (`const PLAYWRIGHT_VERSION` in `build.rs`).
-- In the agent sandbox, a pod's TCP connect to `pypi.org:443` times out, while the host and a container on the `kind` Docker network connect. Image pulls by the node work. Pod egress is therefore lost between the pod network and the node's uplink, most likely in the NAT (masquerade) rules kindnet installs.
+- In the agent sandbox, pods have internet egress (DNS, TCP and NAT work), but the sandbox's TLS-intercepting proxy presents a certificate from a CA that the test-project image does not trust, so an HTTPS fetch from a pod fails verification (investigation: D5).
 
 ## Goals / Non-Goals
 
@@ -44,11 +44,13 @@ The Playwright version appears in `deploy/images/playwright-server/package.json`
 
 ### D5: Pod egress: fix first, probe-and-skip as fallback
 
-Implementation starts with a bounded investigation in a kept cluster (`E2E_KEEP=1`): kindnet logs, the node's NAT rules (`iptables-save -t nat`, `nft list ruleset`), and a pod-side connect with packet counters on the masquerade rule. If a missing kernel feature has a workaround inside the node (for example an equivalent rule kindnet can use), the script applies it like the CoreDNS scale-down. Otherwise:
+Finding of the investigation (kept cluster in the agent sandbox, task 4.1): pods do reach the internet. DNS works, TCP connects to `pypi.org:443` succeed in 20 ms from a pod in `playwright` and one in `dark-factory` (IPv6 addresses fail at once with `Network unreachable`, the IPv4 ones connect), the node's `KIND-MASQ-AGENT` chain masquerades the traffic (counter grows with each connect), and no rule or kernel feature is missing for outbound traffic. kindnet logs `netlink receive: operation not supported` from its nftables sync (the network policy controller); that affects policy enforcement, not egress. The cause of the failing test is the sandbox's TLS-intercepting proxy: the certificate `pypi.org` presents in a pod is issued by `microsandbox CA`, which the CA store of the test project image does not trust (`curl` fails verification, `curl -k` returns 200). The earlier premise "the connect times out" does not hold. A workaround inside the node does not exist: the CA would have to reach the sandbox pods (image or environment), which the e2e cluster deliberately does not do.
 
-- After the cluster is up, the script runs a short-lived pod (`docker.io/library/python:3.13-alpine`, already pulled for the receiver) in a namespace without NetworkPolicies that opens a TCP connection to `pypi.org:443` with a 5 s timeout.
-- On failure it logs `pods have no internet egress: skipping <tests>` and appends `--skip <name>` for each test in `internet_tests` (one array in the script, today `denied_host_is_requested_and_the_approval_lets_the_retry_through`) to the test arguments, including user-given `E2E_TEST_ARGS`.
-- CI has egress, so it runs every test.
+The fallback therefore applies with a different probe than the TCP connect first planned (a connect succeeds here and the test would still fail):
+
+- Just before the tests (in `run_suite`), `e2e-local.sh` runs a short-lived pod from the test project image (the CA store the sandboxes use; namespace `playwright`, no NetworkPolicy) that fetches `https://pypi.org/simple/pip/` with `curl` and a 10 s limit.
+- On failure it logs `pods cannot fetch https://pypi.org ...: skipping <tests>` and appends `--skip <name>` for each test in `internet_tests` (one array in the script, today `denied_host_is_requested_and_the_approval_lets_the_retry_through`) to the test arguments, including user-given `E2E_TEST_ARGS`.
+- CI has egress without interception, so it runs every test. When `CI` is set, a failed probe fails the script with a message instead of skipping, so a flake cannot silently skip the test there.
 
 ## Risks / Trade-offs
 

@@ -31,7 +31,7 @@ flowchart TB
 | Component | Runs as | Does | Holds |
 | --- | --- | --- | --- |
 | Control plane | Deployment `dark-factory serve` | Web UI, task and run scheduling, the agent channel for sandboxes, forge plugins, sandbox provisioning, policy distribution to the gateway | The database connection; resolves credentials from Secret references when it uses them |
-| Gateway | Deployment `dark-factory gateway` (2 or more replicas) | Egress proxy for sandbox HTTP(S), Git smart-HTTP proxy with push checks, inference endpoint for model traffic, live traffic events | No database access and no Kubernetes token; policies and forge and model provider credentials arrive from the control plane and stay in memory |
+| Gateway | Deployment `dark-factory gateway` (1 by default; 2 or more for high availability) | Egress proxy for sandbox HTTP(S), Git smart-HTTP proxy with push checks, inference endpoint for model traffic, live traffic events | No database access and no Kubernetes token; policies and forge and model provider credentials arrive from the control plane and stay in memory |
 | `migrate` job | Helm pre-install and pre-upgrade hook | Schema migrations, application role and grants | The owner role's password |
 | Sandbox pod | Pod per run in the sandbox namespace, Kata Containers where configured | The project image with the runtime (`factory-agent`) and the harness (for example Claude Code over ACP) mounted as image volumes | The task volume at `/data`; no credential |
 | PostgreSQL | External | All state: projects, personas, tasks, runs, transcripts and their binary content, requests, egress rules, audit log | |
@@ -40,6 +40,11 @@ The control plane and the gateway are the same binary in two modes. The control 
 several replicas: every replica serves the UI and agent connections and can start runs (the database
 prevents two runs of one task); jobs that must run once, such as the task volume cleanup, run on the
 replica holding the instance lease.
+
+The gateway runs one replica by default. For high availability set `gateway.replicas` to `2` or
+more; the chart then also renders a PodDisruptionBudget (`gateway.pdb.minAvailable`, switch it off
+with `gateway.pdb.enabled: false`). With a single gateway, a restart briefly interrupts the egress
+of the sandboxes; they retry through the proxy.
 
 ## Connections
 
