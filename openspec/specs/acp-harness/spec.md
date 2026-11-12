@@ -7,19 +7,23 @@ Runs an external agent (Claude Code first) through the Agent Client Protocol for
 ## Requirements
 
 ### Requirement: Harness start
-The runtime SHALL write the harness files from `Assign` under `/data/home` and start the adapter command of `Assign` (the project's, otherwise the harness image's default) with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment and the `Assign` env: the harness's inference configuration (variables or a configuration document), CA variables and fixed variables. It SHALL NOT advertise ACP file-system or terminal client capabilities.
+The runtime SHALL write the harness files from `Assign` under `/data/home` and start the adapter command of `Assign` (the project's, otherwise the image's default), under Landlock through its sandbox subcommand, with cwd `/data/repo`, `HOME=/data/home`, the pod's proxy environment and the `Assign` env: the harness's inference configuration (variables or a configuration document), CA variables and fixed variables. It SHALL NOT advertise ACP file-system or terminal client capabilities.
 
 #### Scenario: Adapter from the harness image
 - **WHEN** a run of a project without an adapter command starts
-- **THEN** the runtime starts `/opt/harness/claude-code/bin/node /opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js` with `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude` in the env
+- **THEN** the runtime starts `/opt/harness/claude-code/bin/node /opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js` through `factory-agent sandbox --`, with `CLAUDE_CODE_EXECUTABLE=/opt/harness/claude-code/bin/claude` in the env
 
 #### Scenario: OpenCode adapter from the harness image
 - **WHEN** a run of an `opencode` persona in a project without an adapter command starts
-- **THEN** the runtime starts `/opt/harness/opencode/bin/opencode acp`
+- **THEN** the runtime starts `/opt/harness/opencode/bin/opencode acp` through `factory-agent sandbox --`
 
 #### Scenario: Adapter from the project image
 - **WHEN** a run of a project with adapter command `/opt/harness/bin/fake-acp-agent` starts
-- **THEN** the runtime starts that command, and for `claude-code` the env has no `CLAUDE_CODE_EXECUTABLE`
+- **THEN** the runtime starts that command through `factory-agent sandbox --`, and for `claude-code` the env has no `CLAUDE_CODE_EXECUTABLE`
+
+#### Scenario: Adapter without Landlock
+- **WHEN** a run starts with `sandbox.landlock: disabled`
+- **THEN** the runtime starts the adapter command directly, without `factory-agent sandbox --`
 
 #### Scenario: Claude Code sends no non-essential traffic
 - **WHEN** a run of the `claude-code` harness starts, with a subscription or an API key provider
