@@ -112,6 +112,30 @@ create_cluster() {
   kc -n kube-system rollout status deployment/coredns --timeout=120s
 }
 
+# Landlock ABI 6 needs Linux 6.12 or newer with `landlock` in the LSM list. The kind node runs the
+# kernel of the host (or of the container VM), so the node is asked. A container does not mount
+# securityfs, which holds the LSM list (`/sys/kernel/security/lsm`), so the privileged exec mounts it
+# first; a kernel without securityfs fails that mount and counts as having no Landlock. Sets
+# `landlock` for the release (`sandbox.landlock`) and for the suite (`E2E_LANDLOCK`): without ABI 6
+# the sandboxes would refuse every run, so the suite runs unconfined and its Landlock check skips
+# itself. Works with docker and podman (`exec --privileged` exists in both).
+detect_landlock() {
+  local cli=docker node="$cluster-control-plane" kernel
+  [[ "${KIND_EXPERIMENTAL_PROVIDER:-}" == podman ]] && cli=podman
+  kernel="$("$cli" exec "$node" uname -r 2>/dev/null)" || kernel=
+  if [[ "$kernel" =~ ^([0-9]+)\.([0-9]+) ]] &&
+    ((BASH_REMATCH[1] > 6 || (BASH_REMATCH[1] == 6 && BASH_REMATCH[2] >= 12))) &&
+    "$cli" exec --privileged "$node" sh -c \
+      'grep -qw landlock /sys/kernel/security/lsm 2>/dev/null ||
+       { mount -t securityfs securityfs /sys/kernel/security 2>/dev/null &&
+         grep -qw landlock /sys/kernel/security/lsm; }'; then
+    landlock=enforce
+  else
+    landlock=disabled
+    log "kernel '${kernel:-unknown}' of the cluster offers no Landlock ABI 6 (Linux 6.12+ with landlock in /sys/kernel/security/lsm): sandbox.landlock=disabled, the Landlock check is skipped"
+  fi
+}
+
 # Prints the kind configuration: E2E_KIND_CONFIG, else deploy/e2e/kind.yaml. Behind a TLS-intercepting
 # proxy (CA at $ca_cert) the default gets the CA mounted into /etc/ssl/certs of the node, which the
 # node's containerd (Go) reads in addition to the CA bundle, so image pulls trust the proxy.
@@ -258,7 +282,7 @@ install_release() {
 
 helm_install_release() {
   hc upgrade --install "$release" deploy/helm/dark-factory --namespace "$namespace" \
-    --values deploy/values-e2e.yaml --wait --timeout 5m
+    --values deploy/values-e2e.yaml --set "sandbox.landlock=$landlock" --wait --timeout 5m
 }
 
 # Source directory of the locked `playwright-rs` crate.
@@ -324,7 +348,7 @@ pods_reach_the_internet() {
     --command -- curl -sSf -m 10 -o /dev/null https://pypi.org/simple/pip/ >/dev/null 2>&1
 }
 
-suite_tests=(--test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks)
+suite_tests=(--test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks)
 
 # Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {
@@ -345,6 +369,7 @@ run_suite() {
   export E2E_FORGEJO_TOKEN="$forgejo_token"
   export E2E_FORGEJO_REVIEWER_TOKEN="$forgejo_reviewer_token"
   export E2E_RECEIVER_URL="http://127.0.0.1:$receiver_port"
+  export E2E_LANDLOCK="$landlock"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-1}}"
@@ -366,6 +391,7 @@ build_suite &
 build_pid=$!
 pids+=("$build_pid")
 create_cluster
+detect_landlock
 load_images &
 images_pid=$!
 pids+=("$images_pid")

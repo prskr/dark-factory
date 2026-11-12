@@ -247,6 +247,7 @@ fn agent_env(config: &ProvisioningConfig, no_proxy: &str) -> Vec<EnvVar> {
         ),
         var("DF_LOG_FORMAT", config.log_format.as_str().to_string()),
         var("RUST_LOG", config.sandbox.log_level.clone()),
+        var("DF_LANDLOCK", config.sandbox.landlock.as_str().to_string()),
     ]
 }
 

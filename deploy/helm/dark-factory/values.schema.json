@@ -152,9 +152,10 @@
     },
     "sandbox": {
       "type": "object",
-      "required": ["logLevel"],
+      "required": ["logLevel", "landlock"],
       "properties": {
-        "logLevel": { "type": "string" }
+        "logLevel": { "type": "string" },
+        "landlock": { "enum": ["enforce", "disabled"] }
       }
     },
     "sandboxNamespace": {

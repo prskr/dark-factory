@@ -308,3 +308,28 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: maxImageBytes
+
+  - it: enforces Landlock in the instance config by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  landlock: "enforce"$'
+        documentIndex: 0
+
+  - it: renders the Landlock opt-out into the instance config
+    template: configmap.yaml
+    set:
+      sandbox.landlock: disabled
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  landlock: "disabled"$'
+        documentIndex: 0
+
+  - it: rejects a Landlock mode other than enforce and disabled
+    template: configmap.yaml
+    set:
+      sandbox.landlock: best-effort
+    asserts:
+      - failedTemplate: {}

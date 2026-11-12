@@ -29,6 +29,7 @@ fn test_config() -> ProvisioningConfig {
             runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
+            landlock: df_core::LandlockMode::Enforce,
         },
         control_plane_ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),
         control_plane_port: 9443,
@@ -385,6 +386,20 @@ fn sandbox_log_level_comes_from_the_sandbox_config() {
     assert_eq!(sandbox_env(&config, "RUST_LOG").as_deref(), Some("info"));
     config.sandbox.log_level = "debug".to_string();
     assert_eq!(sandbox_env(&config, "RUST_LOG").as_deref(), Some("debug"));
+}
+
+#[test]
+fn sandbox_landlock_mode_comes_from_the_sandbox_config() {
+    let mut config = test_config();
+    assert_eq!(
+        sandbox_env(&config, "DF_LANDLOCK").as_deref(),
+        Some("enforce")
+    );
+    config.sandbox.landlock = df_core::LandlockMode::Disabled;
+    assert_eq!(
+        sandbox_env(&config, "DF_LANDLOCK").as_deref(),
+        Some("disabled")
+    );
 }
 
 #[test]

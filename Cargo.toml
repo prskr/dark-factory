@@ -97,8 +97,10 @@ insta = { version = "1.49", features = ["yaml"] }
 jsonschema = { version = "0.60", default-features = false }
 k8s-openapi = { version = "0.28", default-features = false, features = ["v1_36"] }
 kube = { version = "4.2", default-features = false, features = ["client", "runtime", "derive", "rustls-tls"] }
+landlock = "0.4"
 maud = { version = "0.27", features = ["axum"] }
 minijinja = { version = "3", default-features = false, features = ["builtins", "fuel"] }
+nix = { version = "0.31", default-features = false }
 openidconnect = "4"
 opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "trace", "internal-logs"] }
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "tls-ring", "tls-roots", "metrics", "trace"] }

@@ -101,6 +101,7 @@ impl LiveEnv {
                 runtime_image: self.runtime_image.clone(),
                 cluster_domain: "cluster.local".to_string(),
                 log_level: "info".to_string(),
+                landlock: df_core::LandlockMode::Enforce,
             },
             ControlPlaneEndpoint {
                 ip: control_plane_ip,

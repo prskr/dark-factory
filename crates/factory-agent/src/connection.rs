@@ -383,10 +383,20 @@ impl ConnectionManager {
 
     /// Reloads the certificates (supporting rotation), connects, opens the bidirectional stream
     /// and exchanges `Hello` and `HelloAck`. `None` after a logged failure: the caller backs off.
-    async fn connect_and_handshake(&self) -> Option<Handshake> {
-        let tls_files = TlsFiles::load_from_dir(&self.config.tls_dir)
+    pub(crate) async fn connect_and_handshake(&self) -> Option<Handshake> {
+        let tls_files = TlsFiles::load_from_dir(&self.config.layout.tls_dir)
             .inspect_err(|e| tracing::warn!(error = %e, "failed to load TLS files, backing off"))
             .ok()?;
+        // The harness reads the CA from this copy; the CSI driver replaces `ca.crt` on renewal. A
+        // stale copy would break the harness's TLS while the stream stays up, so back off instead.
+        crate::sandbox::aliases::publish_ca(
+            &self.config.layout.tls_dir,
+            &self.config.layout.ca_dir(),
+        )
+        .inspect_err(|e| {
+            tracing::warn!(error = %e, "failed to copy the instance CA for the harness, backing off");
+        })
+        .ok()?;
 
         let mut client = with_timeout(connect_channel(
             &self.config.control_plane_addr,
@@ -689,7 +699,7 @@ async fn next_outbound(
 }
 
 /// An open stream to the control plane after the Hello exchange.
-struct Handshake {
+pub(crate) struct Handshake {
     tx_stream: mpsc::Sender<AgentMessage>,
     in_stream: tonic::Streaming<ControlMessage>,
     ack: HelloAck,

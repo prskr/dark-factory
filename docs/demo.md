@@ -36,7 +36,7 @@ flowchart TD
     P --> E[helm install values-e2e.yaml]
     E --> F[seed, port-forwards]
     F --> X["egress probe: skip the internet test (fail in CI)"]
-    X --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1"]
+    X --> G["cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1"]
     G --> H[kind delete cluster]
 ```
 
@@ -63,6 +63,7 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `runs.keepAliveSeconds` | `0` | A run ends with its turn, so the follow-up message starts run 2 (the `loaded` session of the script). |
 | `plugins.forgejo.webhookSecret` | Secret `forge-webhooks`, key `forgejo` | Enables `POST /webhooks/forgejo` for the repository webhook. |
 | `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
+| `sandbox.landlock` | `enforce`; `just e2e-local` passes `disabled` when the node kernel has no Landlock ABI 6 | Without ABI 6 every run would fail with `sandbox.landlock_unavailable`. |
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
 | `networkPolicy.ingressController.allowAll` | `true` | The browser pod and the port-forward reach the UI. |
 | `sandboxNamespace.resourceQuota.pods`, `limitRange` | 4 pods, 1 Gi default memory | Memory budget, see below. |
@@ -84,6 +85,7 @@ All targets come from the environment, so the same tests run against any instanc
 | `E2E_FORGEJO_TOKEN` | yes (tests) | Token of the bot user. |
 | `E2E_FORGEJO_REVIEWER_TOKEN` | yes (tests) | Token of `reviewer`, a second user with write access to the repository. |
 | `E2E_USER`, `E2E_PASSWORD` | yes (tests) | Login at the identity provider. |
+| `E2E_LANDLOCK` | no | `disabled` skips the `landlock` test (the cluster kernel has no Landlock ABI 6 and the release runs with `sandbox.landlock: disabled`). Anything else, or unset, runs it. |
 | `E2E_RECEIVER_URL` | yes (`lifecycle_events`) | The lifecycle event receiver as the test host reaches it, e.g. `http://127.0.0.1:13002`. The control plane reaches it as `http://receiver.receiver.svc:8080/hook`. |
 
 ### `just e2e-local` (`deploy/e2e/e2e-local.sh`)
@@ -93,7 +95,7 @@ All targets come from the environment, so the same tests run against any instanc
 | `E2E_KEEP` | unset | `1` keeps the cluster after the run. |
 | `E2E_KIND_CONFIG` | `deploy/e2e/kind.yaml` | kind configuration for the cluster. Without it, when `/.msb/tls/ca.pem` exists (CA of a TLS-intercepting proxy in the sandbox), the script mounts that file into the node (see [Sandboxes behind a TLS-intercepting proxy](#sandboxes-behind-a-tls-intercepting-proxy)). A custom configuration gets no mount. |
 | `E2E_TEST_THREADS` | `1` | Tests that run in parallel per test binary. CI uses `2`; each test works on its own task, branch and requests. More than `1` exceeds the [resource budget](#resource-budget). |
-| `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks`, e.g. a test name. |
+| `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks`, e.g. a test name. |
 | `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
@@ -102,7 +104,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 
 ## Tests
 
-`cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
+`cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks -- --ignored` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
 
 | Test | Scenarios (`openspec/specs/task-delivery/spec.md`) |
 |---|---|
@@ -144,6 +146,7 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 | Project `DG` | "Delegation", same repository, script `/opt/harness/scripts/delegation.yaml` |
 | Project `RS` | "Research", same repository, script `/opt/harness/scripts/research.yaml` |
 | Project `IN` | "Interrupt", same repository, script `/opt/harness/scripts/interrupt.yaml` |
+| Project `LL` | "Landlock", same repository, script `/opt/harness/scripts/landlock.yaml` |
 
 All projects wake tasks on reviews and mentions of members (`webhook_wake` `members`).
 
@@ -166,6 +169,8 @@ There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git p
 - `delegation.yaml` (project `DG`, no webhook): one script for the coordinator `DG-1`, the implementation `DG-2` and the review `DG-3`, told apart by the markers `[coordinator]`, `[impl]`, `[review]` and `[fix]` in their prompts (`when` steps play their steps only if the prompt contains `prompt_contains`). The coordinator creates the implementation and a review that depends on its completion; each child completes and wakes the coordinator, which relays the review to the implementation with `send_message` for a second round.
 - `interrupt.yaml` (project `IN`, no webhook): the first turn says `Starting a long task.` and stays open (`end: hang`) until the runtime sends `session/cancel`, which an interrupt does; the next turn says `Noted the interruption.` if its input has the interrupt line and `Switched to the other API.` if it has the queued message `Use the other API`.
 
+- `landlock.yaml` (project `LL`, no webhook): the turn tries `cat /run/factory/tls/tls.key` and a write to `/opt/probe-writable/x` (a directory of the test project image owned by the sandbox user, so file permissions allow the write and only Landlock denies it), says `tls.key: EACCES` and `probe-writable: EACCES` for the denials, then asks a non-blocking question through the factory tool `ask_question`, which proves that the runtime socket still works inside the domain. `just e2e-local` asks the kind node for its kernel (mounting securityfs there first, which a container does not have): without Linux 6.12+ and `landlock` in `/sys/kernel/security/lsm`, it installs the release with `sandbox.landlock=disabled`, exports `E2E_LANDLOCK=disabled` and the `landlock` test skips itself with a message.
+
 Scripts commit with the identity of the runtime-owned `.git/config`; the Git proxy rejects any other (`df:identity`).
 
 ## Running on another machine
@@ -173,7 +178,7 @@ Scripts commit with the identity of the runtime-owned `.git/config`; the Git pro
 The suite contains nothing specific to kind. Point the `E2E_*` variables at an instance that has the seed data and run (`webhooks` also needs the repository webhook and a reviewer with write access, as `just e2e-local` sets them up):
 
 ```bash
-cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
+cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
 ```
 
 The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` assembles the driver the way `playwright-rs` does (the `playwright-core` npm package next to the Node binary, versions read from the locked `playwright-rs` source), but downloads it with `curl`, which trusts the system CA store. It keeps the driver in `E2E_TOOLS_DIR` and points `PLAYWRIGHT_DRIVER_PATH` at it. On another machine run `playwright-rs install --driver-only` once, or set `PLAYWRIGHT_DRIVER_PATH` to such a directory.

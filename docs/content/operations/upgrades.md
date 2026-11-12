@@ -131,3 +131,13 @@ To roll back, restore the database backup taken before the upgrade, then roll ba
 Some releases need a step beyond `helm upgrade`, for example removing the forge host from the egress
 rules after the switch to the Git proxy. They are listed in the release notes and in the
 [chart README](https://github.com/prskr/dark-factory/blob/main/deploy/helm/dark-factory/README.md).
+
+### Landlock for the harness
+
+The runtime now starts every harness inside a Landlock domain (`sandbox.landlock: enforce`, the
+default). Nodes need Linux 6.12 or newer with `landlock` in the LSM list (with Kata, the guest
+kernel). On other nodes, every run fails with a `sandbox.landlock_unavailable` notice until the
+kernel is upgraded or you set `sandbox.landlock: disabled` in your values, which runs the harness
+unrestricted. The harness can write only `/data/repo`, `/data/home`, `/tmp` and `/dev`; tools that write
+elsewhere fail with `Permission denied`. See
+[Sandbox filesystem isolation](../security/sandbox.md).

@@ -37,6 +37,17 @@ pub const HIDDEN_PROJECT_NAME: &str = "Hidden Path";
 pub const HIDDEN_GLOB: &str = "secret/**";
 pub const HIDDEN_PATH: &str = "secret/value.txt";
 
+/// Project whose fake agent probes the Landlock domain of its sandbox (`landlock.yaml`); tasks are
+/// `LL-<n>`.
+pub const LANDLOCK_PROJECT_KEY: &str = "LL";
+pub const LANDLOCK_PROJECT_NAME: &str = "Landlock";
+
+/// What the script says about the private key and about `/opt/probe-writable` under Landlock, and
+/// the question its factory tool call asks.
+pub const LANDLOCK_KEY_DENIED: &str = "tls.key: EACCES";
+pub const LANDLOCK_WRITE_DENIED: &str = "probe-writable: EACCES";
+pub const LANDLOCK_QUESTION: &str = "Landlock probe finished?";
+
 /// Project whose fake agent completes the task in its first run and only reads feedback in the
 /// next (forge webhooks); tasks are `WH-<n>`.
 pub const WEBHOOK_PROJECT_KEY: &str = "WH";
@@ -143,6 +154,7 @@ pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
+pub const LANDLOCK_SCRIPT: &str = "/opt/harness/scripts/landlock.yaml";
 
 /// Repository URL of the projects.
 pub fn repo_url() -> String {

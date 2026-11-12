@@ -365,12 +365,15 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
     let config = crate::config::RuntimeConfig {
         control_plane_addr: format!("https://{}", server.addr),
         server_name: server_name.to_string(),
-        tls_dir,
-        data_dir: temp.path().join("data"),
-        run_dir: temp.path().join("conn-runtime"),
+        layout: crate::config::Layout {
+            tls_dir,
+            data_dir: temp.path().join("data"),
+            run_dir: temp.path().join("conn-runtime"),
+        },
+        landlock: df_core::LandlockMode::Enforce,
     };
     let conn_outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
-        Outbox::open(&config.run_dir, "run-idle", 1024 * 1024, 64 * 1024).unwrap(),
+        Outbox::open(&config.layout.run_dir, "run-idle", 1024 * 1024, 64 * 1024).unwrap(),
     ));
     let policy = ReconnectPolicy {
         initial_delay: Duration::from_millis(20),

@@ -544,7 +544,7 @@ impl Git {
         }
 
         // Git needs no runtime socket: the gateway authenticates upstream.
-        cmd.env_remove("DF_RUNTIME_SOCK");
+        cmd.env_remove(crate::config::ENV_RUNTIME_SOCK);
 
         // It would override the scoped `http.<proxy URL>.sslCAInfo`: other hosts keep the
         // system trust store.

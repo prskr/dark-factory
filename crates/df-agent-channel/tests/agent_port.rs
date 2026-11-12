@@ -270,7 +270,7 @@ async fn first_connect_receives_ack_assign_and_the_assignment_prompt() -> anyhow
     };
     assert_eq!(acp.env["CLAUDE_CODE_OAUTH_TOKEN"], "df-placeholder");
     assert!(acp.env["ANTHROPIC_BASE_URL"].ends_with("/inference"));
-    assert_eq!(acp.env["NODE_EXTRA_CA_CERTS"], "/run/factory/tls/ca.crt");
+    assert_eq!(acp.env["NODE_EXTRA_CA_CERTS"], "/run/factory/ca/ca.crt");
     assert!(
         !format!("{bodies:?}").contains("claude-secret-value"),
         "no model credential reaches the sandbox"

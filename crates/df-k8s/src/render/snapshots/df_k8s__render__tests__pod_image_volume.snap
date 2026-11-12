@@ -41,6 +41,8 @@ spec:
           value: text
         - name: RUST_LOG
           value: info
+        - name: DF_LANDLOCK
+          value: enforce
       image: "test-project:latest"
       name: agent
       securityContext:
