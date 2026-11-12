@@ -34,7 +34,7 @@ ADR-0054 decides that Landlock protects the runtime and the system directories f
 
 1. reads the layout from the runtime's environment (`DF_DATA_DIR`, `DF_RUN_DIR`, `DF_TLS_DIR`), which the child inherits;
 2. builds and applies the ruleset (D2, D3) with the `landlock` crate's safe API;
-3. removes the runtime's own variables from the environment: every `DF_*` except `DF_RUNTIME_SOCK` and `DF_RUN_DIR` (used by the MCP server) and `DF_LOG_FORMAT`;
+3. removes the runtime's own variables from the environment: every `DF_*` except `DF_RUNTIME_SOCK` and `DF_RUN_DIR` (used by the MCP server) and `DF_LOG_FORMAT`. With `disabled` there is no wrapper; the runtime removes the same variables itself before it spawns the harness (one shared kept-list);
 4. replaces itself with the adapter command through `std::os::unix::process::CommandExt::exec`, which is safe.
 
 The environment is not reduced to an allow-list, because the runtime doesn't know the project image's `ENV` (`PATH`, `JAVA_HOME`, `CARGO_HOME`, …), and dropping it would break toolchains. None of the removed variables is a secret (ADR-0050); removing them just stops pointing the agent at the control plane. Landlock doesn't restrict descriptors opened before the ruleset applies. Rust and tokio open descriptors close-on-exec, so only stdin, stdout and stderr reach the harness, and a test checks it (D7).
@@ -63,7 +63,9 @@ Paths come from the layout (`DF_DATA_DIR`, `DF_RUN_DIR`, `DF_TLS_DIR`), not from
 
 **CA certificate.** The cert-manager CSI driver rotates `tls/` by writing a new timestamped directory and repointing `..data`, so `ca.crt` gets a new inode on every renewal (every 4 hours with the default 6 h duration). A rule on the file would bind to the old inode, and Git commands of the harness started after the renewal would fail. A rule on `tls/` would expose `tls.key`. So the runtime copies `ca.crt` into `<run dir>/ca/` (write a temporary file in that directory, then rename) at startup and whenever it reloads its TLS material. The harness gets a directory rule on `<run dir>/ca/`, which covers every replaced file. `http.<proxy>.sslCAInfo` and `NODE_EXTRA_CA_CERTS` point at the copy. The copy holds only the public CA certificate.
 
-**Hard links.** Landlock checks the path used, so a hard link to an outbox file inside `<data dir>/home` or `<data dir>/repo` would give the harness write access to it. Under enforcement the harness can't create one: linking needs `REFER` and access to the source, and `<data dir>/runtime` grants nothing. A link left by an earlier unrestricted run (`disabled`, or a run before this change) would persist on the task volume. So before every run, the runtime replaces each file under `<data dir>/runtime` whose link count is above one with a copy (temporary file plus rename), which breaks the alias.
+**Hard links.** Landlock checks the path used, so a hard link to an outbox file inside `<data dir>/home` or `<data dir>/repo` would give the harness write access to it. Under enforcement the harness can't create one: linking needs `REFER` and access to the source, and `<data dir>/runtime` grants nothing. A link left by an earlier unrestricted run (`disabled`, or a run before this change) would persist on the task volume. So at runtime start, before the outbox opens (one runtime process handles one run, so this is once per run), the runtime replaces each file under `<data dir>/runtime` whose link count is above one with a copy (temporary file plus rename), which breaks the alias.
+
+**Runtime directory.** A symlink at `<data dir>/runtime`, or one inside it, left by an unrestricted run would make the runtime open its outbox and `run.json` under a writable root. At startup the runtime therefore exits if `<data dir>/runtime` is not a real directory with a canonical path equal to the configured one (the same check as for the writable roots), and removes every symlink inside it (the link, not its target) before it creates directories or opens the outbox. No harness process exists yet at that point, so there is no race.
 
 Alternative: a fixed list of system directories. Rejected, because toolchains under `/opt/*`, `/usr/local` or `/home/dev` would break.
 
@@ -94,7 +96,7 @@ The wrapper's own hard requirement (D1) covers the race where the probe passes a
 - **`df-core`**: `SandboxConfig.landlock: LandlockMode` (`enforce` default, `disabled`), serde `lowercase`.
 - **Helm**: `sandbox.landlock` with schema enum `[enforce, disabled]`, rendered into the instance config next to `sandbox.logLevel`.
 - **`df-k8s`**: `render.rs` sets `DF_LANDLOCK` on the sandbox container, the same way as `RUST_LOG`.
-- **`factory-agent` config**: `DF_LANDLOCK` is parsed at startup; an invalid value exits with an error naming the variable. With `disabled`, `spawn_harness` starts the adapter directly and logs `warn!(run_id, "Landlock disabled by instance configuration; harness runs unrestricted")` at every run start.
+- **`factory-agent` config**: `DF_LANDLOCK` is parsed at startup; an invalid value exits with an error naming the variable. With `disabled`, `spawn_harness` starts the adapter directly, without the hidden `DF_*` variables, and logs `warn!(run_id, "Landlock disabled by instance configuration; harness runs unrestricted")` at every run start.
 
 ### D6: System prompt section
 
@@ -112,13 +114,15 @@ If `iter3-hidden-paths` has landed, the hidden-path sentence goes into the same 
   - `/data` and `/run` are excluded;
   - every top-level symlink is skipped;
   - `/tmp` is missing on distroless.
+- The startup alias step is unit-tested: a symlinked runtime directory is refused, a symlink inside it is removed and its target kept, a file with link count 2 is replaced. A runner test in `disabled` mode injects `DF_*` variables into the base environment and checks the harness doesn't see them.
 - Kernel-backed tests run the real wrapper (`cargo run`-built binary via `env!("CARGO_BIN_EXE_factory-agent")`). They use a layout of tempdirs and a hidden `--root` flag of the `sandbox` subcommand. The flag is harmless in production: an agent calling the wrapper can only add restrictions to its own domain, never remove them, then check that:
   - reading a fake `tls.key` gives `EACCES`;
   - the CA copy is readable, also after it was replaced by rename during the run;
   - writing to the data dir's `runtime/` fails;
   - a symlinked writable path (`home → runtime`) and a top-level symlink to `/` in the fake root make the wrapper exit with 125, or are skipped, respectively;
-  - a hard link from `home/` to a `runtime/` file is broken by the pre-run step, and writes through it no longer reach the outbox;
-  - `kill` of the parent fails with `EPERM`;
+  - a hard link from `home/` to a `runtime/` file is broken by the startup step, and writes through it no longer reach the outbox;
+  - `kill` of the parent fails with `EPERM`, and reads of the parent's `/proc/<pid>/environ` and `mem` fail;
+  - a binary under a top-level directory other than `/usr` (the test binary itself, outside the layout's top-level directory) executes;
   - `env` shows no removed `DF_*` variable but keeps the others;
   - `/proc/self/fd` holds only 0, 1 and 2.
 

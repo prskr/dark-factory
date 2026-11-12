@@ -19,7 +19,7 @@ The domain SHALL grant read and execute on every top-level directory that is not
 - **THEN** the command succeeds
 
 ### Requirement: Aliases from unrestricted runs
-The runtime SHALL refuse to start the harness if a writable root directory is itself a symlink or has a symlink among its path components; symlinks inside the writable directories SHALL NOT be checked. It SHALL break hard links to files in its runtime directory before every run.
+The runtime SHALL refuse to start the harness if a writable root directory is itself a symlink or has a symlink among its path components; symlinks inside the writable directories SHALL NOT be checked.
 
 #### Scenario: Symlinked home
 - **WHEN** an earlier unrestricted run replaced `/data/home` with a symlink to `/data/runtime`
@@ -28,10 +28,6 @@ The runtime SHALL refuse to start the harness if a writable root directory is it
 #### Scenario: Symlinks inside the workspace
 - **WHEN** a Bazel build created `/data/repo/bazel-bin` pointing into `/data/home/.cache/bazel`
 - **THEN** the harness starts and can read and write through `bazel-bin`
-
-#### Scenario: Hard link from an unrestricted run
-- **WHEN** `/data/home/x` is a hard link to an outbox file, created while Landlock was disabled
-- **THEN** after the next run starts, writes to `/data/home/x` don't change the outbox
 
 #### Scenario: Private key unreadable
 - **WHEN** the harness runs `cat /run/factory/tls/tls.key`
@@ -56,6 +52,21 @@ The runtime SHALL refuse to start the harness if a writable root directory is it
 #### Scenario: Workspace and home writable
 - **WHEN** the harness builds and runs a binary in `/data/repo/target` and writes `/data/home/.cache/x`
 - **THEN** both succeed
+
+### Requirement: Runtime directory checked at startup
+At startup, before it opens the outbox, the runtime SHALL exit without starting the harness if its runtime directory (default `/data/runtime`) is a symlink or has a symlink among its path components. It SHALL remove symlinks inside the runtime directory (the links, never their targets) and break hard links to files in it. One runtime process handles one run.
+
+#### Scenario: Hard link from an unrestricted run
+- **WHEN** `/data/home/x` is a hard link to an outbox file, created while Landlock was disabled
+- **THEN** after the next run starts, writes to `/data/home/x` don't change the outbox
+
+#### Scenario: Symlinked outbox directory
+- **WHEN** an earlier unrestricted run replaced `/data/runtime` with a symlink to `/data/home/rt`
+- **THEN** the sandbox runtime exits at startup without opening the outbox or starting the harness
+
+#### Scenario: Symlink inside the outbox directory
+- **WHEN** an earlier unrestricted run left `/data/runtime/outbox` as a symlink into `/data/home`
+- **THEN** the runtime removes the link before it opens the outbox, and the link's target is unchanged
 
 ### Requirement: Harness can't reach the runtime process
 With Landlock enforced, the harness SHALL NOT be able to send signals to, trace, or read the memory of processes outside its domain, and SHALL NOT connect to abstract Unix sockets created outside its domain.
