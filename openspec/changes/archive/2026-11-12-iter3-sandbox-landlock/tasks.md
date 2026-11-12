@@ -50,11 +50,11 @@ Kernel-backed tests need Landlock ABI 6 (Linux 6.12+ with `landlock` in `/sys/ke
 
 ## 5. Integration
 
-- [ ] 5.1 Extend the e2e suite (`crates/df-e2e`) with a fake ACP agent script that reads `/run/factory/tls/tls.key` and writes to `/opt/probe-writable/x`, and expects `EACCES` for both, plus a factory tool call that still succeeds. The test image creates `/opt/probe-writable` owned by UID 1000, so the write is a control: it succeeds with `disabled` and fails only through Landlock, unlike `/usr`, which file permissions already protect. When the cluster kernel lacks ABI 6, the suite sets `disabled`, skips this step and prints why. Verify with `just e2e-local`.
-- [ ] 5.2 Run a manual check on the homelab cluster with `runtimeClassName: kata` and with runc. Record both parts in the review log.
+- [x] 5.1 Extend the e2e suite (`crates/df-e2e`) with a fake ACP agent script that reads `/run/factory/tls/tls.key` and writes to `/opt/probe-writable/x`, and expects `EACCES` for both, plus a factory tool call that still succeeds. The test image creates `/opt/probe-writable` owned by UID 1000, so the write is a control: it succeeds with `disabled` and fails only through Landlock, unlike `/usr`, which file permissions already protect. When the cluster kernel lacks ABI 6, the suite sets `disabled`, skips this step and prints why. Verify with `just e2e-local`.
+- [x] 5.2 Run a manual check on the homelab cluster with `runtimeClassName: kata` and with runc. Record both parts in the review log.
   - **Denial:** in each runtime, start a run with the Claude Code harness, ask it to `cat /run/factory/tls/tls.key`, and confirm the denial in the transcript.
   - **Trial run:** Landlock has no permissive mode. Let real sessions build and test a Rust project and a Node project (`cargo`/`npm` caches, test suites with localhost ports). Collect every `EACCES` from failing tool calls and the harness stderr. Fix each one by adjusting the ruleset or the docs, never by silently widening `/data`.
-- [ ] 5.3 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-file-length`, `openspec validate iter3-sandbox-landlock --strict` and `just bazel-test`. Verify that all pass.
+- [x] 5.3 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-file-length`, `openspec validate iter3-sandbox-landlock --strict` and `just bazel-test`. Verify that all pass.
 
 ## Workflow follow-up
 

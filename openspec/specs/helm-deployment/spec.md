@@ -120,6 +120,21 @@ The chart SHALL set `DF_LOG_FORMAT` from `logging.format` on the control plane, 
 - **WHEN** the chart is rendered with `sandbox.logLevel: debug`
 - **THEN** the instance config contains `sandbox.logLevel: debug`
 
+### Requirement: Sandbox Landlock value
+The chart SHALL expose `sandbox.landlock` (`enforce` or `disabled`, default `enforce`) and render it as `sandbox.landlock` in the instance config. The values schema SHALL reject any other value.
+
+#### Scenario: Default
+- **WHEN** the chart is rendered without `sandbox.landlock`
+- **THEN** the instance config contains `sandbox.landlock: enforce`
+
+#### Scenario: Opt-out
+- **WHEN** the chart is rendered with `sandbox.landlock: disabled`
+- **THEN** the instance config contains `sandbox.landlock: disabled`
+
+#### Scenario: Invalid value rejected
+- **WHEN** the chart is rendered with `sandbox.landlock: best-effort`
+- **THEN** rendering fails schema validation
+
 ### Requirement: Telemetry values
 The chart SHALL expose `telemetry.metrics.exporters` (list of `prometheus` and `otlp`, default `[prometheus]`; empty disables metrics), `telemetry.metrics.port` (default `9464`), `telemetry.traces.enabled` (default `false`), `telemetry.traces.sampler`, `telemetry.traces.samplerArg`, and `telemetry.otlp.endpoint`, `.protocol` (only `grpc`), `.insecure` and `.headersSecret`. The values schema SHALL reject any other `telemetry.otlp.protocol`.
 
