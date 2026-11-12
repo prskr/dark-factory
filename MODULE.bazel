@@ -255,7 +255,7 @@ pull(
 
 pull(
     name = "debian_trixie_git",
-    digest = "sha256:703b04a375235727728c526cd1f5d740851d62e199d7abbf955b7aecbbd45f8b",
+    digest = "sha256:5214476af627916270063c9f99a969381f32cd961c861ea95e740ba71abc125f",
     downloader = "bazel",
     platforms = [
         "linux/amd64",
@@ -300,6 +300,7 @@ npm.npm_translate_lock(
     name = "npm_df_web",
     pnpm_lock = "//crates/df-web:pnpm-lock.yaml",
 )
+
 # The Playwright server of the e2e cluster (`deploy/images/playwright-server`): playwright-core on top
 # of the Playwright base image. Its version must equal the base image tag and the locked `playwright-rs`
 # (`deploy/e2e/e2e-local.sh` checks).
