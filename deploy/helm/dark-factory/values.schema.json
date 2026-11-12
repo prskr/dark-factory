@@ -330,13 +330,14 @@
       "type": "object",
       "required": ["replicas", "pdb", "ports", "resources"],
       "properties": {
-        "replicas": { "type": "integer", "minimum": 2 },
+        "replicas": { "type": "integer", "minimum": 1 },
         "logLevel": { "type": "string" },
         "serviceAccountName": { "type": "string" },
         "pdb": {
           "type": "object",
-          "required": ["minAvailable"],
+          "required": ["enabled", "minAvailable"],
           "properties": {
+            "enabled": { "type": "boolean" },
             "minAvailable": { "type": "integer", "minimum": 1 }
           }
         },

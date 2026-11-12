@@ -106,27 +106,10 @@ create_cluster() {
   log "Creating the kind cluster"
   kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
   kind create cluster --name "$cluster" --config "$(kind_config)" --wait 180s
-  if ! has_iptables_statistic; then
-    log "The node's kernel lacks the iptables statistic match: one CoreDNS and one gateway replica"
-    kc -n kube-system scale deployment/coredns --replicas=1
-    kc -n kube-system rollout status deployment/coredns --timeout=120s
-    # The chart requires two gateways (openspec/specs/helm-deployment).
-    release_overrides=(--skip-schema-validation --set gateway.replicas=1)
-  fi
-}
-
-# kube-proxy balances a Service over several endpoints with the iptables `statistic` match. Some
-# sandbox kernels lack it; then one such Service fails every sync and no ClusterIP works, cluster
-# DNS included. Probes the match in a throwaway chain of the node.
-release_overrides=()
-has_iptables_statistic() {
-  # shellcheck disable=SC2016 # expands in the node's shell
-  "${KIND_EXPERIMENTAL_PROVIDER:-docker}" exec "$cluster-control-plane" sh -c '
-    iptables -t nat -N df-e2e-probe
-    iptables -t nat -A df-e2e-probe -m statistic --mode random --probability 0.5 -j RETURN
-    status=$?
-    iptables -t nat -F df-e2e-probe; iptables -t nat -X df-e2e-probe
-    exit $status' >/dev/null 2>&1
+  # Two CoreDNS endpoints need the iptables `statistic` match in kube-proxy, which some kernels
+  # (agent sandboxes) lack; one failing Service fails the whole sync and no ClusterIP works.
+  kc -n kube-system scale deployment/coredns --replicas=1
+  kc -n kube-system rollout status deployment/coredns --timeout=120s
 }
 
 # Prints the kind configuration: E2E_KIND_CONFIG, else deploy/e2e/kind.yaml. Behind a TLS-intercepting
@@ -153,11 +136,12 @@ EOF
 # multi-arch index when only one platform was loaded into the daemon.)
 load_images() {
   local name archive
-  for name in control_plane runtime test_project plugin_forgejo plugin_github; do
+  for name in control_plane runtime test_project plugin_forgejo plugin_github playwright; do
     archive="$scratch/$name.tar"
     "${bazel[@]}" run --platforms="//build/platforms:linux_${arch}_musl" \
       --@rules_img//img/settings:load_daemon=tar "//deploy:load_e2e_$name" >"$archive"
     kind load image-archive "$archive" --name "$cluster"
+    rm -f "$archive" # the Playwright image alone is about 1 GB
   done
 }
 
@@ -167,7 +151,7 @@ install_infrastructure() {
   gh release download "$cert_manager_version" --repo cert-manager/cert-manager \
     --pattern cert-manager.yaml --dir "$scratch" --clobber
   kc apply -f "$scratch/cert-manager.yaml"
-  kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml -f deploy/e2e/playwright.yaml \
+  kc apply -f deploy/e2e/postgres.yaml -f deploy/e2e/dex.yaml \
     -f deploy/e2e/receiver.yaml -f deploy/e2e/fake-upstream.yaml
   kc -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
   hc upgrade --install cert-manager-csi-driver "oci://quay.io/jetstack/charts/cert-manager-csi-driver" \
@@ -178,8 +162,14 @@ install_infrastructure() {
     --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
-  kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
   kc -n receiver wait --for=condition=Available deployment/receiver --timeout=300s
+}
+
+# The Playwright server runs from an image that `load_images` imports; applied afterwards, so the
+# pod does not back off on a pull of the missing image.
+install_playwright() {
+  kc apply -f deploy/e2e/playwright.yaml
+  kc -n playwright wait --for=condition=Available deployment/playwright --timeout=300s
 }
 
 # The model provider's credential reference points at this Secret (the fake upstream expects the
@@ -268,7 +258,33 @@ install_release() {
 
 helm_install_release() {
   hc upgrade --install "$release" deploy/helm/dark-factory --namespace "$namespace" \
-    --values deploy/values-e2e.yaml ${release_overrides[@]+"${release_overrides[@]}"} --wait --timeout 5m
+    --values deploy/values-e2e.yaml --wait --timeout 5m
+}
+
+# Source directory of the locked `playwright-rs` crate.
+playwright_rs_src() {
+  dirname "$(cargo metadata --quiet --format-version 1 --locked |
+    jq -r '.packages[] | select(.name == "playwright-rs") | .manifest_path')"
+}
+
+# Playwright version of the driver in the locked `playwright-rs` (`PLAYWRIGHT_VERSION` in its build.rs).
+playwright_rs_version() {
+  sed -n 's/^const PLAYWRIGHT_VERSION: &str = "\(.*\)";$/\1/p' "$(playwright_rs_src)/build.rs"
+}
+
+# The browser server and the test driver must run the same Playwright version: playwright-core in
+# deploy/images/playwright-server/package.json, the base image tag in MODULE.bazel and the driver
+# of playwright-rs. Renovate groups all three (renovate.json); the check catches a playwright-rs release that lags.
+check_playwright_versions() {
+  local server image driver
+  server="$(jq -r '.dependencies["playwright-core"]' deploy/images/playwright-server/package.json)"
+  image="$(sed -n '/name = "playwright_base"/,/^)/s/^    tag = "v\(.*\)-noble",$/\1/p' MODULE.bazel)"
+  driver="$(playwright_rs_version)"
+  if [[ -z "$server" || "$server" != "$image" || "$server" != "$driver" ]]; then
+    echo "Playwright versions differ: playwright-core in deploy/images/playwright-server/package.json: '$server'," \
+      "base image tag in MODULE.bazel (playwright_base): '$image', playwright-rs driver: '$driver'" >&2
+    exit 1
+  fi
 }
 
 install_driver() {
@@ -278,9 +294,8 @@ install_driver() {
   # trusts only built-in roots, curl the system CA store (needed behind a TLS-intercepting proxy).
   # The versions come from the source of the locked playwright-rs. Reruns find the driver installed.
   local src pw node os node_arch driver tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
-  src="$(dirname "$(cargo metadata --quiet --format-version 1 --locked |
-    jq -r '.packages[] | select(.name == "playwright-rs") | .manifest_path')")"
-  pw="$(sed -n 's/^const PLAYWRIGHT_VERSION: &str = "\(.*\)";$/\1/p' "$src/build.rs")"
+  src="$(playwright_rs_src)"
+  pw="$(playwright_rs_version)"
   node="$(sed -n 's/^const NODE_VERSION: &str = "\(.*\)";$/\1/p' "$src/src/build_support/driver_urls.rs")"
   [[ -n "$pw" && -n "$node" ]] || { echo "no Playwright or Node version in $src" >&2; exit 1; }
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -295,6 +310,18 @@ install_driver() {
     mv "$driver.tmp" "$driver"
   fi
   export PLAYWRIGHT_DRIVER_PATH="$driver"
+}
+
+# Tests that need a verified HTTPS connection from a pod to a public host: the gateway never connects
+# to private addresses, so no in-cluster host can stand in.
+internet_tests=(denied_host_is_requested_and_the_approval_lets_the_retry_through)
+
+# A pod with the CA store of the sandboxes (the test project image) fetches a public page. Fails
+# without egress and behind a TLS-intercepting proxy whose CA the image does not trust (agent sandboxes).
+pods_reach_the_internet() {
+  kc -n playwright run egress-probe --rm -i --quiet --restart=Never \
+    --image=ghcr.io/prskr/dark-factory/test-project:e2e --image-pull-policy=IfNotPresent \
+    --command -- curl -sSf -m 10 -o /dev/null https://pypi.org/simple/pip/ >/dev/null 2>&1
 }
 
 suite_tests=(--test delegation --test demo --test flow --test interrupt --test lifecycle_events --test ui --test webhooks)
@@ -321,10 +348,20 @@ run_suite() {
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-1}}"
+  if ! pods_reach_the_internet; then
+    # CI has egress without interception: a failed probe there is a real failure, not a reason to skip.
+    if [[ -n "${CI:-}" ]]; then
+      echo "pods cannot fetch https://pypi.org in CI; the tests ${internet_tests[*]} need it" >&2
+      exit 1
+    fi
+    log "pods cannot fetch https://pypi.org (no egress, or a TLS-intercepting proxy their CA store does not trust): skipping ${internet_tests[*]}"
+    for name in "${internet_tests[@]}"; do test_args+=(--skip "$name"); done
+  fi
   cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
 }
 
 prepare_tools
+check_playwright_versions
 build_suite &
 build_pid=$!
 pids+=("$build_pid")
@@ -336,6 +373,7 @@ install_infrastructure
 install_release
 setup_forgejo
 wait "$images_pid"
+install_playwright
 wait_for_fake_upstream
 helm_install_release
 install_driver

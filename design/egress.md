@@ -22,7 +22,7 @@
 
 ## 3. Gateway Deployment
 
-- A separate Deployment (`dark-factory gateway`, same binary as the control plane in a different mode), at least two replicas with a PodDisruptionBudget, scaled independently.
+- A separate Deployment (`dark-factory gateway`, same binary as the control plane in a different mode), one replica by default, two or more (with a PodDisruptionBudget) for high availability, scaled independently.
 - Hosts the **egress proxy** now; the **Git smart-HTTP proxy** (F1), the **inference endpoint** (F5) and the **MCP endpoint** for third-party MCP servers (ADR-0032) later. These are the bandwidth-heavy data paths, so they stay out of the control plane process.
 - Every data path uses its native protocol (HTTP `CONNECT`, Git smart HTTP, OpenAI-compatible HTTP, MCP Streamable HTTP), not the agent protocol. The agent protocol (ADR-0007) remains the control channel between runtime and control plane only.
 - The gateway's link to the control plane is a separate internal gRPC API, `darkfactory.gateway.v1`: `PolicyWatch` (§6), `Tail` (§8) and usage/call reports (§9, §10). It gets its own contract when the gateway is built.

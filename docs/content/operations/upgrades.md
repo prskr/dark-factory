@@ -42,6 +42,12 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Gateway replicas
+
+`gateway.replicas` now defaults to `1` (was `2`, minimum `2`) and the gateway PodDisruptionBudget
+exists only with more than one replica. A release that relied on the default runs one gateway after
+the upgrade. To keep two, set `gateway.replicas: 2` in your values.
+
 ### Prompt batches
 
 The agent protocol replaces the singular `Prompt` control message with `Prompts` batches. The

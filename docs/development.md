@@ -283,7 +283,7 @@ action's container: the post-upgrade task `bazel mod tidy` needs Bazel and keeps
 step with Bazel module, Cargo and pnpm updates. The harness adapter is bumped in one PR together with
 every copy of its image tag (`deploy/README.md`, "What the harness image is built from"). The run time
 falls into the window of the weekly lock file maintenance (before 04:00 UTC on Monday); Rust toolchain
-updates change `rust-toolchain.toml` and `RUST_VERSION` in `MODULE.bazel` in one PR. Renovate's npm manager finds `crates/df-web/package.json` and bumps it with `crates/df-web/pnpm-lock.yaml` (Mermaid, htmx, Alpine), next to `deploy/images/claude-harness`; the e2e suite covers the SSE behavior an htmx bump can change.
+updates change `rust-toolchain.toml` and `RUST_VERSION` in `MODULE.bazel` in one PR. Renovate's npm manager finds `crates/df-web/package.json` and bumps it with `crates/df-web/pnpm-lock.yaml` (Mermaid, htmx, Alpine), next to `deploy/images/claude-harness`; `deploy/images/playwright-server/package.json`, the Playwright base image tag in `MODULE.bazel` and `playwright-rs` form the group "Playwright" ([Bump Playwright](demo.md#bump-playwright)); the e2e suite covers the SSE behavior an htmx bump can change.
 
 | Setting | Required | Default | Effect |
 |---|---|---|---|

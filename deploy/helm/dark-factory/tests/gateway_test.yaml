@@ -13,7 +13,7 @@ templates:
   - httproute.yaml
   - servicemonitor.yaml
 tests:
-  - it: renders gateway Deployment with >=2 replicas, automountServiceAccountToken false, PDB, Service, and headless Service
+  - it: renders gateway Deployment with one replica and automountServiceAccountToken false, Service, and headless Service, no PDB
     templates:
       - gateway-deployment.yaml
       - gateway-service.yaml
@@ -23,29 +23,78 @@ tests:
         template: gateway-deployment.yaml
       - equal:
           path: spec.replicas
-          value: 2
+          value: 1
         template: gateway-deployment.yaml
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
         template: gateway-deployment.yaml
+      - hasDocuments:
+          count: 2
+        template: gateway-service.yaml
       - isKind:
-          of: PodDisruptionBudget
+          of: Service
         template: gateway-service.yaml
         documentIndex: 0
       - isKind:
           of: Service
         template: gateway-service.yaml
         documentIndex: 1
-      - isKind:
-          of: Service
-        template: gateway-service.yaml
-        documentIndex: 2
       - equal:
           path: spec.clusterIP
           value: None
         template: gateway-service.yaml
-        documentIndex: 2
+        documentIndex: 1
+
+  - it: renders the requested number of gateway replicas
+    template: gateway-deployment.yaml
+    set:
+      gateway.replicas: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: renders a PodDisruptionBudget for several gateway replicas
+    template: gateway-service.yaml
+    set:
+      gateway.replicas: 3
+      gateway.pdb.minAvailable: 2
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: PodDisruptionBudget
+        documentIndex: 0
+      - equal:
+          path: spec.minAvailable
+          value: 2
+        documentIndex: 0
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: dark-factory
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: gateway
+        documentIndex: 0
+
+  - it: renders no PodDisruptionBudget when it is disabled
+    template: gateway-service.yaml
+    set:
+      gateway.replicas: 2
+      gateway.pdb.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: rejects zero gateway replicas
+    template: gateway-deployment.yaml
+    set:
+      gateway.replicas: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "replicas"
+
 
   - it: renders instance NetworkPolicies restricting control-plane and gateway ingress
     template: netpol.yaml
@@ -115,7 +164,7 @@ tests:
             targetPort: git
             protocol: TCP
         template: gateway-service.yaml
-        documentIndex: 1
+        documentIndex: 0
       - contains:
           path: spec.template.spec.containers[0].ports
           content:
@@ -154,7 +203,7 @@ tests:
             targetPort: git
             protocol: TCP
         template: gateway-service.yaml
-        documentIndex: 1
+        documentIndex: 0
       - contains:
           path: spec.template.spec.volumes
           content:

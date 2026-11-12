@@ -288,11 +288,15 @@ lifecycleEvents:
   subscriptions: []
 
 gateway:
-  replicas: 2
+  # One gateway by default; set 2 or more for high availability (a restart of a single gateway briefly
+  # interrupts sandbox egress).
+  replicas: 1
   # RUST_LOG (EnvFilter syntax) of the gateway.
   logLevel: info
   serviceAccountName: ''
+  # PodDisruptionBudget of the gateway pods; rendered only with more than one replica.
   pdb:
+    enabled: true
     minAvailable: 1
   ports:
     proxy: 3128

@@ -271,6 +271,33 @@ filegroup(
     output_group = "oci_layout",
 )
 
+# Playwright server of the e2e cluster (load_e2e_playwright only, never pushed): the Playwright base
+# image with browsers and system libraries plus the pinned playwright-core, so the pod needs no npm
+# access at runtime.
+image_layer(
+    name = "playwright_layer",
+    srcs = {
+        # package_relative: node_modules/... below /opt/playwright-server
+        "/opt/playwright-server": "//deploy/images/playwright-server:node_modules/playwright-core",
+    },
+    include_runfiles = False,
+)
+
+image_manifest(
+    name = "playwright_manifest",
+    base = "@playwright_base",
+    entrypoint = [
+        "node",
+        "/opt/playwright-server/node_modules/playwright-core/cli.js",
+        "run-server",
+        "--port",
+        "3000",
+        "--host",
+        "0.0.0.0",
+    ],
+    layers = [":playwright_layer"],
+)
+
 # The images are tagged with `--//build:version` (`bazel run //deploy:push_images --//build:version=2026.11.0`,
 # release workflow; `dev` by default).
 image_push(
@@ -354,6 +381,7 @@ multi_deploy(
         ("test_project", "test_project", "test-project"),
         ("plugin_forgejo", "plugin_forgejo", "plugin-forgejo"),
         ("plugin_github", "plugin_github", "plugin-github"),
+        ("playwright", "playwright", "playwright-server"),
     ]
 ]
 
