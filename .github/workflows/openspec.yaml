@@ -23,4 +23,4 @@ jobs:
 
       # Validates the main specs and all active changes (archived changes are not validated)
       - name: Validate
-        run: npx --yes @fission-ai/openspec@1.16.0 validate --all --strict --no-interactive
+        run: npx --yes @fission-ai/openspec@1.16.1 validate --all --strict --no-interactive

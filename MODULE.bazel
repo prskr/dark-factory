@@ -300,6 +300,7 @@ npm.npm_translate_lock(
     name = "npm_df_web",
     pnpm_lock = "//crates/df-web:pnpm-lock.yaml",
 )
+
 # The Playwright server of the e2e cluster (`deploy/images/playwright-server`): playwright-core on top
 # of the Playwright base image. Its version must equal the base image tag and the locked `playwright-rs`
 # (`deploy/e2e/e2e-local.sh` checks).
