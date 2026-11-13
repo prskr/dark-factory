@@ -462,11 +462,14 @@ restart_loaded_workloads() {
 }
 
 # Whether a kept cluster can run the suite as it is: it exists, answers, was set up by this script
-# (`e2e-state`) and Forgejo is healthy. Starts the Forgejo port-forward, which the suite needs.
+# (`e2e-state`), has the workloads that reuse restarts but never installs (a first run can die after
+# writing `e2e-state`) and Forgejo is healthy. Starts the Forgejo port-forward, which the suite needs.
 cluster_is_reusable() {
   [[ "${E2E_FRESH:-0}" != 1 ]] || return 1
   kind get clusters 2>/dev/null | grep -qx "$cluster" || return 1
   kc --request-timeout=10s -n "$namespace" get secret e2e-state >/dev/null 2>&1 || return 1
+  kc --request-timeout=10s -n playwright get deployment/playwright >/dev/null 2>&1 || return 1
+  kc --request-timeout=10s -n fake-upstream get deployment/fake-anthropic >/dev/null 2>&1 || return 1
   forward_forgejo >/dev/null 2>&1 || return 1
   curl -sf -m 10 -o /dev/null "http://127.0.0.1:$forgejo_port/api/healthz"
 }

@@ -708,8 +708,10 @@ mod tests {
     async fn the_sweep_does_not_try_databases_with_connections() -> sqlx::Result<()> {
         let server = server().await;
         let admin = server.admin_pool(1).await;
-        let grace = Duration::from_secs(10);
-        let age = grace + Duration::from_secs(10);
+        // Younger than the 10 s grace period of the concurrent sweep test, which would drop
+        // `released`; this test only lists candidates and drops nothing.
+        let grace = Duration::from_secs(1);
+        let age = Duration::from_secs(5);
         let released = aged_name(DATABASE_PREFIX, age);
         let open = aged_name(DATABASE_PREFIX, age);
         create_database(&admin, &released).await;

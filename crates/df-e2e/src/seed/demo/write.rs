@@ -204,18 +204,20 @@ async fn insert_task(
         persona_name: task.persona,
     };
     write_runs(tx, &written, task, &message).await?;
-    set_task_fields(tx, &written, task, pr_url.as_deref()).await?;
+    set_task_fields(tx, &written, task, &message, pr_url.as_deref()).await?;
     if let Some(question) = &task.question {
         write_question(tx, &written, task, question).await?;
     }
     Ok(written)
 }
 
-/// The task row as the runs left it: status, times, pull request.
+/// The task row as the runs left it: status, times, pull request. The assignment is queued when
+/// the task was created; follow-up messages keep the times of their runs.
 async fn set_task_fields(
     tx: &mut Transaction<'_, Postgres>,
     task: &Written,
     spec: &DemoTask,
+    assignment: &TaskMessageRow,
     pr_url: Option<&str>,
 ) -> Result<()> {
     let last_end = spec.runs.last().map(|run| run.start_ago - run.minutes * 60);
@@ -256,9 +258,9 @@ async fn set_task_fields(
     .execute(&mut **tx)
     .await?;
     sqlx::query(
-        "UPDATE task_messages SET queued_at = now() - make_interval(secs => $2) WHERE task_id = $1",
+        "UPDATE task_messages SET queued_at = now() - make_interval(secs => $2) WHERE id = $1",
     )
-    .bind(task.id)
+    .bind(assignment.id.as_uuid())
     .bind(secs(spec.created_ago))
     .execute(&mut **tx)
     .await?;
