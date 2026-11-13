@@ -57,7 +57,7 @@ When it reports:
 
 For every finding, decide each of the following and record it in the ledger.
 
-**Verify first.** Open the cited code for every finding a reviewer rates `critical` or `major`, and for any finding that looks doubtful. Mark false positives `rejected` with a one-line reason. Merge findings from different axes that describe the same defect into one entry and keep all IDs. Keep the axis label on each entry.
+**Verify first.** Open the cited code for every finding a reviewer rates `critical` or `major`, for any finding that looks doubtful, and for every finding whose fix would change runtime behavior (what is pushed, stored, sent or deleted), whatever its severity. For those, check the fix against the spec and design as a whole, not only the sentence the reviewer quotes: a minor "the code is stricter than the spec" finding once led to a fix that let the runtime overwrite human commits. Mark false positives `rejected` with a one-line reason. Merge findings from different axes that describe the same defect into one entry and keep all IDs. Keep the axis label on each entry.
 
 **Blocking** (must be fixed before the change is done):
 - A spec requirement is missing, partial or wrong. A spec scenario has no test.

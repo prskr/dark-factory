@@ -24,7 +24,9 @@ The orchestrator sends one of:
 - If a task reveals a design problem in the change artifacts, don't edit the artifacts. Return `BLOCKED` with the problem and a proposed artifact change.
 - TDD: write the failing test first, see it fail, then implement.
 - During red/green run only the test you work on (`cargo test -p <crate> <test_name>`); the whole crate and the Bazel targets run once in the checks below (skill `rust`, "Feedback loop").
-- Change files with the Edit or Write tool, not with shell scripts (`python3` heredocs, `sed -i`); Edit calls are auto-approved in this agent's permission mode, shell edits are not.
+- Change files with the Edit or Write tool, not with shell scripts (`python3` heredocs, `sed -i`, `perl -pi`); Edit calls are auto-approved in this agent's permission mode, shell edits are not, and a hook blocks them. A rename across many files is still a series of Edit calls.
+- Long commands (full test runs, Bazel, `just e2e-local`): start one in the background and wait for its completion notification. Don't stack monitors, wait loops or `sleep` polls.
+- e2e work: run only the test you work on (`E2E_TEST_ARGS="--ignored --test-threads=1 <filter>" just e2e-local`) and the full suite once at the end; free the disk first (skill `rust`, "End-to-end suite").
 - Mark tasks done in `tasks.md` as you finish them.
 
 ## Checks before reporting
@@ -36,7 +38,7 @@ First probe for `protoc`, which plain `cargo` builds need (AGENTS.md): `command 
 1. `cargo fmt --all --check`
 2. `cargo clippy --all-targets --all-features -- -D warnings`
 3. `cargo machete`
-4. Tests of the touched crates, once (`cargo test -p <crate>`), including container-backed tests when a socket is available (below). Then the affected Bazel test targets (`bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...`), which catch Bazel-only wiring and are cached for unchanged targets. Skip the Bazel step for cargo-only crates (an entry in `[workspace.metadata.check-crates.exempt]` of the root `Cargo.toml`, such as `crates/df-e2e`): they have no Bazel targets.
+4. Tests of the touched crates in one command (`cargo test --all-features -p <a> -p <b> …`, same features as clippy), including container-backed tests when a socket is available (below). Never one `cargo test -p` per crate in a loop: each recompiles. Bazel only when Bazel inputs changed (`BUILD.bazel`, `MODULE.bazel`, `Cargo.toml`, `Cargo.lock`, test `data`): then `bazel --bazelrc=.bazelrc.agents build --lockfile_mode=error //crates/... //plugins/...` and the affected test targets. Cargo-only crates (`[workspace.metadata.check-crates.exempt]`, such as `crates/df-e2e`) have no Bazel targets.
 5. If you changed a `sqlx::query!`/`query_as!` macro: regenerate `.sqlx/` (`docs/development.md`).
 
 Without `protoc`, use the Bazel equivalents and say so in the report:
@@ -85,4 +87,4 @@ BLOCKED: <question or design problem, with options>   (only when BLOCKED)
 NOTES: <deviations from the spec or the fix list, and why>
 ```
 
-Keep it under 300 words. No summaries of the code you wrote; the reviewers read the diff.
+Keep it under 300 words. No summaries of the code you wrote; the reviewers read the diff. Always end with this report, also after a long background command or a resumed round: the orchestrator only sees your final message.

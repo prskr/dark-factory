@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup), when running Rust tests (choosing cargo or Bazel, filters, no container socket), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints or a file over the length limit.
+description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup) or a target such as wasm32-wasip2 seems missing, when running Rust tests (choosing cargo or Bazel, filters, no container socket, disk full), when running or writing end-to-end tests (just e2e-local, crates/df-e2e), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints or a file over the length limit.
 ---
 
 # Rust in Dark Factory
@@ -22,6 +22,7 @@ cargo clippy --version && cargo fmt --version
 - `rust-toolchain.toml` is the source of truth. The same version is repeated in `MODULE.bazel` (`versions`); bump both together.
 - A missing component or target: `rustup component add <name>` / `rustup target add <triple>` with the names from the file; don't change the file.
 - A plain `cargo build` also needs `protoc` (>= 29.x) on `PATH` (or `PROTOC`). Without it, build and test through Bazel.
+- `.bazel_env/bin` (on `PATH` through direnv) contains Bazel's own `cargo` and `rustc`, which come before rustup's and know no extra targets: `wasm32-wasip2` looks missing. Don't take `.bazel_env/bin` off `PATH` (it also provides `swc`, `tailwindcss`, `kind`, `buf`); call rustup's toolchain explicitly for target builds: `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build --target wasm32-wasip2 -p forgejo-plugin`.
 - `df-web` compiles its scripts (`swc`) and stylesheet (`tailwindcss`) in `build.rs`. Without the tools (`bazel run //:bazel_env` builds them into `.bazel_env/bin`, which must be on `PATH`; in a sandbox they are usually missing) the build succeeds with a warning, nothing is embedded, and `cargo test -p df-web` lists the tests that read compiled assets as `ignored` (cfgs `df_web_scripts` / `df_web_styles`). Say in the report that they did not run; `bazel test //crates/df-web/...` always runs them.
 
 ## Adding a dependency
@@ -61,8 +62,12 @@ The order of preference (std, existing dependency, hand-rolled) is in `AGENTS.md
 ### Feedback loop: cargo with a filter, Bazel once at the end
 
 - **While red/green, run only the test you work on:** `cargo test -p <crate> <test_name>` or `cargo test -p <crate> --test <file> <test_name>`. Cargo compiles the edited crate incrementally; Bazel (rules_rust) recompiles the whole crate as static musl on every change and reruns the whole test target.
-- **Before committing,** run the whole touched crates once (`cargo test -p <crate>`), then the affected Bazel test targets (`bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...`, or `//...` when shared code changed). Bazel caches test results and shares the remote cache across worktrees, so unchanged targets are not rerun; this run catches Bazel-only breakage (`rustc_env_files`, `data`, transitions). Cargo-only crates (`[workspace.metadata.check-crates.exempt]`, such as `crates/df-e2e`) have no Bazel targets; skip the Bazel step for them.
+- **Before committing,** run all touched crates in one command: `cargo test -p <a> -p <b> …` (or `cargo test --workspace`). Never loop `cargo test -p $c` over crates: each invocation resolves features anew and relinks shared dependencies, so a loop spends ~10 minutes compiling for ~2 minutes of tests.
+- Use the same feature flags for clippy and tests (`cargo clippy --all-targets --all-features` and `cargo test --all-features`, or neither): different features invalidate the build and the next command recompiles most of the workspace.
+- **Bazel only when the Bazel inputs changed:** a `BUILD.bazel`, `MODULE.bazel`, a `Cargo.toml` or `Cargo.lock`, or `data`/`rustc_env` a test reads. Then run the affected targets once (`bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...`). Otherwise the cargo run is enough; CI runs Bazel. Cargo-only crates (`[workspace.metadata.check-crates.exempt]`, such as `crates/df-e2e`) have no Bazel targets.
 - Don't alternate cargo and Bazel runs during the loop: they share no build outputs, so each switch compiles everything twice.
+- `.bazelrc.agents` uses no remote cache (it was unreachable from sandboxes). Don't add `--config=cache`.
+- **Long commands:** start one in the background and wait for its completion notification. Don't stack wait loops, monitors or `sleep` polls; they wake you for nothing and blocked sleeps fail.
 - `--test_filter` narrows a Bazel run, but each new filter value is a new cache key and reruns the target.
 
 ### Container-backed tests
@@ -80,7 +85,18 @@ Find the container socket first, as described in `AGENTS.md` ("Containers and in
   ```
 
 - **Tests hang after the container runtime restarted:** the shared PostgreSQL container (`df-test-postgres-*`, reused by all test binaries) stays exited. With the CLI of the runtime that owns `<socket>` (`podman` or `docker`), check with `<cli> ps -a --filter name=df-test-postgres` and remove it with `<cli> rm -f <name>`; testcontainers recreates it on the next run.
-- **`dark-factory` tests with plain cargo** load the Forgejo wasm plugin from `target/wasm32-wasip2/debug/`. Build it first: `cargo build --target wasm32-wasip2 -p forgejo-plugin`. Bazel (CI, release) builds it as test `data` and sets `FORGEJO_PLUGIN_WASM`; no extra step there.
+- **Disk full (`no space left on device`):** the shared container `df-test-postgres-17-alpine-r1` keeps every test database (TD-123) and grows to 15+ GB. Check with `<cli> system df` / `df -h /var/lib/docker`, then remove it with its volume: `<cli> rm -fv df-test-postgres-17-alpine-r1`. Its data is throwaway; the next test run recreates it. Do this before an e2e run, which needs several GB for images.
+- **`dark-factory` tests with plain cargo** load the Forgejo wasm plugin from `target/wasm32-wasip2/debug/`. Build it first with rustup's toolchain (see "Toolchain in a sandbox"): `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build --target wasm32-wasip2 -p forgejo-plugin`. Bazel (CI, release) builds it as test `data` and sets `FORGEJO_PLUGIN_WASM`; no extra step there.
+
+### End-to-end suite (`just e2e-local`)
+
+`deploy/e2e/e2e-local.sh` creates a kind cluster (~2-4 minutes), runs `crates/df-e2e` against it and deletes it. A full run takes ~15 minutes; `flow.rs` alone ~10 minutes. Needs a container socket and free disk (previous section).
+
+- **While working on one e2e test, run only it:** `E2E_TEST_ARGS="--ignored --test-threads=1 <test_name_filter>" just e2e-local`. The setup still runs, but the other tests are skipped (~12 minutes saved per run). `E2E_TEST_ARGS` replaces the default arguments, so keep `--test-threads=1`: a filter can match several tests, and the cluster's memory budget (`docs/demo.md`) is one test at a time.
+- **Run the full suite once,** at the end, when the targeted test passes.
+- **A new test file** under `crates/df-e2e/tests/` must be added to `suite_tests` in `deploy/e2e/e2e-local.sh`; otherwise it is built but never run, and the suite still passes.
+- `E2E_KEEP=1` keeps the cluster after the run for inspection (`kubectl --context kind-df-e2e …`); the next run still recreates it.
+- Forgejo refuses to merge a draft PR (HTTP 405): a test that merges an attached or draft PR marks it ready through the test's own Forgejo client first. It also answers 405 while it re-checks a PR after its base branch moved (another test merged); `Forgejo::merge_pull` retries that.
 
 ## Adding a crate
 

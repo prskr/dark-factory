@@ -13,7 +13,7 @@ If there are good reasons to break something now or to clean something up in a w
 
 ## Bazel usage
 
-When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` like this: `bazel --bazelrc=.bazelrc.agents ...` to avoid issues in the sandbox. Builds and tests run locally; it enables the shared BuildBuddy remote cache (`--config=cache`). On Linux every target is built as static musl (see `docs/development.md`, "Bazel: platforms, cache and images").
+When using Bazel for any kind of operation you MUST use the `.bazelrc.agents` like this: `bazel --bazelrc=.bazelrc.agents ...` to avoid issues in the sandbox. Builds and tests run locally, without the remote cache (unreachable from sandboxes). On Linux every target is built as static musl (see `docs/development.md`, "Bazel: platforms, cache and images").
 
 ## Containers and integration tests in a sandbox
 

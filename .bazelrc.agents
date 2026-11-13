@@ -5,8 +5,8 @@ common --repo_contents_cache=
 
 # The workspace .bazelrc is always read: importing it again duplicates flags such as --aspects.
 
-# Share build outputs through the BuildBuddy remote cache (builds and tests run locally)
-build --config=cache
+# No remote cache: BuildBuddy is unreachable from agent sandboxes (ALPN errors) and cost more
+# time than it saved. CI passes --config=cache itself.
 
 # Cap local parallelism to keep sandboxes from running out of memory
 build --jobs=4

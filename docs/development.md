@@ -221,7 +221,7 @@ The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` 
 - Base images (`pull` in `MODULE.bazel`) are pinned by digest and fetched with Bazel's downloader, so their manifests and configs land in the repository cache and are not requested again; CI keeps that cache between runs (`repository-cache` of `setup-bazel`). `platforms` limits the fetch to `linux/amd64` and `linux/arm64`, because a registry counts every child manifest as a pull. The Bazel downloader cannot do the anonymous token handshake of `public.ecr.aws` (401); Docker Hub images therefore come from `mirror.gcr.io`, which serves them under the same digests.
 - Images go to `ghcr.io/prskr/dark-factory/{control-plane,plugin-forgejo,plugin-github,runtime,test-project}`. The tag is `--//build:version` (default `dev`), which also becomes `df_telemetry::VERSION`; the `release` workflow sets it to the release version (see [`releasing.md`](releasing.md)). Locally: `docker login ghcr.io`, then `just release-push 2026.11.0`.
 - The plugin images (`//deploy:plugin_forgejo_image`, `//deploy:plugin_github_image`: `scratch`, one file `/plugin.wasm`) are mounted by the chart as image volumes at `/plugins/<name>`; the control plane image contains no plugin. `bazel run //deploy:dev` pushes them as `plugin-forgejo:dev` and `plugin-github:dev` and passes `plugins.forgejo.image.digest` and `plugins.github.image.digest` to Helm, so a plugin change replaces the control plane pods.
-- `.bazelrc.agents` makes `--config=cache` the default for sandboxed agents.
+- `.bazelrc.agents` (sandboxed agents) uses no remote cache: BuildBuddy is unreachable from the sandboxes. CI passes `--config=cache` in its Bazel arguments.
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
