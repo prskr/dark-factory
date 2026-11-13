@@ -44,6 +44,10 @@ The repository SHALL provide a Bazel configuration `rbe` that runs build and tes
 - **WHEN** `bazel test --config=rbe --test_tag_filters=-no-remote-exec //...` runs on an arm64 Linux or a macOS client
 - **THEN** the test binaries are built for amd64 Linux and every selected test runs and passes on the remote workers
 
+#### Scenario: One command for all tests on an arm64 Linux client
+- **WHEN** a developer runs `just bazel-test-rbe` on an arm64 Linux machine with a container runtime, and the spike showed the recipe is faster than `just bazel-test` there (design D4)
+- **THEN** every test, including the database tests, runs once and passes, without the developer passing any tag filter
+
 ### Requirement: CI and releases on remote execution
 The Bazel jobs of the CI workflow and of the release workflow SHALL use the `rbe` configuration, provided the spike showed that both workflows pass with it and that the CI job is not slower than with the remote cache alone (design D6). Otherwise they SHALL keep the remote cache configuration.
 
