@@ -14,8 +14,9 @@
 //! Tests never share a database. Databases older than [`STALE_AFTER`] (1 minute; the creation time
 //! is in the `UUIDv7` of the name) are dropped when the server is first used by a test binary and
 //! then while tests create databases, at most every [`SWEEP_INTERVAL`] (30 s) per process, so a
-//! long run does not fill the container. `DROP DATABASE` has no `FORCE`: a database whose pool is
-//! still open, also in another test binary, survives. Test pools keep one connection for their
+//! long run does not fill the container. Only databases without connections are dropped, and
+//! `DROP DATABASE` has no `FORCE`: a database whose pool is still open, also in another test
+//! binary, survives. Test pools keep one connection for their
 //! whole lifetime (no idle timeout, no max lifetime), so a database without connections has no
 //! pool. The databases of the last tests of a run stay until the next run sweeps them.
 //!
@@ -439,18 +440,12 @@ fn created_at(name: &str, prefix: &str) -> Option<SystemTime> {
     Some(UNIX_EPOCH + Duration::new(secs, nanos))
 }
 
-/// Drops test databases and unfinished templates older than `grace`. A database with connections
-/// survives (no `FORCE`). Names that do not follow the scheme are left alone; all errors are
+/// Drops test databases and unfinished templates older than `grace` that have no connection (see
+/// [`stale_databases`]); one that gets a connection meanwhile survives (no `FORCE`). Names that do not follow the scheme are left alone; all errors are
 /// ignored (best effort).
 async fn drop_stale_databases(admin: &PgPool, grace: Duration) {
-    let names: Vec<String> = sqlx::query_scalar("SELECT datname FROM pg_database")
-        .fetch_all(admin)
-        .await
-        .unwrap_or_default();
-    let cutoff = SystemTime::now() - grace;
-    for name in names {
-        let is_stale = |prefix| created_at(&name, prefix).is_some_and(|created| created < cutoff);
-        if is_stale(TEMPLATE_TMP_PREFIX) {
+    for name in stale_databases(admin, grace).await {
+        if name.starts_with(TEMPLATE_TMP_PREFIX) {
             // A build that died after marking the database as template; templates cannot be dropped.
             execute(
                 admin,
@@ -458,13 +453,32 @@ async fn drop_stale_databases(admin: &PgPool, grace: Duration) {
             )
             .await
             .ok(); // another test binary may have dropped it already
-        } else if !is_stale(DATABASE_PREFIX) {
-            continue;
         }
         execute(admin, &format!("DROP DATABASE \"{name}\""))
             .await
-            .ok(); // another test binary may have dropped it already
+            .ok(); // another test binary may have dropped it or connected to it meanwhile
     }
+}
+
+/// Test and temporary template databases older than `grace` that have no connection. Databases in
+/// use are left out up front: `DROP DATABASE` would wait up to 5 s for their connections to end.
+async fn stale_databases(admin: &PgPool, grace: Duration) -> Vec<String> {
+    let names: Vec<String> = sqlx::query_scalar(
+        "SELECT datname FROM pg_database d
+         WHERE NOT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.datname = d.datname)",
+    )
+    .fetch_all(admin)
+    .await
+    .unwrap_or_default();
+    let cutoff = SystemTime::now() - grace;
+    names
+        .into_iter()
+        .filter(|name| {
+            [TEMPLATE_TMP_PREFIX, DATABASE_PREFIX]
+                .into_iter()
+                .any(|prefix| created_at(name, prefix).is_some_and(|created| created < cutoff))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -685,6 +699,27 @@ mod tests {
         assert!(database_exists(&admin, &open).await);
         let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&open_pool).await?;
         assert_eq!(one, 1);
+        Ok(())
+    }
+
+    /// `DROP DATABASE` waits up to 5 s for the connections of a database in use before it fails;
+    /// with many such databases in a busy run, sweeps blocked database creation for minutes.
+    #[tokio::test]
+    async fn the_sweep_does_not_try_databases_with_connections() -> sqlx::Result<()> {
+        let server = server().await;
+        let admin = server.admin_pool(1).await;
+        let grace = Duration::from_secs(10);
+        let age = grace + Duration::from_secs(10);
+        let released = aged_name(DATABASE_PREFIX, age);
+        let open = aged_name(DATABASE_PREFIX, age);
+        create_database(&admin, &released).await;
+        create_database(&admin, &open).await;
+        let _open_pool = server.pool(&open, 5).await?;
+
+        let candidates = stale_databases(&admin, grace).await;
+
+        assert!(candidates.contains(&released), "{candidates:?}");
+        assert!(!candidates.contains(&open), "{candidates:?}");
         Ok(())
     }
 

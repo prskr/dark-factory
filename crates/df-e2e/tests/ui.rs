@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use df_e2e::browser::Session;
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data};
-use playwright_rs::protocol::{DragToOptions, Position};
+use playwright_rs::protocol::{DragToOptions, Locator, Position};
 use playwright_rs::{Viewport, expect, expect_page};
 
 /// Wide enough for the graph to grow next to the 520 px events table.
@@ -40,6 +40,14 @@ async fn assert_menu_inside_viewport(session: &Session, min_left: f64) -> Result
         "menu {menu:?} is not inside {min_left}..{viewport}"
     );
     Ok(())
+}
+
+/// The row of `older`, matched only when it comes after the row of `newer`. Tests in parallel add
+/// tasks to the same project, so the test's own rows need not be the first ones.
+fn newer_listed_before_older(session: &Session, newer: &str, older: &str) -> Locator {
+    session
+        .page
+        .locator(format!("#task-rows > #row-{newer} ~ #row-{older}"))
 }
 
 /// Opens the settings page of project `key` from the edit action of the projects page.
@@ -372,16 +380,10 @@ async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
     .to_be_visible()
     .await
     .context("the button names the current sort")?;
-    let rows = session.page.locator("#task-rows li[id^=row-]");
-    expect(rows.first())
-        .to_have_attribute("id", &format!("row-{newer}"))
+    expect(newer_listed_before_older(&session, newer, older))
+        .to_be_visible()
         .await
-        .context("the newest task is first")?;
-    let position = |key: &str| format!("#task-rows #row-{key}");
-    assert!(
-        session.page.locator(position(older)).count().await? == 1,
-        "the older task is listed"
-    );
+        .context("the newer task is listed before the older one")?;
 
     for key in &keys {
         session.open_task(&env, key).await?;
@@ -544,7 +546,7 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
                 .await?,
         );
     }
-    let (_, newer) = (&keys[0], &keys[1]);
+    let (older, newer) = (&keys[0], &keys[1]);
     session
         .page
         .goto(
@@ -574,10 +576,10 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
         .to_have_url_regex("sort=created")
         .await
         .context("the sort is part of the URL")?;
-    expect(session.page.locator("#task-rows li[id^=row-]").first())
-        .to_have_attribute("id", &format!("row-{newer}"))
+    expect(newer_listed_before_older(&session, newer, older))
+        .to_be_visible()
         .await
-        .context("the newest task is first")?;
+        .context("the newer task is listed before the older one")?;
     let overflows = session
         .page
         .evaluate_value(
