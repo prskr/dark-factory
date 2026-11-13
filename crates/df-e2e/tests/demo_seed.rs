@@ -158,6 +158,22 @@ async fn completed_demo_tasks_with_a_pull_request_have_a_merged_one() -> Result<
 }
 
 #[tokio::test]
+async fn follow_up_messages_are_queued_after_the_task_was_created() -> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
+
+    demo::run(&pool).await?;
+
+    let follow_ups = scalar(
+        &pool,
+        "SELECT count(*) FROM task_messages m JOIN tasks t ON t.id = m.task_id
+          WHERE m.queued_at > t.created_at AND m.queued_at <= m.delivered_at",
+    )
+    .await?;
+    assert!(follow_ups > 0, "no follow-up message keeps its queue time");
+    Ok(())
+}
+
+#[tokio::test]
 async fn demo_profile_keeps_the_resume_times_in_the_future() -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
     demo::run(&pool).await?;

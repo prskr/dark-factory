@@ -1328,12 +1328,6 @@ async fn a_stop_while_the_sandbox_is_created_tears_it_down_afterwards() {
 async fn a_task_that_becomes_due_starts_within_the_configured_tick() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    // Nothing notifies when the resume time passes: only a tick finds the task.
-    sqlx::query("UPDATE tasks SET resume_at = now() + interval '300 milliseconds' WHERE id = $1")
-        .bind(env.task.id.as_uuid())
-        .execute(&pool)
-        .await
-        .unwrap();
     let mut ctx = env.ctx.clone();
     ctx.config = Arc::new(crate::ChannelConfig {
         scheduling: df_core::config::SchedulingConfig {
@@ -1344,6 +1338,14 @@ async fn a_task_that_becomes_due_starts_within_the_configured_tick() {
     });
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let scheduler = Scheduler::new(ctx);
+    // Nothing notifies when the resume time passes: only a tick finds the task. Set right before
+    // the start, so the first tick (immediate) runs while the task is not due yet and a later tick
+    // of the configured interval has to start it.
+    sqlx::query("UPDATE tasks SET resume_at = now() + interval '300 milliseconds' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
     let running = tokio::spawn(async move {
         scheduler
             .run(async {
