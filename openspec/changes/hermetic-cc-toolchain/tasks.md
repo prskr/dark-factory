@@ -1,6 +1,6 @@
 # Tasks
 
-No published docs change: this alters contributor tooling only (Bazel toolchains, `.bazelrc`, `.cargo`/`.envrc`); nothing a user or operator sees or configures. Contributor docs are updated in the groups below.
+No published docs change: this alters contributor and maintainer tooling only (Bazel toolchains, `.bazelrc`, `.cargo`/`.envrc`, and the CI and release workflows that build the images); the released images, chart and configuration an operator uses stay the same. Contributor and maintainer docs (`docs/development.md`, `docs/releasing.md`, `docs/remote-execution.md`) are updated in the groups below.
 
 ## 1. Spike and decision (design D1)
 
@@ -24,18 +24,18 @@ No published docs change: this alters contributor tooling only (Bazel toolchains
 
 ## 3. Pinned linker for plain cargo (spec: Pinned linker for plain cargo; only if D5 says go)
 
-- [ ] 3.1 Implement the option chosen in D5 (`.cargo/config.toml` with bundled `rust-lld`, or `ld.lld` in the `bazel_env` tools of `BUILD.bazel` plus the conditional flags in `.envrc`); verify `cargo test --workspace --no-run` links with lld when `.bazel_env/bin` is on `PATH` (`-Clink-arg=-Wl,--version` or `readelf -p .comment`).
-- [ ] 3.2 Verify the fallback: `cargo build --workspace` passes with `.bazel_env/bin` off `PATH`, and `cargo clippy --all-targets --all-features -- -D warnings` passes.
+- [ ] 3.1 Implement the option chosen in D5 (`.cargo/config.toml` with bundled `rust-lld`, or `ld.lld` in the `bazel_env` tools of `BUILD.bazel` plus the conditional flags in `.envrc`); verify `cargo test --workspace --no-run` links with lld (with `.bazel_env/bin` on `PATH` for the `bazel_env` option) by `readelf -p .comment` on a test binary from `target/debug/deps`.
+- [ ] 3.2 Verify `cargo build --workspace` and `cargo clippy --all-targets --all-features -- -D warnings` pass; for the `bazel_env` option also with `.bazel_env/bin` off `PATH` (fallback).
 - [ ] 3.3 Document the linker in `docs/development.md` (local setup and `bazel_env` tool list); verify the tool list matches `BUILD.bazel`.
 
 ## 4. Remote execution (spec: Remote execution configuration; CI and releases on remote execution)
 
-- [ ] 4.1 Add the RBE execution platform(s) to `build/platforms/BUILD.bazel` with `exec_properties` (image pinned by digest) and `build:rbe` to `.bazelrc` without `--platforms` (D4); verify `bazel build --config=rbe --config=linux-amd64-musl //...` passes from a Linux client and `bazel build //...` without it sends no remote action (BuildBuddy invocation shows local strategy only).
-- [ ] 4.2 Tag every test target that depends on `//crates/df-test-postgres` with `no-remote-exec` and add the repository check of D4; verify `bazel test --config=rbe //...` on a client with Docker passes with those tests executed locally (`--execution_log_compact_file` or the BuildBuddy invocation), and that the check fails for a test target without the tag.
+- [ ] 4.1 Add the RBE execution platform(s) to `build/platforms/BUILD.bazel` with `exec_properties` (image pinned by digest) and `build:rbe` to `.bazelrc` with `--platforms=//build/platforms:linux_amd64_musl` (D4); verify `bazel build --config=rbe //...` passes from an amd64 and an arm64 Linux client, `bazel cquery --config=rbe 'deps(//deploy:runtime_image)'` still contains both the amd64 and the arm64 `factory-agent`, and `bazel build //...` without it sends no remote action (BuildBuddy invocation shows local strategy only).
+- [ ] 4.2 Tag every test target that depends on `//crates/df-test-postgres` with `no-remote-exec` and add the repository check of D4; verify `bazel test --config=rbe //...` on an amd64 Linux client with Docker passes with those tests executed locally (`--execution_log_compact_file` or the BuildBuddy invocation), `bazel test --config=rbe --test_tag_filters=-no-remote-exec //...` passes from macOS, and the check fails for a test target without the tag.
 - [ ] 4.3 Only if 1.5 showed the default executor image is not enough: add `deploy/images/rbe-executor` and publish it to `ghcr.io/prskr/dark-factory/rbe-executor` from the image workflow; verify its structure test passes in CI.
 - [ ] 4.4 Verify the cross-client scenario: build the same commit with `--config=rbe` from Linux, then from macOS; the second invocation is fully cached.
 - [ ] 4.5 If the D6 gate passed (1.6): replace `--config=cache` with `--config=rbe` in `BAZEL_ARGS` of `.github/workflows/ci.yaml` and of both Bazel jobs in `.github/workflows/release.yaml`, with a comment pointing to the ADR and naming the rollback; verify the CI run of the pull request uses remote execution (BuildBuddy invocation link) and passes. If the gate failed, leave both workflows unchanged and remove the "CI and releases" scenarios that no longer apply from the spec delta.
-- [ ] 4.6 Update `docs/remote-execution.md` (status, §2.2 and §3 to what was built, §4 limitations), `docs/development.md` (`--config=rbe`, API key, `no-remote-exec` for database tests, what CI uses) and `docs/releasing.md` if the release workflow switched; update TD-27 in `docs/tech_debt.md` to the remaining part (container-backed tests on RBE workers, agent sandboxes); verify links with `just docs-build`.
+- [ ] 4.6 Update `docs/remote-execution.md` (status, §2.2 and §3 to what was built, §4 limitations), `docs/development.md` (`--config=rbe`, API key, `no-remote-exec` for database tests and `--test_tag_filters=-no-remote-exec` for macOS and arm64 clients, what CI uses) and `docs/releasing.md` if the release workflow switched; update TD-27 in `docs/tech_debt.md` to the remaining part (container-backed tests on RBE workers, agent sandboxes); verify links with `just docs-build`.
 
 ## 5. Integration checks
 
