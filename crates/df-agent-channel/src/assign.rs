@@ -9,7 +9,7 @@ use df_core::harness::{
     SANDBOX_HOME_DIR, SANDBOX_REPO_DIR,
 };
 use df_core::model_provider::ProviderModel;
-use df_core::{LandlockMode, PersonaId, Principal, ProjectId, TaskId};
+use df_core::{LandlockMode, PersonaId, Principal, ProjectId, RewritePolicy, TaskId};
 use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::push_policy;
 use df_db::{
@@ -17,7 +17,8 @@ use df_db::{
 };
 use df_proto::agent::v1::{
     AcpHarness, Assign, Budgets, CommitIdentity, Continuation, Harness, HarnessFile, Prompt,
-    TaskRef, ToolAnnotations, ToolDescriptor, Workspace, harness as harness_kind,
+    RewritePolicy as RewritePolicyProto, TaskRef, ToolAnnotations, ToolDescriptor, Workspace,
+    harness as harness_kind,
 };
 use df_proto::pbjson_types::{Duration, Timestamp};
 use df_proto::transcript::v1 as transcript;
@@ -40,6 +41,9 @@ pub struct ProjectInfo {
     pub base_branch: String,
     /// Command that starts the adapter in the project image; empty means the harness image.
     pub adapter_command: Vec<String>,
+    pub rewrite_policy: RewritePolicy,
+    /// Globs of the existing branches an agent may start tasks on.
+    pub agent_branch_globs: Vec<String>,
 }
 
 impl ProjectInfo {
@@ -80,8 +84,14 @@ pub struct RunContext {
 }
 
 impl RunContext {
-    pub fn task_branch(&self) -> String {
-        self.task.key.task_branch()
+    /// The task's stored branch.
+    pub fn task_branch(&self) -> &str {
+        &self.task.branch
+    }
+
+    /// The task's effective base branch: the base of its attached PR, else the project's.
+    pub fn base_branch(&self) -> &str {
+        self.task.base_branch(&self.project.base_branch)
     }
 
     pub fn wip_branch(&self) -> String {
@@ -96,6 +106,9 @@ struct ProjectRecord {
     image: String,
     base_branch: String,
     adapter_command: Vec<String>,
+    #[sqlx(try_from = "String")]
+    branch_rewrite_policy: RewritePolicy,
+    agent_branch_globs: Vec<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -114,7 +127,9 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         .ok_or_else(|| ChannelError::InvalidData(format!("task of run {} is missing", run.id)))?;
 
     let project: ProjectRecord = sqlx::query_as(
-        "SELECT key, repo_url, image, base_branch, adapter_command FROM projects WHERE id = $1",
+        "SELECT key, repo_url, image, base_branch, adapter_command, branch_rewrite_policy,
+                agent_branch_globs
+         FROM projects WHERE id = $1",
     )
     .bind(task.project_id.as_uuid())
     .fetch_one(pool)
@@ -126,6 +141,8 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         image: project.image,
         base_branch: project.base_branch,
         adapter_command: project.adapter_command,
+        rewrite_policy: project.branch_rewrite_policy,
+        agent_branch_globs: project.agent_branch_globs,
     };
 
     let persona: PersonaRecord = sqlx::query_as(
@@ -258,8 +275,8 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         }),
         workspace: Some(Workspace {
             repo_url: proxy_repo_url(&config.git_proxy, &rc.task.key.to_string()),
-            base_branch: rc.project.base_branch.clone(),
-            task_branch: rc.task_branch(),
+            base_branch: rc.base_branch().to_owned(),
+            task_branch: rc.task_branch().to_owned(),
             wip_branch: rc.wip_branch(),
             commit_identity: Some(CommitIdentity {
                 name: config.agent.commit_identity.name.clone(),
@@ -268,6 +285,12 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             git_hooks: Vec::new(),
             git_config: Vec::new(),
             hidden_paths: hidden_paths.clone(),
+            rewrite_policy: match rc.project.rewrite_policy {
+                RewritePolicy::Never => RewritePolicyProto::Never,
+                RewritePolicy::WithLease => RewritePolicyProto::WithLease,
+            }
+            .into(),
+            existing_branch: rc.task.on_existing_branch(),
         }),
         harness: Some(Harness {
             kind: Some(harness_kind::Kind::Acp(AcpHarness {

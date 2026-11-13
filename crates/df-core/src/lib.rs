@@ -1,6 +1,7 @@
 //! Core domain types, instance configuration, and provider trait seams for Dark Factory.
 
 pub mod artifacts;
+pub mod branch;
 pub mod config;
 pub mod domain;
 pub mod forge;
@@ -21,6 +22,9 @@ pub mod testing;
 pub mod title;
 pub mod webhooks;
 
+pub use branch::{
+    BranchError, ExistingBranch, RewritePolicy, default_agent_branch_globs, matches_agent_branch,
+};
 pub use config::{
     ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,
     ConfigError, DatabaseConfig, InstanceConfig, LandlockMode, MAX_PLUGIN_CALL_TIMEOUT_SECONDS,

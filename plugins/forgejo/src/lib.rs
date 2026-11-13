@@ -22,8 +22,8 @@ use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef}
 use darkfactory::integrations::webhook_signature;
 use exports::darkfactory::integrations::issues::{Comment, Guest as IssuesGuest, Issue};
 use exports::darkfactory::integrations::pull_requests::{
-    AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, PostedComment, PullRequest,
-    PullRequestUpdate,
+    AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, OpenFilter, PostedComment,
+    PullRequest, PullRequestUpdate,
 };
 use exports::darkfactory::integrations::webhooks::{Guest as WebhooksGuest, ParsedEvent};
 use forge_common::draft;
@@ -40,6 +40,11 @@ impl PullRequestsGuest for ForgejoPlugin {
 
     fn find_open(repo: RepoRef, head: String, base: String) -> Result<Option<PullRequest>, Error> {
         instance()?.find_open(&repo, &head, &base)
+    }
+
+    fn list_open(repo: RepoRef, filter: OpenFilter) -> Result<Vec<PullRequest>, Error> {
+        reject_unsupported_filters(&filter)?;
+        instance()?.list_open(&repo, &filter.head)
     }
 
     fn get(id: PullRequestRef) -> Result<PullRequest, Error> {
@@ -117,9 +122,44 @@ fn config(key: &str) -> Result<Option<String>, Error> {
     wasi::config::store::get(key).map_err(|e| Error::Config(format!("reading `{key}`: {e:?}")))
 }
 
+/// `list-open` filters beyond `head` come with `iter3-ci-tools`.
+fn reject_unsupported_filters(filter: &OpenFilter) -> Result<(), Error> {
+    forge_common::open_filter::reject_unsupported_filters(forge_common::open_filter::SetFilters {
+        head_prefix: filter.head_prefix.is_some(),
+        author: filter.author.is_some(),
+        label: filter.label.is_some(),
+        base: filter.base.is_some(),
+    })
+    .map_err(Error::InvalidInput)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_head_filter_is_supported() {
+        let head = |f: fn(&mut OpenFilter)| {
+            let mut filter = OpenFilter {
+                head: "h".into(),
+                head_prefix: None,
+                author: None,
+                label: None,
+                base: None,
+            };
+            f(&mut filter);
+            reject_unsupported_filters(&filter)
+        };
+        assert!(head(|_| {}).is_ok());
+        assert!(matches!(
+            head(|f| f.author = Some("a".into())),
+            Err(Error::InvalidInput(_))
+        ));
+        assert!(matches!(
+            head(|f| f.base = Some("main".into())),
+            Err(Error::InvalidInput(_))
+        ));
+    }
 
     #[test]
     fn missing_base_url_is_a_config_error() {

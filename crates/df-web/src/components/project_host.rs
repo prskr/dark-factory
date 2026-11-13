@@ -146,6 +146,8 @@ pub(crate) fn test_project(repo: &str, issue: Option<&str>, credential: bool) ->
         adapter_command: Vec::new(),
         forge_credential_id: credential.then(uuid::Uuid::nil),
         webhook_wake: df_core::webhooks::WebhookWake::Members,
+        branch_rewrite_policy: df_core::RewritePolicy::default(),
+        agent_branch_globs: df_core::default_agent_branch_globs(),
         has_tasks: false,
     }
 }

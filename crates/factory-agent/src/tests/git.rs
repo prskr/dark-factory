@@ -332,7 +332,7 @@ async fn test_malicious_hook_scenario() {
         .with_hooks_empty_dir(&empty_hooks_dir);
 
     let hardened_push = hardened_git
-        .push("origin", "HEAD:main", false)
+        .push("origin", "HEAD:main", crate::git::Force::No)
         .await
         .expect("hardened push");
     assert!(

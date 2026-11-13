@@ -1,8 +1,10 @@
 //! The delegation tools: `create_task`, `list_personas` and `send_message` (spec
 //! `factory-tools`, design D5).
 
-use df_core::{DependencyKind, Principal, TaskKey, sanitize_title};
-use df_db::{DbError, NewDependency, NewTask};
+use df_core::{
+    DependencyKind, ExistingBranch, Principal, TaskKey, matches_agent_branch, sanitize_title,
+};
+use df_db::{DbError, NewDependency, NewTask, TaskPlacement, place_on_branch};
 use serde_json::{Value, json};
 
 use super::{Outcome, text_arg};
@@ -38,6 +40,10 @@ pub(super) async fn create_task(
         Ok(depends_on) => depends_on,
         Err(problem) => return Ok(Outcome::error(problem)),
     };
+    let placement = match resolve_branch(ctx, rc, args).await {
+        Ok(placement) => placement,
+        Err(problem) => return Ok(Outcome::error(problem)),
+    };
     let input = NewTask {
         project_id: rc.project.id,
         persona_id: df_core::PersonaId::from_uuid(persona),
@@ -48,7 +54,7 @@ pub(super) async fn create_task(
         parent_id: Some(rc.task.id),
         depends_on,
     };
-    match df_db::create_task(&ctx.pool, input).await {
+    match df_db::create_task_on(&ctx.pool, input, placement).await {
         Ok((task, _)) => {
             let mut outcome = Outcome::ok(format!(
                 "Created {} with status {}. End your turn: you are woken when it ends.",
@@ -60,8 +66,44 @@ pub(super) async fn create_task(
         Err(DbError::InvalidDependency(key)) => Ok(Outcome::error(format!(
             "invalid dependency `{key}`: it is not a task of this project, or it is listed twice"
         ))),
+        Err(held @ DbError::BranchHeld { .. }) => Ok(Outcome::error(held.to_string())),
         Err(e) => Err(e.into()),
     }
+}
+
+/// The placement of the `branch` argument: validated, matched against the project's agent
+/// branches and attached to its one open PR. The `Err` is what the agent is told.
+async fn resolve_branch(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<TaskPlacement, String> {
+    let Some(branch) = text_arg(args, "branch") else {
+        return Ok(TaskPlacement::default());
+    };
+    if args.get("base_task").is_some() {
+        return Err(
+            "`branch` can't be combined with `base_task`: a task on an existing branch has no base task"
+                .into(),
+        );
+    }
+    let branch = ExistingBranch::parse(&branch, &rc.project.base_branch)
+        .map_err(|problem| format!("invalid branch: {problem}"))?;
+    let globs = &rc.project.agent_branch_globs;
+    if !matches_agent_branch(globs, branch.as_str()) {
+        let allowed = if globs.is_empty() {
+            "none".to_owned()
+        } else {
+            globs.join(", ")
+        };
+        return Err(format!(
+            "`{branch}` is not one of the agent branches of project {} (allowed: {allowed}); ask a board member to start a task on it",
+            rc.project.key
+        ));
+    }
+    place_on_branch(&*ctx.forge, &rc.project.id, branch)
+        .await
+        .map_err(|problem| problem.to_string())
 }
 
 /// Every persona with its description, ordered by name.
@@ -121,7 +163,11 @@ pub(super) async fn send_message(
     };
     let content = vec![df_db::text_block(text, false)];
     let mut tx = ctx.pool.begin().await?;
-    let message = df_db::queue_message_tx(&mut tx, child, agent(rc), content).await?;
+    let message = match df_db::queue_message_tx(&mut tx, child, agent(rc), content).await {
+        Ok(message) => message,
+        Err(held @ DbError::BranchHeld { .. }) => return Ok(Outcome::error(held.to_string())),
+        Err(e) => return Err(e.into()),
+    };
     let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
         .bind(child.as_uuid())
         .fetch_one(&mut *tx)

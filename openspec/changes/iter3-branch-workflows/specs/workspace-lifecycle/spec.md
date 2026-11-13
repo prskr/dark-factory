@@ -49,7 +49,7 @@ If the workspace exists, the runtime SHALL rewrite `.git/config`, re-apply the h
 - **THEN** nothing is pushed or reset, a `workspace.diverged` notice is emitted and the run report marks the workspace diverged
 
 ### Requirement: Push after every turn with new commits
-After each turn whose HEAD differs from the last pushed commit, the runtime SHALL push the task branch with an explicit refspec and SHALL send a `PushReport` with status and commits ahead of base. A fast-forward SHALL be pushed without force. Under the `with-lease` policy, a non-fast-forward SHALL be pushed with `--force-with-lease`, expecting the remote commit the runtime itself last pushed or fetched. Under `never`, it SHALL NOT be forced.
+After each turn whose HEAD differs from the last pushed commit, the runtime SHALL push the task branch with an explicit refspec and SHALL send a `PushReport` with status and commits ahead of base. A fast-forward SHALL be pushed without force. Under the `with-lease` policy, a non-fast-forward SHALL be pushed with `--force-with-lease`, expecting the remote commit the runtime itself last pushed or fetched. Under `never`, it SHALL NOT be forced. A rewrite SHALL pass the push checks like any other push: rewritten commits are new commits that keep their author, so rewriting commits whose author is not the instance's commit identity is rejected with `df:identity`.
 
 #### Scenario: Turn with commits
 - **WHEN** a turn ends with 2 new commits
@@ -66,6 +66,10 @@ After each turn whose HEAD differs from the last pushed commit, the runtime SHAL
 #### Scenario: Agent fetched on its own
 - **WHEN** the policy is `with-lease`, a human pushed to the task branch, and the agent ran `git fetch` itself and then rewrote the branch without the human's commit
 - **THEN** the lease expects the commit the runtime last pushed or fetched, so the push is rejected and the human's commit stays on the remote
+
+#### Scenario: Rebase of third-party commits
+- **WHEN** the policy is `with-lease` and the agent of `DF-13` rebases `renovate/serde-1.x` onto a moved `main`, rewriting a commit authored by Renovate
+- **THEN** the push is rejected with `df:identity`, the report has `REJECTED_BY_CHECK`, and the remote branch is unchanged
 
 #### Scenario: Rebase under never
 - **WHEN** the policy is `never` and the agent rebased the task branch

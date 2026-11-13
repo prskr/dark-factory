@@ -4,8 +4,8 @@ weight: 2
 ---
 
 A task is a piece of work for one persona in one project. Its code lives on the branch
-`factory/task/<KEY>`; the agent opens a draft pull request with its first commit and you review it
-in your forge.
+`factory/task/<KEY>` (or an [existing branch](existing-branches.md) an agent started the task on); the
+agent opens a draft pull request with its first commit and you review it in your forge.
 
 ## Create a task
 
@@ -13,6 +13,13 @@ in your forge.
 persona and send. The task gets the next key of the project (`DF-12`) and starts as soon as a run
 slot is free. Without a title, the first sentence of the description is used until the agent sets a
 better one; you can rename a task at any time.
+
+The **+** button below the description opens the options: a **linked issue** (shown as an
+`Issue #7` chip) and an **existing branch** (shown as a `Branch renovate/serde-1.x` chip, with a
+remove button). With a branch the task works on it instead of its own `factory/task/<KEY>` branch,
+and an open pull request from it is attached
+([details](existing-branches.md#from-the-composer)). If the branch is taken or not usable, the
+composer stays open with the error above the buttons and keeps everything you entered.
 
 ## Follow and steer it
 
@@ -28,7 +35,8 @@ The task view has three columns: the task list, the transcript and the details.
   turn boundary, without restarting anything; while it waits it is shown as queued and can be
   edited or removed. A message to a finished task reopens it. A message to a task that awaits its dependencies is
   delivered in its first run.
-- **Details**: what the agent is doing now, the pull request and issue links, project, persona
+- **Details**: what the agent is doing now, the pull request (with an **attached** marker when it
+  was opened outside the factory) and issue links, project, persona
   (the project links to its [settings page](setup.md#projects), the persona to the persona list),
   branch, who created the task and its parent (for a task an agent created), the
   [dependencies](delegation.md#in-the-task-view) and the list of runs with model and token usage. The tokens are summed per model from the
@@ -155,7 +163,7 @@ All of them, and Interrupt (`run.interrupt`), are audited with your name and nee
 
 | Where | What |
 | --- | --- |
-| `factory/task/<KEY>` | Commits of the agent, pushed after every turn |
+| `factory/task/<KEY>` | Commits of the agent, pushed after every turn; a rebase is pushed with lease if the project's branch rewrite policy allows it ([details](existing-branches.md#rebase-with-lease)) |
 | `factory/wip/<KEY>` | Snapshot of uncommitted files at the end of each run (secrets such as `.env` and keys excluded) |
-| Draft pull request | Opened on the first commit ahead of the base branch; marked ready when the task completes. Forge failures are retried for an hour |
+| Draft pull request | Opened on the first commit ahead of the base branch; marked ready when the task completes. Forge failures are retried for an hour. A pull request that was opened outside the factory is *attached*: it is commented on but never changed ([details](existing-branches.md#attached-pull-requests)) |
 | Task volume | Cache of the checkout between runs; deleted 7 days after the task closed or after 30 days without a run |

@@ -96,6 +96,11 @@ pub async fn run(pool: &PgPool) -> Result<()> {
             data::WEBHOOK_SCRIPT,
         ),
         project(
+            data::EXISTING_BRANCH_PROJECT_KEY,
+            data::EXISTING_BRANCH_PROJECT_NAME,
+            data::EXISTING_BRANCH_SCRIPT,
+        ),
+        project(
             data::DELEGATION_PROJECT_KEY,
             data::DELEGATION_PROJECT_NAME,
             data::DELEGATION_SCRIPT,
@@ -266,6 +271,8 @@ async fn ensure_project(
         adapter_command: data::adapter_command(script),
         forge_credential_id: Some(credential),
         webhook_wake: df_core::webhooks::WebhookWake::Members,
+        branch_rewrite_policy: df_core::RewritePolicy::default(),
+        agent_branch_globs: df_core::default_agent_branch_globs(),
     };
     let existing = get_project_by_key(pool, key).await?;
     let id = match &existing {

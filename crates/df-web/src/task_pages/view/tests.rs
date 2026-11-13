@@ -425,3 +425,33 @@ fn composer_without_projects_says_what_to_do() {
     assert!(html.contains("Create a project and a persona first."));
     assert!(!html.contains("<form id=\"composer-form\""));
 }
+
+#[test]
+fn composer_keeps_the_branch_as_a_json_string_and_shows_the_error_outside_the_popover() {
+    let choices = Choices {
+        projects: vec![("p1".into(), "DF - Dark Factory".into())],
+        personas: vec![("u1".into(), "Linus".into())],
+    };
+    let values = TaskForm {
+        branch: " renovate/\"x\" ".into(),
+        ..TaskForm::default()
+    };
+    let mut errors = FormErrors::default();
+    errors.add("branch", "renovate/x is held by DF-13.");
+
+    let html = composer_form(&values, &errors, &choices).into_string();
+
+    assert!(
+        html.contains("branch: &quot;renovate/\\&quot;x\\&quot;&quot;"),
+        "{html}"
+    );
+    assert!(
+        html.contains("aria-label=\"Remove existing branch\""),
+        "{html}"
+    );
+    let error = html.find("renovate/x is held by DF-13.").unwrap();
+    assert!(
+        error < html.find("aria-label=\"Linked issue and branch\"").unwrap(),
+        "{html}"
+    );
+}

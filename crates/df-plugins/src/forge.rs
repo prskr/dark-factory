@@ -14,7 +14,7 @@ use secrecy::SecretString;
 use wasmtime::Store;
 
 use crate::convert;
-use crate::host::{Forge, InstanceSpec, PluginHost, wit};
+use crate::host::{Forge, InstanceSpec, PluginHost, pull_requests::OpenFilter, wit};
 use crate::policy::HttpPolicy;
 use crate::retry::with_retries;
 use crate::state::{State, WebhookCall};
@@ -200,6 +200,30 @@ impl PluginForgeClient {
         })
         .await
         .map(|pr| pr.map(convert::from_pull_request))
+    }
+
+    pub(crate) async fn list_open_pull_requests(
+        &self,
+        target: &RepoTarget,
+        head: &str,
+    ) -> Result<Vec<PullRequest>, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        self.call(target, |plugin, store| {
+            let filter = OpenFilter {
+                head: head.to_string(),
+                head_prefix: None,
+                author: None,
+                label: None,
+                base: None,
+            };
+            let repo = repo.clone();
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_list_open(store, &repo, &filter).await
+            })
+        })
+        .await
+        .map(|prs| prs.into_iter().map(convert::from_pull_request).collect())
     }
 
     pub(crate) async fn update_pull_request(

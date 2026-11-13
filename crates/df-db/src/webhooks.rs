@@ -39,7 +39,7 @@ pub async fn webhook_projects(pool: &PgPool) -> Result<Vec<WebhookProject>, DbEr
         .collect()
 }
 
-/// The project's tasks an event addresses: the task of a key, the tasks of a pull request, or
+/// The project's tasks an event addresses: the task of a branch, the tasks of a pull request, or
 /// the open (not `completed`, `cancelled` or `failed`) tasks of an issue.
 pub async fn target_tasks(
     pool: &PgPool,
@@ -47,11 +47,15 @@ pub async fn target_tasks(
     target: &Target,
 ) -> Result<Vec<TaskId>, DbError> {
     let ids = match target {
-        Target::Task(key) => {
+        // The open holder of the branch first; without one, the latest task that had it.
+        Target::Branch(branch) => {
             sqlx::query_scalar!(
-                "SELECT id FROM tasks WHERE project_id = $1 AND key = $2",
+                "SELECT id FROM tasks WHERE project_id = $1 AND branch = $2
+                 ORDER BY (status NOT IN ('completed', 'failed', 'cancelled')) DESC,
+                          created_at DESC, id DESC
+                 LIMIT 1",
                 project_id.as_uuid(),
-                key.to_string(),
+                branch,
             )
             .fetch_all(pool)
             .await?

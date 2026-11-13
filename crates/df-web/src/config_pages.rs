@@ -6,6 +6,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
+use df_core::RewritePolicy;
 use df_core::routing::{ForgeRoutes, ForgeServing};
 use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, StatusSet};
@@ -31,6 +32,7 @@ use crate::layout::{Nav, Shell, layout};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
 use crate::{project_subscriptions, project_webhook};
 
+mod branches;
 mod personas;
 mod project_page;
 mod providers;
@@ -84,6 +86,12 @@ pub(crate) struct ProjectForm {
     adapter_command: String,
     forge_credential_id: String,
     webhook_wake: String,
+    /// `never` or `with-lease`; empty when the form doesn't carry the field (the stored value
+    /// stays on an edit, the default applies to a new project).
+    branch_rewrite_policy: String,
+    /// One glob per line; missing when the form doesn't carry the field (the stored globs stay on
+    /// an edit, the defaults apply to a new project). An empty field means no agent branches.
+    agent_branch_globs: Option<String>,
     /// The tab the settings page showed when it was saved; it stays open afterwards.
     tab: String,
     /// The push policy of the "Security" tab of the edit form.
@@ -214,6 +222,18 @@ fn validate_project(
         errors.add("webhook_wake", "Choose who wakes tasks.");
         WebhookWake::default()
     });
+    let branch_rewrite_policy = if form.branch_rewrite_policy.is_empty() {
+        RewritePolicy::default()
+    } else {
+        form.branch_rewrite_policy
+            .parse()
+            .unwrap_or_else(|_unknown| {
+                errors.add("branch_rewrite_policy", "Choose a branch rewrite policy.");
+                RewritePolicy::default()
+            })
+    };
+    let agent_branch_globs =
+        branches::parse_agent_branches(&mut errors, form.agent_branch_globs.as_deref());
     errors.into_result(ProjectInput {
         key,
         name,
@@ -225,6 +245,8 @@ fn validate_project(
         adapter_command,
         forge_credential_id,
         webhook_wake,
+        branch_rewrite_policy,
+        agent_branch_globs,
     })
 }
 
@@ -712,6 +734,8 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
             .map(|id| id.to_string())
             .unwrap_or_default(),
         webhook_wake: p.webhook_wake.as_str().to_string(),
+        branch_rewrite_policy: p.branch_rewrite_policy.as_str().to_string(),
+        agent_branch_globs: Some(p.agent_branch_globs.join("\n")),
         tab: String::new(),
         push: PushPolicyForm::from_policy(push_policy),
     }
@@ -923,7 +947,14 @@ fn project_form(
         Tab {
             id: "security",
             label: "Security",
-            panel: push_policy::panel(&values.push, errors),
+            panel: html! {
+                (form_group("Push checks", push_policy::panel(&values.push, errors)))
+                (form_group("Branches", branches::group(
+                    &values.branch_rewrite_policy,
+                    values.agent_branch_globs.as_deref().unwrap_or_default(),
+                    errors,
+                )))
+            },
         },
     ];
     if let (Editing::AsAdmin, Some(project)) = (editing, project) {
@@ -1238,6 +1269,19 @@ async fn project_update(
     save_project(state, user, Some(key), form.0).await
 }
 
+/// A form without the fields of the Security tab's "Branches" group keeps the stored values.
+fn keep_stored_branch_settings(form: &mut ProjectForm, stored: &ProjectRecord) {
+    if form.branch_rewrite_policy.is_empty() {
+        stored
+            .branch_rewrite_policy
+            .as_str()
+            .clone_into(&mut form.branch_rewrite_policy);
+    }
+    if form.agent_branch_globs.is_none() {
+        form.agent_branch_globs = Some(stored.agent_branch_globs.join("\n"));
+    }
+}
+
 async fn save_project(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
@@ -1266,6 +1310,9 @@ async fn save_project(
         },
         _ => form,
     };
+    if let Some(e) = &existing {
+        keep_stored_branch_settings(&mut form, e);
+    }
     let known: Vec<Uuid> = credentials.iter().map(|c| c.id.as_uuid()).collect();
     let mut errors = FormErrors::default();
     let input = validate_project(&form, &known, state.allow_plain_http)

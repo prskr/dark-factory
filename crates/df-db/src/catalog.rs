@@ -4,6 +4,8 @@
 //! transaction. Credential references hold the name of a Kubernetes Secret and a key, never a
 //! value.
 
+use df_core::RewritePolicy;
+use df_core::glob::protected_glob;
 use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, CredentialRefId, Principal, SecretKeyRef};
 use serde::Serialize;
@@ -44,6 +46,10 @@ pub struct ProjectInput {
     pub forge_credential_id: Option<Uuid>,
     /// Whose reviews and mentions wake the project's tasks.
     pub webhook_wake: WebhookWake,
+    /// Whether agents may rebase their task branch (`never` or `with-lease`).
+    pub branch_rewrite_policy: RewritePolicy,
+    /// Globs of the existing branches an agent may start tasks on (`create_task`).
+    pub agent_branch_globs: Vec<String>,
 }
 
 /// A stored project.
@@ -60,6 +66,9 @@ pub struct ProjectRecord {
     pub forge_credential_id: Option<Uuid>,
     #[sqlx(try_from = "String")]
     pub webhook_wake: WebhookWake,
+    #[sqlx(try_from = "String")]
+    pub branch_rewrite_policy: RewritePolicy,
+    pub agent_branch_globs: Vec<String>,
     /// Whether tasks exist.
     pub has_tasks: bool,
 }
@@ -115,7 +124,7 @@ macro_rules! select_project {
     ($tail:literal) => {
         concat!(
             "SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch, \
-             p.adapter_command, p.forge_credential_id, p.webhook_wake, \
+             p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy, p.agent_branch_globs, \
              EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS has_tasks \
              FROM projects p ",
             $tail
@@ -165,6 +174,13 @@ pub async fn get_project_by_key(
 ) -> Result<Option<ProjectRecord>, DbError> {
     Ok(sqlx::query_as(select_project!("WHERE p.key = $1"))
         .bind(key)
+        .fetch_optional(pool)
+        .await?)
+}
+
+pub async fn get_project(pool: &PgPool, id: Uuid) -> Result<Option<ProjectRecord>, DbError> {
+    Ok(sqlx::query_as(select_project!("WHERE p.id = $1"))
+        .bind(id)
         .fetch_optional(pool)
         .await?)
 }
@@ -292,6 +308,10 @@ async fn save_project_in(
         }
         None => None,
     };
+    for glob in &input.agent_branch_globs {
+        protected_glob(glob)
+            .map_err(|error| DbError::InvalidData(format!("agent branch `{glob}`: {error}")))?;
+    }
     // The key is set at creation and never changes: task keys (DF-1) and branches derive from it.
     if let Some(b) = &before
         && b.key != input.key
@@ -304,14 +324,15 @@ async fn save_project_in(
         Some(b) => sqlx::query_scalar(
             "UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5, \
              image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9, \
-             webhook_wake = $10, updated_at = now() \
+             webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12, updated_at = now() \
              WHERE id = $1 RETURNING id",
         )
         .bind(b.id),
         None => sqlx::query_scalar(
             "INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image, base_branch, \
-             forge_credential_id, adapter_command, webhook_wake) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+             forge_credential_id, adapter_command, webhook_wake, branch_rewrite_policy, \
+             agent_branch_globs) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
         )
         .bind(Uuid::now_v7()),
     }
@@ -324,6 +345,8 @@ async fn save_project_in(
     .bind(input.forge_credential_id)
     .bind(&input.adapter_command)
     .bind(input.webhook_wake.as_str())
+    .bind(input.branch_rewrite_policy.as_str())
+    .bind(&input.agent_branch_globs)
     .fetch_one(&mut **tx)
     .await
     .map_err(|e| conflict_or(e, "a project with this key already exists"))?;
@@ -445,6 +468,8 @@ fn project_input(p: &ProjectRecord) -> ProjectInput {
         adapter_command: p.adapter_command.clone(),
         forge_credential_id: p.forge_credential_id,
         webhook_wake: p.webhook_wake,
+        branch_rewrite_policy: p.branch_rewrite_policy,
+        agent_branch_globs: p.agent_branch_globs.clone(),
     }
 }
 
@@ -505,6 +530,8 @@ mod tests {
             adapter_command: Vec::new(),
             forge_credential_id: credential,
             webhook_wake: WebhookWake::Members,
+            branch_rewrite_policy: RewritePolicy::default(),
+            agent_branch_globs: df_core::default_agent_branch_globs(),
         }
     }
 
@@ -591,6 +618,94 @@ mod tests {
         let saved = save_persona(&pool, actor, None, &input).await;
 
         assert!(matches!(saved, Err(DbError::ModelConflict(_))), "{saved:?}");
+    }
+
+    #[tokio::test]
+    async fn the_branch_rewrite_policy_defaults_to_with_lease_and_changes_are_audited() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+        assert_eq!(p.branch_rewrite_policy, RewritePolicy::WithLease);
+
+        let mut input = project("DF", None);
+        input.branch_rewrite_policy = RewritePolicy::Never;
+        save_project(&pool, actor, Some(p.id), &input)
+            .await
+            .unwrap();
+
+        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
+        assert_eq!(stored.branch_rewrite_policy, RewritePolicy::Never);
+        let updated = audit_details(&pool, "project.update").await;
+        assert_eq!(updated[0]["before"]["branch_rewrite_policy"], "with-lease");
+        assert_eq!(updated[0]["after"]["branch_rewrite_policy"], "never");
+    }
+
+    #[tokio::test]
+    async fn a_project_inserted_without_agent_branches_gets_the_dependency_bot_globs() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        sqlx::query(
+            "INSERT INTO projects (id, key, name, repo_url, image) \
+             VALUES ($1, 'OLD', 'Old', 'https://example.test/r.git', 'img')",
+        )
+        .bind(Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let project = get_project_by_key(&pool, "OLD").await.unwrap().unwrap();
+
+        assert_eq!(project.agent_branch_globs, ["renovate/**", "dependabot/**"]);
+    }
+
+    #[tokio::test]
+    async fn agent_branch_globs_default_are_validated_and_changes_are_audited() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+        assert_eq!(p.agent_branch_globs, ["renovate/**", "dependabot/**"]);
+
+        let mut invalid = project("DF", None);
+        invalid.agent_branch_globs = vec!["renovate/[".into()];
+        let rejected = save_project(&pool, actor, Some(p.id), &invalid).await;
+        assert!(
+            matches!(rejected, Err(DbError::InvalidData(_))),
+            "{rejected:?}"
+        );
+        assert_eq!(
+            get_project_by_key(&pool, "DF")
+                .await
+                .unwrap()
+                .unwrap()
+                .agent_branch_globs,
+            ["renovate/**", "dependabot/**"]
+        );
+
+        let mut input = project("DF", None);
+        input.agent_branch_globs = vec!["renovate/**".into(), "agent/**".into()];
+        save_project(&pool, actor, Some(p.id), &input)
+            .await
+            .unwrap();
+        let updated = audit_details(&pool, "project.update").await;
+        assert_eq!(
+            updated[0]["before"]["agent_branch_globs"],
+            serde_json::json!(["renovate/**", "dependabot/**"])
+        );
+        assert_eq!(
+            updated[0]["after"]["agent_branch_globs"],
+            serde_json::json!(["renovate/**", "agent/**"])
+        );
     }
 
     #[tokio::test]

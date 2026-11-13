@@ -337,6 +337,14 @@ pub trait ForgeClient: Send + Sync {
         base: &str,
     ) -> Result<Option<PullRequest>, IntegrationError>;
 
+    /// The open pull requests of the project's repository whose head branch is `head` (in the
+    /// repository itself, never a fork), whatever their base.
+    async fn list_open_pull_requests(
+        &self,
+        p: &ProjectId,
+        head: &str,
+    ) -> Result<Vec<PullRequest>, IntegrationError>;
+
     async fn update_pull_request(
         &self,
         p: &ProjectId,

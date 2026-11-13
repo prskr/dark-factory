@@ -41,6 +41,9 @@ pub struct AddedCommit {
     pub changes: Vec<PathChange>,
 }
 
+/// Directory of the factory's own task branches, as full ref names.
+const FACTORY_TASK_NAMESPACE: &str = "refs/heads/factory/task/";
+
 /// The branches of the pushing run, as full ref names. They decide which mirror refs count as
 /// upstream: all but the factory's WIP branches and the task branches of other tasks, whose
 /// commits passed fewer checks or another task's exceptions.
@@ -53,8 +56,10 @@ pub struct TaskRefs<'a> {
 impl TaskRefs<'_> {
     /// Whether the commits of the mirror ref `name` are already checked for this run.
     fn counts_as_upstream(&self, name: &str) -> bool {
+        // The task branch of a task on an existing branch (`renovate/serde-1.x`) has no namespace
+        // of its own: other tasks' branches are the `factory/task/` ones.
         name == self.task_branch
-            || !(in_namespace_of(name, self.task_branch) || in_namespace_of(name, self.wip_branch))
+            || !(name.starts_with(FACTORY_TASK_NAMESPACE) || in_namespace_of(name, self.wip_branch))
     }
 }
 

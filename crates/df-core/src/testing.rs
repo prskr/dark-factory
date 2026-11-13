@@ -205,6 +205,10 @@ pub enum ForgeCall {
         head: String,
         base: String,
     },
+    ListOpenPullRequests {
+        project_id: ProjectId,
+        head: String,
+    },
     UpdatePullRequest {
         project_id: ProjectId,
         number: u64,
@@ -248,6 +252,7 @@ struct ForgeState {
     issues: HashMap<(ProjectId, u64), Issue>,
     create_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     find_open_results: VecDeque<Result<Option<PullRequest>, IntegrationError>>,
+    list_open_results: VecDeque<Result<Vec<PullRequest>, IntegrationError>>,
     hang_find_open: bool,
     hang_update_pr: bool,
     find_open_gate: Option<Arc<tokio::sync::Semaphore>>,
@@ -310,6 +315,18 @@ impl FakeForgeClient {
             .lock()
             .expect("lock poisoned")
             .find_open_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `list_open_pull_requests`.
+    pub fn push_list_open_pull_requests_result(
+        &self,
+        res: Result<Vec<PullRequest>, IntegrationError>,
+    ) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .list_open_results
             .push_back(res);
     }
 
@@ -502,6 +519,31 @@ impl ForgeClient for FakeForgeClient {
             }
         }
         answer
+    }
+
+    async fn list_open_pull_requests(
+        &self,
+        p: &ProjectId,
+        head: &str,
+    ) -> Result<Vec<PullRequest>, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ListOpenPullRequests {
+            project_id: *p,
+            head: head.to_string(),
+        });
+        if let Some(scripted) = state.list_open_results.pop_front() {
+            return scripted;
+        }
+        let mut open: Vec<_> = state
+            .pull_requests
+            .iter()
+            .filter(|((proj, _), pr)| {
+                proj == p && pr.state == PullRequestState::Open && pr.head == head
+            })
+            .map(|(_, pr)| pr.clone())
+            .collect();
+        open.sort_by_key(|pr| pr.id.number);
+        Ok(open)
     }
 
     async fn update_pull_request(

@@ -87,6 +87,30 @@ impl Session {
         description: &str,
         issue: Option<u64>,
     ) -> Result<String> {
+        self.compose_task(env, project_key, description, issue, None)
+            .await
+    }
+
+    /// [`Session::create_task`] on the existing branch `branch` (the composer's options).
+    pub async fn create_task_on_branch(
+        &self,
+        env: &E2eEnv,
+        project_key: &str,
+        description: &str,
+        branch: &str,
+    ) -> Result<String> {
+        self.compose_task(env, project_key, description, None, Some(branch))
+            .await
+    }
+
+    async fn compose_task(
+        &self,
+        env: &E2eEnv,
+        project_key: &str,
+        description: &str,
+        issue: Option<u64>,
+        branch: Option<&str>,
+    ) -> Result<String> {
         self.page
             .goto(
                 &format!("{}/tasks?project={project_key}", env.base_url),
@@ -100,17 +124,26 @@ impl Session {
             .click(None)
             .await
             .context("open the composer")?;
-        if let Some(issue) = issue {
+        if issue.is_some() || branch.is_some() {
             self.page
-                .locator("button[aria-label='Link issue']")
+                .locator("button[aria-label='Task options']")
                 .click(None)
                 .await
-                .context("open the issue link")?;
+                .context("open the task options")?;
+        }
+        if let Some(issue) = issue {
             self.page
                 .locator("#issue_number")
                 .fill(&issue.to_string(), None)
                 .await
                 .context("fill the issue number")?;
+        }
+        if let Some(branch) = branch {
+            self.page
+                .locator("#branch")
+                .fill(branch, None)
+                .await
+                .context("fill the existing branch")?;
         }
         self.page
             .locator("#description")

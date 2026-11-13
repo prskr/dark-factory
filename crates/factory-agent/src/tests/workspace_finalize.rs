@@ -150,6 +150,7 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
@@ -336,6 +337,7 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     // 1. Create uncommitted modifications, an untracked normal file, and untracked secret files (.env, id_rsa)
@@ -528,6 +530,7 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
@@ -688,6 +691,7 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     // Create a large uncommitted file exceeding size cap of 500 bytes
@@ -901,6 +905,7 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
     let params = FinalizeParams {
@@ -961,6 +966,7 @@ async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
     let mut last_pushed_sha = Some(git.current_head().await.unwrap());
     let params = FinalizeParams {

@@ -59,6 +59,10 @@ impl OutboxHandler for MarkDraftHandler {
         let Some((task, number)) = task.and_then(|t| t.pr_number.map(|n| (t, n))) else {
             return Ok(());
         };
+        // The factory never changes an attached PR.
+        if task.pr_attached {
+            return Ok(());
+        }
         // The task finished again (a merge also completes it) before the job ran.
         if matches!(
             task.status,
@@ -78,8 +82,8 @@ impl OutboxHandler for MarkDraftHandler {
             .forge
             .find_open_pull_request(
                 &task.project_id,
-                &task.key.task_branch(),
-                &project.base_branch,
+                &task.branch,
+                task.base_branch(&project.base_branch),
             )
             .await
             .map_err(|e| JobError::Retry(format!("PR #{number}: {e}")))?;
@@ -264,5 +268,20 @@ mod tests {
 
         let result = handler(&env).handle(&serde_json::json!({})).await;
         assert!(matches!(result, Err(JobError::GiveUp(_))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn mark_draft_leaves_an_attached_pull_request_alone() {
+        let env = env_with_pr().await;
+        sqlx::query("UPDATE tasks SET pr_attached = true WHERE id = $1")
+            .bind(env.task.id.as_uuid())
+            .execute(&env.ctx.pool)
+            .await
+            .unwrap();
+        let calls = env.forge.calls().len();
+
+        handler(&env).handle(&job(&env)).await.unwrap();
+
+        assert_eq!(env.forge.calls().len(), calls);
     }
 }

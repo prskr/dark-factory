@@ -3,7 +3,7 @@
 //! Changes to entries write an audit entry and publish `egress_policy` in the transaction that
 //! changes them, so the notification reaches the gateways only for committed changes.
 
-use df_core::{CredentialRef, CredentialRefId, RequestId, SecretKeyRef};
+use df_core::{CredentialRef, CredentialRefId, RequestId, RewritePolicy, SecretKeyRef};
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -115,7 +115,11 @@ pub struct ActiveRun {
     pub project_key: String,
     pub persona_id: Uuid,
     pub repo_url: String,
+    /// The task's effective base branch (`tasks.base_branch` before the project's).
     pub base_branch: String,
+    /// The task's stored branch, without `refs/heads/`.
+    pub task_branch: String,
+    pub rewrite_policy: RewritePolicy,
     /// The project's forge credential, if it has one.
     pub forge_credential: Option<CredentialRef>,
 }
@@ -207,7 +211,9 @@ pub async fn next_policy_version(pool: &PgPool) -> Result<u64, DbError> {
 pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
     let rows = sqlx::query!(
         r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,
-                  p.key AS project_key, t.persona_id, p.repo_url, p.base_branch,
+                  p.key AS project_key, t.persona_id, p.repo_url,
+                  COALESCE(t.base_branch, p.base_branch) AS "base_branch!", t.branch AS task_branch,
+                  p.branch_rewrite_policy,
                   c.id AS "credential_id?", c.name AS "credential_name?",
                   c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
            FROM runs r
@@ -220,39 +226,42 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| ActiveRun {
-            forge_credential: match (
-                row.credential_id,
-                row.credential_name,
-                row.secret_name,
-                row.secret_key,
-            ) {
-                (Some(id), Some(name), Some(secret_name), Some(secret_key)) => {
-                    Some(CredentialRef {
-                        id: CredentialRefId::from_uuid(id),
-                        name,
-                        secret: SecretKeyRef {
-                            name: secret_name,
-                            key: secret_key,
-                        },
-                    })
-                }
-                _ => None,
-            },
-            run_id: row.run_id,
-            pod_ip: row.pod_ip,
-            task_id: row.task_id,
-            task_key: row.task_key,
-            run_number: row.run_number,
-            project_id: row.project_id,
-            project_key: row.project_key,
-            persona_id: row.persona_id,
-            repo_url: row.repo_url,
-            base_branch: row.base_branch,
+    rows.into_iter()
+        .map(|row| {
+            Ok(ActiveRun {
+                forge_credential: match (
+                    row.credential_id,
+                    row.credential_name,
+                    row.secret_name,
+                    row.secret_key,
+                ) {
+                    (Some(id), Some(name), Some(secret_name), Some(secret_key)) => {
+                        Some(CredentialRef {
+                            id: CredentialRefId::from_uuid(id),
+                            name,
+                            secret: SecretKeyRef {
+                                name: secret_name,
+                                key: secret_key,
+                            },
+                        })
+                    }
+                    _ => None,
+                },
+                run_id: row.run_id,
+                pod_ip: row.pod_ip,
+                task_id: row.task_id,
+                task_key: row.task_key,
+                run_number: row.run_number,
+                project_id: row.project_id,
+                project_key: row.project_key,
+                persona_id: row.persona_id,
+                repo_url: row.repo_url,
+                base_branch: row.base_branch,
+                task_branch: row.task_branch,
+                rewrite_policy: row.branch_rewrite_policy.parse()?,
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// All `http-host` entries. An entry with a stored port outside `1..=65535` is skipped (and
@@ -985,6 +994,54 @@ mod tests {
         );
         let deleted = delete_entry(&pool, actor, task_entry.id).await.unwrap();
         assert_eq!(deleted, task_entry);
+    }
+
+    #[tokio::test]
+    async fn an_active_run_carries_the_stored_branch_the_effective_base_and_the_policy() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let project = insert_project(&pool, "DF").await;
+        sqlx::query("UPDATE projects SET branch_rewrite_policy = 'never'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let persona = Uuid::now_v7();
+        crate::model_providers::tests::seed_provider(&pool).await;
+        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+            .bind(persona)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let task = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO tasks (id, project_id, number, key, title, title_source, persona_id,
+                 created_by, branch, base_branch)
+             VALUES ($1, $2, 1, 'DF-1', 't', 'user', $3,
+                     '{\"kind\":\"system\",\"reason\":\"test\"}', 'fix/cve', 'release/1.2')",
+        )
+        .bind(task)
+        .bind(project)
+        .bind(persona)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO runs (id, task_id, number, state, pod_ip)
+             VALUES ($1, $2, 1, 'running', '10.1.0.7')",
+        )
+        .bind(Uuid::now_v7())
+        .bind(task)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let runs = active_runs(&pool).await.unwrap();
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            (runs[0].task_branch.as_str(), runs[0].base_branch.as_str()),
+            ("fix/cve", "release/1.2")
+        );
+        assert_eq!(runs[0].rewrite_policy, RewritePolicy::Never);
     }
 
     #[tokio::test]

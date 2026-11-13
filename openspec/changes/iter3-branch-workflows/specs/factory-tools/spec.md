@@ -14,7 +14,7 @@
 - **THEN** the result has `is_error: true` and PR #40 is unchanged
 
 ### Requirement: create_task
-`create_task` SHALL create a task in the run's project with `persona` (name), `title`, `prompt`, optional `depends_on` (list of `{task, kind}`, task given by key) and optional `branch` (an existing branch, see `task-branches`), with the run's task as parent and its agent as creator, and SHALL return the new task's key and status. The title SHALL be sanitized and stored with source `agent`. An unknown persona, an empty prompt or title, an invalid dependency or a rejected branch SHALL produce an error result and create nothing.
+`create_task` SHALL create a task in the run's project with `persona` (name), `title`, `prompt`, optional `depends_on` (list of `{task, kind}`, task given by key) and optional `branch` (an existing branch, see `task-branches`), with the run's task as parent and its agent as creator, and SHALL return the new task's key and status. The title SHALL be sanitized and stored with source `agent`. An unknown persona, an empty prompt or title, an invalid dependency or a rejected branch (including a branch outside the project's agent branches) SHALL produce an error result and create nothing.
 
 #### Scenario: Review task for an implementation
 - **WHEN** the agent of `DF-19` calls `create_task` with persona "Reviewer", title "Review DF-20", a prompt and `depends_on: [{task: "DF-20", kind: "completion"}]` while `DF-20` is `running`
@@ -35,3 +35,7 @@
 #### Scenario: Branch held by another task
 - **WHEN** `create_task` names `branch: "renovate/serde-1.x"` while `DF-13` holds it
 - **THEN** the result has `is_error: true` naming `DF-13` and no task is created
+
+#### Scenario: Branch outside the agent branches
+- **WHEN** `create_task` names `branch: "release/1.2"` in project `DF` with agent branches `renovate/**`, `dependabot/**`
+- **THEN** the result has `is_error: true` naming `release/1.2` and the globs, and no task is created

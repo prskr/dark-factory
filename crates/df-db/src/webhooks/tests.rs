@@ -1,7 +1,7 @@
 //! Tests of webhook messages, routing and completion on merge.
 
 use df_core::seams::ReviewVerdict;
-use df_core::{PersonaId, ProjectId, TaskKey, TaskStatus};
+use df_core::{PersonaId, ProjectId, TaskStatus};
 use df_proto::transcript::v1::content_block;
 use serde_json::Value;
 use uuid::Uuid;
@@ -239,7 +239,7 @@ async fn webhook_projects_lists_every_project_with_its_wake_policy() {
 }
 
 #[tokio::test]
-async fn target_tasks_finds_the_task_by_key_pr_or_open_issue() {
+async fn target_tasks_finds_the_task_by_branch_pr_or_open_issue() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let project = seed_project(&pool).await;
     let first = add_task(&pool, project).await;
@@ -249,12 +249,15 @@ async fn target_tasks_finds_the_task_by_key_pr_or_open_issue() {
     set_numbers(&pool, second, None, Some(7)).await;
     set_numbers(&pool, done, None, Some(7)).await;
     set_status(&pool, done, "completed").await;
-    let key: TaskKey = "DF-2".parse().unwrap();
 
-    let by_key = target_tasks(&pool, project.0, &Target::Task(key))
-        .await
-        .unwrap();
-    assert_eq!(by_key, vec![second]);
+    let by_branch = target_tasks(
+        &pool,
+        project.0,
+        &Target::Branch("factory/task/DF-2".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(by_branch, vec![second]);
     let by_pr = target_tasks(&pool, project.0, &Target::PullRequest(12))
         .await
         .unwrap();
@@ -479,4 +482,68 @@ async fn add_done_dependent(pool: &PgPool, project: (ProjectId, PersonaId)) -> T
     .await
     .unwrap();
     task.id
+}
+
+#[tokio::test]
+async fn a_branch_routes_to_its_open_holder_else_to_the_latest_task() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let project = seed_project(&pool).await;
+    let old = add_task(&pool, project).await;
+    let newer = add_task(&pool, project).await;
+    set_status(&pool, old, "cancelled").await;
+    for task in [old, newer] {
+        sqlx::query("UPDATE tasks SET branch = 'renovate/serde-1.x' WHERE id = $1")
+            .bind(task.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let branch = Target::Branch("renovate/serde-1.x".into());
+
+    // `newer` is open: it holds the branch.
+    assert_eq!(
+        target_tasks(&pool, project.0, &branch).await.unwrap(),
+        vec![newer]
+    );
+
+    // Nobody holds it: the most recently created task gets the event.
+    set_status(&pool, newer, "completed").await;
+    assert_eq!(
+        target_tasks(&pool, project.0, &branch).await.unwrap(),
+        vec![newer]
+    );
+
+    let unknown = Target::Branch("feature/login".into());
+    assert!(
+        target_tasks(&pool, project.0, &unknown)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn an_older_open_holder_of_a_branch_gets_the_event_before_a_newer_final_task() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let project = seed_project(&pool).await;
+    let open = add_task(&pool, project).await;
+    let newer_final = add_task(&pool, project).await;
+    set_status(&pool, newer_final, "completed").await;
+    for task in [open, newer_final] {
+        sqlx::query("UPDATE tasks SET branch = 'renovate/serde-1.x' WHERE id = $1")
+            .bind(task.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let routed = target_tasks(
+        &pool,
+        project.0,
+        &Target::Branch("renovate/serde-1.x".into()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(routed, vec![open]);
 }

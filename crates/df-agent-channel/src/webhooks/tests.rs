@@ -309,3 +309,44 @@ async fn webhook_failing_bot_lookup_fails_the_delivery() {
     assert!(result.is_err(), "{result:?}");
     assert_eq!(queued(&env, env.task.id).await, 0);
 }
+
+#[tokio::test]
+async fn webhook_review_on_an_attached_pr_routes_to_the_task_holding_its_branch() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool).await;
+    env.forge.set_author_role("alice", AuthorRole::Member);
+    let attached = env.task_on_branch("renovate/serde-1.x", None).await;
+    let event = parsed(WebhookEvent::ReviewSubmitted {
+        number: 40,
+        head: "renovate/serde-1.x".into(),
+        actor: "alice".into(),
+        verdict: ReviewVerdict::ChangesRequested,
+    });
+
+    applier(&env).apply(&[event]).await.unwrap();
+
+    assert_eq!(queued(&env, attached.id).await, 1);
+    assert_eq!(queued(&env, env.task.id).await, 0);
+}
+
+#[tokio::test]
+async fn webhook_merge_of_an_attached_pr_completes_its_task() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool).await;
+    let attached = env.task_on_branch("renovate/serde-1.x", None).await;
+    sqlx::query("UPDATE tasks SET status = 'in_review' WHERE id = $1")
+        .bind(attached.id.as_uuid())
+        .execute(&env.ctx.pool)
+        .await
+        .unwrap();
+    let event = parsed(WebhookEvent::PullRequestClosed {
+        number: 40,
+        head: "renovate/serde-1.x".into(),
+        actor: "bob".into(),
+        merged: true,
+    });
+
+    applier(&env).apply(&[event]).await.unwrap();
+
+    assert_eq!(status(&env, attached.id).await, "completed");
+}

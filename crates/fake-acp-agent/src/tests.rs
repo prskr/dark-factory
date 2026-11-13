@@ -92,6 +92,13 @@ fn shipped_scripts_parse() {
     let webhook = Script::from_yaml_str(include_str!("../scripts/webhook.yaml")).unwrap();
     assert_eq!(webhook.sessions.new.len(), 1);
     assert_eq!(webhook.sessions.loaded.len(), 1);
+    let existing_branch =
+        Script::from_yaml_str(include_str!("../scripts/existing-branch.yaml")).unwrap();
+    assert_eq!(existing_branch.sessions.new.len(), 1);
+    assert_eq!(
+        existing_branch.sessions.new,
+        existing_branch.sessions.loaded
+    );
 }
 
 #[tokio::test]

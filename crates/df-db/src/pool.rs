@@ -35,6 +35,10 @@ pub enum DbError {
     /// A dependency of a new task names a task that is not in the project, or names one twice.
     #[error("invalid dependency `{0}`")]
     InvalidDependency(String),
+    /// The branch of a new or reopened task is held by another open task of the project
+    /// (`tasks_open_branch`). `task` is `None` when only the unique index noticed it.
+    #[error("{}", branch_held_message(task.as_ref()))]
+    BranchHeld { task: Option<df_core::TaskKey> },
     /// A board member interrupts a task whose run has no turn running.
     #[error("no turn is running")]
     NoTurnRunning,
@@ -92,6 +96,13 @@ pub async fn connect_pool(cfg: &DatabaseConfig) -> Result<PgPool, DbError> {
         .await?;
 
     Ok(pool)
+}
+
+fn branch_held_message(task: Option<&df_core::TaskKey>) -> String {
+    match task {
+        Some(task) => format!("the branch is held by {task}"),
+        None => "the branch is held by another task".to_owned(),
+    }
 }
 
 #[cfg(test)]

@@ -275,7 +275,7 @@
     {
       "name": "create_task",
       "title": "Create a task",
-      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued).",
+      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued). Use branch to hand an existing branch (for example a failing Renovate pull request) to a persona.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -322,6 +322,12 @@
               ],
               "additionalProperties": false
             }
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Work on this existing branch of the repository instead of a new one, for example renovate/serde-1.x. Without a leading refs/heads/. The branch must exist when the task starts. If it has exactly one open pull request, the task is attached to it: you and the task may comment on it, but its title, description and draft state are never changed. Only branches that match the project's agent branches (by default renovate/** and dependabot/**) are allowed. Fails for the project's base branch, factory/ branches and a branch another open task works on."
           }
         },
         "required": [

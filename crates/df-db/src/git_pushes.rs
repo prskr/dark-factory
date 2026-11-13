@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use df_core::{PersonaId, Principal, RunId, TaskId, TaskKey};
+use df_core::{PersonaId, Principal, RunId, TaskId};
 use df_proto::transcript::v1 as pb;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -264,7 +264,7 @@ async fn run_agent(
 ) -> Result<(Principal, PushingTask), DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT r.task_id, t.key AS task_key, t.persona_id, p.name
+        SELECT r.task_id, t.branch AS task_branch, t.persona_id, p.name
         FROM runs r
         JOIN tasks t ON t.id = r.task_id
         JOIN personas p ON p.id = t.persona_id
@@ -275,10 +275,6 @@ async fn run_agent(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| DbError::NotFound(format!("run {run_id}")))?;
-    let key: TaskKey = row
-        .task_key
-        .parse()
-        .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))?;
     let task_id = TaskId::from_uuid(row.task_id);
     let actor = Principal::agent(
         PersonaId::from_uuid(row.persona_id),
@@ -288,7 +284,7 @@ async fn run_agent(
     );
     let task = PushingTask {
         id: task_id,
-        task_branch: format!("refs/heads/{}", key.task_branch()),
+        task_branch: format!("refs/heads/{}", row.task_branch),
     };
     Ok((actor, task))
 }

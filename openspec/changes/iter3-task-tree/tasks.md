@@ -20,6 +20,8 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 - [ ] 2.1 Add the migration of design D1 (`tasks.base_task_id`, `projects.subtask_merge`) and regenerate `.sqlx/` (`docs/development.md`, "Updating `sqlx` Offline Metadata"). Verify that `cargo build --workspace` passes offline and a `df-db` migration test shows existing projects with `subtask_merge = 'human'`.
 - [ ] 2.2 Write failing `df-db` tests, then implement `base_branch(conn, task_id)` (design D2). Verify with `cargo test -p df-db base_branch` covering the scenarios of `task-tree` "Effective base branch", including a chain of two Done base tasks.
+  - `iter3-branch-workflows` adds a small `df_db::tasks::base_branch()` without the CTE (`tasks.base_branch` before `projects.base_branch`). Extend it: the base task's branch comes first and is read from `tasks.branch`, not formatted as `factory/task/<key>`.
+  - Add the base-task scenario to the "Draft PR on first push ahead of base" block of `iter3-branch-workflows` (`specs/pull-request-lifecycle`) if that change is not archived yet.
 - [ ] 2.3 Use `base_branch` in `load_run_context`, `try_ensure_draft` and the gateway snapshot query. Verify with tests:
   - a `df-agent-channel` assign test: `Workspace.base_branch` is `factory/task/DF-20`;
   - a `pr.rs` test for "Push of a task with a base task";
@@ -30,6 +32,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 ## 3. Workspace
 
 - [ ] 3.1 Write failing `factory-agent` workspace tests (local bare remotes in `tempfile` dirs), then implement the prepare fast-forward (design D4). Verify with `cargo test -p factory-agent workspace` covering every scenario of `workspace-lifecycle` "Following the base branch".
+  - Skip "Following the base branch" for a task on an existing branch (`Workspace.existing_branch` of `iter3-branch-workflows`): a third-party branch that happens to be an ancestor of its base is not moved.
 - [ ] 3.2 Write a failing test, then create the base task's branch on the first run (design D3). Verify with `df-agent-channel` tests for both scenarios of "Base branch created on first start", plus a forge error that ends the run `failed` with the forge's message.
 - [ ] 3.3 Update `design/agent-run.md` §6.2 (prepare fast-forward, base branch resolution). Done when the section matches D2 and D4.
 

@@ -153,7 +153,8 @@ message Workspace {
   // plane's Git proxy (F1). The runtime never derives URLs itself.
   string repo_url = 1;
   string base_branch = 2;
-  // e.g. "factory/task/DF-1".
+  // The task's stored branch: "factory/task/DF-1", or an existing branch such as
+  // "renovate/serde-1.x".
   string task_branch = 3;
   // e.g. "factory/wip/DF-1".
   string wip_branch = 4;
@@ -172,6 +173,21 @@ message Workspace {
   // configured. The runtime leaves them out of the checkout with non-cone sparse patterns and
   // removes existing files below them. Empty: nothing is hidden.
   repeated string hidden_paths = 8;
+  // Whether the runtime may push a rewritten task branch with lease. UNSPECIFIED is treated as
+  // NEVER.
+  RewritePolicy rewrite_policy = 9;
+  // The task works on a branch that exists upstream (`task_branch`). A fresh workspace checks it
+  // out from `origin/<task_branch>` and fails prepare if it is missing, instead of creating it
+  // from the base.
+  bool existing_branch = 10;
+}
+
+enum RewritePolicy {
+  REWRITE_POLICY_UNSPECIFIED = 0;
+  // Task branches accept fast-forward pushes only.
+  REWRITE_POLICY_NEVER = 1;
+  // Rebases are pushed with `--force-with-lease`.
+  REWRITE_POLICY_WITH_LEASE = 2;
 }
 
 message GitHookCommand {

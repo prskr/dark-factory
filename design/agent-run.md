@@ -203,20 +203,27 @@ Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wi
 if /data/repo/.git does not exist:
     git clone --filter=blob:none --no-checkout <repo_url> /data/repo
     write runtime-owned .git/config (§7)
-    if origin has factory/task/<key> with own commits (not an ancestor of origin/<base>):
-                                       git checkout -B factory/task/<key> origin/factory/task/<key>
-    else:                              git checkout -B factory/task/<key> origin/<base>
+    if origin has <task branch> with own commits (not an ancestor of origin/<base>):
+                                       git checkout -B <task branch> origin/<task branch>
+    elif the task is on an existing branch: fail prepare (BranchMissing), push nothing
+    else:                              git checkout -B <task branch> origin/<base>
+    remote_sha := origin/<task branch> as fetched (kept in /data/runtime/remote_sha, §6.4)
     if origin has factory/wip/<key>:   restore WIP files into the worktree
                                        (git restore --source=<wip> --worktree -- <paths that differ from HEAD, except hidden paths>)
 else:
     sanitize: rewrite .git/config (§7), regenerate harness config (§6.3)
-    git fetch origin <base> factory/task/<key>
+    git fetch origin <base> <task branch>
     if local has commits not on origin (failed earlier push): push them first (§6.5)
     compare local vs origin task branch:
         equal         → nothing to do
         remote ahead  → git merge --ff-only
+        diverged, policy with-lease and origin == remote_sha
+                      → the local history was rewritten (rebase) by a killed run:
+                        git push --force-with-lease=<task branch>:<remote_sha>   (§6.4)
         diverged      → don't resolve automatically; record "diverged" in run context
                         (agent instruction or human decision, per project policy)
+    remote_sha := origin/<task branch> after the fetch (when equal), a fast-forward or a successful push;
+                  a diverged prepare keeps the stored value
     if the task branch has no own commits (ancestor of origin/<base>):
         git merge --ff-only origin/<base>   # follow the base (ADR-0041); on failure leave it as is
 no git clean — preserving caches is the purpose of the PVC
@@ -244,7 +251,7 @@ Trust policy for configuration found in the repository:
 - **ACP mode**: spawn the adapter, `session/new` (or `session/load`, see below) with cwd `/data/repo` and the runtime's MCP server; translate `session/update` notifications into the Dark Factory transcript schema (ADR-0017) and stream them to the control plane.
 - **First prompt** of a run: the trigger plus all queued messages.
 - **Queued messages during a run**: delivered turn-based — the runtime sends them as the next prompt after the current turn ends. ACP has no mid-turn injection; a human who needs to interrupt uses cancel.
-- **Pushes during the run**: after every turn that produced new commits, the runtime pushes the task branch and reports it; the control plane opens the draft PR on the first push that is ahead of base (ADR-0025).
+- **Pushes during the run**: after every turn whose `HEAD` differs from the last pushed commit, the runtime pushes the task branch and reports it; the control plane opens the draft PR on the first push that is ahead of base (ADR-0025). Under the project's `with-lease` rewrite policy (ADR-0033), a `HEAD` that does not contain `remote_sha` (the commit the runtime itself last fetched or pushed; never `refs/remotes/origin/*`, which the agent's own `git fetch` moves) is pushed with `--force-with-lease=refs/heads/<task branch>:<remote_sha>`; everything else is a plain push, and under `never` nothing is forced. A rejected lease maps to `REJECTED_NON_FAST_FORWARD`: the runtime rewrites nothing on its own.
 - **Permission requests** (`session/request_permission`): answered by a control-plane policy — auto-approve inside the sandbox by default, escalate selected categories to a human as a `harness-permission` approval request (ADR-0038).
 - **Blocking questions and approvals** (raised via factory tools to a human or another agent, ADR-0038): the run enters `AwaitingInput`, the sandbox stays alive for a short keep-alive window. An answer within the window is delivered as the next prompt in the same run; otherwise the run finalizes as `Blocked` and the answer later starts a new run.
 - **Full-harness mode**: same tool registry, model calls through the inference gateway.

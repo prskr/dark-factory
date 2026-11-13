@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::domain::ParseEnumError;
-use crate::keys::TaskKey;
 use crate::seams::ReviewVerdict;
 
 /// The audit action of an admin reading the webhook secret on a project's settings page
@@ -54,12 +53,14 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    /// The tasks the event names, or `None` for a head branch outside the factory.
+    /// The tasks the event names.
     pub fn target(&self) -> Option<Target> {
         match self {
             Self::ReviewSubmitted { head, .. }
             | Self::PullRequestClosed { head, .. }
-            | Self::CiFailed { head, .. } => TaskKey::from_task_branch(head).map(Target::Task),
+            | Self::CiFailed { head, .. } => Some(Target::Branch(
+                head.strip_prefix("refs/heads/").unwrap_or(head).to_owned(),
+            )),
             Self::CommentCreated {
                 number,
                 is_pull_request: true,
@@ -93,8 +94,9 @@ impl WebhookEvent {
 /// The tasks an event names (spec "Routing").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    /// The task whose branch `factory/task/{key}` is the event's head branch.
-    Task(TaskKey),
+    /// The task that holds the event's head branch (`tasks.branch`): the open one, else the most
+    /// recently created one.
+    Branch(String),
     /// The project's task with this PR number.
     PullRequest(u64),
     /// Every non-final task of the project linked to this issue.
@@ -278,10 +280,6 @@ mod tests {
         }
     }
 
-    fn key(raw: &str) -> TaskKey {
-        raw.parse().unwrap()
-    }
-
     #[test]
     fn webhook_repository_match_ignores_case_trailing_slash_and_git_suffix() {
         let project = "https://git.example.org/peter/dark-factory.git";
@@ -326,17 +324,20 @@ mod tests {
     fn webhook_events_route_by_branch_pr_number_or_issue() {
         assert_eq!(
             review("factory/task/DF-1", "alice").target(),
-            Some(Target::Task(key("DF-1")))
+            Some(Target::Branch("factory/task/DF-1".into()))
         );
         assert_eq!(
             closed(true, "bob").target(),
-            Some(Target::Task(key("DF-1")))
+            Some(Target::Branch("factory/task/DF-1".into()))
         );
         assert_eq!(
             ci("factory/task/DF-3").target(),
-            Some(Target::Task(key("DF-3")))
+            Some(Target::Branch("factory/task/DF-3".into()))
         );
-        assert_eq!(review("feature/login", "alice").target(), None);
+        assert_eq!(
+            review("renovate/serde-1.x", "alice").target(),
+            Some(Target::Branch("renovate/serde-1.x".into()))
+        );
         assert_eq!(
             comment(true, "alice", &[]).target(),
             Some(Target::PullRequest(7))

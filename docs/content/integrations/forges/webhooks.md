@@ -11,7 +11,7 @@ waits until someone writes in the web UI.
 | --- | --- |
 | Review submitted (approve, request changes, comment) | wakes the task, subject to the [wake setting](#choose-who-wakes-tasks) |
 | Comment that mentions the bot account (`@factory-bot`) on the pull request or on the linked issue | wakes the task, subject to the wake setting |
-| CI failed on `factory/task/<key>` | wakes the task |
+| CI failed on the branch of a task | wakes the task |
 | Pull request closed without merge | wakes the task |
 | Pull request merged | the task becomes `completed` and its run stops; its volume is deleted at the next hourly check, whatever `volumes.retainAfterCloseSeconds` says |
 
@@ -251,8 +251,7 @@ controlPlane:
 | Debug message | Cause |
 | --- | --- |
 | `webhook repository matches no project` | No project has this repository URL (compared by host, owner and name). |
-| `webhook event names no factory task` | The pull request's or CI run's branch is not `factory/task/<key>`. |
-| `webhook event matches no task` | No task of the project has this key or pull request, or no unfinished task is linked to the commented issue. |
+| `webhook event matches no task` | No task of the project holds the pull request's or CI run's head branch (`factory/task/<key>` or an [existing branch](../../using/existing-branches.md)), or no task has this pull request, or no unfinished task is linked to the commented issue. |
 | `webhook event dropped` | The author is the bot account (`reason="bot"`), or a comment does not mention the bot account (`reason="no mention"`). |
 | `webhook author below the wake policy` | The wake setting is *Nobody*, or the author has no write access (or the forge refused the permission lookup, see above) and the wake setting is *Members with write access*. |
 | `webhook event of a finished task dropped` | The task is `completed`, `cancelled` or `failed`. |

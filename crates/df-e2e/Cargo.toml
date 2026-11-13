@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 playwright-rs.workspace = true
@@ -24,6 +25,5 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-base64.workspace = true
 df-test-postgres.workspace = true
 ring.workspace = true

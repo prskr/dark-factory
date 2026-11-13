@@ -11,12 +11,12 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, patch, post};
 use axum::{Extension, Router};
 use df_core::{
-    PersonaId, ProjectId, PromptId, TITLE_MAX_CHARS, TaskId, TaskKey, sanitize_title,
-    title_too_long,
+    ExistingBranch, PersonaId, ProjectId, PromptId, TITLE_MAX_CHARS, TaskId, TaskKey,
+    sanitize_title, title_too_long,
 };
-use df_db::NewTask;
 use df_db::task_views::{Dependencies, RunView, TaskDetail};
 use df_db::volumes::VolumeError;
+use df_db::{NewTask, TaskPlacement};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -394,7 +394,15 @@ async fn task_create(
     let (Some(project), Some(persona), true) = (project, persona, errors.is_empty()) else {
         return invalid(composer_form(&form, &errors, &choices));
     };
-    let created = df_db::create_task(
+    let placement = match branch_placement(&state, project, form.branch.trim()).await {
+        Ok(placement) => placement,
+        Err(BranchProblem::Shown(problem)) => {
+            errors.add("branch", problem);
+            return invalid(composer_form(&form, &errors, &choices));
+        }
+        Err(BranchProblem::Db(e)) => return internal_error(&e),
+    };
+    let created = df_db::create_task_on(
         &state.pool,
         NewTask {
             project_id: ProjectId::from_uuid(project),
@@ -406,10 +414,16 @@ async fn task_create(
             parent_id: None,
             depends_on: Vec::new(),
         },
+        placement,
     )
     .await;
     let (task, _) = match created {
         Ok(created) => created,
+        Err(df_db::DbError::BranchHeld { task }) => {
+            let held = branch_held_message(form.branch.trim(), task);
+            errors.add("branch", format!("{held}, or pick another branch."));
+            return invalid(composer_form(&form, &errors, &choices));
+        }
         Err(e) => return internal_error(&e),
     };
     let entry = df_db::NewAuditEntry::new(
@@ -429,6 +443,48 @@ async fn task_create(
         tracing::warn!(%error, task = %task.key, "audit entry for task creation failed");
     }
     htmx_redirect(&format!("/tasks/{}", task.key))
+}
+
+/// The placement of the composer's existing `branch` (empty: the task's own branch): validated
+/// against the project's base branch and attached to its one open PR. Unlike an agent's
+/// `create_task`, the project's agent branches don't apply to a board member.
+async fn branch_placement(
+    state: &WebState,
+    project: uuid::Uuid,
+    branch: &str,
+) -> Result<TaskPlacement, BranchProblem> {
+    if branch.is_empty() {
+        return Ok(TaskPlacement::default());
+    }
+    let Some(record) = df_db::catalog::get_project(&state.pool, project).await? else {
+        return Err(BranchProblem::Shown("Choose a project.".to_owned()));
+    };
+    let branch = ExistingBranch::parse(branch, &record.base_branch)
+        .map_err(|problem| BranchProblem::Shown(format!("{problem}.")))?;
+    df_db::place_on_branch(&*state.forge, &ProjectId::from_uuid(project), branch)
+        .await
+        .map_err(|problem| BranchProblem::Shown(problem.to_string()))
+}
+
+/// Why the composer's branch can't be placed: a message for the composer, or a failure.
+enum BranchProblem {
+    Shown(String),
+    Db(df_db::DbError),
+}
+
+impl From<df_db::DbError> for BranchProblem {
+    fn from(error: df_db::DbError) -> Self {
+        Self::Db(error)
+    }
+}
+
+/// "`branch` is held by DF-13. Finish or cancel DF-13 first": the start of every message about a
+/// branch another open task holds; the caller adds what to do instead.
+fn branch_held_message(branch: &str, holder: Option<TaskKey>) -> String {
+    match holder {
+        Some(holder) => format!("{branch} is held by {holder}. Finish or cancel {holder} first"),
+        None => format!("{branch} is held by another task. Finish or cancel it first"),
+    }
 }
 
 /// Loads a task by key; the error is the response to send.
@@ -641,7 +697,7 @@ async fn message_create(
     let id = TaskId::from_uuid(task.id);
     let text = form.message.trim();
     let error = if text.is_empty() {
-        Some("Write a message first.")
+        "Write a message first.".to_string()
     } else {
         let content = vec![ContentBlock {
             kind: Some(content_block::Kind::Text(TextContent {
@@ -651,10 +707,17 @@ async fn message_create(
         }];
         match df_db::queue_message(&state.pool, id, user.principal(), content).await {
             Ok(_) => return stream_renders_stack(Some("message-queued")),
+            // Another open task holds the branch of this final task: nothing is queued.
+            Err(df_db::DbError::BranchHeld { task: holder }) => {
+                format!(
+                    "Can't reopen: {}.",
+                    branch_held_message(&task.branch, holder)
+                )
+            }
             Err(e) => return internal_error(&e),
         }
     };
-    match stack(&state, &task, error).await {
+    match stack(&state, &task, Some(&error)).await {
         Ok(body) => invalid(body),
         Err(response) => *response,
     }

@@ -569,6 +569,7 @@ async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
     let result = run_with_workspace(&temp, Some(workspace)).await;
     assert_eq!(result.outcome, df_proto::agent::v1::RunOutcome::Failed);

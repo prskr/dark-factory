@@ -117,6 +117,30 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
         Ok(None)
     }
 
+    /// Every open pull request whose head branch `head` is in `repo` itself, whatever its base.
+    pub fn list_open(&self, repo: &RepoRef, head: &str) -> Result<Vec<PullRequest>, Error> {
+        let mut found = Vec::new();
+        for page in 1.. {
+            let prs: Vec<ApiPullRequest> = self.call(
+                Method::Get,
+                format!(
+                    "{}/pulls?state=open&page={page}&limit={PAGE_SIZE}",
+                    repo_path(repo)
+                ),
+                None,
+            )?;
+            if prs.is_empty() {
+                break;
+            }
+            found.extend(
+                prs.into_iter()
+                    .filter(|pr| pr.state == "open" && pr.head.branch == head && pr.head_in(repo))
+                    .map(|pr| self.pull_request(repo.clone(), pr)),
+            );
+        }
+        Ok(found)
+    }
+
     pub fn get(&self, id: &PullRequestRef) -> Result<PullRequest, Error> {
         let pr = self.get_raw(id)?;
         Ok(self.pull_request(id.repo.clone(), pr))
@@ -281,6 +305,22 @@ struct ApiBranch {
     branch: String,
     #[serde(default)]
     sha: String,
+    /// The repository of the branch; absent when a fork was deleted.
+    #[serde(default)]
+    repo: Option<ApiHeadRepo>,
+}
+
+#[derive(Deserialize)]
+struct ApiHeadRepo {
+    full_name: String,
+}
+
+impl ApiPullRequest {
+    /// Whether the head branch lives in `repo` itself, not in a fork.
+    fn head_in(&self, repo: &RepoRef) -> bool {
+        let full_name = self.head.repo.as_ref().map(|head| head.full_name.as_str());
+        forge_common::open_filter::head_in_repo(full_name, &repo.owner, &repo.name)
+    }
 }
 
 #[derive(Deserialize)]
@@ -359,7 +399,17 @@ mod tests {
         serde_json::json!({
             "number": 7, "html_url": "https://git/pr/7", "title": title, "body": "b",
             "state": "open", "merged": false,
-            "head": {"ref": branch, "sha": "abc"}, "base": {"ref": "main", "sha": "def"}
+            "head": {"ref": branch, "sha": "abc", "repo": {"full_name": "o/r"}},
+            "base": {"ref": "main", "sha": "def"}
+        })
+    }
+
+    fn numbered_pr(number: u64, branch: &str, base: &str, head_repo: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number, "html_url": format!("https://git/pr/{number}"), "title": "t",
+            "body": "", "state": "open", "merged": false,
+            "head": {"ref": branch, "sha": "abc", "repo": {"full_name": head_repo}},
+            "base": {"ref": base, "sha": "def"}
         })
     }
 
@@ -427,6 +477,55 @@ mod tests {
         let pr = plugin(&fake).find_open(&repo(), "f/t/DF-1", "main")?;
         assert_eq!(pr.map(|p| p.id.number), Some(7));
         assert!(fake.requests.borrow()[1].path.contains("page=2"));
+        Ok(())
+    }
+
+    #[test]
+    fn list_open_returns_every_base_across_pages() -> anyhow::Result<()> {
+        let fake = fake(vec![
+            json(
+                200,
+                serde_json::json!([
+                    numbered_pr(42, "fix/shared", "main", "o/r"),
+                    numbered_pr(1, "other", "main", "o/r"),
+                ]),
+            ),
+            json(
+                200,
+                serde_json::json!([numbered_pr(43, "fix/shared", "release/1.2", "O/R")]),
+            ),
+            json(200, serde_json::json!([])),
+        ]);
+        let prs = plugin(&fake).list_open(&repo(), "fix/shared")?;
+        let found: Vec<_> = prs.iter().map(|p| (p.id.number, p.base.as_str())).collect();
+        assert_eq!(found, [(42, "main"), (43, "release/1.2")]);
+        assert!(fake.requests.borrow()[1].path.contains("page=2"));
+        Ok(())
+    }
+
+    #[test]
+    fn list_open_asks_for_open_pull_requests_and_drops_closed_ones() -> anyhow::Result<()> {
+        let mut closed = numbered_pr(5, "fix/login", "main", "o/r");
+        closed["state"] = serde_json::json!("closed");
+        let fake = fake(vec![
+            json(200, serde_json::json!([closed])),
+            json(200, serde_json::json!([])),
+        ]);
+        assert!(plugin(&fake).list_open(&repo(), "fix/login")?.is_empty());
+        assert!(fake.requests.borrow()[0].path.contains("state=open"));
+        Ok(())
+    }
+
+    #[test]
+    fn list_open_skips_fork_pull_requests_and_finds_none_when_closed() -> anyhow::Result<()> {
+        let fake = fake(vec![
+            json(
+                200,
+                serde_json::json!([numbered_pr(5, "fix/login", "main", "fork/r")]),
+            ),
+            json(200, serde_json::json!([])),
+        ]);
+        assert!(plugin(&fake).list_open(&repo(), "fix/login")?.is_empty());
         Ok(())
     }
 

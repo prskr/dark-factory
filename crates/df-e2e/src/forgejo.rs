@@ -2,13 +2,19 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 
 use crate::data;
+use crate::wait::eventually;
 
 /// Bounds each API call, so a stalled port-forward fails the test instead of hanging it.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a merge is retried while Forgejo re-checks the pull request.
+const MERGE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Forgejo API client for the repository `factory/demo`, authenticated with the token it is built
 /// with (the bot's or the reviewer's).
@@ -97,6 +103,105 @@ impl Forgejo {
         )
         .await?;
         Ok(())
+    }
+
+    /// Creates branch `branch` at the head of `from`.
+    pub async fn create_branch(&self, branch: &str, from: &str) -> Result<()> {
+        self.post(
+            "branches",
+            &serde_json::json!({ "new_branch_name": branch, "old_ref_name": from }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Commits a new file `path` with `content` to `branch`, as the commit identity of the
+    /// instance: the Git proxy rejects the push of a commit by anyone else (`df:identity`), so a
+    /// branch that agents rebase must hold such commits.
+    pub async fn create_file(
+        &self,
+        branch: &str,
+        path: &str,
+        content: &str,
+        message: &str,
+    ) -> Result<()> {
+        let identity = df_core::config::CommitIdentityConfig::default();
+        let person = serde_json::json!({ "name": identity.name, "email": identity.email });
+        self.post(
+            &format!("contents/{path}"),
+            &serde_json::json!({
+                "branch": branch,
+                "message": message,
+                "content": STANDARD.encode(content),
+                "author": person,
+                "committer": person,
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Opens a pull request from `head` into `base`; a draft has the `WIP: ` title prefix that
+    /// Forgejo recognizes. Returns its number.
+    pub async fn open_pull(&self, head: &str, base: &str, title: &str, draft: bool) -> Result<u64> {
+        let title = if draft {
+            format!("WIP: {title}")
+        } else {
+            title.to_owned()
+        };
+        let pull = self
+            .post(
+                "pulls",
+                &serde_json::json!({ "head": head, "base": base, "title": title }),
+            )
+            .await?;
+        pull.get("number")
+            .and_then(Value::as_u64)
+            .context("pull request number")
+    }
+
+    /// Takes pull request `number` out of draft by retitling it (Forgejo refuses to merge a
+    /// draft).
+    pub async fn retitle_pull(&self, number: u64, title: &str) -> Result<()> {
+        let url = self.url(&format!("pulls/{number}"));
+        self.http
+            .patch(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&serde_json::json!({ "title": title }))
+            .send()
+            .await
+            .with_context(|| format!("PATCH {url}"))?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    /// Merges pull request `number` with a merge commit. Forgejo answers 405 ("Please try again
+    /// later") while it re-checks whether the pull request can be merged, for example right after
+    /// another test moved the base branch, so a failed merge is retried until [`MERGE_TIMEOUT`].
+    /// The error names Forgejo's last answer.
+    pub async fn merge_pull(&self, number: u64) -> Result<()> {
+        let url = self.url(&format!("pulls/{number}/merge"));
+        eventually(
+            &format!("the merge of pull request {number}"),
+            MERGE_TIMEOUT,
+            || async {
+                let response = self
+                    .http
+                    .post(&url)
+                    .header("Authorization", format!("token {}", self.token))
+                    .json(&serde_json::json!({ "Do": "merge" }))
+                    .send()
+                    .await
+                    .with_context(|| format!("POST {url}"))?;
+                let status = response.status();
+                if status.is_success() {
+                    return Ok(Some(()));
+                }
+                let body = response.text().await.unwrap_or_default();
+                bail!("POST {url}: {status}: {}", body.trim())
+            },
+        )
+        .await
     }
 
     /// Content of `path` on `branch`.

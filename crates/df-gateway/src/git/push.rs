@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use df_proto::gateway::v1::{GitRoute, PushFinding, PushPolicy, PushVerdict, RefUpdate};
+use df_proto::gateway::v1::{
+    self as pb, GitRoute, PushFinding, PushPolicy, PushVerdict, RefUpdate,
+};
 use df_proto::push_reasons::{CHECK_FAILED, PUSH_TOO_LARGE};
 use http_body_util::{BodyExt, Full};
 use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue};
@@ -401,6 +403,7 @@ impl Push {
             scope: RefScope {
                 task_branch: forge.route.task_branch.clone(),
                 wip_branch: forge.route.wip_branch.clone(),
+                rewrite_allowed: forge.route.rewrite_policy() == pb::RewritePolicy::WithLease,
             },
             commands: parsed.commands.clone(),
             pack_offset: parsed.pack_offset,

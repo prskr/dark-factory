@@ -24,6 +24,7 @@
 **Non-Goals:**
 - Stopping an agent from force-pushing over third-party commits by hand under `with-lease` (see Risks). A proxy rule that inspects which commits a rewrite drops is rejected, because it would need the full remote history in the proxy.
 - Renaming or moving a task to another branch after creation: rejected.
+- Rebasing third-party commits: a rewrite produces new commits that keep their author, and `df:identity` (push-checks) rejects every new commit not authored by the instance. On a third-party branch the agent asks the bot to rebase (playbook §2.1) and adds its fixes as new commits on top. Accepting rebased copies of commits already on the branch is backlog.
 
 ## Decisions
 
@@ -45,6 +46,7 @@ CREATE UNIQUE INDEX tasks_open_branch ON tasks (project_id, branch)
 - The same index makes a reopening message fail ("Reopening needs the branch"). The status update hits the index and maps to the same error.
 - `existing_branch` isn't a column. A task is on an existing branch iff `branch != factory/task/<KEY>`.
 - Alternative: a `task_branches` table with its own lifecycle. Rejected, because the partial index on `tasks` expresses the rule in one line.
+- A second migration adds the agent branches (D11): `ALTER TABLE projects ADD COLUMN agent_branch_globs TEXT[] NOT NULL DEFAULT '{renovate/**,dependabot/**}';`. Existing projects get the default.
 
 ### D2: Effective base branch
 
@@ -58,7 +60,7 @@ CREATE UNIQUE INDEX tasks_open_branch ON tasks (project_id, branch)
 ### D3: Attaching
 
 - `create_task` with a `branch`:
-  1. Validate the name (D4).
+  1. Validate the name (D4) and, for an agent's call, match it against the project's agent branches (D11).
   2. Call `pull-requests.list-open(repo, { head: branch })`.
   3. With 0 PRs, insert the task without a PR. With 1, insert it with `pr_number`, `pr_url`, `base_branch = pr.base` and `pr_attached = true`. With 2 or more, return an error.
 - The forge call happens before the insert transaction, so no lock is held across a network call. A PR opened between the call and the insert is caught later by D3's second path.
@@ -96,7 +98,7 @@ Combining it with `base_task` is rejected in the tool and form handlers before v
 
 ### D7: Runtime push with lease
 
-- The runtime keeps `remote_sha` (the task branch's remote commit as the runtime last saw it) in its persistent workspace state under `/data/runtime`, next to `last_pushed_sha`. It sets `remote_sha` after its own fetch in prepare and after every successful push.
+- The runtime keeps `remote_sha` (the task branch's remote commit as the runtime last saw it) in its persistent workspace state under `/data/runtime`, next to `last_pushed_sha`. It sets `remote_sha` after its own fetch in prepare when the fetch does not diverge (fresh checkout, fast-forward, unchanged remote) and after every successful push.
 - It never reads `refs/remotes/origin/<branch>` for the lease, because the agent's own `git fetch` moves that ref.
 - Push:
   - If HEAD contains `remote_sha` (`merge-base --is-ancestor`), it pushes plainly.
@@ -105,7 +107,7 @@ Combining it with `base_task` is rejected in the tool and form handlers before v
 - A lease rejection maps to `PUSH_STATUS_REJECTED_NON_FAST_FORWARD`. Git reports it as `stale info`, and the runtime matches both messages.
 - Prepare of an existing workspace:
   - If the fetched remote equals the stored `remote_sha` and the local branch differs, it pushes as above, which covers a rebase from a killed run.
-  - If the remote moved and both sides have their own commits, it reports diverged as today.
+  - If the remote moved and both sides have their own commits, it reports diverged as today and keeps the old `remote_sha`. A later rewrite that drops the others' commits is then rejected by the lease; integrating them (rebase onto or merge of the remote) is a plain push.
 - `Git::push` takes an enum `Force::{No, Always, WithLease(sha)}` instead of `bool`. `Always` remains for the WIP snapshot only.
 
 ### D8: Prepare of an existing branch
@@ -121,13 +123,25 @@ Combining it with `base_task` is rejected in the tool and form handlers before v
 
 ### D10: UI
 
-- **Project form:** a select with "Never" and "With lease (default)". Its help text: "With lease, agents may rebase their task branch; commits pushed by others in the meantime are never overwritten by the runtime."
+- **Project form, Security tab:** two groups with a heading and a divider, as on the General tab.
+  - "Push checks": the existing intro, protected paths, checks card and note, unchanged.
+  - "Branches":
+    - "Branch rewrites", a full-width select with "Never" and "With lease (default)". Its help text: "With lease, agents may rebase their task branch; commits pushed by others in the meantime are never overwritten by the runtime."
+    - "Agent branches", a textarea, one glob per line, with the same validation display as protected paths. Its help text: "One glob per line. Existing branches agents may start tasks on with create_task. Board members can pick any branch in the composer."
 - **Composer:** the options menu gets "Existing branch", a text input that shows as a removable chip. A server-side error (held, invalid, several PRs) keeps the composer open, as for a missing description.
-- **Task details:** the existing branch line is unchanged, and an "attached" badge follows the PR link. The badge reuses the chip style and has the tooltip "Opened outside the factory; the factory comments but never changes it".
+- **Task details:** the existing branch line is unchanged, and an "attached" badge follows the PR link. The badge uses the neutral status-badge style (`Tone::Queued`) and has the tooltip "Opened outside the factory; the factory comments but never changes it".
+
+### D11: Agent branches
+
+- `projects.agent_branch_globs` (D1) lists the existing branches an agent may name in `create_task`. Matching uses `df_core::glob::protected_glob` (`*` stops at `/`, `**` crosses it), so `renovate/**` matches `renovate/serde-1.x`.
+- The `create_task` handler checks the branch after `ExistingBranch::parse`. A miss returns an `is_error` result naming the branch and the globs. An empty list means agents can't use existing branches.
+- The composer path doesn't check the globs: a board member picking a branch is not the threat the list guards against (an agent steered by repository content).
+- The check runs once at creation. The stored branch is immutable, so the proxy and the snapshot need no new rule. Alternative: re-check in the snapshot. Rejected, because editing the patterns would cut off a running task's pushes.
+- Alternative: a denylist of protected branches. Rejected, because a branch nobody listed (a new `hotfix/…`, `gh-pages`) would be open to agents by default.
 
 ## Risks / Trade-offs
 
-- [An agent can force-push over third-party commits itself, since under `with-lease` the proxy forwards any non-fast-forward with a matching old value, and a plain `git push --force` sends exactly that] → The runtime's own pushes never do this; the playbook forbids rewriting commits the agent didn't make; every push is recorded with old and new SHA (`git.push` audit); projects that can't accept the risk use `never`. Recorded in the consequences of ADR-0033.
+- [An agent can force-push over third-party commits itself on a branch it may write: its own `factory/task/<KEY>`, a branch matching the project's agent branches, or a branch a board member chose. Under `with-lease` the proxy forwards any non-fast-forward with a matching old value, and a plain `git push --force` sends exactly that] → The runtime's own pushes never do this; the playbook forbids rewriting commits the agent didn't make; every push is recorded with old and new SHA (`git.push` audit); projects that can't accept the risk use `never`. Recorded in the consequences of ADR-0033.
 - [Crash between creating a PR for an existing-branch task and recording it makes the PR count as attached] → The factory then only stops marking it ready or draft. A human can mark it ready; accepted.
 - [Renovate stops managing a branch once the agent pushes to it] → Playbook §2.1: ask for a Renovate rebase by comment first; note it in a PR comment otherwise.
 - [Migration flips existing projects to `with-lease`] → Pre-MVP, no installations to preserve (decided 2026-11-03).

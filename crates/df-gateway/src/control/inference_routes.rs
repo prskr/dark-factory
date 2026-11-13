@@ -123,6 +123,8 @@ mod tests {
             persona_id: Uuid::now_v7(),
             repo_url: "https://example.test/r.git".into(),
             base_branch: "main".into(),
+            task_branch: "factory/task/DF-7".into(),
+            rewrite_policy: df_core::RewritePolicy::WithLease,
             forge_credential: None,
         }
     }

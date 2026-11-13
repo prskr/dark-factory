@@ -86,6 +86,15 @@ pub fn tone_badge(tone: Tone, label: &str) -> Markup {
     html! { span class={(BADGE) " " (tone.class())} { (label) } }
 }
 
+/// Marks a pull request that was opened outside the factory (`task-branches`, "Attached pull
+/// requests stay untouched"), in the neutral status-badge style.
+pub fn attached_badge() -> Markup {
+    html! {
+        span class={(BADGE) " " (Tone::Queued.class())}
+            title="Opened outside the factory; the factory comments but never changes it" { "attached" }
+    }
+}
+
 /// The badge of a task status: the status name without underscores in the status's tone.
 pub fn status_badge(status: TaskStatus) -> Markup {
     tone_badge(Tone::of_status(status), &status.as_str().replace('_', " "))

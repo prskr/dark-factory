@@ -47,6 +47,29 @@ An existing branch SHALL be a valid Git branch name given without `refs/heads/`.
 - **WHEN** `create_task` names both `branch: "fix/login"` and `base_task: "DF-30"`
 - **THEN** the call fails and no task exists
 
+### Requirement: Agent branches
+An existing branch given by an agent through `create_task` SHALL match one of the project's agent branch globs; otherwise creation SHALL fail with an error naming the branch and the project's globs. An existing branch chosen by a board member in the new-task composer SHALL NOT be checked against the globs. The globs SHALL be checked only at creation; changing them SHALL NOT affect existing tasks.
+
+#### Scenario: Renovate branch
+- **WHEN** an agent of project `DF` (agent branches `renovate/**`, `dependabot/**`) creates a task on `renovate/serde-1.x`
+- **THEN** the task is created on `renovate/serde-1.x`
+
+#### Scenario: Release branch from an agent
+- **WHEN** an agent of project `DF` creates a task on `release/1.2`
+- **THEN** creation fails naming `release/1.2` and the globs `renovate/**`, `dependabot/**`, and no task exists
+
+#### Scenario: No agent branches
+- **WHEN** project `DF` has an empty agent branch list and an agent creates a task on `renovate/serde-1.x`
+- **THEN** creation fails and no task exists
+
+#### Scenario: Release branch from the composer
+- **WHEN** a board member creates a task on `release/1.2` in the new-task composer
+- **THEN** the task is created on `release/1.2`
+
+#### Scenario: Globs changed after creation
+- **WHEN** `DF-13` holds `renovate/serde-1.x` and `renovate/**` is removed from the project's agent branches
+- **THEN** `DF-13` keeps its branch and its runs push to it as before
+
 ### Requirement: Missing existing branch fails the task
 Whether an existing branch exists SHALL be checked when the task's first run prepares its workspace. If the branch doesn't exist on the remote, prepare SHALL fail with a reason naming the branch, and the task SHALL become `failed`.
 

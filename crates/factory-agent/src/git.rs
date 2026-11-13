@@ -446,6 +446,9 @@ pub struct Git {
     pub global_gitconfig: PathBuf,
     pub allowed_protocols: Vec<String>,
     pub ssl_ca_info: Option<PathBuf>,
+    /// The runtime directory (`/data/runtime`), where the runtime keeps the commit the task
+    /// branch had on the remote. Without one, no lease is tracked and pushes are plain.
+    pub runtime_dir: Option<PathBuf>,
     pub program: PathBuf,
     pub retry_delays: Vec<std::time::Duration>,
 }
@@ -459,6 +462,7 @@ impl Git {
             global_gitconfig: PathBuf::from("/opt/factory/gitconfig"),
             allowed_protocols: vec!["https".to_string()],
             ssl_ca_info: None,
+            runtime_dir: None,
             program: PathBuf::from("git"),
             retry_delays: GIT_RETRY_DELAYS.to_vec(),
         }
@@ -493,6 +497,13 @@ impl Git {
     #[must_use]
     pub fn with_hooks_empty_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.hooks_empty_dir = path.into();
+        self
+    }
+
+    /// Sets the runtime directory the remote sha of the task branch is kept in.
+    #[must_use]
+    pub fn with_runtime_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.runtime_dir = Some(path.into());
         self
     }
 
@@ -726,14 +737,40 @@ impl Git {
     }
 
     /// Pushes to a remote with an explicit refspec, retrying transient failures.
-    pub async fn push(&self, remote: &str, refspec: &str, force: bool) -> anyhow::Result<Output> {
+    pub async fn push(&self, remote: &str, refspec: &str, force: Force) -> anyhow::Result<Output> {
         let mut args = vec!["push", "--porcelain", remote, refspec];
-        if force {
-            args.push("--force");
+        let lease;
+        match &force {
+            Force::No => {}
+            Force::Always => args.push("--force"),
+            Force::WithLease(expected) => {
+                let (_src, dst) = refspec.split_once(':').unwrap_or((refspec, refspec));
+                let dst = dst.strip_prefix("refs/heads/").unwrap_or(dst);
+                lease = format!("--force-with-lease=refs/heads/{dst}:{expected}");
+                args.push(&lease);
+            }
         }
         self.run_with_retry(&self.repo_dir, &args, Some((remote, refspec)))
             .await
     }
+
+    /// Whether `ancestor` is an ancestor of `descendant`; a commit the repository lacks is not.
+    pub async fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
+        self.run_cmd(&["merge-base", "--is-ancestor", ancestor, descendant])
+            .await
+            .is_ok_and(|o| o.status.success())
+    }
+}
+
+/// How a push may overwrite the remote ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Force {
+    /// Fast-forward only.
+    No,
+    /// Overwrites unconditionally; only the WIP snapshot branch.
+    Always,
+    /// Overwrites only while the remote ref still points to this commit.
+    WithLease(String),
 }
 
 /// `args` as one line, for error messages.

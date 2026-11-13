@@ -14,6 +14,7 @@ use crate::git::Git;
 use crate::outbox::Outbox;
 use crate::runner::{Confinement, RunDriverParams, RunExecutionResult, Timeouts, run_session};
 
+mod branch_rewrite;
 mod cli;
 mod confinement;
 mod connection;
@@ -338,6 +339,7 @@ impl RunScenario {
                 git_hooks: Vec::new(),
                 git_config: Vec::new(),
                 hidden_paths: Vec::new(),
+                ..Default::default()
             }),
             harness: Some(Harness {
                 kind: Some(df_proto::agent::v1::harness::Kind::Acp(AcpHarness {

@@ -437,7 +437,7 @@ impl ApprovalType for PushCheckException {
 #[derive(Debug, Clone)]
 pub(crate) struct PushingTask {
     pub(crate) id: TaskId,
-    /// `refs/heads/factory/task/<KEY>`.
+    /// `refs/heads/<tasks.branch>`.
     pub(crate) task_branch: String,
 }
 

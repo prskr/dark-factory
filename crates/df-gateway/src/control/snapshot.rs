@@ -5,9 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use df_core::SecretStore;
 use df_core::TaskKey;
 use df_core::config::{AgentConfig, NetworkConfig};
+use df_core::{RewritePolicy, SecretStore};
 use df_db::model_providers::{self, RunModelProvider};
 use df_db::push_checks::{self, CheckMode, PushPolicy};
 use df_db::{ActiveRun, DbError, HostEntry, PgPool};
@@ -187,7 +187,7 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
     Some(GitRoute {
         upstream_url: run.repo_url.clone(),
         base_branch: format!("refs/heads/{}", run.base_branch),
-        task_branch: format!("refs/heads/{}", key.task_branch()),
+        task_branch: format!("refs/heads/{}", run.task_branch),
         wip_branch: format!("refs/heads/{}", key.wip_branch()),
         credential_ref: run
             .forge_credential
@@ -196,6 +196,11 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
             .unwrap_or_default(),
         commit_name: git.commit_name.clone(),
         commit_email: git.commit_email.clone(),
+        rewrite_policy: match run.rewrite_policy {
+            RewritePolicy::Never => pb::RewritePolicy::Never,
+            RewritePolicy::WithLease => pb::RewritePolicy::WithLease,
+        }
+        .into(),
     })
 }
 
@@ -263,6 +268,8 @@ mod tests {
             persona_id: Uuid::now_v7(),
             repo_url: "https://example.test/r.git".into(),
             base_branch: "main".into(),
+            task_branch: format!("factory/task/{key}-1"),
+            rewrite_policy: RewritePolicy::WithLease,
             forge_credential: None,
         }
     }
@@ -359,6 +366,20 @@ mod tests {
             (route.commit_name.as_str(), route.commit_email.as_str()),
             ("Dark Factory", "factory@example.test")
         );
+    }
+
+    #[test]
+    fn a_run_on_an_existing_branch_routes_that_branch_with_the_rewrite_policy() {
+        let mut existing = run(Uuid::now_v7(), "DF");
+        existing.task_branch = "renovate/serde-1.x".into();
+        existing.base_branch = "release/1.2".into();
+        existing.rewrite_policy = RewritePolicy::Never;
+        let update = assemble(1, &[existing], &[]);
+        let route = update.snapshot.unwrap().sandboxes[0].git.clone().unwrap();
+        assert_eq!(route.task_branch, "refs/heads/renovate/serde-1.x");
+        assert_eq!(route.base_branch, "refs/heads/release/1.2");
+        assert_eq!(route.wip_branch, "refs/heads/factory/wip/DF-1");
+        assert_eq!(route.rewrite_policy(), pb::RewritePolicy::Never);
     }
 
     #[test]

@@ -408,3 +408,50 @@ async fn both_message_boxes_signal_focus_neutrally() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_message_to_a_final_task_whose_branch_is_taken_names_the_holder_and_queues_nothing() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let on_branch = |title: &str| df_db::NewTask {
+        project_id: df_core::ProjectId::from_uuid(seed.project),
+        persona_id: df_core::PersonaId::from_uuid(seed.persona),
+        title: Some(title.into()),
+        description: String::new(),
+        issue_number: None,
+        created_by: Principal::system("test"),
+        parent_id: None,
+        depends_on: Vec::new(),
+    };
+    let placement = || df_db::TaskPlacement {
+        branch: Some(df_core::ExistingBranch::parse("fix/login", "main").unwrap()),
+        attached_pr: None,
+    };
+    let (old, _) = df_db::create_task_on(&app.pool, on_branch("old"), placement())
+        .await
+        .unwrap();
+    crate::testkit::set_task_status(&app.pool, old.id, df_core::TaskStatus::Cancelled).await;
+    let (holder, _) = df_db::create_task_on(&app.pool, on_branch("new"), placement())
+        .await
+        .unwrap();
+
+    let response = app
+        .post(
+            "/tasks/DF-1/messages",
+            &form(&[("message", "once more")]),
+            &cookie,
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(text(response).await.contains(&holder.key.to_string()));
+    let stored = df_db::get_task(&app.pool, old.id).await.unwrap().unwrap();
+    assert_eq!(stored.status, df_core::TaskStatus::Cancelled);
+    let messages: i64 = sqlx::query_scalar("SELECT count(*) FROM task_messages WHERE task_id = $1")
+        .bind(old.id.as_uuid())
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(messages, 1, "only the assignment prompt exists");
+}

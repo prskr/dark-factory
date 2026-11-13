@@ -252,6 +252,7 @@ async fn test_scenario_prepare_first_run() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
@@ -419,6 +420,7 @@ async fn test_scenario_prepare_volume_lost_restore_wip() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     let res = prepare_workspace(&git, &local_dir, &workspace, &empty_hooks, None)
@@ -527,6 +529,7 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     // First prepare (fresh clone)
@@ -717,6 +720,7 @@ async fn test_scenario_prepare_diverged() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     // Prepare fresh workspace
@@ -810,6 +814,7 @@ async fn test_prepare_recreates_missing_task_branch() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     };
 
     let res = prepare_workspace(&git, &local, &workspace, &hooks, None)

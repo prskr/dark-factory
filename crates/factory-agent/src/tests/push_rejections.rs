@@ -70,6 +70,7 @@ impl RejectingRemote {
             git_hooks: vec![],
             git_config: vec![],
             hidden_paths: Vec::new(),
+            ..Default::default()
         };
         Self {
             _temp: temp,
