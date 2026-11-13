@@ -83,6 +83,13 @@ The task details SHALL show the task's status line, links to the pull request an
 - **WHEN** a turn of a running run ends while the page is open
 - **THEN** the run card shows the usage stored up to then without a reload
 
+### Requirement: Attached PR marker
+The task details SHALL follow the link of an attached pull request with an "attached" marker.
+
+#### Scenario: Attached PR
+- **WHEN** the details of `DF-13`, attached to Renovate's PR #40, are shown
+- **THEN** the PR link is followed by an "attached" marker and the task branch is `renovate/serde-1.x`
+
 ### Requirement: Collapsible runs list
 The runs list SHALL be collapsible to its header; it starts collapsed, shows the run count in its header and keeps its state across live updates.
 
@@ -185,7 +192,7 @@ Wherever a task title is shown, a placeholder title (no title set yet) SHALL be 
 - **THEN** the header shows the previous title and nothing is stored
 
 ### Requirement: New task composer
-The UI SHALL offer a new-task composer, opened from the new-task action of the rail or bottom bar, with project, assignee (persona), one description field and an options menu holding the optional linked issue. Submitting it SHALL create the task through the task-management operations and open the new task.
+The UI SHALL offer a new-task composer, opened from the new-task action of the rail or bottom bar, with project, assignee (persona), one description field and an options menu holding the optional linked issue and the optional existing branch. Submitting it SHALL create the task through the task-management operations and open the new task.
 
 #### Scenario: Create DF-1
 - **WHEN** a board member submits the composer for project `DF` with a description
@@ -198,6 +205,14 @@ The UI SHALL offer a new-task composer, opened from the new-task action of the r
 #### Scenario: Linked issue set
 - **WHEN** issue 7 is entered in the options menu
 - **THEN** the composer shows "Issue #7" as a removable chip and the task is created with issue number 7
+
+#### Scenario: Existing branch set
+- **WHEN** branch `renovate/serde-1.x` is entered in the options menu
+- **THEN** the composer shows "Branch renovate/serde-1.x" as a removable chip and the task is created on that branch
+
+#### Scenario: Rejected branch
+- **WHEN** the composer is submitted with branch `renovate/serde-1.x` while `DF-13` holds it
+- **THEN** the composer stays open with an error naming `DF-13` and the entered values kept
 
 ### Requirement: Conversation layout
 The transcript SHALL read as a conversation: human messages aligned to the right, agent messages to the left, each with author name and time below it. Consecutive messages of one author SHALL show the avatar only once, at the last message. Tool calls SHALL be one-line rows between the messages with a tool icon in front, an expand chevron at the end and a thin separator line above and below, shared by consecutive tool calls. The start of each run SHALL be marked with a divider naming the run.

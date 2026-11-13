@@ -197,7 +197,7 @@ A board member SHALL be able to mark a task done unless it is `queued`, `running
 - **THEN** the request is rejected as a conflict and no audit entry is written
 
 ### Requirement: Marking done readies the PR
-If a task marked done has a PR, the control plane SHALL mark it ready for review after the status change, without a summary. A forge failure SHALL be logged and SHALL NOT undo the status.
+If a task marked done has a PR that isn't attached, the control plane SHALL mark it ready for review after the status change, without a summary. A forge failure SHALL be logged and SHALL NOT undo the status.
 
 #### Scenario: Close a waiting task with a PR
 - **WHEN** a board member marks `DF-1` in status `waiting` with a draft PR done
@@ -206,6 +206,10 @@ If a task marked done has a PR, the control plane SHALL mark it ready for review
 #### Scenario: Mark done without a PR
 - **WHEN** a board member marks a task without a PR done
 - **THEN** the task becomes `completed` and the forge is not called
+
+#### Scenario: Mark done with an attached PR
+- **WHEN** a board member marks `DF-15`, attached to a human's draft PR #45, done
+- **THEN** `DF-15` becomes `completed` and the forge is not called
 
 ### Requirement: Cancelling a task
 A board member SHALL be able to cancel a task in any status except `completed` and `cancelled` (including `in_review`). Cancelling SHALL set the status `cancelled`, stop its active run, mark its undelivered messages as discarded and write an audit entry `task.cancel`. The task's PR and linked issue SHALL NOT be changed.
@@ -287,3 +291,14 @@ The retention scan SHALL delete the volume of a task without a non-terminal run 
 #### Scenario: Merged an hour ago
 - **WHEN** the PR of `DF-1` was merged and its stopped run has ended
 - **THEN** the next retention scan deletes the volume of `DF-1`
+
+### Requirement: Reopening needs the branch
+A message that would move a task in status `completed`, `failed` or `cancelled` back to `queued` SHALL be rejected with a conflict naming the other task if that task now holds the same branch. Nothing SHALL be queued.
+
+#### Scenario: Branch taken over
+- **WHEN** `DF-13` on `renovate/serde-1.x` was cancelled, `DF-16` was created on `renovate/serde-1.x`, and a board member queues a message on `DF-13`
+- **THEN** the message is rejected with a conflict naming `DF-16` and `DF-13` stays `cancelled`
+
+#### Scenario: Branch free
+- **WHEN** a board member queues a message on cancelled `DF-13` while no other open task holds `renovate/serde-1.x`
+- **THEN** `DF-13` becomes `queued`

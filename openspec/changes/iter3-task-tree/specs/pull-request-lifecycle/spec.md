@@ -29,6 +29,10 @@ On a successful task-branch `PushReport` with at least one commit ahead of base,
 - **WHEN** run 1 of `DF-1` ends `completed` and the task branch was never pushed
 - **THEN** the forge is not asked to open a PR and `DF-1` is `in_review` without a PR
 
+#### Scenario: First push on an existing branch without a PR
+- **WHEN** the runtime reports pushing `fix/login` of `DF-14`, which has no PR, 1 commit ahead of `main`
+- **THEN** a draft PR `fix/login → main` exists and is not attached
+
 ## ADDED Requirements
 
 ### Requirement: PR after a subtask merge
