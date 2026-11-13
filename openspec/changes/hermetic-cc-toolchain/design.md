@@ -14,11 +14,12 @@
 **Goals:**
 - Answer the six questions of #172 with measurements, recorded in an ADR, before changing defaults.
 - Linux exec builds independent of the host's C toolchain, for amd64 and arm64.
-- An opt-in `--config=rbe` that builds `//...` from Linux and macOS clients.
+- A `--config=rbe` that builds `//...` from Linux and macOS clients.
+- CI and release workflows on `--config=rbe` in this change, if the gate of D6 passes.
 - A faster linker for plain `cargo` only if the numbers justify it.
 
 **Non-Goals:**
-- Container-backed tests on RBE and RBE as CI default: backlog (`roadmap.md`, new row "Container-backed tests on RBE workers", linked to TD-27).
+- Container-backed tests on RBE workers (they run on the client, D4): backlog (`roadmap.md`, new row "Container-backed tests on RBE workers", linked to TD-27).
 - Hermetic exec toolchain on macOS hosts: rejected (see proposal).
 - Replacing `toolchains_musl` as a goal in itself: only if the spike shows it simplifies `MODULE.bazel` (D3); otherwise rejected.
 - Changing the Rust toolchain, `rules_rust` version or target platforms: rejected, not needed.
@@ -54,14 +55,15 @@ build:rbe --config=cache
 build:rbe --remote_executor=grpcs://remote.buildbuddy.io
 build:rbe --extra_execution_platforms=//build/platforms:linux_amd64_rbe
 build:rbe --host_platform=//build/platforms:linux_amd64_rbe
-build:rbe --platforms=//build/platforms:linux_amd64_musl
 build:rbe --jobs=50
 ```
 
+No `--platforms` in `build:rbe`: `ci.yaml` passes `--config=linux-amd64-musl` itself, and the release jobs deliberately set no target platform because the image targets transition to amd64 and arm64.
+
 - `linux_amd64_rbe` (and `linux_arm64_rbe` if BuildBuddy's cloud offers arm64 executors; otherwise arm64 stays cross-compiled as today): `@platforms//os:linux`, cpu, `exec_properties` with `OSFamily`, `Arch` and `container-image` pinned by digest.
 - Executor image: with a hermetic toolchain and sysroot, BuildBuddy's default image should suffice (it needs `bash`, coreutils, `tar`, `file` for test scripts). Only if a test or repository rule needs more, a minimal image goes to `deploy/images/rbe-executor`, built with `rules_img` like the other images and published to `ghcr.io/prskr/dark-factory/rbe-executor` by the existing image workflow.
-- Container-backed test targets (`df_db_test`, `df_web_test`, ... — everything that depends on `df-test-postgres`) get a new tag `requires-container`; `build:rbe --test_tag_filters=-requires-container` skips them until the backlog row lands. No such tag exists today.
-- `--config=rbe` stays opt-in. CI keeps `--config=cache` until the cost numbers of D1 justify switching.
+- Container-backed test targets (`df_db_test`, `df_web_test`, ... — everything that depends on `df-test-postgres`) get Bazel's built-in `no-remote-exec` tag. Under `--config=rbe` they run on the client (the GitHub runner in CI, which has Docker), with their binaries taken from the remote cache; every other action, tests included, runs on BuildBuddy. Without `--config=rbe` the tag changes nothing. A repository check (the existing `cargo xtask check-crates` or a `bazel query` in CI) fails when a test target depends on `//crates/df-test-postgres` without the tag, so a new database test cannot silently land on a worker without Docker.
+- Alternative: run all tests on the client (`--strategy=TestRunner=local`). Simpler (one flag, no tags), but test parallelism drops to the runner's cores and every test binary is downloaded. Kept as the fallback if the executor image turns out to be a problem for the image structure tests.
 
 ### D5. Plain `cargo`: measure, then the least config that works
 
@@ -73,6 +75,19 @@ If it pays off, pick the first option that works on stable Rust 1.99:
 
 Alternative: `mold`. Rejected: one more pinned tool, and lld comes with D2 for free.
 
+### D6. CI and releases switch to `--config=rbe` behind a gate
+
+Gate, measured in the spike on the change branch:
+1. The `bazel` job of `ci.yaml` passes every step (testcontainers check, Test, Clippy, Rustfmt) with `--config=rbe`, the database tests running on the runner.
+2. Its wall time is not higher than with `--config=cache`, on a cold remote cache and on a warm one (same commit run twice; two runs each, median).
+3. The build and test steps of both release jobs (`images`, harness images) pass with `--config=rbe`, run on the branch from a manual workflow run that stops before any push (release builds are `workflow_dispatch` only and push for real).
+
+If all three hold, `BAZEL_ARGS` in `ci.yaml` and both release jobs replace `--config=cache` with `--config=rbe` (which includes it). BuildBuddy minutes are recorded in the ADR but do not decide. If one fails, both workflows stay on `--config=cache`, the spec's "Remote execution rejected" scenario applies, and the ADR records the numbers.
+
+`bazel run //deploy:push_images` runs the push tool on the runner; with remote execution its runfiles (image layers) are downloaded first (`--remote_download_outputs=toplevel`, Bazel's default). The release check in step 3 covers this up to the push.
+
+Alternative: switch only `ci.yaml` and keep releases on the cache. Rejected: one configuration for both keeps the release images built by the same actions that CI tested.
+
 ## Risks / Trade-offs
 
 - [Large first fetch (LLVM ~1 GB per arch, sysroot)] → Measured in D1; CI repository cache keeps it; agents fetch once per sandbox. If it dominates sandbox build time, the ADR may restrict the hermetic toolchain to CI and RBE via a config instead of the default.
@@ -80,11 +95,13 @@ Alternative: `mold`. Rejected: one more pinned tool, and lld comes with D2 for f
 - [aarch64 NixOS: prebuilt LLVM binaries need a dynamic loader] → `nix-ld` provides it; verified in the spike. If it fails, NixOS users keep `--extra_toolchains=@local_config_cc//:all` in `.bazelrc.user` (documented).
 - [Toolchain resolution picks LLVM for musl targets] → Registration order after `@musl_toolchains_hub` and `//deploy:images_structure_test` (static ELF check) catch it.
 - [BuildBuddy cloud has no arm64 executors] → arm64 stays cross-compiled under RBE, as it is today without RBE.
-- [Cost of RBE minutes] → opt-in only; numbers in the ADR before any default changes.
+- [Cost of RBE minutes] → recorded in the ADR; local builds stay local.
+- [BuildBuddy outage or quota blocks CI and releases] → Rollback is replacing `--config=rbe` with `--config=cache` in `BAZEL_ARGS`; the comment next to it says so.
+- [A new database test target without `no-remote-exec` fails on the workers] → The repository check of D4.
 
 ## Migration Plan
 
-Contributor-only change. Developers on Linux run `bazel fetch` once (new toolchain repositories). Rollback: revert the `MODULE.bazel` registration; `@local_config_cc` is autodetected again. `--config=rbe` is additive.
+Contributor-only change. Developers on Linux run `bazel fetch` once (new toolchain repositories). Rollback: revert the `MODULE.bazel` registration; `@local_config_cc` is autodetected again. CI and releases go back to `--config=cache` by changing `BAZEL_ARGS`.
 
 ## Open Questions
 

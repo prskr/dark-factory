@@ -9,9 +9,10 @@ No published docs change: this alters contributor tooling only (Bazel toolchains
 - [ ] 1.3 Check aarch64 NixOS (`nix-ld`) and a host whose default `ld` is gold; verify the build passes and no gold deprecation warning appears.
 - [ ] 1.4 Try `toolchains_llvm` for the musl targets (D3); record whether `//deploy:images_structure_test` passes and how `MODULE.bazel` changes compared to keeping `toolchains_musl`.
 - [ ] 1.5 Prototype `--config=rbe` against BuildBuddy (D4) from a Linux and a macOS client; record whether the default executor image suffices, whether arm64 executors exist, the RBE wall time and the cache hit rate of the second client.
-- [ ] 1.6 Measure the cargo link share (D5) on aarch64 Linux with the default linker vs. lld, and check whether Rust's bundled `rust-lld` is usable on stable for `aarch64-unknown-linux-gnu`; record the numbers against the 10 % threshold.
-- [ ] 1.7 Only if 1.2–1.5 show `toolchains_llvm` falls short: repeat the failing checks with `hermetic_cc_toolchain` and record the comparison.
-- [ ] 1.8 Write `docs/adr/0058-hermetic-c-toolchain.md` (template `docs/adr/template.md`) with the results table, the answers to the six questions of #172 and the decisions on D3, D4 and D5; add it to `docs/adr/README.md`; verify `openspec validate hermetic-cc-toolchain --strict` still passes after adjusting the spec delta to the decisions (remove the cargo requirement if D5 says drop).
+- [ ] 1.6 Measure the CI gate (D6) on the spike branch: the `ci.yaml` `bazel` job with `--config=rbe` vs. `--config=cache`, cold and warm cache, two runs each; and the release jobs' build and test steps with `--config=rbe` from a manual run that stops before pushing. Record pass/fail, median wall times and BuildBuddy minutes in the results table.
+- [ ] 1.7 Measure the cargo link share (D5) on aarch64 Linux with the default linker vs. lld, and check whether Rust's bundled `rust-lld` is usable on stable for `aarch64-unknown-linux-gnu`; record the numbers against the 10 % threshold.
+- [ ] 1.8 Only if 1.2–1.6 show `toolchains_llvm` falls short: repeat the failing checks with `hermetic_cc_toolchain` and record the comparison.
+- [ ] 1.9 Write `docs/adr/0058-hermetic-c-toolchain.md` (template `docs/adr/template.md`) with the results table, the answers to the six questions of #172 and the decisions on D3, D4, D5 and D6; add it to `docs/adr/README.md`; verify `openspec validate hermetic-cc-toolchain --strict` still passes after adjusting the spec delta to the decisions (remove the cargo requirement if D5 says drop).
 
 ## 2. Hermetic exec toolchain (spec: Hermetic C toolchain for Linux exec tools)
 
@@ -27,20 +28,22 @@ No published docs change: this alters contributor tooling only (Bazel toolchains
 - [ ] 3.2 Verify the fallback: `cargo build --workspace` passes with `.bazel_env/bin` off `PATH`, and `cargo clippy --all-targets --all-features -- -D warnings` passes.
 - [ ] 3.3 Document the linker in `docs/development.md` (local setup and `bazel_env` tool list); verify the tool list matches `BUILD.bazel`.
 
-## 4. Opt-in remote execution (spec: Opt-in remote execution)
+## 4. Remote execution (spec: Remote execution configuration; CI and releases on remote execution)
 
-- [ ] 4.1 Add the RBE execution platform(s) to `build/platforms/BUILD.bazel` with `exec_properties` (image pinned by digest) and `build:rbe` to `.bazelrc` (D4); verify `bazel build --config=rbe //...` passes from a Linux client and `bazel build //...` without it sends no remote action (BuildBuddy invocation shows local strategy only).
-- [ ] 4.2 Tag container-backed test targets `requires-container` and filter them under `build:rbe`; verify `bazel test --config=rbe //...` passes and `bazel query 'attr(tags, requires-container, tests(//...))'` lists every target depending on `//crates/df-test-postgres`.
+- [ ] 4.1 Add the RBE execution platform(s) to `build/platforms/BUILD.bazel` with `exec_properties` (image pinned by digest) and `build:rbe` to `.bazelrc` without `--platforms` (D4); verify `bazel build --config=rbe --config=linux-amd64-musl //...` passes from a Linux client and `bazel build //...` without it sends no remote action (BuildBuddy invocation shows local strategy only).
+- [ ] 4.2 Tag every test target that depends on `//crates/df-test-postgres` with `no-remote-exec` and add the repository check of D4; verify `bazel test --config=rbe //...` on a client with Docker passes with those tests executed locally (`--execution_log_compact_file` or the BuildBuddy invocation), and that the check fails for a test target without the tag.
 - [ ] 4.3 Only if 1.5 showed the default executor image is not enough: add `deploy/images/rbe-executor` and publish it to `ghcr.io/prskr/dark-factory/rbe-executor` from the image workflow; verify its structure test passes in CI.
 - [ ] 4.4 Verify the cross-client scenario: build the same commit with `--config=rbe` from Linux, then from macOS; the second invocation is fully cached.
-- [ ] 4.5 Update `docs/remote-execution.md` (status, §2.2 and §3 to what was built, §4 limitations) and `docs/development.md` (`--config=rbe`, API key); update TD-27 in `docs/tech_debt.md` to the remaining part (container-backed tests on RBE, agent sandboxes); verify links with `just docs-build`.
+- [ ] 4.5 If the D6 gate passed (1.6): replace `--config=cache` with `--config=rbe` in `BAZEL_ARGS` of `.github/workflows/ci.yaml` and of both Bazel jobs in `.github/workflows/release.yaml`, with a comment pointing to the ADR and naming the rollback; verify the CI run of the pull request uses remote execution (BuildBuddy invocation link) and passes. If the gate failed, leave both workflows unchanged and remove the "CI and releases" scenarios that no longer apply from the spec delta.
+- [ ] 4.6 Update `docs/remote-execution.md` (status, §2.2 and §3 to what was built, §4 limitations), `docs/development.md` (`--config=rbe`, API key, `no-remote-exec` for database tests, what CI uses) and `docs/releasing.md` if the release workflow switched; update TD-27 in `docs/tech_debt.md` to the remaining part (container-backed tests on RBE workers, agent sandboxes); verify links with `just docs-build`.
 
 ## 5. Integration checks
 
-- [ ] 5.1 Run the CI workflow on the branch with the unchanged `--config=cache --config=linux-amd64-musl` arguments; verify all jobs pass and the remote cache hit rate on a re-run is not lower than on `main`.
+- [ ] 5.1 Run the CI workflow on the branch with its final `BAZEL_ARGS`; verify all jobs pass, and on a re-run of the same commit that the remote cache hit rate is not lower than on `main`.
 - [ ] 5.2 Run the pre-push hooks (`cargo clippy --all-targets --all-features -- -D warnings`, `cargo deny check`) and `cargo-machete`; verify no findings.
 
 ## Workflow follow-up
 
-- On archive: add the backlog row "Container-backed tests on RBE workers (`dockerd` in the executor); then `--config=rbe` as CI default" to `product/iterations/roadmap.md`, referencing TD-27 and the archived change.
+- On archive: add the backlog row "Container-backed tests on RBE workers (`dockerd` in the executor), so they no longer run on the GitHub runner" to `product/iterations/roadmap.md`, referencing TD-27 and the archived change.
+- The first real release after the switch is the end-to-end check of the push step under `--config=rbe` (D6 step 3 stops before pushing); watch it.
 - Comment the ADR and the results table on issue #172 when the user asks for it.
