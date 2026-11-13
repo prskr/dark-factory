@@ -1,0 +1,14 @@
+# Script of the rate-limit resume scenario: run 1 hits the provider limit and reports a retry time of
+# a few seconds, so the scheduler resumes the task without a message while the test still waits.
+# `rate-limit.yaml` keeps 60 s for the test that sends a message before the retry time.
+sessions:
+  new:
+    - - say: "Starting."
+      - end:
+          rate_limited:
+            retry_after_seconds: 5
+    - - say: "Continuing after the rate limit."
+      - end: end_turn
+  loaded:
+    - - say: "Continuing after the rate limit."
+      - end: end_turn

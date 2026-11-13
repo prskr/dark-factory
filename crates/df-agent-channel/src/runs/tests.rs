@@ -15,11 +15,6 @@ fn config() -> ChannelConfig {
     config
 }
 
-#[test]
-fn a_completed_run_succeeds() {
-    assert_eq!(run_state_for(RunOutcome::Completed), RunState::Succeeded);
-}
-
 #[tokio::test]
 async fn blocked_run_is_terminal_and_blocks_the_task() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
@@ -332,6 +327,30 @@ async fn infrastructure_failure_of_a_cancelled_task_does_not_reopen_it() {
     assert_eq!(
         (state.status.as_str(), state.resume_at, state.auto_resumes),
         ("cancelled", None, 0)
+    );
+}
+
+#[tokio::test]
+async fn a_lost_sandbox_resumes_after_the_configured_resume_backoff() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    deliver_all(&pool, env.task.id).await;
+    let run_id = env.insert_run(env.task.id, 1, "running").await;
+    let mut config = config();
+    config.scheduling.resume_backoff_seconds = 5;
+
+    let before = Utc::now();
+    end_run(&pool, &end_with(run_id, RunOutcome::SandboxLost), &config)
+        .await
+        .unwrap();
+    let after = Utc::now();
+
+    let state = task_resume_state(&pool, env.task.id).await;
+    assert_eq!(state.status, "queued");
+    let resume_at = state.resume_at.expect("a resume time");
+    assert!(
+        resume_at >= before + TimeDelta::seconds(5) && resume_at <= after + TimeDelta::seconds(6),
+        "resume at {resume_at}, ended between {before} and {after}"
     );
 }
 

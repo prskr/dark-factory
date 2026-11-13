@@ -64,7 +64,8 @@ sequenceDiagram
 
 1. **Scheduling.** A task is due when it is `queued` (or `rate_limited`) and its resume time has
    passed. Up to `runs.maxConcurrent` runs (default 4) are active at a time; further due tasks wait,
-   oldest first. A task never has two active runs.
+   oldest first. A task never has two active runs. The scheduler notices a due resume time on its
+   tick (`scheduling.tickMillis`, 5 s by default), so a due task starts within one tick.
 2. **Provisioning.** The control plane ensures the task volume exists, creates the sandbox pod (the
    project's image with the runtime and harness mounted read-only, the configured runtime class) and a
    NetworkPolicy for the run.
@@ -130,7 +131,7 @@ sequenceDiagram
 | `blocked` (a blocking question was not answered in time) | `blocked` |
 | `rate_limited` (the model provider's usage limit) | `rate_limited`, with a resume time; the next run starts automatically and continues |
 | `limit_reached` (a budget, or the harness's token or turn limit) | `limit_reached` |
-| `sandbox_lost`, `connect_timeout`, `provisioning_failed` | `queued` again with a growing delay, up to `runs.maxAutoResumes` (default 3) times; then `failed` |
+| `sandbox_lost`, `connect_timeout`, `provisioning_failed` | `queued` again with a growing delay (the n-th resume after n times `scheduling.resumeBackoffSeconds`, 2 minutes by default), up to `runs.maxAutoResumes` (default 3) times; then `failed` |
 | `cancelled` (stopped by a human, or over the wall-clock budget) | `waiting`; a cancelled task stays `cancelled`, a task marked done stays `completed` |
 | `failed` | `failed` |
 
@@ -165,8 +166,8 @@ the transaction that records their trigger and run by the dispatcher on the lead
 | End of a run with outcome `completed` | mark the pull request ready and post the summary of that run |
 | **Mark done** in the UI, task with a pull request | mark the pull request ready, no summary |
 
-Failed forge calls are retried with backoff (30 s doubling to 10 min) for one hour, also after a
-control plane restart; then the job is given up with a warning (`df.outbox.jobs{kind="pr.sync",result="gave_up"}`).
+Failed forge calls are retried with backoff (a first delay of `scheduling.forgeRetryBaseSeconds`,
+30 s by default, doubling to 10 min) for one hour, also after a control plane restart; then the job is given up with a warning (`df.outbox.jobs{kind="pr.sync",result="gave_up"}`).
 Behavior to know:
 
 - A completed run that never pushed the task branch opens no pull request. A pull request an

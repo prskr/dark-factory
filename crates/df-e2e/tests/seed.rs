@@ -65,6 +65,13 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         rate_limit.adapter_command,
         data::adapter_command(data::RATE_LIMIT_SCRIPT)
     );
+    let short = get_project_by_key(&pool, data::RATE_LIMIT_SHORT_PROJECT_KEY)
+        .await?
+        .context("project RT")?;
+    assert_eq!(
+        short.adapter_command,
+        data::adapter_command(data::RATE_LIMIT_SHORT_SCRIPT)
+    );
     let network = get_project_by_key(&pool, data::NETWORK_PROJECT_KEY)
         .await?
         .context("project NA")?;

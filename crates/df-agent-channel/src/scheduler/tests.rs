@@ -1323,3 +1323,47 @@ async fn a_stop_while_the_sandbox_is_created_tears_it_down_afterwards() {
         .count();
     assert_eq!(teardowns, 2, "once by the stop, once after the creation");
 }
+
+#[tokio::test]
+async fn a_task_that_becomes_due_starts_within_the_configured_tick() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // Nothing notifies when the resume time passes: only a tick finds the task.
+    sqlx::query("UPDATE tasks SET resume_at = now() + interval '300 milliseconds' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut ctx = env.ctx.clone();
+    ctx.config = Arc::new(crate::ChannelConfig {
+        scheduling: df_core::config::SchedulingConfig {
+            tick_millis: 50,
+            ..df_core::config::SchedulingConfig::default()
+        },
+        ..(*ctx.config).clone()
+    });
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let scheduler = Scheduler::new(ctx);
+    let running = tokio::spawn(async move {
+        scheduler
+            .run(async {
+                stopped.await.ok(); // a dropped sender stops it as well
+            })
+            .await;
+    });
+
+    // The default tick of 5 s would not get there in time.
+    let started = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if !list_runs(&pool).await.is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await;
+    stop.send(()).ok(); // the scheduler is gone if it panicked; the join below reports that
+    running.await.unwrap();
+
+    assert!(started.is_ok(), "no run started within 3 s");
+}

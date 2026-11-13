@@ -219,6 +219,19 @@ runs:
   # provisioning before the task fails.
   maxAutoResumes: 3
 
+# Waits after which the control plane acts on its own. The defaults suit production; short values
+# make a test cluster faster at the cost of CPU (deploy/values-e2e.yaml). Timeouts are not part of
+# it.
+scheduling:
+  # How often the scheduler looks for due tasks and ends timed-out runs, and the outbox
+  # dispatcher's poll (1 to 60000).
+  tickMillis: 5000
+  # Base of the automatic resume after an infrastructure failure (times the attempt number) and the
+  # wait after a capacity rejection (1 to 3600).
+  resumeBackoffSeconds: 120
+  # First retry delay of the pull request actions; it doubles up to 10 minutes (1 to 600).
+  forgeRetryBaseSeconds: 30
+
 # Limits of task artifacts (`write_artifact`). Bytes are at most 8388608 (8 MiB, the most the
 # runtime sends). An image is also limited to 8000 px per side.
 artifacts:

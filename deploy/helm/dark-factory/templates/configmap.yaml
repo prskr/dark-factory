@@ -42,6 +42,10 @@ data:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
       maxConcurrent: {{ .Values.runs.maxConcurrent }}
       maxAutoResumes: {{ .Values.runs.maxAutoResumes }}
+    scheduling:
+      tickMillis: {{ .Values.scheduling.tickMillis }}
+      resumeBackoffSeconds: {{ .Values.scheduling.resumeBackoffSeconds }}
+      forgeRetryBaseSeconds: {{ .Values.scheduling.forgeRetryBaseSeconds }}
     artifacts:
       maxTextBytes: {{ .Values.artifacts.maxTextBytes | int64 }}
       maxImageBytes: {{ .Values.artifacts.maxImageBytes | int64 }}

@@ -443,6 +443,21 @@ impl RunOutcome {
             Self::SandboxLost => "sandbox_lost",
         }
     }
+
+    /// Run state for a finished run (design D4).
+    pub const fn run_state(self) -> RunState {
+        match self {
+            Self::Completed
+            | Self::EndTurn
+            | Self::Blocked
+            | Self::LimitReached
+            | Self::RateLimited => RunState::Succeeded,
+            Self::Cancelled => RunState::Cancelled,
+            Self::Failed | Self::ProvisioningFailed | Self::ConnectTimeout | Self::SandboxLost => {
+                RunState::Failed
+            }
+        }
+    }
 }
 
 impl fmt::Display for RunOutcome {
@@ -572,6 +587,26 @@ impl Principal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_run_outcome_maps_to_its_run_state() {
+        let expected = [
+            (RunOutcome::Completed, RunState::Succeeded),
+            (RunOutcome::EndTurn, RunState::Succeeded),
+            (RunOutcome::Blocked, RunState::Succeeded),
+            (RunOutcome::LimitReached, RunState::Succeeded),
+            (RunOutcome::RateLimited, RunState::Succeeded),
+            (RunOutcome::Cancelled, RunState::Cancelled),
+            (RunOutcome::Failed, RunState::Failed),
+            (RunOutcome::ProvisioningFailed, RunState::Failed),
+            (RunOutcome::ConnectTimeout, RunState::Failed),
+            (RunOutcome::SandboxLost, RunState::Failed),
+        ];
+        assert_eq!(expected.len(), RunOutcome::ALL.len());
+        for (outcome, state) in expected {
+            assert_eq!(outcome.run_state(), state, "{outcome}");
+        }
+    }
 
     #[test]
     fn task_status_string_and_serde_roundtrip() {

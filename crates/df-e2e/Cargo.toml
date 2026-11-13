@@ -13,8 +13,10 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
+clap.workspace = true
 df-core.workspace = true
 df-db.workspace = true
+df-proto.workspace = true
 playwright-rs.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }

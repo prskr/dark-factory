@@ -52,6 +52,8 @@ pub struct ChannelConfig {
     pub artifacts: df_core::ArtifactsConfig,
     /// Whether the sandboxes confine the harness; the system prompt tells the agent.
     pub landlock: df_core::LandlockMode,
+    /// The scheduler's tick and the resume backoff.
+    pub scheduling: df_core::config::SchedulingConfig,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -68,6 +70,7 @@ impl From<&InstanceConfig> for ChannelConfig {
             events: EventSinks::new(&cfg.lifecycle_events),
             artifacts: cfg.artifacts,
             landlock: cfg.sandbox.provisioning.landlock,
+            scheduling: cfg.scheduling,
         }
     }
 }

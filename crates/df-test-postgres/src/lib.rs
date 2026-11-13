@@ -11,10 +11,13 @@
 //! [`CONFIG_REVISION`], because reuse matches by name only: changing the image or its settings
 //! starts a new container.
 //!
-//! Tests never share a database. Databases older than [`STALE_AFTER`] (the creation time is in the
-//! `UUIDv7` of the name) are dropped when a test binary starts, so databases of tests that are still
-//! running in another binary survive. `DROP DATABASE` has no `FORCE`, which protects a test that
-//! runs longer than the grace period.
+//! Tests never share a database. Databases older than [`STALE_AFTER`] (1 minute; the creation time
+//! is in the `UUIDv7` of the name) are dropped when the server is first used by a test binary and
+//! then while tests create databases, at most every [`SWEEP_INTERVAL`] (30 s) per process, so a
+//! long run does not fill the container. `DROP DATABASE` has no `FORCE`: a database whose pool is
+//! still open, also in another test binary, survives. Test pools keep one connection for their
+//! whole lifetime (no idle timeout, no max lifetime), so a database without connections has no
+//! pool. The databases of the last tests of a run stay until the next run sweeps them.
 //!
 //! # Templates
 //! [`migrated_pool`] migrates a template database once per migration set and clones it for every
@@ -36,7 +39,8 @@ use std::{
     error::Error,
     hash::{DefaultHasher, Hash, Hasher},
     io::{self, ErrorKind},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::Mutex,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use sqlx::{
@@ -65,14 +69,19 @@ const TEMPLATE_PREFIX: &str = "df_tpl_";
 const TEMPLATE_TMP_PREFIX: &str = "df_tpl_tmp_";
 /// How test databases are cloned from the template: `FILE_COPY` or `WAL_LOG` (PostgreSQL 15+).
 const CLONE_STRATEGY: &str = "FILE_COPY";
-/// Databases older than this are dropped when a test binary starts.
-const STALE_AFTER: Duration = Duration::from_mins(15);
+/// Databases older than this (and without connections) are dropped by the sweep.
+const STALE_AFTER: Duration = Duration::from_mins(1);
+/// The sweep during a run happens at most this often per process.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const START_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 /// The outcome of the first start, success or failure: a failed start is not retried by the
 /// next test, every caller reports the same message.
 static SERVER: OnceCell<Result<TestServer, String>> = OnceCell::const_new();
+
+/// When this process last swept stale databases during a run.
+static LAST_SWEEP: Mutex<Option<Instant>> = Mutex::new(None);
 
 type StartError = Box<dyn Error + Send + Sync>;
 
@@ -217,7 +226,7 @@ impl TestServer {
             .pool("postgres", 1)
             .await
             .map_err(|e| e.to_string())?;
-        drop_stale_databases(&admin).await;
+        drop_stale_databases(&admin, STALE_AFTER).await;
         Ok(server)
     }
 
@@ -287,10 +296,14 @@ impl TestServer {
         let template = template.map_or_else(String::new, |t| {
             format!(" TEMPLATE \"{t}\" STRATEGY {CLONE_STRATEGY}")
         });
+        let admin = self.admin_pool(1).await;
+        if take_sweep_slot(Instant::now()) {
+            drop_stale_databases(&admin, STALE_AFTER).await;
+        }
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE DATABASE \"{name}\"{template}"
         )))
-        .execute(&self.admin_pool(1).await)
+        .execute(&admin)
         .await
         .expect("create the test database");
         self.pool(&name, 5)
@@ -364,11 +377,36 @@ impl TestServer {
             .username(USER)
             .password(PASSWORD)
             .database(database);
-        PgPoolOptions::new()
-            .max_connections(max_connections)
-            .connect_with(options)
-            .await
+        pool_options(max_connections).connect_with(options).await
     }
+}
+
+/// Test pools keep one connection for their whole lifetime: a database without connections then
+/// has no pool, which is what the sweep relies on. The sqlx defaults (no minimum, idle timeout 10
+/// minutes) would let an idle test lose its database.
+fn pool_options(max_connections: u32) -> PgPoolOptions {
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .min_connections(1)
+        .idle_timeout(None)
+        .max_lifetime(None)
+}
+
+/// Whether a sweep is due, given the instant of the last one.
+fn sweep_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|last| now.saturating_duration_since(last) >= SWEEP_INTERVAL)
+}
+
+/// Claims the sweep for this process if one is due.
+fn take_sweep_slot(now: Instant) -> bool {
+    let mut last = LAST_SWEEP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let due = sweep_due(*last, now);
+    if due {
+        *last = Some(now);
+    }
+    due
 }
 
 async fn execute(admin: &PgPool, sql: &str) -> Result<(), sqlx::Error> {
@@ -401,14 +439,15 @@ fn created_at(name: &str, prefix: &str) -> Option<SystemTime> {
     Some(UNIX_EPOCH + Duration::new(secs, nanos))
 }
 
-/// Drops test databases and unfinished templates older than [`STALE_AFTER`]. Names that do not
-/// follow the scheme are left alone; all errors are ignored (best effort).
-async fn drop_stale_databases(admin: &PgPool) {
+/// Drops test databases and unfinished templates older than `grace`. A database with connections
+/// survives (no `FORCE`). Names that do not follow the scheme are left alone; all errors are
+/// ignored (best effort).
+async fn drop_stale_databases(admin: &PgPool, grace: Duration) {
     let names: Vec<String> = sqlx::query_scalar("SELECT datname FROM pg_database")
         .fetch_all(admin)
         .await
         .unwrap_or_default();
-    let cutoff = SystemTime::now() - STALE_AFTER;
+    let cutoff = SystemTime::now() - grace;
     for name in names {
         let is_stale = |prefix| created_at(&name, prefix).is_some_and(|created| created < cutoff);
         if is_stale(TEMPLATE_TMP_PREFIX) {
@@ -608,7 +647,7 @@ mod tests {
         )
         .await?;
 
-        drop_stale_databases(&admin).await;
+        drop_stale_databases(&admin, STALE_AFTER).await;
 
         assert!(!database_exists(&admin, &old).await);
         assert!(!database_exists(&admin, &old_tmp).await);
@@ -616,6 +655,54 @@ mod tests {
             assert!(database_exists(&admin, kept).await, "{kept} was dropped");
         }
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_sweep_drops_released_databases_and_keeps_those_with_an_open_pool()
+    -> sqlx::Result<()> {
+        let server = server().await;
+        let admin = server.admin_pool(1).await;
+        // Younger than STALE_AFTER, so sweeps of concurrent tests ignore these databases; this
+        // test sweeps with a shorter grace period.
+        let grace = Duration::from_secs(10);
+        let age = grace + Duration::from_secs(10);
+        let released = aged_name(DATABASE_PREFIX, age);
+        let open = aged_name(DATABASE_PREFIX, age);
+        create_database(&admin, &released).await;
+        create_database(&admin, &open).await;
+        let released_pool = server.pool(&released, 5).await?;
+        // Idle, like a test of another process that sends no query for a while.
+        let open_pool = server.pool(&open, 5).await?;
+
+        // While its pool is open, the old database survives.
+        drop_stale_databases(&admin, grace).await;
+        assert!(database_exists(&admin, &released).await);
+
+        released_pool.close().await;
+        drop_stale_databases(&admin, grace).await;
+
+        assert!(!database_exists(&admin, &released).await);
+        assert!(database_exists(&admin, &open).await);
+        let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&open_pool).await?;
+        assert_eq!(one, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn the_sweep_is_due_at_most_once_per_interval() {
+        let start = Instant::now();
+        assert!(sweep_due(None, start));
+        assert!(!sweep_due(Some(start), start));
+        assert!(!sweep_due(Some(start), start + SWEEP_INTERVAL / 2));
+        assert!(sweep_due(Some(start), start + SWEEP_INTERVAL));
+    }
+
+    #[test]
+    fn test_pools_keep_one_connection_without_idle_timeout_or_max_lifetime() {
+        let options = pool_options(5);
+        assert_eq!(options.get_min_connections(), 1);
+        assert_eq!(options.get_idle_timeout(), None);
+        assert_eq!(options.get_max_lifetime(), None);
     }
 
     #[tokio::test]

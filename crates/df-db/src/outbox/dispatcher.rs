@@ -25,7 +25,8 @@ use crate::pool::DbError;
 /// Jobs claimed at once and run at the same time, across all kinds. One wave per claim keeps
 /// every job of a batch within its lease.
 pub const MAX_IN_FLIGHT: usize = 8;
-/// Wake-up without an `outbox` notification, for example after a backoff elapsed.
+/// Default wake-up without an `outbox` notification, for example after a backoff elapsed
+/// ([`Dispatcher::with_poll_interval`]).
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Interval of [`Dispatcher::cleanup`].
 pub const CLEANUP_INTERVAL: Duration = Duration::from_hours(1);
@@ -106,6 +107,7 @@ pub struct Dispatcher {
     handlers: HashMap<&'static str, Arc<dyn OutboxHandler>>,
     /// The longest lease of the handlers; one claim covers every kind.
     lease: Duration,
+    poll_interval: Duration,
     jobs: Counter<u64>,
 }
 
@@ -126,6 +128,7 @@ impl Dispatcher {
             notifier,
             handlers: handlers.into_iter().map(|h| (h.kind(), h)).collect(),
             lease,
+            poll_interval: POLL_INTERVAL,
             jobs: meter
                 .u64_counter("df.outbox.jobs")
                 .with_description("Outbox job attempts by result")
@@ -133,8 +136,16 @@ impl Dispatcher {
         }
     }
 
+    /// Wakes up every `interval` without a notification instead of every [`POLL_INTERVAL`]
+    /// (`scheduling.tickMillis`).
+    #[must_use]
+    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
     /// Dispatches while `is_leader` is `true`, until `stop` turns `true` (or its sender is gone)
-    /// or the leader election ended. Woken by `outbox` notifications, every [`POLL_INTERVAL`]
+    /// or the leader election ended. Woken by `outbox` notifications, every poll interval
     /// and every [`CLEANUP_INTERVAL`] for [`Self::cleanup`].
     pub async fn run(&self, mut is_leader: watch::Receiver<bool>, mut stop: watch::Receiver<bool>) {
         loop {
@@ -228,7 +239,7 @@ impl Dispatcher {
             // All branches are cancel-safe; the work runs after the `select!`.
             let clean_up = tokio::select! {
                 () = outbox_notified(&mut wake) => false,
-                () = tokio::time::sleep(POLL_INTERVAL) => false,
+                () = tokio::time::sleep(self.poll_interval) => false,
                 _ = cleanup.tick() => true,
                 _ = stop.wait_for(|stop| *stop) => return LeadEnd::Stopped,
                 lost = is_leader.wait_for(|leading| !*leading) => {

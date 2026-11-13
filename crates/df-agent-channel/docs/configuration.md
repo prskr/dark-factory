@@ -30,7 +30,10 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `volumes.retainAfterCloseSeconds` | no | `604800` (7 days) | The volume of a `completed` or `cancelled` task without an active run is deleted this long after its last run ended. The volume of a task whose pull request was merged is deleted at the next check, whatever this value. The check runs once per hour on the replica holding the instance Lease (not without a cluster). `0` deletes at the next check; a value too large to represent as a date means never. |
 | `volumes.idleTtlSeconds` | no | `2592000` (30 days) | The volume of any task without an active run is deleted this long after its last run ended; same check and value rules as `retainAfterCloseSeconds`. The next run creates a fresh volume, clones again and restores the WIP snapshot. A board member can delete a volume at once with "Reset workspace" (`crates/df-web/README.md`). |
 | `runs.maxConcurrent` | no | `4` | At least 1 (0 is rejected at startup). Runs that may be non-terminal at the same time, counted across all replicas. Further due tasks keep their status until a slot frees and then start oldest resume time first. |
-| `runs.maxAutoResumes` | no | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` (backoff 2 min x (resumes + 1)); then the task becomes `failed`. A message or a run that ends with a `RunReport` resets the count; a capacity rejection does not count. |
+| `runs.maxAutoResumes` | no | `3` | Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or `provisioning_failed` (backoff `scheduling.resumeBackoffSeconds` x (resumes + 1), 2 min x (resumes + 1) by default); then the task becomes `failed`. A message or a run that ends with a `RunReport` resets the count; a capacity rejection does not count. |
+| `scheduling.tickMillis` | no | `5000` | Between 1 and 60000 (anything else is rejected at startup, naming the setting). How often the scheduler looks for due tasks (resume times, freed run slots) and ends timed-out runs. A due task starts within one tick. It also paces the check for lost sandboxes after a start and the poll of the outbox dispatcher, which runs jobs whose retry delay elapsed. For test clusters: a low value (for example `500`) starts tasks sooner at the cost of CPU; production keeps the default. |
+| `scheduling.resumeBackoffSeconds` | no | `120` | Between 1 and 3600. Base of the automatic resume after `sandbox_lost`, `connect_timeout` or `provisioning_failed`: the n-th resume starts n times this long after the run ended. Also the wait after a capacity rejection (`provisioning_failed` with the detail `capacity`). A rate limit resumes at the provider's retry time and is not affected. For test clusters: a few seconds make a failed start visible sooner. |
+| `scheduling.forgeRetryBaseSeconds` | no | `30` | Between 1 and 600. Delay before the first retry of a failed pull request action (`pr.sync`, `pr.mark_draft`); it doubles up to 10 minutes, and the action is given up after one hour. Those two limits are fixed. For test clusters: a few seconds. |
 | `artifacts.maxTextBytes` | no | `1048576` (1 MiB) | Largest text artifact (`write_artifact`). Between 1 and 8388608 (8 MiB, the most the runtime sends); anything else is rejected at startup. |
 | `artifacts.maxImageBytes` | no | `3932160` (3.75 MiB) | Largest image artifact (PNG, JPEG, WebP, GIF), also limited to 8000 px per side (a constant). Same range as `maxTextBytes`. |
 | `artifacts.maxPerTask` | no | `50` | Artifacts per task, at least 1. Replacing an artifact does not count; a write of a new name over the limit is rejected. |
@@ -42,6 +45,11 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `lifecycleEvents.subscriptions[].events` | no | `[]` (all) | Event types sent to this subscription (`volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`). Empty means all, including types added later. An unknown type refuses the start. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
+
+The `scheduling` section holds only waits after which the control plane acts on its own. Timeouts
+(handshake, connect, keepalive, drain, wall clock) are fixed or have their own setting under `runs`,
+because shortening them changes how failures behave, not how fast things run. The Helm chart renders
+the section from `scheduling.*` of the values.
 
 ### Harness environment and files
 
@@ -136,7 +144,7 @@ The scheduler tears the sandbox down at connect + `maxWallClock` + 2 x `cancelGr
 | `rate_limited` | `succeeded` | `rate_limited` with a resume time (the retry time, or one hour ahead) |
 | `failed` | `failed` | `failed` |
 | `provisioning_failed`, `connect_timeout`, `sandbox_lost` | `failed` | `queued` with a resume time and the resume count + 1, until `runs.maxAutoResumes`, then `failed` |
-| `provisioning_failed` with detail `capacity` (quota exceeded) | `failed` | `queued` in 2 minutes, resume count unchanged |
+| `provisioning_failed` with detail `capacity` (quota exceeded) | `failed` | `queued` after `scheduling.resumeBackoffSeconds` (2 minutes by default), resume count unchanged |
 
 If prompts are still undelivered when a run ends with an outcome other than `failed`-class or
 `rate_limited`, the task becomes `queued` and the next run starts with them. A task a board member
@@ -221,8 +229,8 @@ sends `Release` (or `Cancel` for a task marked done) the control plane moves the
   under the same lock, which `pr.mark_draft` takes too); writes `pr-ready:<n>` to the run's
   transcript once; posts `runs.completion_summary` of the job's run if non-empty. A ready-only job
   without a recorded pull request waits (retry) while an unfinished `open` job of the task exists.
-  Forge and database errors retry with backoff (30 s base, 10 min cap, given up after 1 h; lease
-  3 min); an invalid payload is given up. At most 8 jobs run at once, so at most 8 pooled connections
+  Forge and database errors retry with backoff (`scheduling.forgeRetryBaseSeconds` base, 30 s by
+  default, 10 min cap, given up after 1 h; lease 3 min); an invalid payload is given up. At most 8 jobs run at once, so at most 8 pooled connections
   wait for or hold the advisory lock.
 - Shutdown (SIGTERM): the scheduler lets provisioning in flight finish (10 s); sessions stop reading,
   finish their in-flight tool calls and credential requests (up to 20 s, then they are aborted) and

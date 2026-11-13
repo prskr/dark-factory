@@ -96,6 +96,13 @@ sandboxNamespace:
 enforcement:
   mode: kubernetes
 
+# Short scheduling waits: tests that wait for a due task, an automatic resume or a forge retry don't
+# wait for production delays. The cost is control plane CPU (docs/demo.md, "Resource budget").
+scheduling:
+  tickMillis: 500
+  resumeBackoffSeconds: 5
+  forgeRetryBaseSeconds: 2
+
 # The sandbox reaches Forgejo as a cluster Service (allowlist entry from the seed).
 clusterTargets:
   anyNamespace: false

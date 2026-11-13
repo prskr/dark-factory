@@ -447,6 +447,7 @@ fn spawn_leader_tasks(
         &ctx.notifier,
         delivery,
         ctx.forge.clone(),
+        &ctx.config.scheduling,
         &meter,
     )?;
     let (dispatcher_leader, dispatcher_stop) = (is_leader.clone(), stop.clone());

@@ -71,8 +71,8 @@ just docs-theme-update v0.13.0    # new Hextra release (needs Go); check light a
 
 Screenshots on the landing page (`docs/landing/images/`, Git LFS; the docs workflows check out with `lfs: true`) come from the running app, not from the design file. To retake one:
 
-1. `just serve-local`, then `just seed`; log in as `admin@example.com` / `password`.
-2. Playwright at 1440 x 900, light theme, open the view (for example `/egress/log`, whose traffic comes from `--demo-flows`).
+1. `just serve-local`, then `just seed-demo` (the demo profile: 3 projects, 3 personas and 14 tasks in every state with transcripts, usage and artifacts, see `docs/demo.md`, "Demo profile"); log in as `admin@example.com` / `password`. `just seed` writes only the technical e2e fixtures and leaves the task list empty.
+2. Playwright at 1440 x 900, light theme, open the view (for example `/tasks/WEB-5` with its Artifacts tab, `/tasks/PAY-2` with a pending question, or `/egress/log`, whose traffic comes from `--demo-flows`).
 3. Save the viewport as WebP (`browser_take_screenshot` with `type: webp`; with the Playwright container, copy it out with `podman cp`) under the same name in `docs/landing/images/`.
 
 Links between published pages are relative (root-relative page links are checked too) and checked by the build: a broken link or an absolute `https://www.dark-factory.eu/...` link fails it. Link to unpublished repository files with a `https://github.com/prskr/dark-factory/blob/main/...` URL. The configuration references are mounted from the crates (`docs/config/_default/module.yaml`), not copied.

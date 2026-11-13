@@ -385,8 +385,9 @@ async fn rate_limited_run_shows_the_limit_and_the_next_message_continues() -> Re
     Ok(())
 }
 
-/// A rate-limited task resumes at the retry time reported by the run (60 s in the script) and the
-/// next run starts without a message.
+/// A rate-limited task resumes at the retry time reported by the run (5 s in the script of project
+/// `RT`; `rate-limit.yaml` keeps 60 s for the test that sends a message before the retry time) and
+/// the next run starts without a message.
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn rate_limited_task_resumes_at_the_retry_time_without_a_message() -> Result<()> {
@@ -395,7 +396,7 @@ async fn rate_limited_task_resumes_at_the_retry_time_without_a_message() -> Resu
         .session
         .create_task(
             &world.env,
-            data::RATE_LIMIT_PROJECT_KEY,
+            data::RATE_LIMIT_SHORT_PROJECT_KEY,
             "Do some work",
             None,
         )

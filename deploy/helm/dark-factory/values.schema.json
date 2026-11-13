@@ -243,6 +243,15 @@
         "maxAutoResumes": { "type": "integer", "minimum": 0 }
       }
     },
+    "scheduling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tickMillis": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "resumeBackoffSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "forgeRetryBaseSeconds": { "type": "integer", "minimum": 1, "maximum": 600 }
+      }
+    },
     "artifacts": {
       "type": "object",
       "properties": {
