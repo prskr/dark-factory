@@ -21,8 +21,8 @@ On Linux amd64 and arm64 hosts, Bazel SHALL compile and link exec tools (build s
 - **WHEN** `factory-agent` is built for the runtime image after the toolchain change
 - **THEN** `file` still reports a statically linked ELF executable and `//deploy:images_structure_test` passes
 
-### Requirement: Opt-in remote execution
-The repository SHALL provide a Bazel configuration `rbe` that runs build and test actions on BuildBuddy remote execution with a Linux execution platform. With it, no action SHALL depend on the client's C toolchain, and the client MAY be Linux or macOS. Without `--config=rbe`, builds SHALL keep running on the local machine.
+### Requirement: Remote execution configuration
+The repository SHALL provide a Bazel configuration `rbe` that runs build and test actions on BuildBuddy remote execution with a Linux execution platform. With it, no action SHALL depend on the client's C toolchain, and the client MAY be Linux or macOS. Tests that need a container runtime SHALL run on the client. Without `--config=rbe`, builds SHALL keep running on the local machine.
 
 #### Scenario: Build from a macOS client
 - **WHEN** `bazel build --config=rbe //...` runs on an arm64 macOS client with a valid BuildBuddy API key
@@ -35,6 +35,25 @@ The repository SHALL provide a Bazel configuration `rbe` that runs build and tes
 #### Scenario: Default stays local
 - **WHEN** `bazel build //...` runs without `--config=rbe`
 - **THEN** no action is sent to a remote executor
+
+#### Scenario: Container-backed tests on the client
+- **WHEN** `bazel test --config=rbe //...` runs on a client with a container runtime
+- **THEN** the tests that depend on `df-test-postgres` run on the client and pass, and every other test runs on the remote workers
+
+### Requirement: CI and releases on remote execution
+The Bazel jobs of the CI workflow and of the release workflow SHALL use the `rbe` configuration, provided the spike showed that both workflows pass with it and that the CI job is not slower than with the remote cache alone (design D6). Otherwise they SHALL keep the remote cache configuration.
+
+#### Scenario: Pull request build
+- **WHEN** the CI workflow runs for a pull request
+- **THEN** its Bazel job builds and tests `//...` with `--config=rbe`, and the database tests run on the GitHub runner
+
+#### Scenario: Release
+- **WHEN** a release is started
+- **THEN** its image jobs build, test and push the images with `--config=rbe`
+
+#### Scenario: Remote execution rejected in the spike
+- **WHEN** the spike showed a failing workflow or a slower CI job with `--config=rbe`
+- **THEN** both workflows keep `--config=cache`, and the ADR records the measurements
 
 ### Requirement: Pinned linker for plain cargo
 When the pinned `ld.lld` is on `PATH` (through `bazel_env`), plain `cargo` builds for the `*-unknown-linux-gnu` host targets SHALL link with it. When it is not on `PATH`, `cargo` SHALL fall back to the default linker and `cargo build --workspace` SHALL still pass. If the link share measured in the spike is too small to matter (design D5), this requirement SHALL be removed from the change before archiving.
