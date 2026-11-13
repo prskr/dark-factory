@@ -6,7 +6,7 @@ Lets board members configure what agents work on and as whom: projects, personas
 ## Requirements
 
 ### Requirement: Projects
-Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, optional adapter command, base branch and forge credential reference. The key SHALL be set when the project is created and SHALL be immutable afterwards; the project settings page SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
+Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, optional adapter command, base branch, forge credential reference and the branch settings (see "Project branch settings"). The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
 
 #### Scenario: Create a project
 - **WHEN** a board member submits name "Dark Factory", key `DF`, repo `https://git.example.org/peter/dark-factory.git`, image, base `main` and a forge credential
@@ -17,7 +17,7 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 - **THEN** the form shows a validation error and nothing is stored
 
 #### Scenario: Key in the edit form
-- **WHEN** a board member opens the settings page of project `DF`, with or without tasks
+- **WHEN** a board member opens the edit form of project `DF`, with or without tasks
 - **THEN** the key is shown read-only
 
 #### Scenario: Changing the key of a used project
@@ -30,11 +30,34 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 
 #### Scenario: Project image with its own adapter
 - **WHEN** a board member sets the adapter command `/usr/local/bin/my-acp-adapter` on project `DF`
-- **THEN** it is stored and the settings page shows it on the next visit
+- **THEN** it is stored and the form shows it on the next edit
 
 #### Scenario: Adapter command left empty
 - **WHEN** a board member saves a project with an empty adapter command
 - **THEN** the project uses the instance's harness image and adapter
+
+### Requirement: Project branch settings
+Board members SHALL set a project's branch rewrite policy (`never` or `with-lease`, default `with-lease`) and agent branch globs (default `renovate/**` and `dependabot/**`, see `task-branches`) when creating or editing the project.
+
+#### Scenario: Default rewrite policy
+- **WHEN** a board member creates a project without changing the branch rewrite policy
+- **THEN** the project's policy is `with-lease`
+
+#### Scenario: Rewrite policy changed
+- **WHEN** a board member sets the branch rewrite policy of `DF` to `never`
+- **THEN** it is stored, audited with before and after values, and applies from the next run of each task
+
+#### Scenario: Default agent branches
+- **WHEN** a board member creates a project without changing the agent branches
+- **THEN** the project's agent branch globs are `renovate/**` and `dependabot/**`
+
+#### Scenario: Invalid agent branch glob
+- **WHEN** a board member saves the agent branches with the line `renovate/[`
+- **THEN** the form shows a validation error naming the line and nothing is stored
+
+#### Scenario: Agent branches changed
+- **WHEN** a board member adds `agent/**` to the agent branches of `DF`
+- **THEN** it is stored and audited with before and after values
 
 ### Requirement: Adapter command quoting
 The adapter command field of a project SHALL use shell-style quoting: arguments are separated by whitespace, single or double quotes keep whitespace inside an argument, and the stored command SHALL be shown quoted so that saving it again stores the same arguments. An unclosed quote SHALL be a validation error.
