@@ -33,7 +33,11 @@ async fn completed_run() -> Env {
 
 /// A dispatcher of a (restarted) replica.
 fn dispatcher(env: &Env) -> Dispatcher {
-    let handler = PrSyncHandler::new(env.ctx.pool.clone(), Arc::new(env.forge.clone()));
+    let handler = PrSyncHandler::new(
+        env.ctx.pool.clone(),
+        Arc::new(env.forge.clone()),
+        Duration::from_secs(30),
+    );
     Dispatcher::new(
         env.ctx.pool.clone(),
         env.ctx.notifier.clone(),

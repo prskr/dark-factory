@@ -15,10 +15,6 @@ use crate::ids::RunId;
 
 /// Resume time of a task whose run reported a rate limit without a retry time.
 const UNKNOWN_RETRY_AFTER: TimeDelta = TimeDelta::hours(1);
-/// Backoff per resume attempt after an infrastructure failure, and the wait after a capacity
-/// rejection.
-const RESUME_BACKOFF: TimeDelta = TimeDelta::minutes(2);
-
 /// What the task's own rows show when an event is applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskSnapshot {
@@ -98,6 +94,9 @@ pub struct RunEnded {
     pub stop_requested_at: Option<DateTime<Utc>>,
     /// `runs.maxAutoResumes`.
     pub max_auto_resumes: u32,
+    /// `scheduling.resumeBackoffSeconds`: the backoff per resume attempt after an infrastructure
+    /// failure, and the wait after a capacity rejection.
+    pub resume_backoff: TimeDelta,
     pub now: DateTime<Utc>,
 }
 
@@ -478,14 +477,14 @@ fn plan_resume(end: &RunEnded, overridden: Option<TaskStatus>, auto_resumes: i32
     if end.outcome == RunOutcome::ProvisioningFailed && end.detail == CAPACITY_DETAIL {
         return plan(
             TaskStatus::Queued,
-            Some(later(RESUME_BACKOFF)),
+            Some(later(end.resume_backoff)),
             auto_resumes,
         );
     }
     if auto_resumes < i32::try_from(end.max_auto_resumes).unwrap_or(i32::MAX) {
         return plan(
             TaskStatus::Queued,
-            Some(later(RESUME_BACKOFF * (auto_resumes + 1))),
+            Some(later(end.resume_backoff * (auto_resumes + 1))),
             auto_resumes + 1,
         );
     }

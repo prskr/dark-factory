@@ -74,6 +74,8 @@ See proposal.md, "Why". Current state:
 - `E2E_TEST_THREADS` defaults to 2, like CI.
 - The first task measures the node peak with 2 threads (`docker stats` / `podman stats`) and updates "Resource budget" in `docs/demo.md`. If the peak exceeds about 5 GiB, the default stays 1 and the docs say so.
 - Splitting `flow.rs` is rejected (proposal): it doesn't add parallelism.
+- **Measured (task 2.5):** three consecutive full runs with 2 threads on a reused cluster were green (32 tests each): 8 min 31 s (images rebuilt, setup 127 s), 7 min 27 s and 7 min 28 s, with a node peak (`docker stats`, every 5 s) of 3.41, 3.45 and 3.47 GiB. The full suite with 1 thread took 13 min 11 s at 3.5 GiB. The budget covers 2, so the default is 2, like CI.
+- **Flake found on the way:** earlier runs with 2 threads, and `coordinator_delegates_implementation_and_review_and_relays_the_next_round` with 1 thread, failed about every second run (`Failed to send WebSocket message: Trying to work with closed connection`; in `flow.rs` `connection refused` on the port-forward `13001`). Evidence: after a kept run, `ps` showed `kubectl port-forward` processes with parent 1 from earlier runs that still held the ports (the Playwright forward of the previous run, started 14:05, bound `13001`); the log of the next run's forward said `unable to listen on port 13001: address already in use`; the runner's `forward` only waited for the port to accept connections, which the old forward did. That old forward pointed at the Playwright pod that the reuse had restarted. Cause: `forward` backgrounded the `kc` shell function, so `$!` was a subshell, and the cleanup killed it without its `kubectl` child. Fix: `kubectl` is the background job itself, and `forward` fails when the port is taken. After the fix, 5 two-thread runs of the failing pair and the three full runs above passed. The Playwright server logs and pod showed no restart or OOM.
 
 ### D5: Dropping test databases during the run
 - `database_from()` in `df-test-postgres`, which both `empty_pool` (through `database()`) and `migrated_pool` use, calls the existing sweep before it creates a database, throttled to once per 30 seconds per process.
@@ -106,6 +108,18 @@ See proposal.md, "Why". Current state:
   - **one transaction per task:** a task and its runs, transcript events, usage records and artifacts are written in one transaction (`create_task_tx`, not `create_task`, which commits on its own). An interrupted seeding leaves no task without its records, so the skip-if-exists rule stays correct.
 - **Timestamps:** relative to `now()` at the first seeding (minutes to days ago), so screenshots look recent.
 - **Running, queued and rate-limited states:** with `--no-cluster`, every sandbox operation fails. A task shown as `running` may be reconciled to another state when the control plane starts, and the scheduler picks up `queued` tasks and `rate_limited` tasks past their resume time and tries to start a run, which fails. The first demo task checks what `serve --no-cluster` does to `running` and `queued` tasks and their runs. A state that changes is replaced: `running` by `waiting` or `rate_limited`; `queued` by a queued task whose start the scheduler skips (for example one blocked on a concurrency limit) or, if there is none, it is dropped from the profile and the spec scenario says so.
+- **Measured** (task 3.1; tasks written with SQL, `serve --no-cluster` for 150 s, `runs.maxAutoResumes` 3):
+
+  | Seeded state | After 150 s |
+  |---|---|
+  | `running`, active `running` run | The startup sweep ends the run `sandbox_lost` (the placeholder provider reports every sandbox as gone). The task is queued again with a backoff, the scheduler starts a run that fails `provisioning_failed` ("no sandbox provider is configured"), the task is queued again (2 resumes, 2 runs). |
+  | `queued`, no resume time | The scheduler starts a run within 5 s, it fails `provisioning_failed`, and the task is queued again with a backoff (2 runs). |
+  | `rate_limited`, resume time passed | Like `queued`: started, `provisioning_failed`, queued again. |
+  | `queued` with a resume time in the future | Unchanged. |
+  | `rate_limited` with a resume time in the future | Unchanged. |
+  | `waiting`, `blocked`, `in_review`, `awaiting_dependencies`, `completed`, `failed`, `cancelled` (no active run) | Unchanged. |
+
+  Consequences for the profile: `running` is replaced by `waiting` (the agent finished its turn and waits for a message); the `queued` demo task is the one the scheduler skips because its resume time lies in the future (after an infrastructure failure, `queued` with a resume time is a regular state); the `rate_limited` task has a resume time days ahead. No demo run is unfinished. The one update of an existing task stays: when a resume time has passed and no run started, the next seeding moves it forward. When the scheduler already started the task, the profile prints a hint.
 - Alternative: drive real runs with the fake ACP agent to produce the data. Rejected, because it needs a cluster, takes minutes and the content isn't controllable.
 
 ### D7: Verification of the demo profile
@@ -125,6 +139,18 @@ See proposal.md, "Why". Current state:
 - **All three settings, also where today's suite doesn't hit them:** no e2e test triggers `sandbox_lost`, the `capacity` requeue or a forge failure yet. The settings stay for consistency and pay off once the suite covers those cases (a likely follow-up). The measurement (first D8 task) only sets the e2e values.
 - **Plumbing:** `task_transition` is pure, so `RunEnded` gets the backoff next to `max_auto_resumes`, filled where `runs.rs` builds it. The PR retry policies become values on the handlers instead of constants, built where `dark-factory/src/outbox.rs` registers them. The dispatcher takes its poll interval as a parameter.
 - **e2e values** in `deploy/values-e2e.yaml`: about 500 ms tick, 5 s backoff, 2 s retry start. The CPU cost (control plane CPU from `kubectl top` during a run) goes to `docs/demo.md` "Resource budget".
+- **Measured (task 5.1):** one full run (reused cluster, 1 thread, 13 min 11 s, all 32 tests green) with every `eventually` and `expect_text` wait logged per test (a temporary patch, not kept):
+
+  | Test | Wait | Duration | Ends on |
+  |---|---|---|---|
+  | `coordinator_delegates_implementation_and_review_and_relays_the_next_round` | `task DG-2 to have 2 finished run(s)` | 18 s | two runs of the fake agent (cold sandbox start each) |
+  | `a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact` | `task RS-2 to have 1 finished run(s)` | 14 s | a run |
+  | `rate_limited_task_resumes_at_the_retry_time_without_a_message` | `Continuing after the rate limit.` | 10 s | the scripted retry time (5 s) plus a scheduler tick (up to 5 s) plus run 2 |
+  | `member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again` | `task WH-1 to be in_review` | 8 s | a run |
+  | `traffic_page_pauses_resizes_and_opens_details` | `I need the package index from pypi.org.` | 8 s | a run |
+  | most other tests | `task X to be waiting`, a request, a push | 4 to 6 s | a run start (scheduler tick or notification, sandbox cold start) and the 2 s poll of `eventually` |
+
+  Result: no single wait exceeds 18 s; the 10 minutes of `flow.rs` are runs, browser steps and the 11 tests' own sequence, not scheduler waits. Waits that end on a tick, a dispatcher poll, a resume backoff, a forge retry or a scripted retry time: only the rate-limit resume (10 s of 60 s before the short script). No test hits `sandbox_lost`, the capacity requeue or a forge failure yet. The e2e values follow the design: tick 500 ms, backoff 5 s, forge retry 2 s. The gain is mainly the rate-limit resume test (about 60 s) and the first-start latency of a task; CPU is recorded in `docs/demo.md`.
 - **Scripted retry time:** the rate-limit script stays at 60 s, because `rate_limited_run_shows_the_limit_and_the_next_message_continues` sends a message before the retry time and expects exactly 2 runs; a short retry would resume the task first. The resume test gets its own script `rate-limit-short.yaml` (a few seconds) and its own project in the e2e data and seed. That is test data, not a setting.
 - Alternatives:
   - one global time-scale factor: rejected, it also shortens the timeouts above, and a factor is harder to document than three named waits;

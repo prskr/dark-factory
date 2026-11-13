@@ -363,22 +363,6 @@ pub struct EndedRun {
     pub task_status: TaskStatus,
 }
 
-/// Run state for a finished run (design D4).
-pub const fn run_state_for(outcome: RunOutcome) -> RunState {
-    match outcome {
-        RunOutcome::Completed
-        | RunOutcome::EndTurn
-        | RunOutcome::Blocked
-        | RunOutcome::LimitReached
-        | RunOutcome::RateLimited => RunState::Succeeded,
-        RunOutcome::Cancelled => RunState::Cancelled,
-        RunOutcome::Failed
-        | RunOutcome::ProvisioningFailed
-        | RunOutcome::ConnectTimeout
-        | RunOutcome::SandboxLost => RunState::Failed,
-    }
-}
-
 /// Locks the task row, the lock `queue_message` takes. What the caller decides afterwards cannot
 /// miss a message queued concurrently.
 ///
@@ -437,7 +421,7 @@ pub async fn end_run_tx(
     end: &RunEnd,
     config: &ChannelConfig,
 ) -> Result<Option<EndedRun>, ChannelError> {
-    let run_state = run_state_for(end.outcome);
+    let run_state = end.outcome.run_state();
     let ended: Option<EndedRow> = sqlx::query_as(concat!(
         "UPDATE runs SET state = $2, outcome = $3, detail = $4, retry_after = $5,
              harness_session_id = CASE WHEN $6 <> '' THEN $6 ELSE harness_session_id END,
@@ -478,6 +462,7 @@ pub async fn end_run_tx(
         task_branch_pushed: end.task_branch_pushed,
         stop_requested_at,
         max_auto_resumes: config.runs.max_auto_resumes,
+        resume_backoff: config.scheduling.resume_backoff(),
         now: Utc::now(),
     });
     let next = apply_task_event(tx, task_id, event, &Principal::system("run.ended")).await?;

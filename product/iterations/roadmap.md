@@ -145,7 +145,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Docs site: preview of the docs for every pull request (today the PR job only builds) | idea | `openspec/changes/archive/2026-11-04-docs-site` (non-goal) |
 | Docs site: check external links (dead URLs) in CI | idea | `openspec/changes/archive/2026-11-04-docs-site` (D7: only links within the site are checked) |
 | Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/archive/2026-11-04-docs-site` (Risks) |
-| Showcase seed: tasks with runs, transcripts, queued messages and requests in `just seed` (design-workflow build order step 2); then real screenshots of the task views for the landing page cards | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
+| Real screenshots of the task views for the landing page cards, from the demo profile (`just seed-demo`, delivered by `e2e-suite-and-seed`) | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
+| Automated screenshot capture: a Playwright script over the demo data (`just serve-local` + `just seed-demo`) for docs and landing page | idea | `openspec/changes/e2e-suite-and-seed` (out of scope) |
+| Measure compile time (`cargo test --no-run --timings`), then less debug info in the dev profile and `cargo nextest` | idea | `openspec/changes/e2e-suite-and-seed` (out of scope) |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |

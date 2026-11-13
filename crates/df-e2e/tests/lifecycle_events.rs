@@ -72,11 +72,14 @@ async fn project_subscription_receives_a_signed_sandbox_provisioned_event() -> R
     );
     verify_signature(&delivery, &public_key)?;
 
-    // The tab shows the outcome of the last attempt.
-    open_subscriptions(&session, &env).await?;
-    session
-        .expect_region_text(REGION, "HTTP 204", UI_TIMEOUT)
-        .await
+    // The tab shows the outcome of the last attempt. The receiver has the event before the control
+    // plane records the outcome, and the tab doesn't update itself, so load it again until it shows.
+    wait::eventually("the tab to show HTTP 204", UI_TIMEOUT, || async {
+        open_subscriptions(&session, &env).await?;
+        let text = session.region_text(REGION).await?;
+        Ok(text.contains("HTTP 204").then_some(()))
+    })
+    .await
 }
 
 /// Creates a subscription to [`EVENT`] at the receiver by pressing Enter in the URL field, cancels

@@ -5,7 +5,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use chrono::TimeDelta;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -84,6 +86,8 @@ pub struct InstanceConfig {
     pub lifecycle_events: crate::lifecycle::LifecycleEventsConfig,
     #[serde(default)]
     pub artifacts: ArtifactsConfig,
+    #[serde(default)]
+    pub scheduling: SchedulingConfig,
 }
 
 impl InstanceConfig {
@@ -97,6 +101,7 @@ impl InstanceConfig {
         }
         cfg.lifecycle_events.validate()?;
         cfg.artifacts.validate()?;
+        cfg.scheduling.validate()?;
         if cfg.auth.is_some() && cfg.public_url.is_none() {
             return Err(ConfigError::Invalid(
                 "`publicUrl` is required when `auth` is set: the OIDC redirect URI is `<publicUrl>/auth/callback`"
@@ -347,8 +352,8 @@ impl Default for GatewayConfig {
 
 impl GatewayConfig {
     /// `buffer_max_age_seconds` as a duration.
-    pub fn buffer_max_age(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.buffer_max_age_seconds)
+    pub fn buffer_max_age(&self) -> Duration {
+        Duration::from_secs(self.buffer_max_age_seconds)
     }
 
     /// The certificate name of the control plane.
@@ -739,6 +744,96 @@ impl Default for RunsConfig {
             max_auto_resumes: default_max_auto_resumes(),
         }
     }
+}
+
+/// Longest `scheduling.tickMillis`: a due task would wait a minute to start.
+pub const MAX_TICK_MILLIS: u64 = 60_000;
+/// Longest `scheduling.resumeBackoffSeconds`.
+pub const MAX_RESUME_BACKOFF_SECONDS: u64 = 3600;
+/// Longest `scheduling.forgeRetryBaseSeconds`: the cap of the retry delay (10 minutes), which stays
+/// fixed.
+pub const MAX_FORGE_RETRY_BASE_SECONDS: u64 = 600;
+
+/// The waits after which the control plane acts on its own, for test clusters that trade CPU for
+/// speed. The defaults are the values of a production instance. Timeouts (handshakes, keepalives,
+/// the wall-clock budget) are not part of it: shortening them changes failure behavior, not speed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SchedulingConfig {
+    /// How often the scheduler looks for due tasks and ends timed-out runs. It also paces the
+    /// check for lost sandboxes after a start and the outbox dispatcher's poll.
+    #[serde(default = "default_tick_millis")]
+    pub tick_millis: u64,
+    /// Base of the automatic resume after an infrastructure failure (times the attempt number) and
+    /// the wait after a capacity rejection.
+    #[serde(default = "default_resume_backoff_seconds")]
+    pub resume_backoff_seconds: u64,
+    /// First retry delay of the pull request actions (it doubles up to 10 minutes).
+    #[serde(default = "default_forge_retry_base_seconds")]
+    pub forge_retry_base_seconds: u64,
+}
+
+impl Default for SchedulingConfig {
+    fn default() -> Self {
+        Self {
+            tick_millis: default_tick_millis(),
+            resume_backoff_seconds: default_resume_backoff_seconds(),
+            forge_retry_base_seconds: default_forge_retry_base_seconds(),
+        }
+    }
+}
+
+impl SchedulingConfig {
+    pub fn tick(&self) -> Duration {
+        Duration::from_millis(self.tick_millis)
+    }
+
+    /// Clamped to the limit that `validate` enforces, so a value that skipped validation (the
+    /// fields are public) cannot overflow.
+    pub fn resume_backoff(&self) -> TimeDelta {
+        let seconds = self.resume_backoff_seconds.min(MAX_RESUME_BACKOFF_SECONDS);
+        // Cannot fail for the clamped value; the fallback is the longest wait, never "at once".
+        TimeDelta::try_seconds(i64::try_from(seconds).unwrap_or(i64::MAX)).unwrap_or(TimeDelta::MAX)
+    }
+
+    pub fn forge_retry_base(&self) -> Duration {
+        Duration::from_secs(self.forge_retry_base_seconds)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (option, value, max) in [
+            ("tickMillis", self.tick_millis, MAX_TICK_MILLIS),
+            (
+                "resumeBackoffSeconds",
+                self.resume_backoff_seconds,
+                MAX_RESUME_BACKOFF_SECONDS,
+            ),
+            (
+                "forgeRetryBaseSeconds",
+                self.forge_retry_base_seconds,
+                MAX_FORGE_RETRY_BASE_SECONDS,
+            ),
+        ] {
+            if !(1..=max).contains(&value) {
+                return Err(ConfigError::Invalid(format!(
+                    "`scheduling.{option}` is {value}: it must be between 1 and {max}"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_tick_millis() -> u64 {
+    5000
+}
+
+fn default_resume_backoff_seconds() -> u64 {
+    120
+}
+
+fn default_forge_retry_base_seconds() -> u64 {
+    30
 }
 
 /// Limits of task artifacts (spec `task-artifacts`).

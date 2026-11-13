@@ -22,27 +22,26 @@ use df_proto::transcript::v1::{
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use super::{lock_task_pr, repo_ref};
+use super::{forge_retry_policy, lock_task_pr, repo_ref};
 use crate::error::ChannelError;
 
-/// Retries while the forge is unavailable; after an hour the dispatcher gives up with a warning.
 /// The lease covers up to five forge calls at the default plugin call timeout of 30 s.
-const RETRY_POLICY: RetryPolicy = RetryPolicy {
-    base: Duration::from_secs(30),
-    cap: Duration::from_mins(10),
-    give_up_after: Duration::from_hours(1),
-    lease: Duration::from_mins(3),
-};
+const LEASE: Duration = Duration::from_mins(3);
 
 /// Runs [`PR_SYNC_KIND`] jobs.
 pub struct PrSyncHandler {
     pool: PgPool,
     forge: Arc<dyn ForgeClient>,
+    retry_base: Duration,
 }
 
 impl PrSyncHandler {
-    pub fn new(pool: PgPool, forge: Arc<dyn ForgeClient>) -> Self {
-        Self { pool, forge }
+    pub fn new(pool: PgPool, forge: Arc<dyn ForgeClient>, retry_base: Duration) -> Self {
+        Self {
+            pool,
+            forge,
+            retry_base,
+        }
     }
 
     async fn sync(&self, job: PrSyncJob) -> Result<(), JobError> {
@@ -253,7 +252,7 @@ impl OutboxHandler for PrSyncHandler {
     }
 
     fn retry_policy(&self) -> RetryPolicy {
-        RETRY_POLICY
+        forge_retry_policy(self.retry_base, LEASE)
     }
 
     async fn handle(&self, payload: &Value) -> Result<(), JobError> {

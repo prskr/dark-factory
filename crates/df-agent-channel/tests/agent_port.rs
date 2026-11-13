@@ -1237,6 +1237,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
         vec![Arc::new(df_agent_channel::pr::sync::PrSyncHandler::new(
             pool.clone(),
             Arc::new(env.forge.clone()),
+            Duration::from_secs(30),
         ))],
         &opentelemetry::global::meter("test"),
     );

@@ -61,6 +61,16 @@ fn shipped_scripts_parse() {
             crate::script::EndStep::RateLimited(_)
         ))
     ));
+    let retry_after = |script: &Script| match script.sessions.new[0].steps.last() {
+        Some(crate::script::Step::End(crate::script::EndStep::RateLimited(step))) => {
+            step.retry_after_seconds
+        }
+        other => panic!("not a rate limit: {other:?}"),
+    };
+    assert_eq!(retry_after(&limited), Some(60));
+    let short = Script::from_yaml_str(include_str!("../scripts/rate-limit-short.yaml")).unwrap();
+    assert_eq!(retry_after(&short), Some(5), "a few seconds, not a minute");
+    assert_eq!(short.sessions.loaded.len(), limited.sessions.loaded.len());
     let network = Script::from_yaml_str(include_str!("../scripts/network-access.yaml")).unwrap();
     assert!(
         network.sessions.new[0]

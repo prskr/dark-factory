@@ -28,9 +28,6 @@ use crate::runs::{
     list_unprovisioned_runs, mark_started, start_queued_runs, teardown,
 };
 
-/// Interval of the tick: resume times and freed slots are noticed on it (a due task starts
-/// within 5 seconds), and it is the safety net besides notifications.
-const TICK_INTERVAL: Duration = Duration::from_secs(5);
 /// Age of a run without a sandbox after which the tick provisions it again (design D4).
 const REPROVISION_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 /// Runs started per tick; the next tick (or notification) picks up the rest.
@@ -70,11 +67,14 @@ impl Scheduler {
     pub async fn run(&self, shutdown: impl Future<Output = ()>) {
         let mut notifications = self.ctx.notifier.subscribe();
         let mut events = self.ctx.provider.events();
-        let mut interval = tokio::time::interval(TICK_INTERVAL);
+        // Resume times and freed slots are noticed on the tick (`scheduling.tickMillis`, 5 s by
+        // default), the safety net besides notifications.
+        let tick = self.ctx.config.scheduling.tick();
+        let mut interval = tokio::time::interval(tick);
         // Provisioning and the startup sweep run here, off the event loop.
         let mut background = JoinSet::new();
         let scheduler = self.clone();
-        background.spawn(async move { scheduler.sweep_lost_sandboxes(TICK_INTERVAL).await });
+        background.spawn(async move { scheduler.sweep_lost_sandboxes(tick).await });
         tokio::pin!(shutdown);
         loop {
             tokio::select! {

@@ -57,7 +57,7 @@ cargo test --workspace
 
 `just test [FILTER]` does the same and also builds the plugin components first (see the end of this section). It sets `DOCKER_HOST` to the rootless Podman socket (`$XDG_RUNTIME_DIR/podman/podman.sock`) when that socket exists and `DOCKER_HOST` is unset; `just bazel-test [TARGETS]` passes the same socket into the Bazel sandbox (`--test_env=DOCKER_HOST=…`, `--sandbox_writable_path=…`). `just test-db-rm` removes the shared `df-test-postgres` containers.
 
-The `df-test-postgres` crate (a dev-dependency, never linked into a binary) starts one `postgres:17-alpine` container on first use and creates a database per test: `df_test_postgres::migrated_pool(&df_db::MIGRATOR)`. testcontainers has no reaper and does not drop statics at process exit, so the container is marked reusable: all test binaries on the machine share it and it keeps running after the tests. `migrated_pool` migrates a template database once per migration set and clones it per test; templates (`df_tpl_<hash>`) stay in the container. Test databases older than 15 minutes (the creation time is in the UUIDv7 of the name) are dropped when a test binary starts. The container name carries the image tag and a config revision (see `crates/df-test-postgres/src/lib.rs`); remove old ones with `docker ps -a --filter name=df-test-postgres` and `docker rm -f`.
+The `df-test-postgres` crate (a dev-dependency, never linked into a binary) starts one `postgres:17-alpine` container on first use and creates a database per test: `df_test_postgres::migrated_pool(&df_db::MIGRATOR)`. testcontainers has no reaper and does not drop statics at process exit, so the container is marked reusable: all test binaries on the machine share it and it keeps running after the tests. `migrated_pool` migrates a template database once per migration set and clones it per test; templates (`df_tpl_<hash>`) stay in the container. Test databases older than 1 minute (the creation time is in the UUIDv7 of the name) are dropped when a test binary starts and, while tests create databases, at most every 30 s per test process. A database whose pool is still open survives (`DROP DATABASE` without `FORCE`), also across test processes, and test pools keep one connection open for their lifetime. The databases of the last tests of a run stay until the next run. The container name carries the image tag and a config revision (see `crates/df-test-postgres/src/lib.rs`); remove old ones with `docker ps -a --filter name=df-test-postgres` and `docker rm -f`.
 
 To measure line coverage across `df-core` and `df-db`:
 
@@ -137,7 +137,7 @@ The checksum is the SHA-384 of the migration file; run the `UPDATE` again after 
 
 ## 6. Running the Web UI Locally
 
-The end-to-end suite and the demo data (`just seed`) are described in [`demo.md`](demo.md).
+The end-to-end suite and the seed data (`just seed` for the e2e fixtures, `just seed-demo` for demo data with tasks in every state) are described in [`demo.md`](demo.md).
 
 `just serve-local` runs the control plane against the compose services without a Kubernetes cluster:
 

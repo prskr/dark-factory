@@ -3,10 +3,14 @@
 # this script creates and deletes. Details and prerequisites: docs/demo.md.
 #
 # Environment:
-#   E2E_KEEP=1        keep the cluster after the run (delete it with `kind delete cluster --name df-e2e`)
+#   E2E_KEEP=1        keep the cluster after the run (delete it with `kind delete cluster --name df-e2e`);
+#                     the next run reuses a healthy kept cluster and resets its state
+#   E2E_FRESH=1       delete a kept cluster and create a new one (needed after changes to deploy/e2e/*.yaml)
+#   E2E_LIST=1        print the selected and the skipped test binaries and exit, before any cluster step
+#   E2E_MIN_FREE_GIB  free space the container storage needs before a run (default: 10)
 #   E2E_TOOLS_DIR     where the Playwright driver is kept (default: ~/.cache/df-e2e)
 #   E2E_KIND_CONFIG   kind configuration (default: deploy/e2e/kind.yaml, plus a mount of /.msb/tls/ca.pem into the node when that file exists)
-#   E2E_TEST_THREADS  tests run in parallel per test binary (default: 1, the memory budget of docs/demo.md)
+#   E2E_TEST_THREADS  tests run in parallel per test binary (default: 2, like CI; the memory budget of docs/demo.md)
 #   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=$E2E_TEST_THREADS)
 #   BAZEL             Bazel command, e.g. "bazel --bazelrc=.bazelrc.agents" (default: bazel)
 #   KIND_EXPERIMENTAL_PROVIDER, DOCKER_HOST   as for kind; Podman is used when Docker is not installed
@@ -43,10 +47,45 @@ webhook_secret=e2e-webhook-secret
 
 kc() { kubectl --context "$ctx" "$@"; }
 hc() { helm --kube-context "$ctx" "$@"; }
-log() { printf '\n=== %s\n' "$*" >&2; }
+log() { printf '\n=== [%s s] %s\n' "$SECONDS" "$*" >&2; }
 
-scratch="$(mktemp -d)"
+scratch=
 pids=()
+forgejo_forward_pid=
+
+# Test binaries of crates/df-e2e/tests that the suite does not run, as `name:reason`.
+excluded_tests=(
+  "seed:container-backed test of the seed program, not a cluster test; runs with cargo test -p df-e2e"
+  "demo_seed:container-backed test of the demo profile of the seed, not a cluster test; runs with cargo test -p df-e2e"
+)
+
+# Fills `suite_tests` (`--test <name>` arguments) with every test binary under crates/df-e2e/tests
+# minus `excluded_tests`, and `skipped_tests` (`name: reason`) with the others.
+discover_tests() {
+  local file name entry reason
+  suite_tests=()
+  skipped_tests=()
+  for file in crates/df-e2e/tests/*.rs; do
+    name="$(basename "$file" .rs)"
+    reason=
+    for entry in "${excluded_tests[@]}"; do
+      [[ "${entry%%:*}" == "$name" ]] && reason="${entry#*:}"
+    done
+    if [[ -n "$reason" ]]; then
+      skipped_tests+=("$name: $reason")
+    else
+      suite_tests+=(--test "$name")
+    fi
+  done
+}
+
+list_tests() {
+  local name
+  echo "selected test binaries:"
+  for name in "${suite_tests[@]}"; do [[ "$name" == --test ]] || echo "  $name"; done
+  echo "skipped test binaries:"
+  for name in ${skipped_tests[@]+"${skipped_tests[@]}"}; do echo "  $name"; done
+}
 
 cleanup() {
   local status=$?
@@ -75,11 +114,15 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT
-# A cancelled CI job sends INT/TERM: exit through the EXIT trap, so the state is printed and the
-# cluster deleted.
-trap 'exit 130' INT
-trap 'exit 143' TERM
+# Installed after the checks that must not touch a kept cluster (the disk check and the port check).
+install_traps() {
+  scratch="$(mktemp -d)"
+  trap cleanup EXIT
+  # A cancelled CI job sends INT/TERM: exit through the EXIT trap, so the state is printed and the
+  # cluster deleted.
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
 
 require() {
   for tool in "$@"; do
@@ -96,9 +139,46 @@ prepare_tools() {
     aarch64 | arm64) arch=arm64 ;;
     *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
   esac
+  cli=docker
   if ! command -v docker >/dev/null; then
     require podman
     export KIND_EXPERIMENTAL_PROVIDER=podman
+  fi
+  [[ "${KIND_EXPERIMENTAL_PROVIDER:-}" == podman ]] && cli=podman
+  return 0
+}
+
+# Fails when the storage of the container runtime has less than E2E_MIN_FREE_GIB free: a full disk
+# stops the image loads and the test PostgreSQL halfway. Runs before the cluster is touched. The
+# check needs the storage directory on this host: it is skipped (with a warning) for a remote daemon
+# and for Docker Desktop, whose storage is inside a VM.
+check_free_disk() {
+  local min="${E2E_MIN_FREE_GIB:-10}" dir='' os='' free_kib free_gib
+  if [[ "$cli" == podman ]]; then
+    dir="$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null)" || dir=
+  else
+    dir="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)" || dir=
+    os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" || os=
+  fi
+  if [[ -n "${DOCKER_HOST:-}" && "$DOCKER_HOST" != unix://* ]] || [[ "$os" == "Docker Desktop"* ]] ||
+    [[ -z "$dir" || ! -d "$dir" ]]; then
+    log "free disk space not checked: the storage of the container runtime (${dir:-unknown}) is not on this host"
+    return 0
+  fi
+  free_kib="$(df -Pk "$dir" 2>/dev/null | awk 'NR == 2 {print $4}')"
+  if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+    log "free disk space not checked: df gave no number for $dir"
+    return 0
+  fi
+  free_gib=$((free_kib / 1024 / 1024))
+  if ((free_gib < min)); then
+    {
+      echo "only $free_gib GiB free in $dir, the suite needs $min GiB (E2E_MIN_FREE_GIB)."
+      echo "Free space with:"
+      echo "  $cli rm -fv df-test-postgres-17-alpine-r1   # the shared test PostgreSQL, throwaway data"
+      echo "  $cli system prune"
+    } >&2
+    exit 1
   fi
 }
 
@@ -120,8 +200,7 @@ create_cluster() {
 # the sandboxes would refuse every run, so the suite runs unconfined and its Landlock check skips
 # itself. Works with docker and podman (`exec --privileged` exists in both).
 detect_landlock() {
-  local cli=docker node="$cluster-control-plane" kernel
-  [[ "${KIND_EXPERIMENTAL_PROVIDER:-}" == podman ]] && cli=podman
+  local node="$cluster-control-plane" kernel
   kernel="$("$cli" exec "$node" uname -r 2>/dev/null)" || kernel=
   if [[ "$kernel" =~ ^([0-9]+)\.([0-9]+) ]] &&
     ((BASH_REMATCH[1] > 6 || (BASH_REMATCH[1] == 6 && BASH_REMATCH[2] >= 12))) &&
@@ -199,7 +278,7 @@ install_playwright() {
 # The model provider's credential reference points at this Secret (the fake upstream expects the
 # same key); the sandboxes never see it.
 create_model_secret() {
-  kc -n "$namespace" create secret generic fake-llm-key --from-literal=key=e2e-model-api-key
+  apply_secret fake-llm-key --from-literal=key=e2e-model-api-key
 }
 
 # The fake upstream runs from the test project image, which is imported by `load_images`.
@@ -207,16 +286,42 @@ wait_for_fake_upstream() {
   kc -n fake-upstream wait --for=condition=Available deployment/fake-anthropic --timeout=300s
 }
 
+# Starts `kubectl port-forward` in the background and waits until it listens. kubectl itself is the
+# background job (not the `kc` function, whose subshell would die without taking kubectl along: such
+# orphans kept the ports and silently served a forward to a deleted pod to the next run). A port that
+# is taken already fails, instead of passing for the new forward.
 forward() { # namespace service host-port service-port
-  kc -n "$1" port-forward "svc/$2" "$3:$4" >"$scratch/forward-$2.log" 2>&1 &
-  pids+=("$!")
+  if (: >"/dev/tcp/127.0.0.1/$3") 2>/dev/null; then
+    echo "port $3 is in use already (a port-forward left over from an earlier run? \`pkill -f 'kubectl --context $ctx .*port-forward'\`)" >&2
+    return 1
+  fi
+  kubectl --context "$ctx" -n "$1" port-forward "svc/$2" "$3:$4" >"$scratch/forward-$2.log" 2>&1 &
+  forward_pid=$!
+  pids+=("$forward_pid")
   for _ in $(seq 30); do
     (: >"/dev/tcp/127.0.0.1/$3") 2>/dev/null && return 0
+    # kubectl exits at once when the Service has no running pod.
+    kill -0 "$forward_pid" 2>/dev/null || break
     sleep 1
   done
   cat "$scratch/forward-$2.log" >&2
   echo "port-forward to $2 did not come up" >&2
+  # Stop it: a kubectl that is still starting could bind the port later.
+  kill "$forward_pid" 2>/dev/null || true
+  wait "$forward_pid" 2>/dev/null || true
   return 1
+}
+
+# Stops the run before any cluster change when a port that the run forwards is taken already (a
+# port-forward left over from an earlier run, another program).
+check_ports_free() {
+  local port
+  for port in "$forgejo_port" "$pg_port" "$playwright_port" "$receiver_port"; do
+    if (: >"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+      echo "port $port is in use already (a port-forward left over from an earlier run? \`pkill -f 'kubectl --context $ctx .*port-forward'\`)" >&2
+      exit 1
+    fi
+  done
 }
 
 forgejo_api() { # method path [json-body]
@@ -235,13 +340,50 @@ create_forgejo_user() {
   printf '%s' "$token"
 }
 
-# The bot user with its token, the repository factory/demo with the issue the demo tasks link to and
-# the webhook to the control plane, and a second user with write access who reviews.
-setup_forgejo() {
-  log "Setting up Forgejo"
+forward_forgejo() {
+  forward forgejo forgejo-http "$forgejo_port" 3000 || return 1
+  forgejo_forward_pid=$forward_pid
+}
+
+# The bot user and a second user with write access who reviews, with their tokens. Once per cluster:
+# the tokens are kept in the Secret `e2e-state` (with a hash of deploy/e2e/*.yaml, to tell a reused
+# cluster that its manifests are outdated) and in `forgejo-token`, the credential reference of the
+# sandboxes (Secret in the release namespace).
+setup_forgejo_users() {
+  log "Creating the Forgejo users"
   forgejo_token="$(create_forgejo_user "$forgejo_user" "$forgejo_password")"
   forgejo_reviewer_token="$(create_forgejo_user "$forgejo_reviewer" "$forgejo_reviewer_password")"
-  forward forgejo forgejo-http "$forgejo_port" 3000
+  apply_secret forgejo-token --from-literal=token="$forgejo_token"
+  apply_secret e2e-state --from-literal=forgejo-token="$forgejo_token" \
+    --from-literal=reviewer-token="$forgejo_reviewer_token" --from-literal=manifest-hash="$(manifest_hash)"
+}
+
+# Hash of the manifests of the cluster's infrastructure.
+manifest_hash() {
+  cat deploy/e2e/*.yaml | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1
+}
+
+# A value of `e2e-state`; fails when the key is missing or empty.
+state_value() { # key
+  local value
+  value="$(kc -n "$namespace" get secret e2e-state -o "jsonpath={.data.$1}" | base64 -d)" || value=
+  [[ -n "$value" ]] || { echo "the Secret e2e-state has no value for $1; run with E2E_FRESH=1" >&2; return 1; }
+  printf '%s' "$value"
+}
+
+# Reads what `setup_forgejo_users` stored.
+restore_forgejo_users() {
+  forgejo_token="$(state_value forgejo-token)"
+  forgejo_reviewer_token="$(state_value reviewer-token)"
+  if [[ "$(state_value manifest-hash)" != "$(manifest_hash)" ]]; then
+    log "deploy/e2e/*.yaml changed since the cluster was created; run with E2E_FRESH=1 to apply it"
+  fi
+}
+
+# The repository factory/demo with the issue the demo tasks link to and the webhook to the control
+# plane, and the reviewer as collaborator.
+setup_repository() {
+  log "Setting up the Forgejo repository"
   forgejo_api POST user/repos '{"name":"demo","auto_init":true,"default_branch":"main"}'
   forgejo_api POST "repos/$forgejo_user/demo/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
   # The file the hidden-path demo project (`HP`) hides from its agent.
@@ -255,8 +397,6 @@ setup_forgejo() {
   forgejo_api POST "repos/$forgejo_user/demo/hooks" \
     "{\"type\":\"forgejo\",\"active\":true,\"events\":$events,\"config\":{\"url\":\"$hook_url\",\"content_type\":\"json\",\"secret\":\"$webhook_secret\"}}"
   check_forgejo_push
-  # The sandboxes read the token through a credential reference (Secret in the release namespace).
-  kc -n "$namespace" create secret generic forgejo-token --from-literal=token="$forgejo_token"
 }
 
 # Fails early when the token cannot push: pushes a throwaway branch over the port-forward.
@@ -269,15 +409,74 @@ check_forgejo_push() {
   forgejo_api DELETE "repos/$forgejo_user/demo/branches/e2e-push-check"
 }
 
+# Creates or updates a Secret in the release namespace, so that reruns on a kept cluster succeed.
+apply_secret() { # name kubectl-create-secret-args...
+  kc -n "$namespace" create secret generic "$@" --dry-run=client -o yaml | kc apply -f -
+}
+
+# The namespace and the Secrets of the release; safe to run again.
 install_release() {
-  log "Installing Dark Factory"
-  kc create namespace "$namespace"
-  kc -n "$namespace" create secret generic dark-factory-db-owner --from-literal=password="$owner_password"
-  kc -n "$namespace" create secret generic dark-factory-db-app --from-literal=password="$app_password"
-  kc -n "$namespace" create secret generic dark-factory-oidc --from-literal=client-secret="$oidc_secret"
+  log "Preparing the release namespace"
+  kc create namespace "$namespace" --dry-run=client -o yaml | kc apply -f -
+  apply_secret dark-factory-db-owner --from-literal=password="$owner_password"
+  apply_secret dark-factory-db-app --from-literal=password="$app_password"
+  apply_secret dark-factory-oidc --from-literal=client-secret="$oidc_secret"
   # `plugins.forgejo.webhookSecret` of values-e2e.yaml; the repository webhook signs with it.
-  kc -n "$namespace" create secret generic forge-webhooks --from-literal=forgejo="$webhook_secret"
+  apply_secret forge-webhooks --from-literal=forgejo="$webhook_secret"
   create_model_secret
+}
+
+# Brings a kept cluster back to the state of a new one, apart from the infrastructure and the Forgejo
+# users: the tasks of earlier runs keep volumes, branches and pull requests, and the task keys of
+# the new database would collide with them. The control plane is stopped first, so it does not react
+# to the reset (lost sandboxes, queued tasks starting runs). The following `helm upgrade` restores
+# its replicas, and its migration Job migrates the empty database.
+reset_state() {
+  log "Resetting the state of the kept cluster"
+  local sandboxes=dark-factory-sandboxes control_plane="deployment/$release-control-plane"
+  if kc -n "$namespace" get "$control_plane" >/dev/null 2>&1; then
+    kc -n "$namespace" scale "$control_plane" --replicas=0
+    kc -n "$namespace" wait --for=delete pod -l app.kubernetes.io/component=control-plane --timeout=120s
+  fi
+  kc -n "$sandboxes" delete pod,pvc --all --ignore-not-found --wait=true --timeout=300s
+  # The owner role is the superuser of the throwaway PostgreSQL; the roles survive the drop.
+  local psql=(kc -n postgres exec deploy/postgres -- psql -v ON_ERROR_STOP=1 -U dark_factory_owner -d postgres)
+  "${psql[@]}" -c 'DROP DATABASE IF EXISTS dark_factory WITH (FORCE)'
+  "${psql[@]}" -c 'CREATE DATABASE dark_factory'
+  # Missing (404) when an earlier run died before it was created; any other status fails.
+  local status
+  status="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: token $forgejo_token" \
+    "http://127.0.0.1:$forgejo_port/api/v1/repos/$forgejo_user/demo")"
+  [[ "$status" == 204 || "$status" == 404 ]] || { echo "deleting the repository failed: HTTP $status" >&2; return 1; }
+  setup_repository
+}
+
+# The workloads that run a loaded image keep the old one after `helm upgrade`, because the tag
+# (`e2e`) does not change.
+restart_loaded_workloads() {
+  log "Restarting the workloads with the loaded images"
+  # The control plane was scaled to 0 by `reset_state`, its new pods run the loaded image.
+  local workloads=("$namespace:deployment/$release-gateway" fake-upstream:deployment/fake-anthropic playwright:deployment/playwright) w
+  for w in "${workloads[@]}"; do kc -n "${w%%:*}" rollout restart "${w#*:}"; done
+  for w in "${workloads[@]}"; do kc -n "${w%%:*}" rollout status "${w#*:}" --timeout=300s; done
+}
+
+# Whether a kept cluster can run the suite as it is: it exists, answers, was set up by this script
+# (`e2e-state`) and Forgejo is healthy. Starts the Forgejo port-forward, which the suite needs.
+cluster_is_reusable() {
+  [[ "${E2E_FRESH:-0}" != 1 ]] || return 1
+  kind get clusters 2>/dev/null | grep -qx "$cluster" || return 1
+  kc --request-timeout=10s -n "$namespace" get secret e2e-state >/dev/null 2>&1 || return 1
+  forward_forgejo >/dev/null 2>&1 || return 1
+  curl -sf -m 10 -o /dev/null "http://127.0.0.1:$forgejo_port/api/healthz"
+}
+
+# Stops the Forgejo port-forward of a cluster that is about to be replaced.
+stop_forgejo_forward() {
+  [[ -n "$forgejo_forward_pid" ]] || return 0
+  kill "$forgejo_forward_pid" 2>/dev/null || true
+  wait "$forgejo_forward_pid" 2>/dev/null || true
+  forgejo_forward_pid=
 }
 
 helm_install_release() {
@@ -348,12 +547,27 @@ pods_reach_the_internet() {
     --command -- curl -sSf -m 10 -o /dev/null https://pypi.org/simple/pip/ >/dev/null 2>&1
 }
 
-suite_tests=(--test delegation --test demo --test existing_branch --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks)
-
 # Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {
   cargo build -q -p df-e2e --bin seed
-  cargo test -q -p df-e2e "${suite_tests[@]}" --no-run
+  # Excluded binaries are built too (not run), so a compile error in them shows up here.
+  cargo test -q -p df-e2e --tests --no-run
+}
+
+# A freshly restarted Playwright server accepts TCP connections before it completes WebSocket
+# handshakes ("Handshake not finished"), which fails the first tests of a reused cluster. Waits for
+# a handshake (HTTP 101) through the port-forward.
+wait_for_playwright() {
+  local code
+  for _ in $(seq 30); do
+    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+      -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+      "http://127.0.0.1:$playwright_port/?browser=chromium")" || true
+    [[ "$code" == 101 ]] && return 0
+    sleep 1
+  done
+  echo "the Playwright server does not complete WebSocket handshakes" >&2
+  return 1
 }
 
 run_suite() {
@@ -361,6 +575,7 @@ run_suite() {
   forward postgres postgres "$pg_port" 5432
   forward playwright playwright "$playwright_port" 3000
   forward receiver receiver "$receiver_port" 8080
+  wait_for_playwright
   export E2E_DATABASE_URL="postgres://dark_factory_app:$app_password@127.0.0.1:$pg_port/dark_factory"
   cargo run -q -p df-e2e --bin seed
   export E2E_BASE_URL="http://$release-control-plane.$namespace.svc:8080"
@@ -372,7 +587,7 @@ run_suite() {
   export E2E_LANDLOCK="$landlock"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
-  read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-1}}"
+  read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-2}}"
   if ! pods_reach_the_internet; then
     # CI has egress without interception: a failed probe there is a real failure, not a reason to skip.
     if [[ -n "${CI:-}" ]]; then
@@ -385,23 +600,54 @@ run_suite() {
   cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
 }
 
+discover_tests
+if [[ "${E2E_LIST:-0}" == 1 ]]; then
+  list_tests
+  exit 0
+fi
+for skipped in ${skipped_tests[@]+"${skipped_tests[@]}"}; do log "skipping test binary $skipped"; done
 prepare_tools
+check_free_disk
+check_ports_free
+install_traps
 check_playwright_versions
 build_suite &
 build_pid=$!
 pids+=("$build_pid")
-create_cluster
+setup_started=$SECONDS
+if cluster_is_reusable; then
+  log "Reusing the kept cluster"
+  reuse=1
+else
+  stop_forgejo_forward
+  reuse=0
+  create_cluster
+fi
 detect_landlock
 load_images &
 images_pid=$!
 pids+=("$images_pid")
-install_infrastructure
-install_release
-setup_forgejo
-wait "$images_pid"
-install_playwright
-wait_for_fake_upstream
+if ((reuse)); then
+  restore_forgejo_users
+  install_release
+  reset_state
+  log "Waiting for the images"
+  wait "$images_pid"
+else
+  install_infrastructure
+  install_release
+  forward_forgejo
+  setup_forgejo_users
+  setup_repository
+  log "Waiting for the images"
+  wait "$images_pid"
+  install_playwright
+  wait_for_fake_upstream
+fi
 helm_install_release
+((reuse)) && restart_loaded_workloads
 install_driver
+log "Waiting for the suite build"
 wait "$build_pid"
+log "Setup took $((SECONDS - setup_started)) s ($( ((reuse)) && echo reused || echo new ) cluster)"
 run_suite

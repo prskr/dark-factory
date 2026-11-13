@@ -22,7 +22,11 @@ impl Fixture {
     }
 
     fn handler(&self) -> PrSyncHandler {
-        PrSyncHandler::new(self.env.ctx.pool.clone(), Arc::new(self.env.forge.clone()))
+        PrSyncHandler::new(
+            self.env.ctx.pool.clone(),
+            Arc::new(self.env.forge.clone()),
+            Duration::from_secs(30),
+        )
     }
 
     fn job(&self, open: bool, ready: Option<DateTime<Utc>>) -> PrSyncJob {

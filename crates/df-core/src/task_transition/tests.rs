@@ -34,6 +34,7 @@ fn end(outcome: RunOutcome) -> RunEnded {
         task_branch_pushed: false,
         stop_requested_at: None,
         max_auto_resumes: 3,
+        resume_backoff: TimeDelta::minutes(2),
         now: Utc::now(),
     }
 }
@@ -275,6 +276,35 @@ fn an_infrastructure_failure_below_the_cap_resumes_with_a_growing_backoff() {
     assert_eq!(next.status, Queued);
     assert_eq!(next.resume_at, Some(now + TimeDelta::minutes(4)));
     assert_eq!(next.auto_resumes, 2);
+}
+
+#[test]
+fn a_configured_resume_backoff_sets_the_resume_time_of_a_resume_and_of_a_capacity_rejection() {
+    let now = Utc::now();
+    let backoff = TimeDelta::seconds(5);
+    let lost = RunEnded {
+        now,
+        resume_backoff: backoff,
+        ..end(RunOutcome::SandboxLost)
+    };
+    let first = apply(&snapshot(Running), TaskEvent::RunEnded(lost.clone()));
+    assert_eq!(first.resume_at, Some(now + backoff));
+
+    let again = TaskSnapshot {
+        auto_resumes: 1,
+        ..snapshot(Running)
+    };
+    let second = apply(&again, TaskEvent::RunEnded(lost));
+    assert_eq!(second.resume_at, Some(now + backoff * 2));
+
+    let rejected = RunEnded {
+        now,
+        resume_backoff: backoff,
+        detail: CAPACITY_DETAIL.into(),
+        ..end(RunOutcome::ProvisioningFailed)
+    };
+    let requeued = apply(&snapshot(Running), TaskEvent::RunEnded(rejected));
+    assert_eq!(requeued.resume_at, Some(now + backoff));
 }
 
 #[test]

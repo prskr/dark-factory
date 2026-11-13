@@ -12,25 +12,25 @@ use df_db::tasks::{MARK_DRAFT_KIND, MarkDraftJob, get_task};
 use serde_json::Value;
 use sqlx::PgPool;
 
-use super::lock_task_pr;
+use super::{forge_retry_policy, lock_task_pr};
 
-/// Retries while the forge is unavailable; after an hour the dispatcher gives up with a warning.
-const RETRY_POLICY: RetryPolicy = RetryPolicy {
-    base: Duration::from_secs(30),
-    cap: Duration::from_mins(10),
-    give_up_after: Duration::from_hours(1),
-    lease: Duration::from_secs(30),
-};
+/// One forge call per attempt.
+const LEASE: Duration = Duration::from_secs(30);
 
 /// Runs [`MARK_DRAFT_KIND`] jobs.
 pub struct MarkDraftHandler {
     pool: PgPool,
     forge: Arc<dyn ForgeClient>,
+    retry_base: Duration,
 }
 
 impl MarkDraftHandler {
-    pub fn new(pool: PgPool, forge: Arc<dyn ForgeClient>) -> Self {
-        Self { pool, forge }
+    pub fn new(pool: PgPool, forge: Arc<dyn ForgeClient>, retry_base: Duration) -> Self {
+        Self {
+            pool,
+            forge,
+            retry_base,
+        }
     }
 }
 
@@ -41,7 +41,7 @@ impl OutboxHandler for MarkDraftHandler {
     }
 
     fn retry_policy(&self) -> RetryPolicy {
-        RETRY_POLICY
+        forge_retry_policy(self.retry_base, LEASE)
     }
 
     async fn handle(&self, payload: &Value) -> Result<(), JobError> {
@@ -143,7 +143,11 @@ mod tests {
     }
 
     fn handler(env: &Env) -> MarkDraftHandler {
-        MarkDraftHandler::new(env.ctx.pool.clone(), Arc::new(env.forge.clone()))
+        MarkDraftHandler::new(
+            env.ctx.pool.clone(),
+            Arc::new(env.forge.clone()),
+            Duration::from_secs(30),
+        )
     }
 
     fn job(env: &Env) -> Value {

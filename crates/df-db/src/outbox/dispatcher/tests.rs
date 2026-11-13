@@ -390,6 +390,52 @@ async fn cleanup_removes_jobs_finished_more_than_seven_days_ago() {
 }
 
 #[tokio::test]
+async fn a_job_whose_backoff_elapsed_runs_at_the_next_configured_poll() {
+    let (pool, notifier) = setup().await;
+    let (fake, mut seen) = Fake::new(KIND);
+    let fake = fake.answering([Err(JobError::Retry("down".into()))]);
+    let dispatcher = Arc::new(
+        dispatcher(&pool, &notifier, vec![Arc::new(fake)])
+            .with_poll_interval(Duration::from_millis(100)),
+    );
+    let (_leader_tx, leader_rx) = watch::channel(true);
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let run = tokio::spawn({
+        let dispatcher = dispatcher.clone();
+        async move { dispatcher.run(leader_rx, stop_rx).await }
+    });
+    let job = enqueue_job(&pool, KIND, json!({"n": 1})).await;
+    let first = tokio::time::timeout(Duration::from_secs(10), seen.recv()).await;
+    assert!(first.is_ok(), "the job did not run within 10 s");
+    // The failed attempt records its backoff.
+    let backoff = tokio::time::timeout(Duration::from_secs(10), async {
+        while row(&pool, job).await.due_in < 20.0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        backoff.is_ok(),
+        "the failed attempt recorded no backoff within 10 s"
+    );
+
+    // Nothing notifies when a backoff elapses: only the poll finds the job. The default poll of
+    // 5 s would not get there in time.
+    sqlx::query(
+        "UPDATE outbox SET next_attempt_at = now() + interval '200 milliseconds' WHERE id = $1",
+    )
+    .bind(job)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let again = tokio::time::timeout(Duration::from_secs(3), seen.recv()).await;
+
+    stop_tx.send_replace(true);
+    run.await.unwrap();
+    assert!(again.is_ok(), "the job did not run again within 3 s");
+}
+
+#[tokio::test]
 async fn only_the_leader_dispatches() {
     let (pool, notifier) = setup().await;
     let (fake, mut seen) = Fake::new(KIND);

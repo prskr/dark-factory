@@ -6,7 +6,10 @@
 //! them; [`sync::PrSyncHandler`] does the forge work and retries it with backoff
 //! (`pr-forge-outbox` design D1, D2).
 
+use std::time::Duration;
+
 use df_core::{RepoRef, RunId, TaskId};
+use df_db::outbox::RetryPolicy;
 use df_db::tasks::{PR_SYNC_KIND, PrSyncJob};
 use sqlx::{Postgres, Transaction};
 
@@ -82,9 +85,38 @@ pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
     }
 }
 
+/// Retry policy of the pull request actions: the first retry after `base`
+/// (`scheduling.forgeRetryBaseSeconds`, 30 s by default), doubling up to 10 minutes; after an hour
+/// the dispatcher gives up with a warning. `lease` covers the forge calls of one attempt.
+pub(crate) fn forge_retry_policy(base: Duration, lease: Duration) -> RetryPolicy {
+    RetryPolicy {
+        base,
+        cap: Duration::from_mins(10),
+        give_up_after: Duration::from_hours(1),
+        lease,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_retry_policy_starts_at_the_configured_base_and_keeps_cap_and_give_up_age() {
+        let lease = Duration::from_secs(30);
+        let policy = forge_retry_policy(Duration::from_secs(2), lease);
+
+        assert_eq!(policy.backoff(1), Duration::from_secs(2));
+        assert_eq!(policy.backoff(3), Duration::from_secs(8));
+        assert_eq!(policy.cap, Duration::from_mins(10));
+        assert_eq!(policy.give_up_after, Duration::from_hours(1));
+        assert_eq!(policy.lease, lease);
+        assert_eq!(
+            forge_retry_policy(Duration::from_secs(30), lease).backoff(1),
+            Duration::from_secs(30),
+            "the default base"
+        );
+    }
 
     #[test]
     fn repo_ref_takes_owner_and_name() {

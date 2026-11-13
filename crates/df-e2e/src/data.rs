@@ -8,6 +8,11 @@ pub const PROJECT_NAME: &str = "Demo Factory";
 pub const RATE_LIMIT_PROJECT_KEY: &str = "RL";
 pub const RATE_LIMIT_PROJECT_NAME: &str = "Rate Limit";
 
+/// Project whose fake agent hits a rate limit with a retry time of a few seconds, for the test
+/// that waits for the automatic resume; tasks are `RT-<n>`.
+pub const RATE_LIMIT_SHORT_PROJECT_KEY: &str = "RT";
+pub const RATE_LIMIT_SHORT_PROJECT_NAME: &str = "Rate Limit Short";
+
 /// Project whose fake agent needs `pypi.org` (demo step 4 of iteration 2); tasks are `NA-<n>`.
 pub const NETWORK_PROJECT_KEY: &str = "NA";
 pub const NETWORK_PROJECT_NAME: &str = "Network Access";
@@ -155,6 +160,7 @@ pub const PROJECT_IMAGE: &str = "ghcr.io/prskr/dark-factory/test-project:e2e";
 pub const FAKE_AGENT: &str = "/opt/harness/bin/fake-acp-agent";
 pub const DEMO_SCRIPT: &str = "/opt/harness/scripts/demo.yaml";
 pub const RATE_LIMIT_SCRIPT: &str = "/opt/harness/scripts/rate-limit.yaml";
+pub const RATE_LIMIT_SHORT_SCRIPT: &str = "/opt/harness/scripts/rate-limit-short.yaml";
 pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";

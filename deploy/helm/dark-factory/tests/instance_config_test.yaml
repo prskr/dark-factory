@@ -301,6 +301,50 @@ tests:
           pattern: 'artifacts:\n  maxTextBytes: 1048576\n  maxImageBytes: 3932160\n  maxPerTask: 50\n'
         documentIndex: 0
 
+  - it: renders the scheduling waits with their defaults
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'scheduling:\n  tickMillis: 5000\n  resumeBackoffSeconds: 120\n  forgeRetryBaseSeconds: 30\n'
+        documentIndex: 0
+
+  - it: renders configured scheduling waits into the instance config
+    template: configmap.yaml
+    set:
+      scheduling.tickMillis: 500
+      scheduling.resumeBackoffSeconds: 5
+      scheduling.forgeRetryBaseSeconds: 2
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'scheduling:\n  tickMillis: 500\n  resumeBackoffSeconds: 5\n  forgeRetryBaseSeconds: 2\n'
+        documentIndex: 0
+
+  - it: rejects a scheduler tick of zero
+    template: configmap.yaml
+    set:
+      scheduling.tickMillis: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: tickMillis
+
+  - it: rejects a resume backoff above the limit
+    template: configmap.yaml
+    set:
+      scheduling.resumeBackoffSeconds: 3601
+    asserts:
+      - failedTemplate:
+          errorPattern: resumeBackoffSeconds
+
+  - it: rejects an unknown scheduling key
+    template: configmap.yaml
+    set:
+      scheduling.tickSeconds: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: tickSeconds
+
   - it: rejects an image limit above the runtime cap
     template: configmap.yaml
     set:

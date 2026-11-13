@@ -705,3 +705,73 @@ fn invalid_artifact_limits_are_rejected_naming_the_option() {
         assert!(err.contains(option), "{err}");
     }
 }
+
+#[test]
+fn scheduling_defaults_are_the_waits_of_the_control_plane() {
+    let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
+
+    assert_eq!(cfg.scheduling.tick(), Duration::from_secs(5));
+    assert_eq!(cfg.scheduling.resume_backoff(), TimeDelta::minutes(2));
+    assert_eq!(cfg.scheduling.forge_retry_base(), Duration::from_secs(30));
+    assert_eq!(cfg.scheduling, SchedulingConfig::default());
+}
+
+#[test]
+fn scheduling_values_can_be_overridden() {
+    let yaml = format!(
+        "{MINIMAL_DB}scheduling:\n  tickMillis: 500\n  resumeBackoffSeconds: 5\n  forgeRetryBaseSeconds: 2\n"
+    );
+
+    let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+
+    assert_eq!(cfg.scheduling.tick(), Duration::from_millis(500));
+    assert_eq!(cfg.scheduling.resume_backoff(), TimeDelta::seconds(5));
+    assert_eq!(cfg.scheduling.forge_retry_base(), Duration::from_secs(2));
+}
+
+#[test]
+fn invalid_scheduling_values_are_rejected_naming_the_setting() {
+    for (body, option) in [
+        ("tickMillis: 0", "scheduling.tickMillis"),
+        ("tickMillis: 60001", "scheduling.tickMillis"),
+        ("resumeBackoffSeconds: 0", "scheduling.resumeBackoffSeconds"),
+        (
+            "resumeBackoffSeconds: 3601",
+            "scheduling.resumeBackoffSeconds",
+        ),
+        (
+            "forgeRetryBaseSeconds: 0",
+            "scheduling.forgeRetryBaseSeconds",
+        ),
+        (
+            "forgeRetryBaseSeconds: 601",
+            "scheduling.forgeRetryBaseSeconds",
+        ),
+    ] {
+        let yaml = format!("{MINIMAL_DB}scheduling:\n  {body}\n");
+        let err = InstanceConfig::from_yaml_str(&yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(option), "{body}: {err}");
+    }
+}
+
+#[test]
+fn an_unvalidated_huge_resume_backoff_is_clamped_instead_of_panicking() {
+    let scheduling = SchedulingConfig {
+        resume_backoff_seconds: u64::MAX,
+        ..SchedulingConfig::default()
+    };
+
+    assert_eq!(
+        scheduling.resume_backoff(),
+        TimeDelta::seconds(i64::try_from(MAX_RESUME_BACKOFF_SECONDS).unwrap())
+    );
+}
+
+#[test]
+fn unknown_scheduling_keys_are_rejected() {
+    let yaml = format!("{MINIMAL_DB}scheduling:\n  tickSeconds: 1\n");
+
+    assert!(InstanceConfig::from_yaml_str(&yaml).is_err());
+}

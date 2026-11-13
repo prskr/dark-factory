@@ -41,7 +41,6 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-120: full `just e2e-local` run while closing #124 (2026-11-07).
 - Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-122: code review of `artifact-written-transcript-events` (`df-web`, 2026-11-10). The `TD-n (ID)` heading gives the ID used in that review.
-- Origin of TD-123: implementation and browser check of `iter3-hidden-paths` (2026-11-11), not review findings.
 - Origin of TD-125: code review of `iter3-branch-workflows` (`df-gateway`, 2026-11-13). The `TD-n (ID)` heading gives the ID used in that review.
 
 ## Summary
@@ -126,7 +125,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-120 | medium | `df-gateway` relay, `df-web` egress log | Live rows of the traffic page stopped once; live delivery has no e2e test |
 | TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
 | TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
-| TD-123 | medium | `df-test-postgres` | Test databases are never dropped; repeated runs fill the container volume |
 | TD-125 | low   | `df-gateway` push checks | Other open tasks' existing branches count as already-checked upstream |
 
 ## Entries
@@ -921,16 +919,6 @@ The chain from an artifact-written event to the Artifacts tab appearing and relo
 **Matters when:** `artifactSplit.ts`, the out-of-band tab bar or the row attribute changes; the tab can stop appearing live without a failing test.
 
 **Fix:** in `delegation.rs`, open the task page before the researcher writes and assert that the Artifacts tab appears with count 1 without a reload.
-
-### TD-123. Test databases are never dropped
-
-`crates/df-test-postgres`
-
-Every test creates a `df_test_*` database in the shared container `df-test-postgres-17-alpine-r1` and never drops it. One Bazel test run leaves about 700. That fills the 9.8 GB volume, after which PostgreSQL can't start and every container-backed test fails with "No space left on device".
-
-**Matters when:** the suite runs more than once on one machine (agent sandboxes, local Bazel or cargo runs).
-
-**Fix:** drop the database `WITH (FORCE)` when the test's pool guard is dropped. On server start, remove leftover `df_test_*` databases from earlier runs.
 
 ### TD-125 (P8). Other tasks' existing branches count as checked upstream
 
