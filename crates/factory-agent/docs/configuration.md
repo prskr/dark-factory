@@ -146,6 +146,29 @@ These are compiled in and not configurable.
   fresh workspace restores only the paths that differ between `HEAD` and the snapshot and match no
   hidden glob, so no blob below a hidden path is fetched. The WIP snapshot resets hidden paths to
   `HEAD`. An invalid glob fails prepare. Requires Git 2.27 or newer.
+- **Task branch pushes and the rewrite policy.** `Workspace.task_branch` is the task's stored branch
+  (`factory/task/<KEY>`, or an existing branch). After every turn whose `HEAD` differs from the last
+  pushed commit the runtime pushes `HEAD:refs/heads/<task_branch>`. The runtime keeps the commit the
+  remote branch had when it last fetched (prepare) or pushed it in `$DF_DATA_DIR/runtime/remote_sha`
+  (written next to `run.json`, which the harness cannot write; it is kept across runs). It never
+  uses `refs/remotes/origin/<branch>` for this, because the agent's own `git fetch` moves that ref.
+  With `Workspace.rewrite_policy = REWRITE_POLICY_WITH_LEASE`, a `HEAD` that does not contain
+  `remote_sha` is pushed with `--force-with-lease=refs/heads/<branch>:<remote_sha>`; any other push
+  is a plain fast-forward. `NEVER` and `UNSPECIFIED` never force. A lease or non-fast-forward
+  rejection (`stale info`, `[rejected]`) is reported as `REJECTED_NON_FAST_FORWARD` and not retried
+  with force. The WIP snapshot branch is the only force push (`--force`).
+- **Existing workspace and rewrites.** Prepare fetches and compares the local with the remote task
+  branch: equal, local ahead (pushed, plainly), remote ahead (fast-forwarded). If both have commits
+  the other lacks, the branch counts as diverged (`workspace.diverged`), except under
+  `WITH_LEASE` when the fetched remote is still the commit in `remote_sha`: then the local history
+  was rewritten by an earlier, killed run, and prepare pushes it with lease. A diverged prepare
+  keeps the stored `remote_sha`, so a later rewrite that drops the other side's commits is rejected
+  and a second prepare reports the divergence again. The file is written without following links
+  (`remote_sha` is replaced, not written through).
+- **Existing branches.** With `Workspace.existing_branch` a fresh workspace checks out
+  `origin/<task_branch>`. If the remote lacks it, prepare fails with `the branch `<name>` does not
+  exist on the remote` (`PrepareError::BranchMissing`), nothing is pushed, and the run ends `FAILED`
+  with that reason.
 - **Git retries.** A clone, fetch or push whose output shows HTTP 503 (`returned error: 503`) or a
   connection error (`Failed to connect to`, `Connection refused`, `Connection reset by peer`,
   `Empty reply from server`, and mid-transfer `Operation timed out`,

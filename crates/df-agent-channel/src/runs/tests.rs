@@ -268,6 +268,34 @@ async fn a_harness_crash_is_not_resumed() {
 }
 
 #[tokio::test]
+async fn a_missing_existing_branch_fails_the_run_with_its_reason_and_the_task() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let task = env.task_on_branch("fix/login", None).await;
+    deliver_all(&pool, task.id).await;
+    let run_id = env.insert_run(task.id, 1, "running").await;
+    let reason =
+        "Workspace preparation failed: the branch `fix/login` does not exist on the remote";
+
+    end_run(
+        &pool,
+        &RunEnd::failure(run_id, RunOutcome::Failed, reason),
+        &config(),
+    )
+    .await
+    .unwrap();
+
+    let state = task_resume_state(&pool, task.id).await;
+    assert_eq!((state.status.as_str(), state.resume_at), ("failed", None));
+    let detail: String = sqlx::query_scalar("SELECT detail FROM runs WHERE id = $1")
+        .bind(run_id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(detail.contains("fix/login"), "{detail}");
+}
+
+#[tokio::test]
 async fn capacity_rejection_requeues_in_two_minutes_and_keeps_the_count() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;

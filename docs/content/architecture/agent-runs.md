@@ -178,6 +178,9 @@ Behavior to know:
   The summary is still posted. Both times come from the database clock under the task lock, so
   they are ordered like the lock.
 - A cancelled task gets no pull request action.
+- A pull request found on the branch of a task on an [existing branch](../using/existing-branches.md)
+  is *attached*. For an attached pull request the jobs above only post the summary: it is never
+  marked ready or draft, and `update_pull_request` fails.
 
 ## Continuation across runs
 

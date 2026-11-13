@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-125.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-126.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -42,6 +42,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-122: code review of `artifact-written-transcript-events` (`df-web`, 2026-11-10). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-123: implementation and browser check of `iter3-hidden-paths` (2026-11-11), not review findings.
+- Origin of TD-125: code review of `iter3-branch-workflows` (`df-gateway`, 2026-11-13). The `TD-n (ID)` heading gives the ID used in that review.
 
 ## Summary
 
@@ -126,6 +127,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
 | TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
 | TD-123 | medium | `df-test-postgres` | Test databases are never dropped; repeated runs fill the container volume |
+| TD-125 | low   | `df-gateway` push checks | Other open tasks' existing branches count as already-checked upstream |
 
 ## Entries
 
@@ -929,6 +931,16 @@ Every test creates a `df_test_*` database in the shared container `df-test-postg
 **Matters when:** the suite runs more than once on one machine (agent sandboxes, local Bazel or cargo runs).
 
 **Fix:** drop the database `WITH (FORCE)` when the test's pool guard is dropped. On server start, remove leftover `df_test_*` databases from earlier runs.
+
+### TD-125 (P8). Other tasks' existing branches count as checked upstream
+
+`crates/df-gateway/src/git/view.rs`
+
+`TaskRefs::counts_as_upstream` excludes only the `factory/task/` and `factory/wip/` namespaces. A branch held by another open task on an existing branch (for example `renovate/x`, pushed under that task's push-check exceptions) counts as already checked for this run, so its commits are not checked again.
+
+**Matters when:** one task's push-check exception (an approved protected-path change) must not cover another task's run. Low impact today: those commits are already on the forge.
+
+**Fix:** pass the branches of the project's other open tasks into the snapshot route and exclude them in `counts_as_upstream`. Add a test with two tasks on existing branches.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

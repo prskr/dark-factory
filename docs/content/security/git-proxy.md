@@ -37,11 +37,23 @@ A push is forwarded only if every ref update is:
 
 | Ref | Allowed update |
 | --- | --- |
-| `refs/heads/factory/task/<KEY>` | create or fast-forward |
+| `refs/heads/<branch of the task>` (`factory/task/<KEY>`, or the existing branch the task works on) | create or fast-forward; under the project's `with-lease` [rewrite policy](../using/existing-branches.md#rebase-with-lease) also any other update, never a delete |
 | `refs/heads/factory/wip/<KEY>` | create, update or delete (the WIP snapshot) |
 
-Anything else (another branch, a tag, a force-push, another task's branch) rejects the whole push
-before the forge is contacted. Git prints the reason, prefixed with `df:`.
+Anything else (another branch, a tag, a force-push under the `never` policy, another task's
+branch, the key's own `factory/task/<KEY>` while the task works on an existing branch) rejects the
+whole push before the forge is contacted. Git prints the reason, prefixed with `df:`.
+
+Under `with-lease` the proxy does not check ancestry: it forwards the update with the old value
+the client sent, and the forge rejects it if the branch moved since (`--force-with-lease`). The
+runtime only sends such an update expecting the commit it last pushed or fetched itself. An agent
+that runs `git push --force` by hand can still overwrite commits of others; every push is recorded
+with the old and the new commit. Projects that cannot accept that use the policy `never`.
+
+Which existing branch a task may hold is decided when the task is created, not by the proxy: an
+agent's `create_task` only names branches that match the project's
+[agent branches](../using/existing-branches.md#agent-branches); a board member may pick any branch
+except the base branch and `factory/` branches in the composer.
 
 ## Push checks
 

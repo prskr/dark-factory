@@ -10,7 +10,7 @@ use crate::components::FormErrors;
 use crate::components::forms::INPUT_CLASS;
 
 /// Fields of the tab, so a re-rendered form opens the tab with the error.
-pub(crate) const FIELDS: [&str; 7] = [
+pub(crate) const FIELDS: [&str; 9] = [
     "protected_globs",
     "hidden_globs",
     "protected_mode",
@@ -18,6 +18,8 @@ pub(crate) const FIELDS: [&str; 7] = [
     "size_mode",
     "max_blob_mib",
     "linear_history",
+    "branch_rewrite_policy",
+    "agent_branch_globs",
 ];
 
 const MIB: u64 = 1024 * 1024;
@@ -151,7 +153,7 @@ pub(crate) fn panel(values: &PushPolicyForm, errors: &FormErrors) -> Markup {
 
 /// The non-blank lines of `text`, trimmed. Reports the first one `check` refuses, with its line
 /// number and the reason, compiled like the Git proxy does.
-fn globs(
+pub(super) fn globs(
     errors: &mut FormErrors,
     field: &GlobsField,
     text: &str,
@@ -200,7 +202,7 @@ fn mode(errors: &mut FormErrors, field: &'static str, value: Option<&str>) -> Ch
 }
 
 /// A textarea of globs: its field name, label and hint.
-struct GlobsField {
+pub(super) struct GlobsField {
     name: &'static str,
     label: &'static str,
     hint: &'static str,
@@ -213,6 +215,13 @@ impl GlobsField {
         hint: "One glob per line. A commit that adds, changes, deletes or renames a matching path is a finding.",
     };
 
+    /// The "Branches" group of the Security tab.
+    pub(super) const AGENT_BRANCHES: Self = Self {
+        name: "agent_branch_globs",
+        label: "Agent branches",
+        hint: "One glob per line. Existing branches agents may start tasks on with create_task. Board members can pick any branch in the composer.",
+    };
+
     const HIDDEN: Self = Self {
         name: "hidden_globs",
         label: "Hidden paths",
@@ -221,7 +230,7 @@ impl GlobsField {
 }
 
 /// The textarea of the globs, high enough to show every line (at least [`MIN_GLOB_ROWS`]).
-fn globs_field(field: &GlobsField, value: &str, errors: &FormErrors) -> Markup {
+pub(super) fn globs_field(field: &GlobsField, value: &str, errors: &FormErrors) -> Markup {
     let name = field.name;
     let error = errors.get(name);
     let describedby = if error.is_some() {

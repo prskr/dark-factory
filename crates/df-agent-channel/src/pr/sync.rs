@@ -76,10 +76,12 @@ impl PrSyncHandler {
             return Ok(());
         };
 
-        // Mark ready and post the summary of the run.
-        self.mark_ready(&task, &pr, ready_at, job.run_id)
-            .await
-            .map_err(retry)?;
+        // Mark ready and post the summary of the run. The factory never changes an attached PR.
+        if !pr.attached {
+            self.mark_ready(&task, &pr, ready_at, job.run_id)
+                .await
+                .map_err(retry)?;
+        }
         if let Some(run_id) = job.run_id {
             self.post_summary(&task, pr.number, run_id)
                 .await
@@ -96,7 +98,7 @@ impl PrSyncHandler {
                 .await?;
         Ok(row.map(|(repo_url, base_branch)| Project {
             repo_url,
-            base_branch,
+            base_branch: task.base_branch(&base_branch).to_owned(),
         }))
     }
 
@@ -134,7 +136,7 @@ impl PrSyncHandler {
             .bind(task.id.as_uuid())
             .fetch_one(&mut *tx)
             .await?;
-        let (head, base) = (task.key.task_branch(), project.base_branch.clone());
+        let (head, base) = (task.branch.clone(), project.base_branch.clone());
         let existing = self
             .forge
             .find_open_pull_request(&task.project_id, &head, &base)
@@ -146,6 +148,8 @@ impl PrSyncHandler {
             status.parse::<TaskStatus>().map_err(df_db::DbError::from)?,
             TaskStatus::Completed | TaskStatus::Cancelled
         );
+        // Any PR the factory did not create itself counts as found.
+        let mut found = existing.is_some();
         let pr = if let Some(pr) = existing {
             pr
         } else if closed {
@@ -158,17 +162,22 @@ impl PrSyncHandler {
                 .await
             {
                 Ok(pr) => pr,
-                Err(IntegrationError::Conflict(_)) => self
-                    .forge
-                    .find_open_pull_request(&task.project_id, &head, &base)
-                    .await?
-                    .ok_or_else(|| {
-                        ChannelError::InvalidData("conflicting pull request vanished".into())
-                    })?,
+                Err(IntegrationError::Conflict(_)) => {
+                    found = true;
+                    self.forge
+                        .find_open_pull_request(&task.project_id, &head, &base)
+                        .await?
+                        .ok_or_else(|| {
+                            ChannelError::InvalidData("conflicting pull request vanished".into())
+                        })?
+                }
                 Err(e) => return Err(e.into()),
             }
         };
-        let recorded = record_pr(&mut tx, task, run_id, &pr).await?;
+        // A PR found on the branch of an existing-branch task was opened outside the factory;
+        // on the task's own branch a found PR is the factory's (a crash lost its recording).
+        let attached = found && task.on_existing_branch();
+        let recorded = record_pr(&mut tx, task, run_id, &pr, attached).await?;
         tx.commit().await?;
         Ok(Some(recorded))
     }
@@ -259,13 +268,15 @@ struct RecordedPr {
     number: u64,
     /// Empty if the task row has none.
     url: String,
+    /// The PR was opened outside the factory.
+    attached: bool,
 }
 
 impl RecordedPr {
     /// The PR of the task row, if it has one. A negative stored number is `InvalidData`.
     fn of_task(task: &TaskRow) -> Result<Option<Self>, ChannelError> {
         task.pr_number
-            .map(|number| Self::from_row(number, task.pr_url.clone()))
+            .map(|number| Self::from_row(number, task.pr_url.clone(), task.pr_attached))
             .transpose()
     }
 
@@ -274,23 +285,24 @@ impl RecordedPr {
         tx: &mut Transaction<'_, Postgres>,
         task_id: TaskId,
     ) -> Result<Option<Self>, ChannelError> {
-        let row: (Option<i64>, Option<String>) =
-            sqlx::query_as("SELECT pr_number, pr_url FROM tasks WHERE id = $1")
+        let row: (Option<i64>, Option<String>, bool) =
+            sqlx::query_as("SELECT pr_number, pr_url, pr_attached FROM tasks WHERE id = $1")
                 .bind(task_id.as_uuid())
                 .fetch_one(&mut **tx)
                 .await?;
         row.0
-            .map(|number| Self::from_row(number, row.1))
+            .map(|number| Self::from_row(number, row.1, row.2))
             .transpose()
     }
 
-    fn from_row(number: i64, url: Option<String>) -> Result<Self, ChannelError> {
+    fn from_row(number: i64, url: Option<String>, attached: bool) -> Result<Self, ChannelError> {
         let number = u64::try_from(number).map_err(|_negative| {
             ChannelError::InvalidData("stored pull request number out of range".into())
         })?;
         Ok(Self {
             number,
             url: url.unwrap_or_default(),
+            attached,
         })
     }
 }
@@ -338,6 +350,7 @@ async fn record_pr(
     task: &TaskRow,
     run_id: Option<RunId>,
     pr: &PullRequest,
+    attached: bool,
 ) -> Result<RecordedPr, ChannelError> {
     let number = i64::try_from(pr.id.number).map_err(|_out_of_range| {
         ChannelError::InvalidData("pull request number out of range".into())
@@ -347,12 +360,13 @@ async fn record_pr(
         None => None,
     };
     let updated = sqlx::query(
-        "UPDATE tasks SET pr_number = $2, pr_url = $3, updated_at = now()
+        "UPDATE tasks SET pr_number = $2, pr_url = $3, pr_attached = $4, updated_at = now()
          WHERE id = $1 AND pr_number IS NULL",
     )
     .bind(task.id.as_uuid())
     .bind(number)
     .bind(&pr.url)
+    .bind(attached)
     .execute(&mut **tx)
     .await?;
     if updated.rows_affected() == 0 {
@@ -375,6 +389,7 @@ async fn record_pr(
     Ok(RecordedPr {
         number: pr.id.number,
         url: pr.url.clone(),
+        attached,
     })
 }
 

@@ -163,7 +163,7 @@ message GitRoute {
   string upstream_url = 1;
   // The branch the task branch is based on, e.g. `refs/heads/main`.
   string base_branch = 2;
-  // `refs/heads/factory/task/<KEY>`.
+  // `refs/heads/<tasks.branch>`: `factory/task/<KEY>`, or the existing branch of the task.
   string task_branch = 3;
   // `refs/heads/factory/wip/<KEY>`.
   string wip_branch = 4;
@@ -172,6 +172,16 @@ message GitRoute {
   // Identity the agent's commits must carry (checked by iter2-push-checks).
   string commit_name = 6;
   string commit_email = 7;
+  // Whether non-fast-forward updates of the task branch are forwarded (upstream rejects a stale
+  // lease). UNSPECIFIED is treated as NEVER.
+  RewritePolicy rewrite_policy = 8;
+}
+
+// Branch rewrite policy of the project (`darkfactory.agent.v1.RewritePolicy`).
+enum RewritePolicy {
+  REWRITE_POLICY_UNSPECIFIED = 0;
+  REWRITE_POLICY_NEVER = 1;
+  REWRITE_POLICY_WITH_LEASE = 2;
 }
 
 // Basic auth credential for a forge. Secret: never logged; the Rust `Debug` redacts `password`.

@@ -62,6 +62,15 @@ pub const WEBHOOK_SECRET: &str = "e2e-webhook-secret";
 pub const DELEGATION_PROJECT_KEY: &str = "DG";
 pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
 
+/// Project whose fake agent works on existing branches (attached pull requests, rebase with
+/// lease); tasks are `EB-<n>`. The prompt markers tell the two scenarios apart.
+pub const EXISTING_BRANCH_PROJECT_KEY: &str = "EB";
+pub const EXISTING_BRANCH_PROJECT_NAME: &str = "Existing Branch";
+pub const EXISTING_BRANCH_ATTACHED_MARKER: &str = "[attached]";
+pub const EXISTING_BRANCH_REBASE_MARKER: &str = "[rebase]";
+/// The summary the script completes the attached task with.
+pub const EXISTING_BRANCH_SUMMARY: &str = "Bumped the dependency on the bot branch.";
+
 /// Project whose fake agents hand a result over as an artifact (demo step 5 of iteration 3);
 /// tasks are `RS-<n>`.
 pub const RESEARCH_PROJECT_KEY: &str = "RS";
@@ -151,6 +160,7 @@ pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 pub const HIDDEN_SCRIPT: &str = "/opt/harness/scripts/push-hidden.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
+pub const EXISTING_BRANCH_SCRIPT: &str = "/opt/harness/scripts/existing-branch.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";

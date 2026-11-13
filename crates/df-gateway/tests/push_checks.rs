@@ -21,7 +21,7 @@ use df_gateway::git::upstream::ForgeUpstream;
 use df_gateway::policy::{Policy, Sandbox};
 use df_gateway::upstream::UpstreamConnector;
 use df_proto::gateway::v1::{
-    CheckMode, ForgeCredential, GitRoute, PushCheck, PushPolicy, PushVerdict,
+    CheckMode, ForgeCredential, GitRoute, PushCheck, PushPolicy, PushVerdict, RewritePolicy,
 };
 use df_telemetry::testing::{Captured, buffer};
 use tokio::net::TcpListener;
@@ -123,6 +123,11 @@ impl Gateway {
 
     /// `git push HEAD:<branch>` through the gateway; the output whatever the exit status.
     async fn push_to(&self, work: &Path, branch: &str) -> Result<Output> {
+        self.push_args(work, &[&format!("HEAD:{branch}")]).await
+    }
+
+    /// `git push <args>` through the gateway; the output whatever the exit status.
+    async fn push_args(&self, work: &Path, args: &[&str]) -> Result<Output> {
         let mut command = Command::new("git");
         command
             .current_dir(work)
@@ -133,7 +138,7 @@ impl Gateway {
             .arg(format!("http.sslCAInfo={}", self.ca.display()))
             .arg("push")
             .arg(format!("https://127.0.0.1:{}/git/{KEY}.git", self.port))
-            .arg(format!("HEAD:{branch}"));
+            .args(args);
         let output =
             tokio::time::timeout(LIMIT, tokio::task::spawn_blocking(move || command.output()))
                 .await
@@ -160,6 +165,7 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
         credential_ref: "forge".into(),
         commit_name: "Bot".into(),
         commit_email: BOT.into(),
+        rewrite_policy: RewritePolicy::WithLease.into(),
         ..GitRoute::default()
     };
     let sandbox = Sandbox {
@@ -319,6 +325,67 @@ async fn an_approved_protected_path_exception_lets_the_same_commits_through() ->
     let record = gateway.records.last()?;
     assert_eq!(record.verdict, PushVerdict::Accepted);
     assert!(record.findings.is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebase_of_a_commit_by_another_author_is_rejected_by_the_identity_check() -> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    let forge = gateway
+        .dir
+        .path()
+        .join("forge/app.git")
+        .display()
+        .to_string();
+    // A bot's branch on the forge: one commit authored and committed by Renovate.
+    std::fs::write(work.join("dep.txt"), "serde 1.0.1\n")?;
+    git(&work, &["add", "dep.txt"])?;
+    git(
+        &work,
+        &[
+            "-c",
+            "user.name=Renovate",
+            "-c",
+            "user.email=renovate@bot.test",
+            "commit",
+            "-q",
+            "-m",
+            "Update serde",
+        ],
+    )?;
+    git(&work, &["push", "-q", &forge, &format!("HEAD:{BRANCH}")])?;
+    let pushed = gateway.forge_head()?.context("the bot branch")?;
+    // The base moved on; the agent rebases the bot's commit onto it as the instance identity.
+    git(&work, &["checkout", "-q", "-b", "moved", "HEAD~1"])?;
+    commit(&work, "moved.txt", "main moved\n")?;
+    git(&work, &["checkout", "-q", "-b", "rebased", &pushed])?;
+    git(
+        &work,
+        &[
+            "-c",
+            "user.name=Bot",
+            "-c",
+            &format!("user.email={BOT}"),
+            "rebase",
+            "-q",
+            "moved",
+        ],
+    )?;
+
+    let lease = format!("--force-with-lease={BRANCH}:{pushed}");
+    let output = gateway
+        .push_args(&work, &[&lease, &format!("HEAD:{BRANCH}")])
+        .await?;
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("df:identity"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(gateway.forge_head()?.as_deref(), Some(pushed.as_str()));
+    assert_eq!(gateway.records.last()?.verdict, PushVerdict::Rejected);
     Ok(())
 }
 

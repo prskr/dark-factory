@@ -3,7 +3,7 @@
 //! `#task-details`, `#runs`, `#pending`, `#task-rows`) are re-rendered by `crate::sse`.
 
 use chrono::{DateTime, Utc};
-use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskKey, TaskSort, TaskStatus, TitleSource};
+use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskSort, TaskStatus, TitleSource};
 use df_db::TaskMessageRow;
 use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail, TaskListItem};
 use maud::{Markup, html};
@@ -14,9 +14,9 @@ use crate::components::forms::{INPUT_CLASS, MenuItem};
 use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
-    action_class, chip, definition_list, details_panel_with_heading, dialog_close, dialog_with,
-    field_error, filter_chip, form_error, harness_label, icon, icon_menu, phone_profile_menu,
-    search_menu, section, status_badge, tone_badge,
+    action_class, attached_badge, chip, definition_list, details_panel_with_heading, dialog_close,
+    dialog_with, field_error, filter_chip, form_error, harness_label, icon, icon_menu,
+    phone_profile_menu, search_menu, section, status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
 use crate::layout::Shell;
@@ -573,11 +573,7 @@ pub(crate) fn details_region(
     resume: &ResumeNote,
     error: Option<&str>,
 ) -> Markup {
-    let branch = task
-        .key
-        .parse::<TaskKey>()
-        .map(|k| k.task_branch())
-        .unwrap_or_default();
+    let branch = task.branch.clone();
     let pr = task.pr_url.as_deref().map(|url| {
         (
             url,
@@ -652,7 +648,10 @@ pub(crate) fn details_region(
                     @if pr.is_some() || issue.is_some() {
                         div class="flex flex-col gap-2 text-sm" {
                             @if let Some(url) = &task.pr_url {
-                                (external_link(url, &format!("PR{}", task.pr_number.map(|n| format!(" #{n}")).unwrap_or_default()), task.pr_title.as_deref(), Icon::PullRequest))
+                                div class="flex items-center gap-2" {
+                                    (external_link(url, &format!("PR{}", task.pr_number.map(|n| format!(" #{n}")).unwrap_or_default()), task.pr_title.as_deref(), Icon::PullRequest))
+                                    @if task.pr_attached { (attached_badge()) }
+                                }
                             }
                             @if let Some((url, label)) = &issue { (external_link(url, label, None, Icon::Issue)) }
                         }
@@ -964,6 +963,8 @@ pub(crate) struct TaskForm {
     pub project: String,
     pub persona: String,
     pub issue_number: String,
+    /// An existing branch to work on instead of a new `factory/task/<KEY>` branch.
+    pub branch: String,
 }
 
 /// Projects and personas to choose from, as `(id, label)`.
@@ -995,7 +996,7 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
     };
     html! {
         form id="composer-form" class="space-y-2" hx-post="/tasks" hx-target="this" hx-swap="outerHTML"
-            x-data={"{ issue: '" (values.issue_number.trim().chars().filter(char::is_ascii_digit).collect::<String>()) "', linking: false }"}
+            x-data={"{ issue: '" (values.issue_number.trim().chars().filter(char::is_ascii_digit).collect::<String>()) "', branch: " (json_string(values.branch.trim())) ", linking: false }"}
             x-init="(() => { try { const d = JSON.parse(localStorage.getItem('df.composer') ?? '{}'); const pick = (el, v) => { if (!el.dataset.explicit && v && [...el.options].some(o => o.value === v)) el.value = v }; pick($refs.project, d.project); pick($refs.persona, d.persona) } catch (e) {} })()"
             "x-on:submit"="(() => { try { localStorage.setItem('df.composer', JSON.stringify({ project: $refs.project.value, persona: $refs.persona.value })) } catch (e) {} })()"
             "x-on:keydown.ctrl.enter.prevent"="$el.requestSubmit()" "x-on:keydown.meta.enter.prevent"="$el.requestSubmit()" {
@@ -1006,6 +1007,10 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
                     "Issue " span class="font-mono" { "#" span x-text="issue" {} }
                     button type="button" aria-label="Remove linked issue" "x-on:click"="issue = ''" class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
                 }
+                span x-show="branch" x-cloak class="inline-flex items-center gap-1 rounded-[10px] bg-accent-soft pl-3 text-xs text-accent-text" {
+                    (icon(Icon::Git)) "Branch " span class="font-mono" x-text="branch" {}
+                    button type="button" aria-label="Remove existing branch" "x-on:click"="branch = ''" class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
+                }
                 div class="ml-auto" { (dialog_close()) }
             }
             div class="relative rounded-2xl border border-line bg-panel p-3 shadow-lg focus-within:border-line-strong"
@@ -1015,9 +1020,12 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
                 textarea id="description" name="description" rows="5" placeholder="What should the agent do?"
                     class="w-full resize-none bg-transparent text-base text-ink placeholder:text-faint focus-visible:outline-none" autofocus { (values.description) }
                 (field_error(errors.get("description")))
-                // The linked issue: a popover below the card (inline on phones, where the sheet
-                // leaves no room below it). The field name stays `issue_number`.
-                div x-show="linking" x-cloak role="group" aria-label="Linked issue"
+                // The branch error stays visible with the popover closed.
+                (field_error(errors.get("branch")))
+                // The options: a popover below the card (inline on phones, where the sheet
+                // leaves no room below it) with the linked issue, then the existing branch. The
+                // field names are `issue_number` and `branch`.
+                div x-show="linking" x-cloak role="group" aria-label="Linked issue and branch"
                     class="absolute top-[calc(100%-8px)] left-3 z-10 w-[280px] rounded-xl border border-line bg-panel p-3 shadow-lg max-md:static max-md:mt-2 max-md:w-full" {
                     label for="issue_number" class="text-[13px] font-medium text-muted" { "Linked issue" }
                     div class="mt-1.5 flex min-h-10 items-center overflow-hidden rounded-[10px] border border-line-strong focus-within:ring-1 focus-within:ring-line-strong" {
@@ -1031,11 +1039,17 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
                         "'s tracker that this task works on."
                     }
                     (field_error(errors.get("issue_number")))
+                    label for="branch" class="mt-3 block text-[13px] font-medium text-muted" { "Existing branch" }
+                    input id="branch" name="branch" type="text" x-model="branch" spellcheck="false" autocomplete="off"
+                        class="mt-1.5 min-h-10 w-full rounded-[10px] border border-line-strong bg-transparent px-3 py-2 font-mono text-sm text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-line-strong";
+                    p class="mt-1.5 text-xs text-faint" {
+                        "Work on this branch instead of a new factory/task branch. An open pull request from it is attached."
+                    }
                 }
                 div class="mt-2 flex items-center gap-2" {
                     button type="button" "x-on:click"="linking = !linking" ":aria-expanded"="linking"
                         ":class"="linking ? 'border-accent-text bg-accent-soft text-accent-text' : 'border-line text-muted hover:bg-sunk'"
-                        aria-label="Link issue" title="Link issue"
+                        aria-label="Task options" title="Task options"
                         class="inline-flex size-11 shrink-0 items-center justify-center rounded-full border lg:size-9" { (icon(Icon::Plus)) }
                     div class="ml-auto" { (choice_select(PERSONA_SELECT, "Assignee", "persona", &choices.personas, persona, !values.persona.is_empty(), errors)) }
                     button type="submit" aria-label="Create task" title="Create task"
@@ -1044,6 +1058,12 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
             }
         }
     }
+}
+
+/// `value` as a JSON (and so JavaScript) string literal, for an Alpine expression.
+fn json_string(value: &str) -> String {
+    // A string always serializes.
+    serde_json::to_string(value).unwrap_or_else(|_unreachable| "\"\"".to_owned())
 }
 
 /// The composer as a dialog without frame (bottom sheet on phones), or a hint when nothing can

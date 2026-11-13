@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Projects
-Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, optional adapter command, base branch, forge credential reference and branch rewrite policy (`never` or `with-lease`, default `with-lease`). The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
+Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, sandbox image, optional adapter command, base branch, forge credential reference, branch rewrite policy (`never` or `with-lease`, default `with-lease`) and agent branch globs (default `renovate/**` and `dependabot/**`, see `task-branches`). The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
 
 #### Scenario: Create a project
 - **WHEN** a board member submits name "Dark Factory", key `DF`, repo `https://git.example.org/peter/dark-factory.git`, image, base `main` and a forge credential
@@ -40,3 +40,15 @@ Board members SHALL list, create and edit projects with name, key, repository UR
 #### Scenario: Rewrite policy changed
 - **WHEN** a board member sets the branch rewrite policy of `DF` to `never`
 - **THEN** it is stored, audited with before and after values, and applies from the next run of each task
+
+#### Scenario: Default agent branches
+- **WHEN** a board member creates a project without changing the agent branches
+- **THEN** the project's agent branch globs are `renovate/**` and `dependabot/**`
+
+#### Scenario: Invalid agent branch glob
+- **WHEN** a board member saves the agent branches with the line `renovate/[`
+- **THEN** the form shows a validation error naming the line and nothing is stored
+
+#### Scenario: Agent branches changed
+- **WHEN** a board member adds `agent/**` to the agent branches of `DF`
+- **THEN** it is stored and audited with before and after values

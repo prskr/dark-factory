@@ -49,10 +49,14 @@ The **General** tab and the new-project form group the fields:
 | | Adapter command | Optional. Replaces the instance's harness image for this project (a harness installed in the sandbox image). Arguments use shell-style quoting: `/opt/adapter '--config=/workspace/my config.json'` is two arguments, the second with a space. Nothing is expanded (`$HOME` stays literal). A word that starts with `#` must be quoted (`'#fff'`), otherwise it starts a comment and the rest of the field is dropped. A literal backslash is written `\\`. An unclosed quote is refused. The field shows the stored arguments quoted the same way. |
 | Forge events | Wake tasks on reviews and mentions | Whose PR reviews and `@mentions` of the bot account wake a task when [forge webhooks](../integrations/forges/webhooks.md) are set up: *Nobody*, *Members with write access* (default) or *Anyone*. Merged or closed pull requests and failed checks apply regardless. |
 
-The **Security** tab sets what the [Git proxy](../security/git-proxy.md#push-checks) checks for
-this project: protected paths, secret scan and blob size, each in mode *approval* or *reject*, and
-whether merge commits are allowed. The **Hidden paths** field lists files that are left out of the
-agent's workspace and never pushable ([Hide files from agents](hidden-paths.md)). **Save project** saves General and Security together.
+The **Security** tab has two groups. **Save project** saves General and Security together.
+
+| Group | Field | Meaning |
+| --- | --- | --- |
+| Push checks | Protected paths, secret scan, blob size, linear history | What the [Git proxy](../security/git-proxy.md#push-checks) checks for this project: each check in mode *approval* or *reject*, and whether merge commits are allowed. |
+| | Hidden paths | Files that are left out of the agent's workspace and never pushable ([Hide files from agents](hidden-paths.md)). |
+| Branches | Branch rewrites | Whether agents may rebase their task branch: *With lease (default)* or *Never*. A change applies from the next run of each task and is audited with the before and after value. See [Rebase with lease](existing-branches.md#rebase-with-lease). |
+| | Agent branches | One glob per line (`*` stops at `/`, `**` crosses it). The existing branches an agent may start tasks on with `create_task`. Default `renovate/**` and `dependabot/**` for new projects and the migrated ones; an empty field means agents cannot use existing branches. Board members can pick any branch in the composer. The globs are checked when the task is created, so a change does not affect existing tasks. An invalid line is refused with its line number. Changes are audited. See [Agent branches](existing-branches.md#agent-branches). |
 
 Users with the role `admin` also see the last tab, **Integrations**, with two groups:
 

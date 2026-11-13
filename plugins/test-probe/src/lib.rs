@@ -16,8 +16,9 @@ use exports::darkfactory::integrations::issues::{
     Comment, Guest as IssuesGuest, Issue, IssueState,
 };
 use exports::darkfactory::integrations::pull_requests::{
-    Author, AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, PostedComment,
-    PrComment, PullRequest, PullRequestUpdate, Review, ReviewComment, ReviewThread, ReviewVerdict,
+    Author, AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, OpenFilter,
+    PostedComment, PrComment, PullRequest, PullRequestState, PullRequestUpdate, Review,
+    ReviewComment, ReviewThread, ReviewVerdict,
 };
 use exports::darkfactory::integrations::webhooks::{
     CiFailed, Guest as WebhooksGuest, ParsedEvent, WebhookEvent,
@@ -139,6 +140,32 @@ impl PullRequestsGuest for Probe {
 
     fn find_open(_: RepoRef, _: String, _: String) -> Result<Option<PullRequest>, Error> {
         Ok(None)
+    }
+
+    fn list_open(repo: RepoRef, filter: OpenFilter) -> Result<Vec<PullRequest>, Error> {
+        if filter.head_prefix.is_some()
+            || filter.author.is_some()
+            || filter.label.is_some()
+            || filter.base.is_some()
+        {
+            return Err(Error::InvalidInput(
+                "only the `head` filter is supported".to_string(),
+            ));
+        }
+        if filter.head != "renovate/serde-1.x" {
+            return Ok(Vec::new());
+        }
+        Ok(vec![PullRequest {
+            id: PullRequestRef { repo, number: 40 },
+            url: "https://forge.test/o/r/pulls/40".to_string(),
+            head: filter.head,
+            base: "main".to_string(),
+            title: "Update serde".to_string(),
+            body: String::new(),
+            draft: false,
+            state: PullRequestState::Open,
+            head_sha: "abc".to_string(),
+        }])
     }
 
     fn get(_: PullRequestRef) -> Result<PullRequest, Error> {

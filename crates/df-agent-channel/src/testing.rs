@@ -513,6 +513,32 @@ impl Env {
         task.id
     }
 
+    /// Creates a task of the seeded project on the existing `branch`, attached to `pr`.
+    pub async fn task_on_branch(&self, branch: &str, pr: Option<df_db::AttachedPr>) -> TaskRow {
+        let (task, _) = df_db::create_task_on(
+            &self.ctx.pool,
+            NewTask {
+                project_id: self.project_id,
+                persona_id: self.persona_id,
+                title: Some("Existing branch".into()),
+                description: String::new(),
+                issue_number: None,
+                created_by: df_core::Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
+            },
+            df_db::TaskPlacement {
+                branch: Some(
+                    df_core::ExistingBranch::parse(branch, "main").expect("a valid test branch"),
+                ),
+                attached_pr: pr,
+            },
+        )
+        .await
+        .expect("create a task on an existing branch");
+        task
+    }
+
     /// Creates a run for the task in `state` with pod IP `127.0.0.1`.
     pub async fn insert_run(&self, task_id: TaskId, number: i64, state: &str) -> RunId {
         let run_id = RunId::new();

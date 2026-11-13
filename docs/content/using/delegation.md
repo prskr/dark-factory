@@ -15,7 +15,7 @@ Every task of an agent gets three more [factory tools](../architecture/agent-run
 | Tool | What it does |
 | --- | --- |
 | `list_personas` | Returns the name and the [description](setup.md#personas) of every persona, ordered by name. |
-| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt` and optional `depends_on`. The caller becomes the **parent**. Returns the key and the status of the new task. |
+| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on` and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches)). The caller becomes the **parent**. Returns the key and the status of the new task. |
 | `send_message` | Queues a message on a child of the caller, with the same effect as your message in the task view. The caller cannot message any other task. |
 
 Tasks created in the UI have no parent. A task created by an agent shows that agent as its creator

@@ -206,7 +206,7 @@ async fn the_composer_has_a_link_issue_plus_on_the_left_and_the_assignee_next_to
     seed(&app.pool).await;
     let html = text(app.get("/tasks/compose", &cookie).await).await;
     assert!(!html.contains("Options"), "no Options text");
-    let plus = html.find("aria-label=\"Link issue\"").unwrap();
+    let plus = html.find("aria-label=\"Task options\"").unwrap();
     let assignee = html.find("name=\"persona\"").unwrap();
     let submit = html.find("aria-label=\"Create task\"").unwrap();
     let description = html.find("name=\"description\"").unwrap();
@@ -234,7 +234,7 @@ async fn the_composer_has_a_link_issue_plus_on_the_left_and_the_assignee_next_to
     );
     assert!(
         html.contains("aria-label=\"Remove linked issue\"")
-            && html.contains("aria-label=\"Linked issue\"")
+            && html.contains("aria-label=\"Linked issue and branch\"")
     );
 }
 
@@ -299,7 +299,7 @@ async fn the_link_issue_plus_opens_a_popover_with_the_number_field_and_a_chip_sh
     let html = text(app.get("/tasks/compose", &cookie).await).await;
 
     // The plus: named, expanded state bound, active look while open (accent border + soft fill).
-    let plus = tag_around(&html, "aria-label=\"Link issue\"");
+    let plus = tag_around(&html, "aria-label=\"Task options\"");
     assert!(
         plus.contains(":aria-expanded=\"linking\"")
             && plus.contains("x-on:click=\"linking = !linking\""),
@@ -307,7 +307,7 @@ async fn the_link_issue_plus_opens_a_popover_with_the_number_field_and_a_chip_sh
     );
     assert!(plus.contains("border-accent-text bg-accent-soft"), "{plus}");
     // The popover: anchored below the card on the left, 280 px, panel surface, named.
-    let popover = tag_around(&html, "aria-label=\"Linked issue\"");
+    let popover = tag_around(&html, "aria-label=\"Linked issue and branch\"");
     for class in [
         "absolute",
         "left-3",
@@ -328,7 +328,7 @@ async fn the_link_issue_plus_opens_a_popover_with_the_number_field_and_a_chip_sh
     );
     assert!(popover.contains("x-show=\"linking\""));
     // Label, mono # prefix, numeric field under the unchanged form field name, help sentence.
-    let at = html.find("aria-label=\"Linked issue\"").unwrap();
+    let at = html.find("aria-label=\"Linked issue and branch\"").unwrap();
     let inside = &html[at..];
     assert!(inside.contains(">Linked issue</label>"), "{inside}");
     assert!(inside.contains(">#</span>") && inside.contains("font-mono"));

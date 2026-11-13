@@ -118,3 +118,28 @@ async fn reply_round_trips_and_retries_a_rate_limit() -> anyhow::Result<()> {
     assert_eq!(requests.len(), 2, "one rate-limited call and one retry");
     Ok(())
 }
+
+#[tokio::test]
+async fn list_open_by_head_round_trips_through_the_host() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    let client = probe_client(&server)?;
+
+    let found = client
+        .list_open_pull_requests(&ProjectId::new(), "renovate/serde-1.x")
+        .await?;
+    let none = client
+        .list_open_pull_requests(&ProjectId::new(), "fix/login")
+        .await?;
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        (
+            found[0].id.number,
+            found[0].head.as_str(),
+            found[0].base.as_str()
+        ),
+        (40, "renovate/serde-1.x", "main")
+    );
+    assert!(none.is_empty());
+    Ok(())
+}

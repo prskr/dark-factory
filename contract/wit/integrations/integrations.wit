@@ -224,6 +224,24 @@ interface pull-requests {
     /// idempotent and supports attaching tasks to existing pull requests.
     find-open: func(repo: repo-ref, head: string, base: string) -> result<option<pull-request>, error>;
 
+    /// Which open pull requests `list-open` returns. All set fields apply together.
+    record open-filter {
+        /// Head branch in the repository itself; pull requests from forks never match.
+        head: string,
+        /// Not supported yet: plugins return `invalid-input` when set (`iter3-ci-tools`).
+        head-prefix: option<string>,
+        /// Not supported yet, see `head-prefix`.
+        author: option<string>,
+        /// Not supported yet, see `head-prefix`.
+        label: option<string>,
+        /// Not supported yet, see `head-prefix`.
+        base: option<string>,
+    }
+
+    /// Open pull requests of the repository that match `filter`, following the forge's
+    /// pagination. Unlike `find-open` it needs no base branch.
+    list-open: func(repo: repo-ref, filter: open-filter) -> result<list<pull-request>, error>;
+
     get: func(id: pull-request-ref) -> result<pull-request, error>;
 
     update: func(id: pull-request-ref, changes: pull-request-update) -> result<pull-request, error>;

@@ -168,6 +168,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
             git_hooks: Vec::new(),
             git_config: Vec::new(),
             hidden_paths: Vec::new(),
+            ..Default::default()
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -413,6 +414,7 @@ sessions:
                 value: ca_path.to_str().unwrap().to_string(),
             }],
             hidden_paths: Vec::new(),
+            ..Default::default()
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -545,6 +547,7 @@ sessions:
                 value: ca_path.to_str().unwrap().to_string(),
             }],
             hidden_paths: Vec::new(),
+            ..Default::default()
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -763,6 +766,7 @@ async fn test_manual_claude_acp_run() {
             git_hooks: Vec::new(),
             git_config: Vec::new(),
             hidden_paths: Vec::new(),
+            ..Default::default()
         }),
         harness: Some(Harness {
             kind: Some(df_proto::agent::v1::harness::Kind::Acp(
@@ -889,6 +893,7 @@ async fn test_cancel_before_assign_skips_prepare() {
                 git_hooks: vec![],
                 git_config: vec![],
                 hidden_paths: Vec::new(),
+                ..Default::default()
             }),
             harness: None,
             tools: vec![],

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO tasks (\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, created_by, parent_id\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n        RETURNING\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_at, updated_at\n        ",
+  "query": "\n        INSERT INTO tasks (\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, created_by, parent_id,\n            branch, base_branch, pr_number, pr_url, pr_attached\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)\n        RETURNING\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -226,7 +226,12 @@
         "Int8",
         "Text",
         "Jsonb",
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
@@ -251,5 +256,5 @@
       false
     ]
   },
-  "hash": "6bb6995c99d11b00c9875787cb1f8d643f3446dfc827afcd705fe16618a96f48"
+  "hash": "f19d1837c661427ef001a9cc0838e806f8c171f22e872e5cf8a792e2d75c2b8d"
 }

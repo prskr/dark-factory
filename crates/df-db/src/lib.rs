@@ -16,6 +16,7 @@ pub mod model_usage;
 pub mod network_access;
 pub mod notify;
 pub mod outbox;
+pub mod placement;
 pub mod pool;
 pub mod projects;
 pub mod push_checks;
@@ -37,16 +38,17 @@ pub use egress::{
 };
 pub use migrate::run_migrate;
 pub use notify::{Notification, Notifier, publish};
+pub use placement::{PlacementError, place_on_branch};
 pub use pool::{DbError, build_connect_options, connect_pool, validate_sql_identifier};
 pub use projects::{ForgeTarget, forge_target};
 pub use sqlx::PgPool;
 pub use task_events::apply_task_event;
 pub use tasks::{
-    NewDependency, NewTask, TaskMessageRow, TaskRow, cancel_task, claim_held_back_messages,
-    create_task, create_task_tx, edit_queued_message, format_assignment_prompt, get_task,
-    interrupt_turn, list_undelivered_messages, mark_prompt_delivered, mark_task_done,
-    queue_message, queue_message_tx, remove_queued_message, rename_task, set_task_title, stop_run,
-    text_block,
+    AttachedPr, NewDependency, NewTask, TaskMessageRow, TaskPlacement, TaskRow, cancel_task,
+    claim_held_back_messages, create_task, create_task_on, create_task_on_tx, create_task_tx,
+    edit_queued_message, format_assignment_prompt, get_task, interrupt_turn,
+    list_undelivered_messages, mark_prompt_delivered, mark_task_done, queue_message,
+    queue_message_tx, remove_queued_message, rename_task, set_task_title, stop_run, text_block,
 };
 
 /// Embedded database migrations from `crates/df-db/migrations`.

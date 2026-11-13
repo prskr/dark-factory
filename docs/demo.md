@@ -143,6 +143,7 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 | Project `PP` | "Protected Path", same repository, script `/opt/harness/scripts/push-protected.yaml` |
 | Project `HP` | "Hidden Path", same repository (`secret/value.txt` on `main`, committed by `just e2e-local`), hidden path `secret/**`, script `/opt/harness/scripts/push-hidden.yaml` |
 | Project `WH` | "Webhooks", same repository, script `/opt/harness/scripts/webhook.yaml` |
+| Project `EB` | "Existing Branch", same repository, script `/opt/harness/scripts/existing-branch.yaml` (tasks on existing branches: attached pull request, rebase with lease) |
 | Project `DG` | "Delegation", same repository, script `/opt/harness/scripts/delegation.yaml` |
 | Project `RS` | "Research", same repository, script `/opt/harness/scripts/research.yaml` |
 | Project `IN` | "Interrupt", same repository, script `/opt/harness/scripts/interrupt.yaml` |

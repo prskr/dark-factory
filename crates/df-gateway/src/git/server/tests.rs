@@ -60,6 +60,7 @@ fn route(credential_ref: &str) -> GitRoute {
         credential_ref: credential_ref.into(),
         commit_name: "factory".into(),
         commit_email: "factory@example.com".into(),
+        rewrite_policy: 0,
     }
 }
 

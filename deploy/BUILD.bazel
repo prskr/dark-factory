@@ -228,6 +228,7 @@ image_layer(
         "/opt/harness/bin/fake-acp-agent": ":fake_acp_agent",
         "/opt/harness/scripts/delegation.yaml": "//crates/fake-acp-agent:scripts/delegation.yaml",
         "/opt/harness/scripts/demo.yaml": "//crates/fake-acp-agent:scripts/demo.yaml",
+        "/opt/harness/scripts/existing-branch.yaml": "//crates/fake-acp-agent:scripts/existing-branch.yaml",
         "/opt/harness/scripts/interrupt.yaml": "//crates/fake-acp-agent:scripts/interrupt.yaml",
         "/opt/harness/scripts/landlock.yaml": "//crates/fake-acp-agent:scripts/landlock.yaml",
         "/opt/probe-writable": ":probe_writable",
@@ -243,6 +244,7 @@ image_layer(
         "/opt/harness/bin/fake-acp-agent": file_metadata(mode = "0755"),
         "/opt/harness/scripts/delegation.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/demo.yaml": file_metadata(mode = "0644"),
+        "/opt/harness/scripts/existing-branch.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/interrupt.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/landlock.yaml": file_metadata(mode = "0644"),
         "/opt/probe-writable": file_metadata(

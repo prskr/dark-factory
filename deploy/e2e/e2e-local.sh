@@ -348,7 +348,7 @@ pods_reach_the_internet() {
     --command -- curl -sSf -m 10 -o /dev/null https://pypi.org/simple/pip/ >/dev/null 2>&1
 }
 
-suite_tests=(--test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks)
+suite_tests=(--test delegation --test demo --test existing_branch --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks)
 
 # Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {

@@ -83,6 +83,10 @@ pub struct TaskDetail {
     pub pr_number: Option<i64>,
     pub pr_url: Option<String>,
     pub pr_title: Option<String>,
+    /// The PR was opened outside the factory.
+    pub pr_attached: bool,
+    /// The branch the task commits to.
+    pub branch: String,
     pub resume_at: Option<DateTime<Utc>>,
     /// Consecutive automatic resumes after infrastructure failures.
     pub auto_resumes: i32,
@@ -241,7 +245,7 @@ macro_rules! select_task_detail {
         concat!(
             "SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
                 p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title,
+                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
                 t.resume_at, t.auto_resumes, t.created_by, creator.key AS creator_task_key,
                 parent.key AS parent_key, parent.title AS parent_title
              FROM tasks t

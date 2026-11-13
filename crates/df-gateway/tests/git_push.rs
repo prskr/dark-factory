@@ -20,7 +20,7 @@ use df_gateway::git::upstream::ForgeUpstream;
 use df_gateway::policy::{Policy, Sandbox};
 use df_gateway::upstream::Body;
 use df_gateway::upstream::UpstreamConnector;
-use df_proto::gateway::v1::{ForgeCredential, GitRoute, PushVerdict};
+use df_proto::gateway::v1::{ForgeCredential, GitRoute, PushVerdict, RewritePolicy};
 use hyper::body::Incoming;
 use rustls::RootCertStore;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -44,6 +44,8 @@ struct Fixture {
     push_idle: Option<Duration>,
     /// Scheme of the route's upstream URL.
     scheme: &'static str,
+    /// The project's branch rewrite policy is `with-lease`.
+    with_lease: bool,
 }
 
 impl Fixture {
@@ -72,6 +74,7 @@ impl Fixture {
             gateway_roots,
             push_idle: None,
             scheme: "https",
+            with_lease: false,
         })
     }
 
@@ -142,6 +145,12 @@ impl Fixture {
             task_branch: format!("refs/heads/factory/task/{key}"),
             wip_branch: format!("refs/heads/factory/wip/{key}"),
             credential_ref: "forge".into(),
+            rewrite_policy: if self.with_lease {
+                RewritePolicy::WithLease
+            } else {
+                RewritePolicy::Never
+            }
+            .into(),
             ..GitRoute::default()
         };
         let sandbox = Sandbox {
@@ -414,6 +423,67 @@ async fn a_forced_non_fast_forward_push_is_rejected() -> Result<()> {
     assert!(stderr.contains("[remote rejected]"), "{stderr}");
     assert!(stderr.contains("df:non-fast-forward"), "{stderr}");
     assert_eq!(head_of(&fixture.forge_repo(), branch)?, pushed);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebase_is_pushed_with_lease_under_with_lease_and_a_stale_lease_changes_nothing()
+-> Result<()> {
+    let mut fixture = Fixture::new().await?;
+    fixture.with_lease = true;
+    let (port, gateway) = fixture
+        .gateway("DF-7", fixture.mirrors()?, DEFAULT_MAX)
+        .await?;
+    let work = fixture.client("client")?;
+    let branch = "refs/heads/factory/task/DF-7";
+    commit(&work, "ONE")?;
+    succeeded(
+        &push(
+            &work,
+            &fixture.ca,
+            port,
+            "DF-7",
+            &[&format!("HEAD:{branch}")],
+        )
+        .await?,
+    )?;
+    let pushed = head_of(&fixture.forge_repo(), branch)?.expect("pushed");
+
+    git(&work, &["reset", "-q", "--hard", "HEAD~1"])?;
+    commit(&work, "OTHER")?;
+    let lease = format!("--force-with-lease={branch}:{pushed}");
+    succeeded(
+        &push(
+            &work,
+            &fixture.ca,
+            port,
+            "DF-7",
+            &[&lease, &format!("HEAD:{branch}")],
+        )
+        .await?,
+    )?;
+    let rebased = head_of(&fixture.forge_repo(), branch)?.expect("rebased");
+    assert_ne!(rebased, pushed);
+
+    let stale = format!("--force-with-lease={branch}:{pushed}");
+    git(&work, &["reset", "-q", "--hard", "HEAD~1"])?;
+    commit(&work, "THIRD")?;
+    let output = push(
+        &work,
+        &fixture.ca,
+        port,
+        "DF-7",
+        &[&stale, &format!("HEAD:{branch}")],
+    )
+    .await?;
+    gateway.abort();
+    fixture.forge_task.abort();
+
+    assert!(!output.status.success());
+    assert_eq!(
+        head_of(&fixture.forge_repo(), branch)?.as_deref(),
+        Some(rebased.as_str())
+    );
     Ok(())
 }
 

@@ -15,6 +15,8 @@ use forge_common::draft;
 use forge_common::http;
 use forge_common::log::Log;
 
+/// Pull requests per page of `list-open`; GitHub's maximum.
+const LIST_PAGE_SIZE: usize = 100;
 /// `User-Agent` of every request; GitHub rejects requests without one.
 const USER_AGENT: &str = concat!("dark-factory-github-plugin/", env!("CARGO_PKG_VERSION"));
 
@@ -148,6 +150,30 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
             .into_iter()
             .find(|pr| pr.head.branch == head && pr.base.branch == base)
             .map(|pr| self.pull_request(repo.clone(), pr)))
+    }
+
+    /// Every open pull request whose head branch `head` is in `repo` itself, whatever its base.
+    /// `head=<owner>:<branch>` narrows the listing; pages of 100 follow until a short one.
+    pub fn list_open(&self, repo: &RepoRef, head: &str) -> Result<Vec<PullRequest>, Error> {
+        let mut found = Vec::new();
+        for page in 1.. {
+            let path = format!(
+                "{}/pulls?state=open&head={}&per_page={LIST_PAGE_SIZE}&page={page}",
+                repo_path(repo),
+                utf8_percent_encode(&format!("{}:{head}", repo.owner), QUERY_VALUE),
+            );
+            let prs: Vec<ApiPullRequest> = self.rest(Method::Get, &path, None)?;
+            let last_page = prs.len() < LIST_PAGE_SIZE;
+            found.extend(
+                prs.into_iter()
+                    .filter(|pr| pr.state == "open" && pr.head.branch == head && pr.head_in(repo))
+                    .map(|pr| self.pull_request(repo.clone(), pr)),
+            );
+            if last_page {
+                break;
+            }
+        }
+        Ok(found)
     }
 
     /// Changes only the given fields; draft changes follow the draft mode (design D2).
@@ -428,6 +454,22 @@ struct ApiBranch {
     branch: String,
     #[serde(default)]
     sha: String,
+    /// The repository of the branch; absent when a fork was deleted.
+    #[serde(default)]
+    repo: Option<ApiHeadRepo>,
+}
+
+#[derive(Deserialize)]
+struct ApiHeadRepo {
+    full_name: String,
+}
+
+impl ApiPullRequest {
+    /// Whether the head branch lives in `repo` itself, not in a fork.
+    fn head_in(&self, repo: &RepoRef) -> bool {
+        let full_name = self.head.repo.as_ref().map(|head| head.full_name.as_str());
+        forge_common::open_filter::head_in_repo(full_name, &repo.owner, &repo.name)
+    }
 }
 
 #[derive(Deserialize)]

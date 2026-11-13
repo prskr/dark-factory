@@ -300,8 +300,9 @@ async fn groups_are_separated_by_a_line_except_above_the_first() {
     let html = text(app.get("/projects/DF", &app.login().await).await).await;
 
     let sections = html.matches("<section aria-labelledby=\"group-").count();
-    assert_eq!(sections, 4, "{html}");
-    assert_eq!(html.matches("first:border-t-0").count(), 4, "{html}");
+    // Four groups of General, "Push checks" and "Branches" of Security.
+    assert_eq!(sections, 6, "{html}");
+    assert_eq!(html.matches("first:border-t-0").count(), 6, "{html}");
 }
 
 #[tokio::test]

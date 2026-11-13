@@ -20,7 +20,9 @@ pub use actions::{
     ButtonKind, ICON_BUTTON_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS, action_class, button,
     link_button, submit_button,
 };
-pub use badges::{Tone, chip, filter_chip, harness_label, status_badge, tone_badge};
+pub use badges::{
+    Tone, attached_badge, chip, filter_chip, harness_label, status_badge, tone_badge,
+};
 pub use forms::{
     FormErrors, MenuItem, field, field_error, form_error, form_group, icon_menu,
     mono_text_field_of_form, readonly_field, readonly_field_compact, search_menu, select_field,

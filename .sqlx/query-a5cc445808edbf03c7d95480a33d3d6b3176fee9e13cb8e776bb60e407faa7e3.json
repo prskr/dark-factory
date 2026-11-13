@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, parent_id, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, parent_id,\n            branch, base_branch, pr_attached, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -214,6 +214,39 @@
       },
       {
         "ordinal": 19,
+        "name": "branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "branch"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "base_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "pr_attached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_attached"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -224,7 +257,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 23,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -261,8 +294,11 @@
       false,
       true,
       false,
+      true,
+      false,
+      false,
       false
     ]
   },
-  "hash": "f0d72fe259059c90ffadd31bb66a0184fb9281e759666a6bc20a1066d0e7b3db"
+  "hash": "a5cc445808edbf03c7d95480a33d3d6b3176fee9e13cb8e776bb60e407faa7e3"
 }

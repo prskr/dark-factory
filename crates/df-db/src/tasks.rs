@@ -3,9 +3,9 @@
 use chrono::{DateTime, Utc};
 use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
-    DependencyKind, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey, PromptId, RunId,
-    TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource, is_satisfied, placeholder_title,
-    sanitize_title, system_reason, title_too_long,
+    DependencyKind, ExistingBranch, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey,
+    PromptId, RunId, TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource, is_satisfied,
+    placeholder_title, sanitize_title, system_reason, title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,24 @@ pub struct NewTask {
     pub depends_on: Vec<NewDependency>,
 }
 
+/// Where a new task commits and which PR it starts with (`task-branches`). The default is the
+/// task's own `factory/task/<KEY>` branch without a PR.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskPlacement {
+    /// A validated existing branch; `None` stores `factory/task/<KEY>`.
+    pub branch: Option<ExistingBranch>,
+    /// The open PR of the existing branch the task attaches to.
+    pub attached_pr: Option<AttachedPr>,
+}
+
+/// An open PR a new task is attached to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachedPr {
+    pub number: i64,
+    pub url: String,
+    pub base: String,
+}
+
 /// A dependency of a new task on another task of the project, named by key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewDependency {
@@ -106,8 +124,28 @@ pub struct TaskRow {
     pub harness_session_id: String,
     pub created_by: Principal,
     pub parent_id: Option<TaskId>,
+    /// The branch the task commits to (`factory/task/<KEY>` unless it started on an existing one).
+    pub branch: String,
+    /// The base of the PR the task is attached to, when it differs from the project's.
+    pub base_branch: Option<String>,
+    /// The PR was opened outside the factory; the factory never changes it.
+    pub pr_attached: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl TaskRow {
+    /// Whether the task started on an existing branch rather than its own `factory/task/<KEY>`.
+    pub fn on_existing_branch(&self) -> bool {
+        self.branch != self.key.task_branch()
+    }
+
+    /// The task's effective base branch: the base of the PR it is attached to
+    /// (`tasks.base_branch`), else `project_base` (`iter3-branch-workflows` design D2; the base
+    /// task of `iter3-task-tree` comes first once it lands).
+    pub fn base_branch<'a>(&'a self, project_base: &'a str) -> &'a str {
+        self.base_branch.as_deref().unwrap_or(project_base)
+    }
 }
 
 /// Stored prompt / message record from `task_messages`.
@@ -168,8 +206,18 @@ pub async fn create_task(
     pool: &PgPool,
     input: NewTask,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
+    create_task_on(pool, input, TaskPlacement::default()).await
+}
+
+/// [`create_task`] on an existing branch, possibly attached to its PR. A branch held by another
+/// open task of the project is [`DbError::BranchHeld`] naming the holder.
+pub async fn create_task_on(
+    pool: &PgPool,
+    input: NewTask,
+    placement: TaskPlacement,
+) -> Result<(TaskRow, TaskMessageRow), DbError> {
     let mut tx = pool.begin().await?;
-    let created = create_task_tx(&mut tx, input).await?;
+    let created = create_task_on_tx(&mut tx, input, placement).await?;
     tx.commit().await?;
     Ok(created)
 }
@@ -179,7 +227,23 @@ pub async fn create_task_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     input: NewTask,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
+    create_task_on_tx(tx, input, TaskPlacement::default()).await
+}
+
+/// [`create_task_on`] inside the caller's transaction.
+pub async fn create_task_on_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: NewTask,
+    placement: TaskPlacement,
+) -> Result<(TaskRow, TaskMessageRow), DbError> {
+    // The project row lock of the allocation serializes creations; the check names the holder.
     let (task_key, number) = allocate_task_key(tx, input.project_id).await?;
+    if let Some(branch) = &placement.branch
+        && let Some(holder) =
+            open_branch_holder(tx, input.project_id, branch.as_str(), None).await?
+    {
+        return Err(DbError::BranchHeld { task: Some(holder) });
+    }
     let resolved = resolve_dependencies(tx, &input).await?;
     let user_title = input.title.as_deref().and_then(sanitize_title);
     let snapshot = TaskSnapshot {
@@ -191,6 +255,7 @@ pub async fn create_task_tx(
     let task_row = insert_task(
         tx,
         &input,
+        &placement,
         task_key,
         number,
         user_title.as_deref(),
@@ -318,11 +383,17 @@ async fn allocate_task_key(
 async fn insert_task(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     input: &NewTask,
+    placement: &TaskPlacement,
     task_key: TaskKey,
     allocated_number: i64,
     user_title: Option<&str>,
     status: TaskStatus,
 ) -> Result<TaskRow, DbError> {
+    let branch = placement.branch.as_ref().map_or_else(
+        || task_key.task_branch(),
+        |branch| branch.as_str().to_owned(),
+    );
+    let attached = placement.attached_pr.as_ref();
     // A title the creating agent chose is an agent title, which a generated or edited one replaces.
     let given_source = if matches!(input.created_by, Principal::Agent { .. }) {
         TitleSource::Agent
@@ -344,9 +415,10 @@ async fn insert_task(
         r#"
         INSERT INTO tasks (
             id, project_id, number, key, title, title_source, description,
-            persona_id, issue_number, status, created_by, parent_id
+            persona_id, issue_number, status, created_by, parent_id,
+            branch, base_branch, pr_number, pr_url, pr_attached
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
@@ -364,10 +436,16 @@ async fn insert_task(
         input.issue_number,
         status.as_str(),
         created_by,
-        input.parent_id.map(|id| id.as_uuid())
+        input.parent_id.map(|id| id.as_uuid()),
+        branch,
+        attached.map(|pr| pr.base.as_str()),
+        attached.map(|pr| pr.number),
+        attached.map(|pr| pr.url.as_str()),
+        attached.is_some()
     )
     .fetch_one(&mut **tx)
-    .await?;
+    .await
+    .map_err(branch_violation)?;
 
     Ok(TaskRow {
         id: TaskId::from_uuid(row.id),
@@ -389,9 +467,50 @@ async fn insert_task(
         harness_session_id: row.harness_session_id,
         created_by: input.created_by.clone(),
         parent_id: input.parent_id,
+        branch,
+        base_branch: attached.map(|pr| pr.base.clone()),
+        pr_attached: attached.is_some(),
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+/// The key of the open task of `project` that holds `branch`, other than `except`.
+async fn open_branch_holder(
+    conn: &mut sqlx::PgConnection,
+    project: ProjectId,
+    branch: &str,
+    except: Option<TaskId>,
+) -> Result<Option<TaskKey>, DbError> {
+    let key: Option<String> = sqlx::query_scalar(
+        "SELECT key FROM tasks
+         WHERE project_id = $1 AND branch = $2 AND id IS DISTINCT FROM $3
+           AND status NOT IN ('completed', 'failed', 'cancelled')",
+    )
+    .bind(project.as_uuid())
+    .bind(branch)
+    .bind(except.map(|id| id.as_uuid()))
+    .fetch_optional(conn)
+    .await?;
+    key.map(|key| {
+        key.parse()
+            .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))
+    })
+    .transpose()
+}
+
+/// Maps a violation of `tasks_open_branch` that the checks did not catch (a concurrent
+/// reopening) to [`DbError::BranchHeld`].
+pub(crate) fn branch_violation(error: sqlx::Error) -> DbError {
+    let held = error
+        .as_database_error()
+        .and_then(|e| e.constraint())
+        .is_some_and(|name| name == "tasks_open_branch");
+    if held {
+        DbError::BranchHeld { task: None }
+    } else {
+        DbError::Sqlx(error)
+    }
 }
 
 /// Queues the initial `task.assigned` prompt of a new task.
@@ -469,7 +588,13 @@ pub async fn queue_message_tx(
     let author_json = serde_json::to_value(&author)?;
     let content_json = serde_json::to_value(&content)?;
 
-    apply_task_event(tx, task_id, TaskEvent::MessageQueued, &author).await?;
+    reject_taken_branch(tx, task_id).await?;
+    apply_task_event(tx, task_id, TaskEvent::MessageQueued, &author)
+        .await
+        .map_err(|error| match error {
+            DbError::Sqlx(error) => branch_violation(error),
+            other => other,
+        })?;
 
     let msg_row = sqlx::query!(
         r#"
@@ -495,6 +620,29 @@ pub async fn queue_message_tx(
         delivered_at: msg_row.delivered_at,
         forwarded_at: None,
     })
+}
+
+/// A message reopens a final task only if no other open task holds its branch
+/// (`task-management` "Reopening needs the branch"). Nothing is queued otherwise.
+async fn reject_taken_branch(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+) -> Result<(), DbError> {
+    let task: Option<(Uuid, String, String)> =
+        sqlx::query_as("SELECT project_id, branch, status FROM tasks WHERE id = $1")
+            .bind(task_id.as_uuid())
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some((project, branch, status)) = task else {
+        return Ok(());
+    };
+    if !matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+        return Ok(());
+    }
+    match open_branch_holder(tx, ProjectId::from_uuid(project), &branch, Some(task_id)).await? {
+        Some(holder) => Err(DbError::BranchHeld { task: Some(holder) }),
+        None => Ok(()),
+    }
 }
 
 /// Text of the prompt a resumed run starts with when nothing else is queued.
@@ -559,7 +707,8 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
-            diverged, harness_session_id, created_by, parent_id, created_at, updated_at
+            diverged, harness_session_id, created_by, parent_id,
+            branch, base_branch, pr_attached, created_at, updated_at
         FROM tasks
         WHERE id = $1
         "#,
@@ -604,6 +753,9 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
             harness_session_id: r.harness_session_id,
             created_by: serde_json::from_value(r.created_by)?,
             parent_id: r.parent_id.map(TaskId::from_uuid),
+            branch: r.branch,
+            base_branch: r.base_branch,
+            pr_attached: r.pr_attached,
             created_at: r.created_at,
             updated_at: r.updated_at,
         })
@@ -1067,6 +1219,8 @@ async fn set_title_in(
     Ok(changed)
 }
 
+#[cfg(test)]
+mod branch_tests;
 #[cfg(test)]
 mod dependency_tests;
 #[cfg(test)]

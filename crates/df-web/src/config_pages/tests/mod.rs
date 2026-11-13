@@ -2,6 +2,7 @@
 //! are grouped by topic in the submodules.
 
 mod adapter_command;
+mod branches;
 mod credentials;
 mod forge_hints;
 mod forms;

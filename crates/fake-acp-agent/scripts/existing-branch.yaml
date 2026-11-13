@@ -1,0 +1,34 @@
+# Script of the existing-branch scenarios of the e2e suite (project `EB`). The marker in the
+# prompt picks the scenario; every turn plays the same `when` blocks.
+#
+# `[attached]`: the task works on a bot branch with an open draft pull request. The agent adds a
+# commit and completes the task: the factory comments on the pull request but leaves its draft
+# state alone.
+# `[rebase]`: the main branch moved on. The agent rebases its branch onto it; the runtime pushes
+# the rewritten branch with lease after the turn.
+sessions:
+  new:
+    - &turn
+      - when:
+          prompt_contains: "[attached]"
+          steps:
+            - say: "Bumping the dependency on the bot branch."
+            - shell: |
+                printf 'bumped by the demo agent\n' > bump.txt
+                git add bump.txt
+                git commit -q -m 'Add bump'
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Bumped the dependency on the bot branch."
+      - when:
+          prompt_contains: "[rebase]"
+          steps:
+            - say: "Rebasing the branch onto main."
+            - shell: |
+                git fetch -q origin main
+                git rebase -q origin/main
+      - end: end_turn
+  loaded:
+    - *turn

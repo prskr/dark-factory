@@ -130,6 +130,15 @@ impl ForgeClient for ForgeRouter {
         client.find_open_pull_request(&target, head, base).await
     }
 
+    async fn list_open_pull_requests(
+        &self,
+        p: &ProjectId,
+        head: &str,
+    ) -> Result<Vec<PullRequest>, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.list_open_pull_requests(&target, head).await
+    }
+
     async fn update_pull_request(
         &self,
         p: &ProjectId,

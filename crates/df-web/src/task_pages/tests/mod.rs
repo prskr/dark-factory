@@ -5,6 +5,7 @@ use crate::testkit::TestApp;
 mod create;
 mod dependencies;
 mod detail;
+mod existing_branch;
 mod layout;
 mod list;
 mod messages;

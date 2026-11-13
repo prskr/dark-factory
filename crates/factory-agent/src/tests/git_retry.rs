@@ -67,6 +67,7 @@ fn workspace(upstream: &Path) -> Workspace {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        ..Default::default()
     }
 }
 

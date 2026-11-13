@@ -159,9 +159,9 @@ fn bad_gateway() -> IntegrationError {
 
 #[test]
 fn a_negative_stored_pull_request_number_is_invalid_data() {
-    let error = RecordedPr::from_row(-1, None).err().unwrap();
+    let error = RecordedPr::from_row(-1, None, false).err().unwrap();
     assert!(matches!(error, ChannelError::InvalidData(_)));
-    assert_eq!(RecordedPr::from_row(7, None).unwrap().number, 7);
+    assert_eq!(RecordedPr::from_row(7, None, false).unwrap().number, 7);
 }
 
 #[tokio::test]
@@ -601,4 +601,129 @@ async fn the_ready_update_waits_for_the_task_lock() {
 
     running.await.unwrap().unwrap();
     assert_eq!(f.ready_marks(), [1]);
+}
+
+/// A fixture whose task holds the existing branch `fix/login`, attached to `pr` if given.
+async fn on_existing_branch(pr: Option<df_db::AttachedPr>) -> Fixture {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool).await;
+    env.task = env.task_on_branch("fix/login", pr).await;
+    let run = env.insert_run(env.task.id, 1, "running").await;
+    Fixture { env, run }
+}
+
+async fn is_attached(f: &Fixture) -> bool {
+    sqlx::query_scalar("SELECT pr_attached FROM tasks WHERE id = $1")
+        .bind(f.env.task.id.as_uuid())
+        .fetch_one(&f.env.ctx.pool)
+        .await
+        .unwrap()
+}
+
+fn attached_pr() -> df_db::AttachedPr {
+    df_db::AttachedPr {
+        number: 45,
+        url: "https://forge.example.test/o/r/pulls/45".into(),
+        base: "main".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_task_on_an_existing_branch_opens_its_own_pr_from_that_branch_unattached() {
+    let f = on_existing_branch(None).await;
+
+    f.run(f.job(true, None)).await.unwrap();
+
+    let creates = f.creates();
+    assert_eq!(
+        (creates[0].head.as_str(), creates[0].base.as_str()),
+        ("fix/login", "main")
+    );
+    assert!(!is_attached(&f).await);
+}
+
+#[tokio::test]
+async fn a_pr_a_human_opened_on_the_existing_branch_is_recorded_as_attached() {
+    let f = on_existing_branch(None).await;
+    let mut human = pull_request(44);
+    human.head = "fix/login".into();
+    f.env
+        .forge
+        .push_find_open_pull_request_result(Ok(Some(human)));
+
+    f.run(f.job(true, None)).await.unwrap();
+
+    assert!(f.creates().is_empty());
+    assert_eq!(f.pr_number().await, Some(44));
+    assert!(is_attached(&f).await);
+}
+
+#[tokio::test]
+async fn a_pr_found_on_the_task_own_branch_stays_the_factorys() {
+    let f = Fixture::new().await;
+    f.env
+        .forge
+        .push_find_open_pull_request_result(Ok(Some(pull_request(7))));
+
+    f.run(f.job(true, None)).await.unwrap();
+
+    assert!(!is_attached(&f).await);
+}
+
+#[tokio::test]
+async fn completion_on_an_attached_pr_posts_the_summary_and_changes_nothing_else() {
+    let f = on_existing_branch(Some(attached_pr())).await;
+    f.set_summary(f.run, "Rebased").await;
+
+    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+
+    assert!(f.ready_marks().is_empty());
+    assert_eq!(f.comments(), [(45, "Rebased".to_string())]);
+    assert!(
+        !f.env
+            .forge
+            .calls()
+            .iter()
+            .any(|c| matches!(c, ForgeCall::UpdatePullRequest { .. }))
+    );
+}
+
+#[tokio::test]
+async fn marking_an_attached_task_done_does_not_call_the_forge() {
+    let f = on_existing_branch(Some(attached_pr())).await;
+    let job = PrSyncJob {
+        run_id: None,
+        ..f.job(false, Some(Utc::now()))
+    };
+
+    f.run(job).await.unwrap();
+
+    assert!(f.env.forge.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_pr_found_after_a_creation_conflict_is_attached_on_an_existing_branch_only() {
+    for (existing_branch, attached) in [(true, true), (false, false)] {
+        let f = if existing_branch {
+            on_existing_branch(None).await
+        } else {
+            Fixture::new().await
+        };
+        f.env.forge.push_find_open_pull_request_result(Ok(None));
+        f.env
+            .forge
+            .push_create_pull_request_result(Err(IntegrationError::Conflict("exists".into())));
+        f.env
+            .forge
+            .push_find_open_pull_request_result(Ok(Some(pull_request(9))));
+
+        f.run(f.job(true, None)).await.unwrap();
+
+        assert_eq!(f.pr_number().await, Some(9));
+        assert_eq!(
+            is_attached(&f).await,
+            attached,
+            "existing branch: {existing_branch}"
+        );
+    }
 }

@@ -1,7 +1,8 @@
 //! Ref rules of a push: which ref updates a sandbox may send upstream.
 //!
-//! A sandbox may create or fast-forward its task branch and change its WIP branch in any way.
-//! Everything else is rejected, and one rejected command rejects the whole push.
+//! A sandbox may create or fast-forward its task branch, rewrite it too under the `with-lease`
+//! policy (upstream rejects a stale lease), and change its WIP branch in any way. Everything else
+//! is rejected, and one rejected command rejects the whole push.
 
 use std::fmt;
 
@@ -65,10 +66,12 @@ pub struct RefCommand {
 /// The refs a run may push to, as full ref names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefScope {
-    /// `refs/heads/factory/task/<KEY>`
+    /// `refs/heads/<tasks.branch>`
     pub task_branch: String,
     /// `refs/heads/factory/wip/<KEY>`
     pub wip_branch: String,
+    /// Whether non-fast-forward updates of the task branch are forwarded (policy `with-lease`).
+    pub rewrite_allowed: bool,
 }
 
 impl RefScope {
@@ -78,6 +81,17 @@ impl RefScope {
         Self {
             task_branch: format!("{TASK_BRANCH_PREFIX}{key}"),
             wip_branch: format!("{WIP_BRANCH_PREFIX}{key}"),
+            rewrite_allowed: false,
+        }
+    }
+
+    /// The scope with the policy `with-lease`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_lease(self) -> Self {
+        Self {
+            rewrite_allowed: true,
+            ..self
         }
     }
 }
@@ -178,7 +192,10 @@ fn rejection<A: Ancestry>(
     if command.name != scope.task_branch || command.new.is_zero() {
         return Ok(Some(Reason::RefNotAllowed));
     }
-    if command.old.is_zero() || ancestry.is_ancestor(&command.old, &command.new)? {
+    if command.old.is_zero()
+        || scope.rewrite_allowed
+        || ancestry.is_ancestor(&command.old, &command.new)?
+    {
         Ok(None)
     } else {
         Ok(Some(Reason::NonFastForward))
@@ -265,7 +282,66 @@ mod tests {
             RefScope {
                 task_branch: "refs/heads/factory/task/DF-7".to_owned(),
                 wip_branch: "refs/heads/factory/wip/DF-7".to_owned(),
+                rewrite_allowed: false,
             }
+        );
+    }
+
+    #[test]
+    fn rebase_of_the_task_branch_is_forwarded_under_with_lease_without_ancestry_lookup() {
+        let ancestry = FakeAncestry::answering(Ok(false));
+        let commands = [command(oid('1'), oid('2'), "refs/heads/factory/task/DF-7")];
+
+        let verdicts = check_refs(&scope().with_lease(), &commands, &ancestry).unwrap();
+
+        assert_eq!(reasons(&verdicts), [None]);
+        assert!(ancestry.calls().is_empty());
+    }
+
+    #[test]
+    fn rebase_of_the_task_branch_is_rejected_under_never() {
+        let ancestry = FakeAncestry::answering(Ok(false));
+        let commands = [command(oid('1'), oid('2'), "refs/heads/factory/task/DF-7")];
+
+        let verdicts = check_refs(&scope(), &commands, &ancestry).unwrap();
+
+        assert_eq!(reasons(&verdicts), [Some(Reason::NonFastForward)]);
+    }
+
+    #[test]
+    fn deleting_the_task_branch_and_other_refs_stay_rejected_under_with_lease() {
+        let ancestry = FakeAncestry::answering(Ok(false));
+        let scope = scope().with_lease();
+        let deletion = [command(oid('1'), zero(), "refs/heads/factory/task/DF-7")];
+        let other = [command(oid('1'), oid('2'), "refs/heads/main")];
+
+        assert_eq!(
+            reasons(&check_refs(&scope, &deletion, &ancestry).unwrap()),
+            [Some(Reason::RefNotAllowed)]
+        );
+        assert_eq!(
+            reasons(&check_refs(&scope, &other, &ancestry).unwrap()),
+            [Some(Reason::RefNotAllowed)]
+        );
+    }
+
+    #[test]
+    fn existing_branch_of_the_task_is_forwarded_and_the_key_pattern_is_not() {
+        let ancestry = FakeAncestry::answering(Ok(true));
+        let scope = RefScope {
+            task_branch: "refs/heads/renovate/serde-1.x".to_owned(),
+            ..scope()
+        };
+        let own = [command(oid('1'), oid('2'), "refs/heads/renovate/serde-1.x")];
+        let key_branch = [command(zero(), oid('2'), "refs/heads/factory/task/DF-7")];
+
+        assert_eq!(
+            reasons(&check_refs(&scope, &own, &ancestry).unwrap()),
+            [None]
+        );
+        assert_eq!(
+            reasons(&check_refs(&scope, &key_branch, &ancestry).unwrap()),
+            [Some(Reason::RefNotAllowed)]
         );
     }
 

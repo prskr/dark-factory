@@ -83,9 +83,78 @@ fn pr_json(title: &str, draft: bool) -> serde_json::Value {
     json!({
         "number": 7, "node_id": "PR_kwDO7", "html_url": "https://github.com/o/r/pull/7",
         "title": title, "body": "b", "state": "open", "draft": draft, "merged_at": null,
-        "head": {"ref": "factory/task/DF-1", "sha": "abc"},
+        "head": {"ref": "factory/task/DF-1", "sha": "abc", "repo": {"full_name": "o/r"}},
         "base": {"ref": "main", "sha": "def"},
     })
+}
+
+fn list_open(github: &GitHub<&Fake, FixedClock, &Fake>) -> Result<Vec<PullRequest>, Error> {
+    github.list_open(&pr_ref().repo, "fix/shared")
+}
+
+fn shared_pr(number: u64, base: &str, head_repo: &str) -> serde_json::Value {
+    let mut pr = pr_json("t", false);
+    pr["number"] = json!(number);
+    pr["head"] = json!({"ref": "fix/shared", "sha": "abc", "repo": {"full_name": head_repo}});
+    pr["base"]["ref"] = json!(base);
+    pr
+}
+
+// Scenarios "One open PR" and "Several bases".
+#[test]
+fn list_open_returns_every_base_of_the_head_branch() -> anyhow::Result<()> {
+    let fake = fake(vec![reply(
+        200,
+        json!([
+            shared_pr(42, "main", "o/r"),
+            shared_pr(43, "release/1.2", "o/r")
+        ]),
+    )]);
+    let prs = list_open(&github(&fake, &[]))?;
+    let found: Vec<_> = prs.iter().map(|p| (p.id.number, p.base.as_str())).collect();
+    assert_eq!(found, [(42, "main"), (43, "release/1.2")]);
+    assert_eq!(
+        urls(&fake),
+        [
+            "https://api.github.com/repos/o/r/pulls?state=open&head=o%3Afix%2Fshared&per_page=100&page=1"
+        ]
+    );
+    Ok(())
+}
+
+// Scenario "Closed PR", and pull requests from forks never match.
+#[test]
+fn list_open_is_empty_without_open_pull_requests_and_skips_forks() -> anyhow::Result<()> {
+    let fake = fake(vec![reply(200, json!([shared_pr(5, "main", "fork/r")]))]);
+    assert!(list_open(&github(&fake, &[]))?.is_empty());
+    Ok(())
+}
+
+// Scenario "Closed PR": the request asks for open pull requests only, and a closed one in the
+// response is dropped.
+#[test]
+fn list_open_asks_for_open_pull_requests_and_drops_closed_ones() -> anyhow::Result<()> {
+    let mut closed = shared_pr(5, "main", "o/r");
+    closed["state"] = json!("closed");
+    let fake = fake(vec![reply(200, json!([closed]))]);
+    assert!(list_open(&github(&fake, &[]))?.is_empty());
+    assert!(urls(&fake)[0].contains("state=open"));
+    Ok(())
+}
+
+#[test]
+fn list_open_follows_full_pages() -> anyhow::Result<()> {
+    let full: Vec<_> = (0..100)
+        .map(|n| shared_pr(100 + n, "main", "fork/r"))
+        .collect();
+    let fake = fake(vec![
+        reply(200, json!(full)),
+        reply(200, json!([shared_pr(42, "main", "o/r")])),
+    ]);
+    let prs = list_open(&github(&fake, &[]))?;
+    assert_eq!(prs.iter().map(|p| p.id.number).collect::<Vec<_>>(), [42]);
+    assert!(urls(&fake)[1].ends_with("page=2"));
+    Ok(())
 }
 
 pub(super) fn pr_ref() -> PullRequestRef {

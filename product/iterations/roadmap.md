@@ -194,6 +194,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Edit own PR comments: agents edit or delete PR comments and review comments they posted | idea | `openspec/changes/archive/2026-11-05-iter3-review-tools` |
 | Agents review in the forge: agents submit reviews (verdict, line comments) and read other tasks' pull requests, as the reviewer of [`iteration-3.md`](iteration-3.md) demo step 2 | idea | ADR-0036, `openspec/changes/archive/2026-11-05-iter3-review-tools` |
 | Branch suggestions in the composer's "Existing branch" field from the head branches of open PRs (`pull-requests.list-open`, native `<datalist>`) | idea | `openspec/changes/iter3-branch-workflows` |
+| Rebase third-party commits on existing branches: accept rebased copies of commits already on the branch in `df:identity` (same author, author date and patch) | idea | `openspec/changes/iter3-branch-workflows` (non-goal) |
 | Waking a task on CI success or recovery | idea | `openspec/changes/iter3-ci-tools` |
 | Re-running or cancelling CI jobs from a factory tool | idea | `openspec/changes/iter3-ci-tools` |
 | CI and PR read tools (`list_pull_requests`, `read_ci_status`, `read_ci_log`) in chats | idea | `openspec/changes/iter3-ci-tools` |

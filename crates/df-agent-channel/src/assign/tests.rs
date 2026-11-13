@@ -1,5 +1,7 @@
 //! Tests of the assignment: prompt sections, harness files and `Assign` of a run.
 
+use df_proto::agent::v1::RewritePolicy as RewritePolicyProto;
+
 use super::*;
 use crate::ChannelConfig;
 use crate::runs::get_run;
@@ -19,6 +21,8 @@ fn project(command: &[&str]) -> ProjectInfo {
         image: "img".into(),
         base_branch: "main".into(),
         adapter_command: command.iter().map(ToString::to_string).collect(),
+        rewrite_policy: RewritePolicy::WithLease,
+        agent_branch_globs: Vec::new(),
     }
 }
 
@@ -189,6 +193,8 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
     assert_eq!(workspace.task_branch, "factory/task/DF-1");
     assert_eq!(workspace.wip_branch, "factory/wip/DF-1");
     assert_eq!(workspace.base_branch, "main");
+    assert_eq!(workspace.rewrite_policy(), RewritePolicyProto::WithLease);
+    assert!(!workspace.existing_branch);
     assert_eq!(assign.tools.len(), 15);
     assert_eq!(assign.task.expect("task").task_key, "DF-1");
     assert!(assign.continuation.is_none());
@@ -723,4 +729,38 @@ fn principals_convert_to_the_wire_type() {
     assert!(
         matches!(p.kind, Some(transcript::principal::Kind::System(s)) if s.reason == df_core::system_reason::TASK_ASSIGNED)
     );
+}
+
+#[tokio::test]
+async fn assign_of_a_task_on_an_existing_branch_carries_it_the_pr_base_and_the_policy()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    sqlx::query("UPDATE projects SET branch_rewrite_policy = 'never'")
+        .execute(&pool)
+        .await?;
+    let task = env
+        .task_on_branch(
+            "fix/cve",
+            Some(df_db::AttachedPr {
+                number: 41,
+                url: "https://git.example.org/pulls/41".into(),
+                base: "release/1.2".into(),
+            }),
+        )
+        .await;
+    let run_id = env.insert_run(task.id, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+
+    let workspace = build_assign(&env.ctx, &rc)
+        .await?
+        .workspace
+        .expect("workspace");
+
+    assert_eq!(workspace.task_branch, "fix/cve");
+    assert_eq!(workspace.wip_branch, format!("factory/wip/{}", task.key));
+    assert_eq!(workspace.base_branch, "release/1.2");
+    assert!(workspace.existing_branch);
+    assert_eq!(workspace.rewrite_policy(), RewritePolicyProto::Never);
+    Ok(())
 }

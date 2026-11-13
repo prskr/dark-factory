@@ -9,15 +9,16 @@ use anyhow::Context as _;
 
 use df_core::glob::{GlobSet, hidden_glob_set};
 use df_proto::agent::v1::{
-    PushReport, PushStatus, PushTarget, RunOutcome, RunReport, Workspace, WorkspaceState,
+    PushReport, PushStatus, PushTarget, RewritePolicy, RunOutcome, RunReport, Workspace,
+    WorkspaceState,
 };
 use df_proto::gateway::v1::PushCheck;
 use df_proto::push_reasons::{NON_FAST_FORWARD, PUSH_TOO_LARGE};
 use df_proto::transcript::v1::{Notice, NoticeLevel};
 
 use crate::git::{
-    DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Git, GitConfigParams, nul_separated,
-    proxy_ca_override, rewrite_git_config, shown_args,
+    DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Force, Git, GitConfigParams,
+    nul_separated, proxy_ca_override, rewrite_git_config, shown_args,
 };
 use crate::hidden_paths;
 
@@ -34,6 +35,68 @@ pub struct PrepareResult {
     pub push_failed: bool,
     /// Notices generated during prepare (e.g. `workspace.diverged`).
     pub notices: Vec<Notice>,
+}
+
+/// Why prepare can't start a task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrepareError {
+    /// The task works on an existing branch that the remote doesn't have.
+    BranchMissing(String),
+}
+
+impl std::fmt::Display for PrepareError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BranchMissing(branch) => {
+                write!(f, "the branch `{branch}` does not exist on the remote")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PrepareError {}
+
+/// File with the commit the task branch had on the remote when the runtime last fetched or
+/// pushed it (`remote_sha`, design D7). It lives in the runtime directory next to the checkout,
+/// which the harness can't write, and survives runs. The remote-tracking ref isn't used for the
+/// lease: the agent's own `git fetch` moves it.
+fn remote_sha_file(git: &Git) -> Option<std::path::PathBuf> {
+    git.runtime_dir.as_ref().map(|dir| dir.join("remote_sha"))
+}
+
+fn load_remote_sha(git: &Git) -> Option<String> {
+    let stored = std::fs::read_to_string(remote_sha_file(git)?).ok()?;
+    Some(stored.trim().to_owned()).filter(|sha| !sha.is_empty())
+}
+
+/// Records `sha`, never following a link planted at the path; a failure only costs the lease
+/// (the next push is plain and may be rejected).
+fn store_remote_sha(git: &Git, sha: &str) {
+    let Some(dir) = git.runtime_dir.as_deref() else {
+        return;
+    };
+    let path = dir.join("remote_sha");
+    let written =
+        crate::fs_util::create_real_dir(dir).and_then(|()| crate::fs_util::write_fresh(&path, sha));
+    if let Err(error) = written {
+        tracing::warn!(error = %error, "failed to persist the remote sha of the task branch");
+    }
+}
+
+fn rewrite_allowed(workspace: &Workspace) -> bool {
+    workspace.rewrite_policy() == RewritePolicy::WithLease
+}
+
+/// How to push `head` to the task branch: with lease on the remote commit the runtime last saw
+/// if the policy allows rewrites and `head` doesn't contain that commit, else plainly.
+async fn force_for(git: &Git, workspace: &Workspace, head: &str) -> Force {
+    if !rewrite_allowed(workspace) {
+        return Force::No;
+    }
+    match load_remote_sha(git) {
+        Some(remote) if !git.is_ancestor(&remote, head).await => Force::WithLease(remote),
+        _ => Force::No,
+    }
 }
 
 /// Builds the runtime-owned git config parameters for a workspace.
@@ -147,7 +210,18 @@ async fn clone_workspace(
     // Start from origin/<task branch> if the remote has it, else from the base branch
     let task_remote_ref = format!("origin/{}", workspace.task_branch);
     let start_point = if ref_exists(git, &task_remote_ref).await {
+        match git.git_output(&["rev-parse", &task_remote_ref]).await {
+            Ok(sha) => store_remote_sha(git, &sha),
+            // Only the lease is lost: pushes stay plain until the next fetch records a sha.
+            Err(error) => tracing::warn!(
+                error = %error,
+                task_branch = %workspace.task_branch,
+                "could not read the remote task branch; the lease is not tracked"
+            ),
+        }
         task_remote_ref
+    } else if workspace.existing_branch {
+        return Err(PrepareError::BranchMissing(workspace.task_branch.clone()).into());
     } else {
         format!("origin/{}", workspace.base_branch)
     };
@@ -229,6 +303,9 @@ async fn sync_existing_workspace(
     // run crashed after the clone), recreate it the way the fresh-clone path does.
     let checkout_out = git.run_cmd(&["checkout", &workspace.task_branch]).await?;
     if !checkout_out.status.success() {
+        if workspace.existing_branch && !has_remote_task {
+            return Err(PrepareError::BranchMissing(workspace.task_branch.clone()).into());
+        }
         let start_point = if has_remote_task {
             task_remote_ref.clone()
         } else {
@@ -257,8 +334,11 @@ async fn sync_with_remote_task_branch(
 ) -> anyhow::Result<PrepareResult> {
     let local_sha = git.current_head().await?;
     let remote_sha = git.git_output(&["rev-parse", task_remote_ref]).await?;
+    // What the runtime knew before this fetch: a remote still at it was not touched by others.
+    let known_remote = load_remote_sha(git);
     if local_sha == remote_sha {
         // Synchronized, nothing to do
+        store_remote_sha(git, &remote_sha);
         return Ok(PrepareResult::clean(local_sha));
     }
 
@@ -284,6 +364,7 @@ async fn sync_with_remote_task_branch(
             &local_sha,
             ahead_of_base,
             "Pushed unpushed commits during workspace prepare",
+            Force::No,
         )
         .await?;
         Ok(PrepareResult::pushed(local_sha, report))
@@ -291,11 +372,31 @@ async fn sync_with_remote_task_branch(
         // Remote is ahead: fast-forward merge
         git.git_output(&["merge", "--ff-only", task_remote_ref])
             .await?;
+        store_remote_sha(git, &remote_sha);
         let head_sha = git.current_head().await.unwrap_or_default();
         Ok(PrepareResult::clean(head_sha))
+    } else if rewrite_allowed(workspace) && known_remote.as_deref() == Some(remote_sha.as_str()) {
+        // A rewrite (rebase) from a killed run: the remote is where the runtime left it
+        let base_remote_ref = format!("origin/{}", workspace.base_branch);
+        let ahead_of_base = git
+            .commits_ahead(&base_remote_ref, &local_sha)
+            .await
+            .unwrap_or(local_ahead);
+        let report = push_task_branch(
+            git,
+            workspace,
+            &local_sha,
+            ahead_of_base,
+            "Pushed the rewritten task branch with lease during workspace prepare",
+            Force::WithLease(remote_sha),
+        )
+        .await?;
+        Ok(PrepareResult::pushed(local_sha, report))
     } else {
         // Diverged: local and remote both have commits the other lacks
-        // Leave both untouched, emit workspace.diverged notice
+        // Leave both untouched, emit workspace.diverged notice. `remote_sha` keeps the commit
+        // the runtime itself last saw: recording the fetched remote would let a later rewrite
+        // push over the other side's commits with that lease.
         let notice = Notice {
             level: NoticeLevel::Warning as i32,
             code: "workspace.diverged".to_string(),
@@ -326,6 +427,7 @@ async fn push_new_task_branch(git: &Git, workspace: &Workspace) -> anyhow::Resul
         &local_sha,
         local_ahead,
         "Pushed task branch during workspace prepare",
+        Force::No,
     )
     .await?;
     Ok(PrepareResult::pushed(local_sha, report))
@@ -338,10 +440,12 @@ async fn push_task_branch(
     local_sha: &str,
     commits_ahead_of_base: u32,
     detail: &str,
+    force: Force,
 ) -> anyhow::Result<PushReport> {
     let refspec = format!("{}:{}", workspace.task_branch, workspace.task_branch);
-    let push_output = git.push("origin", &refspec, false).await?;
+    let push_output = git.push("origin", &refspec, force).await?;
     let (status, detail) = if push_output.status.success() {
+        store_remote_sha(git, local_sha);
         (PushStatus::Ok, detail.to_string())
     } else {
         rejected_push(&push_output)
@@ -409,10 +513,12 @@ pub async fn push_after_turn(
 
     // Push HEAD to task branch ref (Finding 8)
     let refspec = format!("HEAD:refs/heads/{}", workspace.task_branch);
-    let push_out = git.push("origin", &refspec, false).await?;
+    let force = force_for(git, workspace, &current_sha).await;
+    let push_out = git.push("origin", &refspec, force).await?;
 
     if push_out.status.success() {
         *last_pushed_sha = Some(current_sha.clone());
+        store_remote_sha(git, &current_sha);
         let base_remote_ref = format!("origin/{}", workspace.base_branch);
         let ahead = git
             .commits_ahead(&base_remote_ref, &current_sha)
@@ -453,6 +559,7 @@ pub fn rejected_push(output: &std::process::Output) -> (PushStatus, String) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}\n{stderr}");
     let status = if combined.contains("non-fast-forward")
+        || combined.contains("stale info")
         || combined.contains("[rejected]")
         || combined.contains("fetch first")
         || combined
@@ -771,7 +878,7 @@ async fn delete_remote_wip(git: &Git, workspace: &Workspace) -> anyhow::Result<O
         return Ok(None);
     }
     let del_out = git
-        .push("origin", &format!(":{}", workspace.wip_branch), false)
+        .push("origin", &format!(":{}", workspace.wip_branch), Force::No)
         .await?;
     Ok(del_out.status.success().then(|| PushReport {
         target: PushTarget::WipBranch as i32,
@@ -799,7 +906,7 @@ async fn push_wip_snapshot(
     )
     .await?;
     let refspec = format!("{commit_sha}:refs/heads/{wip_branch}");
-    let push_out = git.push("origin", &refspec, true).await?;
+    let push_out = git.push("origin", &refspec, Force::Always).await?;
     let (status, detail) = if push_out.status.success() {
         (PushStatus::Ok, "Pushed WIP snapshot".to_string())
     } else {

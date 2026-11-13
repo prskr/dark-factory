@@ -184,7 +184,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Projects / Projects · new project | `/projects` | as Settings · projects; "New project" clicked | 1440 |
 | Config - Projects / Projects · settings page, general | `/projects/<key>` | `just serve-local`, login as `admin@example.com`; project `DF` with a forge credential; wake setting `members` (default) | 1440 |
 | Config - Projects / Projects · settings page, saved | `/projects/<key>` | as above; "Save project" clicked without changes | 1440 |
-| Config - Projects / Projects · settings page, security | `/projects/<key>?tab=security` | as Projects · settings page, general; default policy | 1440 |
+| Config - Projects / Projects · settings page, security | `/projects/<key>?tab=security` | as Projects · settings page, general; default policy; groups "Push checks" and "Branches" (branch rewrites `with-lease`, agent branches `renovate/**`, `dependabot/**`) | 1440 |
 | Config - Projects / Projects · settings page, security, invalid glob | `/projects/<key>?tab=security` | as above; `deploy/[` added as fifth glob and saved | 1440 |
 | Config - Projects / Projects · settings page, context | `/projects/<key>` | not built (`iter3-project-context`) | 1440 |
 | Config - Projects / Projects · settings page, integrations | `/projects/<key>?tab=integrations` | `just serve-local`, login as `admin@example.com`; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); `publicUrl` set, forgejo plugin with a webhook secret | 1440 |
@@ -205,6 +205,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
 | Flows (filter, new task) / Desktop · task list sort | `/tasks` | fixture tasks (not built); pointer on the sort button (tooltip) | 1440 |
 | Flows (filter, new task) / Desktop · task list sort open | `/tasks` | as above; sort button clicked | 1440 |
+| Flows (filter, new task) / Desktop · new task, options open | `/tasks` | new-task action clicked, options menu open; issue 7 and existing branch `renovate/serde-1.x` entered (chips "Issue #7", "Branch renovate/serde-1.x") | 1440 |
+| Flows (filter, new task) / Desktop · new task, branch held | `/tasks` | as above, submitted while DF-13 holds `renovate/serde-1.x`; error in the composer, values kept | 1440 |
 | Tasks - Phone / Phone · task list sort | `/tasks` | fixture tasks (not built) | 390 |
 | Tasks - Phone / Phone · task list sort open | `/tasks` | as above; sort button tapped | 390 |
 | Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
@@ -225,6 +227,7 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Personas / Personas · edit modal, claude-code, models filtered | `/personas/<id>/edit` | as above with harness `claude-code`; the select lists only the Anthropic Messages models | 1440 |
 | Config - Personas / Phone · edit persona sheet | `/personas/<id>/edit` | as Personas · edit modal | 390 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage | 1440 |
+| Tasks - Details Sidebar / Desktop · attached PR | `/tasks/<key>` | manual seed (not built): task on existing branch `renovate/serde-1.x` with attached open PR #40; "attached" pill after the PR link, tooltip "Opened outside the factory; the factory comments but never changes it" | 1440 |
 | Tasks - Artifacts / Desktop · artifacts tab | `/tasks/<key>` | manual seed (not built): task DF-12 with artifacts `login-loop.png`, `findings.md`, `cookie-trace.log` and a `write_artifact` call in the transcript; tab Artifacts chosen. Without artifacts the details column has no tab bar (Tasks / Desktop · light) | 1440 |
 | Tasks - Artifacts / Desktop · artifact split view | `/tasks/<key>` | as Desktop · artifacts tab; `findings.md` opened, details collapsed to the strip | 1440 |
 | Tasks - Artifacts / Desktop · task list collapsed, artifact open (1280) | `/tasks/<key>` | as Desktop · artifact split view; task list collapsed | 1280 |

@@ -385,6 +385,16 @@ async fn update_pull_request(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let (title, body) = (text_arg(args, "title"), text_arg(args, "body"));
+    let attached: bool = sqlx::query_scalar("SELECT pr_attached FROM tasks WHERE id = $1")
+        .bind(rc.task.id.as_uuid())
+        .fetch_one(&ctx.pool)
+        .await?;
+    if attached {
+        return Ok(Outcome::error(
+            "the pull request of this task was opened by someone else, so you can't change its \
+             title or body; comment on it instead",
+        ));
+    }
     let pr_number: Option<i64> = sqlx::query_scalar(
         "UPDATE tasks SET pr_title = COALESCE($2, pr_title), pr_body = COALESCE($3, pr_body),
              updated_at = now()
@@ -875,6 +885,13 @@ mod tests {
         ) -> Result<Option<df_core::PullRequest>, IntegrationError> {
             panic!("not used")
         }
+        async fn list_open_pull_requests(
+            &self,
+            _: &df_core::ProjectId,
+            _: &str,
+        ) -> Result<Vec<df_core::PullRequest>, IntegrationError> {
+            panic!("not used")
+        }
         async fn update_pull_request(
             &self,
             _: &df_core::ProjectId,
@@ -997,6 +1014,31 @@ mod tests {
         assert!(!res.is_error, "{}", message(&res));
         assert!(env.forge.calls().iter().any(|c| matches!(c,
             ForgeCall::UpdatePullRequest { number: 1, changes, .. } if changes.body.as_deref() == Some("Details"))));
+    }
+
+    #[tokio::test]
+    async fn update_pull_request_fails_for_an_attached_pr_and_changes_nothing() {
+        let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+        let (env, rc) = setup(pool.clone()).await;
+        sqlx::query("UPDATE tasks SET pr_number = 40, pr_attached = true WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let res = execute(
+            &env.ctx,
+            &rc,
+            call("update_pull_request", serde_json::json!({"title": "New"})),
+        )
+        .await;
+        assert!(res.is_error, "{}", message(&res));
+        let title: Option<String> = sqlx::query_scalar("SELECT pr_title FROM tasks WHERE id = $1")
+            .bind(rc.task.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(title, None);
+        assert!(env.forge.calls().is_empty());
     }
 
     #[tokio::test]
