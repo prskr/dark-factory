@@ -7,7 +7,7 @@ Decides when a task gets a run, drives each run through its states, and turns th
 ## Requirements
 
 ### Requirement: Runs start for queued tasks
-A task is due when its status is `queued` or `rate_limited`, it has no non-terminal run and its resume time is unset or in the past. While a run slot is free (see "Concurrent run limit"), the control plane SHALL start a run for a due task within 5 seconds of it becoming due or of the slot becoming free, on any replica, without ever starting two concurrent runs for one task. Starting a run SHALL clear the task's resume time.
+A task is due when its status is `queued` or `rate_limited`, it has no non-terminal run and its resume time is unset or in the past. While a run slot is free (see "Concurrent run limit"), the control plane SHALL start a run for a due task within one scheduler tick (`scheduling.tickMillis`, default 5 seconds) of it becoming due or of the slot becoming free, on any replica, without ever starting two concurrent runs for one task. Starting a run SHALL clear the task's resume time.
 
 #### Scenario: New task
 - **WHEN** task `DF-1` is created
@@ -60,7 +60,7 @@ Starting a run SHALL ensure the task volume exists, then provision a sandbox for
 
 #### Scenario: Quota exceeded
 - **WHEN** the provider rejects the sandbox because a quota is exceeded
-- **THEN** the run ends `provisioning_failed` with detail `capacity`, the task becomes `queued` with a resume time 2 minutes ahead, and the resume count is unchanged
+- **THEN** the run ends `provisioning_failed` with detail `capacity`, the task becomes `queued` with a resume time `scheduling.resumeBackoffSeconds` ahead (default 2 minutes), and the resume count is unchanged
 
 #### Scenario: Provisioning interrupted
 - **WHEN** a replica stops after creating run 3 of `DF-7` and before creating its Sandbox
@@ -248,7 +248,7 @@ If undelivered prompts exist at run end and the outcome is neither `failed` nor 
 - **THEN** the task stays `queued` and the next run starts with that message once the stopped run has ended
 
 ### Requirement: Automatic resume after infrastructure failures
-When a run ends with outcome `sandbox_lost`, `connect_timeout` or `provisioning_failed` (other than detail `capacity`) and the task's resume count is below `runs.maxAutoResumes` (default 3), the control plane SHALL set the task to `queued` with a resume time 2 minutes × (resume count + 1) ahead and increment the resume count. Otherwise the task SHALL become `failed`. Runs ending with outcome `failed` SHALL NOT be resumed automatically.
+When a run ends with outcome `sandbox_lost`, `connect_timeout` or `provisioning_failed` (other than detail `capacity`) and the task's resume count is below `runs.maxAutoResumes` (default 3), the control plane SHALL set the task to `queued` with a resume time `scheduling.resumeBackoffSeconds` (default 2 minutes) × (resume count + 1) ahead and increment the resume count. Otherwise the task SHALL become `failed`. Runs ending with outcome `failed` SHALL NOT be resumed automatically.
 
 #### Scenario: Sandbox lost is resumed
 - **WHEN** the sandbox pod of `DF-8` is deleted during its first run at 02:00
@@ -350,3 +350,22 @@ A board member allowed to stop a run SHALL be able to interrupt its turn. If the
 #### Scenario: Held-back message after an interrupt
 - **WHEN** a board member queues "use the other API" during a turn and then interrupts it
 - **THEN** the message is sent to the runtime at the turn end and starts the next turn of the same run
+
+### Requirement: Configurable scheduling waits
+The control plane SHALL read an optional configuration section `scheduling`: `tickMillis` (default 5000, scheduler tick, lost-sandbox sweep and job dispatcher poll), `resumeBackoffSeconds` (default 120, automatic resume base and `capacity` requeue) and `forgeRetryBaseSeconds` (default 30, first retry of PR sync and mark-draft). Without the section, behavior SHALL be unchanged. A value of 0 or above its limit SHALL stop startup with an error naming the setting.
+
+#### Scenario: Section unset
+- **WHEN** the control plane starts without a `scheduling` section
+- **THEN** the scheduler ticks and the job dispatcher polls every 5 s, a `sandbox_lost` run is resumed after 2 minutes and a failed PR sync is first retried after 30 s
+
+#### Scenario: Short tick
+- **WHEN** `scheduling.tickMillis` is 500 and a PR sync job's backoff elapses without a new job notification
+- **THEN** the dispatcher picks the job up within about 500 ms
+
+#### Scenario: Short backoff
+- **WHEN** `scheduling.resumeBackoffSeconds` is 5 and the sandbox of `DF-8` is lost during its first run
+- **THEN** `DF-8` is `queued` with a resume time 5 s ahead and run 2 starts within one tick after it
+
+#### Scenario: Invalid value
+- **WHEN** the configuration sets `scheduling.tickMillis: 0`
+- **THEN** the control plane doesn't start and the error names `scheduling.tickMillis`
