@@ -205,4 +205,4 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Chat autocomplete of repository file and skill names | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
 | JS unit test runner for web UI component logic | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
 | Type check with the native TypeScript compiler as a pinned standalone binary instead of `npx` | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
-| Project list task counts in status tones (plain numbers: Queued grey, Running blue, Waiting orange, Done ink; no underline), as on the board "Settings · projects, two-line rows (1350)" | idea | `openspec/changes/ui-settings-list-rows`, `docs/design-workflow.md` (Known deviations) |
+| Project list task counts in status tones (plain numbers: Queued grey, Running blue, Waiting orange, Done ink; no underline), as on the board "Settings · projects, two-line rows (1350)" | idea | `openspec/changes/archive/2026-11-14-ui-settings-list-rows`, `docs/design-workflow.md` (Known deviations) |
