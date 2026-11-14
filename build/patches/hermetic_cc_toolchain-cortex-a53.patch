@@ -1,0 +1,16 @@
+Drops rustc's `-Wl,--fix-cortex-a53-843419` (pre-link arg of aarch64-unknown-linux-{gnu,musl} since
+Rust 1.98), which zig cc rejects as an unsupported linker arg. See uber/hermetic_cc_toolchain#269 and
+ziglang/zig#36624; obsolete once rustc 1.101 (rust-lang/rust#164752) is the pinned toolchain.
+
+--- a/toolchain/zig-wrapper.zig
++++ b/toolchain/zig-wrapper.zig
+@@ -270,6 +270,9 @@
+     // This is needed because zig c++ doesn't handle the -u flag correctly
+     // (it tries to open the symbol name as a file instead of passing it to the linker)
+     while (argv_it.next()) |arg| {
++        // The erratum affects Cortex-A53 cores only, which are not a target here.
++        if (mem.eql(u8, arg, "-Wl,--fix-cortex-a53-843419")) continue;
++
+         if (mem.eql(u8, arg, "-u")) {
+             // Get the next argument (the symbol name)
+             if (argv_it.next()) |symbol| {
