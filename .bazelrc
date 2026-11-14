@@ -29,6 +29,14 @@ build:fmt --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
 # transitions to the amd64/arm64 musl platforms) reuse them. macOS keeps its native target platform.
 build:linux --platforms=//build/platforms:host_musl
 
+# zig cc (hermetic_cc_toolchain, C toolchain of the exec platform) keeps its libc/compiler_rt build products
+# in a cache directory. Actions have no HOME and a private /tmp, so without a fixed, writable path every
+# link re-builds them (~16 s per proc-macro or build script, build 2x slower). The path is baked into the
+# toolchain: keep it identical on every machine, or the remote cache is not shared. Override it (and add the
+# matching `--sandbox_writable_path`) in .bazelrc.user only if /var/tmp is not writable.
+common:linux --repo_env=HERMETIC_CC_TOOLCHAIN_CACHE_PREFIX=/var/tmp/zig-cache
+build:linux --sandbox_writable_path=/var/tmp/zig-cache
+
 build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
 build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2
