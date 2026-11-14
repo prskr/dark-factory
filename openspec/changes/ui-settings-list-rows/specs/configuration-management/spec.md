@@ -7,7 +7,7 @@ From 768 px, the lists of projects, model providers and credential references SH
 
 #### Scenario: Project row
 - **WHEN** a board member opens `/projects` at 1440 px width and project `DF` has repository `https://git.example.org/peter/dark-factory.git` and base branch `main`
-- **THEN** the row of `DF` shows the key `DF` in a column to the left of both lines, the name on the first line, the forge icon, the repository URL, a branch icon and `main` on the second line, and the four counts on the right
+- **THEN** the row of `DF` shows the key `DF` in a column to the left of both lines, the name on the first line, the forge icon, the repository as host and path (`git.example.org/peter/dark-factory`, without the `https://` or `http://` scheme and the `.git` suffix), a branch icon and `main` on the second line, and the four counts on the right
 
 #### Scenario: Model provider row
 - **WHEN** a board member opens `/model-providers` at 1440 px width and provider "OpenAI" uses the wire APIs OpenAI Chat Completions and OpenAI Responses, the scheme Authorization: Bearer and credential reference `openai`

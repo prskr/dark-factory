@@ -37,10 +37,13 @@ pub use overlay::{
 };
 pub use project_host::{HostRole, ProjectHosts, issue_role, project_forge_kind, role_icon};
 pub use shell::{
-    CreateAction, avatar, bottom_bar, floating_create, initials, page_header, phone_profile_menu,
-    profile_menu, rail, settings_sidebar,
+    CreateAction, avatar, bottom_bar, floating_create, initials, page_header,
+    page_header_with_subtitle, phone_profile_menu, profile_menu, rail, settings_sidebar,
 };
-pub use table::{Cell, data_table, td, th, tr, tr_with_id};
+pub use table::{
+    Cell, actions_cell, data_table, entry_button, entry_link, entry_tr, faint_separator, name_cell,
+    separator, td, th, tr, tr_with_id,
+};
 pub use transcript::QueuedState;
 
 #[cfg(test)]

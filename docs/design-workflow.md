@@ -64,10 +64,10 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
-| Config - Projects | Projects: table in the settings area, new-project modal, project settings page and its tabs (general, security, context, integrations with its states); phone |
+| Config - Projects | Projects: two-line list rows in the settings area, new-project modal, project settings page and its tabs (general, security, context, integrations with its states); phone |
 | Config - Personas | Personas: cards, edit modal; phone edit sheet; settings area; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
-| Config - Credentials | Credentials: table, new with validation error; error page (not found) |
-| Config - Model providers | Model providers: table, new provider modal per credential scheme, provider settings page (general, models, model errors) |
+| Config - Credentials | Credentials: two-line list rows, new with validation error; error page (not found) |
+| Config - Model providers | Model providers: two-line list rows, new provider modal per credential scheme, provider settings page (general, models, model errors) |
 | Empty states | One board per empty state |
 | Network | Egress rules: table, search, new and edit modals, empty state |
 | Network - Graph | Traffic view: graph, table, allow and deny flows |
@@ -125,6 +125,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has three tabs (General, Security, Integrations).
 - The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
+- The task counts of the project list stay underlined accent links in mono; the board "Settings · projects, two-line rows (1350)" draws them as plain numbers in status tones (`ui-settings-list-rows`).
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
 ## Mapping views to boards
@@ -180,8 +181,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Phone / Phone · rate limited, resumes | `/tasks/<id>` | as Desktop · rate limited, resumes; details sheet open | 390 |
 | Tasks - Phone / Phone · requests | `/requests` | as Requests · inbox | 390 |
 | Tasks - Phone / Phone · requests, deny always | `/requests` | as Requests · deny always | 390 |
-| Config - Projects / Settings · projects | `/projects` | projects (not built) | 1440 |
-| Config - Projects / Projects · new project | `/projects` | as Settings · projects; "New project" clicked | 1440 |
+| Config - Projects / Settings · projects, two-line rows (1350) | `/projects` | `just serve-local` + `just seed-demo`; pointer on the first row | 1350 |
+| Config - Projects / Projects · new project | `/projects` | as Settings · projects, two-line rows (1350); "New project" clicked | 1440 |
 | Config - Projects / Projects · settings page, general | `/projects/<key>` | `just serve-local`, login as `admin@example.com`; project `DF` with a forge credential; wake setting `members` (default) | 1440 |
 | Config - Projects / Projects · settings page, saved | `/projects/<key>` | as above; "Save project" clicked without changes | 1440 |
 | Config - Projects / Projects · settings page, security | `/projects/<key>?tab=security` | as Projects · settings page, general; default policy; groups "Push checks" and "Branches" (branch rewrites `with-lease`, agent branches `renovate/**`, `dependabot/**`) | 1440 |
@@ -209,7 +210,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Flows (filter, new task) / Desktop · new task, branch held | `/tasks` | as above, submitted while DF-13 holds `renovate/serde-1.x`; error in the composer, values kept | 1440 |
 | Tasks - Phone / Phone · task list sort | `/tasks` | fixture tasks (not built) | 390 |
 | Tasks - Phone / Phone · task list sort open | `/tasks` | as above; sort button tapped | 390 |
-| Config - Model providers / Model providers · table | `/model-providers` | manual seed (not built): providers Claude subscription (Linus, Grace, Ada), Anthropic API (Ken), OpenAI (unused) | 1440 |
+| Config - Model providers / Model providers · two-line rows (1350) | `/model-providers` | `just serve-local` + `just seed-demo`; pointer on the first row | 1350 |
+| Config - Credentials / Credentials · two-line rows (1350) | `/credentials` | `just serve-local` + `just seed-demo`; pointer on the first row | 1350 |
 | Config - Model providers / Model providers · new, Claude subscription preset | `/model-providers/new` | "New model provider" clicked, preset Claude subscription chosen; header, value and extra headers disabled | 1440 |
 | Config - Model providers / Model providers · new, custom header | `/model-providers/new` | "New model provider" clicked, scheme Custom header, header `Authorization`, prefix `Token`, one extra header | 1440 |
 | Config - Model providers / Model providers · new, OpenCode Go preset | `/model-providers/new` | "New model provider" clicked, preset OpenCode Go chosen; tab General | 1440 |
