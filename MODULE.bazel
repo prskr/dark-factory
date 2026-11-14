@@ -38,6 +38,45 @@ toolchains_musl.config(
 )
 use_repo(toolchains_musl, "musl_toolchains_hub")
 
+bazel_dep(name = "toolchains_llvm", version = "1.13.0", dev_dependency = True)
+
+# Hermetic C toolchain for the Linux exec platforms (build scripts, proc-macros): pinned LLVM and a
+# Debian bullseye (glibc 2.31) sysroot from Chromium, one per host arch. Registered below.
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm", dev_dependency = True)
+llvm.toolchain(
+    name = "llvm_toolchain",
+    cxx_include_layout = {
+        "linux-x86_64": "debian",
+        "linux-aarch64": "debian",
+    },
+    llvm_version = "18.1.8",
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@sysroot_linux_x86_64//sysroot",
+    targets = ["linux-x86_64"],
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@sysroot_linux_aarch64//sysroot",
+    targets = ["linux-aarch64"],
+)
+use_repo(llvm, "llvm_toolchain")
+
+llvm_sysroot = use_repo_rule("@toolchains_llvm//toolchain:sysroot.bzl", "sysroot")
+
+llvm_sysroot(
+    name = "sysroot_linux_x86_64",
+    sha256 = "f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e"],
+)
+
+llvm_sysroot(
+    name = "sysroot_linux_aarch64",
+    sha256 = "278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6"],
+)
+
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
 buf.toolchains(version = "v1.68.4")
 use_repo(buf, "rules_buf_toolchains")
@@ -151,6 +190,8 @@ use_repo(rust, "rust_toolchains")
 register_toolchains(
     "@musl_toolchains_hub//:all",
     "//build/platforms:musl_test_toolchain",
+    "@llvm_toolchain//:cc-toolchain-x86_64-linux",
+    "@llvm_toolchain//:cc-toolchain-aarch64-linux",
     dev_dependency = True,
 )
 
