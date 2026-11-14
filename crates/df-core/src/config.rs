@@ -1105,7 +1105,7 @@ fn default_commit_email() -> String {
 
 /// The adapter version is the tag of the harness image (`deploy/images/claude-harness`).
 fn default_claude_code_image() -> String {
-    "ghcr.io/prskr/dark-factory/claude-harness:0.95.0".to_string()
+    "ghcr.io/prskr/dark-factory/claude-harness:0.107.0".to_string()
 }
 
 fn default_adapter_command() -> Vec<String> {

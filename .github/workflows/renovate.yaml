@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # renovate: datasource=npm depName=renovate
-      RENOVATE_VERSION: 44.198.3
+      RENOVATE_VERSION: 44.239.1
       # renovate: datasource=npm depName=pnpm
       PNPM_VERSION: 12.18.0
     steps:
@@ -47,9 +47,11 @@ jobs:
       - name: Renovate
         run: npx --yes "renovate@$RENOVATE_VERSION"
         env:
-          # Fine-grained PAT (contents, pull requests, issues, workflows: read and write). Not a GitHub
-          # App installation token (expires after one hour), not GITHUB_TOKEN (its pull requests trigger
-          # no CI runs).
+          # Fine-grained PAT (contents, pull requests, issues, workflows, commit statuses: read and
+          # write). Not a GitHub App installation token (expires after one hour), not GITHUB_TOKEN (its
+          # pull requests trigger no CI runs). Without commit statuses, setting the minimum release age
+          # status (`renovate/stability-days`, npm updates under config:best-practices) fails and
+          # Renovate aborts the whole run ("Repository has changed during renovation").
           RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
           RENOVATE_PLATFORM: github
           RENOVATE_REPOSITORIES: ${{ github.repository }}
@@ -57,4 +59,6 @@ jobs:
           RENOVATE_REQUIRE_CONFIG: required
           RENOVATE_BINARY_SOURCE: global
           RENOVATE_ALLOWED_COMMANDS: '["^bazel mod tidy$"]'
+          # the bazel-module manager updates MODULE.bazel.lock with `bazel mod deps --lockfile_mode=update`
+          RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: '["bazelModDeps"]'
           LOG_LEVEL: info
