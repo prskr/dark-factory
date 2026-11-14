@@ -32,10 +32,11 @@ build:linux --platforms=//build/platforms:host_musl
 # zig cc (hermetic_cc_toolchain, C toolchain of the exec platform) keeps its libc/compiler_rt build products
 # in a cache directory. Actions have no HOME and a private /tmp, so without a fixed, writable path every
 # link re-builds them (~16 s per proc-macro or build script, build 2x slower). The path is baked into the
-# toolchain: keep it identical on every machine, or the remote cache is not shared. Override it (and add the
-# matching `--sandbox_writable_path`) in .bazelrc.user only if /var/tmp is not writable.
+# toolchain: keep it identical on every machine, or the remote cache is not shared. The sandbox makes the
+# parent directory writable, because the sandbox fails to start an action when the cache directory itself
+# does not exist yet. Override both in .bazelrc.user only if /var/tmp is not writable.
 common:linux --repo_env=HERMETIC_CC_TOOLCHAIN_CACHE_PREFIX=/var/tmp/zig-cache
-build:linux --sandbox_writable_path=/var/tmp/zig-cache
+build:linux --sandbox_writable_path=/var/tmp
 
 build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
@@ -66,6 +67,14 @@ build:rbe --extra_execution_platforms=//build/platforms:linux_amd64_rbe
 build:rbe --host_platform=//build/platforms:linux_amd64_rbe
 build:rbe --platforms=//build/platforms:linux_amd64_musl
 build:rbe --jobs=50
+
+# `rbe` from a client that is not amd64 Linux (arm64 Linux, macOS): the zig exec toolchain for the amd64
+# workers is only declared there (hermetic_cc_toolchain skips the host's own platform), and tests that start
+# containers or need the client's own tools cannot run, so the tag is excluded from build and test.
+build:rbe-cross --config=rbe
+build:rbe-cross --extra_toolchains=@zig_sdk//toolchain/linux-amd64:linux_amd64_gnu.2.28
+build:rbe-cross --build_tag_filters=-no-remote-exec
+build:rbe-cross --test_tag_filters=-no-remote-exec
 
 build:ci --build_metadata=ROLE=CI
 
