@@ -140,7 +140,7 @@ pub(super) async fn project_list(
 /// The table row of project `key`.
 pub(super) fn project_row(html: &str, key: &str) -> String {
     let at = html
-        .find(&format!(">{key}</span><a href=\"/projects/{key}\""))
+        .find(&format!(">{key}</span></td>"))
         .unwrap_or_else(|| panic!("{key}: {html}"));
     let start = html[..at].rfind("<tr").unwrap();
     html[start..start + html[start..].find("</tr>").unwrap()].to_string()

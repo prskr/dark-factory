@@ -31,7 +31,9 @@ spec:
             periodSeconds: 5
           resources:
             requests: {cpu: 100m, memory: 512Mi}
-            limits: {memory: 1536Mi}
+            # One Chromium per connection, up to three at once (two tests, one with a second
+            # viewer), plus the memory-backed /dev/shm: 1.5 Gi was OOM-killed in CI.
+            limits: {memory: 2Gi}
           volumeMounts:
             - {name: shm, mountPath: /dev/shm}
       volumes:

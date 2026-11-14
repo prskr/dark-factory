@@ -287,7 +287,7 @@ kind on Podman is experimental. The script sets `KIND_EXPERIMENTAL_PROVIDER=podm
 
 ## Resource budget
 
-The node targets about 3.5 GiB peak memory including Chromium. The manifests set small requests and limits (control plane 128 Mi/512 Mi, PostgreSQL 128 Mi/256 Mi, Forgejo 128 Mi/512 Mi, Dex 32 Mi/128 Mi, Playwright 512 Mi/1.5 Gi), sandbox pods default to 1 Gi, at most four sandbox pods exist and two tests run at a time (`E2E_TEST_THREADS=2`, the default). Measure with `podman stats df-e2e-control-plane` (or `docker stats`) while the run is going.
+The node targets about 3.5 GiB peak memory including Chromium. The manifests set small requests and limits (control plane 128 Mi/512 Mi, PostgreSQL 128 Mi/256 Mi, Forgejo 128 Mi/512 Mi, Dex 32 Mi/128 Mi, Playwright 512 Mi/2 Gi), sandbox pods default to 1 Gi, at most four sandbox pods exist and two tests run at a time (`E2E_TEST_THREADS=2`, the default). Measure with `podman stats df-e2e-control-plane` (or `docker stats`) while the run is going.
 
 Measured on an 8-core, 15 GiB machine (Docker, arm64; `docker stats` every 5 s, node container):
 

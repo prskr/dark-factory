@@ -72,7 +72,7 @@ The row (`tr`) is `relative`. The entry control in the name cell covers the row 
 
 ### D5: Details lines
 
-- **Projects:** `forge_icon` + repository URL, then `Icon::GitBranch` (or the existing branch glyph; add it to `icons.rs` if missing) + base branch, in `font-mono text-[13px] text-muted`.
+- **Projects:** `forge_icon` + repository as host and path (a leading `https://` or `http://` and a trailing `.git` are dropped for display; other URL forms such as `ssh://` or `git@host:path` are shown unchanged), then the existing branch glyph `Icon::Git` + base branch, in `font-mono text-[13px] text-muted`. The phone card, the settings page and the form keep the full URL.
 - **Model providers:** wire API labels joined with ", ", then the scheme label, then the credential (`name (secret/key)`, or "missing"). The parts are separated by `·`; each separator is `aria-hidden`. The scheme and wire APIs use the sans font, the credential uses mono, as on the board.
 - **Credentials:** `secret / key` in mono.
 

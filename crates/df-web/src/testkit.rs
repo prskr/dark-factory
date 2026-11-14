@@ -986,6 +986,22 @@ impl SseReader {
     }
 }
 
+/// The first `<table>` of `html`.
+pub(crate) fn table_of(html: &str) -> &str {
+    &html[html.find("<table").unwrap()..html.find("</table>").unwrap()]
+}
+
+/// The phone card list (`<ul class="divide-y ...">`) of the projects page.
+pub(crate) fn phone_list_of(html: &str) -> &str {
+    let list = &html[html.find("<ul class=\"divide-y").unwrap()..];
+    &list[..list.find("</ul>").unwrap()]
+}
+
+/// The `<thead>` part of a table from [`table_of`].
+pub(crate) fn head_of(table: &str) -> &str {
+    &table[..table.find("<tbody").unwrap()]
+}
+
 /// The opening tag of the element at the first occurrence of `marker` (text or attribute): from
 /// the `<` before it to the next `>`.
 pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
