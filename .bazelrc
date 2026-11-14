@@ -57,6 +57,16 @@ build:cache --remote_timeout=10m
 build:cache-debug --remote_grpc_log=bazel-remote-grpc.log
 build:cache-debug --execution_log_compact_file=execution_log.binpb.zst
 
+# BuildBuddy remote execution (needs the API key like `cache`). The workers are amd64 Linux: tests build for
+# `linux_amd64_musl` whatever the client's OS and arch. Tests tagged `no-remote-exec` (they start containers)
+# run on the client; from clients that cannot run amd64 binaries add `--test_tag_filters=-no-remote-exec`.
+build:rbe --config=cache
+build:rbe --remote_executor=grpcs://remote.buildbuddy.io
+build:rbe --extra_execution_platforms=//build/platforms:linux_amd64_rbe
+build:rbe --host_platform=//build/platforms:linux_amd64_rbe
+build:rbe --platforms=//build/platforms:linux_amd64_musl
+build:rbe --jobs=50
+
 build:ci --build_metadata=ROLE=CI
 
 try-import %workspace%/.bazelrc.local

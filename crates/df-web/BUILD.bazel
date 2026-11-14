@@ -180,6 +180,7 @@ alias(
 
 rust_test(
     name = "df_web_test",
+    tags = ["no-remote-exec"],
     compile_data = [
         "styles/input.css",
         "//deploy:helm/dark-factory/values.schema.json",

@@ -1,0 +1,113 @@
+name: Spike hermetic cc toolchain
+
+# Temporary (change hermetic-cc-toolchain, design D6): measures the CI gate and the client scenarios.
+# Removed before the change is finished. Never pushes or logs in anywhere.
+on:
+  push:
+    branches: [refactor/hermetic-cc-toolchain]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # D6 steps 1 and 2: the `bazel` job of ci.yaml with the remote cache only vs. remote execution.
+  ci-gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [cache, rbe]
+    name: ci-gate (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    env:
+      BAZEL_ARGS: >-
+        --config=${{ matrix.mode }} --config=ci --config=linux-amd64-musl
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: No testcontainers in the production binary
+        run: |
+          deps="$(bazel query 'deps(//crates/dark-factory:dark-factory)' 2>/dev/null)"
+          if grep -q testcontainers <<<"$deps"; then
+            echo "testcontainers is a dependency of //crates/dark-factory:dark-factory" >&2
+            exit 1
+          fi
+
+      - name: Database tests carry no-remote-exec
+        run: build/check_no_remote_exec.sh
+
+      - name: Test
+        run: bazel test $BAZEL_ARGS //...
+
+      - name: Clippy
+        run: bazel build $BAZEL_ARGS --config=lint //crates/... //plugins/...
+
+      - name: Rustfmt
+        run: bazel build $BAZEL_ARGS --config=fmt //crates/... //plugins/...
+
+  # Client scenarios: Linux arm64 and macOS clients with remote execution; tests that cannot run there are excluded.
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, macos-latest]
+    name: client (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      BAZEL_ARGS: >-
+        --config=rbe --config=ci --build_tag_filters=-no-remote-exec --test_tag_filters=-no-remote-exec
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      # macOS cannot fetch the arm64 musl runtime of the harness images (case-insensitive volume, docs/development.md)
+      - name: Build
+        run: bazel build $BAZEL_ARGS //crates/... //plugins/...
+
+      - name: Test
+        run: bazel test $BAZEL_ARGS //crates/... //plugins/...
+
+      # Same commit again: everything must come from the cache, whichever client built it first.
+      - name: Build again
+        run: bazel build $BAZEL_ARGS //crates/... //plugins/...
+
+  # D6 step 3: build and test steps of the release jobs, without login and without push.
+  release-dry-run:
+    runs-on: ubuntu-latest
+    env:
+      BAZEL_ARGS: >-
+        --config=rbe --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Verify images
+        run: bazel test $BAZEL_ARGS //deploy:images_structure_test //deploy/images/claude-harness:structure_test //deploy/images/opencode-harness:structure_test
+
+      - name: Build the push targets (not run)
+        run: |
+          bazel build $BAZEL_ARGS --//build:version=spike //deploy:push_images
+          bazel build $BAZEL_ARGS //deploy/images/claude-harness:push //deploy/images/claude-harness:digest
+          bazel build $BAZEL_ARGS //deploy/images/opencode-harness:push //deploy/images/opencode-harness:digest

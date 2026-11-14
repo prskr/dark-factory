@@ -55,6 +55,7 @@ rust_library(
 
 rust_test(
     name = "df_agent_channel_test",
+    tags = ["no-remote-exec"],
     compile_data = ["//contract:mcp"],
     crate = ":df_agent_channel_test_util",
     # `crate` does not pass on the library's features.
@@ -75,6 +76,7 @@ rust_test(
 
 rust_test(
     name = "agent_port_test",
+    tags = ["no-remote-exec"],
     srcs = ["tests/agent_port.rs"],
     edition = "2024",
     lint_config = ":lints",
@@ -96,6 +98,7 @@ rust_test(
 
 rust_test(
     name = "spans_test",
+    tags = ["no-remote-exec"],
     srcs = ["tests/spans.rs"],
     edition = "2024",
     lint_config = ":lints",

@@ -40,6 +40,7 @@ alias(
 # the library linking them.
 rust_test(
     name = "df_gateway_test",
+    tags = ["no-remote-exec"],
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     compile_data = ["rules/secrets.yml"],
