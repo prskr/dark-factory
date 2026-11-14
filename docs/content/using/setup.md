@@ -16,6 +16,9 @@ instance namespace and a key in it; the control plane reads the value when it us
    `kubectl -n dark-factory create secret generic claude-token --from-file=token=<file>`.
 2. **Settings → Credentials → New credential reference**: a name, the Secret name and the key.
 
+The list shows each reference as a row with its name and, below it, `secret / key`. Click the row to
+edit the reference in a dialog.
+
 Two kinds of credentials are referenced:
 
 | Credential | Used by | Reaches the sandbox |
@@ -27,11 +30,15 @@ Two kinds of credentials are referenced:
 
 Projects are a section of the settings area: on a desktop open **Settings** in the navigation rail
 (it opens **Projects**), on a phone use **Projects** in the bottom bar. The project list shows the
-number of queued, running, waiting and done tasks per project.
+number of queued, running, waiting and done tasks per project. Each project is a row of two lines:
+the name, and below it the repository (host and path, without the `https://` or `http://` scheme and
+the `.git` suffix) with its forge icon and the base branch. On a desktop the whole row opens the
+project's settings page; a count that is not zero links to the task list of that status, and an
+empty count is left blank. On a phone the project is a card with an edit icon.
 
 **New project** opens a form; **Create project** stores the project and opens its settings page. A
-project is edited on its **settings page** at `/projects/<key>` (the project's name or its edit icon in the
-list). The page has a back link to the list, the project's key, name and forge icon, tabs and one
+project is edited on its **settings page** at `/projects/<key>` (its row in the list on a desktop, its
+edit icon on a phone). The page has a back link to the list, the project's key, name and forge icon, tabs and one
 **Save project** button. After a save the page stays open and says **Project saved**. The open tab
 is part of the URL (`?tab=security`, `?tab=integrations`), so a tab can be linked. After a save with an error the tab with the first error opens and the URL follows it.
 

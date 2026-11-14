@@ -9,7 +9,7 @@ The settings lists for projects, model providers and credential references are o
 - **BREAKING (UI):** from 768 px, the lists of projects, model providers and credential references show **two-line rows**:
   - Line 1 is the entry's name, which is the edit link.
   - Line 2 holds the details in smaller muted text:
-    - projects: forge icon, repository URL, branch icon and base branch
+    - projects: forge icon, repository as host and path (no scheme, no `.git`), branch icon and base branch
     - model providers: wire APIs · scheme · credential
     - credential references: secret / key
   - The project key sits in its own column to the left and spans both lines.

@@ -29,8 +29,8 @@ use crate::auth::CurrentUser;
 use crate::components::forms::invalid as invalid_attr;
 use crate::components::forms::{INPUT_CLASS, described_by, field, field_with_markup_hint};
 use crate::components::{
-    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, data_table, empty_panel, icon, select_field, td,
-    text_field, th, tr,
+    Cell, FormErrors, ICON_BUTTON_CLASS, Icon, actions_cell, data_table, empty_panel, entry_link,
+    entry_tr, icon, name_cell, select_field, separator, td, text_field, th,
 };
 use crate::layout::{Nav, Shell};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
@@ -696,9 +696,8 @@ fn region(entries: &[ListEntry], credentials: &[CredentialRef], notice: Option<&
             } @else {
                 (data_table(
                     html! {
-                        (th(Cell::First, html! { "Name" })) (th(Cell::Text, html! { "Wire APIs" }))
-                        (th(Cell::Text, html! { "Scheme" })) (th(Cell::Mono, html! { "Credential" }))
-                        (th(Cell::Text, html! { "Used by" }))
+                        (th(Cell::First, html! { "Name" }))
+                        (th(Cell::NoWrap, html! { "Used by" }))
                         (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
                     },
                     html! {
@@ -717,28 +716,25 @@ fn row(entry: &ListEntry, credentials: &[CredentialRef]) -> Markup {
         .iter()
         .find(|c| c.id.as_uuid() == input.credential_ref_id);
     html! {
-        (tr(html! {
-            (td(Cell::First, html! { a href={"/model-providers/" (id)} class="font-medium hover:underline" { (input.name) } }))
-            (td(Cell::Text, html! {
+        (entry_tr(html! {
+            (name_cell(entry_link(&format!("/model-providers/{id}"), &input.name), html! {
                 (input.apis.iter().map(|api| api.wire_api.label()).collect::<Vec<_>>().join(", "))
+                (separator("·"))
+                (input.scheme.label())
+                (separator("·"))
+                span class="font-mono" {
+                    @if let Some(c) = credential { (c.name) " (" (c.secret.name) "/" (c.secret.key) ")" } @else { "missing" }
+                }
             }))
-            (td(Cell::Text, html! { (input.scheme.label()) }))
-            (td(Cell::Mono, html! {
-                @if let Some(c) = credential { (c.name) " (" (c.secret.name) "/" (c.secret.key) ")" } @else { "missing" }
-            }))
-            (td(Cell::Text, html! {
+            (td(Cell::NoWrap, html! {
                 @if entry.personas.is_empty() { span class="text-faint" { "no persona" } }
                 @else { (entry.personas.join(", ")) }
             }))
-            (td(Cell::Actions, html! {
-                div class="flex items-center gap-1" {
-                    a href={"/model-providers/" (id)} aria-label={"Edit model provider " (input.name)}
-                        title={"Edit model provider " (input.name)} class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
-                    button type="button" hx-delete={"/model-providers/" (id)} hx-target="#config-list" hx-swap="outerHTML"
-                        hx-confirm={"Delete model provider " (input.name) "?"}
-                        aria-label={"Delete model provider " (input.name)} title="Delete" class=(ICON_BUTTON_CLASS) {
-                        (icon(Icon::Trash))
-                    }
+            (actions_cell(html! {
+                button type="button" hx-delete={"/model-providers/" (id)} hx-target="#config-list" hx-swap="outerHTML"
+                    hx-confirm={"Delete model provider " (input.name) "?"}
+                    aria-label={"Delete model provider " (input.name)} title="Delete" class=(ICON_BUTTON_CLASS) {
+                    (icon(Icon::Trash))
                 }
             }))
         }))

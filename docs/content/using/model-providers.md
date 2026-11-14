@@ -28,9 +28,9 @@ a model provider.
 
 ## Edit a provider
 
-A provider is edited on its **settings page** at `/model-providers/<id>` (the provider's name or its edit icon in the list). The page has a back link to the list, the provider's name, the tabs **General** and **Models** and one **Save model provider** button. The General tab is the form below without the Preset field. After a save the page stays open and says **Model provider saved**; a validation error opens the tab of the first error and keeps what you typed. The open tab is part of the URL (`?tab=models` links to the Models tab; General has no `tab`). The Models tab shows one line per model across the width of the page, and the whole list scrolls with the page.
+A provider is edited on its **settings page** at `/model-providers/<id>` (click the provider's row in the list). Each row shows the name, below it the wire APIs, the scheme and the credential (`missing` when the reference is gone), and on the right the personas that use the provider. The page has a back link to the list, the provider's name, the tabs **General** and **Models** and one **Save model provider** button. The General tab is the form below without the Preset field. After a save the page stays open and says **Model provider saved**; a validation error opens the tab of the first error and keeps what you typed. The open tab is part of the URL (`?tab=models` links to the Models tab; General has no `tab`). The Models tab shows one line per model across the width of the page, and the whole list scrolls with the page.
 
-**Delete** stays on the list row: it removes a provider no persona uses. The settings page is for desktop widths; it is not part of the phone navigation.
+**Delete** stays in the list row and does not open the provider: it removes a provider no persona uses. The settings page is for desktop widths; it is not part of the phone navigation.
 
 | Field | Required | Meaning |
 | --- | --- | --- |

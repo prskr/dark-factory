@@ -3,7 +3,9 @@
 use axum::http::StatusCode;
 
 use super::{credential, provider_form, stored};
-use crate::testkit::{TestApp, header_str, open_tab, tab_labels, tag_around, text};
+use crate::testkit::{
+    TestApp, head_of, header_str, open_tab, tab_labels, table_of, tag_around, text,
+};
 
 /// A stored provider named "Anthropic work".
 async fn stored_provider(app: &TestApp, cookie: &str) -> uuid::Uuid {
@@ -88,28 +90,127 @@ async fn an_unknown_provider_and_the_old_edit_route_answer_404() {
 }
 
 #[tokio::test]
-async fn the_list_links_name_and_edit_action_to_the_page() {
+async fn the_list_row_is_a_two_line_cover_link_to_the_page_with_its_own_delete() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let id = stored_provider(&app, &cookie).await;
 
     let html = text(app.get("/model-providers", &cookie).await).await;
 
-    let edit = tag_around(&html, "aria-label=\"Edit model provider Anthropic work\"");
+    let table = table_of(&html);
+    let head = head_of(table);
     assert!(
-        edit.starts_with(&format!("<a href=\"/model-providers/{id}\"")),
-        "{edit}"
+        head.contains(">Name</th>")
+            && head.contains(">Used by</th>")
+            && head.contains("<span class=\"sr-only\">Actions</span>")
+            && !head.contains("Wire APIs")
+            && !head.contains("Scheme"),
+        "{head}"
     );
-    let name = tag_around(&html, ">Anthropic work</a>");
+    let name = tag_around(table, ">Anthropic work</a>");
     assert!(
-        name.contains(&format!("href=\"/model-providers/{id}\"")),
+        name.contains(&format!("href=\"/model-providers/{id}\"")) && name.contains("after:inset-0"),
         "{name}"
     );
-    assert!(!html.contains("/edit"), "{html}");
     assert!(
-        html.contains("hx-delete="),
-        "delete stays in the list: {html}"
+        table.contains("class=\"group relative border-t border-line hover:bg-sunk\""),
+        "{table}"
     );
+    // Wire APIs, scheme and credential on the second line, with decorative separators.
+    assert!(
+        table.contains("Anthropic Messages <span aria-hidden=\"true\" class=\"mx-1\">·</span> ")
+            && table.contains("anthropic-key (llm-secret/api-key)"),
+        "{table}"
+    );
+    // "Used by" stays on one line, in the header and in the cell.
+    assert!(
+        head.contains(
+            "<th scope=\"col\" class=\"whitespace-nowrap px-3 py-3 font-medium\">Used by</th>"
+        ),
+        "{head}"
+    );
+    assert!(
+        table.contains("<td class=\"whitespace-nowrap px-3 py-3.5\">"),
+        "{table}"
+    );
+    let delete = tag_around(table, "aria-label=\"Delete model provider Anthropic work\"");
+    assert!(
+        delete.contains("hx-confirm=\"Delete model provider Anthropic work?\""),
+        "{delete}"
+    );
+    let cell = &table[..table.find("hx-delete=").unwrap()];
+    assert!(cell.ends_with("<div class=\"relative z-10 flex items-center justify-end gap-1\"><button type=\"button\" "), "{cell}");
+    assert!(
+        !table.contains("Edit model provider") && !html.contains("/edit"),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn the_second_line_reads_wire_apis_scheme_and_credential_in_order() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let credential = credential(&app, "openai").await;
+    let body = crate::testkit::form(&[
+        ("name", "OpenAI"),
+        ("credential_ref_id", &credential),
+        ("scheme", "bearer"),
+        ("api_openai_chat", "on"),
+        ("url_openai_chat", "https://api.openai.com"),
+        ("api_openai_responses", "on"),
+        ("url_openai_responses", "https://api.openai.com"),
+    ]);
+    let created = app.post("/model-providers", &body, &cookie).await;
+    assert_eq!(created.status(), StatusCode::OK);
+
+    let html = text(app.get("/model-providers", &cookie).await).await;
+
+    let table = table_of(&html);
+    let marker = "truncate text-[13px] text-muted\">";
+    let line = &table[table.find(marker).unwrap() + marker.len()..];
+    let line = &line[..line.find("</div>").unwrap()];
+    assert_eq!(
+        line.matches("<span aria-hidden=\"true\" class=\"mx-1\">·</span>")
+            .count(),
+        2
+    );
+    let mut visible = String::new();
+    let mut in_tag = false;
+    for c in line.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => visible.push(c),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        visible,
+        "OpenAI Chat Completions, OpenAI Responses · Authorization: Bearer · openai (llm-secret/api-key)"
+    );
+}
+
+#[tokio::test]
+async fn a_provider_whose_credential_is_unknown_shows_missing() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    stored_provider(&app, &cookie).await;
+    let record = df_db::model_providers::list_model_providers(&app.pool)
+        .await
+        .unwrap()
+        .remove(0);
+
+    let html = super::super::region(
+        &[super::super::ListEntry {
+            record,
+            personas: vec![],
+        }],
+        &[],
+        None,
+    )
+    .into_string();
+
+    assert!(html.contains("missing"), "{html}");
 }
 
 #[tokio::test]

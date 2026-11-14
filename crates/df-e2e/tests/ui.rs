@@ -50,7 +50,8 @@ fn newer_listed_before_older(session: &Session, newer: &str, older: &str) -> Loc
         .locator(format!("#task-rows > #row-{newer} ~ #row-{older}"))
 }
 
-/// Opens the settings page of project `key` from the edit action of the projects page.
+/// Opens the settings page of project `key` from its name link in the projects page (the desktop
+/// row or the phone card, whichever is visible).
 async fn open_project_page(session: &Session, env: &E2eEnv, key: &str) -> Result<()> {
     session
         .page
@@ -58,7 +59,7 @@ async fn open_project_page(session: &Session, env: &E2eEnv, key: &str) -> Result
         .await?;
     session
         .page
-        .locator(format!("[aria-label='Edit project {key}']:visible"))
+        .locator(format!("a[href='/projects/{key}']:visible"))
         .first()
         .click(None)
         .await
@@ -135,6 +136,237 @@ async fn projects_are_reached_through_settings_on_desktop_and_the_bottom_bar_on_
         .context("the bottom bar opens the projects page")
 }
 
+/// Neither the project table nor the page scrolls sideways, and the Done cell of every row, the
+/// one of `row` included, lies inside the table and the viewport.
+async fn assert_project_table_fits(session: &Session, row: &str) -> Result<()> {
+    let overflows = session
+        .page
+        .evaluate_value(
+            "(c => c.scrollWidth > c.clientWidth)(document.querySelector('[data-table]'))",
+        )
+        .await?;
+    assert_eq!(overflows, "false", "the project table scrolls sideways");
+    let page_overflows = session
+        .page
+        .evaluate_value(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth",
+        )
+        .await?;
+    assert_eq!(
+        page_overflows, "false",
+        "the page scrolls sideways at 1350 px"
+    );
+    let all_done_inside = session
+        .page
+        .evaluate_value(
+            "[...document.querySelectorAll('[data-table] tbody tr')].every(r => r.lastElementChild.getBoundingClientRect().right <= window.innerWidth)",
+        )
+        .await?;
+    assert_eq!(
+        all_done_inside, "true",
+        "a Done cell lies outside the viewport"
+    );
+    let card_box = session
+        .page
+        .locator("[data-table]")
+        .bounding_box()
+        .await?
+        .context("box of the table")?;
+    let done = session
+        .page
+        .locator(format!("{row} td:last-child"))
+        .bounding_box()
+        .await?
+        .context("box of the Done cell")?;
+    assert!(
+        done.x + done.width <= card_box.x + card_box.width + 0.5,
+        "the Done cell {done:?} is outside the table {card_box:?}"
+    );
+    Ok(())
+}
+
+/// configuration-management, "Two-line settings list rows": at 1350 px the project table fits
+/// without sideways scrolling even for a very long repository URL, a click on the URL opens the
+/// project and a count keeps its own link.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_table() -> Result<()> {
+    const KEY: &str = "LU";
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session
+        .page
+        .set_viewport_size(Viewport {
+            width: 1350,
+            height: 900,
+        })
+        .await?;
+    let url = format!("https://git.example.org/{}.git", "long-path/".repeat(25));
+    assert!(url.len() > 200);
+    session
+        .page
+        .goto(&format!("{}/projects", env.base_url), None)
+        .await?;
+    session
+        .page
+        .locator("button[hx-get='/projects/new']:visible")
+        .first()
+        .click(None)
+        .await
+        .context("open the new project form")?;
+    for (field, value) in [
+        ("#key", KEY),
+        ("#name", "Long URL"),
+        ("#repo_url", url.as_str()),
+        ("#image", data::PROJECT_IMAGE),
+    ] {
+        session.page.locator(field).fill(value, None).await?;
+    }
+    session
+        .page
+        .locator("button:has-text('Create project')")
+        .click(None)
+        .await
+        .context("create the project")?;
+    expect_page(&session.page)
+        .to_have_url_regex(&format!("/projects/{KEY}$"))
+        .await?;
+    // A task gives the row a count that is a link, whichever status the task has reached.
+    session
+        .create_task(&env, KEY, "Count in the project list.", None)
+        .await?;
+
+    session
+        .page
+        .goto(&format!("{}/projects", env.base_url), None)
+        .await?;
+    let row = format!("tr:has(a[href='/projects/{KEY}'])");
+    assert_project_table_fits(&session, &row).await?;
+
+    // The count link sits above the row's cover.
+    session
+        .page
+        .locator(format!("{row} a[href^='/tasks?project={KEY}&status=']"))
+        .first()
+        .click(None)
+        .await
+        .context("click a count")?;
+    expect_page(&session.page)
+        .to_have_url_regex(&format!("/tasks\\?project={KEY}&status="))
+        .await
+        .context("a count opens the filtered task list")?;
+
+    // A click on the repository URL goes through the cover link.
+    session
+        .page
+        .goto(&format!("{}/projects", env.base_url), None)
+        .await?;
+    let repo = session
+        .page
+        .locator(format!("{row} span.truncate"))
+        .bounding_box()
+        .await?
+        .context("box of the repository URL")?;
+    session
+        .page
+        .mouse()
+        .click(repo.x + 20.0, repo.y + repo.height / 2.0, None)
+        .await?;
+    expect_page(&session.page)
+        .to_have_url_regex(&format!("/projects/{KEY}$"))
+        .await
+        .context("a click on the repository URL opens the project")
+}
+
+/// configuration-management, "Click into a credential reference row": a click on the details
+/// line, outside the name, opens the edit dialog of that reference over the list.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_click_on_the_details_of_a_credential_row_opens_its_edit_dialog() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session.page.set_viewport_size(WIDE).await?;
+    session
+        .page
+        .goto(&format!("{}/credentials", env.base_url), None)
+        .await?;
+    let details = session
+        .page
+        .locator(format!(
+            "tr:has(button[aria-label='Edit credential reference {}']) span.font-mono",
+            data::CREDENTIAL_NAME
+        ))
+        .bounding_box()
+        .await?
+        .context("box of the secret and key line")?;
+    session
+        .page
+        .mouse()
+        .click(details.x + 5.0, details.y + details.height / 2.0, None)
+        .await?;
+    expect(session.page.locator("#composer-slot input[name=name]"))
+        .to_have_value(data::CREDENTIAL_NAME)
+        .await
+        .context("the edit dialog of the credential reference opens")?;
+    expect_page(&session.page)
+        .to_have_url_regex("/credentials$")
+        .await
+        .context("the list stays open under the dialog")
+}
+
+/// configuration-management, "Delete inside a row": the delete button asks for confirmation and
+/// does not open the provider's settings page.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn the_delete_button_of_a_provider_row_confirms_and_does_not_open_the_page() -> Result<()> {
+    let env = E2eEnv::from_env()?;
+    let session = Session::start(&env).await?;
+    session.login(&env).await?;
+    session.page.set_viewport_size(WIDE).await?;
+    let (messages, mut seen) = tokio::sync::mpsc::unbounded_channel::<String>();
+    session
+        .page
+        .on_dialog(move |dialog| {
+            let messages = messages.clone();
+            async move {
+                // The receiver only closes when the test is over.
+                messages.send(dialog.message().to_owned()).ok();
+                dialog.dismiss().await
+            }
+        })
+        .await?;
+    session
+        .page
+        .goto(&format!("{}/model-providers", env.base_url), None)
+        .await?;
+    let name = data::SETTINGS_PROVIDER_NAME;
+    session
+        .page
+        .locator(format!("button[aria-label='Delete model provider {name}']"))
+        .click(None)
+        .await
+        .context("click delete")?;
+    let message = tokio::time::timeout(std::time::Duration::from_secs(10), seen.recv())
+        .await
+        .context("the confirmation appears")?
+        .context("the dialog handler is alive")?;
+    assert_eq!(message, format!("Delete model provider {name}?"));
+    expect_page(&session.page)
+        .to_have_url_regex("/model-providers$")
+        .await
+        .context("the settings page did not open")?;
+    expect(
+        session
+            .page
+            .locator(format!("a[href^='/model-providers/']:has-text('{name}')")),
+    )
+    .to_have_count(1)
+    .await
+    .context("the provider is still listed")
+}
+
 /// configuration-management, "Saving the project settings page" and "Project settings tab in the
 /// URL": a save stays on the page and says so, the tab is part of the URL and a URL opens its tab.
 #[tokio::test]
@@ -181,7 +413,7 @@ async fn saving_a_project_stays_on_its_page_and_tabs_follow_the_url() -> Result<
         .context("the URL opens the Integrations tab")
 }
 
-/// Opens the settings page of the seeded provider with an HTTPS upstream from the edit action of the list.
+/// Opens the settings page of the seeded provider with an HTTPS upstream from its row in the list.
 async fn open_provider_page(session: &Session, env: &E2eEnv) -> Result<()> {
     session
         .page
@@ -190,7 +422,7 @@ async fn open_provider_page(session: &Session, env: &E2eEnv) -> Result<()> {
     session
         .page
         .locator(format!(
-            "[aria-label='Edit model provider {}']:visible",
+            "a[href^='/model-providers/']:has-text('{}'):visible",
             data::SETTINGS_PROVIDER_NAME
         ))
         .first()

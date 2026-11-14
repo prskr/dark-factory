@@ -39,13 +39,7 @@ async fn project_forge_follows_the_configured_integration_and_the_credential() {
         .await;
 
     let html = text(app.get("/projects", &cookie).await).await;
-    let row = |key: &str| {
-        let at = html
-            .find(&format!(">{key}</span><a href=\"/projects/{key}\""))
-            .unwrap();
-        let start = html[..at].rfind("<tr").unwrap();
-        html[start..start + html[start..].find("</tr>").unwrap()].to_string()
-    };
+    let row = |key: &str| project_row(&html, key);
     assert!(
         row("DF").contains("data-forge=\"forgejo\"")
             && row("DF").contains("viewBox=\"0 0 212 212\""),
