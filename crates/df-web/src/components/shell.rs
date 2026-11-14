@@ -66,12 +66,27 @@ pub fn avatar(initials: &str) -> Markup {
 /// Title row of a page with the number of entries (if it lists any) and the page's actions on
 /// the right.
 pub fn page_header(title: &str, count: Option<usize>, actions: Markup) -> Markup {
+    page_header_with_subtitle(title, count, None, actions)
+}
+
+/// [`page_header`] with a muted line below the title.
+pub fn page_header_with_subtitle(
+    title: &str,
+    count: Option<usize>,
+    subtitle: Option<&str>,
+    actions: Markup,
+) -> Markup {
+    let heading = html! {
+        h1 class="text-2xl font-semibold" {
+            (title)
+            @if let Some(count) = count { " " span class="font-normal text-faint" { (count) } }
+        }
+    };
     html! {
         header class="mb-5 flex items-center justify-between gap-4" {
-            h1 class="text-2xl font-semibold" {
-                (title)
-                @if let Some(count) = count { " " span class="font-normal text-faint" { (count) } }
-            }
+            @if let Some(subtitle) = subtitle {
+                div { (heading) p class="mt-1 text-sm text-muted" { (subtitle) } }
+            } @else { (heading) }
             (actions)
         }
     }
@@ -512,5 +527,14 @@ mod tests {
             "{plain}"
         );
         assert!(avatar("DF").into_string().contains(">DF<"));
+    }
+
+    #[test]
+    fn page_header_shows_the_subtitle_below_the_title() {
+        let html = page_header_with_subtitle("Credentials", Some(2), Some("About them."), html! {})
+            .into_string();
+        let title = html.find(">Credentials ").unwrap();
+        let subtitle = html.find("<p class=\"mt-1 text-sm text-muted\">About them.</p>");
+        assert!(subtitle.unwrap() > title, "{html}");
     }
 }

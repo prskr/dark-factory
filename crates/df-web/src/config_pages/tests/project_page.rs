@@ -3,7 +3,7 @@
 use axum::http::StatusCode;
 
 use super::{REPO, audit, project_form, stored_key};
-use crate::testkit::{TestApp, header_str, open_tab, seed, tab_labels, tag_around, text};
+use crate::testkit::{TestApp, header_str, open_tab, seed, tab_labels, table_of, tag_around, text};
 
 #[tokio::test]
 async fn the_page_shows_sidebar_back_link_header_tabs_and_save() {
@@ -101,16 +101,16 @@ async fn unknown_project_and_the_old_edit_route_answer_404() {
 }
 
 #[tokio::test]
-async fn the_project_list_links_name_and_edit_action_to_the_page() {
+async fn the_project_list_row_link_opens_the_page() {
     let app = TestApp::new().await;
     seed(&app.pool).await;
     let html = text(app.get("/projects", &app.login().await).await).await;
 
-    let edit = tag_around(&html, "aria-label=\"Edit project DF\"");
-    assert!(edit.starts_with("<a href=\"/projects/DF\""), "{edit}");
+    let table = table_of(&html);
     assert!(!html.contains("/projects/DF/edit"), "{html}");
-    let name = tag_around(&html, ">Dark Factory</a>");
+    let name = tag_around(table, ">Dark Factory</a>");
     assert!(name.contains("href=\"/projects/DF\""), "{name}");
+    assert!(!table.contains("Edit project DF"), "{table}");
 }
 
 #[tokio::test]

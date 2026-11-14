@@ -24,9 +24,10 @@ use crate::auth::CurrentUser;
 use crate::components::forms::{INPUT_CLASS, field, form_group, select_field_with_hint};
 use crate::components::{
     ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
-    action_class, data_table, dialog_with, empty_panel, forge_icon, form_error, icon, issue_role,
-    page_header, phone_profile_menu, project_forge_kind, readonly_field, role_icon, select_field,
-    submit_button, td, text_field, th, tr,
+    action_class, data_table, dialog_with, empty_panel, entry_button, entry_link, entry_tr,
+    faint_separator, forge_icon, form_error, icon, issue_role, name_cell,
+    page_header_with_subtitle, phone_profile_menu, project_forge_kind, readonly_field, role_icon,
+    select_field, submit_button, td, text_field, th,
 };
 use crate::layout::{Nav, Shell, layout};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
@@ -39,6 +40,9 @@ mod providers;
 mod push_policy;
 
 use push_policy::PushPolicyForm;
+
+/// Layout of a task count link in the project list.
+const COUNT_CLASS: &str = "inline-flex min-h-11 min-w-7 items-center justify-end gap-1.5 rounded-md px-2 font-mono text-sm tabular-nums lg:min-h-9";
 
 /// The forms are fragments that open as a modal over their list; a plain browser request for one
 /// (no `HX-Request` header) goes to the list instead.
@@ -354,9 +358,21 @@ pub(crate) fn list_header(
     create: Markup,
     shell: Option<&Shell>,
 ) -> Markup {
-    page_header(
+    list_header_with_subtitle(title, count, None, create, shell)
+}
+
+/// [`list_header`] with a muted line below the title.
+pub(crate) fn list_header_with_subtitle(
+    title: &str,
+    count: usize,
+    subtitle: Option<&str>,
+    create: Markup,
+    shell: Option<&Shell>,
+) -> Markup {
+    page_header_with_subtitle(
         title,
         Some(count),
+        subtitle,
         html! {
             div class="flex items-center gap-2" {
                 (create)
@@ -566,7 +582,13 @@ fn credential_form(
 fn credentials_region(refs: &[CredentialRef]) -> Markup {
     html! {
         div id="config-list" {
-            (list_header("Credentials", refs.len(), create_button("/credentials/new", "New credential reference"), None))
+            (list_header_with_subtitle(
+                "Credentials",
+                refs.len(),
+                Some("References to Kubernetes Secrets. The values never reach the control plane database."),
+                create_button("/credentials/new", "New credential reference"),
+                None,
+            ))
             @if refs.is_empty() {
                 (empty_panel(
                     "No credential references yet",
@@ -575,17 +597,14 @@ fn credentials_region(refs: &[CredentialRef]) -> Markup {
                 ))
             } @else {
                 (data_table(
-                    html! {
-                        (th(Cell::First, html! { "Name" })) (th(Cell::Mono, html! { "Secret" })) (th(Cell::Mono, html! { "Key" }))
-                        (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
-                    },
+                    html! { (th(Cell::First, html! { "Name" })) },
                     html! {
                         @for c in refs {
-                            (tr(html! {
-                                (td(Cell::First, html! { (c.name) }))
-                                (td(Cell::Mono, html! { (c.secret.name) }))
-                                (td(Cell::Mono, html! { (c.secret.key) }))
-                                (td(Cell::Actions, edit_button(&format!("/credentials/{}/edit", c.id), &format!("Edit credential reference {}", c.name))))
+                            (entry_tr(html! {
+                                (name_cell(
+                                    entry_button(&format!("/credentials/{}/edit", c.id), &format!("Edit credential reference {}", c.name), &c.name),
+                                    html! { span class="font-mono" { (c.secret.name) (faint_separator("/")) (c.secret.key) } },
+                                ))
                             }))
                         }
                     },
@@ -1077,24 +1096,54 @@ const COLUMN_TONES: [(&str, Tone); 4] = [
     ("Done", Tone::Completed),
 ];
 
-/// A count that links to the task list of the project with exactly these statuses; zeros are
-/// muted. With a `dot` tone (phone list) it reads "<dot> <number> <state>".
-fn count_link(project: &str, status: &str, label: &str, count: i64, dot: Option<Tone>) -> Markup {
+/// The link target and the accessible name of a count: the task list of the project with exactly
+/// the statuses of the count.
+fn count_target(project: &str, status: &str, label: &str, count: i64) -> (String, String) {
+    (
+        format!("/tasks?project={project}&status={status}"),
+        format!(
+            "{label}: {count} {} of {project}",
+            if count == 1 { "task" } else { "tasks" }
+        ),
+    )
+}
+
+/// A count in the desktop table: a link above the row's cover (`relative z-10`). A zero is no
+/// link, it is only announced.
+fn count_link_desktop(project: &str, status: &str, label: &str, count: i64) -> Markup {
+    let (href, name) = count_target(project, status, label, count);
+    if count == 0 {
+        return html! { span class="sr-only" { (name) } };
+    }
+    html! {
+        a href=(href) aria-label=(name) class={"relative z-10 " (COUNT_CLASS) " text-accent-text underline"} { (count) }
+    }
+}
+
+/// A count in the phone card: "<dot> <number> <state>", a zero is muted.
+fn count_link_phone(project: &str, status: &str, label: &str, count: i64, dot: Tone) -> Markup {
+    let (href, name) = count_target(project, status, label, count);
     let tone = if count == 0 {
         "text-faint"
     } else {
         "text-accent-text underline"
     };
     html! {
-        a href={"/tasks?project=" (project) "&status=" (status)} aria-label={(label) ": " (count) (if count == 1 { " task" } else { " tasks" }) " of " (project)}
-            class={"inline-flex min-h-11 min-w-7 items-center justify-end gap-1.5 rounded-md px-2 font-mono text-sm tabular-nums lg:min-h-9 " (tone)} {
-            @if let Some(dot) = dot { span aria-hidden="true" class={"size-2 rounded-full " (dot.dot_class())} {} }
-            @if dot.is_some() {
-                span { (count) }
-                span class="font-sans text-[13px]" { (label.to_lowercase()) }
-            } @else { (count) }
+        a href=(href) aria-label=(name) class={(COUNT_CLASS) " " (tone)} {
+            span aria-hidden="true" class={"size-2 rounded-full " (dot.dot_class())} {}
+            span { (count) }
+            span class="font-sans text-[13px]" { (label.to_lowercase()) }
         }
     }
+}
+
+/// A repository URL as the desktop list shows it: `https://` or `http://` and a trailing `.git`
+/// removed. Other forms (`ssh://`, `git@host:path`) stay as they are.
+fn repo_display(url: &str) -> &str {
+    let host_and_path = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    host_and_path.map_or(url, |rest| rest.strip_suffix(".git").unwrap_or(rest))
 }
 
 /// The edit action of a project in the list: a link to its settings page.
@@ -1131,7 +1180,7 @@ fn projects_region(
                 div class="hidden min-w-0 md:block" {
                     (data_table(
                         html! {
-                            (th(Cell::First, html! { "Project" })) (th(Cell::Mono, html! { "Repository" })) (th(Cell::Mono, html! { "Branch" }))
+                            (th(Cell::Text, html! { span class="sr-only" { "Key" } })) (th(Cell::First, html! { "Project" }))
                             @for (label, tone) in COLUMN_TONES {
                                 (th(Cell::Number, html! {
                                     span class="inline-flex items-center gap-1.5" {
@@ -1140,31 +1189,23 @@ fn projects_region(
                                     }
                                 }))
                             }
-                            (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
                         },
                         html! {
                             @for p in projects {
                                 @let c = Counts::of(p, counts);
-                                (tr(html! {
-                                    (td(Cell::First, html! {
-                                        span class="flex items-center gap-2.5" {
-                                            span class="rounded-md bg-sunk px-2 py-0.5 font-mono text-xs font-medium text-muted" { (p.key) }
-                                            a href={"/projects/" (p.key)} class="font-medium hover:underline" { (p.name) }
-                                        }
-                                    }))
-                                    (td(Cell::Mono, html! {
-                                        span class="inline-flex min-w-0 items-center gap-2" {
+                                (entry_tr(html! {
+                                    td class="py-3.5 pr-0 pl-5" {
+                                        span class="rounded-md bg-sunk px-2 py-0.5 font-mono text-xs font-medium text-muted group-hover:bg-panel" { (p.key) }
+                                    }
+                                    (name_cell(entry_link(&format!("/projects/{}", p.key), &p.name), html! {
+                                        span class="flex items-center gap-1.5" {
                                             (forge_icon(project_forge_kind(forges, p).as_ref()))
-                                            span class="truncate" { (p.repo_url) }
+                                            span class="min-w-0 truncate font-mono" { (repo_display(&p.repo_url)) }
+                                            (icon(Icon::Git))
+                                            span class="shrink-0 font-mono" { (p.base_branch) }
                                         }
                                     }))
-                                    (td(Cell::Mono, html! { (p.base_branch) }))
-                                    @for (label, status, n) in c.columns() { (td(Cell::Number, count_link(&p.key, status, label, n, None))) }
-                                    (td(Cell::Actions, html! {
-                                        span class="flex justify-end" {
-                                            (project_link(&p.key, ICON_BUTTON_CLASS))
-                                        }
-                                    }))
+                                    @for (label, status, n) in c.columns() { (td(Cell::Number, count_link_desktop(&p.key, status, label, n))) }
                                 }))
                             }
                         },
@@ -1186,7 +1227,7 @@ fn projects_region(
                                     span class="truncate" { (p.repo_url) }
                                 }
                                 div class="flex flex-wrap gap-x-3.5" {
-                                    @for ((label, status, n), (_, tone)) in c.columns().into_iter().zip(COLUMN_TONES) { (count_link(&p.key, status, label, n, Some(tone))) }
+                                    @for ((label, status, n), (_, tone)) in c.columns().into_iter().zip(COLUMN_TONES) { (count_link_phone(&p.key, status, label, n, tone)) }
                                 }
                             }
                             (project_link(&p.key, "flex w-12 shrink-0 items-center justify-center self-stretch text-muted"))

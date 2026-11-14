@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-126.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-127.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -126,6 +126,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-121 | low   | `df-k8s` reconcile | Reconcile keeps the whole policy while one cluster target is unresolvable |
 | TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
 | TD-125 | low   | `df-gateway` push checks | Other open tasks' existing branches count as already-checked upstream |
+| TD-126 | low   | `df-web` assets | The stylesheet size guard has about 1 KB of headroom |
 
 ## Entries
 
@@ -929,6 +930,18 @@ The chain from an artifact-written event to the Artifacts tab appearing and relo
 **Matters when:** one task's push-check exception (an approved protected-path change) must not cover another task's run. Low impact today: those commits are already on the forge.
 
 **Fix:** pass the branches of the project's other open tasks into the snapshot route and exclude them in `counts_as_upstream`. Add a test with two tasks on existing branches.
+
+Origin of TD-126: code review of `ui-settings-list-rows` (`df-web`, 2026-11-14). The `TD-n (ID)` heading gives the ID used in that review.
+
+### TD-126 (S8). The stylesheet size guard has about 1 KB of headroom
+
+`crates/df-web/src/assets.rs` (`stylesheet_contains_only_classes_from_the_sources`)
+
+The test caps the compiled `app.css` below 52,000 bytes. `ui-settings-list-rows` raised the cap from 50,000, because the row cover (`after:` and `focus-visible:after:` variants) pushed the stylesheet to about 50.5 KB; it is now 50,899 bytes.
+
+**Matters when:** the next UI change adds variants; the guard fails and invites another raise without a stated ceiling.
+
+**Fix:** state the intended budget in the test, and trim variants (for example one shared focus-ring class instead of three `focus-visible:after:ring-*` classes) before raising the cap again.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
