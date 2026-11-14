@@ -71,10 +71,21 @@ A two-line list row SHALL show a shaded background and an underlined name while 
 - **WHEN** focus moves on to the delete button of a model provider row
 - **THEN** the delete button shows its focus ring and the row shows none
 
+### Requirement: Zero task counts
+In the project list, from 768 px, a count of 0 SHALL show no number and no link, and SHALL be announced to screen readers as zero tasks of that status; below 768 px it SHALL be shown muted.
+
+#### Scenario: Zero count on a desktop
+- **WHEN** project `WEB` has no running task and the project list is open at 1440 px width
+- **THEN** the Running cell of `WEB` shows no number and holds no link, and a screen reader announces "Running: 0 tasks of WEB"
+
+#### Scenario: Zero count on a phone
+- **WHEN** project `WEB` has no running task and the project list is open at 390 px width
+- **THEN** the card of `WEB` shows "0 running" muted
+
 ## MODIFIED Requirements
 
 ### Requirement: Project overview with task counts
-The project list SHALL show per project its key, name, forge, repository, base branch and the number of its tasks per status group: Queued (queued), Running (running, rate limited), Waiting (waiting, limit reached) and Done (completed, failed). Each non-zero count SHALL link to the task list filtered by that project and exactly the statuses the count includes. From 768 px, a count of 0 SHALL show no number and no link, and SHALL be announced to screen readers as zero tasks of that status; below 768 px it SHALL be shown muted.
+The project list SHALL show per project its key, name, forge, repository, base branch and the number of its tasks per status group: Queued (queued), Running (running, rate limited), Waiting (waiting, limit reached) and Done (completed, failed). Each non-zero count SHALL link to the task list filtered by that project and exactly the statuses the count includes. Counts of 0 follow "Zero task counts".
 
 #### Scenario: Counts of a project
 - **WHEN** project `DF` has one queued, two running, one rate-limited, one limit-reached and three failed tasks
@@ -87,11 +98,3 @@ The project list SHALL show per project its key, name, forge, repository, base b
 #### Scenario: Running count as link
 - **WHEN** a board member follows the Running count of `DF`
 - **THEN** the task list opens with `project=DF` and `status=running` and lists only running and rate-limited tasks of `DF`
-
-#### Scenario: Zero count on a desktop
-- **WHEN** project `WEB` has no running task and the project list is open at 1440 px width
-- **THEN** the Running cell of `WEB` shows no number and holds no link, and a screen reader announces "Running: 0 tasks of WEB"
-
-#### Scenario: Zero count on a phone
-- **WHEN** project `WEB` has no running task and the project list is open at 390 px width
-- **THEN** the card of `WEB` shows "0 running" muted
