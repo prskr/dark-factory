@@ -38,6 +38,28 @@ toolchains_musl.config(
 )
 use_repo(toolchains_musl, "musl_toolchains_hub")
 
+bazel_dep(name = "hermetic_cc_toolchain", version = "4.3.0", dev_dependency = True)
+
+# zig cc is the C toolchain of the Linux exec platforms (build scripts, proc-macros; docs/adr/0058). It is
+# one static binary: no host compiler, linker or shared library is used. The patch drops the arguments of
+# rustc that zig's linker driver rejects (see the patch header).
+single_version_override(
+    module_name = "hermetic_cc_toolchain",
+    patch_strip = 1,
+    patches = ["//build/patches:hermetic_cc_toolchain-rustc-linker-args.patch"],
+    version = "4.3.0",
+)
+
+zig = use_extension("@hermetic_cc_toolchain//toolchain:ext.bzl", "toolchains", dev_dependency = True)
+
+# Toolchains for the amd64 workers of `--config=rbe-cross` (clients that are not amd64 Linux); the host's
+# own platform always has toolchains and is skipped here.
+zig.exec_platform(
+    arch = "amd64",
+    os = "linux",
+)
+use_repo(zig, "zig_config-linux-amd64", "zig_sdk")
+
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
 buf.toolchains(version = "v1.68.4")
 use_repo(buf, "rules_buf_toolchains")
@@ -147,10 +169,17 @@ rust.repository_set(
 use_repo(rust, "rust_toolchains")
 
 # Registration order decides: the default `*-unknown-linux-gnu` toolchains (cpu + os only) also match the
-# musl platforms and would link glibc libstd with musl-gcc, so the musl ones come first.
+# musl platforms and would link glibc libstd with musl-gcc, so the musl ones come first. The zig toolchains
+# (cpu + os only, glibc 2.28) follow `@musl_toolchains_hub`: they serve the exec platform and every other
+# target, the musl platforms keep `toolchains_musl`. The amd64 exec toolchain comes first so that every client
+# (also an amd64 Linux one, whose host toolchain is a different repository) runs the same zig paths and shares
+# the exec actions through the remote cache.
 register_toolchains(
     "@musl_toolchains_hub//:all",
     "//build/platforms:musl_test_toolchain",
+    "//build/platforms:zig_cc_exec_linux_amd64",
+    "@zig_sdk//toolchain:linux_amd64_gnu.2.28",
+    "@zig_sdk//toolchain:linux_arm64_gnu.2.28",
     dev_dependency = True,
 )
 

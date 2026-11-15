@@ -62,6 +62,7 @@ rust_binary(
 # `test-util` variant of `df-agent-channel` without the binary linking it.
 rust_test(
     name = "dark_factory_test",
+    tags = ["no-remote-exec"],
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     compile_data = ["//plugins/forgejo:tests/fixtures/webhooks/pull_request_closed.json"],

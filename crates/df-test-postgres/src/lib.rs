@@ -501,6 +501,27 @@ mod tests {
             .await
     }
 
+    /// Polls `pg_stat_activity` until the server lists no connection to `name` (at most 10 s).
+    async fn wait_until_unconnected(admin: &PgPool, name: &str) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let connections: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = $1")
+                    .bind(name)
+                    .fetch_one(admin)
+                    .await
+                    .expect("query pg_stat_activity");
+            assert!(
+                connections == 0 || tokio::time::Instant::now() < deadline,
+                "{connections} connection(s) to {name} remain 10 s after the pool was closed"
+            );
+            if connections == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     #[tokio::test]
     async fn retry_for_succeeds_after_failures_and_keeps_the_first_error_when_giving_up()
     -> Result<(), String> {
@@ -693,6 +714,9 @@ mod tests {
         assert!(database_exists(&admin, &released).await);
 
         released_pool.close().await;
+        // Closing the pool does not wait for the server to end the backends: the sweep skips a
+        // database it still lists a connection to.
+        wait_until_unconnected(&admin, &released).await;
         drop_stale_databases(&admin, grace).await;
 
         assert!(!database_exists(&admin, &released).await);

@@ -6,6 +6,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 
 - **Rust toolchain**: pinned via [`rust-toolchain.toml`](../rust-toolchain.toml) (1.99.1, edition 2024, with targets `x86_64-unknown-linux-musl` and `wasm32-wasip2`, and `llvm-tools-preview`).
 - **Protobuf compiler**: `protoc` (`>= 29.x`) on `PATH` (or set via `PROTOC`).
+- **C compiler** for plain `cargo` (`cc`/`gcc`/`clang`, as for any Rust project): `cargo` on aarch64 Linux links with it, using the `rust-lld` of the Rust toolchain instead of GNU ld (`.cargo/cc-lld.sh`, [ADR-0058](adr/0058-hermetic-c-toolchain.md)). Bazel needs no C compiler or linker on Linux.
 - **Cargo subcommands**:
   - `cargo-deny` (`cargo deny check`)
   - `sqlx-cli` (`cargo sqlx migrate`, `cargo sqlx prepare`)
@@ -190,7 +191,7 @@ sequenceDiagram
 
 Day-to-day commands are collected in the [`Justfile`](../Justfile) (`just` lists them; the file also works as a plain command reference).
 
-Everything builds on the machine that runs Bazel; there is no remote execution (background and how to bring it back: [remote-execution.md](remote-execution.md)). The same commands work on macOS (arm64) and Linux (amd64, arm64).
+By default everything builds on the machine that runs Bazel. `--config=rbe` runs build and test actions on BuildBuddy remote execution (below; background: [remote-execution.md](remote-execution.md), decision: [ADR-0058](adr/0058-hermetic-c-toolchain.md)). The same commands work on macOS (arm64) and Linux (amd64, arm64).
 
 | Host | Target platform of `bazel build/test //...` | Images (`//deploy:*_image`) |
 |------|---------------------------------------------|------------------------------|
@@ -209,10 +210,13 @@ flowchart LR
 
 The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` is a different platform label and therefore a separate configuration: on a Linux host the host arch is compiled twice (tests and image). Setting `--config=linux-amd64-musl` (or `linux-arm64-musl`) for the host's arch makes the test build the image's configuration; CI does this. On a Linux arm64 machine, add `build --config=linux-arm64-musl` to `.bazelrc.user` for the same effect.
 
-- Toolchains: Rust musl toolchains and `toolchains_musl` (`musl-gcc`) for Linux targets, registered first in `MODULE.bazel`. Exec tools (build scripts, proc-macros) are built for the host with the host's C compiler (Xcode clang, or `gcc`/`clang` on Linux), which must be installed.
+- Toolchains: Rust musl toolchains and `toolchains_musl` (`musl-gcc`) for the static musl targets (tests and images), registered first in `MODULE.bazel`. Exec tools (build scripts, proc-macros) are glibc binaries, because the proc-macros are loaded into the glibc `rustc`; on Linux hosts (amd64, arm64) they are compiled and linked with `zig cc` (`hermetic_cc_toolchain`, glibc 2.28, one static binary of ~50 MB per arch). No `gcc`, `clang`, binutils or system library of the host is used, so a Linux host needs none of them and no `nix-ld` libraries for the C toolchain. macOS hosts use Xcode's clang for local exec tools. A small patch (`build/patches/`) drops two linker arguments of `rustc` that zig rejects. There is no per-user switch back to the host's compiler (`--extra_toolchains` would also win over `toolchains_musl` for the musl targets); removing the zig registration from `MODULE.bazel` restores the autodetected `gcc`/`clang`.
+- zig keeps its libc build products in `/var/tmp/zig-cache` (`HERMETIC_CC_TOOLCHAIN_CACHE_PREFIX` in `.bazelrc`) and the sandbox makes `/var/tmp` writable (`build:linux` in `.bazelrc`). Without a cache directory the sandbox gives every action an empty one and a full build takes twice as long (measured, ADR-0058). The path is part of the toolchain and must be the same on every machine for shared cache hits; delete the directory to start cold.
+- Host tools that tests still call: `file` (`//deploy:images_structure_test`, and the harness `structure_test` targets) and `readelf` from binutils (`//deploy/images/claude-harness:structure_test`, `//deploy/images/opencode-harness:structure_test`). Without them those tests fail.
 - Tests only run for the host's arch; the other arch is cross-compiled into the images but not executed.
 - `--config=cache` (optional) enables the BuildBuddy remote cache and build event stream. It needs an API key: export `BUILDBUDDY_API_KEY=<key>` (read by the credential helper `build/buildbuddy_credentials.sh`) or put `build:cache --remote_header=x-buildbuddy-api-key=<key>` in `.bazelrc.user` (CI uses the `BUILDBUDDY_ORG_API_KEY` secret). The variable is read when the Bazel client starts; a cached key is kept for `--credential_helper_cache_duration` (default 30 min). `--config=cache-debug` additionally writes `bazel-remote-grpc.log` and `execution_log.binpb.zst` to the workspace root (git-ignored).
-- Cache hits are shared between machines with the same host OS and arch (exec tools differ otherwise).
+- Cache hits are shared between Linux machines of the same arch (the exec tools no longer depend on the host's compiler); under `--config=rbe` between every client, whatever its OS and arch.
+- Remote execution on BuildBuddy (`--config=rbe`): see "Remote execution" below.
 - The binaries and the plugins in the images are built with `--compilation_mode=opt` whatever the command line says (`optimized` in `build/optimized.bzl`): a `fastbuild` control plane is ~224 MB with debug info, an optimized one ~84 MB. Symbols stay in, so panic backtraces keep function names.
 - `//deploy:images_structure_test` (multi-arch index, static ELF check, no debug info in the binaries) only runs on Linux hosts and is skipped on macOS (`//...`; when named explicitly, add `--skip_incompatible_explicit_targets`, as `just release-test` does).
 - The Landlock tests of `factory-agent` (`crates/factory-agent/tests/sandbox.rs`, and the Landlock code behind `#[cfg(target_os = "linux")]`) are Linux-only and are not built or run on macOS; the pure ruleset and alias unit tests do run there. On Linux they need a kernel with Landlock ABI 6 (6.12 or newer) and fail with a message naming that requirement without it.
@@ -221,7 +225,25 @@ The images transition to `linux_amd64_musl` and `linux_arm64_musl`. `host_musl` 
 - Base images (`pull` in `MODULE.bazel`) are pinned by digest and fetched with Bazel's downloader, so their manifests and configs land in the repository cache and are not requested again; CI keeps that cache between runs (`repository-cache` of `setup-bazel`). `platforms` limits the fetch to `linux/amd64` and `linux/arm64`, because a registry counts every child manifest as a pull. The Bazel downloader cannot do the anonymous token handshake of `public.ecr.aws` (401); Docker Hub images therefore come from `mirror.gcr.io`, which serves them under the same digests.
 - Images go to `ghcr.io/prskr/dark-factory/{control-plane,plugin-forgejo,plugin-github,runtime,test-project}`. The tag is `--//build:version` (default `dev`), which also becomes `df_telemetry::VERSION`; the `release` workflow sets it to the release version (see [`releasing.md`](releasing.md)). Locally: `docker login ghcr.io`, then `just release-push 2026.11.0`.
 - The plugin images (`//deploy:plugin_forgejo_image`, `//deploy:plugin_github_image`: `scratch`, one file `/plugin.wasm`) are mounted by the chart as image volumes at `/plugins/<name>`; the control plane image contains no plugin. `bazel run //deploy:dev` pushes them as `plugin-forgejo:dev` and `plugin-github:dev` and passes `plugins.forgejo.image.digest` and `plugins.github.image.digest` to Helm, so a plugin change replaces the control plane pods.
-- `.bazelrc.agents` (sandboxed agents) uses no remote cache: BuildBuddy is unreachable from the sandboxes. CI passes `--config=cache` in its Bazel arguments.
+- `.bazelrc.agents` (sandboxed agents) uses no remote cache: BuildBuddy is unreachable from the sandboxes. CI passes `--config=rbe` (which includes `cache`) in its Bazel arguments; the docs, e2e and harness-image workflows pass `--config=cache`.
+
+### Remote execution
+
+Without a flag no action is sent to a remote executor. Background and measurements: [remote-execution.md](remote-execution.md), [ADR-0058](adr/0058-hermetic-c-toolchain.md).
+
+| Item | Value |
+|------|-------|
+| `--config=rbe` | Includes `cache` (same API key). Runs actions on BuildBuddy workers (amd64 Linux, Ubuntu 24.04 image pinned by digest in `build/platforms/BUILD.bazel`), `--platforms=//build/platforms:linux_amd64_musl`, 50 jobs. Pins the cpu name and the `layering_check` features, which differ between clients, so that every client computes the same action keys. |
+| `--config=rbe-cross` | `rbe` for clients that cannot run amd64 binaries (arm64 Linux, macOS): excludes the tag `no-remote-exec` from build and test. |
+| Tag `no-remote-exec` | Tests that need a container runtime or the client's tools run on the client: every test that depends on `df-test-postgres`, the `:test` targets of the harness images, `//contract:buf_lint_test`. |
+| `build/check_no_remote_exec.sh` | CI step: fails when a test depends on `df-test-postgres` without the tag. |
+| CI | The Bazel jobs of `ci.yaml` and the image jobs of `release.yaml` use `--config=rbe`. Rollback: replace it with `--config=cache` in their `BAZEL_ARGS`. |
+
+Run all tests with remote execution from an amd64 Linux client: `bazel test --config=rbe <socket flags of just bazel-test> //...`; the tagged tests run on the client in the same invocation.
+
+From an arm64 Linux or macOS client: `just bazel-test-rbe [TARGETS]` runs `bazel test --config=rbe-cross` and then the tagged tests on this machine, built for this host.
+
+On macOS use a case-sensitive APFS volume for the output base (`bazel --output_user_root=/Volumes/<volume>/bazel …`): on the default volume the extracted `toolchains_musl` tree loses headers whose names differ only in case and only about half of the actions are shared with Linux clients.
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 

@@ -1,8 +1,8 @@
 # Remote Build Execution (RBE)
 
-Status: **not in use**. Bazel builds and tests run on the machine that runs Bazel; BuildBuddy is used as an optional remote cache only (`--config=cache`, see [development.md](development.md#bazel-platforms-cache-and-images)). Tracked as TD-27 in [tech_debt.md](tech_debt.md).
+Status: **in use for CI and releases, opt-in locally** (`--config=rbe`, see [development.md](development.md#bazel-platforms-cache-and-images) and [ADR-0058](adr/0058-hermetic-c-toolchain.md)). BuildBuddy cloud executors run build actions and every test that does not start containers; tests that depend on `df-test-postgres` still run on the client. Running them on workers is the remaining part of TD-27 in [tech_debt.md](tech_debt.md).
 
-This document records why RBE was removed and what a custom worker setup needs to bring it back.
+This document records why the earlier RBE setup was removed, what the current one consists of and what is still missing.
 
 ## 1. Background
 
@@ -10,7 +10,8 @@ This document records why RBE was removed and what a custom worker setup needs t
 |--------|-------|---------|
 | Iteration 1 | NativeLink scheduler (in-cluster) | Replaced by BuildBuddy |
 | `5d6ce43` | BuildBuddy RBE (`--config=remote`, linux/amd64 workers, Firecracker + `dockerd` for tests) with a hermetic glibc LLVM toolchain (`toolchains_llvm`, Debian sysroots); release images built separately with `--config=release` (`toolchains_musl`) on the runner | Two incompatible builds of the whole workspace: glibc for tests on RBE, static musl for images outside RBE. A plain build of the images failed to link (see 2.1). |
-| Current | No RBE. All Linux targets are static musl; tests and images share the build (CI: `--config=linux-amd64-musl`) | Container-backed tests cannot run in agent sandboxes (no container socket, see 4) |
+| Until `hermetic-cc-toolchain` | No RBE. All Linux targets are static musl; tests and images share the build (CI: `--config=linux-amd64-musl`) | Container-backed tests cannot run in agent sandboxes (no container socket, see 4); exec tools used the host's C toolchain |
+| Current | `--config=rbe` on BuildBuddy cloud (amd64 workers), static musl targets, exec tools with `zig cc` (see 2.2, 3) | Container-backed tests run on the client (see 4) |
 
 The design documents still assume RBE runs the container-backed tests: [ADR-0023](adr/0023-kata-isolation-no-nested-containers.md), [agent-run.md](../design/agent-run.md) (§ sandbox, egress), [egress.md](../design/egress.md) and [product/context.md](../product/context.md).
 
@@ -30,9 +31,9 @@ On the RBE workers the same mismatch made static musl builds impossible ("the mu
 
 **Fix (in place):** `MODULE.bazel` registers `@musl_toolchains_hub//:all`, `//build/platforms:musl_test_toolchain` and the `*-unknown-linux-musl` Rust toolchains before `@rust_toolchains//:all`. This holds for local and remote execution alike.
 
-### 2.2 C toolchain for exec tools (inherent to RBE, open)
+### 2.2 C toolchain for exec tools (inherent to RBE, solved with zig cc)
 
-Build scripts, proc-macros and other exec tools are linked with the exec platform's C toolchain. Without configuration, Bazel autodetects that toolchain (`local_config_cc`) **on the client**. From a macOS client this is Xcode clang, which does not exist on a Linux worker. Every RBE setup with mixed client OSes needs a C toolchain that is defined independently of the client. This is not specific to musl or rules_rust; it is why `toolchains_llvm` and the sysroots were added.
+Build scripts, proc-macros and other exec tools are linked with the exec platform's C toolchain. Without configuration, Bazel autodetects that toolchain (`local_config_cc`) **on the client**. From a macOS client this is Xcode clang, which does not exist on a Linux worker. Every RBE setup with mixed client OSes needs a C toolchain that is defined independently of the client. This is not specific to musl or rules_rust; it is why `toolchains_llvm` and the sysroots were added the first time. Today `hermetic_cc_toolchain` (zig cc) is registered for the exec platforms (3.2).
 
 ```mermaid
 flowchart LR
@@ -46,56 +47,58 @@ flowchart LR
   client -. "autodetected cc = client's compiler: wrong for the worker" .-> cc
 ```
 
-## 3. Bringing RBE back with a custom worker setup
+## 3. The current setup
 
-Prerequisite: the workers are under our control (for example self-hosted BuildBuddy executors or NativeLink on the homelab nodes).
+```mermaid
+flowchart LR
+  client["Bazel client (Linux amd64/arm64, macOS)"] -->|"--config=rbe: actions"| worker["BuildBuddy worker (amd64 Linux, Ubuntu 24.04 image)"]
+  client -->|"no-remote-exec tests"| local["client: DB tests, harness image tests, buf"]
+  worker --> cc["zig cc (exec tools, glibc 2.28) + toolchains_musl (targets)"]
+```
 
 ### 3.1 Worker image
 
-| Requirement | Why |
-|-------------|-----|
-| Linux, glibc, `gcc` (or `clang`) and binutils | exec tools (build scripts, proc-macros) |
-| `bash`, `coreutils`, `tar`, `file`, `git` | test scripts (`deploy/test_images.sh`), repository rules executed remotely |
-| Container runtime reachable by tests (`DOCKER_HOST`) | `df-test-postgres` (testcontainers) |
-| amd64 and arm64 pools (optional) | run tests for both architectures; otherwise arm64 is only cross-compiled |
+BuildBuddy's public image `gcr.io/flame-public/rbe-ubuntu24-04`, pinned by the digest of its multi-arch index in `build/platforms/BUILD.bazel` (`linux_amd64_rbe`). It is enough: the C toolchain comes from the repository (zig), the image only supplies a shell, coreutils, `tar` and `file` for the test scripts, and the glibc that the Rust toolchain's `rustc` needs. No custom executor image is built. The same image runs on BuildBuddy's arm64 executors (`Arch=arm64`, verified with a one-action probe); arm64 tests on workers are not wired up.
 
-### 3.2 Exec C toolchain: pick one
+### 3.2 Exec C toolchain
 
-| Option | Effort | Notes |
-|--------|--------|-------|
-| **A. Checked-in toolchain for the worker image** | low | Define a `cc_toolchain` with the image's fixed paths (`/usr/bin/gcc`, include dirs), `exec_compatible_with` = worker platform. Image and config must change together; tag the image by digest. |
-| **B. Hermetic LLVM** (`toolchains_llvm` + sysroots, as in `5d6ce43`) | medium | Independent of the worker image. Needs explicit `-L=` sysroot link flags for rust-lld. Large download (~1 GB) per worker cache. |
-| **C. `hermetic_cc_toolchain` (zig cc)** | medium, untested here | One toolchain for glibc exec tools and musl targets on amd64/arm64, from macOS and Linux clients. Could replace both `toolchains_llvm` and `toolchains_musl`. |
-
-Recommendation: **A** when the worker image is ours anyway; **C** when the same toolchain should also serve local builds.
+`hermetic_cc_toolchain` (zig cc, glibc 2.28 for the exec tools), registered after `@musl_toolchains_hub` in `MODULE.bazel` so that the musl platforms keep `toolchains_musl` (2.1). `//build/platforms:zig_cc_exec_linux_amd64` is registered before `@zig_sdk//toolchain:*` for every client, so that all clients use the same zig paths and share the exec action keys with the amd64 workers. Two arguments of `rustc` that zig rejects are removed by a patch (`build/patches/`). The zig cache directory must be fixed and visible to the sandbox, otherwise every action starts with an empty cache (`.bazelrc`, development.md). `toolchains_llvm` was tried first and rejected, see [ADR-0058](adr/0058-hermetic-c-toolchain.md).
 
 ### 3.3 Bazel configuration
 
 ```
-# .bazelrc (sketch)
-build:remote --config=cache
-build:remote --remote_executor=grpcs://<scheduler>
-build:remote --remote_timeout=10m
-build:remote --jobs=50
-build:remote --extra_execution_platforms=//build/platforms:linux_amd64_rbe
-build:remote --platforms=//build/platforms:linux_amd64_musl
+build:rbe --config=cache
+build:rbe --remote_executor=grpcs://remote.buildbuddy.io
+build:rbe --extra_execution_platforms=//build/platforms:linux_amd64_rbe
+build:rbe --host_platform=//build/platforms:linux_amd64_rbe
+build:rbe --platforms=//build/platforms:linux_amd64_musl
+build:rbe --jobs=50
+# the same action keys on every client
+build:rbe --features=-layering_check
+build:rbe --host_features=-layering_check
+build:rbe --cpu=k8
+build:rbe --host_cpu=k8
+
+# clients that cannot run amd64 binaries (arm64 Linux, macOS)
+build:rbe-cross --config=rbe
+build:rbe-cross --build_tag_filters=-no-remote-exec
+build:rbe-cross --test_tag_filters=-no-remote-exec
 ```
 
-- `linux_amd64_rbe`: `@platforms//os:linux`, `@platforms//cpu:x86_64`, `exec_properties` with the worker image (`container-image`) and the container runtime settings of the scheduler. Listed first via `--extra_execution_platforms`, so test actions select it.
-- Musl tests on a glibc worker: `musl_test_toolchain` (already registered) lets the test run on an exec platform without the `:musl` constraint.
-- Keep `--platforms` equal to an image platform (`linux_amd64_musl`), so tests and images share one configuration.
-- `.bazelrc.agents`: switch the default from `--config=cache` to `--config=remote` once it works; agents then get container-backed tests again (ADR-0023).
+- `linux_amd64_rbe`: `@platforms//os:linux`, `@platforms//cpu:x86_64`, `exec_properties` with `OSFamily`, `Arch` and the pinned `container-image`.
+- Musl tests on a glibc worker: `musl_test_toolchain` lets the test run on an exec platform without the `:musl` constraint.
+- `--platforms` equals an image platform (`linux_amd64_musl`), so tests and images share one configuration; the workers are amd64, whatever the client is.
+- The client's cpu name and `layering_check` features are part of every action key; the four pins make arm64 Linux, macOS and amd64 clients compute the same keys.
+- `.bazelrc.agents` keeps no remote configuration; agents may pass `--config=rbe` themselves where BuildBuddy is reachable.
 
-### 3.4 Verification
+### 3.4 Verification (what was run)
 
-1. `bazel test --config=remote //...` from a Linux client and from macOS: all targets pass, no action runs locally (`--remote_local_fallback` off, check the BuildBuddy invocation).
-2. `bazel cquery --config=remote 'deps(//deploy:runtime_image)'` shows `//crates/factory-agent:factory-agent` in the same configuration as the top-level target.
-3. `//deploy:images_structure_test` passes (static musl ELFs).
-4. Database tests pass on the workers (container runtime reachable).
-5. A second run from another client (macOS vs. Linux) is fully cached: with all actions on the same worker platform, the exec tools are identical.
+Numbers and run links are in [the results of the spike](adr/0058-hermetic-c-toolchain-results.md) and [ADR-0058](adr/0058-hermetic-c-toolchain.md). `bazel build` and `bazel test` with `--config=rbe` passed on the `ubuntu-latest` runner and in the release dry run, and with `--config=rbe-cross` from an arm64 Linux client and on the `ubuntu-24.04-arm` and `macos-latest` runners; a second client finds what the first built in the cache; `//deploy:images_structure_test` passes (static musl ELFs); the database tests run on the client.
 
-## 4. Current limitations without RBE
+## 4. Limitations
 
-- Agent sandboxes have no container socket: `df-test-postgres` based tests fail there. CI runs them.
-- Cache hits are shared only between machines with the same host OS and arch (exec tools are built for the host).
+- Container-backed tests (`df-test-postgres`, harness image tests) do not run on workers: they need a container runtime. They run on the client, which must be amd64 Linux with `--config=rbe`, or any client without it (`just bazel-test-rbe`). Agent sandboxes have no container socket, so these tests only run in CI and on developer machines. Running them on workers (`dockerd` in the executor image) is the remaining part of TD-27.
+- Agent sandboxes do not use remote execution (`.bazelrc.agents`).
+- Without `--config=rbe`, cache hits are shared between Linux machines of the same arch; macOS hosts compile exec tools with Xcode's clang.
 - On Linux hosts other than CI, the host arch is compiled twice (tests on `host_musl`, images on `linux_<arch>_musl`) unless `--config=linux-<arch>-musl` is set.
+- A Linux host needs `file` and `readelf` for the two harness image structure tests.

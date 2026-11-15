@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1–D26 of the original decisions log. New decisions copy [`template.md`](template.md) and take the next number; a decision is never edited into its opposite — it's superseded by a new ADR.
+One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1–D26 of the original decisions log. New decisions copy [`template.md`](template.md) and take the next number; a decision is never edited into its opposite — it's superseded by a new ADR. An ADR may have a companion `NNNN-<slug>-results.md` with measurements; it is not listed in the index.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -61,3 +61,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1�
 | [ADR-0055](0055-task-transitions-through-one-transition-function.md) | Task transitions through one transition function | Accepted (planned for iteration 3) |
 | [ADR-0056](0056-control-plane-generates-missing-instance-secrets.md) | The control plane generates missing instance secrets | Accepted |
 | [ADR-0057](0057-factory-activity-in-the-transcript.md) | Factory activity in the transcript | Accepted |
+| [ADR-0058](0058-hermetic-c-toolchain.md) | Hermetic C toolchain for Linux exec tools and remote execution | Accepted |

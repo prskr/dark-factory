@@ -23,10 +23,11 @@ jobs:
   bazel:
     runs-on: ubuntu-latest
     env:
-      # BuildBuddy remote cache, see docs/development.md. The explicit platform (not `host_musl`) matches the
-      # amd64 image's, so tests and images share one build.
+      # BuildBuddy remote execution (`rbe` includes the remote cache), see docs/development.md and ADR-0058. The
+      # tests that start containers run on this runner. To go back to the remote cache only, replace `rbe` with
+      # `cache`. The explicit platform matches the amd64 image's, so tests and images share one build.
       BAZEL_ARGS: >-
-        --config=cache --config=ci --config=linux-amd64-musl
+        --config=rbe --config=ci --config=linux-amd64-musl
         --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -47,6 +48,10 @@ jobs:
             echo "testcontainers is a dependency of //crates/dark-factory:dark-factory" >&2
             exit 1
           fi
+
+      # A database test without the tag `no-remote-exec` would run on a worker without a container runtime
+      - name: Database tests run on the runner
+        run: build/check_no_remote_exec.sh
 
       # Static musl binaries for the runner's arch; the images add the cross-compiled arm64 binaries
       - name: Test

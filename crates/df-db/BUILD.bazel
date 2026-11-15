@@ -47,6 +47,7 @@ alias(
 
 rust_test(
     name = "df_db_test",
+    tags = ["no-remote-exec"],
     compile_data = glob(["migrations/*.sql"]) + [
         ":sqlx_dotenv",
         "//:sqlx_data",
