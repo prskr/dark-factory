@@ -17,7 +17,7 @@ Cluster runs need a container socket (skill `e2e`, "Running"). Without one, buil
 - [ ] 1.4 Add `src/fixture.rs` with `run(name, body)` and `World`:
   - env, session with tracing started, pool, both Forgejo clients, unique suffix;
   - `create_task` and its variants record the keys they return;
-  - teardown cancels unfinished tasks and their children through the UI, every step bounded and best-effort;
+  - teardown cancels unfinished tasks and their children through the UI, with the HTTP fallback (`POST /tasks/{key}/cancel` with the session cookie taken after login) when the UI path fails, every step bounded; the child query repeats after the coordinator's run stopped until no new child appears; when both cancel paths fail, the test fails and names the leaked tasks;
   - on failure, screenshot, trace and console go to `$E2E_ARTIFACTS_DIR/<name>/`;
   - a panic in the body is resumed after teardown.
 
@@ -25,9 +25,10 @@ Cluster runs need a container socket (skill `e2e`, "Running"). Without one, buil
 - [ ] 1.5 Move `interrupt.rs` to the fixture as the first user. On a kept cluster:
   - it passes;
   - an `assert!(false)` added on purpose leaves `screenshot.png`, `console.txt` (and `trace.zip` per 1.3) under `target/e2e-artifacts/<test>/`;
-  - its task ends `cancelled`.
+  - its task ends `cancelled`;
+  - with the browser connection closed before teardown (temporary test code), the HTTP fallback still cancels the task.
 
-  Remove the deliberate failure afterwards.
+  Remove the deliberate failure and the temporary code afterwards.
 
 ## 2. Shared helpers (D2, D5)
 
@@ -62,7 +63,9 @@ Cluster runs need a container socket (skill `e2e`, "Running"). Without one, buil
 
 ## 4. Migrate the tests (D1–D5, D8)
 
-Each task: move the file to the fixture, use typed statuses and the shared helpers, give everything the test creates a unique suffix, use role-based locators where the UI has an accessible name, and comment each remaining `.first()`. Verify by running the file twice in a row on one kept cluster (`E2E_KEEP=1 E2E_TEST_ARGS="--ignored --test-threads=2 <file filter>"`, without `E2E_FRESH`), passing both times.
+- [ ] 4.0 Add `E2E_REPEAT` (default `1`) to `e2e-local.sh`: run the `cargo test` step that many times after the single reset and seed (design D9), and add it to the variable table in `docs/demo.md`. Verify with `E2E_REPEAT=2` on `interrupt.rs`: the log shows two test runs and one reset.
+
+Each of the following tasks: move the file to the fixture, use typed statuses and the shared helpers, give everything the test creates a unique suffix, use role-based locators where the UI has an accessible name, and comment each remaining `.first()`. Verify with `E2E_REPEAT=2 E2E_KEEP=1 E2E_TEST_ARGS="--ignored --test-threads=2 <file filter>"`: both runs pass against the same database and repositories, with no reset between them.
 
 - [ ] 4.1 `existing_branch.rs`: repository `factory/existing-branch`, unique branch and file names. The rebase test checks for its own commit on its branch.
 - [ ] 4.2 `delegation.rs`: children through the coordinator the test created, no predicted keys.
@@ -111,8 +114,9 @@ Each task: move the file to the fixture, use typed statuses and the shared helpe
 
 ## 7. Integration
 
-- [ ] 7.1 Run the full suite twice in a row on one kept cluster with the default two threads. Both runs pass, and no task outside a final status remains afterwards (`SELECT key, status FROM tasks WHERE status NOT IN ('completed','cancelled','failed')` is empty).
-- [ ] 7.2 `cargo clippy -p df-e2e --all-targets --all-features -- -D warnings`, `cargo machete` and `openspec validate --all --strict` pass, and the CI e2e job is green.
+- [ ] 7.1 Run the full suite with `E2E_REPEAT=2` and the default two threads: both runs pass against the same database and repositories, and no task outside a final status remains at the end (`SELECT key, status FROM tasks WHERE status NOT IN ('completed','cancelled','failed')` is empty).
+- [ ] 7.2 Run the full suite once more on the kept cluster from 7.1 (a second script run, with reset): it reuses the cluster and passes.
+- [ ] 7.3 `cargo clippy -p df-e2e --all-targets --all-features -- -D warnings`, `cargo machete` and `openspec validate --all --strict` pass, and the CI e2e job is green.
 
 ## Workflow follow-up
 

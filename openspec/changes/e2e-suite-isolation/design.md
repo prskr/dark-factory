@@ -43,14 +43,14 @@ playwright-rs 0.21 offers `BrowserContext::tracing()` (`start`/`stop` with a pat
 - **Running the test:** the test body runs in a spawned task. A panic (`assert!` failed) becomes a failure without skipping teardown. After teardown the original panic is resumed, so `cargo test` reports it unchanged.
 - **Recording tasks:** `World::create_task` and its variants record the keys they return.
 - **Teardown** runs every time, with every step bounded and best-effort (it logs and continues):
-  - It cancels each recorded task that is not `completed`, `cancelled` or `failed`, through the UI in a fresh page of the same context.
-  - It also cancels tasks created by the recorded ones (delegation children), found through `parent_id`.
+  - It cancels each recorded task that is not `completed`, `cancelled` or `failed`, through the UI in a fresh page of the same context. If the UI path fails (for example because the browser connection is gone), it posts the cancel directly to the control plane (`POST /tasks/{key}/cancel`, the form the UI submits), using the session cookie taken from the browser context right after login. If that fails too, the test fails and names the tasks it left behind.
+  - It also cancels tasks created by the recorded ones (delegation children), found through `parent_id`, and repeats that query after the coordinator's run has stopped until no new child appears.
   - On failure it writes `screenshot.png`, `trace.zip` and `console.txt` (console messages and page errors) to `$E2E_ARTIFACTS_DIR/<test name>/`. The default directory is `target/e2e-artifacts`.
   - On success it stops tracing without a path.
 
 **Why a function and not a `Drop` guard:** async work can't run in `Drop`, and `run` keeps the order of teardown explicit.
 
-**Cancelling through the UI instead of the database:** a database update would bypass the control plane, so the sandbox would keep running. There is no JSON API for cancelling. The UI path goes through the real control plane, and a hung browser can't block it longer than its timeout.
+**Cancelling through the control plane instead of the database:** a database update would bypass the control plane, so the sandbox would keep running. There is no JSON API for cancelling. The UI path tests the real flow; the HTTP fallback reaches the same handler without the browser. Teardown does not stop the whole run when both fail: the parallel test is already running by then, and the failure names the leaked task.
 
 **Alternatives considered:**
 - `rstest`-style fixtures (a new dependency, and no async teardown on failure).
@@ -115,11 +115,16 @@ Tests call `World` methods that delegate to these modules. No SQL stays in `test
 
 The helpers in `browser.rs` and the tests touched by D1–D5 use `get_by_role` with the accessible name where the element has one (buttons with `aria-label` or text, tabs, menu items, dialogs). IDs stay for app-owned regions (`#transcript`, `#task-details`, `#request-<id>`). Each remaining `.first()` gets a comment.
 
+### D9: Repeat runs without a reset
+
+`e2e-local.sh` reads `E2E_REPEAT` (default `1`) and runs the `cargo test` step that many times after the single reset and seed. A run with `E2E_REPEAT=2` checks the "Repeatable tests" requirement; the existing reuse of a kept cluster stays a separate check. The variable goes into the variable table of `docs/demo.md`.
+
 ## Risks / Trade-offs
 
 - **[Trace of a remote browser]** The browser runs in the cluster; `tracing.stop` with a path has to transfer the file over the connection. → Verify early (task 1.3). If playwright-rs cannot do it, keep screenshot and console and drop the trace, noted in `docs/demo.md`.
 - **[Forgejo's pull-by-base-and-head endpoint]** It exists in current Forgejo, but the pinned chart version must have it. → Verify in task 2.2. The fallback pages through `pulls?state=all` until it finds the head.
-- **[Cancel through the UI fails when the browser is the problem]** → Teardown bounds each step and logs the failure. The runner's reset on the next run still cleans up, as today.
+- **[Cancel through the UI fails when the browser is the problem]** → The HTTP fallback with the session cookie (D1). Verify in task 1.4 that the cancel endpoint accepts a plain form post with that cookie (no extra CSRF token); if it needs one, read it from the task page over HTTP.
+- **[Repeatability needs a run without a reset]** The runner resets the database and the repositories on every invocation, so running the script twice does not check repeatability. → `E2E_REPEAT` (default 1) runs `cargo test` that many times after a single reset (D9).
 - **[Rootless Podman host ports]** Mapped ports above 1024 work rootless, and all four are above 1024. → None needed.
 - **[Larger seed]** One more project and one more repository add a few seconds of setup. → Accepted.
 
