@@ -8,7 +8,7 @@ If there are good reasons to break something now or to clean something up in a w
 
 ## Skills and crate rules
 
-- Task-specific details live in skills under `.agents/skills/` (symlinked into `.claude/skills/`). Skill `rust` covers the sandbox toolchain setup, running tests (cargo vs. Bazel, filters, no container socket), adding dependencies and crates, `MODULE.bazel.lock`, and lint mechanics. Its rules are as binding as this file.
+- Task-specific details live in skills under `.agents/skills/` (symlinked into `.claude/skills/`). Skill `rust` covers the sandbox toolchain setup, running tests (cargo vs. Bazel, filters, no container socket), adding dependencies and crates, `MODULE.bazel.lock`, and lint mechanics. Skill `e2e` covers the end-to-end suite (`crates/df-e2e`, `deploy/e2e`, `just e2e-local`): running it, test isolation and waits. Their rules are as binding as this file.
 - Crates with their own rules have an `AGENTS.md` next to their `Cargo.toml` (`crates/df-web`, `crates/factory-agent`).
 
 ## Bazel usage

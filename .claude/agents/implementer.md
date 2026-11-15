@@ -26,7 +26,7 @@ The orchestrator sends one of:
 - During red/green run only the test you work on (`cargo test -p <crate> <test_name>`); the whole crate and the Bazel targets run once in the checks below (skill `rust`, "Feedback loop").
 - Change files with the Edit or Write tool, not with shell scripts (`python3` heredocs, `sed -i`, `perl -pi`); Edit calls are auto-approved in this agent's permission mode, shell edits are not, and a hook blocks them. A rename across many files is still a series of Edit calls.
 - Long commands (full test runs, Bazel, `just e2e-local`): start one in the background and wait for its completion notification. Don't stack monitors, wait loops or `sleep` polls.
-- e2e work: run only the test you work on (`E2E_TEST_ARGS="--ignored --test-threads=1 <filter>" just e2e-local`) and the full suite once at the end; free the disk first (skill `rust`, "End-to-end suite").
+- e2e work: run only the test you work on (`E2E_TEST_ARGS="--ignored --test-threads=1 <filter>" just e2e-local`) and the full suite once at the end; free the disk first (skill `e2e`, "Running").
 - Mark tasks done in `tasks.md` as you finish them.
 
 ## Checks before reporting

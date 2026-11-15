@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup) or a target such as wasm32-wasip2 seems missing, when running Rust tests (choosing cargo or Bazel, filters, no container socket, disk full), when running or writing end-to-end tests (just e2e-local, crates/df-e2e), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints or a file over the length limit.
+description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup) or a target such as wasm32-wasip2 seems missing, when running Rust tests (choosing cargo or Bazel, filters, no container socket, disk full), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints or a file over the length limit.
 ---
 
 # Rust in Dark Factory
@@ -85,19 +85,10 @@ Find the container socket first, as described in `AGENTS.md` ("Containers and in
   ```
 
 - **Tests hang after the container runtime restarted:** the shared PostgreSQL container (`df-test-postgres-*`, reused by all test binaries) stays exited. With the CLI of the runtime that owns `<socket>` (`podman` or `docker`), check with `<cli> ps -a --filter name=df-test-postgres` and remove it with `<cli> rm -f <name>`; testcontainers recreates it on the next run.
-- **Disk full (`no space left on device`):** the shared container `df-test-postgres-17-alpine-r1` drops the databases of finished tests while a run creates new ones (a minute after their pool closed, checked at most every 30 s per test process) and at the next server start, so only killed runs, the last minutes of a run and databases of long-running tests stay; its data can still grow to several GB after many aborted runs. Check with `<cli> system df` / `df -h /var/lib/docker`, then remove it with its volume: `<cli> rm -fv df-test-postgres-17-alpine-r1`. Its data is throwaway; the next test run recreates it. Do this before an e2e run, which needs several GB for images.
+- **Disk full (`no space left on device`):** the shared container `df-test-postgres-17-alpine-r1` drops the databases of finished tests while a run creates new ones (a minute after their pool closed, checked at most every 30 s per test process) and at the next server start, so only killed runs, the last minutes of a run and databases of long-running tests stay; its data can still grow to several GB after many aborted runs. Check with `<cli> system df` / `df -h /var/lib/docker`, then remove it with its volume: `<cli> rm -fv df-test-postgres-17-alpine-r1`. Its data is throwaway; the next test run recreates it. Do this before an e2e run, which needs several GB for images (skill `e2e`).
 - **`dark-factory` tests with plain cargo** load the Forgejo wasm plugin from `target/wasm32-wasip2/debug/`. Build it first with rustup's toolchain (see "Toolchain in a sandbox"): `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build --target wasm32-wasip2 -p forgejo-plugin`. Bazel (CI, release) builds it as test `data` and sets `FORGEJO_PLUGIN_WASM`; no extra step there.
 
-### End-to-end suite (`just e2e-local`)
-
-`deploy/e2e/e2e-local.sh` creates a kind cluster (~2-4 minutes), runs `crates/df-e2e` against it and deletes it. A full run takes ~15 minutes; `flow.rs` alone ~10 minutes. Needs a container socket and free disk (previous section): the script stops before touching the cluster when the runtime's storage has less than `E2E_MIN_FREE_GIB` (default 10) free, and names the cleanup commands.
-
-- **While working on one e2e test, keep the cluster and run only that test:** `E2E_KEEP=1 E2E_TEST_ARGS="--ignored --test-threads=1 <test_name_filter>" just e2e-local`. The first run creates the cluster; every later run reuses it (state reset, images reloaded, release upgraded), so the setup takes about a minute. `E2E_TEST_ARGS` replaces the default arguments, so keep `--test-threads=1`: a filter can match several tests, and the cluster's memory budget (`docs/demo.md`) is one test at a time.
-- **After changes to `deploy/e2e/*.yaml`** (the infrastructure manifests) run once with `E2E_FRESH=1`: a reused cluster keeps the old infrastructure. The script prints a hint when the manifests changed; it also recreates a cluster whose Forgejo does not answer.
-- **Run the full suite once,** at the end, when the targeted test passes.
-- **A new test file** under `crates/df-e2e/tests/` is picked up by the script (it discovers `tests/*.rs`). A binary that is not a cluster test goes on the `excluded_tests` list at the top of `deploy/e2e/e2e-local.sh` with a reason. `E2E_LIST=1 just e2e-local` prints the selected and skipped binaries without touching the cluster.
-- Delete a kept cluster when you are done (`kind delete cluster --name df-e2e`): it holds several GB of images.
-- Forgejo refuses to merge a draft PR (HTTP 405): a test that merges an attached or draft PR marks it ready through the test's own Forgejo client first. It also answers 405 while it re-checks a PR after its base branch moved (another test merged); `Forgejo::merge_pull` retries that.
+The end-to-end suite (`just e2e-local`, `crates/df-e2e`) has its own skill: `e2e`.
 
 ## Adding a crate
 
