@@ -40,11 +40,15 @@ Every check of a test SHALL be limited to records of that test: its tasks, runs,
 - **THEN** a test still finds the pull request of its task by the task's branch
 
 ### Requirement: Cleanup of a test's tasks
-After a test ends, passed or failed, the suite SHALL cancel every task the test created that is not in a final status, so that no sandbox of a finished test keeps a place in the sandbox quota.
+After a test ends, passed or failed, the suite SHALL cancel, through the control plane, every task the test created that is not in a final status, before the test's result is reported. When the control plane does not accept the cancellation, the test SHALL fail and name the tasks it left behind.
 
 #### Scenario: Failed test with a running task
 - **WHEN** a test fails while its task's run is still waiting for a network decision
-- **THEN** the task is cancelled before the next test starts, and its sandbox is released
+- **THEN** the task is cancelled before the test's result is reported, and its sandbox is released
+
+#### Scenario: Cancellation not possible
+- **WHEN** neither the UI nor a direct request to the control plane can cancel a task of the test
+- **THEN** the test fails, and its error names the task that is still active
 
 #### Scenario: Passed test
 - **WHEN** a test passes and its task is waiting for a follow-up
