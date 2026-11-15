@@ -1,0 +1,1 @@
+exports_files(["hermetic_cc_toolchain-rustc-linker-args.patch"])

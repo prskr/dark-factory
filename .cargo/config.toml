@@ -6,5 +6,10 @@ DATABASE_URL = { value = "postgres://postgres:postgres@localhost:5432/postgres",
 # builds do not need it: `just e2e-local` installs it (docs/demo.md).
 PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD = { value = "1", force = false }
 
+# Linking with GNU ld takes most of a warm `cargo test` build on aarch64 (x86_64 already links with the
+# bundled rust-lld by default); the script uses the toolchain's rust-lld and falls back to plain `cc`.
+[target.aarch64-unknown-linux-gnu]
+linker = ".cargo/cc-lld.sh"
+
 [alias]
 xtask = "run --quiet --manifest-path tools/xtask/Cargo.toml --"

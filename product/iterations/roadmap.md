@@ -128,6 +128,8 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | "Start now" for a task in `awaiting_dependencies`, overriding its dependencies | idea | `openspec/changes/archive/2026-11-06-iter3-task-dependencies` |
 | Dependencies set by humans also covers `base_task` in the new-task composer | idea | `openspec/changes/iter3-task-tree` |
 | Base-branch notices: tell open tasks with own commits that their base branch moved (subtask merged, rebase), without waking them | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Container-backed tests on RBE workers (today they run on the client, tag `no-remote-exec`) | idea | TD-27, ADR-0058, `openspec/changes/hermetic-cc-toolchain` (Non-Goals) |
+| Rust 1.100/1.101 upgrade; with rustc ≥ 1.101 drop `-Wl,--fix-cortex-a53-843419` from the zig patch (`build/patches/hermetic_cc_toolchain-rustc-linker-args.patch`) | idea | ADR-0058 decision 2 |
 | Pi harness: a profile plus its files (`AcpHarness.files` prepared in iter3) | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (out of scope) |
 | Import a provider's model list from its `/v1/models` | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (out of scope) |
 | OpenCode Go preset check with a real key: Chat Completions and Anthropic Messages models with scheme `bearer`, reasoning output without the catalog's `reasoning_field` | idea | `openspec/changes/archive/2026-11-05-iter3-opencode-harness` (task 9.3, postponed) |

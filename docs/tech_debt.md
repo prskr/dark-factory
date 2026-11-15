@@ -69,7 +69,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-23 | low   | `df-agent-channel` scheduler | `enforce_timeouts` loads every active run on every tick ([#123]) |
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
-| TD-27 | medium | Bazel | No remote build execution: container tests cannot run in agent sandboxes |
+| TD-27 | medium | Bazel | Container-backed tests cannot run on remote workers or in agent sandboxes |
 | TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions ([#123]) |
 | TD-34 | low   | `df-core` config | Defaults for `runtime_image` and `issuer_name` don't match what the chart renders |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
@@ -322,13 +322,13 @@ Every 15 s tick on every replica loads all non-terminal runs and filters the dea
 
 **Fix:** One shared helper with the dropped-sender behavior stated in its doc; inline the wrapper and the alias.
 
-### TD-27. No remote build execution: container tests cannot run in agent sandboxes
+### TD-27. Container-backed tests cannot run on remote workers or in agent sandboxes
 
 `.bazelrc`, `.bazelrc.agents`, `MODULE.bazel`, `build/platforms/BUILD.bazel`
 
-RBE was removed in favor of local static musl builds with an optional remote cache. Agent sandboxes have no container socket, so `df-test-postgres` based tests only run in CI and on developer machines. ADR-0023, `design/agent-run.md`, `design/egress.md` and `product/context.md` still assume RBE runs them.
+Remote execution is back for everything except the container-backed tests (`--config=rbe` on BuildBuddy, [ADR-0058](adr/0058-hermetic-c-toolchain.md), [remote-execution.md](remote-execution.md) §3). Tests that depend on `df-test-postgres` run on the client (tag `no-remote-exec`), and agent sandboxes use no remote execution (`.bazelrc.agents`) and have no container socket, so these tests only run in CI and on developer machines. ADR-0023, `design/agent-run.md`, `design/egress.md` and `product/context.md` still assume RBE runs them.
 
-**Fix:** Self-hosted RBE workers with a controlled image and an exec C toolchain that does not depend on the client, see [remote-execution.md](remote-execution.md) §3.
+**Fix:** A container runtime (`dockerd`) in the executor image, so that the tag is not needed, and `--config=rbe` for agent sandboxes where BuildBuddy is reachable.
 
 ### TD-33 (R5-N18). Mixed `.sqlx` metadata format
 

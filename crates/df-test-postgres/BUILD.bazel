@@ -26,6 +26,7 @@ rust_library(
 
 rust_test(
     name = "df_test_postgres_test",
+    tags = ["no-remote-exec"],
     compile_data = glob(["migrations/*.sql"]),
     crate = ":df_test_postgres",
     lint_config = ":lints",

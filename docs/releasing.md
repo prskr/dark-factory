@@ -41,6 +41,8 @@ flowchart LR
 
 Two releases never run at the same time (`concurrency: release`).
 
+The Bazel steps of `images` and `reference-images` build and test with `--config=rbe` (BuildBuddy remote execution, [ADR-0058](adr/0058-hermetic-c-toolchain.md)); the push tools (`bazel run`) run on the runner and download the image layers first. If BuildBuddy is unavailable, replace `--config=rbe` with `--config=cache` in `BAZEL_ARGS` of both jobs (and of `ci.yaml`). The first release after the switch is the end-to-end check of the push step under `--config=rbe`: watch it.
+
 The binaries report the version as `df_telemetry::VERSION`: Bazel passes `--//build:version`, plain `cargo` builds report `dev` unless `DF_VERSION` is set at build time. It is shown in the profile menu of the web UI and exported as OTel `service.version`.
 
 ## Docs site

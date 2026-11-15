@@ -22,6 +22,7 @@ cargo clippy --version && cargo fmt --version
 - `rust-toolchain.toml` is the source of truth. The same version is repeated in `MODULE.bazel` (`versions`); bump both together.
 - A missing component or target: `rustup component add <name>` / `rustup target add <triple>` with the names from the file; don't change the file.
 - A plain `cargo build` also needs `protoc` (>= 29.x) on `PATH` (or `PROTOC`). Without it, build and test through Bazel.
+- Bazel on Linux needs no `gcc`, `clang` or binutils: exec tools (build scripts, proc-macros) are compiled with `zig cc` (ADR-0058). The zig cache is `/var/tmp/zig-cache`, mounted into the sandbox by `.bazelrc`; a sandbox where `/var/tmp` is not writable needs another path in `.bazelrc.user` (`--repo_env=HERMETIC_CC_TOOLCHAIN_CACHE_PREFIX` and `--sandbox_writable_path`, as in `.bazelrc`; `.bazelrc.agents` is shared and checked in), otherwise a full build takes twice as long. Plain `cargo` on aarch64 Linux links with a `cc` and the toolchain's `rust-lld` (`.cargo/cc-lld.sh`), so a C compiler is needed there.
 - `.bazel_env/bin` (on `PATH` through direnv) contains Bazel's own `cargo` and `rustc`, which come before rustup's and know no extra targets: `wasm32-wasip2` looks missing. Don't take `.bazel_env/bin` off `PATH` (it also provides `swc`, `tailwindcss`, `kind`, `buf`); call rustup's toolchain explicitly for target builds: `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build --target wasm32-wasip2 -p forgejo-plugin`.
 - `df-web` compiles its scripts (`swc`) and stylesheet (`tailwindcss`) in `build.rs`. Without the tools (`bazel run //:bazel_env` builds them into `.bazel_env/bin`, which must be on `PATH`; in a sandbox they are usually missing) the build succeeds with a warning, nothing is embedded, and `cargo test -p df-web` lists the tests that read compiled assets as `ignored` (cfgs `df_web_scripts` / `df_web_styles`). Say in the report that they did not run; `bazel test //crates/df-web/...` always runs them.
 
@@ -84,6 +85,7 @@ Find the container socket first, as described in `AGENTS.md` ("Containers and in
     --sandbox_writable_path=$(dirname <socket>)
   ```
 
+- **A new container-backed Bazel test** needs the tag `no-remote-exec` (see "Adding a crate", "Details that bite").
 - **Tests hang after the container runtime restarted:** the shared PostgreSQL container (`df-test-postgres-*`, reused by all test binaries) stays exited. With the CLI of the runtime that owns `<socket>` (`podman` or `docker`), check with `<cli> ps -a --filter name=df-test-postgres` and remove it with `<cli> rm -f <name>`; testcontainers recreates it on the next run.
 - **Disk full (`no space left on device`):** the shared container `df-test-postgres-17-alpine-r1` drops the databases of finished tests while a run creates new ones (a minute after their pool closed, checked at most every 30 s per test process) and at the next server start, so only killed runs, the last minutes of a run and databases of long-running tests stay; its data can still grow to several GB after many aborted runs. Check with `<cli> system df` / `df -h /var/lib/docker`, then remove it with its volume: `<cli> rm -fv df-test-postgres-17-alpine-r1`. Its data is throwaway; the next test run recreates it. Do this before an e2e run, which needs several GB for images.
 - **`dark-factory` tests with plain cargo** load the Forgejo wasm plugin from `target/wasm32-wasip2/debug/`. Build it first with rustup's toolchain (see "Toolchain in a sandbox"): `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build --target wasm32-wasip2 -p forgejo-plugin`. Bazel (CI, release) builds it as test `data` and sets `FORGEJO_PLUGIN_WASM`; no extra step there.
@@ -115,6 +117,7 @@ Details that bite:
 - Bazel runs only what has a target. A `tests/*.rs` or a unit-test module without `rust_test` is never built, run or linted under Bazel.
 - A test that spawns a binary gets it through `data` and the path through `env` (`$(rootpath :bin)`), or through `rustc_env` when the test reads it with `env!` (`CARGO_BIN_EXE_<name>`).
 - Do not tag a target `manual`: `//crates/...` and the clippy aspect skip it, so it would escape linting. Tag a test that cannot run in Bazel `external` instead.
+- Tag a test `no-remote-exec` if it needs a container runtime (`df_test_postgres`, testcontainers) or a tool from the client (`buf`, `file`, `readelf`). Remote workers have neither; the tag keeps the test on the client under `--config=rbe`. `build/check_no_remote_exec.sh` (CI) only catches tests that depend on `df-test-postgres`; tag the others yourself.
 - A new workspace member needs the manifest entry in `MODULE.bazel`; then regenerate `MODULE.bazel.lock` as described above.
 
 ## Lints

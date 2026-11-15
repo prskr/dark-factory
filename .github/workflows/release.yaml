@@ -58,10 +58,11 @@ jobs:
       contents: read
       packages: write # push to ghcr.io/prskr/dark-factory/*
     env:
-      # BuildBuddy remote cache, as in ci.yaml (docs/development.md). No platform flag: the image
+      # BuildBuddy remote execution, as in ci.yaml (docs/development.md, ADR-0058); the push tool runs on this
+      # runner. To go back to the remote cache only, replace `rbe` with `cache`. No platform flag: the image
       # targets set their own platforms (amd64 and arm64).
       BAZEL_ARGS: >-
-        --config=cache --config=ci
+        --config=rbe --config=ci
         --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -100,8 +101,9 @@ jobs:
       harness-digest: ${{ steps.harness.outputs.digest }}
       opencode-digest: ${{ steps.opencode.outputs.digest }}
     env:
+      # Remote execution, see the `images` job.
       BAZEL_ARGS: >-
-        --config=cache --config=ci
+        --config=rbe --config=ci
         --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

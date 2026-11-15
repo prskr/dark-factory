@@ -139,6 +139,7 @@ sh_test(
     data = TEST_DATA,
     tags = [
         "external",
+        "no-remote-exec",
         "no-sandbox",
     ],
     target_compatible_with = ["@platforms//os:linux"],

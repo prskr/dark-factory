@@ -127,6 +127,19 @@ bazel-build:
 bazel-test *TARGETS="//...":
     bazel test {{bazel_test_socket}} {{TARGETS}}
 
+# Run all tests (or TARGETS) with BuildBuddy remote execution (needs BUILDBUDDY_API_KEY, docs/development.md).
+# The tests that start containers (tag no-remote-exec) run on this machine: on amd64 Linux in the same
+# invocation, elsewhere (the workers are amd64) in a second one that builds only them for this host.
+bazel-test-rbe *TARGETS="//...":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{os()}}-{{arch()}}" == linux-x86_64 ]]; then
+        bazel test --config=rbe {{bazel_test_socket}} {{TARGETS}}
+    else
+        bazel test --config=rbe-cross {{TARGETS}}
+        bazel test --config=cache --build_tests_only --test_tag_filters=no-remote-exec {{bazel_test_socket}} {{TARGETS}}
+    fi
+
 # Clippy and rustfmt through Bazel (pinned, hermetic)
 bazel-lint:
     bazel build --config=lint //crates/... //plugins/...

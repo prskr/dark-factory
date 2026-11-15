@@ -29,6 +29,15 @@ build:fmt --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
 # transitions to the amd64/arm64 musl platforms) reuse them. macOS keeps its native target platform.
 build:linux --platforms=//build/platforms:host_musl
 
+# zig cc (hermetic_cc_toolchain, C toolchain of the exec platform) keeps its libc/compiler_rt build products
+# in a cache directory. Actions have no HOME and a private /tmp, so without a fixed, writable path every
+# link re-builds them (~16 s per proc-macro or build script, build 2x slower). The path is baked into the
+# toolchain: keep it identical on every machine, or the remote cache is not shared. The sandbox makes the
+# parent directory writable, because the sandbox fails to start an action when the cache directory itself
+# does not exist yet. Override both in `.bazelrc.user` (not checked in) only if /var/tmp is not writable.
+common:linux --repo_env=HERMETIC_CC_TOOLCHAIN_CACHE_PREFIX=/var/tmp/zig-cache
+build:linux --sandbox_writable_path=/var/tmp
+
 build:linux-amd64-musl --platforms=//build/platforms:linux_amd64_musl
 build:linux-arm64-musl --platforms=//build/platforms:linux_arm64_musl
 build:wasm32-wasip2 --platforms=//build/platforms:wasm32_wasip2
@@ -48,6 +57,31 @@ build:cache --remote_timeout=10m
 # Debugging the remote cache: gRPC and execution logs in the workspace root (git-ignored)
 build:cache-debug --remote_grpc_log=bazel-remote-grpc.log
 build:cache-debug --execution_log_compact_file=execution_log.binpb.zst
+
+# BuildBuddy remote execution (needs the API key like `cache`). The workers are amd64 Linux: tests build for
+# `linux_amd64_musl` whatever the client's OS and arch. Tests tagged `no-remote-exec` (they start containers)
+# run on the client; clients that cannot run amd64 binaries (arm64 Linux, macOS) use `--config=rbe-cross`.
+build:rbe --config=cache
+build:rbe --remote_executor=grpcs://remote.buildbuddy.io
+build:rbe --extra_execution_platforms=//build/platforms:linux_amd64_rbe
+build:rbe --host_platform=//build/platforms:linux_amd64_rbe
+build:rbe --platforms=//build/platforms:linux_amd64_musl
+build:rbe --jobs=50
+# `build:macos` sets `--features` and `--host_features` to `-layering_check`. Features are part of the
+# configuration, hence of the output paths and of every action key: every client sets them, or macOS and
+# Linux clients share no action.
+build:rbe --features=-layering_check
+build:rbe --host_features=-layering_check
+# The cpu name of the client (`aarch64`, `darwin_arm64`) is the name of the output directory of the target
+# configuration and part of every command line, hence of every action key.
+build:rbe --cpu=k8
+build:rbe --host_cpu=k8
+
+# `rbe` from a client that is not amd64 Linux (arm64 Linux, macOS): tests that start containers or need the
+# client's own tools cannot run there, so their tag is excluded from build and test.
+build:rbe-cross --config=rbe
+build:rbe-cross --build_tag_filters=-no-remote-exec
+build:rbe-cross --test_tag_filters=-no-remote-exec
 
 build:ci --build_metadata=ROLE=CI
 
