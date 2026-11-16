@@ -9,6 +9,7 @@ The build group comes first: its baseline must be measured before anything else 
 - [x] 1.1 Measure the baseline with the commands of design D6 (clean, warm low crate, warm leaf crate, `target/` size) on the current `main`; write the numbers into the table of design.md (Risks, "Compile-time numbers") with the machine (CPU, cores, OS).
 - [x] 1.2 Add `[profile.dev]` and `[profile.dev.package."*"]` to the root `Cargo.toml` (design D7). Verify a panic in a test still shows file and line (`RUST_BACKTRACE=1` on a failing test), and `cargo clippy --all-targets --all-features -- -D warnings` passes. If the 1.1 timings show proc macros as a large share, add `[profile.dev.build-override] opt-level = 3` and measure both.
 - [x] 1.3 Pin `cargo-nextest` (entry in `TOOLS` in `tools/xtask/src/main.rs`, `//:bazel_env` in `BUILD.bazel`, `cargo xtask update-tools`), add `.config/nextest.toml` (design D8) and a `just test` recipe (`cargo nextest run --workspace` then `cargo test --workspace --doc`). Verify `just test` passes with a container socket (or report the container-backed tests it could not run), and that `cargo xtask update-tools --check` is clean.
+  - Result: the check could not reach GitHub at first (xtask's TLS ignored the system CA); after that fix it found three upstream breaks (cargo-machete 0.10.1, cargo-deny 0.21.0 without Intel macOS, hugo 0.170.0 without the extended build) and the dropped Linux-only `patchelf`. With those fixed on the branch, `cargo xtask update-tools --check` is clean (2026-11-16).
 - [x] 1.4 Measure again with the D6 commands, fill in the "after" columns, and decide the out-of-scope rows (one test binary per crate, `mold`) from the numbers: add them to the backlog of `product/iterations/roadmap.md` with the measured share, or mark them rejected in the proposal.
 - [x] 1.5 Update skill `rust` (`.agents/skills/rust/SKILL.md`, "Tests": nextest commands for one test, one crate and before commit; `cargo test` as fallback without `.bazel_env`) and `docs/development.md` (profile, `CARGO_PROFILE_DEV_DEBUG=true` for debugger sessions, `just test`, nextest in the tools list). Remove the backlog row "Measure compile time …" from `product/iterations/roadmap.md`.
 
@@ -35,6 +36,7 @@ The build group comes first: its baseline must be measured before anything else 
 ## 5. Integration
 
 - [x] 5.1 Full run: `just e2e-local` with `E2E_REPEAT=2` passes; `just test`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete` and `openspec validate faster-test-loop` are clean.
+  - Result: the first `just test` had one failure, `df-web` `installed_packages_have_the_versions_of_package_json`, caused by stale `crates/df-web/node_modules` in the sandbox (mermaid 11.17.2 installed, 12.3.0 pinned). After `pnpm install --frozen-lockfile`, `just test` passes: 3013 tests, 46 skipped, plus the doc tests (2026-11-16).
 
 ## Workflow follow-up
 
