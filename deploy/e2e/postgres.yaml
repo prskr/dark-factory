@@ -44,6 +44,9 @@ metadata:
   name: postgres
   namespace: postgres
 spec:
+  # NodePort: the seed and the tests reach the database on 127.0.0.1:15432 (kind.yaml maps it).
+  type: NodePort
   selector: {app: postgres}
   ports:
     - port: 5432
+      nodePort: 30432

@@ -9,6 +9,7 @@ pub mod browser;
 pub mod data;
 pub mod db;
 pub mod env;
+pub mod fixture;
 pub mod forgejo;
 pub mod seed;
 pub mod wait;

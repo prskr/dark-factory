@@ -55,11 +55,11 @@ After a test ends, passed or failed, the suite SHALL cancel, through the control
 - **THEN** the task is cancelled
 
 ### Requirement: Failure diagnostics
-When a test fails, the suite SHALL save a screenshot of each of its pages, its browser trace and its browser console in a directory per test. When the run fails, the runner SHALL save the logs of the control plane, the gateway and the sandbox pods into the same artifacts directory, and CI SHALL keep that directory with the failed job.
+When a test fails, the suite SHALL save a screenshot of its main page and its browser console log in a directory per test. It saves no browser trace: the browser runs on a remote server, which writes a trace on its own disk, not on the test host. When the run fails, the runner SHALL save the logs of the control plane, the gateway and the sandbox pods into the same artifacts directory, and CI SHALL keep that directory with the failed job.
 
 #### Scenario: Failed UI assertion
 - **WHEN** a test fails waiting for a text on the task page
-- **THEN** the artifacts directory has the test's screenshot, trace and console log, and the error names the text and the element waited for
+- **THEN** the artifacts directory has the test's screenshot and console log, and the error names the text and the element waited for
 
 #### Scenario: Failed CI job
 - **WHEN** the e2e job fails in CI

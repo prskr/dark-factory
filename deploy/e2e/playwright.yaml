@@ -46,6 +46,9 @@ metadata:
   name: playwright
   namespace: playwright
 spec:
+  # NodePort: the test host connects on 127.0.0.1:13001 (kind.yaml maps it).
+  type: NodePort
   selector: {app: playwright}
   ports:
     - port: 3000
+      nodePort: 30301

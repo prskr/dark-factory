@@ -2,6 +2,31 @@ use super::*;
 use crate::tasks::{NewTask, create_task};
 use df_core::{PersonaId, ProjectId, UserId};
 
+#[test]
+fn every_request_state_parses_from_its_name() {
+    for state in [
+        RequestState::Pending,
+        RequestState::Answered,
+        RequestState::Approved,
+        RequestState::Denied,
+        RequestState::Closed,
+    ] {
+        assert_eq!(state.as_str().parse::<RequestState>().unwrap(), state);
+    }
+}
+
+#[test]
+fn an_unknown_request_state_is_an_error_naming_it() {
+    let error = "reopened"
+        .parse::<RequestState>()
+        .expect_err("unknown state");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid request: unknown request state `reopened`"
+    );
+}
+
 fn raise_by(task_id: TaskId, actor: &Principal, blocking: bool) -> Raise<'_> {
     Raise {
         task_id,

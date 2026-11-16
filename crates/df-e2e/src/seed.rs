@@ -27,6 +27,8 @@ struct SeedProject {
     key: &'static str,
     name: &'static str,
     script: &'static str,
+    /// Repository of the owner the project is linked to.
+    repository: &'static str,
     hidden: &'static [&'static str],
 }
 
@@ -43,13 +45,14 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         key,
         name,
         script,
+        repository,
         hidden,
     } in projects()
     {
         let wanted = project_input(
             key,
             name,
-            &data::repo_url(),
+            &data::repo_url_of(repository),
             None,
             data::PROJECT_IMAGE,
             data::adapter_command(script),
@@ -86,11 +89,12 @@ pub(crate) fn project_input(
 }
 
 /// The projects of the end-to-end suite.
-fn projects() -> [SeedProject; 13] {
+fn projects() -> [SeedProject; 14] {
     let project = |key, name, script| SeedProject {
         key,
         name,
         script,
+        repository: data::FORGE_REPO,
         hidden: &[],
     };
     [
@@ -133,10 +137,18 @@ fn projects() -> [SeedProject; 13] {
             data::WEBHOOK_PROJECT_NAME,
             data::WEBHOOK_SCRIPT,
         ),
+        SeedProject {
+            repository: data::FORGE_EXISTING_BRANCH_REPO,
+            ..project(
+                data::EXISTING_BRANCH_PROJECT_KEY,
+                data::EXISTING_BRANCH_PROJECT_NAME,
+                data::EXISTING_BRANCH_SCRIPT,
+            )
+        },
         project(
-            data::EXISTING_BRANCH_PROJECT_KEY,
-            data::EXISTING_BRANCH_PROJECT_NAME,
-            data::EXISTING_BRANCH_SCRIPT,
+            data::LIFECYCLE_PROJECT_KEY,
+            data::LIFECYCLE_PROJECT_NAME,
+            data::DEMO_SCRIPT,
         ),
         project(
             data::DELEGATION_PROJECT_KEY,

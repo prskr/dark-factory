@@ -1,69 +1,73 @@
 //! Delegation without a forge webhook (`iter3-task-dependencies`, `just e2e-local`): a coordinator
 //! creates an implementation and a review that depends on its completion; the review starts when
 //! the implementation completes, the coordinator is woken by each child and relays the review to
-//! the implementation for a second round. Needs the environment of `E2eEnv`, so the test is
-//! ignored by default.
+//! the implementation for a second round. The children are found through the coordinator the test
+//! created, by the marker of the prompt they were created with, never by a predicted key. Needs
+//! the environment of `E2eEnv`, so the tests are ignored by default.
 
 use anyhow::Result;
-use df_e2e::browser::Session;
-use df_e2e::wait::{RUN_TIMEOUT, eventually};
-use df_e2e::{E2eEnv, data, db};
-use sqlx::PgPool;
+use df_core::TaskStatus;
+use df_e2e::fixture::{self, World};
+use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually, status_reached};
+use df_e2e::{data, db};
+
+/// The prompt markers of `crates/fake-acp-agent/scripts/delegation.yaml` and `research.yaml`.
+const IMPLEMENTATION: &str = "[impl]";
+const REVIEW: &str = "[review]";
+const RESEARCH: &str = "[research]";
 
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn coordinator_delegates_implementation_and_review_and_relays_the_next_round() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
-    let pool = db::connect(&env.database_url).await?;
+    fixture::run(
+        "coordinator_delegates_implementation_and_review_and_relays_the_next_round",
+        |world| async move {
+            let coordinator = world
+                .session
+                .create_task(
+                    &world.env,
+                    data::DELEGATION_PROJECT_KEY,
+                    "[coordinator] Get the greeting written and reviewed.",
+                    None,
+                )
+                .await?;
 
-    let coordinator = session
-        .create_task(
-            &env,
-            data::DELEGATION_PROJECT_KEY,
-            "[coordinator] Get the greeting written and reviewed.",
-            None,
-        )
-        .await?;
-    assert_eq!(coordinator, "DG-1");
+            // The implementation completes, which releases the review; both wake the coordinator,
+            // whose relay of the review reopens the implementation for a second completion.
+            let implementation = child_of(&world, &coordinator, IMPLEMENTATION).await?;
+            let review = child_of(&world, &coordinator, REVIEW).await?;
+            wait_for_runs(&world, &implementation, 2).await?;
+            wait_for_runs(&world, &review, 1).await?;
+            for key in [&implementation, &review] {
+                let status = db::task_status(&world.pool, key).await?;
+                assert_eq!(status, TaskStatus::InReview, "{key}");
+            }
+            let wakeups = db::system_messages(
+                &world.pool,
+                &coordinator,
+                df_core::system_reason::CHILD_ENDED,
+            )
+            .await?;
+            assert_eq!(wakeups.len(), 3, "{wakeups:?}");
+            assert!(
+                wakeups
+                    .iter()
+                    .any(|m| m.contains("Review done, two findings."))
+            );
+            assert_eq!(db::agent_messages(&world.pool, &implementation).await?, 1);
+            assert_eq!(
+                db::children(&world.pool, &coordinator).await?,
+                [implementation.clone(), review.clone()],
+                "the coordinator created exactly these two, in this order"
+            );
 
-    // The implementation completes, which releases the review; both wake the coordinator, whose
-    // relay of the review reopens the implementation for a second completion.
-    wait_for_runs(&pool, "DG-2", 2).await?;
-    wait_for_runs(&pool, "DG-3", 1).await?;
-    for key in ["DG-2", "DG-3"] {
-        let status = db::task_status(&pool, key).await?;
-        assert_eq!(status, "in_review", "{key}");
-    }
-    let wakeups =
-        db::system_messages(&pool, &coordinator, df_core::system_reason::CHILD_ENDED).await?;
-    assert_eq!(wakeups.len(), 3, "{wakeups:?}");
-    assert!(
-        wakeups
-            .iter()
-            .any(|m| m.contains("Review done, two findings."))
-    );
-    let relayed: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM task_messages m JOIN tasks t ON t.id = m.task_id \
-         WHERE t.key = 'DG-2' AND m.author ->> 'kind' = 'agent'",
+            world.session.open_task(&world.env, &review).await?;
+            world.session.open_dependencies().await?;
+            world.session.expect_text("Waits for", UI_TIMEOUT).await?;
+            world.session.expect_text("satisfied", UI_TIMEOUT).await
+        },
     )
-    .fetch_one(&pool)
-    .await?;
-    assert_eq!(relayed, 1);
-    let parents: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM tasks c JOIN tasks p ON p.id = c.parent_id \
-         WHERE p.key = 'DG-1' AND c.key IN ('DG-2', 'DG-3')",
-    )
-    .fetch_one(&pool)
-    .await?;
-    assert_eq!(parents, 2);
-
-    session.open_task(&env, "DG-3").await?;
-    session.open_dependencies().await?;
-    session.expect_text("Waits for", RUN_TIMEOUT).await?;
-    session.expect_text("satisfied", RUN_TIMEOUT).await?;
-    Ok(())
+    .await
 }
 
 /// Hand-over with an artifact (`iter3-artifacts`, demo step 5): the researcher writes
@@ -72,76 +76,88 @@ async fn coordinator_delegates_implementation_and_review_and_relays_the_next_rou
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
-    let pool = db::connect(&env.database_url).await?;
+    fixture::run(
+        "a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact",
+        |world| async move {
+            let coordinator = world
+                .session
+                .create_task(
+                    &world.env,
+                    data::RESEARCH_PROJECT_KEY,
+                    "[coordinator] Find out why the login loops.",
+                    None,
+                )
+                .await?;
 
-    let coordinator = session
-        .create_task(
-            &env,
-            data::RESEARCH_PROJECT_KEY,
-            "[coordinator] Find out why the login loops.",
-            None,
-        )
-        .await?;
-    assert_eq!(coordinator, "RS-1");
-
-    wait_for_runs(&pool, "RS-2", 1).await?;
-    let artifact = format!("RS-2/{}", data::RESEARCH_ARTIFACT);
-    eventually(
-        "the coordinator to read the findings",
-        RUN_TIMEOUT,
-        || async {
-            let reads: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM tool_calls WHERE tool_name = 'read_artifact' \
-                 AND arguments ->> 'task' = 'RS-2' AND arguments ->> 'name' = $1 \
-                 AND result IS NOT NULL AND COALESCE((result ->> 'isError')::boolean, false) = false",
+            let researcher = child_of(&world, &coordinator, RESEARCH).await?;
+            wait_for_runs(&world, &researcher, 1).await?;
+            let artifact = format!("{researcher}/{}", data::RESEARCH_ARTIFACT);
+            eventually(
+                "the coordinator to read the findings",
+                RUN_TIMEOUT,
+                || async {
+                    let reads =
+                        db::artifact_reads(&world.pool, &researcher, data::RESEARCH_ARTIFACT)
+                            .await?;
+                    Ok((reads > 0).then_some(()))
+                },
             )
-            .bind(data::RESEARCH_ARTIFACT)
-            .fetch_one(&pool)
             .await?;
-            Ok((reads > 0).then_some(()))
+            let wakeups = db::system_messages(
+                &world.pool,
+                &coordinator,
+                df_core::system_reason::CHILD_ENDED,
+            )
+            .await?;
+            assert!(wakeups.iter().any(|m| m.contains(&artifact)), "{wakeups:?}");
+
+            world.session.open_task(&world.env, &researcher).await?;
+            world.session.expect_text("Artifacts", UI_TIMEOUT).await?;
+            world
+                .session
+                .page
+                .goto(
+                    &format!(
+                        "{}/tasks/{researcher}/artifacts/{}",
+                        world.env.base_url,
+                        data::RESEARCH_ARTIFACT
+                    ),
+                    None,
+                )
+                .await?;
+            world
+                .session
+                .expect_text(data::RESEARCH_FINDING, UI_TIMEOUT)
+                .await
         },
     )
-    .await?;
-    let wakeups =
-        db::system_messages(&pool, &coordinator, df_core::system_reason::CHILD_ENDED).await?;
-    assert!(wakeups.iter().any(|m| m.contains(&artifact)), "{wakeups:?}");
+    .await
+}
 
-    session.open_task(&env, "RS-2").await?;
-    session.expect_text("Artifacts", RUN_TIMEOUT).await?;
-    session
-        .page
-        .goto(
-            &format!(
-                "{}/tasks/RS-2/artifacts/{}",
-                env.base_url,
-                data::RESEARCH_ARTIFACT
-            ),
-            None,
-        )
-        .await?;
-    session
-        .expect_text(data::RESEARCH_FINDING, RUN_TIMEOUT)
-        .await?;
-    Ok(())
+/// Waits until `coordinator` has created the child that `marker` identifies; returns its key.
+async fn child_of(world: &World, coordinator: &str, marker: &str) -> Result<String> {
+    eventually(
+        &format!("{coordinator} to create the child with {marker}"),
+        RUN_TIMEOUT,
+        || db::child_described(&world.pool, coordinator, marker),
+    )
+    .await
 }
 
 /// Waits until task `key` has ended `runs` runs and is in review.
-async fn wait_for_runs(pool: &PgPool, key: &str, runs: i64) -> Result<()> {
+async fn wait_for_runs(world: &World, key: &str, runs: i64) -> Result<()> {
     eventually(
         &format!("task {key} to have {runs} finished run(s)"),
         RUN_TIMEOUT,
         || async {
-            let ended: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM runs r JOIN tasks t ON t.id = r.task_id \
-                 WHERE t.key = $1 AND r.outcome = 'completed'",
-            )
-            .bind(key)
-            .fetch_one(pool)
-            .await?;
-            Ok((ended >= runs && db::task_status(pool, key).await? == "in_review").then_some(()))
+            // The count first: the status read then follows the runs it counted. Fails at once,
+            // naming the status, when the task ended in another final status.
+            let ended = db::completed_runs(&world.pool, key).await?;
+            let in_review = status_reached(
+                db::task_status(&world.pool, key).await?,
+                TaskStatus::InReview,
+            )?;
+            Ok((in_review.is_some() && ended >= runs).then_some(()))
         },
     )
     .await

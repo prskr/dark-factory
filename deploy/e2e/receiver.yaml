@@ -81,6 +81,9 @@ metadata:
   name: receiver
   namespace: receiver
 spec:
+  # NodePort: the test host reads the received events on 127.0.0.1:13002 (kind.yaml maps it).
+  type: NodePort
   selector: {app: receiver}
   ports:
     - port: 8080
+      nodePort: 30302

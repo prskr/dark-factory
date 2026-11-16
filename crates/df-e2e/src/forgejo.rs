@@ -16,13 +16,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a merge is retried while Forgejo re-checks the pull request.
 const MERGE_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Forgejo API client for the repository `factory/demo`, authenticated with the token it is built
-/// with (the bot's or the reviewer's).
+/// Forgejo API client for one repository (`factory/demo` unless [`Forgejo::for_repository`] says
+/// otherwise), authenticated with the token it is built with (the bot's or the reviewer's).
 #[derive(Debug, Clone)]
 pub struct Forgejo {
     http: reqwest::Client,
     base_url: String,
     token: String,
+    owner: String,
+    repository: String,
 }
 
 impl Forgejo {
@@ -35,7 +37,16 @@ impl Forgejo {
             http,
             base_url: base_url.trim_end_matches('/').to_owned(),
             token: token.to_owned(),
+            owner: data::FORGE_OWNER.to_owned(),
+            repository: data::FORGE_REPO.to_owned(),
         })
+    }
+
+    /// The same client for repository `repository` of the default owner.
+    #[must_use]
+    pub fn for_repository(mut self, repository: &str) -> Self {
+        repository.clone_into(&mut self.repository);
+        self
     }
 
     /// Whether `branch` exists in the repository.
@@ -48,9 +59,33 @@ impl Forgejo {
         }
     }
 
-    /// All pull requests (open and closed) of the repository, newest first.
-    pub async fn pulls(&self) -> Result<Vec<Value>> {
-        self.json("pulls?state=all&limit=50").await
+    /// The pull request from branch `head` into `base`, open or closed; `None` when there is none.
+    /// Looked up by the two branches, so no page limit hides it behind other tests' pull requests.
+    pub async fn pull_of(&self, base: &str, head: &str) -> Result<Option<Value>> {
+        let path = format!("pulls/{base}/{head}");
+        let response = self.get(&path).await?;
+        if response.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        response
+            .error_for_status()?
+            .json()
+            .await
+            .with_context(|| format!("decode GET {path}"))
+    }
+
+    /// Creates an issue and returns its number.
+    pub async fn create_issue(&self, title: &str, body: &str) -> Result<u64> {
+        let issue = self
+            .post(
+                "issues",
+                &serde_json::json!({ "title": title, "body": body }),
+            )
+            .await?;
+        issue
+            .get("number")
+            .and_then(Value::as_u64)
+            .context("issue number")
     }
 
     /// Comments of issue (or pull request) `number`.
@@ -254,9 +289,7 @@ impl Forgejo {
     fn url(&self, path: &str) -> String {
         format!(
             "{}/api/v1/repos/{}/{}/{path}",
-            self.base_url,
-            data::FORGE_OWNER,
-            data::FORGE_REPO
+            self.base_url, self.owner, self.repository
         )
     }
 }

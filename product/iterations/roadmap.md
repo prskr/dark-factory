@@ -138,6 +138,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
 | `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
+| Reuse the login state across e2e tests (`storageState`), one login per binary instead of per test | idea | `openspec/changes/e2e-suite-isolation` (out of scope) |
 | Forgejo author role lookup without repository admin: `GET .../collaborators/{login}` needs only read access but answers 404 for the owner and members of the owning organisation, so it needs a Forgejo API change | idea | `openspec/changes/forge-feedback-fixes` (out of scope) |
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/archive/2026-11-03-iter2-continuation-summary` |

@@ -674,6 +674,45 @@ fn saved_values_skip_missing_pointers_and_encode_non_strings() {
     );
 }
 
+#[test]
+fn saved_values_are_kept_in_the_working_directory_for_a_later_turn() {
+    let cwd = tempfile::tempdir().expect("tempdir");
+    let mut vars = crate::agent::load_vars(cwd.path());
+    assert!(vars.is_empty(), "nothing saved yet");
+    vars.insert("child".to_owned(), "DG-5".to_owned());
+
+    crate::agent::store_vars(cwd.path(), &vars);
+
+    // A later turn, possibly of a resumed session in a new process, starts from what was saved.
+    let later = crate::agent::load_vars(cwd.path());
+    assert_eq!(later.get("child").map(String::as_str), Some("DG-5"));
+}
+
+#[test]
+fn saved_values_in_a_git_worktree_stay_inside_the_git_directory() {
+    let cwd = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(cwd.path().join(".git")).expect("git dir");
+    let vars = std::collections::HashMap::from([("child".to_owned(), "DG-5".to_owned())]);
+
+    crate::agent::store_vars(cwd.path(), &vars);
+
+    // Not in the worktree, where `git add -A` would commit it.
+    let in_worktree: Vec<_> = std::fs::read_dir(cwd.path())
+        .expect("read dir")
+        .map(|e| e.expect("entry").file_name())
+        .collect();
+    assert_eq!(in_worktree, [std::ffi::OsString::from(".git")]);
+    assert_eq!(crate::agent::load_vars(cwd.path()), vars);
+}
+
+#[test]
+fn an_unreadable_vars_file_means_nothing_was_saved() {
+    let cwd = tempfile::tempdir().expect("tempdir");
+    std::fs::write(cwd.path().join(crate::agent::VARS_FILE), "not json").expect("write");
+
+    assert!(crate::agent::load_vars(cwd.path()).is_empty());
+}
+
 #[tokio::test]
 async fn test_scenario_rate_limit() {
     let yaml = r"

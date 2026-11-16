@@ -13,6 +13,23 @@ async fn audit_entries(pool: &df_db::PgPool) -> Result<i64> {
         .await?)
 }
 
+/// `EB` has a repository of its own (its tests move `main`); `LC` shares the one of `DF`.
+async fn assert_repositories_of_the_projects(pool: &df_db::PgPool) -> Result<()> {
+    for (key, repository) in [
+        (
+            data::EXISTING_BRANCH_PROJECT_KEY,
+            data::FORGE_EXISTING_BRANCH_REPO,
+        ),
+        (data::LIFECYCLE_PROJECT_KEY, data::FORGE_REPO),
+    ] {
+        let project = get_project_by_key(pool, key)
+            .await?
+            .with_context(|| format!("project {key}"))?;
+        assert_eq!(project.repo_url, data::repo_url_of(repository), "{key}");
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn seed_writes_the_demo_data() -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
@@ -87,6 +104,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
             data::EXISTING_BRANCH_PROJECT_KEY,
             data::EXISTING_BRANCH_SCRIPT,
         ),
+        (data::LIFECYCLE_PROJECT_KEY, data::DEMO_SCRIPT),
         (data::RESEARCH_PROJECT_KEY, data::RESEARCH_SCRIPT),
         (data::INTERRUPT_PROJECT_KEY, data::INTERRUPT_SCRIPT),
         (data::LANDLOCK_PROJECT_KEY, data::LANDLOCK_SCRIPT),
@@ -96,6 +114,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
             .with_context(|| format!("project {key}"))?;
         assert_eq!(project.adapter_command, data::adapter_command(script));
     }
+    assert_repositories_of_the_projects(&pool).await?;
     let hidden = get_project_by_key(&pool, data::HIDDEN_PROJECT_KEY)
         .await?
         .context("project HP")?;

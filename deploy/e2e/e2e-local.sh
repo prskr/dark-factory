@@ -12,6 +12,10 @@
 #   E2E_KIND_CONFIG   kind configuration (default: deploy/e2e/kind.yaml, plus a mount of /.msb/tls/ca.pem into the node when that file exists)
 #   E2E_TEST_THREADS  tests run in parallel per test binary (default: 2, like CI; the memory budget of docs/demo.md)
 #   E2E_TEST_ARGS     arguments after `--` of `cargo test` (default: --ignored --test-threads=$E2E_TEST_THREADS)
+#   E2E_REPEAT        how often the `cargo test` step runs after the single reset and seed (default: 1); with 2 the
+#                     second run meets the database and repositories of the first, which checks that the tests repeat
+#   E2E_ARTIFACTS_DIR where a failed test writes its screenshot and console (`<test name>/`) and a failed
+#                     run the logs of the cluster (`cluster/`); cleared at the start of a run (default: target/e2e-artifacts)
 #   BAZEL             Bazel command, e.g. "bazel --bazelrc=.bazelrc.agents" (default: bazel)
 #   KIND_EXPERIMENTAL_PROVIDER, DOCKER_HOST   as for kind; Podman is used when Docker is not installed
 set -euo pipefail
@@ -29,7 +33,7 @@ cert_manager_version=v1.21.3
 csi_driver_version=v0.16.1
 forgejo_chart_version=17.3.2
 
-# Ports of the host side of the port-forwards.
+# Host ports of the NodePort Services (`extraPortMappings` of kind.yaml, `nodePort` in the manifests).
 pg_port=15432
 forgejo_port=13000
 playwright_port=13001
@@ -51,12 +55,13 @@ log() { printf '\n=== [%s s] %s\n' "$SECONDS" "$*" >&2; }
 
 scratch=
 pids=()
-forgejo_forward_pid=
+artifacts="${E2E_ARTIFACTS_DIR:-$root/target/e2e-artifacts}"
 
 # Test binaries of crates/df-e2e/tests that the suite does not run, as `name:reason`.
 excluded_tests=(
   "seed:container-backed test of the seed program, not a cluster test; runs with cargo test -p df-e2e"
   "demo_seed:container-backed test of the demo profile of the seed, not a cluster test; runs with cargo test -p df-e2e"
+  "unlanded_lookup:container-backed test of the teardown's task lookup, not a cluster test; runs with cargo test -p df-e2e"
 )
 
 # Fills `suite_tests` (`--test <name>` arguments) with every test binary under crates/df-e2e/tests
@@ -87,6 +92,26 @@ list_tests() {
   for name in ${skipped_tests[@]+"${skipped_tests[@]}"}; do echo "  $name"; done
 }
 
+# Writes the logs of the control plane, the gateway, the sandbox pods, Forgejo and the fake upstream
+# to `$artifacts/cluster/`, next to the files of the failed tests: the last 500 lines of every
+# container, and of the previous container where one restarted. `$1` is the bounded kubectl.
+save_cluster_logs() {
+  local kubectl_cmd=("$@") dir="$artifacts/cluster" target ns selector pod
+  mkdir -p "$dir"
+  # `namespace [label selector]`
+  for target in "$namespace app.kubernetes.io/component=control-plane" "$namespace app.kubernetes.io/component=gateway" \
+    dark-factory-sandboxes forgejo fake-upstream; do
+    read -r ns selector <<<"$target"
+    while read -r pod; do
+      [[ -n "$pod" ]] || continue
+      "${kubectl_cmd[@]}" -n "$ns" logs "$pod" --all-containers --tail=500 >"$dir/$ns-$pod.log" 2>&1 || true
+      "${kubectl_cmd[@]}" -n "$ns" logs "$pod" --all-containers --tail=500 --previous >"$dir/$ns-$pod.previous.log" 2>/dev/null ||
+        rm -f "$dir/$ns-$pod.previous.log"
+    done < <("${kubectl_cmd[@]}" -n "$ns" get pods ${selector:+-l "$selector"} -o name 2>/dev/null | sed 's#^pod/##' || true)
+  done
+  log "Logs of the cluster are in $dir"
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
@@ -105,6 +130,7 @@ cleanup() {
     diag -n playwright logs deployment/playwright --tail=200 --previous 2>/dev/null ||
       diag -n playwright logs deployment/playwright --tail=200 || true
     diag get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -40 || true
+    save_cluster_logs diag
   fi
   if [[ "${E2E_KEEP:-0}" == 1 ]]; then
     log "E2E_KEEP=1: cluster kept; delete it with: kind delete cluster --name $cluster"
@@ -286,39 +312,14 @@ wait_for_fake_upstream() {
   kc -n fake-upstream wait --for=condition=Available deployment/fake-anthropic --timeout=300s
 }
 
-# Starts `kubectl port-forward` in the background and waits until it listens. kubectl itself is the
-# background job (not the `kc` function, whose subshell would die without taking kubectl along: such
-# orphans kept the ports and silently served a forward to a deleted pod to the next run). A port that
-# is taken already fails, instead of passing for the new forward.
-forward() { # namespace service host-port service-port
-  if (: >"/dev/tcp/127.0.0.1/$3") 2>/dev/null; then
-    echo "port $3 is in use already (a port-forward left over from an earlier run? \`pkill -f 'kubectl --context $ctx .*port-forward'\`)" >&2
-    return 1
-  fi
-  kubectl --context "$ctx" -n "$1" port-forward "svc/$2" "$3:$4" >"$scratch/forward-$2.log" 2>&1 &
-  forward_pid=$!
-  pids+=("$forward_pid")
-  for _ in $(seq 30); do
-    (: >"/dev/tcp/127.0.0.1/$3") 2>/dev/null && return 0
-    # kubectl exits at once when the Service has no running pod.
-    kill -0 "$forward_pid" 2>/dev/null || break
-    sleep 1
-  done
-  cat "$scratch/forward-$2.log" >&2
-  echo "port-forward to $2 did not come up" >&2
-  # Stop it: a kubectl that is still starting could bind the port later.
-  kill "$forward_pid" 2>/dev/null || true
-  wait "$forward_pid" 2>/dev/null || true
-  return 1
-}
-
-# Stops the run before any cluster change when a port that the run forwards is taken already (a
-# port-forward left over from an earlier run, another program).
+# Stops the run before a new cluster is created when a host port of its NodePort mappings is taken
+# already (another program, or a cluster that is not `$cluster`). Not run for a reused cluster: its
+# node container holds the ports.
 check_ports_free() {
   local port
   for port in "$forgejo_port" "$pg_port" "$playwright_port" "$receiver_port"; do
     if (: >"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-      echo "port $port is in use already (a port-forward left over from an earlier run? \`pkill -f 'kubectl --context $ctx .*port-forward'\`)" >&2
+      echo "port $port is in use already (a program or another kind cluster holds it); the cluster maps it from the node" >&2
       exit 1
     fi
   done
@@ -340,9 +341,16 @@ create_forgejo_user() {
   printf '%s' "$token"
 }
 
-forward_forgejo() {
-  forward forgejo forgejo-http "$forgejo_port" 3000 || return 1
-  forgejo_forward_pid=$forward_pid
+# kube-proxy needs a moment after the Service exists before the NodePort answers: the first request
+# can be reset. Waits until Forgejo answers its health check on its host port.
+wait_for_forgejo() {
+  local _
+  for _ in $(seq 60); do
+    curl -sf -m 5 -o /dev/null "http://127.0.0.1:$forgejo_port/api/healthz" && return 0
+    sleep 1
+  done
+  echo "Forgejo does not answer on 127.0.0.1:$forgejo_port" >&2
+  return 1
 }
 
 # The bot user and a second user with write access who reviews, with their tokens. Once per cluster:
@@ -380,26 +388,39 @@ restore_forgejo_users() {
   fi
 }
 
-# The repository factory/demo with the issue the demo tasks link to and the webhook to the control
-# plane, and the reviewer as collaborator.
-setup_repository() {
-  log "Setting up the Forgejo repository"
-  forgejo_api POST user/repos '{"name":"demo","auto_init":true,"default_branch":"main"}'
-  forgejo_api POST "repos/$forgejo_user/demo/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
-  # The file the hidden-path demo project (`HP`) hides from its agent.
-  forgejo_api POST "repos/$forgejo_user/demo/contents/secret/value.txt" \
-    '{"content":"c2VjcmV0Cg==","message":"Add a secret file"}'
-  forgejo_api PUT "repos/$forgejo_user/demo/collaborators/$forgejo_reviewer" '{"permission":"write"}'
+# Repositories of the suite, owned by the bot user: `demo` (every project but `EB`) and
+# `existing-branch` (project `EB`, whose tests move and merge into its `main`).
+repositories=(demo existing-branch)
+
+# Creates the repositories of the suite.
+setup_repositories() {
+  local name
+  for name in "${repositories[@]}"; do setup_repository "$name"; done
+  check_forgejo_push
+}
+
+# Repository `$1` with the webhook to the control plane and the reviewer as collaborator. `demo`
+# also gets the issue the demo tasks link to and the file the hidden-path project hides.
+setup_repository() { # name
+  local name="$1"
+  log "Setting up the Forgejo repository $forgejo_user/$name"
+  forgejo_api POST user/repos "{\"name\":\"$name\",\"auto_init\":true,\"default_branch\":\"main\"}"
+  if [[ "$name" == demo ]]; then
+    forgejo_api POST "repos/$forgejo_user/$name/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
+    # The file the hidden-path demo project (`HP`) hides from its agent.
+    forgejo_api POST "repos/$forgejo_user/$name/contents/secret/value.txt" \
+      '{"content":"c2VjcmV0Cg==","message":"Add a secret file"}'
+  fi
+  forgejo_api PUT "repos/$forgejo_user/$name/collaborators/$forgejo_reviewer" '{"permission":"write"}'
   # The events of docs/content/integrations/forges/webhooks.md; `pull_request_only` is the
   # "Modification" checkbox of the form.
   local hook_url="http://$release-control-plane.$namespace.svc:8080/webhooks/forgejo"
   local events='["issue_comment","pull_request_only","pull_request_comment","pull_request_review","action_run_failure"]'
-  forgejo_api POST "repos/$forgejo_user/demo/hooks" \
+  forgejo_api POST "repos/$forgejo_user/$name/hooks" \
     "{\"type\":\"forgejo\",\"active\":true,\"events\":$events,\"config\":{\"url\":\"$hook_url\",\"content_type\":\"json\",\"secret\":\"$webhook_secret\"}}"
-  check_forgejo_push
 }
 
-# Fails early when the token cannot push: pushes a throwaway branch over the port-forward.
+# Fails early when the token cannot push: pushes a throwaway branch to `demo` over its host port.
 check_forgejo_push() {
   local url="http://127.0.0.1:$forgejo_port/$forgejo_user/demo.git" work="$scratch/push-check"
   local git=(git -c "http.extraHeader=Authorization: token $forgejo_token")
@@ -444,11 +465,13 @@ reset_state() {
   "${psql[@]}" -c 'DROP DATABASE IF EXISTS dark_factory WITH (FORCE)'
   "${psql[@]}" -c 'CREATE DATABASE dark_factory'
   # Missing (404) when an earlier run died before it was created; any other status fails.
-  local status
-  status="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: token $forgejo_token" \
-    "http://127.0.0.1:$forgejo_port/api/v1/repos/$forgejo_user/demo")"
-  [[ "$status" == 204 || "$status" == 404 ]] || { echo "deleting the repository failed: HTTP $status" >&2; return 1; }
-  setup_repository
+  local status name
+  for name in "${repositories[@]}"; do
+    status="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: token $forgejo_token" \
+      "http://127.0.0.1:$forgejo_port/api/v1/repos/$forgejo_user/$name")"
+    [[ "$status" == 204 || "$status" == 404 ]] || { echo "deleting the repository $name failed: HTTP $status" >&2; return 1; }
+  done
+  setup_repositories
 }
 
 # The workloads that run a loaded image keep the old one after `helm upgrade`, because the tag
@@ -463,23 +486,15 @@ restart_loaded_workloads() {
 
 # Whether a kept cluster can run the suite as it is: it exists, answers, was set up by this script
 # (`e2e-state`), has the workloads that reuse restarts but never installs (a first run can die after
-# writing `e2e-state`) and Forgejo is healthy. Starts the Forgejo port-forward, which the suite needs.
+# writing `e2e-state`) and Forgejo is healthy on its host port. A cluster created before the NodePort
+# mappings has no such port: the check fails and the cluster is recreated.
 cluster_is_reusable() {
   [[ "${E2E_FRESH:-0}" != 1 ]] || return 1
   kind get clusters 2>/dev/null | grep -qx "$cluster" || return 1
   kc --request-timeout=10s -n "$namespace" get secret e2e-state >/dev/null 2>&1 || return 1
   kc --request-timeout=10s -n playwright get deployment/playwright >/dev/null 2>&1 || return 1
   kc --request-timeout=10s -n fake-upstream get deployment/fake-anthropic >/dev/null 2>&1 || return 1
-  forward_forgejo >/dev/null 2>&1 || return 1
   curl -sf -m 10 -o /dev/null "http://127.0.0.1:$forgejo_port/api/healthz"
-}
-
-# Stops the Forgejo port-forward of a cluster that is about to be replaced.
-stop_forgejo_forward() {
-  [[ -n "$forgejo_forward_pid" ]] || return 0
-  kill "$forgejo_forward_pid" 2>/dev/null || true
-  wait "$forgejo_forward_pid" 2>/dev/null || true
-  forgejo_forward_pid=
 }
 
 helm_install_release() {
@@ -555,11 +570,13 @@ build_suite() {
   cargo build -q -p df-e2e --bin seed
   # Excluded binaries are built too (not run), so a compile error in them shows up here.
   cargo test -q -p df-e2e --tests --no-run
+  # A binary the loader cannot start (a missing shared library) fails here, not after the cluster setup.
+  cargo test -q -p df-e2e --tests -- --list >/dev/null
 }
 
 # A freshly restarted Playwright server accepts TCP connections before it completes WebSocket
 # handshakes ("Handshake not finished"), which fails the first tests of a reused cluster. Waits for
-# a handshake (HTTP 101) through the port-forward.
+# a handshake (HTTP 101) on its host port.
 wait_for_playwright() {
   local code
   for _ in $(seq 30); do
@@ -575,9 +592,6 @@ wait_for_playwright() {
 
 run_suite() {
   log "Seeding and running the suite"
-  forward postgres postgres "$pg_port" 5432
-  forward playwright playwright "$playwright_port" 3000
-  forward receiver receiver "$receiver_port" 8080
   wait_for_playwright
   export E2E_DATABASE_URL="postgres://dark_factory_app:$app_password@127.0.0.1:$pg_port/dark_factory"
   cargo run -q -p df-e2e --bin seed
@@ -590,6 +604,7 @@ run_suite() {
   export E2E_LANDLOCK="$landlock"
   export E2E_USER=admin@example.com
   export E2E_PASSWORD=password
+  export E2E_ARTIFACTS_DIR="$artifacts"
   read -ra test_args <<<"${E2E_TEST_ARGS:---ignored --test-threads=${E2E_TEST_THREADS:-2}}"
   if ! pods_reach_the_internet; then
     # CI has egress without interception: a failed probe there is a real failure, not a reason to skip.
@@ -600,7 +615,14 @@ run_suite() {
     log "pods cannot fetch https://pypi.org (no egress, or a TLS-intercepting proxy their CA store does not trust): skipping ${internet_tests[*]}"
     for name in "${internet_tests[@]}"; do test_args+=(--skip "$name"); done
   fi
-  cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
+  # The repetitions meet the database and the repositories of the one before, with no reset between
+  # them: the tests must not depend on a state of their own making.
+  local run repeat="${E2E_REPEAT:-1}"
+  [[ "$repeat" =~ ^[1-9][0-9]*$ ]] || { echo "E2E_REPEAT must be a positive number, got '$repeat'" >&2; exit 1; }
+  for ((run = 1; run <= repeat; run++)); do
+    ((repeat > 1)) && log "Test run $run of $repeat"
+    cargo test -p df-e2e "${suite_tests[@]}" -- "${test_args[@]}"
+  done
 }
 
 discover_tests
@@ -611,8 +633,9 @@ fi
 for skipped in ${skipped_tests[@]+"${skipped_tests[@]}"}; do log "skipping test binary $skipped"; done
 prepare_tools
 check_free_disk
-check_ports_free
 install_traps
+rm -rf "$artifacts"
+mkdir -p "$artifacts"
 check_playwright_versions
 build_suite &
 build_pid=$!
@@ -622,8 +645,10 @@ if cluster_is_reusable; then
   log "Reusing the kept cluster"
   reuse=1
 else
-  stop_forgejo_forward
   reuse=0
+  # A kept cluster that is not reusable holds the ports of the mappings: delete it first.
+  kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
+  check_ports_free
   create_cluster
 fi
 detect_landlock
@@ -639,9 +664,9 @@ if ((reuse)); then
 else
   install_infrastructure
   install_release
-  forward_forgejo
+  wait_for_forgejo
   setup_forgejo_users
-  setup_repository
+  setup_repositories
   log "Waiting for the images"
   wait "$images_pid"
   install_playwright

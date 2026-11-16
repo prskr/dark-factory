@@ -11,6 +11,12 @@ if [ ! -x "$lld" ]; then
 	exec cc "$@"
 fi
 
+# A Nix `cc` adds the RUNPATH of the store libraries (openssl, ...) through its `ld` wrapper, which
+# `-B` below bypasses: the binaries would not find `libssl.so.3` at run time (exit status 127).
+case "$(readlink -f "$(command -v cc)")" in
+/nix/store/*) exec cc "$@" ;;
+esac
+
 # gcc and clang look for a program called `ld.lld` in the -B directory; rust-lld selects its flavor by name
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT

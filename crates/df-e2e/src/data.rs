@@ -76,6 +76,11 @@ pub const EXISTING_BRANCH_REBASE_MARKER: &str = "[rebase]";
 /// The summary the script completes the attached task with.
 pub const EXISTING_BRANCH_SUMMARY: &str = "Bumped the dependency on the bot branch.";
 
+/// Project of the lifecycle event test, which subscribes on it: a subscription on `DF` would hear
+/// the tasks of every other test. Runs the demo script; tasks are `LC-<n>`.
+pub const LIFECYCLE_PROJECT_KEY: &str = "LC";
+pub const LIFECYCLE_PROJECT_NAME: &str = "Lifecycle";
+
 /// Project whose fake agents hand a result over as an artifact (demo step 5 of iteration 3);
 /// tasks are `RS-<n>`.
 pub const RESEARCH_PROJECT_KEY: &str = "RS";
@@ -112,6 +117,10 @@ pub const PERSONA_MODEL: &str = "claude-sonnet-5-5";
 /// Forgejo owner and repository the projects are linked to.
 pub const FORGE_OWNER: &str = "factory";
 pub const FORGE_REPO: &str = "demo";
+
+/// Second repository of the owner, only for project `EB`: its tests move `main` and merge, which
+/// the other tests of `factory/demo` must not see (created by `just e2e-local`).
+pub const FORGE_EXISTING_BRANCH_REPO: &str = "existing-branch";
 
 /// Second Forgejo user with write access to the repository (created by `just e2e-local`).
 pub const FORGE_REVIEWER: &str = "reviewer";
@@ -172,9 +181,14 @@ pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
 pub const LANDLOCK_SCRIPT: &str = "/opt/harness/scripts/landlock.yaml";
 
-/// Repository URL of the projects.
+/// Repository URL of the projects: `factory/demo`.
 pub fn repo_url() -> String {
-    format!("http://{FORGE_SERVICE}.{FORGE_NAMESPACE}.svc:{FORGE_PORT}/{FORGE_OWNER}/{FORGE_REPO}")
+    repo_url_of(FORGE_REPO)
+}
+
+/// URL of repository `repository` of the owner, as the control plane addresses it.
+pub fn repo_url_of(repository: &str) -> String {
+    format!("http://{FORGE_SERVICE}.{FORGE_NAMESPACE}.svc:{FORGE_PORT}/{FORGE_OWNER}/{repository}")
 }
 
 /// The GitHub token `push-secret.yaml` commits (rule `betterleaks.github-pat`). Assembled from

@@ -1,7 +1,8 @@
 # Script of the delegation scenario of the e2e suite (project `DG`, no webhook): one script serves
-# the coordinator `DG-1`, the implementation `DG-2` and the review `DG-3` (their keys follow from
-# the order of creation), told apart by markers in their prompts. Every turn plays the same
-# `when` blocks, because a woken coordinator may be a live or a resumed session.
+# the coordinator, the implementation and the review, told apart by markers in their prompts. No
+# key is predicted: the coordinator saves the key of the implementation (`${impl}`, kept in the
+# working directory for its later turns), so the scenario repeats against the same database. Every
+# turn plays the same `when` blocks, because a woken coordinator may be a live or a resumed session.
 #
 # 1. `[coordinator]` creates the implementation and a review that depends on its completion.
 # 2. The implementation completes; the review is released and completes; the coordinator is
@@ -21,15 +22,17 @@ sessions:
                   persona: e2e
                   title: Greeting implementation
                   prompt: "[impl] Write the greeting."
+                save:
+                  impl: /key
             - mcp:
                 server: factory
                 tool: create_task
                 args:
                   persona: e2e
                   title: Greeting review
-                  prompt: "[review] Review the greeting of DG-2."
+                  prompt: "[review] Review the greeting."
                   depends_on:
-                    - task: DG-2
+                    - task: "${impl}"
                       kind: completion
             - say: "Delegated the greeting; waiting for the children."
       - when:
@@ -60,17 +63,17 @@ sessions:
                 args:
                   summary: "Findings addressed."
       - when:
-          prompt_contains: 'DG-2 "Greeting implementation" completed'
+          prompt_contains: '"Greeting implementation" completed'
           steps:
             - say: "The implementation is in."
       - when:
-          prompt_contains: 'DG-3 "Greeting review" completed'
+          prompt_contains: '"Greeting review" completed'
           steps:
             - mcp:
                 server: factory
                 tool: send_message
                 args:
-                  task: DG-2
+                  task: "${impl}"
                   text: "[fix] Address the review findings."
             - say: "Relayed the findings."
       - end: end_turn
