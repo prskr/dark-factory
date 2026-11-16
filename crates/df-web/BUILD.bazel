@@ -180,7 +180,6 @@ alias(
 
 rust_test(
     name = "df_web_test",
-    tags = ["no-remote-exec"],
     compile_data = [
         "styles/input.css",
         "//deploy:helm/dark-factory/values.schema.json",
@@ -198,6 +197,7 @@ rust_test(
         proc_macro = True,
         proc_macro_dev = True,
     ),
+    tags = ["no-remote-exec"],
     deps = all_crate_deps(normal_dev = True) + [
         ":build_script",
         "//crates/df-agent-channel:df_agent_channel_test_util",

@@ -47,7 +47,6 @@ alias(
 
 rust_test(
     name = "df_db_test",
-    tags = ["no-remote-exec"],
     compile_data = glob(["migrations/*.sql"]) + [
         ":sqlx_dotenv",
         "//:sqlx_data",
@@ -61,6 +60,7 @@ rust_test(
     rustc_env = {
         "SQLX_OFFLINE": "true",
     },
+    tags = ["no-remote-exec"],
     deps = all_crate_deps(normal_dev = True) + [
         "//crates/df-test-postgres:df_test_postgres",
     ],
