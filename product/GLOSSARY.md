@@ -92,6 +92,24 @@ _Avoid_: Read-only path, locked path
 A repository path of a project whose content agents do not get in their workspace. Every hidden path is also a protected path. Its content can still reach the agent through the repository history.
 _Avoid_: Protected path, secret path, excluded path, private file
 
+### Images
+
+**Project image**:
+The container image a project's sandboxes run: an image a human named, the result of the project's latest image build, or the default image.
+_Avoid_: Custom image, sandbox image, base image
+
+**Default image**:
+The project image an operator sets for the whole instance, used by every project that names no image and doesn't build one.
+_Avoid_: Fallback image, base image
+
+**Image build**:
+Building a project image from the build context at the current commit of the project's base branch, on a human's request. While a project's latest image build that wasn't cancelled hasn't succeeded, its runs don't start; a cancelled build leaves the project image as it was.
+_Avoid_: Image rebuild, Docker build
+
+**Build context**:
+The files under `.dark-factory/` in a project's repository that an image build uses, including its Containerfile.
+_Avoid_: Docker context, Dockerfile directory
+
 ### Runs
 
 **Run**:
