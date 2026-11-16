@@ -58,7 +58,7 @@ zig.exec_platform(
     arch = "amd64",
     os = "linux",
 )
-use_repo(zig, "zig_config-linux-amd64", "zig_sdk")
+use_repo(zig, "zig_sdk")
 
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
 buf.toolchains(version = "v1.68.4")
@@ -298,7 +298,7 @@ pull(
 # tag is the Playwright version (Renovate updates tag and digest together).
 pull(
     name = "playwright_base",
-    digest = "sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe",
+    digest = "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579",
     downloader = "bazel",
     platforms = [
         "linux/amd64",
@@ -306,7 +306,7 @@ pull(
     ],
     registry = "mcr.microsoft.com",
     repository = "playwright",
-    tag = "v1.65.0-noble",
+    tag = "v1.65.1-noble",
 )
 
 # Claude harness image (deploy/images/claude-harness): the ACP adapter and its npm dependencies from
