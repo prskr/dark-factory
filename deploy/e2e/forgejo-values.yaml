@@ -17,9 +17,9 @@ resources:
   requests: {cpu: 50m, memory: 128Mi}
   limits: {memory: 512Mi}
 gitea:
+  # `username` and `password` of the admin come from `e2e-local.sh` (`--set`), which also hands
+  # them to `setup forgejo`.
   admin:
-    username: e2e-admin
-    password: e2e-admin-password
     email: e2e-admin@example.com
   config:
     server:

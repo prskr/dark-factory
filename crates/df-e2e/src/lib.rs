@@ -12,6 +12,7 @@ pub mod env;
 pub mod fixture;
 pub mod forgejo;
 pub mod seed;
+pub mod setup;
 pub mod wait;
 
 pub use env::E2eEnv;

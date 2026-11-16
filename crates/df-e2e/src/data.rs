@@ -38,7 +38,7 @@ pub const HIDDEN_PROJECT_KEY: &str = "HP";
 pub const HIDDEN_PROJECT_NAME: &str = "Hidden Path";
 
 /// The hidden glob of project `HP` and the file of the repository below it
-/// (`deploy/e2e/e2e-local.sh` commits it to `main`).
+/// (`setup forgejo` commits it to `main`).
 pub const HIDDEN_GLOB: &str = "secret/**";
 pub const HIDDEN_PATH: &str = "secret/value.txt";
 
@@ -59,7 +59,7 @@ pub const WEBHOOK_PROJECT_KEY: &str = "WH";
 pub const WEBHOOK_PROJECT_NAME: &str = "Webhooks";
 
 /// The webhook secret of the `forgejo` plugin and of the repository webhook (`webhook_secret` of
-/// `deploy/e2e/e2e-local.sh`).
+/// `deploy/e2e/e2e-local.sh`, which keeps a copy for the Secret `forge-webhooks`).
 pub const WEBHOOK_SECRET: &str = "e2e-webhook-secret";
 
 /// Project whose fake agent delegates (`create_task`, `send_message`) without any webhook; tasks
@@ -121,6 +121,24 @@ pub const FORGE_REPO: &str = "demo";
 /// Second repository of the owner, only for project `EB`: its tests move `main` and merge, which
 /// the other tests of `factory/demo` must not see (created by `just e2e-local`).
 pub const FORGE_EXISTING_BRANCH_REPO: &str = "existing-branch";
+
+/// The repositories of the suite, created by `setup forgejo`.
+pub const FORGE_REPOSITORIES: [&str; 2] = [FORGE_REPO, FORGE_EXISTING_BRANCH_REPO];
+
+/// Passwords of the bot (the owner of the repositories) and the reviewer; `setup forgejo` creates
+/// the users with them and authenticates with them to create their tokens (throwaway cluster).
+pub const FORGE_OWNER_PASSWORD: &str = "e2e-factory-password";
+pub const FORGE_REVIEWER_PASSWORD: &str = "e2e-reviewer-password";
+
+/// Name of the access token `setup forgejo` creates for each user (and replaces on every run).
+pub const FORGE_TOKEN_NAME: &str = "e2e";
+
+/// The issue of `factory/demo` that the demo tasks link to (number [`FORGE_ISSUE_NUMBER`]).
+pub const FORGE_ISSUE_TITLE: &str = "Add a greeting";
+pub const FORGE_ISSUE_BODY: &str = "Linked from the demo tasks.";
+
+/// Content of the file [`HIDDEN_PATH`] in `factory/demo`.
+pub const HIDDEN_CONTENT: &str = "secret\n";
 
 /// Second Forgejo user with write access to the repository (created by `just e2e-local`).
 pub const FORGE_REVIEWER: &str = "reviewer";

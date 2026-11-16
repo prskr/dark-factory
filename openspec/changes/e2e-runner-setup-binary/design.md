@@ -55,7 +55,7 @@ Alternatives: two subcommands `forgejo users` and `forgejo repositories [--reset
 
 ### D2: Tokens are recreated instead of stored
 
-Because D1 replaces the `e2e` token every run, the runner never needs an old token: `e2e-state` keeps only `manifest-hash` (still the reuse marker that `cluster_is_reusable` checks). `state_value` keeps one caller; `restore_forgejo_users` goes. An `e2e-state` written by the old script still has the token keys, which nothing reads, so old kept clusters are reused, not recreated.
+Because D1 replaces the `e2e` token every run, the runner never needs an old token: `e2e-state` keeps only `manifest-hash` (still the reuse marker that `cluster_is_reusable` checks). `state_value` and `restore_forgejo_users` go; the manifest-hash check reads the Secret inline. An `e2e-state` written by the old script still has the token keys, which nothing reads, so old kept clusters are reused, not recreated.
 
 Alternative: keep the stored tokens and add a `state` subcommand. Rejected (proposal, Out of scope).
 
@@ -75,7 +75,7 @@ Alternative: read the admin from `forgejo-values.yaml`. Rejected: needs a YAML c
 
 ### D4: Forgejo client gets basic auth and the setup calls
 
-`Forgejo` holds an `Auth` (`Token` or `Basic { user, password }`) instead of a token string; `Forgejo::new` keeps its signature (token), `Forgejo::with_password` builds the basic-auth client. The request helpers take an API path relative to `/api/v1/` for the setup calls; the existing repository-scoped helpers keep their `repos/{owner}/{repo}/` prefix. New calls: `user_exists`, `create_user`, `delete_token`, `create_token`, `create_repository`, `delete_repository`, `add_collaborator`, `create_webhook`, `delete_branch`. Deletes treat 404 as success; every other non-2xx fails with method, path and status (never the body, which may echo a token).
+`Forgejo` holds an `Auth` (`Token` or `Basic { user, password }`) instead of a token string; `Forgejo::new` keeps its signature (token), `Forgejo::with_password` builds the basic-auth client. The request helpers take an API path relative to `/api/v1/` for the setup calls; the existing repository-scoped helpers keep their `repos/{owner}/{repo}/` prefix. New calls: `user_exists`, `create_user`, `delete_token`, `create_token`, `create_repository`, `delete_repository`, `add_collaborator`, `create_webhook`. Deletes treat 404 as success; every other non-2xx fails with method, path and status (never the body, which may echo a token).
 
 The setup steps live in `crates/df-e2e/src/setup/forgejo.rs` (sequence of D1) and `setup/versions.rs` (D6); `src/bin/setup.rs` is clap parsing and output only.
 
@@ -105,7 +105,7 @@ The check moves from the first step of the script to after the binaries are buil
 
 ### D7: What stays in shell
 
-Cluster, images, Helm, `kubectl` and `git`: `cluster_is_reusable`, `manifest_hash`, `reset_state` (scale down, delete pods and PVCs, drop the database), `wait_for_forgejo`, the push check (`git push` with the token, then one `curl` DELETE of the branch), `install_driver` download, traps and log collection. The rule behind this split, for later additions to the runner (recorded in skill `e2e`, task 4.1):
+Cluster, images, Helm, `kubectl` and `git`: `cluster_is_reusable`, `manifest_hash`, `reset_state` (scale down, delete pods and PVCs, drop the database), `wait_for_forgejo`, the push check (`git push` with the token, then one `curl` DELETE of the branch), `install_driver` download, traps and log collection. The branch delete of the push check stays a fixed `curl` in shell: it is a `git` call in sequence plus one request with no body and no parsing, so a Rust client call would only wrap it. The rule behind this split, for later additions to the runner (recorded in skill `e2e`, task 4.1):
 
 - **Shell** (`e2e-local.sh`): calling a CLI in order (`kind`, `helm`, `kubectl`, container runtime, Bazel, `git`, `cargo`), waiting on one with a loop, traps, log collection, downloads.
 - **Rust** (`df-e2e --bin setup`, logic in `src/setup/`): anything that builds or parses structured data (JSON bodies, API responses, versions from source files), talks to an HTTP API, uses a name or value the suite also uses (`data.rs`), or makes a decision a wrong result of which is hard to diagnose later. Such logic gets a unit test.
