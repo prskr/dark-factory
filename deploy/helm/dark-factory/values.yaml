@@ -141,6 +141,10 @@ sandboxNamespace:
   clusterDomain: 'cluster.local'
   controlPlaneIp: ''
   gatewayIp: ''
+  # Secrets the operator creates in the sandbox namespace (`kubernetes.io/dockerconfigjson`),
+  # applied to every sandbox pod: `[{ name: corp-mirror }]`. The chart does not create them and
+  # does not fall back to `image.pullSecrets`.
+  imagePullSecrets: []
   resourceQuota:
     pods: '20'
     requestsCpu: '16'

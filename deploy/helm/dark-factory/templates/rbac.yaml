@@ -1,3 +1,7 @@
+{{- /* The instance Role grants Secret read in the release namespace; sandboxes must not share it. */}}
+{{- if eq .Values.sandboxNamespace.name .Release.Namespace }}
+{{- fail "sandboxNamespace.name must differ from the release namespace: sandboxes must not run next to the instance Secrets" }}
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

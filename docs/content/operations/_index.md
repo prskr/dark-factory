@@ -7,3 +7,4 @@ weight: 7
 - [Backup and restore](backup.md): what holds state and how to save it.
 - [Troubleshooting](troubleshooting.md): runs that do not start or end unexpectedly.
 - [Several instances in one cluster](multiple-instances.md): production and dev side by side.
+- [Private sandbox images](private-sandbox-images.md): image pull secrets for sandbox pods.

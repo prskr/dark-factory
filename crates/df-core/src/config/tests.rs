@@ -775,3 +775,37 @@ fn unknown_scheduling_keys_are_rejected() {
 
     assert!(InstanceConfig::from_yaml_str(&yaml).is_err());
 }
+
+#[test]
+fn sandbox_image_pull_secrets_keep_their_order_and_default_to_empty() {
+    let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
+    assert!(cfg.sandbox.provisioning.image_pull_secrets.is_empty());
+
+    let yaml = format!("{MINIMAL_DB}sandbox:\n  imagePullSecrets: [corp-mirror, ghcr-team]\n");
+    let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+    assert_eq!(
+        cfg.sandbox.provisioning.image_pull_secrets,
+        ["corp-mirror", "ghcr-team"]
+    );
+}
+
+#[test]
+fn invalid_image_pull_secret_names_are_rejected_naming_option_and_entry() {
+    let too_long = "a".repeat(254);
+    for entry in ["Corp_Mirror", "", "-corp", "corp-", &too_long] {
+        let yaml = format!("{MINIMAL_DB}sandbox:\n  imagePullSecrets: [\"{entry}\"]\n");
+        let err = InstanceConfig::from_yaml_str(&yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("sandbox.imagePullSecrets"), "{entry}: {err}");
+        // The error quotes the entry, so an empty one shows as `""`.
+        assert!(err.contains(&format!("{entry:?}")), "{entry}: {err}");
+    }
+}
+
+#[test]
+fn valid_image_pull_secret_names_are_accepted() {
+    let longest = "a".repeat(253);
+    let yaml = format!("{MINIMAL_DB}sandbox:\n  imagePullSecrets: [a.b-c, {longest}]\n");
+    assert!(InstanceConfig::from_yaml_str(&yaml).is_ok());
+}

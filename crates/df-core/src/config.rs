@@ -102,6 +102,7 @@ impl InstanceConfig {
         cfg.lifecycle_events.validate()?;
         cfg.artifacts.validate()?;
         cfg.scheduling.validate()?;
+        cfg.sandbox.provisioning.validate()?;
         if cfg.auth.is_some() && cfg.public_url.is_none() {
             return Err(ConfigError::Invalid(
                 "`publicUrl` is required when `auth` is set: the OIDC redirect URI is `<publicUrl>/auth/callback`"
@@ -431,6 +432,24 @@ pub struct SandboxProvisioningConfig {
     pub log_level: String,
     /// Whether the runtime confines the harness with Landlock.
     pub landlock: LandlockMode,
+    /// Secrets in the sandbox namespace, applied to every sandbox Pod.
+    pub image_pull_secrets: Vec<String>,
+}
+
+impl SandboxProvisioningConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        match self
+            .image_pull_secrets
+            .iter()
+            .find(|name| !crate::host::is_dns_subdomain(name))
+        {
+            Some(name) => Err(ConfigError::Invalid(format!(
+                "`sandbox.imagePullSecrets` entry {name:?} is not a valid Secret name: \
+                 use at most 253 lowercase alphanumerics, `-` or `.`, starting and ending with an alphanumeric"
+            ))),
+            None => Ok(()),
+        }
+    }
 }
 
 /// Landlock confinement of the harness (instance-wide).
@@ -517,6 +536,7 @@ impl Default for SandboxProvisioningConfig {
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
             landlock: LandlockMode::default(),
+            image_pull_secrets: Vec::new(),
         }
     }
 }

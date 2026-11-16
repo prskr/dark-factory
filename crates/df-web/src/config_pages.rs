@@ -129,15 +129,6 @@ fn forge_url(errors: &mut FormErrors, field: &'static str, value: &str, allow_pl
     }
 }
 
-/// A Kubernetes object name (DNS-1123 subdomain).
-fn is_secret_name(value: &str) -> bool {
-    let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    value.len() <= 253
-        && value.starts_with(edge)
-        && value.ends_with(edge)
-        && value.chars().all(|c| edge(c) || c == '-' || c == '.')
-}
-
 /// A key of a Kubernetes Secret.
 fn is_secret_key(value: &str) -> bool {
     value.len() <= 253
@@ -170,7 +161,7 @@ fn validate_credential(form: &CredentialForm) -> Result<CredentialRefInput, Form
     let name = required(&mut errors, "name", &form.name, "Name");
     let secret_name = required(&mut errors, "secret_name", &form.secret_name, "Secret name");
     let secret_key = required(&mut errors, "secret_key", &form.secret_key, "Key");
-    if !secret_name.is_empty() && !is_secret_name(&secret_name) {
+    if !secret_name.is_empty() && !df_core::host::is_dns_subdomain(&secret_name) {
         errors.add(
             "secret_name",
             "Must be a Kubernetes name: lowercase letters, digits, '-' and '.'.",

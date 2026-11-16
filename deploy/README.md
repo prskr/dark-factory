@@ -59,7 +59,7 @@ The sandbox pod mounts two read-only image volumes (Kubernetes 1.36 or newer, im
 
 The harness image is built with Bazel (`//deploy/images/claude-harness`), the project image from a Dockerfile. CI checks both and publishes them to `ghcr.io/prskr/dark-factory/`.
 
-Sandbox pods have no image pull secret (`image.pullSecrets` reaches only the control plane, gateway and migrate pods), so the runtime and harness images must be pullable anonymously. GHCR creates a new package as private: after its first push, set it to public (package settings, "Change visibility").
+`image.pullSecrets` reaches only the control plane, gateway and migrate pods. For sandbox pods set `sandboxNamespace.imagePullSecrets` to Secrets you created in the sandbox namespace (how-to: `docs/content/operations/private-sandbox-images.md`); without it the runtime and harness images must be pullable anonymously. GHCR creates a new package as private: after its first push, set it to public (package settings, "Change visibility").
 
 | Image | Content | Tags |
 |---|---|---|

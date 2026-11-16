@@ -175,6 +175,16 @@
         "clusterDomain": { "type": "string" },
         "controlPlaneIp": { "type": "string" },
         "gatewayIp": { "type": "string" },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "serviceAccountName": { "type": "string", "minLength": 1 },
         "resourceQuota": {
           "type": "object",
