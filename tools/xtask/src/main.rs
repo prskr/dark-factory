@@ -91,7 +91,18 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 17] = [
+/// Tools pinned for the Linux platforms only (no macOS build upstream; used in Linux image builds).
+const LINUX_ONLY: [&str; 1] = ["patchelf"];
+
+const TOOLS: [GithubTool; 18] = [
+    GithubTool {
+        name: "patchelf",
+        repo: "NixOS/patchelf",
+        asset: |v, p| {
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            (format!("patchelf-{v}-{cpu}.tar.gz"), "bin/patchelf".into())
+        },
+    },
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -295,6 +306,7 @@ fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> 
         .trim_start_matches('v');
     PLATFORMS
         .iter()
+        .filter(|p| p.os == "linux" || !LINUX_ONLY.contains(&tool.name))
         .map(|&p| {
             let (name, file) = (tool.asset)(version, p);
             let asset = release
@@ -491,6 +503,20 @@ mod tests {
             agent.config().tls_config().root_certs(),
             ureq::tls::RootCerts::PlatformVerifier
         ));
+    }
+
+    #[test]
+    fn patchelf_is_pinned_for_linux_only() {
+        let names = [
+            "patchelf-0.19.3-x86_64.tar.gz",
+            "patchelf-0.19.3-aarch64.tar.gz",
+        ];
+        let r = release("0.19.3", &names, Some("sha256:abc"));
+        let bins = github_binaries(tool("patchelf"), &r).unwrap();
+        assert_eq!(bins.len(), 2);
+        assert!(bins.iter().all(|b| b.os == "linux"
+            && b.kind == "archive"
+            && b.file.as_deref() == Some("bin/patchelf")));
     }
 
     #[test]
