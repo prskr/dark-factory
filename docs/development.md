@@ -40,7 +40,7 @@ docker compose down -v
 Export `DATABASE_URL` for the `sqlx` tooling:
 
 ```bash
-export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/dark_factory"
+export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/dark_factory" # local dev database, kingfisher:ignore
 ```
 
 Run migrations directly with `sqlx-cli`:
@@ -92,7 +92,7 @@ All compile-time checked queries in `df-db` have their metadata checked into `.s
 After adding or changing any `sqlx::query!` / `sqlx::query_as!` macro, regenerate `.sqlx/`:
 
 ```bash
-export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/dark_factory"
+export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/dark_factory" # local dev database, kingfisher:ignore
 cargo sqlx prepare --workspace -- --all-targets
 ```
 
@@ -263,13 +263,13 @@ lefthook hooks use the same versions on every machine. The exceptions run throug
 |------|---------|
 | Put the tools on `PATH` (once, needs [direnv](https://direnv.net/)) | `bazel run //:bazel_env && direnv allow` |
 | Bump tools to the latest upstream releases | `cargo xtask update-tools` |
-| Fail if `multitool.lock.json` is stale (CI / scheduled job) | `cargo xtask update-tools --check` |
+| Fail if `multitool.lock.json` is stale | `cargo xtask update-tools --check` |
 | Add a tool | add an entry to `TOOLS` in `tools/xtask/src/main.rs` and to `//:bazel_env` |
 | Check Rust formatting (pinned rustfmt, hermetic) | `bazel build --config=fmt //crates/... //plugins/...` |
 | Format protos / lint protos | `bazel run //contract:format` / `bazel test //contract:buf_lint_test` |
 | Install git hooks without direnv | `LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install` (git hooks use `LEFTHOOK_BIN`) |
 
-`multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits.
+`multitool.lock.json` is generated; do not edit it by hand. Set `GITHUB_TOKEN` to avoid API rate limits. Renovate does not manage it: the daily workflow `Update tools` (`.github/workflows/update-tools.yaml`) runs `cargo xtask update-tools` and opens or updates the pull request `chore/update-tools` when the file changed. The run fails when a new release no longer matches its entry in `TOOLS` (for example a dropped platform); then fix the entry and run `cargo xtask update-tools` locally.
 
 ## Web assets (TypeScript and Tailwind)
 
