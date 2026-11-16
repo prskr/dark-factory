@@ -63,6 +63,10 @@ jobs:
       - name: Rustfmt
         run: bazel build $BAZEL_ARGS --config=fmt //crates/... //plugins/...
 
+      # The pre-commit hook checks staged files only and can be skipped (rebase, --no-verify); this checks all.
+      - name: Buildifier
+        run: bazel run @buildifier_prebuilt//:buildifier -- -mode=check -r "$PWD"
+
       # xtask is its own Cargo workspace outside Bazel. Bazel's cargo cannot compile it (its toolchain has
       # no std for the host's gnu target), so these use the rustup toolchain pinned by rust-toolchain.toml.
       - name: Install Rust toolchain
