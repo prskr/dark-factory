@@ -6,6 +6,13 @@ persistence:
   enabled: false
 test:
   enabled: false
+# NodePort: the test host reaches Forgejo on 127.0.0.1:13000 (kind.yaml maps it). The chart's
+# default is a headless Service; a NodePort needs a ClusterIP, which the empty value gives.
+service:
+  http:
+    type: NodePort
+    clusterIP: ""
+    nodePort: 30300
 resources:
   requests: {cpu: 50m, memory: 128Mi}
   limits: {memory: 512Mi}

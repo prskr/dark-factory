@@ -16,7 +16,7 @@ The end-to-end suite runs two tests at a time per binary against one instance an
   - The interrupt audit check is filtered by the test's run.
   - The issue comment check uses an issue the test creates itself.
   - Pull requests are looked up by head branch instead of the first 50 of the repository.
-- **A test fixture in `df-e2e`.** It sets up the environment, browser, database and Forgejo client. After every test it cancels the test's unfinished tasks, and on failure it saves a screenshot, the Playwright trace and the console. This replaces the setup and helper code that is copied into every test file.
+- **A test fixture in `df-e2e`.** It sets up the environment, browser, database and Forgejo client. After every test it cancels the test's unfinished tasks, and on failure it saves a screenshot of the test's main page and the console log (no Playwright trace: the remote browser server writes it on its own disk, see design Risks). This replaces the setup and helper code that is copied into every test file.
 - **Waits that fail fast and use types:**
   - Waiting for a task status stops as soon as the task reaches a different final status.
   - Statuses are `TaskStatus` values, not strings.
@@ -58,5 +58,5 @@ None.
   - `deploy/e2e`: `kind.yaml`, the Service manifests, `forgejo-values.yaml` and `e2e-local.sh`.
   - `.github/workflows/e2e.yaml`: uploads the artifacts.
 - **Docs:** `docs/demo.md` (contributor docs). No published docs change: nothing a user or operator sees or configures changes.
-- **Dependencies:** none new. `uuid` and `playwright-rs` (tracing, screenshots, `get_by_role`) are already used.
+- **Dependencies:** none new. `uuid` and `playwright-rs` (screenshots, `get_by_role`) are already used.
 - **Developers:** a kept cluster from before the change is recreated on the first run.

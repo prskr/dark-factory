@@ -14,7 +14,8 @@ sessions:
           steps:
             - say: "Bumping the dependency on the bot branch."
             - shell: |
-                printf 'bumped by the demo agent\n' > bump.txt
+                # Appended, so a run after an earlier merge of this commit (the suite repeats) still changes the file.
+                printf 'bumped by the demo agent at %s\n' "$(date +%s%N)" >> bump.txt
                 git add bump.txt
                 git commit -q -m 'Add bump'
             - mcp:

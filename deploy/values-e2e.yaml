@@ -83,10 +83,11 @@ sandboxNamespace:
     requestsMemory: '2Gi'
     limitsCpu: '4'
     limitsMemory: '4Gi'
-    # One volume per task, kept until the task ends: the suite leaves most of its tasks waiting.
-    # local-path does not reserve the requested size.
-    requestsStorage: '32Gi'
-    persistentVolumeClaims: '32'
+    # One volume per task, kept until the task ends (a cancelled task keeps it too): a run of the
+    # suite creates about 30 tasks, and E2E_REPEAT runs it again without a reset. local-path does
+    # not reserve the requested size.
+    requestsStorage: '96Gi'
+    persistentVolumeClaims: '96'
   limitRange:
     defaultCpu: '1'
     defaultMemory: '1Gi'

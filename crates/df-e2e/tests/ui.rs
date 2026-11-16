@@ -3,11 +3,19 @@
 //! on phones, task swaps without console errors and the network traffic page. Needs the
 //! environment of `E2eEnv`, so the tests are ignored by default.
 
+#![expect(
+    clippy::indexing_slicing,
+    reason = "the bodies of the tests are functions of their own, which clippy.toml does not exempt like the #[test] functions"
+)]
+
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use df_e2e::browser::Session;
+use df_e2e::browser::{Session, button};
+use df_e2e::fixture::{self, World};
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data};
-use playwright_rs::protocol::{DragToOptions, Locator, Position};
+use playwright_rs::protocol::{AriaRole, DragToOptions, GetByRoleOptions, Locator, Position};
 use playwright_rs::{Viewport, expect, expect_page};
 
 /// Wide enough for the graph to grow next to the 520 px events table.
@@ -24,6 +32,14 @@ const DIVIDER_STEP: u32 = 32;
 
 /// Width of the navigation rail from 768 px (`w-[4.5rem]`).
 const RAIL_WIDTH: f64 = 72.0;
+
+/// The sort menu item named `name`.
+fn menu_item(session: &Session, name: &str) -> Locator {
+    session.page.get_by_role(
+        AriaRole::Menuitemradio,
+        Some(GetByRoleOptions::default().name(name).exact(true)),
+    )
+}
 
 /// The open menu lies fully right of `min_left` and inside the viewport.
 async fn assert_menu_inside_viewport(session: &Session, min_left: f64) -> Result<()> {
@@ -57,6 +73,7 @@ async fn open_project_page(session: &Session, env: &E2eEnv, key: &str) -> Result
         .page
         .goto(&format!("{}/projects", env.base_url), None)
         .await?;
+    // `.first()`: the name link exists in the desktop row and in the phone card.
     session
         .page
         .locator(format!("a[href='/projects/{key}']:visible"))
@@ -81,9 +98,15 @@ async fn open_project_page(session: &Session, env: &E2eEnv, key: &str) -> Result
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn projects_are_reached_through_settings_on_desktop_and_the_bottom_bar_on_phones()
 -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "projects_are_reached_through_settings_on_desktop_and_the_bottom_bar_on_phones",
+        settings_navigation_body,
+    )
+    .await
+}
+
+async fn settings_navigation_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
 
     session.page.set_viewport_size(WIDE).await?;
     session
@@ -191,16 +214,18 @@ async fn assert_project_table_fits(session: &Session, row: &str) -> Result<()> {
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_table() -> Result<()> {
-    // Unique per run: the test must pass again against the same instance. The last 8 hex digits
-    // of a v7 UUID are random (the leading ones are the timestamp).
-    let key = format!(
-        "LU{}",
-        uuid::Uuid::now_v7().simple().to_string()[24..].to_uppercase()
-    );
+    fixture::run(
+        "the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_table",
+        project_row_body,
+    )
+    .await
+}
+
+async fn project_row_body(world: Arc<World>) -> Result<()> {
+    // Unique per run: the test must pass again against the same instance.
+    let key = format!("LU{}", world.suffix.to_uppercase());
     let key = key.as_str();
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    let (env, session) = (&world.env, &world.session);
     session
         .page
         .set_viewport_size(Viewport {
@@ -214,6 +239,7 @@ async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_tab
         .page
         .goto(&format!("{}/projects", env.base_url), None)
         .await?;
+    // CSS and `.first()`: the button has no accessible name of its own and exists once per layout.
     session
         .page
         .locator("button[hx-get='/projects/new']:visible")
@@ -229,9 +255,7 @@ async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_tab
     ] {
         session.page.locator(field).fill(value, None).await?;
     }
-    session
-        .page
-        .locator("button:has-text('Create project')")
+    button(&session.page, "Create project")
         .click(None)
         .await
         .context("create the project")?;
@@ -240,9 +264,10 @@ async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_tab
         .await?;
     // A task gives the row a count that is a link, whichever status the task has reached. The
     // project's harness image is not in the cluster, so the task is cancelled right away: its
-    // sandbox would never start and would hold a pod of the quota.
+    // sandbox would never start and would hold a pod of the quota. The test checks the cancelled
+    // status itself, so it cancels here and not only in the teardown.
     session
-        .create_task(&env, key, "Count in the project list.", None)
+        .create_task(env, key, "Count in the project list.", None)
         .await?;
     session.cancel_task().await?;
     expect(session.page.locator("#task-details"))
@@ -255,9 +280,9 @@ async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_tab
         .goto(&format!("{}/projects", env.base_url), None)
         .await?;
     let row = format!("tr:has(a[href='/projects/{key}'])");
-    assert_project_table_fits(&session, &row).await?;
+    assert_project_table_fits(session, &row).await?;
 
-    // The count link sits above the row's cover.
+    // The count link sits above the row's cover. `.first()`: the row has a count link per status.
     session
         .page
         .locator(format!("{row} a[href^='/tasks?project={key}&status=']"))
@@ -297,9 +322,15 @@ async fn the_project_row_opens_the_project_and_a_long_url_does_not_widen_the_tab
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn a_click_on_the_details_of_a_credential_row_opens_its_edit_dialog() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "a_click_on_the_details_of_a_credential_row_opens_its_edit_dialog",
+        credential_row_body,
+    )
+    .await
+}
+
+async fn credential_row_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session.page.set_viewport_size(WIDE).await?;
     session
         .page
@@ -334,9 +365,15 @@ async fn a_click_on_the_details_of_a_credential_row_opens_its_edit_dialog() -> R
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_delete_button_of_a_provider_row_confirms_and_does_not_open_the_page() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "the_delete_button_of_a_provider_row_confirms_and_does_not_open_the_page",
+        provider_delete_body,
+    )
+    .await
+}
+
+async fn provider_delete_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session.page.set_viewport_size(WIDE).await?;
     let (messages, mut seen) = tokio::sync::mpsc::unbounded_channel::<String>();
     session
@@ -355,9 +392,7 @@ async fn the_delete_button_of_a_provider_row_confirms_and_does_not_open_the_page
         .goto(&format!("{}/model-providers", env.base_url), None)
         .await?;
     let name = data::SETTINGS_PROVIDER_NAME;
-    session
-        .page
-        .locator(format!("button[aria-label='Delete model provider {name}']"))
+    button(&session.page, &format!("Delete model provider {name}"))
         .click(None)
         .await
         .context("click delete")?;
@@ -385,16 +420,20 @@ async fn the_delete_button_of_a_provider_row_confirms_and_does_not_open_the_page
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn saving_a_project_stays_on_its_page_and_tabs_follow_the_url() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "saving_a_project_stays_on_its_page_and_tabs_follow_the_url",
+        project_save_body,
+    )
+    .await
+}
+
+async fn project_save_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session.page.set_viewport_size(WIDE).await?;
-    open_project_page(&session, &env, data::PROJECT_KEY).await?;
+    open_project_page(session, env, data::PROJECT_KEY).await?;
     let page_url = session.page.url();
 
-    session
-        .page
-        .locator("button:has-text('Save project'):visible")
+    button(&session.page, "Save project")
         .click(None)
         .await
         .context("save the project")?;
@@ -432,6 +471,7 @@ async fn open_provider_page(session: &Session, env: &E2eEnv) -> Result<()> {
         .page
         .goto(&format!("{}/model-providers", env.base_url), None)
         .await?;
+    // `.first()`: the provider's link exists in the desktop row and in the phone card.
     session
         .page
         .locator(format!(
@@ -472,11 +512,7 @@ async fn save_with_a_general_error(
         .to_have_url_regex(&format!("\\?tab={last}$"))
         .await
         .context("the user is on the last tab")?;
-    session
-        .page
-        .locator(format!("button:has-text('{save}'):visible"))
-        .click(None)
-        .await?;
+    button(&session.page, save).click(None).await?;
     expect(session.page.locator("#tab-general"))
         .to_have_attribute("aria-selected", "true")
         .await
@@ -497,11 +533,20 @@ async fn save_with_a_general_error(
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error",
+        provider_save_body,
+    )
+    .await
+}
+
+async fn provider_save_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
+    // Unique per run, and removed again below: a model left behind would shift the row of the
+    // next run's new model.
+    let model = world.unique("e2e-extra-model");
     session.page.set_viewport_size(WIDE).await?;
-    open_provider_page(&session, &env).await?;
+    open_provider_page(session, env).await?;
     let page_url = session.page.url();
 
     session.page.locator("#tab-models").click(None).await?;
@@ -509,27 +554,19 @@ async fn the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error
         .to_have_url_regex("\\?tab=models$")
         .await
         .context("choosing Models updates the URL")?;
-    session
-        .page
-        .locator("button:has-text('+ Add model'):visible")
-        .click(None)
-        .await?;
-    session
-        .page
-        .locator("input[name=model_id_1]")
-        .fill("e2e-extra-model", None)
-        .await?;
-    session
-        .page
-        .locator("button:has-text('Save model provider'):visible")
-        .click(None)
-        .await?;
-    expect(session.page.locator("#save-status"))
-        .to_contain_text("Model provider saved")
+    let rows = session.page.locator("input[aria-label='Model ID']");
+    let before = rows.count().await?;
+    button(&session.page, "+ Add model").click(None).await?;
+    // The form is rendered again with the new row; filling before that would write into the
+    // old last row. `.last()`: the new row comes after the models of the provider.
+    expect(rows.clone())
+        .to_have_count(before + 1)
         .await
-        .context("the save is confirmed")?;
-    expect(session.page.locator("input[name=model_id_1]"))
-        .to_have_value("e2e-extra-model")
+        .context("the form has a row for the new model")?;
+    rows.last().fill(&model, None).await?;
+    save_model_provider(session).await?;
+    expect(session.page.locator(format!("input[value='{model}']")))
+        .to_be_visible()
         .await
         .context("the added model is in the form after the save")?;
     assert_eq!(
@@ -538,8 +575,19 @@ async fn the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error
         "the page stays open on the Models tab"
     );
 
+    // Back to the seeded state: remove the model and save.
+    button(&session.page, &format!("Remove model {model}"))
+        .click(None)
+        .await
+        .context("remove the added model")?;
+    save_model_provider(session).await?;
+    expect(session.page.locator(format!("input[value='{model}']")))
+        .to_have_count(0)
+        .await
+        .context("the added model is gone after the second save")?;
+
     save_with_a_general_error(
-        &session,
+        session,
         "#url_anthropic_messages",
         "http://insecure.example.org",
         "models",
@@ -548,19 +596,42 @@ async fn the_model_provider_page_saves_in_place_and_shows_the_tab_with_the_error
     .await
 }
 
+/// Saves the model provider form and waits for the confirmation. The status is cleared first: it
+/// lies outside the form and still shows the confirmation of an earlier save.
+async fn save_model_provider(session: &Session) -> Result<()> {
+    session
+        .page
+        .evaluate_value("document.getElementById('save-status').textContent = ''")
+        .await
+        .context("clear the save status")?;
+    button(&session.page, "Save model provider")
+        .click(None)
+        .await?;
+    expect(session.page.locator("#save-status"))
+        .to_contain_text("Model provider saved")
+        .await
+        .context("the save is confirmed")
+}
+
 /// configuration-management, "Saving the project settings page": the same for the project page
 /// (TD-124): on `?tab=security` a save with an invalid repository URL opens General.
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn a_failed_project_save_opens_the_general_tab_and_the_url_follows() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "a_failed_project_save_opens_the_general_tab_and_the_url_follows",
+        failed_project_save_body,
+    )
+    .await
+}
+
+async fn failed_project_save_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session.page.set_viewport_size(WIDE).await?;
-    open_project_page(&session, &env, data::PROJECT_KEY).await?;
+    open_project_page(session, env, data::PROJECT_KEY).await?;
 
     save_with_a_general_error(
-        &session,
+        session,
         "#repo_url",
         "ssh://git.example.org/o/r.git",
         "security",
@@ -573,16 +644,22 @@ async fn a_failed_project_save_opens_the_general_tab_and_the_url_follows() -> Re
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "the_sort_menu_changes_the_order_and_the_url",
+        sort_menu_body,
+    )
+    .await
+}
+
+async fn sort_menu_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session.page.set_viewport_size(WIDE).await?;
     let mut keys = Vec::new();
     for name in ["older", "newer"] {
         let description = format!("Sort the list, {name}.");
         keys.push(
             session
-                .create_task(&env, data::NETWORK_PROJECT_KEY, &description, None)
+                .create_task(env, data::NETWORK_PROJECT_KEY, &description, None)
                 .await?,
         );
     }
@@ -599,17 +676,13 @@ async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
         )
         .await?;
 
-    session
-        .page
-        .locator("button[aria-label='Recently updated']:visible")
+    button(&session.page, "Recently updated")
         .click(None)
         .await
         .context("open the sort menu")?;
     // Right of the 72 px rail, so the first option's text is not cut off.
-    assert_menu_inside_viewport(&session, RAIL_WIDTH).await?;
-    session
-        .page
-        .locator("[role=menuitemradio]:has-text('Newest created')")
+    assert_menu_inside_viewport(session, RAIL_WIDTH).await?;
+    menu_item(session, "Newest created")
         .click(None)
         .await
         .context("choose Newest created")?;
@@ -617,23 +690,14 @@ async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
         .to_have_url_regex("sort=created")
         .await
         .context("the sort is part of the URL")?;
-    expect(
-        session
-            .page
-            .locator("button[aria-label='Newest created']:visible"),
-    )
-    .to_be_visible()
-    .await
-    .context("the button names the current sort")?;
-    expect(newer_listed_before_older(&session, newer, older))
+    expect(button(&session.page, "Newest created"))
+        .to_be_visible()
+        .await
+        .context("the button names the current sort")?;
+    expect(newer_listed_before_older(session, newer, older))
         .to_be_visible()
         .await
         .context("the newer task is listed before the older one")?;
-
-    for key in &keys {
-        session.open_task(&env, key).await?;
-        session.cancel_task().await?;
-    }
     Ok(())
 }
 
@@ -645,15 +709,21 @@ async fn the_sort_menu_changes_the_order_and_the_url() -> Result<()> {
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_last_tab_of_the_project_page_stays_in_view_on_phones() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "the_last_tab_of_the_project_page_stays_in_view_on_phones",
+        last_tab_body,
+    )
+    .await
+}
+
+async fn last_tab_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     for width in [390, 280] {
         session
             .page
             .set_viewport_size(Viewport { width, height: 800 })
             .await?;
-        open_project_page(&session, &env, data::PROJECT_KEY).await?;
+        open_project_page(session, env, data::PROJECT_KEY).await?;
         if width == 280 {
             let overflows = session
                 .page
@@ -663,6 +733,7 @@ async fn the_last_tab_of_the_project_page_stays_in_view_on_phones() -> Result<()
                 .await?;
             assert_eq!(overflows, "true", "the tab row fits at 280 px");
         }
+        // `.last()`: the test is about the last tab of the row.
         let last = session.page.locator("[role=tab]:visible").last();
         last.dispatch_event("click", None).await?;
         expect(last.clone())
@@ -697,15 +768,21 @@ async fn the_last_tab_of_the_project_page_stays_in_view_on_phones() -> Result<()
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab",
+        swap_tasks_body,
+    )
+    .await
+}
+
+async fn swap_tasks_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     let mut keys = Vec::new();
     for name in ["first", "second"] {
         let description = format!("Swap between tasks, {name}.");
         keys.push(
             session
-                .create_task(&env, data::NETWORK_PROJECT_KEY, &description, None)
+                .create_task(env, data::NETWORK_PROJECT_KEY, &description, None)
                 .await?,
         );
     }
@@ -759,11 +836,6 @@ async fn opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab
         .chain(session.page.page_errors())
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
-
-    for key in &keys {
-        session.open_task(&env, key).await?;
-        session.cancel_task().await?;
-    }
     Ok(())
 }
 
@@ -772,9 +844,15 @@ async fn opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling",
+        phone_sort_menu_body,
+    )
+    .await
+}
+
+async fn phone_sort_menu_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     session
         .page
         .set_viewport_size(Viewport {
@@ -787,7 +865,7 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
         let description = format!("Sort the list on a phone, {name}.");
         keys.push(
             session
-                .create_task(&env, data::NETWORK_PROJECT_KEY, &description, None)
+                .create_task(env, data::NETWORK_PROJECT_KEY, &description, None)
                 .await?,
         );
     }
@@ -804,16 +882,13 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
         )
         .await?;
 
-    session
-        .page
-        .locator("section.ws-list div:has(> h1) button[aria-label='Recently updated']:visible")
+    // The phone shows the sort button once, in the title row.
+    button(&session.page, "Recently updated")
         .click(None)
         .await
         .context("open the sort menu in the title row")?;
-    assert_menu_inside_viewport(&session, 0.0).await?;
-    session
-        .page
-        .locator("[role=menuitemradio]:has-text('Newest created'):visible")
+    assert_menu_inside_viewport(session, 0.0).await?;
+    menu_item(session, "Newest created")
         .click(None)
         .await
         .context("choose Newest created")?;
@@ -821,7 +896,7 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
         .to_have_url_regex("sort=created")
         .await
         .context("the sort is part of the URL")?;
-    expect(newer_listed_before_older(&session, newer, older))
+    expect(newer_listed_before_older(session, newer, older))
         .to_be_visible()
         .await
         .context("the newer task is listed before the older one")?;
@@ -832,13 +907,6 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
         )
         .await?;
     assert_eq!(overflows, "false", "the page scrolls sideways at 390 px");
-
-    // The status menu that cancels a task is in the details panel, which phones don't show.
-    session.page.set_viewport_size(WIDE).await?;
-    for key in &keys {
-        session.open_task(&env, key).await?;
-        session.cancel_task().await?;
-    }
     Ok(())
 }
 
@@ -847,12 +915,18 @@ async fn the_sort_menu_on_a_phone_sorts_the_list_without_sideways_scrolling() ->
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
 async fn traffic_page_pauses_resizes_and_opens_details() -> Result<()> {
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
+    fixture::run(
+        "traffic_page_pauses_resizes_and_opens_details",
+        traffic_page_body,
+    )
+    .await
+}
+
+async fn traffic_page_body(world: Arc<World>) -> Result<()> {
+    let (env, session) = (&world.env, &world.session);
     // The script retries the denied fetch once a second until the request is decided.
     let key = session
-        .create_task(&env, data::NETWORK_PROJECT_KEY, "Live traffic.", None)
+        .create_task(env, data::NETWORK_PROJECT_KEY, "Live traffic.", None)
         .await?;
     session.expect_text(data::NETWORK_NEED, RUN_TIMEOUT).await?;
     let url = format!("{}/egress/log?task={key}", env.base_url);
@@ -860,16 +934,13 @@ async fn traffic_page_pauses_resizes_and_opens_details() -> Result<()> {
     // Reloaded until the backlog holds the first denied fetch.
     eventually("the first event of the task", RUN_TIMEOUT, || async {
         session.page.goto(&url, None).await?;
-        Ok((rows(&session).await? > 0).then_some(()))
+        Ok((rows(session).await? > 0).then_some(()))
     })
     .await?;
 
-    pause_and_resume(&session, &env, &url).await?;
-    divider(&session).await?;
-    details(&session).await?;
-
-    session.open_task(&env, &key).await?;
-    session.cancel_task().await?;
+    Box::pin(pause_and_resume(session, env, &url)).await?;
+    divider(session).await?;
+    details(session).await?;
     Ok(())
 }
 
@@ -908,11 +979,7 @@ async fn pause_and_resume(session: &Session, env: &E2eEnv, url: &str) -> Result<
         .await
         .context("the connected stream of the traffic page")?;
     let badge = session.page.locator("header [role=status]");
-    session
-        .page
-        .locator("button:has-text('Pause')")
-        .click(None)
-        .await?;
+    button(&session.page, "Pause").click(None).await?;
     expect(badge.clone()).to_contain_text("Paused").await?;
     let aborted = session
         .page
@@ -937,11 +1004,7 @@ async fn pause_and_resume(session: &Session, env: &E2eEnv, url: &str) -> Result<
     .await?;
     assert_eq!(rows(session).await?, paused, "rows changed while paused");
 
-    session
-        .page
-        .locator("button:has-text('Resume')")
-        .click(None)
-        .await?;
+    button(&session.page, "Resume").click(None).await?;
     expect(badge).to_contain_text("Live").await?;
     wait_for_rows(session, buffered).await?;
     Ok(())
@@ -1017,7 +1080,8 @@ async fn divider(session: &Session) -> Result<()> {
 /// The details of a row open in a panel; Escape closes it and focus returns to the row.
 async fn details(session: &Session) -> Result<()> {
     wait_for_rows(session, 1).await?;
-    // By label (host and time): a live update re-renders the rows.
+    // By label (host and time): a live update re-renders the rows. CSS and `.first()`: the label
+    // is not known yet, the rows are newest first.
     let label = session
         .page
         .locator("#flows button[aria-label^='Request details for']:visible")
@@ -1025,9 +1089,7 @@ async fn details(session: &Session) -> Result<()> {
         .get_attribute("aria-label")
         .await?
         .context("label of the newest row's details button")?;
-    let opener = session
-        .page
-        .locator(format!("#flows button[aria-label='{label}']:visible"));
+    let opener = button(&session.page, &label);
     opener.click(None).await?;
     let panel = session.page.locator("aside[role=dialog]");
     expect(panel.clone()).to_be_visible().await?;

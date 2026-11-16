@@ -34,31 +34,32 @@ E2E_KEEP=1 E2E_TEST_ARGS="--ignored --test-threads=1 <test name>" just e2e-local
 
 ```mermaid
 flowchart TD
-    L["discover the test binaries, check free disk space and free ports"] --> V[check the Playwright versions]
+    L["discover the test binaries, check free disk space, clear E2E_ARTIFACTS_DIR"] --> V[check the Playwright versions]
     V --> R{"kept cluster healthy?"}
     R -- "yes: reset state" --> E
-    R -- no --> A[kind create cluster df-e2e]
+    R -- no --> K[check the host ports are free]
+    K --> A[kind create cluster df-e2e, NodePort mappings]
     A --> B[cert-manager, CSI driver]
     A --> I[bazel run //deploy:load_e2e_*, kind load image-archive]
     B --> C[PostgreSQL, Dex, event receiver, Forgejo]
-    C --> D[Forgejo users factory and reviewer, token, factory/demo, issue 1, webhook, Secrets]
+    C --> D[Forgejo users factory and reviewer, token, factory/demo, factory/existing-branch, webhooks, Secrets]
     D --> P[Playwright server]
     I --> P
     P --> E[helm install values-e2e.yaml]
-    E --> F[seed, port-forwards]
+    E --> F[seed]
     F --> X["egress probe: skip the internet test (fail in CI)"]
-    X --> G["cargo test -p df-e2e (every test binary) -- --ignored --test-threads=N"]
+    X --> G["cargo test -p df-e2e (every test binary) -- --ignored --test-threads=N, E2E_REPEAT times"]
     G --> H[kind delete cluster, unless E2E_KEEP=1]
 ```
 
-0. Before anything touches the cluster, the script lists the test binaries (see [Test discovery](#test-discovery)) and checks that the container runtime has `E2E_MIN_FREE_GIB` (default 10) GiB free in its storage directory (`docker info` / `podman info`). It stops with the free space, the threshold and the cleanup commands (`<cli> rm -fv df-test-postgres-17-alpine-r1`, `<cli> system prune`) otherwise, and leaves a kept cluster alone. For a remote `DOCKER_HOST` or Docker Desktop, whose storage is not on this host, it prints a warning and continues. It also checks that the forwarded ports (15432, 13000, 13001, 13002) are free and stops with a `pkill -f 'kubectl --context kind-df-e2e .*port-forward'` hint otherwise (a port-forward left over from an earlier run), again before any cluster change.
-1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`), unless it reuses a kept cluster (see [Reusing a kept cluster](#reusing-a-kept-cluster)). Meanwhile cargo compiles the seed program and the suite.
+0. Before anything touches the cluster, the script lists the test binaries (see [Test discovery](#test-discovery)) and checks that the container runtime has `E2E_MIN_FREE_GIB` (default 10) GiB free in its storage directory (`docker info` / `podman info`). It stops with the free space, the threshold and the cleanup commands (`<cli> rm -fv df-test-postgres-17-alpine-r1`, `<cli> system prune`) otherwise, and leaves a kept cluster alone. For a remote `DOCKER_HOST` or Docker Desktop, whose storage is not on this host, it prints a warning and continues. It then clears `E2E_ARTIFACTS_DIR` (default `target/e2e-artifacts`, see [Diagnostics of a failed run](#diagnostics-of-a-failed-run)).
+1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`), unless it reuses a kept cluster (see [Reusing a kept cluster](#reusing-a-kept-cluster)). Just before it creates one, the script checks that the host ports of the [NodePort mappings](#host-access-nodeport) (15432, 13000, 13001, 13002) are free and stops otherwise. Meanwhile cargo compiles the seed program and the suite.
 2. Builds the control plane, runtime, test project, plugin and Playwright server images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL) and the Playwright base image, which Bazel downloads into its repository cache. The Claude images are not needed.
    The Playwright server image (`//deploy:load_e2e_playwright`) is the `mcr.microsoft.com/playwright` base image plus the pinned `playwright-core` package (`deploy/images/playwright-server`), so the pod needs no npm access at runtime. The script first checks that the `playwright-core` version, the base image tag in `MODULE.bazel` and the driver version of the locked `playwright-rs` are equal and stops with the three values otherwise.
 3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), the Playwright server (after the images are loaded), the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET), the fake Anthropic upstream (`deploy/e2e/fake-upstream.yaml`: `fake-acp-agent --serve-fake-anthropic` from the test project image; it answers `401` unless the request carries the key `e2e-model-api-key`, which only the gateway knows) and Forgejo (Helm chart, SQLite, no persistence).
-4. Creates the Forgejo users `factory` (the bot) and `reviewer` (collaborator with write access) with their tokens (stored in the Secret `e2e-state` for reuse), the repository `factory/demo` with issue 1 and a repository webhook to `http://dark-factory-control-plane.dark-factory.svc:8080/webhooks/forgejo` (the events of [Forge webhooks](content/integrations/forges/webhooks.md), secret `e2e-webhook-secret`; `deploy/e2e/forgejo-values.yaml` allows the host in `webhook.ALLOWED_HOST_LIST`), and the Secret `forgejo-token` for the credential reference.
+4. Creates the Forgejo users `factory` (the bot) and `reviewer` (collaborator with write access) with their tokens (stored in the Secret `e2e-state` for reuse), the repositories `factory/demo` (with issue 1 and `secret/value.txt`) and `factory/existing-branch` (project `EB`, whose tests move and merge into its `main`), each with a repository webhook to `http://dark-factory-control-plane.dark-factory.svc:8080/webhooks/forgejo` (the events of [Forge webhooks](content/integrations/forges/webhooks.md), secret `e2e-webhook-secret`; `deploy/e2e/forgejo-values.yaml` allows the host in `webhook.ALLOWED_HOST_LIST`), and the Secret `forgejo-token` for the credential reference.
 5. Creates the Secrets `fake-llm-key` for the model provider's credential reference and `forge-webhooks` (key `forgejo`, the webhook secret), and installs the chart with `deploy/values-e2e.yaml`.
-6. Seeds the database, port-forwards PostgreSQL, Forgejo, the Playwright server and the receiver, and runs the ignored tests of `crates/df-e2e` (`E2E_TEST_THREADS` at a time).
+6. Seeds the database and runs the ignored tests of `crates/df-e2e` (`E2E_TEST_THREADS` at a time) `E2E_REPEAT` times in a row against the same database and repositories.
 7. Deletes the cluster on exit, also after a failure or `Ctrl-C`, unless `E2E_KEEP=1`.
 
 ### Reusing a kept cluster
@@ -68,12 +69,25 @@ With `E2E_KEEP=1` the cluster stays after the run. The next run reuses it when `
 1. scales the control plane to 0 and waits until its pods are gone, so it does not react to the reset;
 2. deletes the pods and volumes of the sandbox namespace (task keys restart at `<KEY>-1`, so old volumes would collide);
 3. drops and recreates the database `dark_factory` (`DROP DATABASE ... WITH (FORCE)` as the PostgreSQL superuser);
-4. deletes and recreates the repository `factory/demo` (so no task branches or pull requests of earlier runs remain), its issue, file, collaborator and webhook;
+4. deletes and recreates the repositories `factory/demo` and `factory/existing-branch` (so no task branches or pull requests of earlier runs remain), their issue, file, collaborator and webhook;
 5. loads the images (Bazel rebuilds only what changed), runs `helm upgrade --install` (its migration Job migrates the empty database, and the control plane scales back up with the loaded image), restarts the gateway, the fake upstream and the Playwright server for the same reason (the tag `e2e` does not change, so their pods would keep the old image), seeds and runs the tests.
 
-The script prints `Setup took N s` before the tests start. Changes to `deploy/e2e/*.yaml` (the infrastructure manifests) are not applied to a reused cluster: the script prints a hint when their hash differs from the one stored in `e2e-state`; run once with `E2E_FRESH=1`, which also helps when a kept cluster misbehaves. A cluster kept by an older version of the script has no `e2e-state` and is recreated.
+The script prints `Setup took N s` before the tests start. Changes to `deploy/e2e/*.yaml` (the infrastructure manifests) are not applied to a reused cluster: the script prints a hint when their hash differs from the one stored in `e2e-state`; run once with `E2E_FRESH=1`, which also helps when a kept cluster misbehaves. A cluster kept by an older version of the script has no `e2e-state` and is recreated; so is one created before the NodePort mappings, because Forgejo does not answer on its host port.
 
 The browser runs in the cluster (`playwright` namespace). It opens the control plane at its Service URL and is redirected to Dex through cluster DNS, so the control plane and the browser see the same issuer URL (`http://dex.dex.svc:5556/dex`). The test host only needs the WebSocket of the Playwright server.
+
+### Host access (NodePort)
+
+The test host reaches PostgreSQL, Forgejo, the Playwright server and the event receiver through NodePort Services. `deploy/e2e/kind.yaml` maps the node's container ports to the host, on `127.0.0.1` only:
+
+| Service | NodePort (node) | Host port |
+|---|---|---|
+| PostgreSQL (`deploy/e2e/postgres.yaml`) | `30432` | `15432` |
+| Forgejo (`service.http` of `deploy/e2e/forgejo-values.yaml`) | `30300` | `13000` |
+| Playwright server (`deploy/e2e/playwright.yaml`) | `30301` | `13001` |
+| Event receiver (`deploy/e2e/receiver.yaml`) | `30302` | `13002` |
+
+No process on the host holds a connection to a pod: a restart of a pod (the reuse restarts the Playwright server) needs no action, the next connection reaches the new pod. kube-proxy needs a moment after a Service exists, so the script waits for Forgejo's health check on its host port before it creates the users.
 
 ### `deploy/values-e2e.yaml`
 
@@ -89,9 +103,9 @@ The browser runs in the cluster (`playwright` namespace). It opens the control p
 | `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
 | `sandbox.landlock` | `enforce`; `just e2e-local` passes `disabled` when the node kernel has no Landlock ABI 6 | Without ABI 6 every run would fail with `sandbox.landlock_unavailable`. |
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
-| `networkPolicy.ingressController.allowAll` | `true` | The browser pod and the port-forward reach the UI. |
+| `networkPolicy.ingressController.allowAll` | `true` | The browser pod reaches the UI. |
 | `sandboxNamespace.resourceQuota.pods`, `limitRange` | 4 pods, 1 Gi default memory | Memory budget, see below. |
-| `sandboxNamespace.resourceQuota.persistentVolumeClaims`, `requestsStorage` | 32, `32Gi` | One 1 Gi volume per task, kept while the task is open; the suite leaves most of its tasks `waiting`. `local-path` does not reserve the size. |
+| `sandboxNamespace.resourceQuota.persistentVolumeClaims`, `requestsStorage` | 96, `96Gi` | One 1 Gi volume per task, kept while the task is open and after a cancellation. A run of the suite creates about 30 tasks, and `E2E_REPEAT` runs it again without a reset (with 32 the second run's tasks fail provisioning with `capacity`). `local-path` does not reserve the size. |
 
 ## Environment variables
 
@@ -111,6 +125,7 @@ All targets come from the environment, so the same tests run against any instanc
 | `E2E_USER`, `E2E_PASSWORD` | yes (tests) | Login at the identity provider. |
 | `E2E_LANDLOCK` | no | `disabled` skips the `landlock` test (the cluster kernel has no Landlock ABI 6 and the release runs with `sandbox.landlock: disabled`). Anything else, or unset, runs it. |
 | `E2E_RECEIVER_URL` | yes (`lifecycle_events`) | The lifecycle event receiver as the test host reaches it, e.g. `http://127.0.0.1:13002`. The control plane reaches it as `http://receiver.receiver.svc:8080/hook`. |
+| `E2E_ARTIFACTS_DIR` | no | Where a failed test writes `<test name>/screenshot.png` and `console.txt`. Default `target/e2e-artifacts` of the repository. `just e2e-local` exports it. |
 
 ### `just e2e-local` (`deploy/e2e/e2e-local.sh`)
 
@@ -121,17 +136,51 @@ All targets come from the environment, so the same tests run against any instanc
 | `E2E_LIST` | unset | `1` prints the selected and the skipped test binaries and exits before the disk check and any cluster step. |
 | `E2E_MIN_FREE_GIB` | `10` | Free space the container runtime's storage directory needs before the run; the script stops with the cleanup commands below it. |
 | `E2E_KIND_CONFIG` | `deploy/e2e/kind.yaml` | kind configuration for the cluster. Without it, when `/.msb/tls/ca.pem` exists (CA of a TLS-intercepting proxy in the sandbox), the script mounts that file into the node (see [Sandboxes behind a TLS-intercepting proxy](#sandboxes-behind-a-tls-intercepting-proxy)). A custom configuration gets no mount. |
-| `E2E_TEST_THREADS` | `2` | Tests that run in parallel per test binary, like CI. Each test works on its own task, branch and requests; the node peak stays at about 3.5 GiB (see the [resource budget](#resource-budget)). `1` runs them one at a time. |
+| `E2E_TEST_THREADS` | `2` | Tests that run in parallel per test binary, like CI. The tests are independent of each other ([Isolation](#isolation)): each finds its own tasks, branches and requests by what it created, and state-changing scenarios have fixtures of their own. The node peak stays at about 3.5 GiB (see the [resource budget](#resource-budget)). `1` runs them one at a time. |
 | `E2E_TEST_ARGS` | `--ignored --test-threads=$E2E_TEST_THREADS` | Arguments after `--` of `cargo test -p df-e2e` with the discovered test binaries, e.g. a test name. Replaces the default, so keep `--test-threads`. |
+| `E2E_REPEAT` | `1` | How often the `cargo test` step runs after the single reset and seed. With `2` the second run meets the database and repositories of the first, which checks that the tests repeat; the existing reuse of a kept cluster is a separate check. The log shows `Test run <n> of <m>`. |
+| `E2E_ARTIFACTS_DIR` | `target/e2e-artifacts` | Cleared at the start of a run. A failed test writes its screenshot and console below it, a failed run the logs of the cluster ([Diagnostics of a failed run](#diagnostics-of-a-failed-run)). |
 | `E2E_TOOLS_DIR` | `~/.cache/df-e2e` | Where the Playwright driver is kept. |
 | `BAZEL` | `bazel` | Bazel command; agents use `bazel --bazelrc=.bazelrc.agents`. |
 | `KIND_EXPERIMENTAL_PROVIDER`, `DOCKER_HOST` | as kind | The script selects Podman when `docker` is not installed. |
 
-Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright), `13002` (event receiver).
+Ports on the host (NodePort mappings, `127.0.0.1` only, see [Host access](#host-access-nodeport)): `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright), `13002` (event receiver).
 
 ## Tests
 
-`cargo test -p df-e2e --test <binary> ... -- --ignored` for every binary of `crates/df-e2e/tests/` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a 5 minute limit per run, never a fixed sleep.
+`cargo test -p df-e2e --test <binary> ... -- --ignored` for every binary of `crates/df-e2e/tests/` (ignored by default, they need the cluster). Each test logs in at Dex, acts through the UI and checks what the UI does not show in Forgejo (branch, pull request, draft flag, comments, commits) and in the database (task status, runs, harness session id). Waits poll the condition with a limit named after what is awaited (5 minutes for a sandbox run, 30 s for a UI update after the state is there), never a fixed sleep. A wait for a task status stops at once, naming the status found, when the task ended in another final status.
+
+### Fixture and cleanup
+
+Every test runs through `df_e2e::fixture::run(name, |world| async move { ... })`. The `World` it passes holds the environment, a logged-in browser session (its own context), the database pool, the Forgejo clients of the bot and the reviewer for `factory/demo`, and a unique suffix (8 hex characters) that the test appends to every name it creates (branches, files, personas, issue titles, subscription URLs).
+
+After the body, the teardown runs every time, also after a failure or a panic (which is resumed afterwards, so `cargo test` reports it unchanged):
+
+- It cancels each task the test created through the composer and the tasks those created (delegation children, found through `parent_id`; the query repeats after the cancelled coordinator's run ended until no new child appears), unless a task is `completed`, `cancelled` or `failed`. A cancellation goes through the UI in a fresh page of the context. When that fails, it falls back to the form post of the UI (`POST /tasks/{key}/cancel` with the session cookie taken after the login and the `HX-Request` header), sent through a new connection to the Playwright server, because the control plane is only reachable from inside the cluster. When both ways fail, the test fails and names the tasks that keep running.
+- Every description the session submits ends in ` [<suffix>]` of the test (added in one place, `Session::create_task` and its variants), so no other test submits the same text. A creation whose task page never opened is found by project, that exact description and a creation time since the submit, and cancelled too.
+- When the test failed, it writes `screenshot.png` and `console.txt` (console messages and page errors) to `$E2E_ARTIFACTS_DIR/<test name>/`. There is no Playwright trace: with the browser in the cluster, `Tracing::stop` with a path makes the browser server write the file on its own disk, and `playwright-rs` does not stream it to the test host.
+
+The suite repeats: with `E2E_REPEAT=2` (or a second run of the script on a kept cluster, which resets first) every test passes again. A test therefore finds its data by what it created (task keys come from the UI, children through the coordinator, pull requests by head branch with `GET pulls/{base}/{head}`), never by a predicted key or a position in a shared list.
+
+### Isolation
+
+| Shared state | Rule |
+|---|---|
+| Repository `factory/demo` with `main` and issue 1 | No test commits or merges to its `main`; issue 1 belongs to the demo flow. A test that needs an issue creates its own. |
+| Repository `factory/existing-branch` | Project `EB` only: its two tests move and merge into this `main`, with branches, files and commits named with the suffix. |
+| Project `LC` ("Lifecycle", demo script, `factory/demo`) | Only the lifecycle event test subscribes on it, with a URL of its own, so the deliveries of other tests do not reach it. |
+| Settings pages | A test that saves an edit (a model of the provider page) removes it again; created personas have a unique name. |
+
+### Diagnostics of a failed run
+
+`E2E_ARTIFACTS_DIR` (default `target/e2e-artifacts`) holds, after a failure:
+
+| Path | Content |
+|---|---|
+| `<test name>/screenshot.png`, `console.txt` | The browser of the failed test (see [Fixture and cleanup](#fixture-and-cleanup)). |
+| `cluster/<namespace>-<pod>.log` | The last 500 lines of the control plane, the gateway, every sandbox pod, Forgejo and the fake upstream, and `<pod>.previous.log` where a container restarted. Written by `just e2e-local` when the run fails. |
+
+CI uploads the directory as the artifact `e2e-artifacts` when the job fails (`.github/workflows/e2e.yaml`).
 
 | Test | Scenarios (`openspec/specs/task-delivery/spec.md`) |
 |---|---|
@@ -148,7 +197,7 @@ Ports on the host: `15432` (PostgreSQL), `13000` (Forgejo), `13001` (Playwright)
 | `the_last_tab_of_the_project_dialog_stays_in_view_on_phones` | configuration-management "Form tabs on phones": at 390 and 300 px the chosen last tab of the project dialog lies inside the tab row, and the page does not scroll sideways |
 | `opening_tasks_from_the_list_keeps_the_console_clean_and_the_details_tab` | swapping between two tasks from the list logs no console error and no uncaught exception (the cleanup of the old event stream), and the details keep their open tab (`data-tab`) after the swap settled |
 | `traffic_page_pauses_resizes_and_opens_details` | egress-log on the denied retries of an `NA` task: Pause aborts the stream and the rows stay while new events arrive, Resume shows them; divider Right Arrow, double-click reset, drag up to the limit, width kept across a reload; Escape closes the details panel and returns focus to the row |
-| `project_subscription_receives_a_signed_sandbox_provisioned_event` | lifecycle events (`openspec/changes/archive/2026-11-04-lifecycle-events`): the admin adds a project subscription for `sandbox.provisioned` in the "Lifecycle events" tab of the project dialog, a task of `DF` starts a run, the receiver gets the event of that task, and its `webhook-signature` verifies with the public key shown in the tab; the tab then shows `HTTP 204` |
+| `project_subscription_receives_a_signed_sandbox_provisioned_event` | lifecycle events (`openspec/changes/archive/2026-11-04-lifecycle-events`): the admin adds a project subscription (URL with the suffix of the run) for `sandbox.provisioned` in the "Lifecycle events" tab of project `LC`, edits it, a task of `LC` starts a run, the receiver gets the event of that task on the path of the subscription (`/hook/<suffix>`), and its `webhook-signature` verifies with the public key shown in the tab; the row of the subscription then shows `HTTP 204`, and the test deletes the subscription |
 | `member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again` | forge webhooks (`openspec/changes/iter3-webhooks`): a task of `WH` completes in run 1 (`in_review`, ready PR); `reviewer` requests changes through the Forgejo API, the task page shows the `webhook` message with the review within 30 s, the PR is a draft again, and run 2 reads the feedback and waits |
 
 Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-local`.
@@ -161,8 +210,9 @@ Run one test: `E2E_TEST_ARGS='--ignored --test-threads=1 rate_limited' just e2e-
 |---|---|
 | `seed` | Container-backed test of the seed program (`cargo test -p df-e2e`), not a cluster test. |
 | `demo_seed` | Container-backed test of the demo profile of the seed (`cargo test -p df-e2e`), not a cluster test. |
+| `unlanded_lookup` | Container-backed test of the fixture's lookup of a task whose page never opened (`cargo test -p df-e2e`), not a cluster test. |
 
-Both need a container socket (`df-test-postgres`) but no cluster; `--ignored` would skip them anyway.
+All need a container socket (`df-test-postgres`) but no cluster; `--ignored` would skip them anyway.
 
 ## Seed data
 
@@ -170,7 +220,7 @@ The `seed` program has two profiles. Both are idempotent, write into the databas
 
 | Profile | Command | Purpose |
 |---|---|---|
-| End-to-end fixtures (default) | `cargo run -p df-e2e --bin seed`, `just seed` | The records the suite needs: one persona, 13 projects, no tasks. `just e2e-local` runs it against the cluster. |
+| End-to-end fixtures (default) | `cargo run -p df-e2e --bin seed`, `just seed` | The records the suite needs: one persona, 14 projects, no tasks. `just e2e-local` runs it against the cluster. |
 | Demo | `cargo run -p df-e2e --bin seed -- --demo`, `just seed-demo` | Realistic data for screenshots and demos of `just serve-local`, see [Demo profile](#demo-profile). |
 
 ### End-to-end fixtures
@@ -191,7 +241,8 @@ The `seed` program has two profiles. Both are idempotent, write into the databas
 | Project `PP` | "Protected Path", same repository, script `/opt/harness/scripts/push-protected.yaml` |
 | Project `HP` | "Hidden Path", same repository (`secret/value.txt` on `main`, committed by `just e2e-local`), hidden path `secret/**`, script `/opt/harness/scripts/push-hidden.yaml` |
 | Project `WH` | "Webhooks", same repository, script `/opt/harness/scripts/webhook.yaml` |
-| Project `EB` | "Existing Branch", same repository, script `/opt/harness/scripts/existing-branch.yaml` (tasks on existing branches: attached pull request, rebase with lease) |
+| Project `EB` | "Existing Branch", repository `http://forgejo-http.forgejo.svc:3000/factory/existing-branch` (its own, because its tests move and merge into `main`), script `/opt/harness/scripts/existing-branch.yaml` (tasks on existing branches: attached pull request, rebase with lease) |
+| Project `LC` | "Lifecycle", same repository as `DF`, script `/opt/harness/scripts/demo.yaml`; only the lifecycle event test subscribes on it |
 | Project `DG` | "Delegation", same repository, script `/opt/harness/scripts/delegation.yaml` |
 | Project `RS` | "Research", same repository, script `/opt/harness/scripts/research.yaml` |
 | Project `IN` | "Interrupt", same repository, script `/opt/harness/scripts/interrupt.yaml` |
@@ -229,7 +280,7 @@ A task is identified by project key and title, so a second run writes nothing, n
 
 `crates/fake-acp-agent/scripts/` is part of the test project image under `/opt/harness/scripts/`:
 
-- `demo.yaml`: run 1 first makes a `model` step (a streamed Anthropic Messages request to `$ANTHROPIC_BASE_URL/v1/messages` with `curl`, the key from `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` and the CA from `NODE_EXTRA_CA_CERTS`; it says the received text, or `Model call failed: <status or error>`, then a line `Model key in the sandbox: <key>` and a `Sandbox environment:` dump of every environment variable of the harness (`NAME=value`, sorted); the e2e checks that the key is the placeholder, that the dump is there and that neither the provider key nor the forge token appears in any transcript event), then plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, reads the PR feedback, replies in the first review thread, calls `complete_task` and ends. Without a line comment on the PR the reply is a tool error. An `mcp` step can `save` a value of the structured result (variable name to JSON pointer) that later steps of the turn pass as the string argument `${name}`.
+- `demo.yaml`: run 1 first makes a `model` step (a streamed Anthropic Messages request to `$ANTHROPIC_BASE_URL/v1/messages` with `curl`, the key from `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` and the CA from `NODE_EXTRA_CA_CERTS`; it says the received text, or `Model call failed: <status or error>`, then a line `Model key in the sandbox: <key>` and a `Sandbox environment:` dump of every environment variable of the harness (`NAME=value`, sorted); the e2e checks that the key is the placeholder, that the dump is there and that neither the provider key nor the forge token appears in any transcript event), then plans, commits `greeting.txt`, calls `update_pull_request` and `comment_on_issue`, ends its turn; the follow-up run (loaded session) commits a test file, reads the PR feedback, replies in the first review thread, calls `complete_task` and ends. Without a line comment on the PR the reply is a tool error. An `mcp` step can `save` a value of the structured result (variable name to JSON pointer) that later steps pass as the string argument `${name}` (also in later turns, see below).
 - `rate-limit.yaml`: run 1 ends with a rate limit (60 s); the next turn continues after a message. The message test sends it before the retry time and expects exactly 2 runs, so the script keeps 60 s.
 - `rate-limit-short.yaml` (project `RT`): the same with a retry time of 5 s, for the test that waits for the automatic resume without a message.
 - `network-access.yaml`: run 1 fetches `https://pypi.org/simple/pip/` with a `fetch` step (`curl` through the sandbox's proxy settings, retried once a second for up to 240 s) and says `Fetched <url>.` or `Could not fetch <url>: <error>`; the decision message is the next prompt of the same session. Before the fetch, a `[conversation-flow]` task asks a non-blocking question and a `[blocking-question]` task a blocking one; the held fetch keeps the turn open for the answer. The second turn of a `[blocking-question]` task says `Got the first answer in the same run.` and asks a second blocking question; its answer starts run 2 (loaded session), which says `Continued after the second answer.`
@@ -237,11 +288,15 @@ A task is identified by project key and title, so a second run writes nothing, n
 - `push-protected.yaml`: run 1 commits `.forgejo/workflows/ci.yml`; later prompts have no scripted turn and end at once, so the runtime only pushes the same commit again.
 - `push-hidden.yaml`: run 1 looks for `secret/value.txt` and says `secret/value.txt is missing` (it is not in the workspace), removes it from the index with `git rm --cached --sparse` and commits; later prompts have no scripted turn and end at once, so the runtime only pushes the same commit again.
 - `webhook.yaml`: run 1 commits `welcome.txt`, calls `update_pull_request` and `complete_task`; the run after the `webhook` message (loaded session) calls `read_pull_request_feedback` and ends its turn without completing, so the task waits with a draft PR.
-- `research.yaml` (project `RS`, no webhook): one script for the coordinator `RS-1` and the researcher `RS-2`, told apart by `[coordinator]` and `[research]`. The coordinator creates the researcher; the researcher writes `findings.md` with `write_artifact` and completes; the wake-up message of the coordinator lists `RS-2/findings.md`, and the coordinator reads it with `read_artifact`.
-- `delegation.yaml` (project `DG`, no webhook): one script for the coordinator `DG-1`, the implementation `DG-2` and the review `DG-3`, told apart by the markers `[coordinator]`, `[impl]`, `[review]` and `[fix]` in their prompts (`when` steps play their steps only if the prompt contains `prompt_contains`). The coordinator creates the implementation and a review that depends on its completion; each child completes and wakes the coordinator, which relays the review to the implementation with `send_message` for a second round.
+- `research.yaml` (project `RS`, no webhook): one script for the coordinator and the researcher, told apart by `[coordinator]` and `[research]`. The coordinator creates the researcher and saves its key; the researcher writes `findings.md` with `write_artifact` and completes; the wake-up message of the coordinator lists `<researcher key>/findings.md`, and the coordinator reads that artifact with `read_artifact`.
+- `delegation.yaml` (project `DG`, no webhook): one script for the coordinator, the implementation and the review, told apart by the markers `[coordinator]`, `[impl]`, `[review]` and `[fix]` in their prompts (`when` steps play their steps only if the prompt contains `prompt_contains`). The coordinator creates the implementation (saving its key) and a review that depends on its completion; each child completes and wakes the coordinator, which relays the review to the implementation with `send_message` for a second round.
+- `existing-branch.yaml` (project `EB`): `[attached]` appends a line with the time to `bump.txt` and commits it, so a run after an earlier merge of that file still has a change; `[rebase]` rebases the branch onto `origin/main`.
+
 - `interrupt.yaml` (project `IN`, no webhook): the first turn says `Starting a long task.` and stays open (`end: hang`) until the runtime sends `session/cancel`, which an interrupt does; the next turn says `Noted the interruption.` if its input has the interrupt line and `Switched to the other API.` if it has the queued message `Use the other API`.
 
 - `landlock.yaml` (project `LL`, no webhook): the turn tries `cat /run/factory/tls/tls.key` and a write to `/opt/probe-writable/x` (a directory of the test project image owned by the sandbox user, so file permissions allow the write and only Landlock denies it), says `tls.key: EACCES` and `probe-writable: EACCES` for the denials, then asks a non-blocking question through the factory tool `ask_question`, which proves that the runtime socket still works inside the domain. `just e2e-local` asks the kind node for its kernel (mounting securityfs there first, which a container does not have): without Linux 6.12+ and `landlock` in `/sys/kernel/security/lsm`, it installs the release with `sandbox.landlock=disabled`, exports `E2E_LANDLOCK=disabled` and the `landlock` test skips itself with a message.
+
+The saved values (`save`) of an `mcp` step are also kept in `.git/fake-agent-vars.json` of the working directory (inside `.git`, so `git add -A` does not commit it and no push sends it), so a later turn, also of a resumed session, passes them as `${name}`. That keeps `research.yaml` and `delegation.yaml` free of predicted task keys.
 
 Scripts commit with the identity of the runtime-owned `.git/config`; the Git proxy rejects any other (`df:identity`).
 
@@ -250,8 +305,10 @@ Scripts commit with the identity of the runtime-owned `.git/config`; the Git pro
 The suite contains nothing specific to kind. Point the `E2E_*` variables at an instance that has the seed data and run (`webhooks` also needs the repository webhook and a reviewer with write access, as `just e2e-local` sets them up):
 
 ```bash
-cargo test -p df-e2e --test delegation --test demo --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
+cargo test -p df-e2e --test delegation --test demo --test existing_branch --test flow --test interrupt --test landlock --test lifecycle_events --test ui --test webhooks -- --ignored --test-threads=1
 ```
+
+`existing_branch` also needs the repository `factory/existing-branch` (project `EB`), `lifecycle_events` project `LC`. Set `E2E_ARTIFACTS_DIR` to collect the diagnostics of failed tests elsewhere than `target/e2e-artifacts`.
 
 The test host needs the Playwright driver (about 130 MB). The workspace sets `PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD=1` (`.cargo/config.toml`) so that `cargo build --workspace` and clippy stay offline. `just e2e-local` assembles the driver the way `playwright-rs` does (the `playwright-core` npm package next to the Node binary, versions read from the locked `playwright-rs` source), but downloads it with `curl`, which trusts the system CA store. It keeps the driver in `E2E_TOOLS_DIR` and points `PLAYWRIGHT_DRIVER_PATH` at it. On another machine run `playwright-rs install --driver-only` once, or set `PLAYWRIGHT_DRIVER_PATH` to such a directory.
 
@@ -298,7 +355,7 @@ Measured on an 8-core, 15 GiB machine (Docker, arm64; `docker stats` every 5 s, 
 | Full suite, 1 thread, e2e scheduling values, reused cluster, short rate-limit script | 12 min 35 s (`flow.rs` 9 min 40 s), node peak 3.1 GiB |
 | Setup before the tests | new cluster 114 to 131 s, reused cluster 56 to 65 s (images load about 45 s of it); more when Bazel has to rebuild images (112 to 166 s) |
 
-Earlier runs with 2 threads (and with 1) failed about every second time with `closed connection` or `connection refused` towards the Playwright server. The cause was the runner, not the parallelism: it started `kubectl port-forward` through a shell function, so the background job was a subshell, and the cleanup killed the subshell but not the `kubectl` below it. Each kept cluster run left a port-forward behind that kept port `13001`. The next run's new forward failed to bind (`address already in use`), but the runner only checked that the port accepts connections and used the old forward, which pointed at the Playwright pod that the reuse had restarted. The runner now starts `kubectl` itself as the background job and fails when the port is taken already.
+Earlier runs with 2 threads (and with 1) failed about every second time with `closed connection` or `connection refused` towards the Playwright server. The cause was the runner, not the parallelism: it reached the cluster through `kubectl port-forward` processes, which a restarted pod left pointing at the old pod (and an orphaned forward kept port `13001`). The runner now uses NodePort Services with `extraPortMappings` of the kind node ([Host access](#host-access-nodeport)), which follow a restarted pod.
 
 The e2e scheduling values (`deploy/values-e2e.yaml`: `tickMillis` 500, `resumeBackoffSeconds` 5, `forgeRetryBaseSeconds` 2) cost control plane CPU, measured idle over 60 s with `crictl stats` in the node: about 1 millicore with the defaults (tick 5 s) and about 3 millicores with a tick of 500 ms. That is negligible next to the node (up to 65 % of a core during a run). The short values save about 36 s of the full run (the two 1-thread rows above: 13 min 11 s with the default values, 12 min 35 s with the e2e values); the rate-limit resume test also waits 5 s for its retry time instead of 60 s (`rate-limit-short.yaml`), a saving that is not part of that comparison because both runs used the short script.
 

@@ -115,6 +115,23 @@ impl RequestState {
     }
 }
 
+impl FromStr for RequestState {
+    type Err = RequestError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "answered" => Ok(Self::Answered),
+            "approved" => Ok(Self::Approved),
+            "denied" => Ok(Self::Denied),
+            "closed" => Ok(Self::Closed),
+            other => Err(RequestError::Invalid(format!(
+                "unknown request state `{other}`"
+            ))),
+        }
+    }
+}
+
 impl fmt::Display for RequestState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -969,14 +986,10 @@ impl TryFrom<RequestRecord> for RequestRow {
             "approval" => RequestKind::Approval,
             other => return Err(DbError::InvalidData(format!("request kind `{other}`"))),
         };
-        let state = match r.state.as_str() {
-            "pending" => RequestState::Pending,
-            "answered" => RequestState::Answered,
-            "approved" => RequestState::Approved,
-            "denied" => RequestState::Denied,
-            "closed" => RequestState::Closed,
-            other => return Err(DbError::InvalidData(format!("request state `{other}`"))),
-        };
+        let state = r
+            .state
+            .parse::<RequestState>()
+            .map_err(|e| DbError::InvalidData(e.to_string()))?;
         Ok(Self {
             id: RequestId::from_uuid(r.id),
             task_id: TaskId::from_uuid(r.task_id),

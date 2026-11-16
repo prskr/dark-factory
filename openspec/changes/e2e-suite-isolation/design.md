@@ -39,14 +39,14 @@ playwright-rs 0.21 offers `BrowserContext::tracing()` (`start`/`stop` with a pat
 
 `df_e2e::fixture::run(name, |world| async move { … })` builds a `World`:
 
-- **Contents:** `env`, a `Session` with tracing started, the pool, both Forgejo clients, the test name, and a unique suffix (first 8 hex characters of a `Uuid::new_v4()`).
+- **Contents:** `env`, a logged-in `Session` (no trace, see Risks), the pool, both Forgejo clients, the test name, and a unique suffix (first 8 hex characters of a `Uuid::new_v4()`).
 - **Running the test:** the test body runs in a spawned task. A panic (`assert!` failed) becomes a failure without skipping teardown. After teardown the original panic is resumed, so `cargo test` reports it unchanged.
-- **Recording tasks:** `World::create_task` and its variants record the keys they return.
+- **Recording tasks:** `Session::create_task` and its variants record the keys they return (in `Session`, not `World`, so every existing call `world.session.create_task(...)` is recorded without a change of the tests). A creation whose task page never opened is remembered by project, description and the submit time, and the teardown looks up the tasks of that project with that description created since the submit. `Session` appends ` [<suffix>]` of the test to every description it submits (the fake agent scripts match markers with `contains`), so the description is unique to the test.
 - **Teardown** runs every time, with every step bounded and best-effort (it logs and continues):
   - It cancels each recorded task that is not `completed`, `cancelled` or `failed`, through the UI in a fresh page of the same context. If the UI path fails (for example because the browser connection is gone), it posts the cancel directly to the control plane (`POST /tasks/{key}/cancel`, the form the UI submits), using the session cookie taken from the browser context right after login. If that fails too, the test fails and names the tasks it left behind.
   - It also cancels tasks created by the recorded ones (delegation children), found through `parent_id`, and repeats that query after the coordinator's run has stopped until no new child appears.
-  - On failure it writes `screenshot.png`, `trace.zip` and `console.txt` (console messages and page errors) to `$E2E_ARTIFACTS_DIR/<test name>/`. The default directory is `target/e2e-artifacts`.
-  - On success it stops tracing without a path.
+  - On failure it writes `screenshot.png` and `console.txt` (console messages and page errors) to `$E2E_ARTIFACTS_DIR/<test name>/`. The default directory is `target/e2e-artifacts`. There is no `trace.zip` (see Risks, "Trace of a remote browser").
+  - On success it writes nothing.
 
 **Why a function and not a `Drop` guard:** async work can't run in `Drop`, and `run` keeps the order of teardown explicit.
 
@@ -92,6 +92,8 @@ Tests call `World` methods that delegate to these modules. No SQL stays in `test
 
 `db::children(pool, parent_key)` returns the child keys in creation order (`ORDER BY created_at`). The tests take the implementation and the review from the description they were created with, not from their position or key.
 
+The fake agent scripts predicted keys too (`DG-2`, `RS-2`). The coordinator now saves the key of the child it creates (`save` of the `mcp` step, `${impl}`, `${researcher}`), and the fake agent keeps saved values across turns of a task, also in a resumed session, in `.git/fake-agent-vars.json` of the workspace: inside `.git`, so `git add -A` of the WIP snapshot does not commit it and no push sends it.
+
 ### D6: NodePort with kind port mappings
 
 - **`kind.yaml`:** `extraPortMappings` from container ports `30432`, `30300`, `30301`, `30302` to host ports `15432`, `13000`, `13001`, `13002`, with `listenAddress: 127.0.0.1`.
@@ -122,11 +124,15 @@ The helpers in `browser.rs` and the tests touched by D1–D5 use `get_by_role` w
 ## Risks / Trade-offs
 
 - **[Trace of a remote browser]** The browser runs in the cluster; `tracing.stop` with a path has to transfer the file over the connection. → Verify early (task 1.3). If playwright-rs cannot do it, keep screenshot and console and drop the trace, noted in `docs/demo.md`.
+  **Result (task 1.3, checked on a kept cluster with a deliberately failing test):** it does not work. `Tracing::stop(path)` of playwright-rs 0.21 ends in `Artifact::save_as`, which sends `saveAs` with the path to the browser server, so the server writes the archive on its own disk (inside the Playwright pod) and the call returns without an error; no `trace.zip` appears on the test host. A connected browser needs `saveAsStream`, which playwright-rs does not offer. The trace is dropped: a failed test leaves `screenshot.png` and `console.txt`, `docs/demo.md` says so.
 - **[Forgejo's pull-by-base-and-head endpoint]** It exists in current Forgejo, but the pinned chart version must have it. → Verify in task 2.2. The fallback pages through `pulls?state=all` until it finds the head.
+  **Result (task 2.2, chart 17.3.2, Forgejo 15.0.11):** the endpoint answers. `GET /repos/{owner}/{repo}/pulls/{base}/{head}` finds pull requests whose head branch has slashes (`renovate/e2e-bump-<suffix>`, `factory/task/DF-1`) with the branch unencoded in the path, and answers 404 for a branch without a pull request, which `Forgejo::pull_of` maps to `None`. The paging fallback is not needed.
 - **[Cancel through the UI fails when the browser is the problem]** → The HTTP fallback with the session cookie (D1). Verify in task 1.4 that the cancel endpoint accepts a plain form post with that cookie (no extra CSRF token); if it needs one, read it from the task page over HTTP.
+  **Result (task 1.4/1.5):** the endpoint takes `POST /tasks/{key}/cancel` with the session cookie and the header htmx sends (`HX-Request: true`, the whole CSRF guard of `df-web`, ADR-0011); there is no token. The control plane is only reachable from inside the cluster (`E2E_BASE_URL` is its Service URL, not a NodePort), so the fallback sends the post through a new connection to the Playwright server (`BrowserContext::request()` of a fresh context), not from the test host. Checked with a test that closes its browser context before the teardown: only the fallback cancels the task. Two more findings: a cancellation in a second page stalled (the confirmation had no effect, a navigation timed out) while the test's page was still open, most likely because a task page holds several event streams and the browser allows few connections per host; so the teardown closes the test's page before it opens a fresh one. And the fresh page waits for the cancellation to show before it closes, or the close cancels the request in flight.
 - **[Repeatability needs a run without a reset]** The runner resets the database and the repositories on every invocation, so running the script twice does not check repeatability. → `E2E_REPEAT` (default 1) runs `cargo test` that many times after a single reset (D9).
 - **[Rootless Podman host ports]** Mapped ports above 1024 work rootless, and all four are above 1024. → None needed.
 - **[Larger seed]** One more project and one more repository add a few seconds of setup. → Accepted.
+- **[Volume quota with repeated runs]** A cancelled task keeps its volume, and one run of the suite creates about 30 tasks, so `E2E_REPEAT=2` exhausted the quota of 32 PVCs and the second run's tasks failed provisioning with `capacity`. → `deploy/values-e2e.yaml` allows 96 PVCs and 96 Gi (`local-path` does not reserve the size).
 
 ## Migration Plan
 

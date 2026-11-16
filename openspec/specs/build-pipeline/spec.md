@@ -216,7 +216,7 @@ The Bazel jobs of the CI workflow and of the release workflow SHALL use the `rbe
 - **THEN** both workflows keep `--config=cache`, and the ADR records the measurements
 
 ### Requirement: Pinned linker for plain cargo
-Plain `cargo` builds for the `aarch64-unknown-linux-gnu` host target SHALL link with lld: the `rust-lld` that ships with the pinned Rust toolchain, selected through the linker driver `.cargo/cc-lld.sh` (design D5, ADR-0058; `x86_64-unknown-linux-gnu` already links with it by default). The driver SHALL fall back to plain `cc` when the toolchain has no `rust-lld`. `cargo build --workspace` SHALL pass in both cases.
+Plain `cargo` builds for the `aarch64-unknown-linux-gnu` host target SHALL link with lld: the `rust-lld` that ships with the pinned Rust toolchain, selected through the linker driver `.cargo/cc-lld.sh` (design D5, ADR-0058; `x86_64-unknown-linux-gnu` already links with it by default). The driver SHALL fall back to plain `cc` when the toolchain has no `rust-lld`, and when `cc` resolves into `/nix/store`. `cargo build --workspace` SHALL pass in all cases.
 
 #### Scenario: Linking with lld
 - **WHEN** `cargo test --workspace --no-run` runs on an aarch64 Linux host
@@ -225,3 +225,7 @@ Plain `cargo` builds for the `aarch64-unknown-linux-gnu` host target SHALL link 
 #### Scenario: rust-lld missing
 - **WHEN** the Rust toolchain has no `rust-lld` and `cargo build --workspace` runs on an aarch64 Linux host
 - **THEN** the build passes with the default linker
+
+#### Scenario: Nix C compiler
+- **WHEN** `cc` resolves into `/nix/store` and `cargo test --workspace` runs on an aarch64 Linux host
+- **THEN** the test binaries are linked through the Nix `ld` wrapper, which adds the RUNPATH of the store libraries that lld would bypass, and start (they find `libssl.so.3`)

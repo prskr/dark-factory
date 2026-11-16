@@ -30,6 +30,8 @@ const FETCH_RETRY: Duration = Duration::from_secs(1);
 const FETCH_ATTEMPT: Duration = Duration::from_secs(10);
 /// Limit of the MCP handshake and of one tool call; factory tools wait up to 30 s for the forge.
 const MCP_CALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Name of the file that keeps the values saved by `mcp` steps across turns.
+pub(crate) const VARS_FILE: &str = "fake-agent-vars.json";
 
 /// Tracks active session state.
 #[derive(Debug, Clone)]
@@ -210,7 +212,8 @@ struct TurnContext {
     mcp_servers: Vec<McpServer>,
     cancel_notify: Arc<Notify>,
     cancelled: Arc<AtomicBool>,
-    /// Values saved by `mcp` steps of the turn (`save`), used as `${name}` in later arguments.
+    /// Values saved by `mcp` steps (`save`), used as `${name}` in later arguments: of this turn
+    /// and, through the [`VARS_FILE`] of the task, of the turns before.
     vars: HashMap<String, String>,
 }
 
@@ -317,7 +320,7 @@ async fn take_next_turn(state: &Mutex<AgentState>, session_id: &SessionId) -> Ne
             mcp_servers: session.mcp_servers.clone(),
             cancel_notify,
             cancelled,
-            vars: HashMap::new(),
+            vars: load_vars(&session.cwd),
         },
     )
 }
@@ -571,6 +574,7 @@ async fn play_mcp(mcp_step: McpStep, ctx: &mut TurnContext, cx: &ConnectionTo<Cl
         Ok(res) => {
             if let Some(structured) = &res.structured_content {
                 ctx.vars.extend(saved_values(&mcp_step.save, structured));
+                store_vars(&ctx.cwd, &ctx.vars);
             }
             (
                 serde_json::to_string(&res).unwrap_or_default(),
@@ -608,6 +612,31 @@ pub(crate) fn substitute_vars(
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+/// Where the saved values of the task in `cwd` are kept across turns: in its `.git` directory, which
+/// `git add -A` does not commit and a push does not send, and which a resumed session finds on the
+/// workspace volume. Without a `.git` directory (a test) in `cwd` itself.
+fn vars_path(cwd: &Path) -> PathBuf {
+    let git = cwd.join(".git");
+    let dir = if git.is_dir() { git } else { cwd.to_path_buf() };
+    dir.join(VARS_FILE)
+}
+
+/// The values saved by earlier turns of the task in `cwd`; none when there is no readable file.
+pub(crate) fn load_vars(cwd: &Path) -> HashMap<String, String> {
+    std::fs::read_to_string(vars_path(cwd))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// Keeps `vars` for later turns. A failure only means a later turn does not find the values, which
+/// its calls report.
+pub(crate) fn store_vars(cwd: &Path, vars: &HashMap<String, String>) {
+    if let Ok(text) = serde_json::to_string(vars) {
+        std::fs::write(vars_path(cwd), text).ok();
     }
 }
 

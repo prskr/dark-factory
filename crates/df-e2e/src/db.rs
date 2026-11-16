@@ -1,13 +1,19 @@
 //! The database of the instance, read by the tests for what the UI does not show.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::{Context, Result};
 use df_core::system_reason::PUSH_REJECTED;
+use df_core::{RunOutcome, RunState, TaskStatus};
 use df_db::git_pushes::RefUpdate;
 use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, request_findings};
+use df_db::requests::RequestState;
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Executor, Row};
 use uuid::Uuid;
+
+use crate::wait::{RUN_TIMEOUT, eventually, status_reached};
 
 /// Schema of the control plane tables unless `E2E_DATABASE_SCHEMA` says otherwise.
 pub const DEFAULT_SCHEMA: &str = "dark_factory";
@@ -36,20 +42,167 @@ pub async fn connect(url: &str) -> Result<PgPool> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRow {
     pub number: i64,
-    pub state: String,
-    pub outcome: Option<String>,
+    pub state: RunState,
+    pub outcome: Option<RunOutcome>,
     /// Whether the run carries the time to retry after (rate limit).
     pub has_retry_after: bool,
     pub harness_session_id: String,
 }
 
-/// Status of task `key` (`queued`, `running`, `waiting`, `completed`, `rate_limited`, ...).
-pub async fn task_status(pool: &PgPool, key: &str) -> Result<String> {
-    sqlx::query_scalar::<_, String>("SELECT status FROM tasks WHERE key = $1")
+/// Status of task `key`.
+pub async fn task_status(pool: &PgPool, key: &str) -> Result<TaskStatus> {
+    let status = sqlx::query_scalar::<_, String>("SELECT status FROM tasks WHERE key = $1")
         .bind(key)
         .fetch_one(pool)
         .await
-        .with_context(|| format!("status of task {key}"))
+        .with_context(|| format!("status of task {key}"))?;
+    Ok(status.parse()?)
+}
+
+/// Waits until task `key` has `status`; fails at once when the task ended in another final status
+/// (see [`status_reached`]).
+pub async fn wait_for_status(pool: &PgPool, key: &str, status: TaskStatus) -> Result<()> {
+    eventually(
+        &format!("task {key} to be {status}"),
+        RUN_TIMEOUT,
+        || async { status_reached(task_status(pool, key).await?, status) },
+    )
+    .await
+}
+
+/// The id of task `key`.
+pub async fn task_id(pool: &PgPool, key: &str) -> Result<Uuid> {
+    sqlx::query_scalar::<_, Uuid>("SELECT id FROM tasks WHERE key = $1")
+        .bind(key)
+        .fetch_one(pool)
+        .await
+        .with_context(|| format!("id of task {key}"))
+}
+
+/// The keys of the tasks created by task `parent`, in creation order.
+pub async fn children(pool: &PgPool, parent: &str) -> Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT c.key FROM tasks c JOIN tasks p ON p.id = c.parent_id \
+         WHERE p.key = $1 ORDER BY c.created_at",
+    )
+    .bind(parent)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("children of task {parent}"))
+}
+
+/// The key of the child of task `parent` whose description contains `text` (the marker of the
+/// prompt the coordinator created it with), or `None` while the coordinator has not created it.
+pub async fn child_described(pool: &PgPool, parent: &str, text: &str) -> Result<Option<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT c.key FROM tasks c JOIN tasks p ON p.id = c.parent_id \
+         WHERE p.key = $1 AND strpos(c.description, $2) > 0 ORDER BY c.created_at LIMIT 1",
+    )
+    .bind(parent)
+    .bind(text)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("child of task {parent} described by `{text}`"))
+}
+
+/// Number of messages an agent queued on task `key`.
+pub async fn agent_messages(pool: &PgPool, key: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM task_messages m JOIN tasks t ON t.id = m.task_id \
+         WHERE t.key = $1 AND m.author ->> 'kind' = 'agent'",
+    )
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("agent messages of task {key}"))
+}
+
+/// The keys of the tasks of project `project` with exactly `description` created at or after
+/// `since` (the submit of a creation): what that creation may have left although its page never
+/// opened. The description carries the suffix of the test, so no other test's task matches; the
+/// time only leaves out an earlier task of the same test.
+pub async fn tasks_submitted_since(
+    pool: &PgPool,
+    project: &str,
+    description: &str,
+    since: SystemTime,
+) -> Result<Vec<String>> {
+    // Microseconds, the resolution of the column. `bigint * interval` is computed in float8,
+    // which holds every epoch microsecond (below 2^53) exactly.
+    let micros = i64::try_from(since.duration_since(UNIX_EPOCH)?.as_micros())?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT t.key FROM tasks t JOIN projects p ON p.id = t.project_id \
+         WHERE p.key = $1 AND t.description = $2 \
+         AND t.created_at >= TIMESTAMPTZ 'epoch' + $3 * interval '1 microsecond' \
+         ORDER BY t.created_at",
+    )
+    .bind(project)
+    .bind(description)
+    .bind(micros)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("tasks of {project} described `{description}` since the submit"))
+}
+
+/// The prompt IDs each turn of task `key` started with, oldest turn first.
+pub async fn turn_prompt_ids(pool: &PgPool, key: &str) -> Result<Vec<Vec<String>>> {
+    let events = sqlx::query_scalar::<_, Value>(
+        "SELECT e.payload FROM transcript_events e JOIN tasks t ON t.id = e.task_id \
+         WHERE t.key = $1 AND e.kind = 'turn_started' ORDER BY e.id",
+    )
+    .bind(key)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("turns of task {key}"))?;
+    events
+        .into_iter()
+        .map(|event| {
+            let ids = event
+                .pointer("/turnStarted/promptIds")
+                .with_context(|| format!("prompt IDs in {event}"))?;
+            serde_json::from_value(ids.clone()).context("decode the turn's prompt IDs")
+        })
+        .collect()
+}
+
+/// Number of runs of task `key` that ended `completed`.
+pub async fn completed_runs(pool: &PgPool, key: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM runs r JOIN tasks t ON t.id = r.task_id \
+         WHERE t.key = $1 AND r.outcome = $2",
+    )
+    .bind(key)
+    .bind(RunOutcome::Completed.as_str())
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("completed runs of task {key}"))
+}
+
+/// Number of successful `read_artifact` calls for artifact `name` of task `of`, made by any task.
+pub async fn artifact_reads(pool: &PgPool, of: &str, name: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM tool_calls WHERE tool_name = 'read_artifact' \
+         AND arguments ->> 'task' = $1 AND arguments ->> 'name' = $2 \
+         AND result IS NOT NULL AND COALESCE((result ->> 'isError')::boolean, false) = false",
+    )
+    .bind(of)
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("reads of {name} of task {of}"))
+}
+
+/// Number of audit entries `action` about the runs of task `key` (`resource_id` is the run id).
+pub async fn run_audit_entries(pool: &PgPool, key: &str, action: &str) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM audit_log a JOIN runs r ON r.id::text = a.resource_id \
+         JOIN tasks t ON t.id = r.task_id WHERE t.key = $1 AND a.action = $2",
+    )
+    .bind(key)
+    .bind(action)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("{action} audit entries of task {key}"))
 }
 
 /// Usage records of the runs of task `key`: `(known, unknown)`.
@@ -116,10 +269,11 @@ pub async fn runs(pool: &PgPool, key: &str) -> Result<Vec<RunRow>> {
     .with_context(|| format!("runs of task {key}"))?;
     rows.iter()
         .map(|row| {
+            let outcome: Option<String> = row.try_get("outcome")?;
             Ok(RunRow {
                 number: row.try_get("number")?,
-                state: row.try_get("state")?,
-                outcome: row.try_get("outcome")?,
+                state: row.try_get::<String, _>("state")?.parse()?,
+                outcome: outcome.map(|outcome| outcome.parse()).transpose()?,
                 has_retry_after: row.try_get("has_retry_after")?,
                 harness_session_id: row.try_get("harness_session_id")?,
             })
@@ -131,7 +285,7 @@ pub async fn runs(pool: &PgPool, key: &str) -> Result<Vec<RunRow>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkRequest {
     pub id: Uuid,
-    pub state: String,
+    pub state: RequestState,
     /// Raised by the control plane (no run), not by the agent.
     pub raised_by_control_plane: bool,
     pub blocking: bool,
@@ -164,7 +318,7 @@ pub async fn network_request(
     row.map(|row| {
         Ok(NetworkRequest {
             id: row.try_get("id")?,
-            state: row.try_get("state")?,
+            state: row.try_get::<String, _>("state")?.parse()?,
             raised_by_control_plane: row.try_get("raised_by_control_plane")?,
             blocking: row.try_get("blocking")?,
             reason: row.try_get("reason")?,
@@ -179,7 +333,7 @@ pub async fn network_request(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExceptionRequest {
     pub id: Uuid,
-    pub state: String,
+    pub state: RequestState,
     pub close_reason: Option<String>,
     pub findings: Vec<ExceptionFinding>,
 }
@@ -201,7 +355,7 @@ pub async fn exception_requests(pool: &PgPool, key: &str) -> Result<Vec<Exceptio
             let payload: Value = row.try_get("payload")?;
             Ok(ExceptionRequest {
                 id: row.try_get("id")?,
-                state: row.try_get("state")?,
+                state: row.try_get::<String, _>("state")?.parse()?,
                 close_reason: row.try_get("close_reason")?,
                 findings: request_findings(&payload),
             })

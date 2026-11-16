@@ -89,3 +89,13 @@ jobs:
           E2E_TEST_THREADS: "2"
           # gh downloads the cert-manager manifest through the API
           GH_TOKEN: ${{ github.token }}
+
+      # Screenshot and console of every failed test (<test name>/) and the logs of the
+      # cluster (cluster/), written by the suite and the script (docs/demo.md)
+      - name: Upload the diagnostics of the failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-artifacts
+          path: target/e2e-artifacts
+          if-no-files-found: ignore

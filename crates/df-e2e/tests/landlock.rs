@@ -9,10 +9,9 @@
 use anyhow::Result;
 use df_core::TaskId;
 use df_db::requests::RequestKind;
-use df_e2e::browser::Session;
+use df_e2e::fixture;
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
-use df_e2e::{E2eEnv, data, db};
-use uuid::Uuid;
+use df_e2e::{data, db};
 
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
@@ -26,46 +25,49 @@ async fn the_harness_is_denied_the_private_key_and_the_system_but_keeps_its_fact
         );
         return Ok(());
     }
-    let env = E2eEnv::from_env()?;
-    let session = Session::start(&env).await?;
-    session.login(&env).await?;
-    let pool = db::connect(&env.database_url).await?;
+    fixture::run(
+        "the_harness_is_denied_the_private_key_and_the_system_but_keeps_its_factory_tools",
+        |world| async move {
+            let key = world
+                .session
+                .create_task(
+                    &world.env,
+                    data::LANDLOCK_PROJECT_KEY,
+                    "Probe the sandbox",
+                    None,
+                )
+                .await?;
 
-    let key = session
-        .create_task(&env, data::LANDLOCK_PROJECT_KEY, "Probe the sandbox", None)
-        .await?;
-
-    for text in [data::LANDLOCK_KEY_DENIED, data::LANDLOCK_WRITE_DENIED] {
-        eventually(
-            &format!("transcript event containing `{text}`"),
-            RUN_TIMEOUT,
-            || async {
-                let events = db::transcript_events_containing(&pool, &key, text).await?;
-                Ok((events >= 1).then_some(()))
-            },
-        )
-        .await?;
-    }
-    // The factory tool call reached the control plane through the runtime socket.
-    let task_id = TaskId::from_uuid(
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM tasks WHERE key = $1")
-            .bind(&key)
-            .fetch_one(&pool)
-            .await?,
-    );
-    eventually(
-        "the question of the factory tool call",
-        RUN_TIMEOUT,
-        || async {
-            Ok(df_db::requests::list_for_task(&pool, task_id)
-                .await?
-                .into_iter()
-                .find(|r| {
-                    r.kind == RequestKind::Question && r.question_text() == data::LANDLOCK_QUESTION
-                })
-                .map(|_| ()))
+            for text in [data::LANDLOCK_KEY_DENIED, data::LANDLOCK_WRITE_DENIED] {
+                eventually(
+                    &format!("transcript event containing `{text}`"),
+                    RUN_TIMEOUT,
+                    || async {
+                        let events =
+                            db::transcript_events_containing(&world.pool, &key, text).await?;
+                        Ok((events >= 1).then_some(()))
+                    },
+                )
+                .await?;
+            }
+            // The factory tool call reached the control plane through the runtime socket.
+            let task_id = TaskId::from_uuid(db::task_id(&world.pool, &key).await?);
+            eventually(
+                "the question of the factory tool call",
+                RUN_TIMEOUT,
+                || async {
+                    Ok(df_db::requests::list_for_task(&world.pool, task_id)
+                        .await?
+                        .into_iter()
+                        .find(|r| {
+                            r.kind == RequestKind::Question
+                                && r.question_text() == data::LANDLOCK_QUESTION
+                        })
+                        .map(|_| ()))
+                },
+            )
+            .await
         },
     )
-    .await?;
-    Ok(())
+    .await
 }

@@ -1,14 +1,25 @@
 //! The browser of the suite: a Playwright server in the cluster, and the login at the identity
 //! provider.
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::time::Duration;
+use std::path::Path;
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
-use playwright_rs::protocol::Page;
+use playwright_rs::protocol::{
+    AriaRole, BrowserContext, FetchOptions, GetByRoleOptions, Locator, Page,
+};
 use playwright_rs::{Playwright, expect, expect_page};
 
 use crate::env::E2eEnv;
+
+/// How long taking the screenshot of a failed test may take.
+const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long the teardown of a test waits for one cancellation through the UI.
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long a page waits for a card that already exists in the database.
 const CARD_TIMEOUT: Duration = Duration::from_secs(30);
@@ -22,14 +33,34 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// forever instead of failing it.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// A page of the remote browser. Keeps the local Playwright driver alive.
+/// A task creation that was submitted without the UI opening the task.
+#[derive(Debug, Clone)]
+pub struct UnlandedTask {
+    pub project: String,
+    /// The description as submitted, with the suffix of the test: no other test submits it.
+    pub description: String,
+    /// Just before the submit.
+    pub submitted_at: SystemTime,
+}
+
+/// A page of the remote browser in a context of its own. Keeps the local Playwright driver alive.
+/// Every task the session creates through the composer is recorded, so the fixture can cancel what
+/// a test leaves behind.
 pub struct Session {
     _playwright: Playwright,
+    context: BrowserContext,
     pub page: Page,
+    created: Mutex<Vec<String>>,
+    /// Creations that were submitted but whose page never opened: the task may exist, the fixture
+    /// looks it up.
+    unlanded: Mutex<Vec<UnlandedTask>>,
+    cookie: Mutex<Option<String>>,
+    /// Appended to every description the session submits, see [`Session::set_description_suffix`].
+    description_suffix: OnceLock<String>,
 }
 
 impl Session {
-    /// Connects to the Playwright server and opens a page.
+    /// Connects to the Playwright server and opens a page in a new context.
     pub async fn start(env: &E2eEnv) -> Result<Self> {
         let playwright = within(
             "start the local Playwright driver (`just e2e-local` installs it)",
@@ -41,10 +72,16 @@ impl Session {
             playwright.chromium().connect(&env.playwright_ws, None),
         )
         .await?;
-        let page = within("open a page", browser.new_page()).await?;
+        let context = within("open a browser context", browser.new_context()).await?;
+        let page = within("open a page", context.new_page()).await?;
         Ok(Self {
             _playwright: playwright,
+            context,
             page,
+            created: Mutex::new(Vec::new()),
+            unlanded: Mutex::new(Vec::new()),
+            cookie: Mutex::new(None),
+            description_suffix: OnceLock::new(),
         })
     }
 
@@ -64,6 +101,7 @@ impl Session {
             .fill(&env.password, None)
             .await
             .context("fill the password")?;
+        // Dex's form has a single submit button; its label is Dex's, not the application's.
         self.page
             .locator("button[type=submit]")
             .click(None)
@@ -73,11 +111,143 @@ impl Session {
             .with_timeout(LOGIN_TIMEOUT)
             .to_have_url_regex(&format!("^{}", regex::escape(&env.base_url)))
             .await
-            .context("land on the UI after the login")
+            .context("land on the UI after the login")?;
+        // Kept for the fallback of the teardown, which must work when the browser does not answer.
+        let cookie = self.read_cookie_header().await?;
+        *self.cookie.lock().unwrap_or_else(PoisonError::into_inner) = Some(cookie);
+        Ok(())
     }
-}
 
-impl Session {
+    /// The keys of the tasks created through [`Session::create_task`] and its variants, oldest
+    /// first.
+    pub fn created_tasks(&self) -> Vec<String> {
+        self.created
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Makes every description this session submits end in ` [suffix]` (once; the fixture sets the
+    /// suffix of the test), so no other test submits the same text.
+    pub fn set_description_suffix(&self, suffix: &str) {
+        self.description_suffix.set(suffix.to_owned()).ok();
+    }
+
+    /// The creations whose task page never opened.
+    pub fn unlanded_tasks(&self) -> Vec<UnlandedTask> {
+        self.unlanded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The `Cookie` header of the session as it was right after [`Session::login`].
+    pub fn cookie_header(&self) -> Option<String> {
+        self.cookie
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    async fn read_cookie_header(&self) -> Result<String> {
+        let cookies = within("read the session cookies", self.context.cookies(None)).await?;
+        Ok(cookies
+            .iter()
+            .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+            .collect::<Vec<_>>()
+            .join("; "))
+    }
+
+    /// Cancels task `key` through the UI in a fresh page of the context, so a page that a failed
+    /// test left in a dialog or on another site does not matter.
+    pub async fn cancel_task_in_new_page(&self, env: &E2eEnv, key: &str) -> Result<()> {
+        let cancel = async {
+            let page = self.context.new_page().await.context("open a page")?;
+            let cancelled = async {
+                page.goto(&format!("{}/tasks/{key}", env.base_url), None)
+                    .await
+                    .with_context(|| format!("open task {key}"))?;
+                cancel_task_on(&page).await?;
+                // Closing the page right after the click would cancel the request in flight.
+                expect(page.locator("#task-details"))
+                    .with_timeout(CANCEL_TIMEOUT)
+                    .to_contain_text("cancelled")
+                    .await
+                    .context("the task page shows the cancellation")
+            }
+            .await;
+            // Best effort: a page that stays open keeps its event streams, and the browser allows
+            // few connections per host.
+            page.close().await.ok();
+            cancelled
+        };
+        tokio::time::timeout(CANCEL_TIMEOUT, cancel)
+            .await
+            .map_err(|_elapsed| anyhow!("cancel {key}: no answer within {CANCEL_TIMEOUT:?}"))?
+    }
+
+    /// Closes the page of the session, which ends its event streams. The browser allows few
+    /// connections per host (HTTP/1.1), and every open task page holds several streams: a second
+    /// page next to it would wait for a connection, a cancellation included.
+    pub async fn close_page(&self) {
+        // Best effort: the browser may be gone already.
+        within_for(CANCEL_TIMEOUT, "close the page", self.page.close())
+            .await
+            .ok();
+    }
+
+    /// Writes what explains a failure into `dir`: `screenshot.png` of the page and `console.txt`.
+    /// Every step is bounded and independent: a step that fails is reported in the returned list
+    /// and does not keep the other from running.
+    ///
+    /// There is no Playwright trace: `Tracing::stop` with a path makes the browser server write
+    /// the file on its own disk (`Artifact::save_as` of playwright-rs does not stream it to a
+    /// remote client), so with the browser in the cluster the test host never gets it.
+    pub async fn save_diagnostics(&self, dir: &Path) -> Vec<String> {
+        let mut failures = Vec::new();
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return vec![format!("create {}: {e}", dir.display())];
+        }
+        let console = self.console_log();
+        if let Err(e) = std::fs::write(dir.join("console.txt"), console) {
+            failures.push(format!("console.txt: {e}"));
+        }
+        let shot = within_for(
+            DIAGNOSTICS_TIMEOUT,
+            "screenshot",
+            self.page
+                .screenshot_to_file(&dir.join("screenshot.png"), None),
+        )
+        .await;
+        if let Err(e) = shot {
+            failures.push(format!("screenshot.png: {e:#}"));
+        }
+        failures
+    }
+
+    /// The console messages and page errors the page has accumulated (a test that clears them
+    /// drops the earlier ones), one per line.
+    pub fn console_log(&self) -> String {
+        let messages = self
+            .page
+            .console_messages()
+            .into_iter()
+            .map(|message| format!("[{}] {}", message.type_(), message.text()));
+        let errors = self
+            .page
+            .page_errors()
+            .into_iter()
+            .map(|error| format!("[pageerror] {error}"));
+        messages.chain(errors).collect::<Vec<_>>().join("\n")
+    }
+
+    fn record_created(&self, key: &str) {
+        self.created
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(key.to_owned());
+    }
+
     /// Creates a task of project `project_key` for the only persona through the composer, linked
     /// to issue `issue` when given. Returns its key once the UI has opened the task.
     pub async fn create_task(
@@ -111,6 +281,9 @@ impl Session {
         issue: Option<u64>,
         branch: Option<&str>,
     ) -> Result<String> {
+        // Every submission passes here: the suffix makes the description unique to the test, which
+        // ties a task to its creation (the fake agent scripts match markers with `contains`).
+        let description = &submitted_description(description, self.description_suffix.get());
         self.page
             .goto(
                 &format!("{}/tasks?project={project_key}", env.base_url),
@@ -118,6 +291,8 @@ impl Session {
             )
             .await
             .context("open the task list")?;
+        // `.first()`: the list has a composer button per layout (desktop and phone), without an
+        // accessible name of its own.
         self.page
             .locator("button[hx-get^='/tasks/compose']:visible")
             .first()
@@ -125,8 +300,7 @@ impl Session {
             .await
             .context("open the composer")?;
         if issue.is_some() || branch.is_some() {
-            self.page
-                .locator("button[aria-label='Task options']")
+            button(&self.page, "Task options")
                 .click(None)
                 .await
                 .context("open the task options")?;
@@ -150,20 +324,40 @@ impl Session {
             .fill(description, None)
             .await
             .context("fill the description")?;
-        self.page
-            .locator("button[aria-label='Create task']")
+        let submitted_at = SystemTime::now();
+        button(&self.page, "Create task")
             .click(None)
             .await
             .context("create the task")?;
+        // From here on the task may exist although the page never shows it.
+        let landed = self.landed_task(project_key).await;
+        if landed.is_err() {
+            self.unlanded
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(UnlandedTask {
+                    project: project_key.to_owned(),
+                    description: description.to_owned(),
+                    submitted_at,
+                });
+        }
+        landed
+    }
+
+    /// Waits for the UI to open the new task of `project_key` and records its key.
+    async fn landed_task(&self, project_key: &str) -> Result<String> {
         expect_page(&self.page)
             .to_have_url_regex(&format!("/tasks/{project_key}-[0-9]+$"))
             .await
             .context("land on the new task")?;
         let url = self.page.url();
-        url.rsplit('/')
+        let key = url
+            .rsplit('/')
             .next()
             .map(str::to_owned)
-            .with_context(|| format!("task key in {url}"))
+            .with_context(|| format!("task key in {url}"))?;
+        self.record_created(&key);
+        Ok(key)
     }
 
     /// Opens the page of task `key`.
@@ -201,9 +395,10 @@ impl Session {
                 .await
                 .with_context(|| format!("choose scope {scope}"))?;
         }
-        let approve = self
-            .page
-            .locator(format!("{card} button:has-text('Approve')"));
+        let approve = self.page.locator(&card).get_by_role(
+            AriaRole::Button,
+            Some(GetByRoleOptions::default().name("Approve")),
+        );
         approve.click(None).await.context("approve the request")?;
         expect(approve)
             .with_timeout(CARD_TIMEOUT)
@@ -219,8 +414,7 @@ impl Session {
             .fill(message, None)
             .await
             .context("fill the message")?;
-        self.page
-            .locator("button[aria-label='Send']")
+        button(&self.page, "Send")
             .click(None)
             .await
             .context("send the message")
@@ -246,8 +440,7 @@ impl Session {
     /// Interrupts the running turn of the open task with the "Interrupt" button of the message
     /// box, which shows while the box is empty.
     pub async fn interrupt_turn(&self) -> Result<()> {
-        self.page
-            .locator("#composer-action button[aria-label='Interrupt']")
+        button(&self.page, "Interrupt")
             .click(None)
             .await
             .context("interrupt the turn")
@@ -256,8 +449,13 @@ impl Session {
     /// Stops the active run of the open task with the "Stop run" button of its run card.
     pub async fn stop_run(&self) -> Result<()> {
         self.open_runs().await?;
+        // `.first()`: the run cards of earlier runs have the button too; the active one is first.
         self.page
-            .locator("#runs button:has-text('Stop run')")
+            .locator("#runs")
+            .get_by_role(
+                AriaRole::Button,
+                Some(GetByRoleOptions::default().name("Stop run")),
+            )
             .first()
             .click(None)
             .await
@@ -266,21 +464,7 @@ impl Session {
 
     /// Cancels the open task: Status menu, "Cancel task…", then the confirmation.
     pub async fn cancel_task(&self) -> Result<()> {
-        self.page
-            .locator("#task-details button[aria-haspopup=true]")
-            .click(None)
-            .await
-            .context("open the status menu")?;
-        self.page
-            .locator("#task-details button:has-text('Cancel task…')")
-            .click(None)
-            .await
-            .context("choose Cancel task…")?;
-        self.page
-            .locator("dialog[open] button:has-text('Cancel task')")
-            .click(None)
-            .await
-            .context("confirm the cancellation")
+        cancel_task_on(&self.page).await
     }
 
     /// Opens the closed "Runs" disclosure of the open task.
@@ -327,11 +511,81 @@ impl Session {
 
     /// Waits until the open task shows `text` (a transcript line, a status).
     pub async fn expect_text(&self, text: &str, timeout: Duration) -> Result<()> {
+        // `.first()`: the text may show in the transcript and again in a summary or the list.
         expect(self.page.get_by_text(text, false).first())
             .with_timeout(timeout)
             .to_be_visible()
             .await
             .with_context(|| format!("wait for `{text}` in the UI"))
+    }
+}
+
+/// Cancels task `key` with the form post the UI sends (`POST /tasks/{key}/cancel`, which needs the
+/// session cookie and the header htmx sets, no token), through a browser connection of its own:
+/// the control plane is reachable from the browser in the cluster, not from the test host. For the
+/// teardown when the page of the test cannot cancel. A task that cannot be cancelled any more
+/// (HTTP 409) is already final.
+pub async fn cancel_task_over_new_connection(env: &E2eEnv, cookie: &str, key: &str) -> Result<()> {
+    let playwright = within("start the local Playwright driver", Playwright::launch()).await?;
+    let browser = within(
+        &format!("connect to {}", env.playwright_ws),
+        playwright.chromium().connect(&env.playwright_ws, None),
+    )
+    .await?;
+    let context = within("open a browser context", browser.new_context()).await?;
+    let request = within("get the request context", context.request()).await?;
+    let headers = HashMap::from([
+        ("Cookie".to_owned(), cookie.to_owned()),
+        ("HX-Request".to_owned(), "true".to_owned()),
+    ]);
+    let url = format!("{}/tasks/{key}/cancel", env.base_url);
+    let response = within_for(
+        CANCEL_TIMEOUT,
+        &format!("POST {url}"),
+        request.post(&url, FetchOptions::builder().headers(headers).build()),
+    )
+    .await?;
+    match response.status() {
+        200 | 409 => Ok(()),
+        status => Err(anyhow!("POST {url}: HTTP {status}")),
+    }
+}
+
+/// The button of `page` with the accessible name `name` (exactly).
+pub fn button(page: &Page, name: &str) -> Locator {
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name(name).exact(true)),
+    )
+}
+
+/// Cancels the task open on `page`: Status menu, "Cancel task…", then the confirmation.
+async fn cancel_task_on(page: &Page) -> Result<()> {
+    // CSS: the accessible name of the status menu button is the current status, which varies.
+    page.locator("#task-details button[aria-haspopup=true]")
+        .click(None)
+        .await
+        .context("open the status menu")?;
+    button(page, "Cancel task…")
+        .click(None)
+        .await
+        .context("choose Cancel task…")?;
+    page.get_by_role(AriaRole::Dialog, None)
+        .get_by_role(
+            AriaRole::Button,
+            Some(GetByRoleOptions::default().name("Cancel task").exact(true)),
+        )
+        .click(None)
+        .await
+        .context("confirm the cancellation")
+}
+
+/// The text a task creation submits for `description`: with the suffix of the test, ` [<suffix>]`,
+/// when there is one.
+pub fn submitted_description(description: &str, suffix: Option<&String>) -> String {
+    match suffix {
+        Some(suffix) => format!("{description} [{suffix}]"),
+        None => description.to_owned(),
     }
 }
 
@@ -363,7 +617,25 @@ mod tests {
     use std::future::pending;
     use std::time::Duration;
 
-    use super::{within, within_for};
+    use super::{submitted_description, within, within_for};
+
+    #[test]
+    fn a_submitted_description_ends_in_the_suffix_of_the_test() {
+        let suffix = "1a2b3c4d".to_owned();
+
+        assert_eq!(
+            submitted_description("Add a greeting file", Some(&suffix)),
+            "Add a greeting file [1a2b3c4d]"
+        );
+    }
+
+    #[test]
+    fn a_description_without_a_suffix_is_submitted_as_it_is() {
+        assert_eq!(
+            submitted_description("Add a greeting file", None),
+            "Add a greeting file"
+        );
+    }
 
     #[tokio::test]
     async fn a_setup_step_that_never_answers_fails_with_its_description() {
