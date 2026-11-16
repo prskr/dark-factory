@@ -62,3 +62,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0056](0056-control-plane-generates-missing-instance-secrets.md) | The control plane generates missing instance secrets | Accepted |
 | [ADR-0057](0057-factory-activity-in-the-transcript.md) | Factory activity in the transcript | Accepted |
 | [ADR-0058](0058-hermetic-c-toolchain.md) | Hermetic C toolchain for Linux exec tools and remote execution | Accepted |
+| [ADR-0059](0059-repository-file-reads-through-the-forge-plugin.md) | Repository file reads through the forge plugin | Accepted |

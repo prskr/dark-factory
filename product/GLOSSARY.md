@@ -52,6 +52,14 @@ _Avoid_: Work branch, feature branch
 A project's rule whether agents may rewrite already pushed history of their task branches: never, or only when nobody else pushed in the meantime.
 _Avoid_: Force-push policy, rebase policy
 
+**Base branch**:
+The branch a project's task branches start from and its pull requests target, set per project. A task can target a different one, such as the base of its attached pull request. Repository configuration is read from the project's base branch.
+_Avoid_: Default branch, main branch, target branch (and not to be confused with a base task)
+
+**Revision**:
+A point in a project's repository history to read files at: a branch, a tag or a commit. Reading at a branch or tag reads its current commit, and the answer names that commit.
+_Avoid_: Ref, version, HEAD
+
 **Attached pull request**:
 An open pull request someone else created for an existing branch that a task was started from. The task works on it and is Done when it is merged, but never changes its title, description or draft state.
 _Avoid_: Foreign PR, linked PR, adopted PR

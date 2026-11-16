@@ -203,7 +203,10 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | CI and PR read tools (`list_pull_requests`, `read_ci_status`, `read_ci_log`) in chats | idea | `openspec/changes/iter3-ci-tools` |
 | Signing of images and the Helm chart (cosign), SBOMs and provenance attestations for releases | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
 | Pruning old images and chart versions from GHCR | idea | `openspec/changes/archive/2026-11-04-release-versioning` |
-| Chat autocomplete of repository file and skill names | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
+| Chat autocomplete of repository file and skill names; repository paths directory by directory at a commit resolved when the composer opens (task branch, else its base; chats: base branch), listings cached in the browser | decided | `openspec/changes/archive/2026-11-06-web-assets-typescript`, `openspec/changes/forge-repo-contents` |
+| Fuzzy repository path search (recursive listing or a scheduled repository index) | idea | `openspec/changes/forge-repo-contents` |
+| Image builder from `.dark-factory/Containerfile`: build context `.dark-factory/` read through `contents` (about 200 entries, 10 MiB, symlinks fail the build), at the approved commit of the base branch; Containerfile and context changes need the `project-config` approval | decided | ADR-0059, ADR-0039, `openspec/changes/forge-repo-contents` |
+| Repository file read tools for agents without a workspace (chats) or for other repositories | idea | ADR-0059, `openspec/changes/forge-repo-contents` |
 | JS unit test runner for web UI component logic | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
 | Type check with the native TypeScript compiler as a pinned standalone binary instead of `npx` | idea | `openspec/changes/archive/2026-11-06-web-assets-typescript` |
 | Project list task counts in status tones (plain numbers: Queued grey, Running blue, Waiting orange, Done ink; no underline), as on the board "Settings · projects, two-line rows (1350)" | idea | `openspec/changes/archive/2026-11-14-ui-settings-list-rows`, `docs/design-workflow.md` (Known deviations) |
