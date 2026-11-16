@@ -30,6 +30,7 @@ fn test_config() -> ProvisioningConfig {
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
             landlock: df_core::LandlockMode::Enforce,
+            image_pull_secrets: Vec::new(),
         },
         control_plane_ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),
         control_plane_port: 9443,
@@ -837,4 +838,30 @@ fn test_snapshots() {
         &config,
     );
     insta::assert_yaml_snapshot!("netpol_selectorless_and_dns", netpol_no_sel);
+}
+
+#[test]
+fn image_pull_secrets_are_set_on_the_pod_in_configured_order() {
+    let mut config = test_config();
+    config.sandbox.image_pull_secrets = vec!["corp-mirror".into(), "ghcr-team".into()];
+    let pod_spec = render_pod(&test_spec(), &[], &config)
+        .unwrap()
+        .spec
+        .unwrap();
+    let names: Vec<_> = pod_spec
+        .image_pull_secrets
+        .unwrap()
+        .into_iter()
+        .map(|reference| reference.name)
+        .collect();
+    assert_eq!(names, ["corp-mirror", "ghcr-team"]);
+}
+
+#[test]
+fn no_image_pull_secrets_leave_the_field_absent() {
+    let pod_spec = render_pod(&test_spec(), &[], &test_config())
+        .unwrap()
+        .spec
+        .unwrap();
+    assert_eq!(pod_spec.image_pull_secrets, None);
 }

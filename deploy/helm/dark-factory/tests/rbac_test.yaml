@@ -13,6 +13,17 @@ templates:
   - httproute.yaml
   - servicemonitor.yaml
 tests:
+  - it: rejects a sandbox namespace equal to the release namespace
+    template: rbac.yaml
+    release:
+      namespace: dark-factory
+    set:
+      sandboxNamespace.create: false
+      sandboxNamespace.name: dark-factory
+    asserts:
+      - failedTemplate:
+          errorPattern: "sandboxNamespace.name must differ from the release namespace"
+
   - it: renders least-privilege RBAC without pods/exec or pods/attach and supports target namespaces and Cilium mode
     template: rbac.yaml
     set:
@@ -256,6 +267,31 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: gives the control plane no rule on secrets in the sandbox namespace when image pull secrets are set
+    template: rbac.yaml
+    documentIndex: 2
+    set:
+      sandboxNamespace.imagePullSecrets:
+        - name: corp-mirror
+    asserts:
+      - isKind:
+          of: Role
+      - equal:
+          path: rules
+          value:
+            - apiGroups: [""]
+              resources: ["persistentvolumeclaims"]
+              verbs: ["create", "get", "list", "watch", "patch", "delete"]
+            - apiGroups: ["networking.k8s.io"]
+              resources: ["networkpolicies"]
+              verbs: ["create", "get", "list", "watch", "patch", "delete"]
+            - apiGroups: [""]
+              resources: ["pods"]
+              verbs: ["create", "get", "list", "watch", "delete"]
+            - apiGroups: [""]
+              resources: ["events"]
+              verbs: ["get", "list", "watch"]
 
   - it: lets the instance Role create secrets but not change them while a webhook secret is generated
     template: rbac.yaml

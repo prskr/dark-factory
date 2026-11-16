@@ -71,6 +71,65 @@ tests:
           path: spec.ingress[1].from
         documentIndex: 0
 
+  - it: renders the sandbox image pull secret names into both instance configs
+    template: configmap.yaml
+    set:
+      sandboxNamespace.imagePullSecrets:
+        - name: corp-mirror
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  imagePullSecrets:\n    - "corp-mirror"$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: '(?m)^  imagePullSecrets:\n    - "corp-mirror"$'
+        documentIndex: 1
+
+  - it: renders no sandbox image pull secrets by default
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'imagePullSecrets'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: 'imagePullSecrets'
+        documentIndex: 1
+
+  - it: does not use image.pullSecrets for the sandbox
+    template: configmap.yaml
+    set:
+      image.pullSecrets:
+        - name: release-registry
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'imagePullSecrets|release-registry'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: 'imagePullSecrets|release-registry'
+        documentIndex: 1
+
+  - it: rejects a sandbox image pull secret without a name
+    template: configmap.yaml
+    set:
+      sandboxNamespace.imagePullSecrets:
+        - name: ""
+    asserts:
+      - failedTemplate: {}
+
+  - it: renders no Secret for the sandbox image pull secrets
+    set:
+      sandboxNamespace.imagePullSecrets:
+        - name: corp-mirror
+    asserts:
+      - notEqual:
+          path: metadata.name
+          value: corp-mirror
+
   - it: passes image.runtime as the sandbox runtime image to the control plane
     template: configmap.yaml
     set:

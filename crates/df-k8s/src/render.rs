@@ -7,7 +7,7 @@ use df_core::seams::RunSandboxSpec;
 use df_core::{RunId, TaskKey, TaskVolumeSpec};
 use k8s_openapi::api::core::v1::{
     CSIVolumeSource, Capabilities, Container, EmptyDirVolumeSource, EnvVar, HostAlias,
-    ImageVolumeSource, PersistentVolumeClaim, PersistentVolumeClaimSpec,
+    ImageVolumeSource, LocalObjectReference, PersistentVolumeClaim, PersistentVolumeClaimSpec,
     PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, SeccompProfile,
     SecurityContext, Volume, VolumeMount, VolumeResourceRequirements,
 };
@@ -136,6 +136,7 @@ pub fn render_pod(
             volume_mounts,
         )],
         volumes: Some(volumes),
+        image_pull_secrets: image_pull_secrets(config),
         ..Default::default()
     };
 
@@ -359,6 +360,18 @@ fn tls_volume(config: &ProvisioningConfig) -> Volume {
         }),
         ..Default::default()
     }
+}
+
+/// The pod-level image pull secrets of the instance configuration. `None` for an empty list so
+/// Pods without configured secrets stay unchanged.
+fn image_pull_secrets(config: &ProvisioningConfig) -> Option<Vec<LocalObjectReference>> {
+    let secrets = &config.sandbox.image_pull_secrets;
+    (!secrets.is_empty()).then(|| {
+        secrets
+            .iter()
+            .map(|name| LocalObjectReference { name: name.clone() })
+            .collect()
+    })
 }
 
 /// The agent container: unprivileged, all capabilities dropped.

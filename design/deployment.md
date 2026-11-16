@@ -7,7 +7,7 @@
 | Namespace | Contains | Created by |
 |---|---|---|
 | Instance namespace (e.g. `dark-factory`) | Control plane Deployment, gateway Deployment, `migrate` Job, Services, ServiceAccounts, credential Secrets (incl. a commit signing key, once used — created and rotated outside Dark Factory), Leases | Helm release (or pre-existing) |
-| Sandbox namespace (e.g. `dark-factory-sandboxes`) | Sandbox Pods, task PVCs, generated network policies | Helm chart (`sandboxNamespace.create: true`) **or** the operator beforehand — **never the control plane** |
+| Sandbox namespace (e.g. `dark-factory-sandboxes`) | Sandbox Pods, task PVCs, generated network policies, operator-created image pull secrets | Helm chart (`sandboxNamespace.create: true`) **or** the operator beforehand — **never the control plane** |
 
 - The sandbox namespace is configured per instance (`sandboxNamespace.name` in the chart → control plane setting). Several instances in one cluster each get their own pair of namespaces.
 - At startup the control plane checks that the sandbox namespace exists and that it holds the permissions below (`SelfSubjectAccessReview`); otherwise it refuses to start with a message naming what's missing.
@@ -17,7 +17,7 @@
 - Pod Security Admission labels: `restricted`.
 - Default-deny `NetworkPolicy` for ingress and egress as a baseline; the per-run policies (`design/egress.md`) open what each run needs.
 - `ResourceQuota` (storage, PVC count, pods, CPU/memory) and a `LimitRange`.
-- No Secrets: harness credentials are delivered over the agent stream, never stored in this namespace.
+- No Secrets except the image pull secrets the operator places here for `sandboxNamespace.imagePullSecrets` (never mounted into a sandbox, never readable by the control plane): harness credentials are delivered over the agent stream, never stored in this namespace.
 
 ## 3. Kubernetes RBAC
 

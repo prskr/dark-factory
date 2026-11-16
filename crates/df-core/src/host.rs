@@ -36,6 +36,19 @@ pub fn is_dns_label(label: &str) -> bool {
         && label.chars().all(|c| edge(c) || c == '-')
 }
 
+/// Whether `name` is a lower case DNS-1123 subdomain, the rule for Kubernetes object names.
+/// Each dot-separated part follows the label rule; unlike [`is_dns_label`] a part may exceed 63
+/// characters, only the whole name is limited to 253.
+pub fn is_dns_subdomain(name: &str) -> bool {
+    let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    name.len() <= 253
+        && name.split('.').all(|part| {
+            part.starts_with(edge)
+                && part.ends_with(edge)
+                && part.chars().all(|c| edge(c) || c == '-')
+        })
+}
+
 /// The host of an allowlist entry as stored: a hostname or `*.suffix`, lower case, without a
 /// trailing dot. Surrounding whitespace is trimmed. IP literals, a bare `*`, wildcards anywhere
 /// but at the start, and names over 253 bytes or with invalid DNS labels are rejected.
@@ -79,6 +92,29 @@ pub fn pattern_matches(pattern: &str, host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dns_subdomains_follow_the_kubernetes_name_rule() {
+        for valid in ["a", "corp-mirror", "a.b-c", "0a", &"a".repeat(253)] {
+            assert!(is_dns_subdomain(valid), "{valid}");
+        }
+        for invalid in [
+            "",
+            "-a",
+            "a-",
+            ".a",
+            "a.",
+            "a..b",
+            "a.-b",
+            "a-.b",
+            "Corp",
+            "a_b",
+            "a b",
+            &"a".repeat(254),
+        ] {
+            assert!(!is_dns_subdomain(invalid), "{invalid}");
+        }
+    }
 
     #[test]
     fn hosts_are_lower_case_without_trailing_dots_and_not_trimmed() {

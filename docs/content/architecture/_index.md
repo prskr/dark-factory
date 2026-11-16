@@ -68,7 +68,7 @@ allowed cluster services. Details: [Security](../security/).
 | Namespace | Contains | Created by |
 | --- | --- | --- |
 | Instance (for example `dark-factory`) | Control plane, gateway, `migrate` job, Services, Secrets with credentials, Leases | the Helm release |
-| Sandbox (for example `dark-factory-sandboxes`) | Sandbox pods, task volumes (PVCs), generated per-run NetworkPolicies | the chart (`sandboxNamespace.create`) or you; never the control plane |
+| Sandbox (for example `dark-factory-sandboxes`) | Sandbox pods, task volumes (PVCs), generated per-run NetworkPolicies, the image pull secrets you create for `sandboxNamespace.imagePullSecrets` ([how-to](../operations/private-sandbox-images.md)) | the chart (`sandboxNamespace.create`) or you; never the control plane |
 
 The control plane gets the permissions it needs in these two namespaces only: pods, PVCs,
 NetworkPolicies and events (read) in the sandbox namespace; leases, Secrets (read) and EndpointSlices

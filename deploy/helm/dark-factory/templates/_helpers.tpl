@@ -233,6 +233,12 @@ sandbox:
   controlPlaneServiceName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
   gatewayServiceName: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}
   controlPlaneTlsServerName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
+  {{- with .Values.sandboxNamespace.imagePullSecrets }}
+  imagePullSecrets:
+    {{- range . }}
+    - {{ .name | quote }}
+    {{- end }}
+  {{- end }}
   {{- if .Values.sandboxNamespace.controlPlaneIp }}
   controlPlaneIp: {{ .Values.sandboxNamespace.controlPlaneIp | quote }}
   {{- end }}
