@@ -43,10 +43,10 @@ receiver_port=13002
 owner_password=e2e-owner-password
 app_password=e2e-app-password
 oidc_secret=e2e-oidc-secret
-forgejo_user=factory
-forgejo_password=e2e-factory-password
-forgejo_reviewer=reviewer
-forgejo_reviewer_password=e2e-reviewer-password
+forgejo_admin=e2e-admin
+forgejo_admin_password=e2e-admin-password
+forgejo_user=factory # the bot, owner of the repositories (FORGE_OWNER in crates/df-e2e/src/data.rs)
+# `WEBHOOK_SECRET` of crates/df-e2e/src/data.rs, which signs the repository webhooks.
 webhook_secret=e2e-webhook-secret
 
 kc() { kubectl --context "$ctx" "$@"; }
@@ -289,6 +289,7 @@ install_infrastructure() {
   hc upgrade --install forgejo "oci://code.forgejo.org/forgejo-helm/forgejo" \
     --version "$forgejo_chart_version" --namespace forgejo --create-namespace \
     --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m \
+    --set "gitea.admin.username=$forgejo_admin" --set "gitea.admin.password=$forgejo_admin_password" \
     --set "gitea.config.webhook.ALLOWED_HOST_LIST=$release-control-plane.$namespace.svc"
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
@@ -326,22 +327,6 @@ check_ports_free() {
   done
 }
 
-forgejo_api() { # method path [json-body]
-  curl -sf -X "$1" -H "Authorization: token $forgejo_token" -H 'Content-Type: application/json' \
-    "http://127.0.0.1:$forgejo_port/api/v1/$2" ${3:+-d "$3"} >/dev/null
-}
-
-# Creates Forgejo user `$1` with password `$2` and prints its access token (all scopes).
-create_forgejo_user() {
-  local created token
-  created="$(kc -n forgejo exec deploy/forgejo -c forgejo -- forgejo admin user create \
-    --username "$1" --password "$2" --email "$1@example.com" \
-    --must-change-password=false --access-token --access-token-name e2e --access-token-scopes all)"
-  token="$(sed -n 's/.*Access token was successfully created\.\.\. //p' <<<"$created")"
-  [[ -n "$token" ]] || { echo "no access token in: $created" >&2; exit 1; }
-  printf '%s' "$token"
-}
-
 # kube-proxy needs a moment after the Service exists before the NodePort answers: the first request
 # can be reset. Waits until Forgejo answers its health check on its host port.
 wait_for_forgejo() {
@@ -354,71 +339,31 @@ wait_for_forgejo() {
   return 1
 }
 
-# The bot user and a second user with write access who reviews, with their tokens. Once per cluster:
-# the tokens are kept in the Secret `e2e-state` (with a hash of deploy/e2e/*.yaml, to tell a reused
-# cluster that its manifests are outdated) and in `forgejo-token`, the credential reference of the
-# sandboxes (Secret in the release namespace).
-setup_forgejo_users() {
-  log "Creating the Forgejo users"
-  forgejo_token="$(create_forgejo_user "$forgejo_user" "$forgejo_password")"
-  forgejo_reviewer_token="$(create_forgejo_user "$forgejo_reviewer" "$forgejo_reviewer_password")"
-  apply_secret forgejo-token --from-literal=token="$forgejo_token"
-  apply_secret e2e-state --from-literal=forgejo-token="$forgejo_token" \
-    --from-literal=reviewer-token="$forgejo_reviewer_token" --from-literal=manifest-hash="$(manifest_hash)"
-}
-
 # Hash of the manifests of the cluster's infrastructure.
 manifest_hash() {
   cat deploy/e2e/*.yaml | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1
 }
 
-# A value of `e2e-state`; fails when the key is missing or empty.
-state_value() { # key
-  local value
-  value="$(kc -n "$namespace" get secret e2e-state -o "jsonpath={.data.$1}" | base64 -d)" || value=
-  [[ -n "$value" ]] || { echo "the Secret e2e-state has no value for $1; run with E2E_FRESH=1" >&2; return 1; }
-  printf '%s' "$value"
-}
+# Runs the `setup` binary of crates/df-e2e that `build_bins` built at the start of the run. Not
+# through `cargo run`: that would wait for the lock of the suite build running in the background.
+setup() { "$target_dir/debug/setup" "$@"; }
 
-# Reads what `setup_forgejo_users` stored.
-restore_forgejo_users() {
-  forgejo_token="$(state_value forgejo-token)"
-  forgejo_reviewer_token="$(state_value reviewer-token)"
-  if [[ "$(state_value manifest-hash)" != "$(manifest_hash)" ]]; then
-    log "deploy/e2e/*.yaml changed since the cluster was created; run with E2E_FRESH=1 to apply it"
-  fi
-}
-
-# Repositories of the suite, owned by the bot user: `demo` (every project but `EB`) and
-# `existing-branch` (project `EB`, whose tests move and merge into its `main`).
-repositories=(demo existing-branch)
-
-# Creates the repositories of the suite.
-setup_repositories() {
-  local name
-  for name in "${repositories[@]}"; do setup_repository "$name"; done
+# The bot, the reviewer, their new tokens, the repositories with webhook, issue and collaborator
+# (`setup forgejo`; the same call on a new and on a reused cluster), then the credential reference
+# of the sandboxes (`forgejo-token`, Secret in the release namespace) and, on a new cluster, the
+# marker of `cluster_is_reusable` (`e2e-state`, with a hash of deploy/e2e/*.yaml, to tell a reused
+# cluster that its manifests are outdated). Sets `forgejo_token` and `forgejo_reviewer_token`.
+setup_forgejo() {
+  log "Setting up Forgejo"
+  local tokens
+  tokens="$(E2E_FORGEJO_URL="http://127.0.0.1:$forgejo_port" E2E_FORGEJO_ADMIN_USER="$forgejo_admin" \
+    E2E_FORGEJO_ADMIN_PASSWORD="$forgejo_admin_password" \
+    setup forgejo --webhook-url "http://$release-control-plane.$namespace.svc:8080/webhooks/forgejo")"
+  forgejo_token="$(jq -er '."forgejo-token"' <<<"$tokens")"
+  forgejo_reviewer_token="$(jq -er '."reviewer-token"' <<<"$tokens")"
+  apply_secret forgejo-token --from-literal=token="$forgejo_token"
+  ((reuse)) || apply_secret e2e-state --from-literal=manifest-hash="$(manifest_hash)"
   check_forgejo_push
-}
-
-# Repository `$1` with the webhook to the control plane and the reviewer as collaborator. `demo`
-# also gets the issue the demo tasks link to and the file the hidden-path project hides.
-setup_repository() { # name
-  local name="$1"
-  log "Setting up the Forgejo repository $forgejo_user/$name"
-  forgejo_api POST user/repos "{\"name\":\"$name\",\"auto_init\":true,\"default_branch\":\"main\"}"
-  if [[ "$name" == demo ]]; then
-    forgejo_api POST "repos/$forgejo_user/$name/issues" '{"title":"Add a greeting","body":"Linked from the demo tasks."}'
-    # The file the hidden-path demo project (`HP`) hides from its agent.
-    forgejo_api POST "repos/$forgejo_user/$name/contents/secret/value.txt" \
-      '{"content":"c2VjcmV0Cg==","message":"Add a secret file"}'
-  fi
-  forgejo_api PUT "repos/$forgejo_user/$name/collaborators/$forgejo_reviewer" '{"permission":"write"}'
-  # The events of docs/content/integrations/forges/webhooks.md; `pull_request_only` is the
-  # "Modification" checkbox of the form.
-  local hook_url="http://$release-control-plane.$namespace.svc:8080/webhooks/forgejo"
-  local events='["issue_comment","pull_request_only","pull_request_comment","pull_request_review","action_run_failure"]'
-  forgejo_api POST "repos/$forgejo_user/$name/hooks" \
-    "{\"type\":\"forgejo\",\"active\":true,\"events\":$events,\"config\":{\"url\":\"$hook_url\",\"content_type\":\"json\",\"secret\":\"$webhook_secret\"}}"
 }
 
 # Fails early when the token cannot push: pushes a throwaway branch to `demo` over its host port.
@@ -428,7 +373,8 @@ check_forgejo_push() {
   "${git[@]}" clone --quiet "$url" "$work"
   git -C "$work" -c user.name=e2e -c user.email=e2e@example.com commit --quiet --allow-empty -m "push check"
   "${git[@]}" -C "$work" push --quiet origin HEAD:refs/heads/e2e-push-check
-  forgejo_api DELETE "repos/$forgejo_user/demo/branches/e2e-push-check"
+  curl -sf -m 10 -X DELETE -H "Authorization: token $forgejo_token" \
+    "http://127.0.0.1:$forgejo_port/api/v1/repos/$forgejo_user/demo/branches/e2e-push-check"
 }
 
 # Creates or updates a Secret in the release namespace, so that reruns on a kept cluster succeed.
@@ -448,9 +394,9 @@ install_release() {
   create_model_secret
 }
 
-# Brings a kept cluster back to the state of a new one, apart from the infrastructure and the Forgejo
-# users: the tasks of earlier runs keep volumes, branches and pull requests, and the task keys of
-# the new database would collide with them. The control plane is stopped first, so it does not react
+# Brings a kept cluster back to the state of a new one, apart from the infrastructure and Forgejo
+# (`setup_forgejo` recreates its repositories): the tasks of earlier runs keep volumes, branches and
+# pull requests, and the task keys of the new database would collide with them. The control plane is stopped first, so it does not react
 # to the reset (lost sandboxes, queued tasks starting runs). The following `helm upgrade` restores
 # its replicas, and its migration Job migrates the empty database.
 reset_state() {
@@ -465,14 +411,6 @@ reset_state() {
   local psql=(kc -n postgres exec deploy/postgres -- psql -v ON_ERROR_STOP=1 -U dark_factory_owner -d postgres)
   "${psql[@]}" -c 'DROP DATABASE IF EXISTS dark_factory WITH (FORCE)'
   "${psql[@]}" -c 'CREATE DATABASE dark_factory'
-  # Missing (404) when an earlier run died before it was created; any other status fails.
-  local status name
-  for name in "${repositories[@]}"; do
-    status="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: token $forgejo_token" \
-      "http://127.0.0.1:$forgejo_port/api/v1/repos/$forgejo_user/$name")"
-    [[ "$status" == 204 || "$status" == 404 ]] || { echo "deleting the repository $name failed: HTTP $status" >&2; return 1; }
-  done
-  setup_repositories
 }
 
 # The workloads that run a loaded image keep the old one after `helm upgrade`, because the tag
@@ -503,43 +441,16 @@ helm_install_release() {
     --values deploy/values-e2e.yaml --set "sandbox.landlock=$landlock" --wait --timeout 5m
 }
 
-# Source directory of the locked `playwright-rs` crate.
-playwright_rs_src() {
-  dirname "$(cargo metadata --quiet --format-version 1 --locked |
-    jq -r '.packages[] | select(.name == "playwright-rs") | .manifest_path')"
-}
-
-# Playwright version of the driver in the locked `playwright-rs` (`PLAYWRIGHT_VERSION` in its build.rs).
-playwright_rs_version() {
-  sed -n 's/^const PLAYWRIGHT_VERSION: &str = "\(.*\)";$/\1/p' "$(playwright_rs_src)/build.rs"
-}
-
-# The browser server and the test driver must run the same Playwright version: playwright-core in
-# deploy/images/playwright-server/package.json, the base image tag in MODULE.bazel and the driver
-# of playwright-rs. Renovate groups all three (renovate.json); the check catches a playwright-rs release that lags.
-check_playwright_versions() {
-  local server image driver
-  server="$(jq -r '.dependencies["playwright-core"]' deploy/images/playwright-server/package.json)"
-  image="$(sed -n '/name = "playwright_base"/,/^)/s/^    tag = "v\(.*\)-noble",$/\1/p' MODULE.bazel)"
-  driver="$(playwright_rs_version)"
-  if [[ -z "$server" || "$server" != "$image" || "$server" != "$driver" ]]; then
-    echo "Playwright versions differ: playwright-core in deploy/images/playwright-server/package.json: '$server'," \
-      "base image tag in MODULE.bazel (playwright_base): '$image', playwright-rs driver: '$driver'" >&2
-    exit 1
-  fi
-}
-
 install_driver() {
   log "Installing the Playwright driver for the test host"
   # The workspace skips the driver download (.cargo/config.toml). The driver is what playwright-rs
   # assembles itself: the playwright-core npm package next to a pinned Node binary. Its installer
   # trusts only built-in roots, curl the system CA store (needed behind a TLS-intercepting proxy).
-  # The versions come from the source of the locked playwright-rs. Reruns find the driver installed.
-  local src pw node os node_arch driver tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
-  src="$(playwright_rs_src)"
-  pw="$(playwright_rs_version)"
-  node="$(sed -n 's/^const NODE_VERSION: &str = "\(.*\)";$/\1/p' "$src/src/build_support/driver_urls.rs")"
-  [[ -n "$pw" && -n "$node" ]] || { echo "no Playwright or Node version in $src" >&2; exit 1; }
+  # The versions come from `setup playwright-versions` (the locked playwright-rs, checked against
+  # the browser server). Reruns find the driver installed.
+  local pw node os node_arch driver tools="${E2E_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/df-e2e}"
+  pw="$(jq -er .playwright <<<"$playwright_versions")"
+  node="$(jq -er .node <<<"$playwright_versions")"
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   node_arch="${arch/amd64/x64}"
   driver="$tools/playwright-$pw-node$node-$os-$node_arch"
@@ -566,9 +477,24 @@ pods_reach_the_internet() {
     --command -- curl -sSf -m 10 -o /dev/null https://pypi.org/simple/pip/ >/dev/null 2>&1
 }
 
-# Compiles the seed program and the suite while the cluster comes up; `run_suite` reuses the build.
+# Compiles the `setup` and `seed` programs first: the Forgejo step needs `setup`.
+build_bins() {
+  cargo build -q -p df-e2e --bins
+}
+
+# Waits for the binaries, checks the Playwright versions (sets `playwright_versions`) and starts the
+# build of the suite in the background; `run_suite` waits for it. Runs before the Forgejo step.
+start_suite_build() {
+  log "Waiting for the setup binary"
+  wait "$bins_pid"
+  playwright_versions="$(setup playwright-versions)"
+  build_suite &
+  build_pid=$!
+  pids+=("$build_pid")
+}
+
+# Compiles the suite while the cluster comes up; `run_suite` reuses the build.
 build_suite() {
-  cargo build -q -p df-e2e --bin seed
   # Excluded binaries are built too (not run), so a compile error in them shows up here.
   cargo test -q -p df-e2e --tests --no-run
   # A binary the loader cannot start (a missing shared library) fails here, not after the cluster setup.
@@ -637,10 +563,12 @@ check_free_disk
 install_traps
 rm -rf "$artifacts"
 mkdir -p "$artifacts"
-check_playwright_versions
-build_suite &
-build_pid=$!
-pids+=("$build_pid")
+# Where cargo puts the binaries (`CARGO_TARGET_DIR`, `build.target-dir` or `target`); resolved
+# before the builds start, so it does not wait for their lock.
+target_dir="$(cargo metadata --quiet --format-version 1 --no-deps | jq -er .target_directory)"
+build_bins &
+bins_pid=$!
+pids+=("$bins_pid")
 setup_started=$SECONDS
 if cluster_is_reusable; then
   log "Reusing the kept cluster"
@@ -657,17 +585,21 @@ load_images &
 images_pid=$!
 pids+=("$images_pid")
 if ((reuse)); then
-  restore_forgejo_users
+  if [[ "$(kc -n "$namespace" get secret e2e-state -o 'jsonpath={.data.manifest-hash}' | base64 -d)" != "$(manifest_hash)" ]]; then
+    log "deploy/e2e/*.yaml changed since the cluster was created; run with E2E_FRESH=1 to apply it"
+  fi
   install_release
   reset_state
+  start_suite_build
+  setup_forgejo
   log "Waiting for the images"
   wait "$images_pid"
 else
   install_infrastructure
   install_release
   wait_for_forgejo
-  setup_forgejo_users
-  setup_repositories
+  start_suite_build
+  setup_forgejo
   log "Waiting for the images"
   wait "$images_pid"
   install_playwright

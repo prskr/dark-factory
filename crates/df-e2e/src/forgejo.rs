@@ -1,4 +1,5 @@
-//! The few Forgejo API calls the tests use to check what the UI does not show.
+//! The few Forgejo API calls the tests use to check what the UI does not show, and the calls
+//! `setup forgejo` needs to prepare an instance.
 
 use std::time::Duration;
 
@@ -36,29 +37,31 @@ impl ReviewEvent {
 }
 
 /// Forgejo API client for one repository (`factory/demo` unless [`Forgejo::for_repository`] says
-/// otherwise), authenticated with the token it is built with (the bot's or the reviewer's).
+/// otherwise), authenticated with the token or the user it is built with.
 #[derive(Debug, Clone)]
 pub struct Forgejo {
     http: reqwest::Client,
     base_url: String,
-    token: String,
+    auth: Auth,
     owner: String,
     repository: String,
 }
 
 impl Forgejo {
+    /// A client that authenticates with access token `token` (the bot's or the reviewer's).
     pub fn new(base_url: &str, token: &str) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .context("build the Forgejo HTTP client")?;
-        Ok(Self {
-            http,
-            base_url: base_url.trim_end_matches('/').to_owned(),
-            token: token.to_owned(),
-            owner: data::FORGE_OWNER.to_owned(),
-            repository: data::FORGE_REPO.to_owned(),
-        })
+        Self::build(base_url, Auth::Token(token.to_owned()))
+    }
+
+    /// A client that authenticates as `user` with `password` (basic auth).
+    pub fn with_password(base_url: &str, user: &str, password: &str) -> Result<Self> {
+        Self::build(
+            base_url,
+            Auth::Basic {
+                user: user.to_owned(),
+                password: password.to_owned(),
+            },
+        )
     }
 
     /// The same client for repository `repository` of the default owner.
@@ -70,24 +73,19 @@ impl Forgejo {
 
     /// Whether `branch` exists in the repository.
     pub async fn branch_exists(&self, branch: &str) -> Result<bool> {
-        let response = self.get(&format!("branches/{branch}")).await?;
-        match response.status().as_u16() {
-            200 => Ok(true),
-            404 => Ok(false),
-            status => anyhow::bail!("GET branches/{branch}: HTTP {status}"),
-        }
+        let response = self.get(&format!("branches/{branch}"), &[404]).await?;
+        Ok(response.status().is_success())
     }
 
     /// The pull request from branch `head` into `base`, open or closed; `None` when there is none.
     /// Looked up by the two branches, so no page limit hides it behind other tests' pull requests.
     pub async fn pull_of(&self, base: &str, head: &str) -> Result<Option<Value>> {
         let path = format!("pulls/{base}/{head}");
-        let response = self.get(&path).await?;
+        let response = self.get(&path, &[404]).await?;
         if response.status().as_u16() == 404 {
             return Ok(None);
         }
         response
-            .error_for_status()?
             .json()
             .await
             .with_context(|| format!("decode GET {path}"))
@@ -216,42 +214,40 @@ impl Forgejo {
     /// Takes pull request `number` out of draft by retitling it (Forgejo refuses to merge a
     /// draft).
     pub async fn retitle_pull(&self, number: u64, title: &str) -> Result<()> {
-        let url = self.url(&format!("pulls/{number}"));
-        self.http
-            .patch(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .json(&serde_json::json!({ "title": title }))
-            .send()
-            .await
-            .with_context(|| format!("PATCH {url}"))?
-            .error_for_status()?;
+        self.call(
+            reqwest::Method::PATCH,
+            &self.repo_path(&format!("pulls/{number}")),
+            Some(&serde_json::json!({ "title": title })),
+            &[],
+        )
+        .await?;
         Ok(())
     }
 
     /// Merges pull request `number` with a merge commit. Forgejo answers 405 ("Please try again
     /// later") while it re-checks whether the pull request can be merged, for example right after
     /// another test moved the base branch, so a failed merge is retried until [`MERGE_TIMEOUT`].
-    /// The error names Forgejo's last answer.
+    /// The error names Forgejo's last answer, body included (unlike other calls: it is the
+    /// reason for the retry).
     pub async fn merge_pull(&self, number: u64) -> Result<()> {
-        let url = self.url(&format!("pulls/{number}/merge"));
+        let path = self.repo_path(&format!("pulls/{number}/merge"));
         eventually(
             &format!("the merge of pull request {number}"),
             MERGE_TIMEOUT,
             || async {
                 let response = self
-                    .http
-                    .post(&url)
-                    .header("Authorization", format!("token {}", self.token))
-                    .json(&serde_json::json!({ "Do": "merge" }))
-                    .send()
-                    .await
-                    .with_context(|| format!("POST {url}"))?;
+                    .send(
+                        reqwest::Method::POST,
+                        &path,
+                        Some(&serde_json::json!({ "Do": "merge" })),
+                    )
+                    .await?;
                 let status = response.status();
                 if status.is_success() {
                     return Ok(Some(()));
                 }
                 let body = response.text().await.unwrap_or_default();
-                bail!("POST {url}: {status}: {}", body.trim())
+                bail!("POST {path}: {status}: {}", body.trim())
             },
         )
         .await
@@ -259,67 +255,204 @@ impl Forgejo {
 
     /// Content of `path` on `branch`.
     pub async fn file(&self, branch: &str, path: &str) -> Result<String> {
-        let response = self
-            .get(&format!("raw/{path}?ref={branch}"))
-            .await?
-            .error_for_status()?;
+        let response = self.get(&format!("raw/{path}?ref={branch}"), &[]).await?;
         response
             .text()
             .await
             .with_context(|| format!("read {path} on {branch}"))
     }
 
+    // Setup calls: what `setup forgejo` needs to prepare an instance for the suite.
+
+    /// Whether user `name` exists.
+    pub async fn user_exists(&self, name: &str) -> Result<bool> {
+        let response = self
+            .call(reqwest::Method::GET, &format!("users/{name}"), None, &[404])
+            .await?;
+        Ok(response.status().is_success())
+    }
+
+    /// Creates user `name` with `password` (admin only); the password need not be changed.
+    pub async fn create_user(&self, name: &str, password: &str, email: &str) -> Result<()> {
+        let body = serde_json::json!({
+            "username": name,
+            "password": password,
+            "email": email,
+            "must_change_password": false,
+        });
+        self.call(reqwest::Method::POST, "admin/users", Some(&body), &[])
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes access token `token_name` of `user` (authenticated as that user); a missing token
+    /// is fine.
+    pub async fn delete_token(&self, user: &str, token_name: &str) -> Result<()> {
+        let path = format!("users/{user}/tokens/{token_name}");
+        self.call(reqwest::Method::DELETE, &path, None, &[404])
+            .await?;
+        Ok(())
+    }
+
+    /// Creates access token `token_name` with all scopes for `user` (authenticated as that user)
+    /// and returns it.
+    pub async fn create_token(&self, user: &str, token_name: &str) -> Result<String> {
+        let path = format!("users/{user}/tokens");
+        let body = serde_json::json!({ "name": token_name, "scopes": ["all"] });
+        let created: Value = self
+            .call(reqwest::Method::POST, &path, Some(&body), &[])
+            .await?
+            .json()
+            .await
+            .with_context(|| format!("decode POST {path}"))?;
+        created
+            .get("sha1")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .with_context(|| format!("POST {path}: the response has no token"))
+    }
+
+    /// Creates repository `name` of the authenticated user, with an initial commit on `main`.
+    pub async fn create_repository(&self, name: &str) -> Result<()> {
+        let body = serde_json::json!({
+            "name": name,
+            "auto_init": true,
+            "default_branch": data::BASE_BRANCH,
+        });
+        self.call(reqwest::Method::POST, "user/repos", Some(&body), &[])
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes repository `name` of the owner; a missing repository is fine.
+    pub async fn delete_repository(&self, name: &str) -> Result<()> {
+        let path = format!("repos/{}/{name}", self.owner);
+        self.call(reqwest::Method::DELETE, &path, None, &[404])
+            .await?;
+        Ok(())
+    }
+
+    /// Gives `user` write access to the repository.
+    pub async fn add_collaborator(&self, user: &str) -> Result<()> {
+        let body = serde_json::json!({ "permission": "write" });
+        self.call(
+            reqwest::Method::PUT,
+            &self.repo_path(&format!("collaborators/{user}")),
+            Some(&body),
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Adds a webhook of type `forgejo` that posts `events` to `url`, signed with `secret`.
+    pub async fn create_webhook(&self, url: &str, secret: &str, events: &[&str]) -> Result<()> {
+        let body = serde_json::json!({
+            "type": "forgejo",
+            "active": true,
+            "events": events,
+            "config": { "url": url, "content_type": "json", "secret": secret },
+        });
+        self.call(
+            reqwest::Method::POST,
+            &self.repo_path("hooks"),
+            Some(&body),
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
+    fn build(base_url: &str, auth: Auth) -> Result<Self> {
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .context("build the Forgejo HTTP client")?;
+        Ok(Self {
+            http,
+            base_url: base_url.trim_end_matches('/').to_owned(),
+            auth,
+            owner: data::FORGE_OWNER.to_owned(),
+            repository: data::FORGE_REPO.to_owned(),
+        })
+    }
+
+    /// `path` below `repos/{owner}/{repository}/`, relative to `/api/v1/`.
+    fn repo_path(&self, path: &str) -> String {
+        format!("repos/{}/{}/{path}", self.owner, self.repository)
+    }
+
     async fn json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let response = self.get(path).await?.error_for_status()?;
-        response
+        self.get(path, &[])
+            .await?
             .json()
             .await
             .with_context(|| format!("decode GET {path}"))
     }
 
-    async fn get(&self, path: &str) -> Result<reqwest::Response> {
-        let url = self.url(path);
-        self.http
-            .get(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .send()
+    /// GET of a repository path.
+    async fn get(&self, path: &str, tolerated: &[u16]) -> Result<reqwest::Response> {
+        self.call(reqwest::Method::GET, &self.repo_path(path), None, tolerated)
             .await
-            .with_context(|| format!("GET {url}"))
     }
 
+    /// POST of a repository path; returns the JSON answer.
     async fn post(&self, path: &str, body: &Value) -> Result<Value> {
-        let url = self.url(path);
-        let response = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .json(body)
-            .send()
-            .await
-            .with_context(|| format!("POST {url}"))?
-            .error_for_status()?;
-        response
+        let path = self.repo_path(path);
+        self.call(reqwest::Method::POST, &path, Some(body), &[])
+            .await?
             .json()
             .await
             .with_context(|| format!("decode POST {path}"))
     }
 
-    fn url(&self, path: &str) -> String {
-        format!(
-            "{}/api/v1/repos/{}/{}/{path}",
-            self.base_url, self.owner, self.repository
-        )
+    /// Sends `method` to `path` below `/api/v1/` and returns the response whatever its status.
+    async fn send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<reqwest::Response> {
+        let url = format!("{}/api/v1/{path}", self.base_url);
+        let request = self.http.request(method.clone(), url);
+        let mut request = match &self.auth {
+            Auth::Token(token) => request.header("Authorization", format!("token {token}")),
+            Auth::Basic { user, password } => request.basic_auth(user, Some(password)),
+        };
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        request
+            .send()
+            .await
+            .with_context(|| format!("{method} {path}"))
     }
+
+    /// Like [`Self::send`], but fails unless the status is a success or one of `tolerated`. The
+    /// error names method, path and status, never the body (it may echo a token).
+    async fn call(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+        tolerated: &[u16],
+    ) -> Result<reqwest::Response> {
+        let response = self.send(method.clone(), path, body).await?;
+        let status = response.status();
+        if !status.is_success() && !tolerated.contains(&status.as_u16()) {
+            bail!("{method} {path}: HTTP {}", status.as_u16());
+        }
+        Ok(response)
+    }
+}
+
+/// How a [`Forgejo`] client authenticates: with an access token (the tests) or as a user with a
+/// password (the setup, which creates the tokens).
+#[derive(Debug, Clone)]
+enum Auth {
+    Token(String),
+    Basic { user: String, password: String },
 }
 
 #[cfg(test)]
-mod tests {
-    use super::ReviewEvent;
-
-    #[test]
-    fn a_review_event_is_sent_as_the_string_forgejo_expects() {
-        assert_eq!(ReviewEvent::Approve.as_str(), "APPROVED");
-        assert_eq!(ReviewEvent::RequestChanges.as_str(), "REQUEST_CHANGES");
-        assert_eq!(ReviewEvent::Comment.as_str(), "COMMENT");
-    }
-}
+mod tests;

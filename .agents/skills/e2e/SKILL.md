@@ -1,6 +1,6 @@
 ---
 name: e2e
-description: Rules for the end-to-end suite (crates/df-e2e, deploy/e2e, just e2e-local). Use when writing, changing, reviewing or running an e2e test, when changing the seed fixtures (src/data.rs, src/seed.rs), the e2e helpers (browser, db, forgejo, wait), deploy/e2e/* or .github/workflows/e2e.yaml, or when an e2e test is flaky.
+description: Rules for the end-to-end suite (crates/df-e2e, deploy/e2e, just e2e-local). Use when writing, changing, reviewing or running an e2e test, when changing the seed fixtures (src/data.rs, src/seed.rs), the e2e helpers (browser, db, forgejo, wait), the Forgejo setup and Playwright version check (src/setup/, the setup binary src/bin/setup.rs), deploy/e2e/* or .github/workflows/e2e.yaml, or when an e2e test is flaky.
 ---
 
 # End-to-end suite
@@ -56,6 +56,7 @@ All tests run against one instance, two at a time per test binary. The script re
 ## Structure
 
 - **Shared helpers live in `src/`**: browser actions in `browser.rs`, queries in `db.rs`, Forgejo calls in `forgejo.rs`, waits in `wait.rs`, setup and teardown in `fixture.rs`. Don't copy a helper into a test file or write SQL inline in a test (none of the cluster tests has any; only `seed` and `demo_seed`, which test the seed against their own database, query directly); add it to the module.
+- **Shell or Rust for the runner:** `deploy/e2e/e2e-local.sh` calls CLIs in order (`kind`, `helm`, `kubectl`, the container runtime, Bazel, `git`, `cargo`), waits on one with a loop, and holds the traps, the log collection and the downloads. Anything that builds or parses structured data (JSON bodies, API responses, versions from source files), talks to an HTTP API, uses a name or value the suite also uses (`src/data.rs`), or makes a decision whose wrong result is hard to diagnose later goes to `cargo run -p df-e2e --bin setup` (`src/bin/setup.rs` is the clap wrapper, the logic is in `src/setup/`) with a unit test (wiremock for API calls, fixture text for parsing). A script function that needs `sed`/`jq` to extract a value or string interpolation to build JSON belongs there. The push check (`check_forgejo_push`: `git push` with the token, then one `curl` DELETE of a fixed branch) stays in shell: it is a `git` call in sequence plus one request with no body and no parsing, so a Rust client call would only wrap it. The Forgejo setup is `setup forgejo` (`src/setup/forgejo.rs`, calls through `src/forgejo.rs`), the Playwright version check `setup playwright-versions` (`src/setup/versions.rs`); both run on every run, also on a kept cluster.
 - **Typed values over strings** where `df-core`/`df-db` have the type (`TaskStatus`, `RunOutcome`, `RequestState`), so a renamed state fails to compile instead of timing out.
 - **A test checks one behavior.** Name it after that behavior and cite the spec scenario or demo step in its doc comment. A long journey is one test with named steps (the `what` of each wait), not a chain of tests.
 - **What the UI does not show** is checked in the database or Forgejo; what it shows is checked in the UI.

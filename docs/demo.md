@@ -34,16 +34,17 @@ E2E_KEEP=1 E2E_TEST_ARGS="--ignored --test-threads=1 <test name>" just e2e-local
 
 ```mermaid
 flowchart TD
-    L["discover the test binaries, check free disk space, clear E2E_ARTIFACTS_DIR"] --> V[check the Playwright versions]
-    V --> R{"kept cluster healthy?"}
-    R -- "yes: reset state" --> E
+    L["discover the test binaries, check free disk space, clear E2E_ARTIFACTS_DIR, build the setup and seed binaries"] --> R{"kept cluster healthy?"}
+    R -- "yes: reset state" --> V
     R -- no --> K[check the host ports are free]
     K --> A[kind create cluster df-e2e, NodePort mappings]
     A --> B[cert-manager, CSI driver]
     A --> I[bazel run //deploy:load_e2e_*, kind load image-archive]
     B --> C[PostgreSQL, Dex, event receiver, Forgejo]
-    C --> D[Forgejo users factory and reviewer, token, factory/demo, factory/existing-branch, webhooks, Secrets]
-    D --> P[Playwright server]
+    C --> V[check the Playwright versions]
+    V --> D["setup forgejo: users factory and reviewer, tokens, factory/demo, factory/existing-branch, webhooks, Secrets"]
+    D -- "new cluster" --> P[Playwright server]
+    D -- "reused cluster" --> E
     I --> P
     P --> E[helm install values-e2e.yaml]
     E --> F[seed]
@@ -53,26 +54,26 @@ flowchart TD
 ```
 
 0. Before anything touches the cluster, the script lists the test binaries (see [Test discovery](#test-discovery)) and checks that the container runtime has `E2E_MIN_FREE_GIB` (default 10) GiB free in its storage directory (`docker info` / `podman info`). It stops with the free space, the threshold and the cleanup commands (`<cli> rm -fv df-test-postgres-17-alpine-r1`, `<cli> system prune`) otherwise, and leaves a kept cluster alone. For a remote `DOCKER_HOST` or Docker Desktop, whose storage is not on this host, it prints a warning and continues. It then clears `E2E_ARTIFACTS_DIR` (default `target/e2e-artifacts`, see [Diagnostics of a failed run](#diagnostics-of-a-failed-run)).
-1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`), unless it reuses a kept cluster (see [Reusing a kept cluster](#reusing-a-kept-cluster)). Just before it creates one, the script checks that the host ports of the [NodePort mappings](#host-access-nodeport) (15432, 13000, 13001, 13002) are free and stops otherwise. Meanwhile cargo compiles the seed program and the suite.
+1. Creates the single-node cluster `df-e2e` (`deploy/e2e/kind.yaml`), unless it reuses a kept cluster (see [Reusing a kept cluster](#reusing-a-kept-cluster)). Just before it creates one, the script checks that the host ports of the [NodePort mappings](#host-access-nodeport) (15432, 13000, 13001, 13002) are free and stops otherwise. Meanwhile cargo compiles the `setup` and `seed` programs of `crates/df-e2e`, then the suite.
 2. Builds the control plane, runtime, test project, plugin and Playwright server images with Bazel and loads them into the node: `bazel run //deploy:load_e2e_<name>` (with `--platforms=//build/platforms:linux_<arch>_musl` and `load_daemon=tar`) writes each single-platform image as a tarball, `kind load image-archive` imports it into the node. No container daemon holds the images. Nothing is pushed to a registry; `values-e2e.yaml` references the tag `e2e` with `pullPolicy: IfNotPresent`. The control plane image is a `dev-tools` build (`//crates/dark-factory:dark-factory-dev`), unlike the release image. The only downloads are the pinned upstream manifests, charts and images (cert-manager and its CSI driver, Forgejo, Dex, PostgreSQL) and the Playwright base image, which Bazel downloads into its repository cache. The Claude images are not needed.
-   The Playwright server image (`//deploy:load_e2e_playwright`) is the `mcr.microsoft.com/playwright` base image plus the pinned `playwright-core` package (`deploy/images/playwright-server`), so the pod needs no npm access at runtime. The script first checks that the `playwright-core` version, the base image tag in `MODULE.bazel` and the driver version of the locked `playwright-rs` are equal and stops with the three values otherwise.
+   The Playwright server image (`//deploy:load_e2e_playwright`) is the `mcr.microsoft.com/playwright` base image plus the pinned `playwright-core` package (`deploy/images/playwright-server`), so the pod needs no npm access at runtime. Its `playwright-core` version, the base image tag in `MODULE.bazel` and the driver version of the locked `playwright-rs` must be equal; step 4 checks that.
 3. Installs cert-manager and its CSI driver, PostgreSQL (`postgres:17-alpine`, no persistence), Dex (static user `admin@example.com`), the Playwright server (after the images are loaded), the lifecycle event receiver (`deploy/e2e/receiver.yaml`: stores every POST, returns them as JSON on GET), the fake Anthropic upstream (`deploy/e2e/fake-upstream.yaml`: `fake-acp-agent --serve-fake-anthropic` from the test project image; it answers `401` unless the request carries the key `e2e-model-api-key`, which only the gateway knows) and Forgejo (Helm chart, SQLite, no persistence).
-4. Creates the Forgejo users `factory` (the bot) and `reviewer` (collaborator with write access) with their tokens (stored in the Secret `e2e-state` for reuse), the repositories `factory/demo` (with issue 1 and `secret/value.txt`) and `factory/existing-branch` (project `EB`, whose tests move and merge into its `main`), each with a repository webhook to `http://dark-factory-control-plane.dark-factory.svc:8080/webhooks/forgejo` (the events of [Forge webhooks](content/integrations/forges/webhooks.md), secret `e2e-webhook-secret`; `deploy/e2e/forgejo-values.yaml` allows the host in `webhook.ALLOWED_HOST_LIST`), and the Secret `forgejo-token` for the credential reference.
+4. Waits for the `setup` binary and runs `setup playwright-versions`, which stops the run unless `playwright-core` of the browser server image, the base image tag in `MODULE.bazel` and the driver of the locked `playwright-rs` agree (and prints the versions the driver install needs). Then runs `setup forgejo` (`crates/df-e2e/src/setup/`, through the Forgejo API as the admin that the script passes to the chart and to the binary), which creates the Forgejo users `factory` (the bot) and `reviewer` (collaborator with write access) if missing and a new token `e2e` for each (the script reads both from the JSON on stdout), the repositories `factory/demo` (with issue 1 and `secret/value.txt`) and `factory/existing-branch` (project `EB`, whose tests move and merge into its `main`), each with a repository webhook to `http://dark-factory-control-plane.dark-factory.svc:8080/webhooks/forgejo` (the events of [Forge webhooks](content/integrations/forges/webhooks.md), secret `e2e-webhook-secret`; `deploy/e2e/forgejo-values.yaml` allows the host in `webhook.ALLOWED_HOST_LIST`). The script then writes the bot's token to the Secret `forgejo-token` for the credential reference and, on a new cluster, the hash of `deploy/e2e/*.yaml` to the Secret `e2e-state`.
 5. Creates the Secrets `fake-llm-key` for the model provider's credential reference and `forge-webhooks` (key `forgejo`, the webhook secret), and installs the chart with `deploy/values-e2e.yaml`.
 6. Seeds the database and runs the ignored tests of `crates/df-e2e` (`E2E_TEST_THREADS` at a time) `E2E_REPEAT` times in a row against the same database and repositories.
 7. Deletes the cluster on exit, also after a failure or `Ctrl-C`, unless `E2E_KEEP=1`.
 
 ### Reusing a kept cluster
 
-With `E2E_KEEP=1` the cluster stays after the run. The next run reuses it when `kind get clusters` lists `df-e2e`, the Secret `e2e-state` exists in the `dark-factory` namespace, Forgejo answers its health check and `E2E_FRESH` is not `1`. Otherwise it deletes the cluster and creates it as described above. A reuse skips the cluster creation, cert-manager, PostgreSQL, Dex, the receiver, Forgejo, the Forgejo users and the Playwright server installation, and restores the Forgejo tokens from `e2e-state`. It then resets the state:
+With `E2E_KEEP=1` the cluster stays after the run. The next run reuses it when `kind get clusters` lists `df-e2e`, the Secret `e2e-state` exists in the `dark-factory` namespace, Forgejo answers its health check and `E2E_FRESH` is not `1`. Otherwise it deletes the cluster and creates it as described above. A reuse skips the cluster creation, cert-manager, PostgreSQL, Dex, the receiver, Forgejo and the Playwright server installation. It then resets the state:
 
 1. scales the control plane to 0 and waits until its pods are gone, so it does not react to the reset;
 2. deletes the pods and volumes of the sandbox namespace (task keys restart at `<KEY>-1`, so old volumes would collide);
 3. drops and recreates the database `dark_factory` (`DROP DATABASE ... WITH (FORCE)` as the PostgreSQL superuser);
-4. deletes and recreates the repositories `factory/demo` and `factory/existing-branch` (so no task branches or pull requests of earlier runs remain), their issue, file, collaborator and webhook;
+4. runs `setup forgejo` again: the users stay, their tokens named `e2e` are replaced (the old tokens stop working; the Secret `forgejo-token` gets the new bot token, which the control plane reads at use) and the repositories `factory/demo` and `factory/existing-branch` are deleted and created again (so no task branches or pull requests of earlier runs remain), with their issue, file, collaborator and webhook;
 5. loads the images (Bazel rebuilds only what changed), runs `helm upgrade --install` (its migration Job migrates the empty database, and the control plane scales back up with the loaded image), restarts the gateway, the fake upstream and the Playwright server for the same reason (the tag `e2e` does not change, so their pods would keep the old image), seeds and runs the tests.
 
-The script prints `Setup took N s` before the tests start. Changes to `deploy/e2e/*.yaml` (the infrastructure manifests) are not applied to a reused cluster: the script prints a hint when their hash differs from the one stored in `e2e-state`; run once with `E2E_FRESH=1`, which also helps when a kept cluster misbehaves. A cluster kept by an older version of the script has no `e2e-state` and is recreated; so is one created before the NodePort mappings, because Forgejo does not answer on its host port.
+The script prints `Setup took N s` before the tests start. Changes to `deploy/e2e/*.yaml` (the infrastructure manifests) are not applied to a reused cluster: the script prints a hint when their hash differs from the one stored in `e2e-state`, which holds only that hash (`manifest-hash`); run once with `E2E_FRESH=1`, which also helps when a kept cluster misbehaves. A cluster kept by an earlier version of the script that stored the tokens in `e2e-state` is reused, the extra keys are ignored. A cluster kept by an older version of the script has no `e2e-state` and is recreated; so is one created before the NodePort mappings, because Forgejo does not answer on its host port.
 
 The browser runs in the cluster (`playwright` namespace). It opens the control plane at its Service URL and is redirected to Dex through cluster DNS, so the control plane and the browser see the same issuer URL (`http://dex.dex.svc:5556/dex`). The test host only needs the WebSocket of the Playwright server.
 
@@ -87,7 +88,7 @@ The test host reaches PostgreSQL, Forgejo, the Playwright server and the event r
 | Playwright server (`deploy/e2e/playwright.yaml`) | `30301` | `13001` |
 | Event receiver (`deploy/e2e/receiver.yaml`) | `30302` | `13002` |
 
-No process on the host holds a connection to a pod: a restart of a pod (the reuse restarts the Playwright server) needs no action, the next connection reaches the new pod. kube-proxy needs a moment after a Service exists, so the script waits for Forgejo's health check on its host port before it creates the users.
+No process on the host holds a connection to a pod: a restart of a pod (the reuse restarts the Playwright server) needs no action, the next connection reaches the new pod. kube-proxy needs a moment after a Service exists, so the script waits for Forgejo's health check on its host port before `setup forgejo` runs.
 
 ### `deploy/values-e2e.yaml`
 
@@ -254,7 +255,7 @@ All projects wake tasks on reviews and mentions of members (`webhook_wake` `memb
 
 There is no allowlist entry: sandboxes reach Forgejo through the gateway's Git proxy.
 
-`just seed` targets the `just serve-local` database (`postgres://postgres:postgres@127.0.0.1:5432/dark_factory`); set `E2E_DATABASE_URL` for another one.
+`just seed` targets the `just serve-local` database (`dark_factory` on `127.0.0.1:5432`, user and password `postgres`); set `E2E_DATABASE_URL` for another one.
 
 ### Demo profile
 
