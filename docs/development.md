@@ -9,6 +9,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 - **C compiler** for plain `cargo` (`cc`/`gcc`/`clang`, as for any Rust project): `cargo` on aarch64 Linux links with it, using the `rust-lld` of the Rust toolchain instead of GNU ld (`.cargo/cc-lld.sh`, [ADR-0058](adr/0058-hermetic-c-toolchain.md)). Bazel needs no C compiler or linker on Linux.
 - **Cargo subcommands**:
   - `cargo-deny` (`cargo deny check`)
+  - `cargo-nextest` (`cargo nextest run`, `just test`; pinned in `.bazel_env/bin`, see "Pinned linters")
   - `sqlx-cli` (`cargo sqlx migrate`, `cargo sqlx prepare`)
   - `cargo-llvm-cov` (`cargo llvm-cov --workspace`)
 - **Docker / OrbStack or Podman** with compose (`docker compose`, or `podman compose` with `podman-compose`): for the local services in [`compose.yml`](../compose.yml).
@@ -50,15 +51,23 @@ cargo sqlx migrate run --source crates/df-db/migrations
 
 ## 3. Running Tests and Coverage
 
-Database tests need a Docker socket but no `DATABASE_URL`:
+Database tests need a Docker socket but no `DATABASE_URL`. The local loop uses [`cargo nextest`](https://nextest.rs) (pinned, in `.bazel_env/bin`; settings in `.config/nextest.toml`), which does not run doc tests:
 
 ```bash
-cargo test --workspace
+cargo nextest run --workspace      # all tests
+cargo test --workspace --doc       # doc tests
+cargo nextest run -p df-db name    # one crate, tests whose name contains `name`
 ```
 
-`just test [FILTER]` does the same and also builds the plugin components first (see the end of this section). It sets `DOCKER_HOST` to the rootless Podman socket (`$XDG_RUNTIME_DIR/podman/podman.sock`) when that socket exists and `DOCKER_HOST` is unset; `just bazel-test [TARGETS]` passes the same socket into the Bazel sandbox (`--test_env=DOCKER_HOST=…`, `--sandbox_writable_path=…`). `just test-db-rm` removes the shared `df-test-postgres` containers.
+Without `cargo-nextest` on `PATH`, `cargo test --workspace` runs the same tests. The e2e suite always runs through `cargo test` (`just e2e-local`).
+
+`just test [FILTER]` runs both commands and also builds the plugin components first (see the end of this section). It sets `DOCKER_HOST` to the rootless Podman socket (`$XDG_RUNTIME_DIR/podman/podman.sock`) when that socket exists and `DOCKER_HOST` is unset; `just bazel-test [TARGETS]` passes the same socket into the Bazel sandbox (`--test_env=DOCKER_HOST=…`, `--sandbox_writable_path=…`). `just test-db-rm` removes the shared `df-test-postgres` containers.
 
 The `df-test-postgres` crate (a dev-dependency, never linked into a binary) starts one `postgres:17-alpine` container on first use and creates a database per test: `df_test_postgres::migrated_pool(&df_db::MIGRATOR)`. testcontainers has no reaper and does not drop statics at process exit, so the container is marked reusable: all test binaries on the machine share it and it keeps running after the tests. `migrated_pool` migrates a template database once per migration set and clones it per test; templates (`df_tpl_<hash>`) stay in the container. Test databases older than 1 minute (the creation time is in the UUIDv7 of the name) are dropped when a test binary starts and, while tests create databases, at most every 30 s per test process. A database whose pool is still open survives (`DROP DATABASE` without `FORCE`), also across test processes, and test pools keep one connection open for their lifetime. The databases of the last tests of a run stay until the next run. The container name carries the image tag and a config revision (see `crates/df-test-postgres/src/lib.rs`); remove old ones with `docker ps -a --filter name=df-test-postgres` and `docker rm -f`.
+
+### Debug info of the dev profile
+
+`[profile.dev]` in the root `Cargo.toml` keeps line tables only for workspace crates (`debug = "line-tables-only"`) and no debug info for dependencies, which shrinks `target/` to about a third (33 GB to 12 GB after a clean `cargo test --workspace --no-run`) and builds 18 to 31 % faster (clean, warm low crate, warm leaf crate). Panics and `RUST_BACKTRACE` output keep file and line; a debugger sees no local variables. For a debugger session set `CARGO_PROFILE_DEV_DEBUG=true` in that shell (a rebuild of the workspace follows). Bazel and CI keep their own settings.
 
 To measure line coverage across `df-core` and `df-db`:
 
@@ -247,7 +256,7 @@ On macOS use a case-sensitive APFS volume for the output base (`bazel --output_u
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `swc`, `tailwindcss` and `yq` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `cargo-machete`, `cargo-nextest`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `swc`, `tailwindcss` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine. The exceptions run through `npx` and need Node.js and, on first use, network access: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml`, and the `web-typecheck` hook runs `tsc` from `typescript@<version>`, pinned in `lefthook.yml` and `.github/workflows/ci.yaml`. A Renovate regex manager updates both copies of each version in one PR.
 
 | Task | Command |

@@ -20,7 +20,7 @@ use tokio::task::JoinError;
 use uuid::Uuid;
 
 use crate::E2eEnv;
-use crate::browser::{Session, cancel_task_over_new_connection};
+use crate::browser::{Session, cancel_task_over_new_connection, report};
 use crate::db;
 use crate::forgejo::Forgejo;
 use crate::wait::{UI_TIMEOUT, eventually};
@@ -52,8 +52,7 @@ pub struct World {
 impl World {
     async fn start(name: &str) -> Result<Self> {
         let env = E2eEnv::from_env()?;
-        let session = Session::start(&env).await?;
-        session.login(&env).await?;
+        let session = Session::start_logged_in(&env).await?;
         let suffix = unique_suffix();
         session.set_description_suffix(&suffix);
         Ok(Self {
@@ -152,7 +151,7 @@ struct Teardown {
 /// The result of the test: the body's failure or panic wins over the teardown's, a clean body
 /// fails on a leaked task.
 fn finish(outcome: Outcome, teardown: Teardown) -> Result<()> {
-    report(&teardown.notes);
+    report_teardown(&teardown.notes);
     let mut problems = Vec::new();
     if !teardown.leaked.is_empty() {
         problems.push(format!(
@@ -170,7 +169,7 @@ fn finish(outcome: Outcome, teardown: Teardown) -> Result<()> {
     match outcome {
         Outcome::Panicked(payload) => {
             if let Some(leaked) = leaked {
-                report(&[leaked]);
+                report_teardown(&[leaked]);
             }
             std::panic::resume_unwind(payload)
         }
@@ -182,13 +181,9 @@ fn finish(outcome: Outcome, teardown: Teardown) -> Result<()> {
     }
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "the teardown reports to the test output of cargo"
-)]
-fn report(lines: &[String]) {
+fn report_teardown(lines: &[String]) {
     for line in lines {
-        eprintln!("teardown: {line}");
+        report("teardown", line);
     }
 }
 

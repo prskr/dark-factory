@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.content::text AS \"content!\" FROM task_messages m JOIN tasks t ON t.id = m.task_id\n         WHERE t.key = $1 AND m.author ->> 'kind' = 'system' AND m.author ->> 'reason' = $2\n         ORDER BY m.queued_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e29bc9ad103ff93c94213c1b89b15a5724d77d64d718fb4a640c18e6944a2a55"
+}

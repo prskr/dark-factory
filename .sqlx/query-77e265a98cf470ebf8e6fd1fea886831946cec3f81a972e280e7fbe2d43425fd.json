@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.key FROM tasks c JOIN tasks p ON p.id = c.parent_id WHERE p.key = $1 AND strpos(c.description, $2) > 0 ORDER BY c.created_at LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "77e265a98cf470ebf8e6fd1fea886831946cec3f81a972e280e7fbe2d43425fd"
+}

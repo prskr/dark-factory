@@ -994,8 +994,7 @@ async fn pause_and_resume(session: &Session, env: &E2eEnv, url: &str) -> Result<
     let paused = rows(session).await?;
 
     // The denied retries go on (up to 240 s after the task started, far longer than this takes).
-    let watcher = Session::start(env).await?;
-    watcher.login(env).await?;
+    let watcher = Session::start_logged_in(env).await?;
     let buffered = eventually("an event after the pause", RUN_TIMEOUT, || async {
         watcher.page.goto(url, None).await?;
         let count = rows(&watcher).await?;

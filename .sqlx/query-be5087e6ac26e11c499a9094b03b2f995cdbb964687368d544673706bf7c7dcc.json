@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM task_messages m JOIN tasks t ON t.id = m.task_id\n         WHERE t.key = $1 AND m.author ->> 'kind' = 'agent'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "be5087e6ac26e11c499a9094b03b2f995cdbb964687368d544673706bf7c7dcc"
+}

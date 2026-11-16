@@ -1,7 +1,7 @@
 //! The iteration 1 demo through the web UI (`just e2e-local`). Needs the environment of
 //! `E2eEnv`, so the tests are ignored by default.
 
-use df_e2e::browser::button;
+use df_e2e::browser::{Session, button};
 use df_e2e::data;
 use df_e2e::fixture;
 use playwright_rs::protocol::SelectOption;
@@ -13,20 +13,24 @@ async fn login_shows_the_demo_project_on_the_board() -> anyhow::Result<()> {
     fixture::run(
         "login_shows_the_demo_project_on_the_board",
         |world| async move {
+            // The fixture's session starts with the login shared by the binary; this test checks
+            // the login itself, so it submits the Dex form in a context of its own.
+            let session = Session::start(&world.env).await?;
+            session.login(&world.env).await?;
             // The project filter of the board lists the seeded projects as `KEY · <open tasks>`.
-            button(&world.session.page, "All projects")
+            button(&session.page, "All projects")
                 // `.first()`: the board has the filter once per layout (desktop and phone).
                 .first()
                 .click(None)
                 .await?;
             expect(
-                world
-                    .session
+                session
                     .page
                     .get_by_text(&format!("{} ·", data::PROJECT_KEY), false),
             )
             .to_be_visible()
             .await?;
+            session.close_page().await;
             Ok(())
         },
     )

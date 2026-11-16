@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) FILTER (WHERE u.usage_known) AS \"known!\",\n         count(*) FILTER (WHERE NOT u.usage_known) AS \"unknown!\"\n         FROM model_usage u JOIN runs r ON r.id = u.run_id JOIN tasks t ON t.id = r.task_id\n         WHERE t.key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "known!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "unknown!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "bc7e5366bf21888179e2f7c335b176ea11fddbb4ae761cf1f75a8646f36ea607"
+}

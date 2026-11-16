@@ -60,11 +60,15 @@ The order of preference (std, existing dependency, hand-rolled) is in `AGENTS.md
 
 ## Tests
 
-### Feedback loop: cargo with a filter, Bazel once at the end
+### Feedback loop: nextest with a filter, Bazel once at the end
 
-- **While red/green, run only the test you work on:** `cargo test -p <crate> <test_name>` or `cargo test -p <crate> --test <file> <test_name>`. Cargo compiles the edited crate incrementally; Bazel (rules_rust) recompiles the whole crate as static musl on every change and reruns the whole test target.
-- **Before committing,** run all touched crates in one command: `cargo test -p <a> -p <b> …` (or `cargo test --workspace`). Never loop `cargo test -p $c` over crates: each invocation resolves features anew and relinks shared dependencies, so a loop spends ~10 minutes compiling for ~2 minutes of tests.
-- Use the same feature flags for clippy and tests (`cargo clippy --all-targets --all-features` and `cargo test --all-features`, or neither): different features invalidate the build and the next command recompiles most of the workspace.
+`cargo nextest` is the test runner of the local loop (pinned in `//:bazel_env`, so it is in `.bazel_env/bin`; settings in `.config/nextest.toml`). It runs the test binaries in parallel and one process per test, names a slow test, and filters across binaries. It does not run doc tests: run those with `cargo test --doc`. Where `cargo-nextest` is not on `PATH` (a sandbox without `.bazel_env`), `cargo test` takes the same arguments (`cargo test -p <crate> <test_name>`).
+
+- **While red/green, run only the test you work on:** `cargo nextest run -p <crate> <test_name>` (a substring of the name; `-E 'test(=<exact_name>)'` for an exact match) or `cargo nextest run -p <crate> --test <file> <test_name>`. Cargo compiles the edited crate incrementally; Bazel (rules_rust) recompiles the whole crate as static musl on every change and reruns the whole test target.
+- **One crate:** `cargo nextest run -p <crate>`.
+- **Before committing,** run all touched crates in one command: `cargo nextest run --all-features -p <a> -p <b> …` (or `cargo nextest run --workspace`, which `just test` runs, followed by `cargo test --workspace --doc`), and `cargo test --all-features --doc -p <a> -p <b>` for crates with doc tests. Never loop `cargo nextest run -p $c` or `cargo test -p $c` over crates: each invocation resolves features anew and relinks shared dependencies, so a loop spends ~10 minutes compiling for ~2 minutes of tests.
+- Use the same feature flags for clippy and tests (`cargo clippy --all-targets --all-features` and `cargo nextest run --all-features`, or neither): different features invalidate the build and the next command recompiles most of the workspace.
+- A failing test prints its output at the end of the run; `--no-capture` (one test) streams it. The e2e suite stays on `cargo test` (skill `e2e`).
 - **Bazel only when the Bazel inputs changed:** a `BUILD.bazel`, `MODULE.bazel`, a `Cargo.toml` or `Cargo.lock`, or `data`/`rustc_env` a test reads. Then run the affected targets once (`bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...`). Otherwise the cargo run is enough; CI runs Bazel. Cargo-only crates (`[workspace.metadata.check-crates.exempt]`, such as `crates/df-e2e`) have no Bazel targets.
 - Don't alternate cargo and Bazel runs during the loop: they share no build outputs, so each switch compiles everything twice.
 - `.bazelrc.agents` uses no remote cache (it was unreachable from sandboxes). Don't add `--config=cache`.

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT g.verdict, g.refs FROM git_pushes g JOIN runs r ON r.id = g.run_id JOIN tasks t ON t.id = r.task_id WHERE t.key = $1 ORDER BY g.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "verdict",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_pushes",
+            "name": "verdict"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "refs",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "git_pushes",
+            "name": "refs"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "824d867b2412686eee1390e58ce4a46afbb653eb738e97bd6d7d431f4e139723"
+}

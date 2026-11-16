@@ -48,6 +48,14 @@ similar_names = "allow"
 struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
+# Cargo only (Bazel and CI have their own settings). File and line stay in panics and backtraces;
+# a debugger session sets `CARGO_PROFILE_DEV_DEBUG=true` (docs/development.md).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.metadata.check-crates.exempt]
 "crates/df-e2e" = "end-to-end suite and seed program, built by cargo only (playwright-rs is pre-1.0 with a build-time driver download; design D6 of iter1-demo-e2e)"
 
