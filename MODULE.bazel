@@ -58,7 +58,7 @@ zig.exec_platform(
     arch = "amd64",
     os = "linux",
 )
-use_repo(zig, "zig_config-linux-amd64", "zig_sdk")
+use_repo(zig, "zig_sdk")
 
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
 buf.toolchains(version = "v1.68.4")
