@@ -41,7 +41,8 @@ struct Platform {
     cpu: &'static str,
 }
 
-const PLATFORMS: [Platform; 4] = [
+/// Intel macOS is not supported: upstream tools stopped shipping builds for it (cargo-deny 0.21).
+const PLATFORMS: [Platform; 3] = [
     Platform {
         os: "linux",
         cpu: "x86_64",
@@ -49,10 +50,6 @@ const PLATFORMS: [Platform; 4] = [
     Platform {
         os: "linux",
         cpu: "arm64",
-    },
-    Platform {
-        os: "macos",
-        cpu: "x86_64",
     },
     Platform {
         os: "macos",
@@ -137,11 +134,10 @@ const TOOLS: [GithubTool; 17] = [
         repo: "bnjbvr/cargo-machete",
         asset: |v, p| {
             let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
-            // upstream ships a gnu build for linux arm64 and musl for x86_64
-            let target = match (p.os, p.cpu) {
-                ("macos", _) => format!("{cpu}-apple-darwin"),
-                (_, "arm64") => format!("{cpu}-unknown-linux-gnu"),
-                _ => format!("{cpu}-unknown-linux-musl"),
+            let target = if p.os == "macos" {
+                format!("{cpu}-apple-darwin")
+            } else {
+                format!("{cpu}-unknown-linux-musl")
             };
             let stem = format!("cargo-machete-v{v}-{target}");
             (format!("{stem}.tar.gz"), format!("{stem}/cargo-machete"))
@@ -274,19 +270,17 @@ const TOOLS: [GithubTool; 17] = [
     GithubTool {
         name: "hugo",
         repo: "gohugoio/hugo",
-        // Extended build (SCSS, needed by Hextra). macOS ships only a universal installer package
-        // (kind `pkg`, expanded by `pkgutil`); the binary is `Payload/hugo` inside it.
+        // Standard build (0.170 dropped the extended one; Hextra needs no Sass). macOS ships only a
+        // universal installer package (kind `pkg`, expanded by `pkgutil`); the binary is
+        // `Payload/hugo` inside it.
         asset: |v, p| match (p.os, p.cpu) {
             ("macos", _) => (
-                format!("hugo_extended_{v}_darwin-universal.pkg"),
+                format!("hugo_{v}_darwin-universal.pkg"),
                 "Payload/hugo".into(),
             ),
             (_, cpu) => {
                 let arch = if cpu == "arm64" { "arm64" } else { "amd64" };
-                (
-                    format!("hugo_extended_{v}_linux-{arch}.tar.gz"),
-                    "hugo".into(),
-                )
+                (format!("hugo_{v}_linux-{arch}.tar.gz"), "hugo".into())
             }
         },
     },
@@ -500,13 +494,22 @@ mod tests {
     }
 
     #[test]
+    fn tools_are_pinned_for_linux_and_apple_silicon_only() {
+        let platforms: Vec<_> = PLATFORMS.iter().map(|p| (p.os, p.cpu)).collect();
+        assert_eq!(
+            platforms,
+            [("linux", "x86_64"), ("linux", "arm64"), ("macos", "arm64")]
+        );
+    }
+
+    #[test]
     fn github_maps_every_platform() {
         let r = release("v2.13.0", &ALL_KINGFISHER, Some("sha256:abc"));
         let bins = github_binaries(tool("kingfisher"), &r).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         assert!(bins.iter().any(|b| b.os == "macos"
-            && b.cpu == "x86_64"
-            && b.url.ends_with("kingfisher-darwin-x64.tgz")
+            && b.cpu == "arm64"
+            && b.url.ends_with("kingfisher-darwin-arm64.tgz")
             && b.sha256 == "abc"));
     }
 
@@ -524,7 +527,7 @@ mod tests {
 
     #[test]
     fn archive_paths_embed_version() {
-        let (name, file) = (tool("cargo-deny").asset)("0.20.2", PLATFORMS[3]);
+        let (name, file) = (tool("cargo-deny").asset)("0.20.2", PLATFORMS[2]);
         assert_eq!(name, "cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz");
         assert_eq!(file, "cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny");
         let (_, file) = (tool("shellcheck").asset)("0.11.0", PLATFORMS[0]);
@@ -540,23 +543,23 @@ mod tests {
         ];
         let r = release("cargo-nextest-0.9.152", &names, Some("sha256:abc"));
         let bins = github_binaries(tool("cargo-nextest"), &r).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         assert!(
             bins.iter()
                 .all(|b| b.file.as_deref() == Some("cargo-nextest"))
         );
-        assert_eq!(
-            bins.iter().filter(|b| b.os == "macos").count(),
-            2,
-            "both macOS CPUs use the universal build"
-        );
+        assert!(bins.iter().any(|b| {
+            b.os == "macos"
+                && b.url
+                    .ends_with("cargo-nextest-0.9.152-universal-apple-darwin.tar.gz")
+        }));
     }
 
     #[test]
     fn helm_unittest_names() {
-        let (name, file) = (tool("helm-unittest").asset)("1.2.1", PLATFORMS[2]);
-        assert_eq!(name, "helm-unittest-macos-amd64-1.2.1.tgz");
-        assert_eq!(file, "untt-macos-amd64");
+        let (name, file) = (tool("helm-unittest").asset)("1.2.1", PLATFORMS[0]);
+        assert_eq!(name, "helm-unittest-linux-amd64-1.2.1.tgz");
+        assert_eq!(file, "untt-linux-amd64");
     }
 
     #[test]
@@ -569,7 +572,7 @@ mod tests {
         let (name, file) = (tool("yq").asset)("4.54.1", PLATFORMS[2]);
         assert_eq!(
             (name.as_str(), file.as_str()),
-            ("yq_darwin_amd64.tar.gz", "yq_darwin_amd64")
+            ("yq_darwin_arm64.tar.gz", "yq_darwin_arm64")
         );
     }
 
@@ -583,7 +586,7 @@ mod tests {
         ];
         let r = release("v0.8.3", &names, Some("sha256:abc"));
         let bins = github_binaries(tool("kube-linter"), &r).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
         assert!(
             bins.iter().any(|b| b.os == "linux"
@@ -594,7 +597,7 @@ mod tests {
 
     #[test]
     fn lefthook_asset_names() {
-        let (name, file) = (tool("lefthook").asset)("2.2.2", PLATFORMS[3]);
+        let (name, file) = (tool("lefthook").asset)("2.2.2", PLATFORMS[2]);
         assert_eq!(
             (name.as_str(), file.as_str()),
             ("lefthook_2.2.2_MacOS_arm64", "")
@@ -605,21 +608,21 @@ mod tests {
 
     #[test]
     fn hadolint_typos_machete_names() {
-        let (name, file) = (tool("hadolint").asset)("2.15.1", PLATFORMS[3]);
+        let (name, file) = (tool("hadolint").asset)("2.15.1", PLATFORMS[2]);
         assert_eq!((name.as_str(), file.as_str()), ("hadolint-macos-arm64", ""));
         let (name, file) = (tool("typos").asset)("1.51.1", PLATFORMS[0]);
         assert_eq!(
             (name.as_str(), file.as_str()),
             ("typos-v1.51.1-x86_64-unknown-linux-musl.tar.gz", "typos")
         );
-        let (name, file) = (tool("cargo-machete").asset)("0.9.2", PLATFORMS[1]);
+        let (name, file) = (tool("cargo-machete").asset)("0.10.1", PLATFORMS[1]);
         assert_eq!(
             name,
-            "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu.tar.gz"
+            "cargo-machete-v0.10.1-aarch64-unknown-linux-musl.tar.gz"
         );
         assert_eq!(
             file,
-            "cargo-machete-v0.9.2-aarch64-unknown-linux-gnu/cargo-machete"
+            "cargo-machete-v0.10.1-aarch64-unknown-linux-musl/cargo-machete"
         );
     }
 
@@ -628,7 +631,7 @@ mod tests {
         let hash = "a".repeat(64);
         let body = format!("{hash}  helm.tar.gz\n");
         let bins = helm_binaries("4.3.1", |_| Ok(body.clone())).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         let b = &bins[1];
         assert_eq!(b.url, "https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz");
         assert_eq!(b.file.as_deref(), Some("linux-arm64/helm"));
@@ -660,12 +663,7 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            [
-                "jq-linux-amd64",
-                "jq-linux-arm64",
-                "jq-macos-amd64",
-                "jq-macos-arm64"
-            ]
+            ["jq-linux-amd64", "jq-linux-arm64", "jq-macos-arm64"]
         );
     }
 
@@ -684,11 +682,6 @@ mod tests {
         let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[2]);
         assert_eq!(
             (name.as_str(), file.as_str()),
-            ("tailwindcss-macos-x64", "")
-        );
-        let (name, file) = (tool("tailwindcss").asset)("4.3.3", PLATFORMS[3]);
-        assert_eq!(
-            (name.as_str(), file.as_str()),
             ("tailwindcss-macos-arm64", "")
         );
     }
@@ -702,7 +695,6 @@ mod tests {
         let expected = [
             "swc-linux-x64-musl",
             "swc-linux-arm64-musl",
-            "swc-darwin-x64",
             "swc-darwin-arm64",
         ];
         for (got, want) in names.iter().zip(expected) {
@@ -711,15 +703,15 @@ mod tests {
     }
 
     #[test]
-    fn hugo_asset_names_use_the_extended_build() {
+    fn hugo_asset_names_use_the_standard_build() {
         let names: Vec<_> = PLATFORMS
             .iter()
-            .map(|&p| (tool("hugo").asset)("0.169.0", p))
+            .map(|&p| (tool("hugo").asset)("0.170.0", p))
             .collect();
-        let linux_x86 = ("hugo_extended_0.169.0_linux-amd64.tar.gz", "hugo");
-        let linux_arm = ("hugo_extended_0.169.0_linux-arm64.tar.gz", "hugo");
-        let macos = ("hugo_extended_0.169.0_darwin-universal.pkg", "Payload/hugo");
-        let expected = [linux_x86, linux_arm, macos, macos];
+        let linux_x86 = ("hugo_0.170.0_linux-amd64.tar.gz", "hugo");
+        let linux_arm = ("hugo_0.170.0_linux-arm64.tar.gz", "hugo");
+        let macos = ("hugo_0.170.0_darwin-universal.pkg", "Payload/hugo");
+        let expected = [linux_x86, linux_arm, macos];
         for (got, want) in names.iter().zip(expected) {
             assert_eq!((got.0.as_str(), got.1.as_str()), want);
         }
@@ -728,13 +720,13 @@ mod tests {
     #[test]
     fn hugo_macos_is_a_pkg_and_linux_an_archive() {
         let names = [
-            "hugo_extended_0.169.0_linux-amd64.tar.gz",
-            "hugo_extended_0.169.0_linux-arm64.tar.gz",
-            "hugo_extended_0.169.0_darwin-universal.pkg",
+            "hugo_0.170.0_linux-amd64.tar.gz",
+            "hugo_0.170.0_linux-arm64.tar.gz",
+            "hugo_0.170.0_darwin-universal.pkg",
         ];
-        let r = release("v0.169.0", &names, Some("sha256:abc"));
+        let r = release("v0.170.0", &names, Some("sha256:abc"));
         let bins = github_binaries(tool("hugo"), &r).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         assert!(
             bins.iter()
                 .all(|b| b.kind == if b.os == "macos" { "pkg" } else { "archive" })
@@ -754,7 +746,7 @@ mod tests {
         ];
         let r = release("v4.3.3", &names, Some("sha256:abc"));
         let bins = github_binaries(tool("tailwindcss"), &r).unwrap();
-        assert_eq!(bins.len(), 4);
+        assert_eq!(bins.len(), 3);
         assert!(bins.iter().all(|b| b.kind == "file" && b.file.is_none()));
     }
 }

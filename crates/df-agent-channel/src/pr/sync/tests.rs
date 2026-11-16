@@ -663,7 +663,7 @@ async fn a_pr_a_human_opened_on_the_existing_branch_is_recorded_as_attached() {
 }
 
 #[tokio::test]
-async fn a_pr_found_on_the_task_own_branch_stays_the_factorys() {
+async fn a_pr_found_on_the_task_own_branch_stays_owned_by_the_factory() {
     let f = Fixture::new().await;
     f.env
         .forge

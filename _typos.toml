@@ -16,4 +16,6 @@ extend-exclude = [
 extend-ignore-re = [
     # Verbatim linker error message.
     "mis-aligned",
+    # Non-UTF-8 file name in tests (`café` in Latin-1).
+    "caf\\\\xe9",
 ]

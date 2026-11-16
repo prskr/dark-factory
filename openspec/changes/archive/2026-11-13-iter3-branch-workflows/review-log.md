@@ -34,7 +34,7 @@
 | P8 | Spec | P2 | `crates/df-gateway/src/git/view.rs:59` | other open tasks' existing branches count as already-checked upstream; matters when a push-check exception of one task should not cover another task's run | tech-debt | tech-debt (TD-125) |
 | S6 | Standards | P3 | `assign.rs:292`, `snapshot.rs:200` | RewritePolicy → proto match written twice | | cosmetic |
 | S10 | Standards | P3 | `crates/df-db/src/tasks.rs:641` | final-status list repeated as strings | | cosmetic |
-| P9 | Spec | P3 | migration `20261112000001` | BEFORE INSERT trigger fills `branch`; serves only raw test INSERTs | | cosmetic |
+| P9 | Spec | P3 | migration `20261112000001` | BEFORE INSERT trigger fills `branch`; serves only raw test INSERT statements | | cosmetic |
 | X1 | Security | Rejected | `delegation.rs`, `branch.rs`, `refs.rs` | agent can pick any non-base branch and rewrite it under with-lease | | rejected (verifier 4); addressed by the agent-branches spec change, verified closed in round 2 |
 
 X1 spec update (agreed 2026-11-12), notes for `/opsx:update`:
