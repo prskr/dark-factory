@@ -374,8 +374,23 @@ fn render(tools: BTreeMap<&str, Vec<Binary>>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&doc)? + "\n")
 }
 
+/// An agent that trusts the platform's root certificates (on Linux the system bundle, honoring
+/// `SSL_CERT_FILE`) instead of ureq's built-in Mozilla roots, so it works behind a
+/// TLS-intercepting proxy whose CA is installed on the machine.
+fn http_agent() -> ureq::Agent {
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder()
+        .tls_config(tls)
+        .build()
+        .new_agent()
+}
+
 fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    let mut req = ureq::get(url).header("User-Agent", "dark-factory-xtask");
+    let mut req = http_agent()
+        .get(url)
+        .header("User-Agent", "dark-factory-xtask");
     if let Ok(token) = std::env::var("GITHUB_TOKEN")
         && url.starts_with("https://api.github.com/")
     {
@@ -474,6 +489,15 @@ mod tests {
         "kingfisher-linux-arm64.tgz",
         "kingfisher-linux-x64.tgz",
     ];
+
+    #[test]
+    fn http_agent_trusts_the_platform_root_certificates() {
+        let agent = http_agent();
+        assert!(matches!(
+            agent.config().tls_config().root_certs(),
+            ureq::tls::RootCerts::PlatformVerifier
+        ));
+    }
 
     #[test]
     fn github_maps_every_platform() {
