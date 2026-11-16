@@ -58,7 +58,7 @@ zig.exec_platform(
     arch = "amd64",
     os = "linux",
 )
-use_repo(zig, "zig_config-linux-amd64", "zig_sdk")
+use_repo(zig, "zig_sdk")
 
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf", dev_dependency = True)
 buf.toolchains(version = "v1.68.4")
@@ -261,7 +261,7 @@ filegroup(
     srcs = glob(["**/*.json"]),
     visibility = ["//visibility:public"],
 )""",
-    commit = "89c736bdde38b5fecd0f8436ec5f3aa3679a3b86",
+    commit = "3e8a8916ca1b7af6464606c2c2f5869dbafa9653",
     remote = "https://github.com/datreeio/CRDs-catalog.git",
     sparse_checkout_patterns = ["cert-manager.io"],
 )
