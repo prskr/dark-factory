@@ -188,12 +188,7 @@ fn index_path(name: &str) -> String {
 
 fn latest_stable(krate: &str) -> Result<Option<Version>> {
     let url = format!("{INDEX_URL}/{}", index_path(krate));
-    let body = ureq::get(&url)
-        .header("User-Agent", "dark-factory-xtask")
-        .call()
-        .with_context(|| format!("GET {url}"))?
-        .body_mut()
-        .read_to_string()?;
+    let body = crate::get(&url)?.body_mut().read_to_string()?;
     Ok(latest_stable_from_index(&body))
 }
 
