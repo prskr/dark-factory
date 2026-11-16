@@ -51,7 +51,7 @@ The chart SHALL run `dark-factory migrate` as a pre-install/pre-upgrade hook Job
 - **THEN** the migrate Job completes before the control plane pods are replaced
 
 ### Requirement: Sandbox namespace
-With `sandboxNamespace.create: true` the chart SHALL create the sandbox namespace with Pod Security Admission `restricted`, a default-deny ingress and egress NetworkPolicy, a ResourceQuota and a LimitRange; otherwise it SHALL reference an existing namespace. The sandbox namespace SHALL contain no Secrets.
+With `sandboxNamespace.create: true` the chart SHALL create the sandbox namespace with Pod Security Admission `restricted`, a default-deny ingress and egress NetworkPolicy, a ResourceQuota and a LimitRange; otherwise it SHALL reference an existing namespace. The sandbox namespace SHALL contain no Secrets other than the image pull secrets an operator places there for `sandboxNamespace.imagePullSecrets`.
 
 #### Scenario: Default-deny baseline
 - **WHEN** a pod without a run policy starts in the sandbox namespace
@@ -75,6 +75,13 @@ The chart SHALL grant exactly the permissions in `design/deployment.md` §3: the
 #### Scenario: No Secret create when every secret is provided
 - **WHEN** every plugin sets `webhookSecret.existingSecret`
 - **THEN** the control plane's instance Role allows only `get` on `secrets`
+
+### Requirement: No Secret access in the sandbox namespace
+The chart SHALL grant the control plane no access to Secrets in the sandbox namespace.
+
+#### Scenario: No Secret access with image pull secrets
+- **WHEN** the chart is rendered with `sandboxNamespace.imagePullSecrets` set
+- **THEN** the control plane's sandbox Role grants no verb on `secrets`
 
 ### Requirement: Certificates
 The chart SHALL create (or reference) a private CA Issuer usable by cert-manager csi-driver, and Certificates for the control plane (agent and internal ports) and the gateway, all issued by that CA. The gateway certificate SHALL include the gateway Service's DNS names used in Git proxy URLs.
@@ -359,3 +366,22 @@ The chart SHALL expose `artifacts.maxTextBytes` (default 1048576), `artifacts.ma
 #### Scenario: Image limit above the runtime cap
 - **WHEN** `artifacts.maxImageBytes` is 10485760
 - **THEN** rendering fails with a schema error
+
+### Requirement: Sandbox image pull secret values
+The chart SHALL offer `sandboxNamespace.imagePullSecrets` (default `[]`), a list of references `{ name: "<Secret>" }` to existing Secrets in the sandbox namespace, and render their names as `sandbox.imagePullSecrets` of the instance configuration. The chart SHALL NOT create these Secrets and SHALL NOT fall back to `image.pullSecrets`. The values schema SHALL reject an entry without a non-empty `name`.
+
+#### Scenario: Pull secrets set
+- **WHEN** `sandboxNamespace.imagePullSecrets` is `[{ name: corp-mirror }]`
+- **THEN** the instance configuration has `sandbox.imagePullSecrets: ["corp-mirror"]` and the chart renders no Secret named `corp-mirror`
+
+#### Scenario: Default
+- **WHEN** the chart is rendered with default values
+- **THEN** the instance configuration has no `sandbox.imagePullSecrets` entries
+
+#### Scenario: Independent of the instance pull secrets
+- **WHEN** `image.pullSecrets` is `[{ name: release-registry }]` and `sandboxNamespace.imagePullSecrets` is empty
+- **THEN** the instance configuration has no `sandbox.imagePullSecrets` entries
+
+#### Scenario: Entry without a name
+- **WHEN** `sandboxNamespace.imagePullSecrets` is `[{ name: "" }]`
+- **THEN** the render fails schema validation
