@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM runs r JOIN tasks t ON t.id = r.task_id\n         WHERE t.key = $1 AND r.outcome = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bb48b9aeb5c516c436aacb1814d97c3a51ef4c2ee9c02c9f4c627e733da161b3"
+}

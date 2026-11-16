@@ -29,12 +29,10 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-77: code review of `iter2-github-plugin` (`plugins/github`, `df-plugins`, `deploy`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-78 to TD-79: code review of `iter2-multi-forge` (`df-core`, `dark-factory`, 2026-10-30). The `TD-n (ID)` headings give the IDs used in that review. TD-77 is taken by `iter2-github-plugin` (PR #44).
-- Origin of TD-81: code review of `iter1-demo-e2e` (2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-83: code review of `iter2-git-proxy` (`df-gateway`, 2026-10-31).
 - Origin of TD-84 to TD-86: code review of `iter2-egress-approvals` (`df-db`, `df-gateway`, `df-agent-channel`, 2026-10-31). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-87 to TD-88: e2e work and code review of `iter2-egress-approvals` task 4.1 (`factory-agent`, `fake-acp-agent`, 2026-11-01). Both existed before that change.
-- Origin of TD-93 to TD-94: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03). TD-94 existed before that change.
-- Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). Both existed before that change.
+- Origin of TD-93: code review and e2e runs of `iter3-review-tools` (`df-e2e`, `deploy/e2e`, `df-agent-channel`, `plugins/forgejo`, 2026-11-03).
 - Origin of TD-106 to TD-115 (TD-114 resolved in the same PR): code review of `iter3-webhooks` (`plugins`, `df-db`, `dark-factory`, `df-web`, `df-e2e`, 2026-11-05). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-116 to TD-118: code review of `iter3-task-dependencies` (`df-db`, `df-web`, 2026-11-06). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-119: code review of `conversation-flow` (`df-agent-channel`, `factory-agent`, 2026-11-06). The `TD-n (ID)` heading gives the IDs used in that review.
@@ -93,7 +91,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-76 | low   | `factory-agent` outbox, `df-db` migrate | Warnings for failed outbox and lock-release calls have no test |
 | TD-77 | low    | `deploy` plugin images | Image targets and content checks are copied per plugin |
 | TD-79 | low    | `dark-factory` startup | Skipping a plugin without `pull-requests` has no test |
-| TD-81 | low   | `df-e2e` | e2e database checks are not compile-time checked ([#123]) |
 | TD-84 | low   | `df-agent-channel` tools | `request_approval` copies the raise logic of `ask_question` |
 | TD-85 | low   | `df-db` requests | Decision path repeats the approval sequence and looks up the type three times |
 | TD-86 | low   | `df-gateway` link | Two failure types for gateway → control-plane calls |
@@ -102,19 +99,15 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-89 | low   | `df-gateway`, `df-db`, `df-proto` push checks | The check enum exists three times |
 | TD-90 | medium | `df-gateway` push view | No cap on the bytes scanned per push |
 | TD-92 | low   | `df-agent-channel` Assign | The continuation summary reads every earlier transcript event of the task |
-| TD-93 | low   | `df-e2e` review loop | The e2e review comment comes from the bot account, so author roles are only checked against a live Forgejo |
-| TD-94 | low   | `deploy/e2e` | `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster |
+| TD-93 | low   | `df-e2e` review loop | The follow-up test's review comment comes from the bot account, so the role `member` is not asserted in the agent's tool result |
 | TD-97 | low   | `df-db` network access | "Deny always" copies a wildcard request host into the deny rule |
 | TD-98 | low   | `df-web` egress rules | Truncated long hosts have no tooltip |
 | TD-99 | low   | `deploy/helm` values | Chart default values reference the test project image |
 | TD-100 | low   | `docs/publish.sh`, `gh-pages` | Old doc versions are never pruned |
 | TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
-| TD-103 | low   | `df-e2e` | Follow-up test can see the PR still in draft after `in_review` |
 | TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
 | TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
 | TD-109 | low   | `df-web` tests | Dev-dependency on `df-agent-channel` only for the metric probe |
-| TD-110 | low   | `deploy/e2e` | Forgejo `ALLOWED_HOST_LIST` hardcodes the release and namespace |
-| TD-111 | low   | `df-e2e` | `submit_review` takes the review event as a string |
 | TD-112 | low   | `plugins/forgejo` webhooks | `review` and `closed` repeat the pull request event parsing |
 | TD-113 | low   | `df-plugins` tests | Three plugin client helpers repeat the same call |
 | TD-115 | medium | `dark-factory` webhooks | A failed webhook delivery is lost until an operator redelivers it |
@@ -562,18 +555,6 @@ Startup logs a plugin without the `pull-requests` capability as "not a forge plu
 
 **Fix:** a startup test that loads that plugin next to Forgejo and asserts it is skipped with an error event.
 
-### TD-81 (S6). e2e database checks are not compile-time checked
-
-Tracked in [#123].
-
-`crates/df-e2e/src/db.rs:43,52,64`
-
-The e2e suite reads `tasks` and `runs` through runtime `sqlx::query` instead of `query!`/`query_as!` with `.sqlx/` metadata.
-
-**Matters when:** a schema change renames or drops a column the suite reads; the break shows up only in a `just e2e-local` run instead of at compile time.
-
-**Fix:** use the checked macros (offline metadata for `df-e2e`), or read through existing `df-db` functions.
-
 ### TD-84 (S4). `request_approval` copies the raise logic of `ask_question`
 
 `crates/df-agent-channel/src/tools.rs` (`request_approval`, `ask_question`)
@@ -667,17 +648,9 @@ The e2e suite submits the line comment that run 2 answers with the bot's own For
 
 **Matters when:** a real forge answers the permission lookup differently from the mocks (status, field values, the admin requirement); no test run would notice.
 
-**Fix:** create a second Forgejo user in `deploy/e2e/e2e-local.sh` (write access to the test repository), submit the review with its token and assert role `member` in the agent's tool result; optionally a third user without access for `outside`.
+A second Forgejo user with write access exists (`World::reviewer`, created by `deploy/e2e/e2e-local.sh`), and `tests/webhooks.rs` submits its review with it. The follow-up test does not use it yet.
 
-### TD-94. `e2e-local.sh` cleanup fails on an early abort and leaves the kind cluster
-
-`deploy/e2e/e2e-local.sh` (`cleanup`)
-
-With `set -u` and the bash 3.2 of macOS, `"${pids[@]}"` on the empty array fails with `pids[@]: unbound variable`. An abort before the first background job (Ctrl-C or a failure while creating the cluster) ends the trap there, so `kind delete cluster` never runs and the next run fails until the `df-e2e` cluster is deleted by hand.
-
-**Matters when:** local e2e runs on macOS are interrupted or fail during cluster setup.
-
-**Fix:** iterate with `${pids[@]+"${pids[@]}"}` (or guard with `(( ${#pids[@]} ))`). Test: run the script with a failing first step under `/bin/bash` 3.2 and check that the cluster is gone.
+**Fix:** submit the line comment of the follow-up test with `World::reviewer` and assert role `member` in the agent's tool result; optionally a third user without access for `outside`.
 
 Origin of TD-97 to TD-98: code review of `iter2-egress-deny-rules` (2026-11-03).
 
@@ -756,18 +729,6 @@ Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activ
 
 **Fix:** one helper in `df-test-postgres` (for example `wait_until_a_backend_waits_for_a_lock(&pool)`) that filters on the current database; replace every copy.
 
-Origin of TD-102 to TD-103: code review of `iter3-inference-gateway` (`factory-agent`, `df-e2e`, 2026-11-04). The `TD-n (ID)` headings give the IDs used in that review. Both existed before that change.
-
-### TD-103 (TD-e2e). Follow-up e2e test can see the PR still in draft
-
-`crates/df-e2e/tests/flow.rs:229` (`follow_up_resumes_the_session_and_completing_marks_the_pr_ready`)
-
-The test waits for task status `in_review`, then asserts `draft == false`. Marking the PR ready may land after the status change; the test failed once in six runs on the `iter3-inference-gateway` branch.
-
-**Matters when:** CI flakes block merges.
-
-**Fix:** wait on the PR's draft flag (or the event that marks it ready) instead of the task status.
-
 ### TD-106 (S2). Webhook parsing helpers are copied between the forge plugins
 
 `plugins/forgejo/src/webhook.rs`, `plugins/github/src/webhook.rs`
@@ -797,24 +758,6 @@ The function locks runs, requests a stop and writes a message block. For that, `
 **Matters when:** `df-agent-channel` starts to depend on `df-web`, or its test build gets slow.
 
 **Fix:** move the metric probe to a lower crate (for example `df-telemetry` with `test-util`) and depend on that.
-
-### TD-110 (S10). Forgejo `ALLOWED_HOST_LIST` hardcodes the release and namespace
-
-`deploy/e2e/forgejo-values.yaml` (`ALLOWED_HOST_LIST: dark-factory-control-plane.dark-factory.svc`)
-
-`e2e-local.sh` derives the service name from `$release` and `$namespace`; the values file repeats the defaults.
-
-**Matters when:** the e2e runs with another release name or namespace: Forgejo refuses to deliver webhooks.
-
-**Fix:** set the value from the script (`--set`), or add a comment that ties it to the defaults.
-
-### TD-111 (S11). `submit_review` takes the review event as a string
-
-`crates/df-e2e/src/forgejo.rs` (`submit_review(&self, number: u64, event: &str, body: &str)`)
-
-**Matters when:** a test passes a misspelled event; Forgejo rejects it only at run time.
-
-**Fix:** a small enum (`Approve`, `RequestChanges`, `Comment`).
 
 ### TD-112 (S13). `review` and `closed` repeat the pull request event parsing
 

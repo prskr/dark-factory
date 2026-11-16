@@ -72,7 +72,7 @@ Read `docs/development.md` for the local setup (PostgreSQL, `DATABASE_URL`, cove
 ## Building, testing and hooks
 
 - Build: `cargo build --workspace`, or `bazel --bazelrc=.bazelrc.agents build //...`. Format: `cargo fmt --all` (the pre-commit hook checks with the pinned rustfmt through Bazel).
-- Tests: `cargo test -p <crate>`, everything with `bazel --bazelrc=.bazelrc.agents test //...`; which to run when: skill `rust`.
+- Tests: `cargo nextest run -p <crate>` (`cargo test -p <crate>` without `.bazel_env`), everything with `bazel --bazelrc=.bazelrc.agents test //...`; which to run when: skill `rust`.
 - `lefthook.yml` runs the pre-commit checks (rustfmt, linters, Helm tests, `openspec validate`) and pre-push `cargo clippy --all-targets --all-features -- -D warnings` and `cargo deny check`. Before you finish, clippy has no warnings and `cargo-machete` finds no unused dependencies.
 
 ## Search of files and binaries

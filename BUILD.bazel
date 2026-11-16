@@ -28,6 +28,7 @@ bazel_env(
         "cargo-clippy": "@rules_rust//tools/upstream_wrapper:cargo_clippy",
         "cargo-deny": TOOLS["cargo-deny"],
         "cargo-machete": TOOLS["cargo-machete"],
+        "cargo-nextest": TOOLS["cargo-nextest"],
         "hadolint": TOOLS["hadolint"],
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use df_core::TaskStatus;
 use df_e2e::browser::button;
 use df_e2e::fixture;
+use df_e2e::forgejo::ReviewEvent;
 use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually};
 use df_e2e::{data, db};
 use playwright_rs::expect;
@@ -46,7 +47,11 @@ async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() ->
 
             world
                 .reviewer
-                .submit_review(number, "REQUEST_CHANGES", "Please greet in German as well.")
+                .submit_review(
+                    number,
+                    ReviewEvent::RequestChanges,
+                    "Please greet in German as well.",
+                )
                 .await?;
 
             let line = format!(

@@ -288,7 +288,8 @@ install_infrastructure() {
   log "Installing Forgejo"
   hc upgrade --install forgejo "oci://code.forgejo.org/forgejo-helm/forgejo" \
     --version "$forgejo_chart_version" --namespace forgejo --create-namespace \
-    --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m
+    --values deploy/e2e/forgejo-values.yaml --wait --timeout 8m \
+    --set "gitea.config.webhook.ALLOWED_HOST_LIST=$release-control-plane.$namespace.svc"
   kc -n postgres wait --for=condition=Available deployment/postgres --timeout=300s
   kc -n dex wait --for=condition=Available deployment/dex --timeout=300s
   kc -n receiver wait --for=condition=Available deployment/receiver --timeout=300s

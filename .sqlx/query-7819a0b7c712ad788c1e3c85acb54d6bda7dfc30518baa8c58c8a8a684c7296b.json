@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM tool_calls WHERE tool_name = 'read_artifact'\n         AND arguments ->> 'task' = $1 AND arguments ->> 'name' = $2\n         AND result IS NOT NULL AND COALESCE((result ->> 'isError')::boolean, false) = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7819a0b7c712ad788c1e3c85acb54d6bda7dfc30518baa8c58c8a8a684c7296b"
+}

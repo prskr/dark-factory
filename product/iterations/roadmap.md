@@ -138,7 +138,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Re-parenting tasks: a parent picker in the composer and moving a task to another parent | idea | ADR-0034, ADR-0043, `openspec/changes/iter3-task-tree` |
 | `subtask_merge` override per task or subtree | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
 | Project overrides of the delegation limits (`tasks.maxDepth`, `tasks.maxOpenSubtasks`) | idea | ADR-0034, `openspec/changes/iter3-task-tree` |
-| Reuse the login state across e2e tests (`storageState`), one login per binary instead of per test | idea | `openspec/changes/e2e-suite-isolation` (out of scope) |
+| One integration test binary per crate (`df-plugins` has 10, `df-gateway` 6): the 36 integration test binaries take 34 % of the CPU time of a clean `cargo test --no-run` (662 of 1930 s); every Bazel `rust_test` target and `cargo xtask check-crates` change with it | idea | `openspec/changes/faster-test-loop` (design.md, "Compile-time numbers") |
 | Forgejo author role lookup without repository admin: `GET .../collaborators/{login}` needs only read access but answers 404 for the owner and members of the owning organisation, so it needs a Forgejo API change | idea | `openspec/changes/forge-feedback-fixes` (out of scope) |
 | MCP tools as WASI components | idea | F2 |
 | Context compaction plugins (model-generated summaries, mid-run compaction) | idea | F3, `openspec/changes/archive/2026-11-03-iter2-continuation-summary` |
@@ -150,7 +150,6 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/archive/2026-11-04-docs-site` (Risks) |
 | Real screenshots of the task views for the landing page cards, from the demo profile (`just seed-demo`, delivered by `e2e-suite-and-seed`) | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
 | Automated screenshot capture: a Playwright script over the demo data (`just serve-local` + `just seed-demo`) for docs and landing page | idea | `openspec/changes/e2e-suite-and-seed` (out of scope) |
-| Measure compile time (`cargo test --no-run --timings`), then less debug info in the dev profile and `cargo nextest` | idea | `openspec/changes/e2e-suite-and-seed` (out of scope) |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
 | Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
@@ -164,7 +163,6 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
 | Heartbeats (periodic wake-ups), only if events, routines and monitors turn out to be insufficient | idea | ADR-0016 |
-| CI job running the e2e suite (`just e2e-local` on Docker) | decided | `openspec/changes/archive/2026-10-31-iter1-demo-e2e/design.md` (Non-Goals) |
 | Automatic downscaling of image artifacts (e.g. to 2k or 4k on the long side) instead of rejecting images above the size and pixel limits | idea | ADR-0048 (amended 2026-11-03) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
 | SSH repository URLs, issue-only trackers | idea | `openspec/changes/archive/2026-10-30-iter2-multi-forge` |

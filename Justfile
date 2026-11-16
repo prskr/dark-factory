@@ -88,9 +88,10 @@ build:
 plugins:
     RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
 
-# Run all tests (or the ones matching FILTER); database tests share one `df-test-postgres` container
+# Run all tests (or the ones whose name contains FILTER) with cargo-nextest, then the doc tests; database tests share one `df-test-postgres` container. Needs `cargo-nextest` (`bazel run //:bazel_env`, docs/development.md).
 test *FILTER: plugins
-    {{docker_env}} cargo test --workspace {{FILTER}}
+    {{docker_env}} cargo nextest run --workspace {{FILTER}}
+    {{docker_env}} cargo test --workspace --doc {{FILTER}}
 
 # Line coverage across the workspace
 coverage: plugins

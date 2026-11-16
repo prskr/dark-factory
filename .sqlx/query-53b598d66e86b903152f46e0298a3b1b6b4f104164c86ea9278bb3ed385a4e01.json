@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.payload FROM transcript_events e JOIN tasks t ON t.id = e.task_id WHERE t.key = $1 AND e.kind = 'turn_started' ORDER BY e.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "transcript_events",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53b598d66e86b903152f46e0298a3b1b6b4f104164c86ea9278bb3ed385a4e01"
+}

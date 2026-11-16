@@ -9,11 +9,13 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use playwright_rs::protocol::{
-    AriaRole, BrowserContext, FetchOptions, GetByRoleOptions, Locator, Page,
+    AriaRole, BrowserContext, BrowserContextOptions, FetchOptions, GetByRoleOptions, Locator, Page,
+    StorageState,
 };
 use playwright_rs::{Playwright, expect, expect_page};
 
 use crate::env::E2eEnv;
+use crate::wait::UI_TIMEOUT;
 
 /// How long taking the screenshot of a failed test may take.
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -32,6 +34,19 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// Without a bound a server that stops answering (for example a restarted pod) blocks a test
 /// forever instead of failing it.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The login the tests of this process share. Every `#[tokio::test]` has a runtime of its own, and
+/// tokio's mutex does not depend on one.
+static SHARED_LOGIN: tokio::sync::Mutex<SharedLogin> = tokio::sync::Mutex::const_new(SharedLogin {
+    state: None,
+    generation: 0,
+});
+
+/// The storage state after the last login at Dex, and how many logins stored one.
+struct SharedLogin {
+    state: Option<StorageState>,
+    generation: u64,
+}
 
 /// A task creation that was submitted without the UI opening the task.
 #[derive(Debug, Clone)]
@@ -62,6 +77,56 @@ pub struct Session {
 impl Session {
     /// Connects to the Playwright server and opens a page in a new context.
     pub async fn start(env: &E2eEnv) -> Result<Self> {
+        Self::open(env, None).await
+    }
+
+    /// Like [`Session::start`] followed by [`Session::login`], but the Dex form is submitted at
+    /// most once per process while the session stays valid: the first call logs in and keeps the
+    /// storage state (cookies) of its context, later calls open their own context with it. A
+    /// context that still lands on the login form (the session expired or was removed) logs in
+    /// again and replaces the stored state. Tests that start together wait for that one login.
+    pub async fn start_logged_in(env: &E2eEnv) -> Result<Self> {
+        let (stored, generation) = {
+            let shared = SHARED_LOGIN.lock().await;
+            (shared.state.clone(), shared.generation)
+        };
+        let has_stored_state = stored.is_some();
+        let mut session = Box::pin(Self::open(env, stored)).await?;
+        if has_stored_state && session.try_stored_login(env).await? {
+            return Ok(session);
+        }
+        // Held across the login on purpose (the one exception to the rule against holding a lock
+        // over an await, AGENTS.md "Concurrency"): a test that starts meanwhile needs exactly its
+        // result. Every step under the lock is bounded on the client by `within`/`within_for`
+        // (`CONNECT_TIMEOUT`, `UI_TIMEOUT`) or, for the landing, by `LOGIN_TIMEOUT`. A stuck login
+        // fails the test that runs it and releases the lock.
+        let mut shared = SHARED_LOGIN.lock().await;
+        if shared.generation != generation {
+            let newer = Box::pin(Self::open(env, shared.state.clone())).await?;
+            if newer.try_stored_login(env).await? {
+                return Ok(newer);
+            }
+            session = newer;
+        }
+        if has_stored_state {
+            report(
+                "login",
+                "the stored login is no longer accepted, logging in again",
+            );
+        }
+        session.login(env).await?;
+        shared.state = Some(
+            within(
+                "read the storage state of the login",
+                session.context.storage_state(None),
+            )
+            .await?,
+        );
+        shared.generation += 1;
+        Ok(session)
+    }
+
+    async fn open(env: &E2eEnv, state: Option<StorageState>) -> Result<Self> {
         let playwright = within(
             "start the local Playwright driver (`just e2e-local` installs it)",
             Playwright::launch(),
@@ -72,7 +137,19 @@ impl Session {
             playwright.chromium().connect(&env.playwright_ws, None),
         )
         .await?;
-        let context = within("open a browser context", browser.new_context()).await?;
+        let context = match state {
+            Some(state) => {
+                let options = BrowserContextOptions::builder()
+                    .storage_state(state)
+                    .build();
+                within(
+                    "open a browser context with the stored login",
+                    browser.new_context_with_options(options),
+                )
+                .await?
+            }
+            None => within("open a browser context", browser.new_context()).await?,
+        };
         let page = within("open a page", context.new_page()).await?;
         Ok(Self {
             _playwright: playwright,
@@ -87,35 +164,69 @@ impl Session {
 
     /// Opens the UI and logs in at Dex; returns when the board is shown.
     pub async fn login(&self, env: &E2eEnv) -> Result<()> {
-        self.page
-            .goto(&env.base_url, None)
-            .await
-            .context("open the UI")?;
-        self.page
-            .locator("input[name=login]")
-            .fill(&env.user, None)
-            .await
-            .context("fill the user")?;
-        self.page
-            .locator("input[name=password]")
-            .fill(&env.password, None)
-            .await
-            .context("fill the password")?;
+        report("login", "submitting the Dex login form");
+        within_for(
+            UI_TIMEOUT,
+            "open the UI",
+            self.page.goto(&env.base_url, None),
+        )
+        .await?;
+        within_for(
+            UI_TIMEOUT,
+            "fill the user",
+            self.page.locator("input[name=login]").fill(&env.user, None),
+        )
+        .await?;
+        within_for(
+            UI_TIMEOUT,
+            "fill the password",
+            self.page
+                .locator("input[name=password]")
+                .fill(&env.password, None),
+        )
+        .await?;
         // Dex's form has a single submit button; its label is Dex's, not the application's.
-        self.page
-            .locator("button[type=submit]")
-            .click(None)
-            .await
-            .context("submit the login")?;
+        within_for(
+            UI_TIMEOUT,
+            "submit the login",
+            self.page.locator("button[type=submit]").click(None),
+        )
+        .await?;
         expect_page(&self.page)
             .with_timeout(LOGIN_TIMEOUT)
             .to_have_url_regex(&format!("^{}", regex::escape(&env.base_url)))
             .await
             .context("land on the UI after the login")?;
-        // Kept for the fallback of the teardown, which must work when the browser does not answer.
+        self.remember_cookie().await
+    }
+
+    /// Kept for the fallback of the teardown, which must work when the browser does not answer.
+    async fn remember_cookie(&self) -> Result<()> {
         let cookie = self.read_cookie_header().await?;
         *self.cookie.lock().unwrap_or_else(PoisonError::into_inner) = Some(cookie);
         Ok(())
+    }
+
+    /// Opens the UI with the stored login and reports whether it is accepted; if so, keeps the
+    /// cookie header of the session for the teardown.
+    async fn try_stored_login(&self, env: &E2eEnv) -> Result<bool> {
+        if !self.opens_the_ui(env).await? {
+            return Ok(false);
+        }
+        self.remember_cookie().await?;
+        Ok(true)
+    }
+
+    /// Opens the UI and reports whether it answered instead of redirecting to the login form.
+    async fn opens_the_ui(&self, env: &E2eEnv) -> Result<bool> {
+        let response = within_for(
+            UI_TIMEOUT,
+            "open the UI with the stored login",
+            self.page.goto(&env.base_url, None),
+        )
+        .await?;
+        check_ui_status(response.map(|r| r.status()))?;
+        Ok(lands_on_the_ui(&self.page.url(), &env.base_url))
     }
 
     /// The keys of the tasks created through [`Session::create_task`] and its variants, oldest
@@ -589,6 +700,32 @@ pub fn submitted_description(description: &str, suffix: Option<&String>) -> Stri
     }
 }
 
+/// An error page under the UI's origin (for example the 502 "Login unavailable" of `/login` when the
+/// identity provider fails) is not a logged-in page, although its URL passes [`lands_on_the_ui`].
+fn check_ui_status(status: Option<u16>) -> Result<()> {
+    match status {
+        Some(status) if status >= 400 => Err(anyhow!("the UI answered with HTTP {status}")),
+        _ => Ok(()),
+    }
+}
+
+/// Whether `url`, where a page ended up after opening the UI, is a page of the UI (at `base_url`)
+/// and not the login form of the identity provider.
+fn lands_on_the_ui(url: &str, base_url: &str) -> bool {
+    url.strip_prefix(base_url)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+}
+
+/// Writes `<topic>: <line>` to stderr, the test output of cargo (visible with `--nocapture`): a run
+/// shows how often the suite logs in and what a teardown had to do.
+#[expect(
+    clippy::print_stderr,
+    reason = "the suite reports to the test output of cargo"
+)]
+pub(crate) fn report(topic: &str, line: &str) {
+    eprintln!("{topic}: {line}");
+}
+
 /// Runs `step` of the browser setup with [`CONNECT_TIMEOUT`], so that a server that does not
 /// answer fails the test with `what` instead of blocking it.
 async fn within<T, E>(what: &str, step: impl Future<Output = Result<T, E>>) -> Result<T>
@@ -617,7 +754,40 @@ mod tests {
     use std::future::pending;
     use std::time::Duration;
 
-    use super::{submitted_description, within, within_for};
+    use super::{check_ui_status, lands_on_the_ui, submitted_description, within, within_for};
+
+    #[test]
+    fn an_error_page_of_the_ui_is_not_a_login() {
+        assert!(check_ui_status(Some(200)).is_ok());
+        assert!(check_ui_status(None).is_ok());
+        let error = check_ui_status(Some(502)).unwrap_err();
+        assert!(error.to_string().contains("502"), "{error}");
+        assert!(check_ui_status(Some(404)).is_err());
+    }
+
+    #[test]
+    fn a_page_of_the_ui_is_not_the_login_form() {
+        let base = "http://127.0.0.1:13001";
+
+        assert!(lands_on_the_ui("http://127.0.0.1:13001", base));
+        assert!(lands_on_the_ui("http://127.0.0.1:13001/", base));
+        assert!(lands_on_the_ui(
+            "http://127.0.0.1:13001/tasks?project=DF",
+            base
+        ));
+        assert!(!lands_on_the_ui(
+            "http://dex.dex.svc:5556/dex/auth?client_id=dark-factory",
+            base
+        ));
+    }
+
+    #[test]
+    fn another_port_with_the_same_prefix_is_not_the_ui() {
+        assert!(!lands_on_the_ui(
+            "http://127.0.0.1:130010/",
+            "http://127.0.0.1:13001"
+        ));
+    }
 
     #[test]
     fn a_submitted_description_ends_in_the_suffix_of_the_test() {

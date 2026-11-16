@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.number, r.state, r.outcome, r.retry_after IS NOT NULL AS \"has_retry_after!\",\n         r.harness_session_id FROM runs r\n         JOIN tasks t ON t.id = r.task_id WHERE t.key = $1 ORDER BY r.number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "has_retry_after!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "harness_session_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "harness_session_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "f33b1eb845fb8f393020b8e6aed96f7a44e18f7b8bc9bea0d0a4a2a63dd9811e"
+}

@@ -33,7 +33,7 @@ Waiting for the compiler is the largest cost of shipping a feature with agents, 
 - TD-93 role assertions (`member`, `outside`): needs the agent's tool result checked in the e2e and a third user; not a cleanup. Stays in `docs/tech_debt.md`.
 - TD-120 and TD-122 (live delivery of the traffic page and the Artifacts tab have no e2e test): new tests, not a cleanup. Stay in `docs/tech_debt.md`.
 - One integration test binary per crate (`df-plugins` has 10, `df-gateway` 6): saves link time, but every Bazel `rust_test` target and `cargo xtask check-crates` change with it. Target: backlog in `product/iterations/roadmap.md`, decided with the timings of this change.
-- A different linker (`mold`) or a shared `CARGO_TARGET_DIR` across worktrees: decided with the timings of this change. Target: backlog in `product/iterations/roadmap.md`.
+- A different linker (`mold`) or a shared `CARGO_TARGET_DIR` across worktrees: rejected with the timings of this change (design.md, Risks, "Compile-time numbers"): the arm64 build already links with `rust-lld` and linking is not shown as the bottleneck, and a shared target directory serializes parallel builds.
 - Pruning stale artifacts from `target/` (a `just` recipe or `cargo-sweep`): `target/` is deleted before each change anyway. Rejected.
 - Changes to Bazel's `fastbuild` settings: CI test times are not the complaint. Rejected.
 

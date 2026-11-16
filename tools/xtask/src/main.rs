@@ -94,7 +94,7 @@ struct GithubTool {
     asset: AssetFn,
 }
 
-const TOOLS: [GithubTool; 16] = [
+const TOOLS: [GithubTool; 17] = [
     GithubTool {
         name: "shellcheck",
         repo: "koalaman/shellcheck",
@@ -223,6 +223,23 @@ const TOOLS: [GithubTool; 16] = [
         },
     },
     GithubTool {
+        name: "cargo-nextest",
+        repo: "nextest-rs/nextest",
+        // The tag is `cargo-nextest-<version>`. Static musl builds on Linux, one universal build on
+        // macOS; the archive holds the bare `cargo-nextest` binary.
+        asset: |v, p| {
+            let cpu = if p.cpu == "arm64" { "aarch64" } else { p.cpu };
+            let target = match p.os {
+                "macos" => "universal-apple-darwin".to_owned(),
+                _ => format!("{cpu}-unknown-linux-musl"),
+            };
+            (
+                format!("cargo-nextest-{v}-{target}.tar.gz"),
+                "cargo-nextest".into(),
+            )
+        },
+    },
+    GithubTool {
         name: "jq",
         repo: "jqlang/jq",
         asset: |_, p| {
@@ -276,7 +293,12 @@ const TOOLS: [GithubTool; 16] = [
 ];
 
 fn github_binaries(tool: &GithubTool, release: &Release) -> Result<Vec<Binary>> {
-    let version = release.tag_name.trim_start_matches('v');
+    // The tag is `v1.2.3`, or `<tool>-1.2.3` where one repository releases several tools.
+    let tag = &release.tag_name;
+    let version = tag
+        .strip_prefix(tool.name)
+        .map_or(tag.as_str(), |rest| rest.trim_start_matches('-'))
+        .trim_start_matches('v');
     PLATFORMS
         .iter()
         .map(|&p| {
@@ -483,6 +505,27 @@ mod tests {
         assert_eq!(file, "cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny");
         let (_, file) = (tool("shellcheck").asset)("0.11.0", PLATFORMS[0]);
         assert_eq!(file, "shellcheck-v0.11.0/shellcheck");
+    }
+
+    #[test]
+    fn nextest_version_comes_from_its_prefixed_tag() {
+        let names = [
+            "cargo-nextest-0.9.152-x86_64-unknown-linux-musl.tar.gz",
+            "cargo-nextest-0.9.152-aarch64-unknown-linux-musl.tar.gz",
+            "cargo-nextest-0.9.152-universal-apple-darwin.tar.gz",
+        ];
+        let r = release("cargo-nextest-0.9.152", &names, Some("sha256:abc"));
+        let bins = github_binaries(tool("cargo-nextest"), &r).unwrap();
+        assert_eq!(bins.len(), 4);
+        assert!(
+            bins.iter()
+                .all(|b| b.file.as_deref() == Some("cargo-nextest"))
+        );
+        assert_eq!(
+            bins.iter().filter(|b| b.os == "macos").count(),
+            2,
+            "both macOS CPUs use the universal build"
+        );
     }
 
     #[test]

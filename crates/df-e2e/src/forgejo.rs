@@ -16,6 +16,25 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a merge is retried while Forgejo re-checks the pull request.
 const MERGE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// The verdict of a review submitted with [`Forgejo::submit_review`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewEvent {
+    Approve,
+    RequestChanges,
+    Comment,
+}
+
+impl ReviewEvent {
+    /// The value of the `event` field of Forgejo's review API.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approve => "APPROVED",
+            Self::RequestChanges => "REQUEST_CHANGES",
+            Self::Comment => "COMMENT",
+        }
+    }
+}
+
 /// Forgejo API client for one repository (`factory/demo` unless [`Forgejo::for_repository`] says
 /// otherwise), authenticated with the token it is built with (the bot's or the reviewer's).
 #[derive(Debug, Clone)]
@@ -129,12 +148,11 @@ impl Forgejo {
             .await
     }
 
-    /// Submits a review of pull request `number` with verdict `event` (`APPROVED`,
-    /// `REQUEST_CHANGES` or `COMMENT`) and `body`.
-    pub async fn submit_review(&self, number: u64, event: &str, body: &str) -> Result<()> {
+    /// Submits a review of pull request `number` with verdict `event` and `body`.
+    pub async fn submit_review(&self, number: u64, event: ReviewEvent, body: &str) -> Result<()> {
         self.post(
             &format!("pulls/{number}/reviews"),
-            &serde_json::json!({ "event": event, "body": body }),
+            &serde_json::json!({ "event": event.as_str(), "body": body }),
         )
         .await?;
         Ok(())
@@ -291,5 +309,17 @@ impl Forgejo {
             "{}/api/v1/repos/{}/{}/{path}",
             self.base_url, self.owner, self.repository
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReviewEvent;
+
+    #[test]
+    fn a_review_event_is_sent_as_the_string_forgejo_expects() {
+        assert_eq!(ReviewEvent::Approve.as_str(), "APPROVED");
+        assert_eq!(ReviewEvent::RequestChanges.as_str(), "REQUEST_CHANGES");
+        assert_eq!(ReviewEvent::Comment.as_str(), "COMMENT");
     }
 }

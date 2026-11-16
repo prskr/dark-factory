@@ -103,13 +103,43 @@ debug = false
 ## Risks / Trade-offs
 
 - **[Compile-time numbers]** Filled in by tasks 1.1 and 1.4: a table of clean, warm (low crate), warm (leaf crate) and `target/` size, before and after.
+
+  Machine: Linux 6.12 guest (NixOS) on Apple silicon, 8 cores, 15 GiB RAM, aarch64; rustc 1.99.1, plain `cargo` (no `mold`), `-j` default.
+
+  | Measure (commands of D6) | Before | After |
+  |---|---|---|
+  | Clean `cargo test --workspace --no-run --timings` | 600 s | 490 s (-18 %) |
+  | Warm, `touch crates/df-core/src/lib.rs`, `cargo test --workspace --no-run` | 359 s | 274 s (-24 %) |
+  | Warm, `touch crates/df-web/src/lib.rs`, `cargo test -p df-web --no-run` | 123 s | 85 s (-31 %) |
+  | `target/debug` after the clean build | 33 GB | 12 GB (-64 %) |
+  | `target/debug/deps` / `incremental` after the two warm builds | 27 GB / 12 GB | 8.3 GB / 6.6 GB |
+  | Test binaries above 50 MB in `deps/` (after the clean build) | 54 | 38 |
+  | CPU time of all compile units (sum, `--timings`) | 2369 s | 1930 s |
+
+  "After" is `[profile.dev]` of D7 alone; nextest changes no build. A panic in a test still prints `file:line` (checked with `RUST_BACKTRACE=1` on a failing test: `panicked at crates/df-core/tests/…rs:4:5`, frames with `at ./tests/…rs:4:5`).
+
+  Decisions on the out-of-scope rows (task 1.4): the 36 integration test binaries take 662 s of the 1930 s CPU time after the change (34 %; 866 s of 2369 s before), more than any other group, and `--timings` does not split their compile and link time. One test binary per crate stays a backlog row of `product/iterations/roadmap.md` with that share. `mold` is rejected: the Linux arm64 build already links with `rust-lld` (`.cargo/cc-lld.sh`), and nothing here shows linking as the bottleneck. A shared `CARGO_TARGET_DIR` across worktrees is rejected: cargo locks the directory, so parallel builds of two worktrees would wait for each other, and branches would invalidate each other's artifacts.
+
+  What the timings of the baseline show: 1073 compile units add up to 2369 s of CPU time, 1427 s (60 %) of it in the 57 test and test-harness units of workspace crates; the proc-macro crates (`sqlx-macros`, `prost-derive`, `serde_derive`, ...) add up to about 20 s and build scripts to 13 s. Proc macros are therefore not a large share, so no `[profile.dev.build-override]` (D7).
 - **[Debugger sessions lose variables]** → `CARGO_PROFILE_DEV_DEBUG=true` for that shell; documented in `docs/development.md`.
 - **[nextest output differs from `cargo test`]** Agents parse test output in their reports. → Skill `rust` shows the nextest commands for one test, one crate and the before-commit run, and keeps `cargo test` as the fallback where nextest is not installed (sandboxes without `.bazel_env`).
 
 - **[A test logs out or changes the session]** No test logs out today (`grep -i logout crates/df-e2e` is empty). → A test that needs it must use its own `Session::start` + `login`, noted in skill `e2e` and `docs/demo.md`.
-- **[A failure in one test now looks like a login failure in another]** If the shared session breaks, the next test re-logs in (D1 step 3) instead of failing on a stale cookie. → The re-login is logged at `info` with the test name, so a run shows how often it happened.
+- **[A failure in one test now looks like a login failure in another]** If the shared session breaks, the next test re-logs in (D1 step 3) instead of failing on a stale cookie. → The re-login prints a `login: …` line to stderr (visible with `--nocapture`), so a run shows how often it happened.
 - **[Checked queries need a database for `prepare`]** Regenerating `.sqlx/` needs PostgreSQL (container or local). → CI and the pre-push hook build offline from the checked-in metadata; only the implementer needs a database once.
 - **[Speed gain smaller than expected]** → Tasks 2.1 and 2.4 measure the summed fixture start times before and after, and the result goes into this section.
+
+  Measured on a kept kind cluster of the machine above (temporary elapsed-time output around `World::start`, removed again; `--test-threads=2`, all 35 fixture tests of 9 binaries):
+
+  | | Before (login per test) | After (login per binary) |
+  |---|---|---|
+  | Dex form submissions per run | 37 (35 fixture tests, the login test's own, the watcher of `ui.rs`) | 10 (one per binary, plus the login test's own) |
+  | Summed `World::start` | 13.0 s | 11.1 s (22.1 s over the two runs of `E2E_REPEAT=2`) |
+  | Median `World::start` | 344 ms | 203 ms |
+  | Longest `World::start` | 674 ms | 662 ms |
+  | One run of the test step (`cargo test`, after the reset) | not recorded | 384 s and 386 s |
+
+  On a warm cluster the gain is small: a login costs about 140 ms, the rest of `World::start` (Playwright driver, browser connection, context) stays, so the suite saves about 2 s of about 6.5 minutes. The cold first login after a cluster start (up to `LOGIN_TIMEOUT`, 30 s) is the case this helps most; the measurement does not cover it. Re-login path (task 2.4): with the `web_sessions` rows deleted before each of three sequential tests of `demo.rs`, the second and third test logged `the stored login is no longer accepted, logging in again`, submitted the Dex form again and passed.
 
 ## Migration Plan
 
