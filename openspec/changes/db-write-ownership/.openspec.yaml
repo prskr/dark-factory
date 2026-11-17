@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-16
+# Pure refactor: storage ownership moves between crates, no requirement or observable behavior changes.
+skip_specs: true
