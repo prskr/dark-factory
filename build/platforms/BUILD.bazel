@@ -41,24 +41,6 @@ platform(
     },
 )
 
-# zig cc for amd64 exec platforms on every client: hermetic_cc_toolchain declares toolchains for the host's own
-# platform in `@zig_sdk//toolchain` and for other exec platforms in a sub-package that does not exist on an
-# amd64 Linux host, so that label cannot be registered directly. Registered before the host's toolchains, so
-# all clients run the same zig paths (action keys, remote cache); target platform: the exec platform itself.
-toolchain(
-    name = "zig_cc_exec_linux_amd64",
-    exec_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ],
-    target_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ],
-    toolchain = "@zig_config-linux-amd64//:x86_64-linux-gnu.2.28_cc",
-    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
-)
-
 # Default target platform on Linux hosts (`build:linux` in .bazelrc): the host's cpu with musl, so tests
 # run the same static binaries that go into the images. The exec platform stays the plain (glibc) host.
 platform(

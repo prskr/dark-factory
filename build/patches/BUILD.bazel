@@ -1,1 +1,4 @@
-exports_files(["hermetic_cc_toolchain-rustc-linker-args.patch"])
+exports_files([
+    "hermetic_cc_toolchain-host-exec-platform.patch",
+    "hermetic_cc_toolchain-rustc-linker-args.patch",
+])

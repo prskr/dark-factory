@@ -1,0 +1,21 @@
+Declares the toolchains of every `zig.exec_platform` tag in `@zig_sdk//toolchain/<os>-<arch>`, also the one of
+the host's own platform. Upstream skips that package on a matching host, so
+`@zig_sdk//toolchain/linux-amd64` did not exist on an amd64 Linux client and could not be registered for every
+client (shared exec action keys, docs/adr/0058). The host's toolchains in `@zig_sdk//toolchain` stay as they are.
+
+--- a/toolchain/private/repositories.bzl
++++ b/toolchain/private/repositories.bzl
+@@ -78,12 +78,7 @@
+     # toolchains for the HOST
+     _define_zig_toolchains(repository_ctx, "@zig_config")
+
+-    # Remove the HOST to not duplicate Zig HOST toolchains (@zig_config)
+-    exec_platforms = dict(repository_ctx.attr.exec_platforms)
+-    exec_archs = exec_platforms.get(_os, list())
+-    exec_platforms[_os] = [a for a in exec_archs if a != _arch]
+-
+-    for os, archs in exec_platforms.items():
++    for os, archs in repository_ctx.attr.exec_platforms.items():
+         for arch in archs:
+             _os = transform_os_name(os)
+             _arch = transform_arch_name(arch)

@@ -62,7 +62,7 @@ BuildBuddy's public image `gcr.io/flame-public/rbe-ubuntu24-04`, pinned by the d
 
 ### 3.2 Exec C toolchain
 
-`hermetic_cc_toolchain` (zig cc, glibc 2.28 for the exec tools), registered after `@musl_toolchains_hub` in `MODULE.bazel` so that the musl platforms keep `toolchains_musl` (2.1). `//build/platforms:zig_cc_exec_linux_amd64` is registered before `@zig_sdk//toolchain:*` for every client, so that all clients use the same zig paths and share the exec action keys with the amd64 workers. Two arguments of `rustc` that zig rejects are removed by a patch (`build/patches/`). The zig cache directory must be fixed and visible to the sandbox, otherwise every action starts with an empty cache (`.bazelrc`, development.md). `toolchains_llvm` was tried first and rejected, see [ADR-0058](adr/0058-hermetic-c-toolchain.md).
+`hermetic_cc_toolchain` (zig cc, glibc 2.28 for the exec tools), registered after `@musl_toolchains_hub` in `MODULE.bazel` so that the musl platforms keep `toolchains_musl` (2.1). `@zig_sdk//toolchain/linux-amd64:linux_amd64_gnu.2.28` is registered before `@zig_sdk//toolchain:*` for every client, so that all clients use the same zig paths and share the exec action keys with the amd64 workers. Two patches (`build/patches/`) remove two arguments of `rustc` that zig rejects and declare that package on amd64 Linux hosts too (upstream skips the host's own exec platform). The zig cache directory must be fixed and visible to the sandbox, otherwise every action starts with an empty cache (`.bazelrc`, development.md). `toolchains_llvm` was tried first and rejected, see [ADR-0058](adr/0058-hermetic-c-toolchain.md).
 
 ### 3.3 Bazel configuration
 
