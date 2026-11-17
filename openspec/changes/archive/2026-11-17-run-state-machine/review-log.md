@@ -105,3 +105,16 @@ Spec: 0 findings. Security: 0 findings.
 - Tech debt: none (no P2 findings).
 - Roadmap backlog rows added: remove RUN_PHASE_PREPARING/FINALIZING from agent.proto; move old lock-wait test loops onto `wait_for_lock_wait` (user request).
 - Totals: fixed 31 IDs (S1–S6, S8, S10–S20, SP1–SP3, SP5–SP14; S20 and SP13 one defect), cosmetic 5 (S7, S9, SP4, S21, S22), rejected 0, security 0.
+
+## Follow-up at rebase (2026-11-17)
+
+- `main` gained 7036bf0a (user's design review): `Finalize(reason)` on a finalizing run replaces `idle` with `budget` or `done`. Branch implemented only `budget`: a task marked done by the board after an idle Release got no `Cancel("task marked done")` (base did send it). Not caught by the reviews (commit was not on the branch).
+- User decision: implement it. Done takes over `idle`; `finalize_idle_run` uses `active_run_of_task` (`idle_run_of_task` deleted); tests in df-core, df-db and session; configuration.md and run-transitions.md updated. Folded into the refactor commit; container tests ran, clippy/docs-build ok.
+- Rebased onto 7036bf0a: branch artifact text kept, decision 3 takes main's sentence on the takeover.
+
+## PR #246 review (CodeRabbit, 2026-11-17)
+
+| ID | Where | Finding | Decision | Status |
+|----|-------|---------|----------|--------|
+| CR1 | `crates/df-core/src/run_transition.rs:372` | A stop accepted before connection is lost if the sandbox connects before the scheduler ends the run: `connected` moves it to `preparing`, no Cancel, teardown only at stop timeout (also true in base) | fix: `Connected` on a stopped unconnected run → `finalizing` + `stop`; df-core and session tests; listed under Intended differences | fixed |
+| CR2 | `tasks.md:39` | Task 5.2 claims Bazel/e2e pass on a revision they did not run on | Bazel and e2e jobs ran green in CI on af010c28 and run on every push; task text says so | fixed |
