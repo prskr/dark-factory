@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT run_id, kind,\n          COALESCE(payload ->> 'turnId', '') AS \"turn_id!\",\n          COALESCE(payload #>> '{agentMessageChunk,messageId}', '') AS \"message_id!\",\n          COALESCE(CASE kind\n            WHEN $4 THEN\n              (SELECT string_agg(b.block #>> '{text,text}', E'\\n' ORDER BY b.ord)\n                 FROM jsonb_array_elements(payload #> '{userMessage,content}')\n                      WITH ORDINALITY AS b(block, ord)\n                WHERE COALESCE((b.block ->> 'hidden')::boolean, false) = false)\n            ELSE payload #>> '{agentMessageChunk,content,text,text}'\n          END, '') AS \"text!\",\n          COALESCE(payload #>> '{toolCall,toolCallId}', payload #>> '{toolCallUpdate,toolCallId}', '')\n            AS \"tool_call_id!\",\n          COALESCE(payload #>> '{toolCall,title}', payload #>> '{toolCallUpdate,title}') AS title,\n          COALESCE(payload #>> '{toolCall,status}', payload #>> '{toolCallUpdate,status}') AS status\n        FROM transcript_events\n        WHERE task_id = $1 AND run_id <> $2 AND kind = ANY($3)\n        ORDER BY id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "transcript_events",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transcript_events",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "turn_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "message_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "text!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "tool_call_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "title",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f615e20ef85849357e175a9823cde392cac2c0731819e340a36ae31ca55f842d"
+}

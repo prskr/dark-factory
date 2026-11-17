@@ -195,7 +195,7 @@ async fn queueing_message_on_waiting_or_failed_or_rate_limited_task() {
         .unwrap();
 
     assert!(
-        mark_prompt_delivered(&pool, initial_prompt.id, run_id)
+        mark_prompt_delivered(&pool, task.id, initial_prompt.id, run_id)
             .await
             .unwrap()
     );
@@ -602,9 +602,14 @@ async fn task_with_queued_message(pool: &PgPool) -> (TaskRow, TaskMessageRow) {
     let (task, assignment) = create_task(pool, new_task(project_id, persona_id, Some("T")))
         .await
         .unwrap();
-    mark_prompt_delivered(pool, assignment.id, insert_run(pool, task.id).await)
-        .await
-        .unwrap();
+    mark_prompt_delivered(
+        pool,
+        task.id,
+        assignment.id,
+        insert_run(pool, task.id).await,
+    )
+    .await
+    .unwrap();
     crate::task_events::set_status_for_test(pool, task.id, TaskStatus::Waiting).await;
     let msg = queue_message(pool, task.id, human(), text("first"))
         .await
@@ -632,7 +637,7 @@ pub(crate) async fn task_with_run(pool: &PgPool, status: TaskStatus, run_state: 
         .await
         .unwrap();
     let run = insert_run(pool, task.id).await;
-    mark_prompt_delivered(pool, assignment.id, run)
+    mark_prompt_delivered(pool, task.id, assignment.id, run)
         .await
         .unwrap();
     sqlx::query("UPDATE runs SET state = $2 WHERE id = $1")
@@ -831,7 +836,7 @@ async fn claim_marks_held_back_messages_forwarded_once_in_queue_order() {
 async fn claim_skips_delivered_messages() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let (task, msg) = task_with_queued_message(&pool).await;
-    mark_prompt_delivered(&pool, msg.id, insert_run(&pool, task.id).await)
+    mark_prompt_delivered(&pool, task.id, msg.id, insert_run(&pool, task.id).await)
         .await
         .unwrap();
 
@@ -1058,7 +1063,7 @@ async fn sql_and_rust_agree_on_which_messages_are_editable() {
             .await
             .unwrap();
         let run = insert_run(&pool, task.id).await;
-        mark_prompt_delivered(&pool, delivered.id, run)
+        mark_prompt_delivered(&pool, task.id, delivered.id, run)
             .await
             .unwrap();
         let system = queue_message(&pool, task.id, Principal::system("x"), text("system"))

@@ -17,9 +17,14 @@ async fn follow_up_message_is_pending_and_requeues_the_task() {
         .await
         .unwrap();
     let run = insert_run(&app.pool, task.id, 1, "succeeded").await;
-    df_db::mark_prompt_delivered(&app.pool, initial[0].id, df_core::RunId::from_uuid(run))
-        .await
-        .unwrap();
+    df_db::mark_prompt_delivered(
+        &app.pool,
+        task.id,
+        initial[0].id,
+        df_core::RunId::from_uuid(run),
+    )
+    .await
+    .unwrap();
     crate::testkit::set_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting).await;
 
     let response = app
@@ -51,9 +56,14 @@ async fn follow_up_message_is_pending_and_requeues_the_task() {
     // The page shows it as pending until the transcript delivers it.
     let page = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(page.contains("also add a test for X"));
-    df_db::mark_prompt_delivered(&app.pool, queued[0].id, df_core::RunId::from_uuid(run))
-        .await
-        .unwrap();
+    df_db::mark_prompt_delivered(
+        &app.pool,
+        task.id,
+        queued[0].id,
+        df_core::RunId::from_uuid(run),
+    )
+    .await
+    .unwrap();
     let page = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(!page.contains("also add a test for X"));
 }
@@ -141,9 +151,14 @@ async fn task_with_queued_message(
         .await
         .unwrap();
     let run = insert_run(&app.pool, task.id, 1, "succeeded").await;
-    df_db::mark_prompt_delivered(&app.pool, initial[0].id, df_core::RunId::from_uuid(run))
-        .await
-        .unwrap();
+    df_db::mark_prompt_delivered(
+        &app.pool,
+        task.id,
+        initial[0].id,
+        df_core::RunId::from_uuid(run),
+    )
+    .await
+    .unwrap();
     crate::testkit::set_task_status(&app.pool, task.id, df_core::TaskStatus::Waiting).await;
     let message = df_db::queue_message(&app.pool, task.id, human(), text_content(text))
         .await

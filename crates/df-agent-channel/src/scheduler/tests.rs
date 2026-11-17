@@ -1,11 +1,11 @@
 //! Tests of the run scheduler.
 
 use super::*;
-use crate::runs::get_run;
 use crate::testing::gated::{Gate, GatedProvider};
 use crate::testing::{Env, task_resume_state};
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, TaskStatus};
+use df_db::runs::get_run;
 use sqlx::PgPool;
 
 /// One pass of the production code: start and provision what is queued, then enforce

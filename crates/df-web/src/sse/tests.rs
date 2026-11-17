@@ -182,10 +182,13 @@ async fn forge_activity_written_by_the_control_plane_reaches_the_stream_in_order
         df_db::transcript::lock_run_and_task(&mut tx, df_core::RunId::from_uuid(f.run), f.task)
             .await
             .unwrap();
-    let id = df_db::transcript::append_control_event(&mut tx, &lock, "pr-opened:12", &opened)
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
+    let id = writer
+        .append_control(&mut tx, "pr-opened:12", &opened)
         .await
         .unwrap()
         .unwrap();
+    writer.finish(&mut tx).await.unwrap();
     tx.commit().await.unwrap();
     let frame = tokio::time::timeout(LIVE, sse.next())
         .await
@@ -227,10 +230,13 @@ async fn an_artifact_written_event_reaches_the_stream_as_a_row_in_order_with_the
         df_db::transcript::lock_run_and_task(&mut tx, df_core::RunId::from_uuid(f.run), f.task)
             .await
             .unwrap();
-    let id = df_db::transcript::append_control_event(&mut tx, &lock, "artifact:c1", &written)
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
+    let id = writer
+        .append_control(&mut tx, "artifact:c1", &written)
         .await
         .unwrap()
         .unwrap();
+    writer.finish(&mut tx).await.unwrap();
     tx.commit().await.unwrap();
 
     let frame = tokio::time::timeout(LIVE, sse.next())

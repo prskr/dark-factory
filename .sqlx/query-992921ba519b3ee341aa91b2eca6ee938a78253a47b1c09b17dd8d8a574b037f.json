@@ -1,0 +1,167 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,\n               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,\n               p.agent_branch_globs,\n               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS \"has_tasks!\"\n        FROM projects p WHERE p.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "repo_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "repo_url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "issue_tracker_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "issue_tracker_url"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "image",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "image"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "base_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "base_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "adapter_command",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "adapter_command"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "forge_credential_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "forge_credential_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "webhook_wake",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "webhook_wake"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "branch_rewrite_policy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "branch_rewrite_policy"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "agent_branch_globs",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "agent_branch_globs"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "has_tasks!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "992921ba519b3ee341aa91b2eca6ee938a78253a47b1c09b17dd8d8a574b037f"
+}

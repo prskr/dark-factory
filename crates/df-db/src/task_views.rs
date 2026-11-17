@@ -7,19 +7,18 @@ use df_core::{
     is_satisfied,
 };
 use df_proto::transcript::v1::Event;
-use sqlx::{FromRow, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::pool::DbError;
 
 /// One row of the task list.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListItem {
     pub id: Uuid,
     pub key: String,
     pub title: String,
     /// `Placeholder` while the title is provisional.
-    #[sqlx(try_from = "String")]
     pub title_source: TitleSource,
     pub project_key: String,
     pub project_name: String,
@@ -30,6 +29,43 @@ pub struct TaskListItem {
     pub resume_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// A row of the task list as `query_as!` reads it.
+struct TaskListRow {
+    id: Uuid,
+    key: String,
+    title: String,
+    title_source: String,
+    project_key: String,
+    project_name: String,
+    persona_name: String,
+    status: String,
+    status_line: String,
+    resume_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<TaskListRow> for TaskListItem {
+    type Error = DbError;
+
+    fn try_from(row: TaskListRow) -> Result<Self, DbError> {
+        Ok(Self {
+            id: row.id,
+            key: row.key,
+            title: row.title,
+            title_source: row.title_source.parse()?,
+            project_key: row.project_key,
+            project_name: row.project_name,
+            persona_name: row.persona_name,
+            status: row.status,
+            status_line: row.status_line,
+            resume_at: row.resume_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
 }
 
 /// Which tasks the list shows; the default is all of them.
@@ -51,7 +87,7 @@ impl TaskFilter {
 }
 
 /// A project of the project filter with its number of tasks in the current status group.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectFilterItem {
     pub key: String,
     pub name: String,
@@ -59,12 +95,11 @@ pub struct ProjectFilterItem {
 }
 
 /// A task with the names and links the detail page shows.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskDetail {
     pub id: Uuid,
     pub key: String,
     pub title: String,
-    #[sqlx(try_from = "String")]
     pub title_source: TitleSource,
     pub description: String,
     pub project_key: String,
@@ -77,7 +112,6 @@ pub struct TaskDetail {
     /// Model of the persona; `None` means the instance default.
     pub persona_model: Option<String>,
     pub issue_number: Option<i64>,
-    #[sqlx(try_from = "String")]
     pub status: TaskStatus,
     pub status_line: String,
     pub pr_number: Option<i64>,
@@ -90,12 +124,76 @@ pub struct TaskDetail {
     pub resume_at: Option<DateTime<Utc>>,
     /// Consecutive automatic resumes after infrastructure failures.
     pub auto_resumes: i32,
-    #[sqlx(json)]
     pub created_by: Principal,
     /// Key of the task whose agent created this one, if an agent did.
     pub creator_task_key: Option<String>,
     pub parent_key: Option<String>,
     pub parent_title: Option<String>,
+}
+
+/// A task detail as `query_as!` reads it.
+struct TaskDetailRow {
+    id: Uuid,
+    key: String,
+    title: String,
+    title_source: String,
+    description: String,
+    project_key: String,
+    project_name: String,
+    repo_url: String,
+    issue_tracker_url: Option<String>,
+    persona_name: String,
+    persona_harness: String,
+    persona_model: Option<String>,
+    issue_number: Option<i64>,
+    status: String,
+    status_line: String,
+    pr_number: Option<i64>,
+    pr_url: Option<String>,
+    pr_title: Option<String>,
+    pr_attached: bool,
+    branch: String,
+    resume_at: Option<DateTime<Utc>>,
+    auto_resumes: i32,
+    created_by: serde_json::Value,
+    creator_task_key: Option<String>,
+    parent_key: Option<String>,
+    parent_title: Option<String>,
+}
+
+impl TryFrom<TaskDetailRow> for TaskDetail {
+    type Error = DbError;
+
+    fn try_from(row: TaskDetailRow) -> Result<Self, DbError> {
+        Ok(Self {
+            id: row.id,
+            key: row.key,
+            title: row.title,
+            title_source: row.title_source.parse()?,
+            description: row.description,
+            project_key: row.project_key,
+            project_name: row.project_name,
+            repo_url: row.repo_url,
+            issue_tracker_url: row.issue_tracker_url,
+            persona_name: row.persona_name,
+            persona_harness: row.persona_harness,
+            persona_model: row.persona_model,
+            issue_number: row.issue_number,
+            status: row.status.parse()?,
+            status_line: row.status_line,
+            pr_number: row.pr_number,
+            pr_url: row.pr_url,
+            pr_title: row.pr_title,
+            pr_attached: row.pr_attached,
+            branch: row.branch,
+            resume_at: row.resume_at,
+            auto_resumes: row.auto_resumes,
+            created_by: serde_json::from_value(row.created_by)?,
+            creator_task_key: row.creator_task_key,
+            parent_key: row.parent_key,
+            parent_title: row.parent_title,
+        })
+    }
 }
 
 /// A task this task waits for.
@@ -124,7 +222,7 @@ pub struct Dependencies {
 }
 
 /// Token counts of one model within a run, summed over its requests with known usage.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelUsage {
     pub model_id: String,
     pub input_tokens: i64,
@@ -149,12 +247,10 @@ pub struct RunView {
     pub unknown_usage_requests: i64,
 }
 
-#[derive(FromRow)]
 struct RunRow {
     id: Uuid,
     number: i64,
-    #[sqlx(try_from = "String")]
-    state: RunState,
+    state: String,
     outcome: Option<String>,
     detail: String,
     retry_after: Option<DateTime<Utc>>,
@@ -162,11 +258,13 @@ struct RunRow {
     ended_at: Option<DateTime<Utc>>,
 }
 
-#[derive(FromRow)]
 struct RunUsageRow {
     run_id: Uuid,
-    #[sqlx(flatten)]
-    usage: ModelUsage,
+    model_id: String,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
 }
 
 /// A stored transcript row; `event` is `None` if the payload cannot be decoded as v1.
@@ -188,26 +286,33 @@ pub async fn list_task_items(
     pool: &PgPool,
     filter: &TaskFilter,
 ) -> Result<Vec<TaskListItem>, DbError> {
-    Ok(sqlx::query_as(
-        "SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,
-                p.name AS project_name, ps.name AS persona_name,
-                t.status, t.status_line, t.resume_at, t.created_at, t.updated_at
-         FROM tasks t
-         JOIN projects p ON p.id = t.project_id
-         JOIN personas ps ON ps.id = t.persona_id
-         WHERE ($1::text[] IS NULL OR t.status = ANY($1))
-           AND ($2::text IS NULL OR p.key = $2)
-         ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
-                  CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,
-                  CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,
-                  CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,
-                  t.id DESC",
+    let statuses = filter.statuses();
+    sqlx::query_as!(
+        TaskListRow,
+        r#"
+        SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,
+               p.name AS project_name, ps.name AS persona_name,
+               t.status, t.status_line, t.resume_at, t.created_at, t.updated_at
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN personas ps ON ps.id = t.persona_id
+        WHERE ($1::text[] IS NULL OR t.status = ANY($1))
+          AND ($2::text IS NULL OR p.key = $2)
+        ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
+                 CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,
+                 CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,
+                 CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,
+                 t.id DESC
+        "#,
+        statuses.as_deref(),
+        filter.project_key,
+        order_key(filter.sort)
     )
-    .bind(filter.statuses())
-    .bind(&filter.project_key)
-    .bind(order_key(filter.sort))
     .fetch_all(pool)
-    .await?)
+    .await?
+    .into_iter()
+    .map(TaskListItem::try_from)
+    .collect()
 }
 
 /// The key of `sort` in the `ORDER BY` of [`list_task_items`]. It is independent of the URL value
@@ -226,57 +331,78 @@ pub async fn list_project_filter_items(
     group: Option<StatusSet>,
 ) -> Result<Vec<ProjectFilterItem>, DbError> {
     let statuses = group.map(statuses_of);
-    Ok(sqlx::query_as(
-        "SELECT p.key, p.name,
-                count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1)) AS task_count
-         FROM projects p
-         LEFT JOIN tasks t ON t.project_id = p.id
-         GROUP BY p.id
-         ORDER BY p.name, p.key",
+    Ok(sqlx::query_as!(
+        ProjectFilterItem,
+        r#"
+        SELECT p.key AS "key!", p.name AS "name!",
+               count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1))
+                   AS "task_count!"
+        FROM projects p
+        LEFT JOIN tasks t ON t.project_id = p.id
+        GROUP BY p.id
+        ORDER BY p.name, p.key
+        "#,
+        statuses.as_deref()
     )
-    .bind(statuses)
     .fetch_all(pool)
     .await?)
-}
-
-/// `SELECT` of a task detail with a trailing `WHERE` clause.
-macro_rules! select_task_detail {
-    ($tail:literal) => {
-        concat!(
-            "SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
-                p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-                ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status, t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
-                t.resume_at, t.auto_resumes, t.created_by, creator.key AS creator_task_key,
-                parent.key AS parent_key, parent.title AS parent_title
-             FROM tasks t
-             JOIN projects p ON p.id = t.project_id
-             JOIN personas ps ON ps.id = t.persona_id
-             LEFT JOIN tasks creator ON creator.id =
-                 CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
-             LEFT JOIN tasks parent ON parent.id = t.parent_id ",
-            $tail
-        )
-    };
 }
 
 pub async fn get_task_detail_by_key(
     pool: &PgPool,
     key: &str,
 ) -> Result<Option<TaskDetail>, DbError> {
-    Ok(sqlx::query_as(select_task_detail!("WHERE t.key = $1"))
-        .bind(key)
-        .fetch_optional(pool)
-        .await?)
+    sqlx::query_as!(
+        TaskDetailRow,
+        r#"
+        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
+            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
+            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
+            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
+            t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
+            parent.key AS "parent_key?", parent.title AS "parent_title?"
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN personas ps ON ps.id = t.persona_id
+        LEFT JOIN tasks creator ON creator.id =
+            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
+        LEFT JOIN tasks parent ON parent.id = t.parent_id
+        WHERE t.key = $1
+        "#,
+        key
+    )
+    .fetch_optional(pool)
+    .await?
+    .map(TaskDetail::try_from)
+    .transpose()
 }
 
 pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDetail>, DbError> {
-    Ok(sqlx::query_as(select_task_detail!("WHERE t.id = $1"))
-        .bind(id.as_uuid())
-        .fetch_optional(pool)
-        .await?)
+    sqlx::query_as!(
+        TaskDetailRow,
+        r#"
+        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
+            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
+            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
+            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
+            t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
+            parent.key AS "parent_key?", parent.title AS "parent_title?"
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN personas ps ON ps.id = t.persona_id
+        LEFT JOIN tasks creator ON creator.id =
+            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
+        LEFT JOIN tasks parent ON parent.id = t.parent_id
+        WHERE t.id = $1
+        "#,
+        id.as_uuid()
+    )
+    .fetch_optional(pool)
+    .await?
+    .map(TaskDetail::try_from)
+    .transpose()
 }
 
-#[derive(FromRow)]
 struct DependencyRecord {
     key: String,
     title: String,
@@ -288,20 +414,22 @@ struct DependencyRecord {
 
 /// The tasks `task_id` waits for and the tasks that wait for it.
 pub async fn list_dependencies(pool: &PgPool, task_id: TaskId) -> Result<Dependencies, DbError> {
-    let waits_for: Vec<DependencyRecord> = sqlx::query_as(
+    let waits_for = sqlx::query_as!(
+        DependencyRecord,
         "SELECT t.key, t.title, d.kind, t.status, t.first_completed_at, t.first_done_at
          FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id
          WHERE d.task_id = $1 ORDER BY t.number",
+        task_id.as_uuid()
     )
-    .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
-    let needed_by: Vec<DependencyRecord> = sqlx::query_as(
+    let needed_by = sqlx::query_as!(
+        DependencyRecord,
         "SELECT t.key, t.title, d.kind, t.status, t.first_completed_at, t.first_done_at
          FROM task_dependencies d JOIN tasks t ON t.id = d.task_id
          WHERE d.depends_on_task_id = $1 ORDER BY t.number",
+        task_id.as_uuid()
     )
-    .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
     Ok(Dependencies {
@@ -334,59 +462,71 @@ pub async fn list_dependencies(pool: &PgPool, task_id: TaskId) -> Result<Depende
 /// Runs of a task, newest first, with token usage summed per model from the gateway's records
 /// and the count of requests with unknown usage.
 pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, DbError> {
-    let runs: Vec<RunRow> = sqlx::query_as(
+    let runs = sqlx::query_as!(
+        RunRow,
         "SELECT id, number, state, outcome, detail, retry_after, started_at, ended_at
          FROM runs WHERE task_id = $1 ORDER BY number DESC",
+        task_id.as_uuid()
     )
-    .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
-    let usage: Vec<RunUsageRow> = sqlx::query_as(
-        "SELECT u.run_id, COALESCE(u.model, 'unknown') AS model_id,
-                COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
-                COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
-                COALESCE(SUM(u.cache_read_tokens), 0)::bigint AS cache_read_tokens,
-                COALESCE(SUM(u.cache_write_tokens), 0)::bigint AS cache_write_tokens
-         FROM model_usage u JOIN runs r ON r.id = u.run_id
-         WHERE r.task_id = $1 AND u.usage_known
-         GROUP BY u.run_id, u.model
-         ORDER BY u.run_id, model_id",
+    let usage = sqlx::query_as!(
+        RunUsageRow,
+        r#"
+        SELECT u.run_id, COALESCE(u.model, 'unknown') AS "model_id!",
+               COALESCE(SUM(u.input_tokens), 0)::bigint AS "input_tokens!",
+               COALESCE(SUM(u.output_tokens), 0)::bigint AS "output_tokens!",
+               COALESCE(SUM(u.cache_read_tokens), 0)::bigint AS "cache_read_tokens!",
+               COALESCE(SUM(u.cache_write_tokens), 0)::bigint AS "cache_write_tokens!"
+        FROM model_usage u JOIN runs r ON r.id = u.run_id
+        WHERE r.task_id = $1 AND u.usage_known
+        GROUP BY u.run_id, u.model
+        ORDER BY u.run_id, 2
+        "#,
+        task_id.as_uuid()
     )
-    .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
-    let unknown: Vec<(Uuid, i64)> = sqlx::query_as(
-        "SELECT u.run_id, count(*) FROM model_usage u JOIN runs r ON r.id = u.run_id
-         WHERE r.task_id = $1 AND NOT u.usage_known GROUP BY u.run_id",
+    let unknown = sqlx::query!(
+        r#"
+        SELECT u.run_id, count(*) AS "count!" FROM model_usage u JOIN runs r ON r.id = u.run_id
+        WHERE r.task_id = $1 AND NOT u.usage_known GROUP BY u.run_id
+        "#,
+        task_id.as_uuid()
     )
-    .bind(task_id.as_uuid())
     .fetch_all(pool)
     .await?;
-    Ok(runs
-        .into_iter()
-        .map(|r| RunView {
-            usage: usage
-                .iter()
-                .filter(|u| u.run_id == r.id)
-                .map(|u| u.usage.clone())
-                .collect(),
-            unknown_usage_requests: unknown
-                .iter()
-                .find(|(run_id, _)| *run_id == r.id)
-                .map_or(0, |(_, count)| *count),
-            id: r.id,
-            number: r.number,
-            state: r.state,
-            outcome: r.outcome,
-            detail: r.detail,
-            retry_after: r.retry_after,
-            started_at: r.started_at,
-            ended_at: r.ended_at,
+    runs.into_iter()
+        .map(|r| {
+            Ok(RunView {
+                usage: usage
+                    .iter()
+                    .filter(|u| u.run_id == r.id)
+                    .map(|u| ModelUsage {
+                        model_id: u.model_id.clone(),
+                        input_tokens: u.input_tokens,
+                        output_tokens: u.output_tokens,
+                        cache_read_tokens: u.cache_read_tokens,
+                        cache_write_tokens: u.cache_write_tokens,
+                    })
+                    .collect(),
+                unknown_usage_requests: unknown
+                    .iter()
+                    .find(|row| row.run_id == r.id)
+                    .map_or(0, |row| row.count),
+                id: r.id,
+                number: r.number,
+                state: r.state.parse()?,
+                outcome: r.outcome,
+                detail: r.detail,
+                retry_after: r.retry_after,
+                started_at: r.started_at,
+                ended_at: r.ended_at,
+            })
         })
-        .collect())
+        .collect()
 }
 
-#[derive(FromRow)]
 struct TranscriptRow {
     id: i64,
     payload: serde_json::Value,
@@ -416,14 +556,15 @@ pub async fn transcript_after(
     after: i64,
     limit: i64,
 ) -> Result<Vec<StoredEvent>, DbError> {
-    let rows: Vec<TranscriptRow> = sqlx::query_as(
+    let rows = sqlx::query_as!(
+        TranscriptRow,
         "SELECT e.id, e.payload, e.occurred_at, r.number, r.started_at
          FROM transcript_events e JOIN runs r ON r.id = e.run_id
          WHERE e.task_id = $1 AND e.id > $2 ORDER BY e.id LIMIT $3",
+        task_id.as_uuid(),
+        after,
+        limit
     )
-    .bind(task_id.as_uuid())
-    .bind(after)
-    .bind(limit)
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -453,7 +594,7 @@ pub(crate) fn statuses_of(set: StatusSet) -> Vec<String> {
 }
 
 /// Number of tasks of a project in each status that has any.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectStatusCount {
     pub project_id: Uuid,
     pub status: String,
@@ -462,8 +603,9 @@ pub struct ProjectStatusCount {
 
 /// Tasks per project and status in one grouped query; the UI folds them into its columns.
 pub async fn project_status_counts(pool: &PgPool) -> Result<Vec<ProjectStatusCount>, DbError> {
-    Ok(sqlx::query_as(
-        "SELECT project_id, status, count(*) AS count FROM tasks GROUP BY project_id, status",
+    Ok(sqlx::query_as!(
+        ProjectStatusCount,
+        r#"SELECT project_id, status, count(*) AS "count!" FROM tasks GROUP BY project_id, status"#
     )
     .fetch_all(pool)
     .await?)

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT harness_session_id FROM runs\n         WHERE task_id = $1 AND number < $2 AND harness_session_id <> ''\n         ORDER BY number DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "harness_session_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "harness_session_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e9fe83a29760a66f471a3efe488c5d4a4883126bd408a7d5900f60e53460ef9c"
+}

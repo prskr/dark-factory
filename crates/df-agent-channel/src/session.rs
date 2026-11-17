@@ -10,8 +10,16 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use df_core::{RunOutcome, RunState, TaskStatus};
-use df_db::transcript::lock_run_and_task;
-use df_db::{Notification, PgBlobStore, publish};
+use df_db::runs::{
+    EndedRun, RunEnd, RunRow, get_run, mark_connected, persist_state, set_idle_tx,
+    set_last_persisted_seq, set_run_state_tx, start_finalizing,
+};
+use df_db::task_updates::mark_diverged;
+use df_db::transcript::{
+    KIND_TURN_ENDED, KIND_TURN_STARTED, RunTaskLock, TranscriptWriter, last_turn_end,
+    lock_run_and_task, turn_open,
+};
+use df_db::{Notification, PgBlobStore, get_task, transcript};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, Assign, Cancel, ControlMessage, HelloAck, Interrupt, Prompts, PushReport,
@@ -30,12 +38,9 @@ use crate::ChannelConfig;
 use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts};
 use crate::error::ChannelError;
 use crate::metrics::Observation;
-use crate::runs::{
-    EndedRun, RunEnd, RunRow, end_run_tx, get_run, has_undelivered_message, mark_connected,
-    set_idle_tx, set_run_state_tx,
-};
+use crate::runs::end_run_tx;
 use crate::scheduler::cancel_deadline;
-use crate::{ChannelContext, pr, tools, transcript};
+use crate::{ChannelContext, pr, tools};
 
 /// Time the runtime has to send `Hello` after the stream was accepted.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -81,7 +86,8 @@ where
     }
 
     let run = get_run(&ctx.pool, run.id)
-        .await?
+        .await
+        .map_err(ChannelError::from)?
         .filter(|r| !r.state.is_terminal())
         .ok_or_else(|| Status::unauthenticated("run is not active"))?;
     let mut rc = load_run_context(&ctx.pool, run).await?;
@@ -92,7 +98,8 @@ where
 
     // The runtime is up: stop the connect timeout clock and start the wall-clock budget.
     rc.run = mark_connected(&ctx.pool, rc.run.id)
-        .await?
+        .await
+        .map_err(ChannelError::from)?
         .ok_or_else(|| Status::unauthenticated("run is not active"))?;
 
     let assign = build_assign(&ctx, &rc).await?;
@@ -305,39 +312,8 @@ impl Session {
     /// run was moved.
     async fn start_finalizing(&self, only_idle: bool) -> Result<bool, ChannelError> {
         let mut tx = self.ctx.pool.begin().await?;
-        lock_run_and_task(&mut tx, self.rc.run.id, self.rc.task.id).await?;
-        let moved = if only_idle {
-            !has_undelivered_message(&mut tx, self.rc.task.id, None).await?
-                && sqlx::query(
-                    "UPDATE runs SET state = 'finalizing' WHERE id = $1 AND state = 'awaiting_input'",
-                )
-                .bind(self.rc.run.id.as_uuid())
-                .execute(&mut *tx)
-                .await?
-                .rows_affected()
-                    > 0
-        } else {
-            sqlx::query(
-                "UPDATE runs SET state = 'finalizing'
-                 WHERE id = $1
-                   AND state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')",
-            )
-            .bind(self.rc.run.id.as_uuid())
-            .execute(&mut *tx)
-            .await?
-            .rows_affected()
-                > 0
-        };
-        if moved {
-            publish(
-                &mut *tx,
-                &Notification::RunChanged {
-                    run_id: self.rc.run.id,
-                    task_id: self.rc.task.id,
-                },
-            )
-            .await?;
-        }
+        let lock = lock_run_and_task(&mut tx, self.rc.run.id, self.rc.task.id).await?;
+        let moved = start_finalizing(&mut tx, &lock, only_idle).await?;
         tx.commit().await?;
         Ok(moved)
     }
@@ -376,11 +352,10 @@ impl Session {
         if run.state != RunState::Finalizing {
             return Ok(true);
         }
-        let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
-            .bind(self.rc.task.id.as_uuid())
-            .fetch_one(&self.ctx.pool)
-            .await?;
-        let status: TaskStatus = status.parse()?;
+        let status = get_task(&self.ctx.pool, self.rc.task.id)
+            .await?
+            .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?
+            .status;
         if status == TaskStatus::Completed || run.stop_requested_at.is_some() {
             if self.human_cancel_sent {
                 return Ok(true);
@@ -523,10 +498,14 @@ impl Session {
 
     /// Persists the batch, acks it, then runs its effects. `false` ends the session.
     async fn handle_batch(&mut self, batch: Vec<AgentMessage>) -> Result<bool, Status> {
-        // Asked before the batch is persisted: a `RunReport` in this very batch must not
+        // Read once, before the batch is persisted: a `RunReport` in this very batch must not
         // refuse the tool calls that precede it.
-        let active = self.active().await?;
-        let persisted = persist_batch(&self.ctx, &self.rc, batch).await?;
+        let run = persist_state(&self.ctx.pool, self.rc.run.id)
+            .await
+            .map_err(ChannelError::from)?;
+        let active = !self.ended && run.is_some_and(|run| !run.state.is_terminal());
+        let already_persisted = run.map_or(0, |run| run.last_persisted_seq);
+        let persisted = persist_batch(&self.ctx, &self.rc, batch, already_persisted).await?;
         // The batch is committed; replayed messages produced no observation.
         self.ctx
             .metrics
@@ -610,22 +589,25 @@ fn control(body: control_message::Body) -> ControlMessage {
 }
 
 /// Stores a batch in one transaction: drops already persisted messages, stops at a gap, applies
-/// the rest in order and advances `last_persisted_seq`.
+/// the rest in order and advances `last_persisted_seq`. `already_persisted` is the value the
+/// caller read before the batch; the authoritative read happens under the row lock.
 #[tracing::instrument(name = "agent.persist_batch", skip_all, fields(messages = batch.len()))]
 async fn persist_batch(
     ctx: &ChannelContext,
     rc: &RunContext,
     batch: Vec<AgentMessage>,
+    already_persisted: u64,
 ) -> Result<Persisted, ChannelError> {
-    let prepared = prepare_transcript_events(ctx, rc, &batch).await?;
+    let prepared = prepare_transcript_events(ctx, rc, &batch, already_persisted).await?;
 
     let mut tx = ctx.pool.begin().await?;
-    let start = lock_run_and_read_seq(&mut tx, rc).await?;
-    let mut applied = BatchApply {
-        last: start,
-        config: Arc::clone(&ctx.config),
-        ..Default::default()
-    };
+    // Run row, then task row: event ids must become visible in order (`lock_run_and_task`).
+    let lock = lock_run_and_task(&mut tx, rc.run.id, rc.task.id).await?;
+    let start = persist_state(&mut *tx, rc.run.id)
+        .await?
+        .ok_or_else(|| ChannelError::InvalidData("run is missing".into()))?
+        .last_persisted_seq;
+    let mut applied = BatchApply::new(&lock, start, Arc::clone(&ctx.config));
 
     for msg in batch {
         if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= applied.last {
@@ -647,26 +629,9 @@ async fn persist_batch(
     }
 
     if applied.last > start {
-        sqlx::query("UPDATE runs SET last_persisted_seq = $2 WHERE id = $1")
-            .bind(rc.run.id.as_uuid())
-            .bind(
-                i64::try_from(applied.last).map_err(|_out_of_range| {
-                    ChannelError::InvalidData("seq out of range".into())
-                })?,
-            )
-            .execute(&mut *tx)
-            .await?;
+        set_last_persisted_seq(&mut *tx, rc.run.id, applied.last).await?;
     }
-    if let Some(id) = applied.newest_event {
-        publish(
-            &mut *tx,
-            &Notification::TranscriptEvent {
-                task_id: rc.task.id,
-                id,
-            },
-        )
-        .await?;
-    }
+    applied.writer.finish(&mut tx).await?;
     tx.commit().await?;
     Ok(Persisted {
         ack: (applied.last > start).then_some(applied.last),
@@ -685,15 +650,10 @@ async fn prepare_transcript_events(
     ctx: &ChannelContext,
     rc: &RunContext,
     batch: &[AgentMessage],
+    already_persisted: u64,
 ) -> Result<std::collections::HashMap<u64, transcript::PreparedEvent>, ChannelError> {
     // Events a replay repeats are dropped when applying; don't move their blobs again. The
     // authoritative check happens under the row lock in the transaction.
-    let already_persisted: i64 =
-        sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1")
-            .bind(rc.run.id.as_uuid())
-            .fetch_one(&ctx.pool)
-            .await?;
-    let already_persisted = u64::try_from(already_persisted).unwrap_or_default();
     let blobs = PgBlobStore::new(ctx.pool.clone());
     let mut prepared = std::collections::HashMap::new();
     for msg in batch {
@@ -714,31 +674,14 @@ async fn prepare_transcript_events(
     Ok(prepared)
 }
 
-/// Locks the run row and then the task row (`df_db::transcript::lock_run_and_task`: event ids
-/// must become visible in order, also next to events of another run of the task) and returns the
-/// run's `last_persisted_seq`.
-async fn lock_run_and_read_seq(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    rc: &RunContext,
-) -> Result<u64, ChannelError> {
-    lock_run_and_task(tx, rc.run.id, rc.task.id).await?;
-    let stored: i64 = sqlx::query_scalar("SELECT last_persisted_seq FROM runs WHERE id = $1")
-        .bind(rc.run.id.as_uuid())
-        .fetch_one(&mut **tx)
-        .await?;
-    u64::try_from(stored)
-        .map_err(|_negative| ChannelError::InvalidData("negative last_persisted_seq".into()))
-}
-
 /// What applying the messages of a batch has produced so far.
-#[derive(Default)]
-struct BatchApply {
+struct BatchApply<'l> {
     /// The channel configuration, for the run end.
     config: Arc<ChannelConfig>,
+    /// Writes the transcript events of the batch and publishes the notification once.
+    writer: TranscriptWriter<'l>,
     /// Sequence number of the last message applied (or already persisted).
     last: u64,
-    /// Task-wide id of the newest transcript event stored by the batch.
-    newest_event: Option<i64>,
     effects: Effects,
     observations: Vec<Observation>,
     gap: Option<(u64, u64)>,
@@ -747,7 +690,21 @@ struct BatchApply {
     idle_changed: bool,
 }
 
-impl BatchApply {
+impl<'l> BatchApply<'l> {
+    fn new(lock: &'l RunTaskLock, last: u64, config: Arc<ChannelConfig>) -> Self {
+        Self {
+            config,
+            writer: TranscriptWriter::new(lock),
+            last,
+            effects: Effects::default(),
+            observations: Vec::new(),
+            gap: None,
+            busy: None,
+            turn_ended: false,
+            idle_changed: false,
+        }
+    }
+
     /// Applies one message body in the transaction and records its effects and observations.
     async fn apply(
         &mut self,
@@ -764,16 +721,15 @@ impl BatchApply {
             }
             agent_message::Body::TranscriptEvent(raw) => {
                 if let Some(event) = prepared.get(&seq)
-                    && let Some(id) = transcript::insert(tx, rc.task.id, rc.run.id, event).await?
+                    && self.writer.append_runtime(tx, event).await?.is_some()
                 {
-                    self.newest_event = self.newest_event.max(Some(id));
                     self.observations.extend(observe_event(tx, rc, &raw).await?);
                     match event.kind {
-                        "turn_started" => {
+                        KIND_TURN_STARTED => {
                             self.busy = Some(true);
                             self.idle_changed = true;
                         }
-                        "turn_ended" => {
+                        KIND_TURN_ENDED => {
                             self.busy = Some(false);
                             self.turn_ended = true;
                             self.idle_changed = true;
@@ -825,19 +781,7 @@ async fn apply_push(
         return Ok(());
     }
     match push.status() {
-        PushStatus::RejectedNonFastForward => {
-            sqlx::query("UPDATE tasks SET diverged = TRUE, updated_at = now() WHERE id = $1")
-                .bind(rc.task.id.as_uuid())
-                .execute(&mut **tx)
-                .await?;
-            publish(
-                &mut **tx,
-                &Notification::TaskChanged {
-                    task_id: rc.task.id,
-                },
-            )
-            .await?;
-        }
+        PushStatus::RejectedNonFastForward => mark_diverged(tx, rc.task.id).await?,
         PushStatus::Ok if push.commits_ahead_of_base > 0 => {
             pr::enqueue_open_after_push(tx, rc.task.id, rc.run.id).await?;
         }
@@ -918,15 +862,7 @@ async fn stored_tool_call(
     rc: &RunContext,
     tool_call_id: &str,
 ) -> Result<Option<(ToolKind, ToolOrigin)>, ChannelError> {
-    let payload: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT payload FROM transcript_events
-         WHERE run_id = $1 AND kind = 'tool_call' AND payload -> 'toolCall' ->> 'toolCallId' = $2
-         ORDER BY seq LIMIT 1",
-    )
-    .bind(rc.run.id.as_uuid())
-    .bind(tool_call_id)
-    .fetch_optional(&mut **tx)
-    .await?;
+    let payload = transcript::stored_tool_call(&mut **tx, rc.run.id, tool_call_id).await?;
     let Some(event) = payload.and_then(|p| serde_json::from_value::<Event>(p).ok()) else {
         return Ok(None);
     };
@@ -944,38 +880,6 @@ async fn busy_on_connect(
     task_id: df_core::TaskId,
 ) -> Result<bool, ChannelError> {
     Ok(turn_open(pool, run_id).await? || !pending_prompts(pool, task_id, true).await?.is_empty())
-}
-
-/// Kind (`turn_started` or `turn_ended`) and time of the run's last persisted turn event.
-async fn last_turn_event(
-    pool: &sqlx::PgPool,
-    run_id: df_core::RunId,
-) -> Result<Option<(String, DateTime<Utc>)>, ChannelError> {
-    Ok(sqlx::query_as(
-        "SELECT kind, occurred_at FROM transcript_events
-         WHERE run_id = $1 AND kind IN ('turn_started', 'turn_ended')
-         ORDER BY seq DESC LIMIT 1",
-    )
-    .bind(run_id.as_uuid())
-    .fetch_optional(pool)
-    .await?)
-}
-
-/// Whether the run's last persisted turn event is a `TurnStarted`.
-async fn turn_open(pool: &sqlx::PgPool, run_id: df_core::RunId) -> Result<bool, ChannelError> {
-    Ok(last_turn_event(pool, run_id)
-        .await?
-        .is_some_and(|(kind, _)| kind == "turn_started"))
-}
-
-/// When the run's last persisted turn ended, if the last turn event is a `TurnEnded`.
-async fn last_turn_end(
-    pool: &sqlx::PgPool,
-    run_id: df_core::RunId,
-) -> Result<Option<DateTime<Utc>>, ChannelError> {
-    Ok(last_turn_event(pool, run_id)
-        .await?
-        .and_then(|(kind, at)| (kind == "turn_ended").then_some(at)))
 }
 
 /// The instant `keep_alive_seconds` after `turn_end`; `None` if that is not representable.

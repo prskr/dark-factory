@@ -4,6 +4,11 @@
 //! session is created. [`PgSessionStore::lock`] serializes changes to one session across requests
 //! and replicas.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "session-store adapter that picks its SQL at runtime (AGENTS.md, \"Database access\")"
+)]
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;

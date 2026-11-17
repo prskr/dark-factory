@@ -44,7 +44,7 @@ flowchart TD
 |---|---|---|---|
 | `dark-factory` | The binary and its subcommands; config loading; wiring of adapters (composition root) | any crate | current |
 | `df-core` | Domain types and rules: IDs, task and run state machines (`task_transition`, `run_transition`: target), routing, webhook rules, the trait seams (`SandboxProvider`, `ForgeClient`, `SecretStore`), configuration types (`config`) | `df-artifact-types`, `df-sandbox-contract` | current (`df-sandbox-contract`: target) |
-| `df-db` | The schema, migrations and every SQL query; sole user of `sqlx` queries | `df-core`, `df-proto` | target: `db-write-ownership` |
+| `df-db` | The schema, migrations and every SQL query; sole user of `sqlx` queries | `df-core`, `df-proto` | current |
 | `df-proto` | Generated protobuf/gRPC wire types | none | current |
 | `df-web` | Web UI and its HTTP handlers; data access through `df-db` | `df-core`, `df-db`, `df-proto` | current |
 | `df-agent-channel` | The agent port: mTLS gRPC server, agent sessions (persistence, acks, prompts), the `Assign` message with the continuation summary, factory tools, run metrics | `df-orchestrator`, `df-db`, `df-core`, `df-proto`, `df-tls` | target: `orchestrator-crate` |
@@ -67,7 +67,7 @@ flowchart TD
 ## Rules
 
 1. **Dependency direction.** A crate depends only on the crates listed for it above. This covers normal dependencies; dev-dependencies may add the test crates (`df-test-postgres`, `fake-acp-agent`) and the `test-util` features of crates already listed. Domain (`df-core`) and wire types (`df-proto`) never depend on adapters, storage or binaries. Only `dark-factory` depends on `df-k8s`.
-2. **Database access only via `df-db`.** Other crates call `df-db` functions and never run `sqlx` queries; they may pass `PgPool`/`Transaction` through. Exceptions: `df-web/src/auth/store.rs` (`web_sessions`) and test fixtures. Enforced by clippy (`disallowed-methods`, `disallowed-macros`, `disallowed-types` in `clippy.toml`) once `db-write-ownership` lands.
+2. **Database access only via `df-db`.** Other crates call `df-db` functions and never run `sqlx` queries; they may pass `PgPool`/`Transaction` through. Exceptions: crate level `df-db`, `df-e2e` and `df-test-postgres`; module level `df-web/src/auth/store.rs` (`web_sessions`); test code, including `test-util` fixture modules. Enforced by clippy (`disallowed-methods`, `disallowed-macros`, `disallowed-types` in `clippy.toml`).
 3. **Wire types at the edges.** `df-proto` types are used by the gRPC edges (`df-agent-channel`, `df-gateway`, `df-gateway-control`, `factory-agent`, `dark-factory`) and as the stored or rendered payload format (`df-db`, `df-web`, `df-orchestrator`) where a decision says so: transcript events as canonical protobuf JSON (ADR-0017, `transcript-storage`) and egress flow events. Domain rules take `df-core` types, not wire types.
 4. **Infrastructure in infrastructure crates.** TLS, telemetry and the sandbox contract live in their own crates. A crate never depends on another domain or adapter crate only to reuse its infrastructure.
 5. **The sandbox runtime stays small.** `factory-agent` depends on no control-plane crate (`df-core`, `df-db`, `df-agent-channel`, …); everything it shares with the control plane is in `df-proto`, `df-sandbox-contract` or `df-artifact-types`. It may also use the infrastructure crate `df-telemetry`.

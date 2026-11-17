@@ -36,6 +36,11 @@
 //! at all (no socket, connection refused) is not retried; the message names `DOCKER_HOST`.
 //! `DOCKER_HOST` need not be set: the default socket of Docker Engine works without it.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "test infrastructure that creates and drops databases (AGENTS.md, \"Database access\")"
+)]
+
 use std::{
     error::Error,
     hash::{DefaultHasher, Hash, Hasher},

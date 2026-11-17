@@ -331,6 +331,18 @@ impl RunState {
         Self::Cancelled,
     ];
 
+    /// The terminal states, for SQL (`state = ANY($n)`); pinned against [`Self::is_terminal`].
+    pub const TERMINAL: &'static [&'static str] = &["succeeded", "failed", "cancelled"];
+
+    /// The states a board member can no longer command: [`Self::TERMINAL`] and `finalizing`;
+    /// pinned against [`Self::can_stop`].
+    pub const NOT_COMMANDABLE: &'static [&'static str] =
+        &["succeeded", "failed", "cancelled", "finalizing"];
+
+    /// The states of a run whose runtime is up and that is not ending yet; a stop moves them to
+    /// `finalizing`. For SQL; pinned against the enum.
+    pub const RUNTIME_UP: &'static [&'static str] = &["preparing", "running", "awaiting_input"];
+
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -730,6 +742,24 @@ mod tests {
         assert_eq!(expected.len(), TaskStatus::ALL.len());
         for (status, group) in expected {
             assert_eq!(status.group(), group, "{status}");
+        }
+    }
+
+    #[test]
+    fn run_state_sql_lists_match_the_predicates() {
+        for state in RunState::ALL {
+            let s = state.as_str();
+            assert_eq!(RunState::TERMINAL.contains(&s), state.is_terminal(), "{s}");
+            assert_eq!(
+                RunState::NOT_COMMANDABLE.contains(&s),
+                !state.can_stop(),
+                "{s}"
+            );
+            let up = matches!(
+                state,
+                RunState::Preparing | RunState::Running | RunState::AwaitingInput
+            );
+            assert_eq!(RunState::RUNTIME_UP.contains(&s), up, "{s}");
         }
     }
 

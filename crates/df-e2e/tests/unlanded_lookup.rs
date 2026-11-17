@@ -2,6 +2,11 @@
 //! same project with the description of another test, nor an earlier task of the same test
 //! (container-backed, no cluster).
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the test reads the database directly (AGENTS.md, \"Database access\")"
+)]
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};

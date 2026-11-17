@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tasks SET pr_title = COALESCE($2, pr_title), pr_body = COALESCE($3, pr_body),\n            updated_at = now()\n        WHERE id = $1\n        RETURNING pr_number\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pr_number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_number"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "30bb0d81b4bb23b2753c56c758d24794da09da9cdc371d23ea9151c8d84b5c91"
+}

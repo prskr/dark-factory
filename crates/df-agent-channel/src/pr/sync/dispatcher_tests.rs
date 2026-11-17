@@ -4,10 +4,11 @@
 use df_core::testing::ForgeCall;
 use df_core::{RunId, RunOutcome};
 use df_db::outbox::Dispatcher;
+use df_db::runs::RunEnd;
 
 use super::*;
 use crate::ChannelConfig;
-use crate::runs::{RunEnd, end_run};
+use crate::runs::end_run;
 use crate::testing::Env;
 
 /// A run of `DF-1` that pushed its task branch and ended `completed` with a summary; the job is

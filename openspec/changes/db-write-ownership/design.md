@@ -6,7 +6,7 @@ See proposal.md for motivation. Production writes outside `df-db`:
 
 | Table | Writers in `df-agent-channel` | Writers in `df-db` |
 |---|---|---|
-| `runs` | `runs.rs`: `start_queued_runs` (INSERT), `set_run_state_tx`, `set_idle_tx`, `end_run_tx`, `mark_started`, `mark_connected`, `begin_provisioning`; `session.rs`: `start_finalizing` (2 UPDATEs), `last_persisted_seq`; `tools.rs`: `complete_task` (`completion_summary`) | `task_events.rs`, `tasks.rs` (`stop_run`) |
+| `runs` | `runs.rs`: `start_queued_runs` (INSERT), `set_run_state_tx`, `set_idle_tx`, `end_run_tx`, `mark_started`, `mark_connected`, `begin_provisioning`; `session.rs`: `start_finalizing` (2 `UPDATE` statements), `last_persisted_seq`; `tools.rs`: `complete_task` (`completion_summary`) | `task_events.rs`, `tasks.rs` (`stop_run`) |
 | `tasks` | `runs.rs` (`end_run_tx`: `harness_session_id`, `diverged`); `session.rs` (`apply_push`: `diverged`); `pr/sync.rs` (`record_pr`); `tools.rs` (`update_pull_request`: `pr_title`/`pr_body`, `report_progress`: `status_line`) | `tasks.rs`, `task_events.rs`, `push_checks.rs`, `volumes.rs`, `webhooks.rs` |
 | `task_messages` | `transcript.rs` (`insert`: delivery confirmation, a copy of `df_db::mark_prompt_delivered` with a `task_id` scope) | `tasks.rs`, `task_events.rs` |
 | `transcript_events` | `transcript.rs` (`insert`, keyed `(run, seq)`) | `transcript.rs` (`append_control_event`, keyed `(run, source_key)`) |
@@ -138,7 +138,7 @@ Alternative: `cargo xtask check-db-writes`, a text match for `INSERT`/`UPDATE`/`
   3. the connect timeout (not connected yet, `started_at` + `connect_timeout_seconds`);
   4. the hard stop (connected states, `COALESCE(connected_at, started_at)` + `max_wall_clock_seconds` + 2 × `cancel_grace_seconds`).
 
-  The filter may return more runs than get ended, never fewer: `enforce_timeouts` keeps its Rust match as the final decision. The intervals come from the same constants and `RunsConfig` fields the Rust check uses, bound as parameters. An interval that `after` can't represent (for example a `u64::MAX` budget) is bound as `NULL`, and its branch tests `$n IS NOT NULL AND …`. The query then never fails on it, and that branch matches nothing, the same as "no deadline" in Rust.
+  The filter may return more runs than get ended, never fewer: `enforce_timeouts` keeps its Rust match as the final decision. The intervals come from the same constants and `RunsConfig` fields the Rust check uses, bound as parameters. An interval that `after` can't represent (for example a `u64::MAX` budget) or that exceeds about 100 years (`MAX_INTERVAL_SECONDS`, which keeps the timestamp arithmetic in range) is bound as `NULL`, and its branch tests `$n IS NOT NULL AND …`. The query then never fails on it, and that branch matches nothing, the same as "no deadline" in Rust.
 
 ### 10. `.sqlx/` metadata (TD-33)
 

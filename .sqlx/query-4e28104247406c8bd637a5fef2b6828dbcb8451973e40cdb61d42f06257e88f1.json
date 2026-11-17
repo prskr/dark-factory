@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE runs SET state = $2, pod_ip = COALESCE($3, pod_ip)\n        WHERE id = $1 AND state <> ALL($4) AND state <> $2\n        RETURNING task_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4e28104247406c8bd637a5fef2b6828dbcb8451973e40cdb61d42f06257e88f1"
+}

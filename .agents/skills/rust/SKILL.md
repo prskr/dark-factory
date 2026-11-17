@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup) or a target such as wasm32-wasip2 seems missing, when running Rust tests (choosing cargo or Bazel, filters, no container socket, disk full), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, or when changing lints or a file over the length limit.
+description: Project rules for Rust work in this workspace that go beyond AGENTS.md. Use when cargo or rustc is missing (sandbox toolchain setup) or a target such as wasm32-wasip2 seems missing, when running Rust tests (choosing cargo or Bazel, filters, no container socket, disk full), when adding, removing or updating a Rust dependency, changing Cargo.toml or Cargo.lock, when a Bazel build of a crate fails with unresolved crates, or when running container-backed tests (df_test_postgres) with cargo or Bazel, when adding a crate or a Bazel test target, when changing lints or a file over the length limit, or when writing SQL or a `sqlx` query, or adding a table or a query to one.
 ---
 
 # Rust in Dark Factory
@@ -114,6 +114,16 @@ Details that bite:
 - Do not tag a target `manual`: `//crates/...` and the clippy aspect skip it, so it would escape linting. Tag a test that cannot run in Bazel `external` instead.
 - Tag a test `no-remote-exec` if it needs a container runtime (`df_test_postgres`, testcontainers) or a tool from the client (`buf`, `file`, `readelf`). Remote workers have neither; the tag keeps the test on the client under `--config=rbe`. `build/check_no_remote_exec.sh` (CI) only catches tests that depend on `df-test-postgres`; tag the others yourself.
 - A new workspace member needs the manifest entry in `MODULE.bazel`; then regenerate `MODULE.bazel.lock` as described above.
+
+## Database access
+
+- All production queries live in `df-db`, in the module of the table they touch (`runs`, `task_updates`, `transcript`, `tool_calls`, `tasks`, `catalog`, ...). Other crates call those functions and never use `sqlx::query*`. Passing a `PgPool` or a `Transaction` stays fine.
+- A new query is a checked `query!`/`query_as!`/`query_scalar!` in a `df-db` function: `impl PgExecutor<'_>` for one statement, `&mut Transaction<'_, Postgres>` for several. Write its `df-db` test first (`df_test_postgres::migrated_pool`). Row types with domain fields use a private record type plus `TryFrom`; fix nullability with `AS "col!"` / `"col?"`.
+- Regenerate `.sqlx/` after every query change (`docs/development.md`, "Updating `sqlx` Offline Metadata"); a build without a database uses it (`SQLX_OFFLINE=true`).
+- State lists come from `RunState::TERMINAL` and `RunState::NOT_COMMANDABLE`, bound as `= ANY($n)` / `<> ALL($n)` (`query!` wants `&[String]`: `crate::runs::state_list`). Never write them out in SQL.
+- Transcript writes go through `TranscriptWriter` (`append_runtime`, `append_control`, then `finish`), which needs a `RunTaskLock`. A transaction that also locks a run takes `lock_run_and_task` first (run row, then task row).
+- No storage traits: plain functions, tested against PostgreSQL.
+- The guard is clippy: `disallowed-methods` (`sqlx::query*`, `sqlx::raw_sql`, `sqlx::Executor::{execute, execute_many, fetch, fetch_many, fetch_all, fetch_one, fetch_optional, prepare, prepare_with, describe}`), `disallowed-macros` (`sqlx::query`, `query_as`, `query_scalar`) and `disallowed-types` (`sqlx::QueryBuilder`) in `clippy.toml`. `df-db`, `df-e2e` and `df-test-postgres` are exempt at crate level (`#![expect(clippy::disallowed_methods, ..., reason = "...")]`), `df-web/src/auth/store.rs` at module level. Test code in other crates opts out with `#![cfg_attr(test, expect(clippy::disallowed_methods, clippy::disallowed_macros, reason = "test fixtures"))]` at the crate root, and each integration test file and each `test-util` fixture module (not `cfg(test)`, for example `df-agent-channel/src/testing.rs`) carries its own `#![expect(...)]`. Name only the lints that fire: `expect` fails when one does not.
 
 ## Lints
 

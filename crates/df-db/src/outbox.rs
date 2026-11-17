@@ -6,7 +6,8 @@
 
 mod dispatcher;
 
-use sqlx::PgConnection;
+use df_core::TaskId;
+use sqlx::{PgConnection, PgExecutor};
 
 pub use self::dispatcher::{
     CLEANUP_INTERVAL, Dispatcher, JobError, JobResult, MAX_IN_FLIGHT, OutboxHandler, POLL_INTERVAL,
@@ -14,6 +15,7 @@ pub use self::dispatcher::{
 };
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::tasks::PR_SYNC_KIND;
 
 /// Enqueues one job of `kind` and notifies `outbox` when the transaction commits.
 pub async fn enqueue(
@@ -29,6 +31,26 @@ pub async fn enqueue(
     .execute(&mut *conn)
     .await?;
     publish(&mut *conn, &Notification::Outbox).await
+}
+
+/// Whether a `pr.sync` job of the task that opens the pull request has not finished.
+pub async fn has_unfinished_pr_open_job(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM outbox
+            WHERE kind = $1 AND payload ->> 'task_id' = $2
+              AND (payload ->> 'open')::boolean
+              AND done_at IS NULL AND gave_up_at IS NULL) AS "pending!"
+        "#,
+        PR_SYNC_KIND,
+        task_id.to_string()
+    )
+    .fetch_one(executor)
+    .await?)
 }
 
 #[cfg(test)]

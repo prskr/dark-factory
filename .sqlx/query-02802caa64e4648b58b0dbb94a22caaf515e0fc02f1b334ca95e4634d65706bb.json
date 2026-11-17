@@ -1,0 +1,162 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE runs SET connected_at = COALESCE(connected_at, now()),\n            state = CASE WHEN state = ANY($2) THEN 'preparing' ELSE state END\n        WHERE id = $1 AND state <> ALL($3)\n        RETURNING id AS \"id!\", task_id AS \"task_id!\", number AS \"number!\", state AS \"state!\",\n                  outcome, detail AS \"detail!\", pod_ip,\n                  last_persisted_seq AS \"last_persisted_seq!\",\n                  harness_session_id AS \"harness_session_id!\",\n                  started_at AS \"started_at!\", connected_at, stop_requested_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "number!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "detail!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "detail"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "pod_ip",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "pod_ip"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_persisted_seq!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "last_persisted_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "harness_session_id!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "harness_session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "started_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "connected_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "connected_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "stop_requested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "stop_requested_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "02802caa64e4648b58b0dbb94a22caaf515e0fc02f1b334ca95e4634d65706bb"
+}

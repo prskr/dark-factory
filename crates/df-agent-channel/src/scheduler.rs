@@ -23,17 +23,16 @@ use tokio::task::JoinSet;
 use crate::ChannelContext;
 use crate::assign::load_run_context;
 use crate::error::ChannelError;
-use crate::runs::{
-    RunEnd, RunRow, begin_provisioning, finish_run, get_run, list_active_runs,
-    list_unprovisioned_runs, mark_started, start_queued_runs, teardown,
+use crate::runs::{finish_run, teardown};
+use df_db::runs::{
+    RunEnd, RunRow, STOP_TIMEOUT_SECONDS, begin_provisioning, get_run, list_active_runs,
+    list_overdue_runs, list_unprovisioned_runs, mark_started, start_queued_runs,
 };
 
 /// Age of a run without a sandbox after which the tick provisions it again (design D4).
 const REPROVISION_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 /// Runs started per tick; the next tick (or notification) picks up the rest.
 const START_BATCH: i64 = 10;
-/// Time a stopped run gets to report before its sandbox is torn down (design D1).
-const STOP_TIMEOUT_SECONDS: u64 = 120;
 /// Time granted to in-flight provisioning when the scheduler stops.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
 /// Detail of a run the startup sweep ends because its sandbox is gone (design D4).
@@ -250,12 +249,12 @@ impl Scheduler {
 
     /// Creates `pending` runs for due tasks.
     async fn start_runs(&self) -> Result<Vec<RunRow>, ChannelError> {
-        start_queued_runs(
+        Ok(start_queued_runs(
             &self.ctx.pool,
             START_BATCH,
             self.ctx.config.runs.max_concurrent,
         )
-        .await
+        .await?)
     }
 
     pub(crate) async fn start_in_background(&self, background: &mut JoinSet<()>) {
@@ -414,7 +413,8 @@ impl Scheduler {
     pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), ChannelError> {
         let cfg = &self.ctx.config.runs;
         let mut first_error = None;
-        for run in list_active_runs(&self.ctx.pool).await? {
+        // The query selects a superset of the runs this match ends; the match decides.
+        for run in list_overdue_runs(&self.ctx.pool, now, cfg).await? {
             let end = match run.state {
                 // A human stopped a run that has no connection to send `Cancel` to.
                 RunState::Pending | RunState::Provisioning | RunState::Connecting

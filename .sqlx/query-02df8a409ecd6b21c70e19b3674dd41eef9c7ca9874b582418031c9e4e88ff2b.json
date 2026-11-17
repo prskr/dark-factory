@@ -1,0 +1,166 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at\n        FROM runs\n        WHERE state <> ALL($1)\n          AND (\n            (stop_requested_at IS NOT NULL AND state = ANY($2))\n            OR (stop_requested_at IS NOT NULL AND $3::bigint IS NOT NULL\n                AND stop_requested_at + $3::bigint * interval '1 second' < $4)\n            OR (state = ANY($2) AND $5::bigint IS NOT NULL\n                AND started_at + $5::bigint * interval '1 second' < $4)\n            OR (state = ANY($6) AND $7::bigint IS NOT NULL\n                AND COALESCE(connected_at, started_at) + $7::bigint * interval '1 second' < $4)\n          )\n        ORDER BY started_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "detail",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "detail"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "pod_ip",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "pod_ip"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_persisted_seq",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "last_persisted_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "harness_session_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "harness_session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "connected_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "connected_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "stop_requested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "stop_requested_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "02df8a409ecd6b21c70e19b3674dd41eef9c7ca9874b582418031c9e4e88ff2b"
+}

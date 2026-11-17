@@ -1,5 +1,11 @@
 //! PostgreSQL persistence, migrations, notifications, audit log, and blob storage for Dark Factory.
 
+#![expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "df-db is the only crate that talks SQL (AGENTS.md, \"Database access\")"
+)]
+
 use sqlx::migrate::Migrator;
 
 pub mod artifacts;
@@ -21,9 +27,12 @@ pub mod pool;
 pub mod projects;
 pub mod push_checks;
 pub mod requests;
+pub mod runs;
 pub mod task_events;
+pub mod task_updates;
 pub mod task_views;
 pub mod tasks;
+pub mod tool_calls;
 pub mod transcript;
 pub mod users;
 pub mod volumes;
@@ -39,7 +48,7 @@ pub use egress::{
 pub use migrate::run_migrate;
 pub use notify::{Notification, Notifier, publish};
 pub use placement::{PlacementError, place_on_branch};
-pub use pool::{DbError, build_connect_options, connect_pool, validate_sql_identifier};
+pub use pool::{DbError, build_connect_options, connect_pool, ping, validate_sql_identifier};
 pub use projects::{ForgeTarget, forge_target};
 pub use sqlx::PgPool;
 pub use task_events::apply_task_event;

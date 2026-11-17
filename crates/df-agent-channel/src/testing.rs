@@ -1,6 +1,11 @@
 //! Test fixtures: private PKI, a server on an ephemeral port, a scripted runtime client and
 //! database seeding. Enabled by the `test-util` feature.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "test fixtures seed the database directly (AGENTS.md, \"Database access\")"
+)]
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;

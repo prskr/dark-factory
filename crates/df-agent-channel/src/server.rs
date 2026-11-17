@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use df_core::config::AgentTlsConfig;
 use df_core::{PeerIdentity, RunId};
+use df_db::runs::{RunRow, get_run};
 use df_proto::agent::v1::agent_channel_server::{AgentChannel, AgentChannelServer};
 use df_proto::agent::v1::{AgentMessage, ControlMessage};
 use rustls::RootCertStore;
@@ -27,7 +28,6 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::identity::pod_uri_san;
-use crate::runs::{RunRow, get_run};
 use crate::{ChannelContext, session};
 
 /// Largest accepted message (ADR-0027: transcript events may carry images).
@@ -393,7 +393,8 @@ pub async fn authenticate(
         .await
         .ok_or_else(|| unauthenticated("unknown sandbox"))?;
     let run = get_run(&ctx.pool, run_id)
-        .await?
+        .await
+        .map_err(crate::ChannelError::from)?
         .filter(|run| !run.state.is_terminal())
         .ok_or_else(|| unauthenticated("run is not active"))?;
     Ok(run)

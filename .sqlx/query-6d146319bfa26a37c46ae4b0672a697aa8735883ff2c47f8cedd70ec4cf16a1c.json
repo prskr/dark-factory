@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE task_messages\n        SET delivered_run_id = COALESCE(delivered_run_id, $2),\n            delivered_at = COALESCE(delivered_at, now())\n        WHERE id = $1 AND task_id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d146319bfa26a37c46ae4b0672a697aa8735883ff2c47f8cedd70ec4cf16a1c"
+}

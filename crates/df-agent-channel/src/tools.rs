@@ -8,12 +8,17 @@ use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanit
 use df_db::requests::{
     Raise, Raised, RequestError, close_pending_for_task, raise_approval, raise_question,
 };
-use df_db::{NewAuditEntry, Notification, PgBlobStore, publish, set_task_title, write_audit_entry};
+use df_db::runs::set_completion_summary;
+use df_db::task_updates::{set_pr_draft_fields, set_status_line};
+use df_db::transcript::externalize_block;
+use df_db::{
+    NewAuditEntry, Notification, PgBlobStore, get_task, publish, set_task_title, tool_calls,
+    write_audit_entry,
+};
 use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
 use df_proto::transcript::v1::{BlobData, ContentBlock, TextContent, blob_data, content_block};
 use jsonschema::Validator;
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
 
 use crate::ChannelContext;
 use crate::assign::{RunContext, tool_input_schemas};
@@ -147,18 +152,14 @@ async fn try_execute(
 
     // Claim the call before executing it, in its own short transaction: no row lock or pool
     // connection is held while the forge is called, and a call is executed at most once.
-    let claimed = sqlx::query(
-        "INSERT INTO tool_calls (call_id, run_id, tool_name, arguments)
-         VALUES ($1, $2, $3, $4) ON CONFLICT (call_id) DO NOTHING",
+    let claimed = tool_calls::claim(
+        &ctx.pool,
+        call_uuid,
+        rc.run.id,
+        &request.tool_name,
+        &stored_arguments,
     )
-    .bind(call_uuid)
-    .bind(rc.run.id.as_uuid())
-    .bind(&request.tool_name)
-    .bind(&stored_arguments)
-    .execute(&ctx.pool)
-    .await?
-    .rows_affected()
-        == 1;
+    .await?;
     if !claimed {
         return answer_repeated_call(ctx, rc, &call_id, call_uuid).await;
     }
@@ -174,7 +175,7 @@ async fn try_execute(
     let blobs = PgBlobStore::new(ctx.pool.clone());
     let stored = externalize_images(&blobs, response.clone()).await?;
     let mut tx = ctx.pool.begin().await?;
-    store_result(&mut tx, call_uuid, &stored).await?;
+    tool_calls::store_result(&mut *tx, call_uuid, &serde_json::to_value(&stored)?).await?;
     let actor = Principal::agent(
         rc.persona.id,
         rc.persona.name.clone(),
@@ -202,24 +203,18 @@ async fn answer_repeated_call(
     call_id: &str,
     call_uuid: uuid::Uuid,
 ) -> Result<ToolCallResult, ChannelError> {
-    let (owner, stored, abandoned): (uuid::Uuid, Option<Value>, bool) = sqlx::query_as(
-        "SELECT run_id, result, created_at < now() - interval '5 minutes'
-         FROM tool_calls WHERE call_id = $1",
-    )
-    .bind(call_uuid)
-    .fetch_one(&ctx.pool)
-    .await?;
-    if owner != rc.run.id.as_uuid() {
+    let call = tool_calls::get(&ctx.pool, call_uuid).await?;
+    if call.run_id != rc.run.id {
         return Ok(result(
             call_id,
             &Outcome::error("call_id is already used by another run"),
         ));
     }
-    if let Some(stored) = stored {
+    if let Some(stored) = call.result {
         let blobs = PgBlobStore::new(ctx.pool.clone());
         return rehydrate_images(&blobs, serde_json::from_value(stored)?).await;
     }
-    if !abandoned {
+    if !call.abandoned {
         return Ok(result(
             call_id,
             &Outcome::error("this call is still in progress; retry later"),
@@ -232,26 +227,8 @@ async fn answer_repeated_call(
             "an earlier attempt of this call did not finish; check whether its effect exists before calling again",
         ),
     );
-    let mut tx = ctx.pool.begin().await?;
-    store_result(&mut tx, call_uuid, &closed).await?;
-    tx.commit().await?;
+    tool_calls::store_result(&ctx.pool, call_uuid, &serde_json::to_value(&closed)?).await?;
     Ok(closed)
-}
-
-/// Stores `response` unless a result is already there.
-async fn store_result(
-    tx: &mut Transaction<'_, Postgres>,
-    call_uuid: uuid::Uuid,
-    response: &ToolCallResult,
-) -> Result<(), ChannelError> {
-    sqlx::query(
-        "UPDATE tool_calls SET result = $2, completed_at = now() WHERE call_id = $1 AND result IS NULL",
-    )
-    .bind(call_uuid)
-    .bind(serde_json::to_value(response)?)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
 }
 
 /// The details of the `tool_call.execute` audit entry. A call that names another task for an
@@ -283,7 +260,7 @@ async fn externalize_images(
     mut response: ToolCallResult,
 ) -> Result<ToolCallResult, ChannelError> {
     for block in &mut response.content {
-        crate::transcript::externalize_block(blobs, block).await?;
+        externalize_block(blobs, block).await?;
     }
     Ok(response)
 }
@@ -385,26 +362,18 @@ async fn update_pull_request(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let (title, body) = (text_arg(args, "title"), text_arg(args, "body"));
-    let attached: bool = sqlx::query_scalar("SELECT pr_attached FROM tasks WHERE id = $1")
-        .bind(rc.task.id.as_uuid())
-        .fetch_one(&ctx.pool)
-        .await?;
+    let attached = get_task(&ctx.pool, rc.task.id)
+        .await?
+        .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?
+        .pr_attached;
     if attached {
         return Ok(Outcome::error(
             "the pull request of this task was opened by someone else, so you can't change its \
              title or body; comment on it instead",
         ));
     }
-    let pr_number: Option<i64> = sqlx::query_scalar(
-        "UPDATE tasks SET pr_title = COALESCE($2, pr_title), pr_body = COALESCE($3, pr_body),
-             updated_at = now()
-         WHERE id = $1 RETURNING pr_number",
-    )
-    .bind(rc.task.id.as_uuid())
-    .bind(&title)
-    .bind(&body)
-    .fetch_one(&ctx.pool)
-    .await?;
+    let pr_number =
+        set_pr_draft_fields(&ctx.pool, rc.task.id, title.as_deref(), body.as_deref()).await?;
     let Some(number) = pr_number.and_then(|n| u64::try_from(n).ok()) else {
         return Ok(Outcome::ok(
             "Saved. The pull request does not exist yet; it will use these values when it is opened.",
@@ -455,15 +424,8 @@ async fn report_progress(
     rc: &RunContext,
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
-    let task_id = rc.task.id;
-    let mut tx = ctx.pool.begin().await?;
-    sqlx::query("UPDATE tasks SET status_line = $2, updated_at = now() WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .bind(text_arg(args, "summary").unwrap_or_default())
-        .execute(&mut *tx)
-        .await?;
-    publish(&mut *tx, &Notification::TaskChanged { task_id }).await?;
-    tx.commit().await?;
+    let line = text_arg(args, "summary").unwrap_or_default();
+    set_status_line(&ctx.pool, rc.task.id, &line).await?;
     Ok(Outcome::ok("Progress recorded."))
 }
 
@@ -493,11 +455,12 @@ async fn complete_task(
 ) -> Result<Outcome, ChannelError> {
     let task_id = rc.task.id;
     let mut tx = ctx.pool.begin().await?;
-    sqlx::query("UPDATE runs SET completion_summary = $2 WHERE id = $1")
-        .bind(rc.run.id.as_uuid())
-        .bind(text_arg(args, "summary").unwrap_or_default())
-        .execute(&mut *tx)
-        .await?;
+    set_completion_summary(
+        &mut *tx,
+        rc.run.id,
+        &text_arg(args, "summary").unwrap_or_default(),
+    )
+    .await?;
     close_pending_for_task(
         &mut tx,
         task_id,
@@ -674,10 +637,10 @@ fn forge_error(err: &IntegrationError) -> Outcome {
 mod tests {
     use super::*;
     use crate::assign::load_run_context;
-    use crate::runs::get_run;
     use crate::testing::Env;
     use df_core::testing::ForgeCall;
     use df_core::{Comment, ForgeClient, RateLimit};
+    use df_db::runs::get_run;
     use sqlx::PgPool;
 
     pub(super) async fn setup(pool: PgPool) -> (Env, RunContext) {

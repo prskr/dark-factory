@@ -1,5 +1,10 @@
 //! The seed writes the demo data once and changes nothing on the second run.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the test reads the seeded database directly (AGENTS.md, \"Database access\")"
+)]
+
 use anyhow::{Context, Result};
 use df_db::MIGRATOR;
 use df_db::catalog::{get_project_by_key, list_credential_refs, list_personas};

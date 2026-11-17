@@ -10,9 +10,9 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-28 to TD-36: code review of `iter1-sandbox-provisioning` (`df-k8s`, 2026-10-21). The `TD-n (Rn-Nm)` headings give the IDs used in that review.
 - Origin of TD-41: external review of the `run-network-policy` spec (2026-10-22).
 - Origin of TD-38 to TD-40: code review of `iter1-integration-plugins` (`df-plugins`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-42 to TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-43: code review of `iter1-control-plane-web` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-44: code review of `ui-redesign` (`df-web`, 2026-10-22). The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-45 to TD-47: code review of `ui-polish` (`df-web`, `df-agent-channel`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-46 to TD-47: code review of `ui-polish` (`df-web`, `df-agent-channel`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-49 to TD-50: code review of `iter1-egress-gateway` (`df-gateway`, 2026-10-23). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-51: first cluster run of `iter1-egress-gateway` (2026-10-24).
 - Origin of TD-52: code review of `agent-session-logging` (`factory-agent`, `dark-factory`, `df-k8s`, 2026-10-24). The `TD-n (ID)` headings give the IDs used in that review.
@@ -23,7 +23,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-61: code review of `egress-log-viewport` (`df-gateway`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-62: code review of `transcript-view-polish` (`df-web`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-63 to TD-64: code review of `native-harness-spike` (`df-harness`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
-- Origin of TD-65 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
+- Origin of TD-66 to TD-68: code review of `iter1-keep-alive-and-review` (`df-agent-channel`, `df-db`, `factory-agent`, 2026-10-27). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-70: code review of `hide-system-prompt-blocks` (`df-web`, `df-proto`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-71 to TD-74 (TD-74 accepted and removed the same day): code review of `iter2-agent-requests` (`df-db`, `df-web`, `df-agent-channel`, 2026-10-28). The `TD-n (ID)` headings give the IDs used in that review.
 - Origin of TD-76: code review of `clippy-strictness` (`factory-agent`, `df-db`, 2026-10-29). The `TD-n (ID)` headings give the IDs used in that review.
@@ -56,23 +56,17 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-8 | medium | `df-agent-channel` scheduler | Timeout and Gone handling await provider teardown inline in the scheduler loop ([#121]) |
 | TD-9 | low    | `df-agent-channel` session | Sandbox teardown after a RunReport is awaited inline in the session loop ([#121]) |
 | TD-10 | low   | `df-agent-channel` server | Streams opened during shutdown start new sessions ([#121]) |
-| TD-14 | low   | `df-agent-channel` session | Two extra database round trips per batch ([#123]) |
 | TD-15 | low   | `df-agent-channel` runs | Guarded run update + `RunChanged` publish exists in three copies |
 | TD-16 | low   | `df-agent-channel` tests | `eventually` test helper polls with `sleep` and ends in `panic!` |
 | TD-17 | medium | `df-agent-channel` session | Tool-call handlers have no timeout; drain timeouts disagree with the shutdown budget ([#121]) |
-| TD-19 | low   | `df-agent-channel` storage | Run, task and tool-call SQL is runtime-checked and partly duplicates `df-db` ([#123]) |
 | TD-20 | low   | Helm chart | `agent.tls.clientCaFile` needs `ca.crt`, which an external issuer may not fill |
 | TD-21 | low   | Helm chart | `terminationGracePeriodSeconds` equals `SHUTDOWN_GRACE` (30 s) ([#121]) |
 | TD-22 | low   | `df-agent-channel` runs | `pod_ip` is not stored when `Hello` arrives before `Started` |
-| TD-23 | low   | `df-agent-channel` scheduler | `enforce_timeouts` loads every active run on every tick ([#123]) |
 | TD-25 | low   | `dark-factory` main | Log message interpolates `component` |
 | TD-26 | low   | `df-agent-channel`, `dark-factory` | Small duplicate helpers and indirections |
 | TD-27 | medium | Bazel | Container-backed tests cannot run on remote workers or in agent sandboxes |
-| TD-33 | low   | `.sqlx` | Offline metadata files come from two sqlx-cli versions ([#123]) |
 | TD-34 | low   | `df-core` config | Defaults for `runtime_image` and `issuer_name` don't match what the chart renders |
 | TD-39 | low    | `deploy` image test | Shipped plugin component is not checked with `wasm-tools validate` |
-| TD-42 | low    | `df-db` / `df-web` storage | Web UI queries are runtime-checked `sqlx::query_as`, not `query!` macros ([#123]) |
-| TD-45 | low   | `df-agent-channel` session | Turn state read with raw SQL; event kinds matched as strings ([#123]) |
 | TD-46 | low   | `df-web` statuses | Task statuses enumerated in parallel and compared as strings |
 | TD-47 | low   | `df-web` components | Message box and composer "+" use one-off class strings |
 | TD-49 | low   | `df-gateway` reasons | Flow reasons and rule scopes are scattered string literals |
@@ -82,8 +76,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-61 | low   | `df-gateway` buffers | `FlowLog` and `Merged` repeat the cutoff, prune and unexpired steps and the max-age clamp |
 | TD-63 | low   | `df-harness` config | `DF_HARNESS_*` environment variables have no reference entry |
 | TD-64 | low   | `df-harness` MCP | `call_tool` timeout (600 s) is a private constant without a test |
-| TD-65 | low   | `df-agent-channel`, `df-db` run state | The "run no longer takes commands" and terminal state lists are hard-coded in several SQL statements ([#123]) |
-| TD-66 | low   | `df-agent-channel` session | `start_finalizing(only_idle: bool)` takes a flag argument |
+| TD-66 | low   | `df-db` runs | `start_finalizing(only_idle: bool)` takes a flag argument |
 | TD-68 | low   | `factory-agent`, `df-agent-channel` tests | Keep-alive tests wait on real deadlines (1 s keep-alive, 3 s budget) |
 | TD-70 | low   | `df-proto`, tests | `hidden: false` spelled out at 48 `ContentBlock` literals |
 | TD-71 | low   | `df-db`, `df-web` requests | Request outcome and decider text is built in two places |
@@ -218,19 +211,9 @@ Tracked in [#121].
 
 **Fix:** Refuse new `Connect` calls once shutdown started (a flag checked in `connect`, returning `UNAVAILABLE`), and stop the acceptor first.
 
-### TD-14. Extra round trips per batch
-
-Tracked in [#123].
-
-`crates/df-agent-channel/src/session.rs` (`Session::active`, `persist_batch`)
-
-Each batch loads the full run row (`active`) and reads `last_persisted_seq` once outside and once inside the transaction. A runtime that sends one transcript chunk per batch causes four or more queries per message.
-
-**Fix:** One `SELECT state, last_persisted_seq FROM runs` before preparing blobs serves both checks; keep the `FOR UPDATE` read in the transaction.
-
 ### TD-15. Duplicated run update and publish
 
-`crates/df-agent-channel/src/runs.rs` (`set_run_state_tx`, `mark_started`, `mark_connected`, `notify_run`)
+`crates/df-db/src/runs.rs` (`set_run_state_tx`, `mark_started`, `mark_connected`, `notify_run`)
 
 Three places update a run with a state guard and publish `RunChanged` (`mark_started` inline, `mark_connected` via `notify_run`, `set_run_state_tx`). A change to the guard or notification semantics has to be made in each.
 
@@ -254,16 +237,6 @@ Tool-call handlers call the forge without a timeout, while forge work after a `P
 
 **Fix:** Bound each tool handler by `FORGE_TIMEOUT` and store a timeout error as the result. Derive the session drain from one budget that fits into `SHUTDOWN_GRACE` (and TD-21).
 
-### TD-19. Runtime-checked SQL outside `df-db`
-
-Tracked in [#123].
-
-`crates/df-agent-channel/src/runs.rs`, `tools.rs`, `transcript.rs`, `pr.rs`, `session.rs`
-
-Run, task, tool-call and transcript persistence uses `sqlx::query(...)` strings (some built with `concat!`), not the compile-time checked `query!` macros and `.sqlx/` metadata that `df-db` uses. A column rename compiles and fails only at runtime; the tests against PostgreSQL catch it, plain builds do not. `transcript::insert` repeats the update of `df_db::mark_prompt_delivered` (now with an extra `task_id` scope).
-
-**Fix:** Move the queries into `df-db` as `query!`/`query_as!` functions generic over `PgExecutor`, regenerate `.sqlx/`, and give `mark_prompt_delivered` the `task_id` scope so `transcript` can call it.
-
 ### TD-20. Client CA file depends on the issuer
 
 `deploy/helm/dark-factory/templates/configmap.yaml` (`agent.tls.clientCaFile: /etc/dark-factory/tls/ca.crt`), `values.yaml` (`tls.ca.existingIssuer`)
@@ -284,21 +257,11 @@ The kubelet sends SIGKILL at the same moment the supervisor gives up. Today the 
 
 ### TD-22. `pod_ip` missing when the runtime connects first
 
-`crates/df-agent-channel/src/runs.rs` (`mark_started`)
+`crates/df-db/src/runs.rs` (`mark_started`)
 
 `mark_started` only writes `pod_ip` while the run is `pending`/`provisioning`. If `Hello` is processed before the provider's `Started` event, the run is already `preparing` and `pod_ip` stays `NULL`. Authentication does not use the column (`SandboxProvider::resolve_identity`), so only diagnostics are affected.
 
 **Fix:** Store `pod_ip` with `COALESCE` for any non-terminal run, and change state only from `pending`/`provisioning`.
-
-### TD-23. Timeout scan loads every active run
-
-Tracked in [#123].
-
-`crates/df-agent-channel/src/scheduler.rs` (`enforce_timeouts`), `crates/df-agent-channel/src/runs.rs` (`list_active_runs`)
-
-Every 15 s tick on every replica loads all non-terminal runs and filters the deadlines in Rust. Fine for tens of runs; wasteful for hundreds with several replicas.
-
-**Fix:** Filter overdue runs in SQL (`started_at`/`connected_at` plus interval) and keep the Rust check for the final decision.
 
 ### TD-25. Log message interpolates a value
 
@@ -324,16 +287,6 @@ Remote execution is back for everything except the container-backed tests (`--co
 
 **Fix:** A container runtime (`dockerd`) in the executor image, so that the tag is not needed, and `--config=rbe` for agent sandboxes where BuildBuddy is reachable.
 
-### TD-33 (R5-N18). Mixed `.sqlx` metadata format
-
-Tracked in [#123].
-
-`.sqlx/`
-
-Only `query-3aad8b60….json` has the `origin` fields of sqlx-cli 0.9.0; the other files come from an older version. Both work.
-
-**Fix:** Regenerate all metadata with one pinned sqlx-cli version (`docs/development.md`, "Updating `sqlx` Offline Metadata").
-
 ### TD-34. `df-core` config defaults don't match the chart
 
 `crates/df-core/src/config.rs` (defaults `runtime_image: "ghcr.io/prskr/dark-factory/runtime:0.1.0"`, `issuer_name: "dark-factory-ca-issuer"`), `deploy/helm/dark-factory/values.yaml` (`image.runtime.tag: ''`, follows `appVersion`), `templates/certs.yaml` (`<release-ns>-<fullname>-ca-issuer`)
@@ -349,30 +302,6 @@ The chart always renders both values, so deployments are not affected. Running t
 The image test checks only the size (< 1 MiB) and the `\0asm` magic of `/plugins/forgejo.wasm`. `wasm-tools validate` ran once by hand (2026-10-22: 338 KB, valid). `wasm-tools` is not in the Bazel multitool. A broken opt transition or toolchain change only shows when `serve` loads the component.
 
 **Fix:** Add `wasm-tools` to multitool and run `wasm-tools validate` (optionally check the exports) in the image test.
-
-### TD-42 (S1). Web UI SQL is runtime-checked
-
-Tracked in [#123].
-
-`crates/df-db/src/{users,catalog,task_views}.rs`, `crates/df-web/src/auth/store.rs`
-
-The queries added for the web UI use `sqlx::query_as` / `query_scalar` instead of `query!` / `query_as!`, so `.sqlx/` does not cover them. `catalog.rs` builds its project queries with the `select_project!` string macro, which the sqlx macros cannot take. A schema change that breaks one of these queries surfaces only in the container-backed tests or at runtime.
-
-**Matters when:** a migration renames or retypes a column these queries read.
-
-**Fix:** Write the queries as literal `query_as!` calls (inline the `select_project!` variants), regenerate `.sqlx/`. The session store may stay runtime-checked (it picks its SQL at runtime).
-
-### TD-45 (S5). Turn state read with raw SQL in the channel crate
-
-Tracked in [#123].
-
-`crates/df-agent-channel/src/session.rs` (`turn_open`, `persist_batch`)
-
-`turn_open` queries `transcript_events` directly instead of going through `df-db`, and the event kinds `"turn_started"` / `"turn_ended"` are string literals in both the Rust code and the SQL.
-
-**Matters when:** the transcript schema or the event kind names change; the hold-back then breaks without a compile error.
-
-**Fix:** Move `turn_open` into `df-db` next to the transcript queries and name the kinds once (constants or an enum shared by both sites).
 
 ### TD-46 (S8, S35). Task statuses enumerated in parallel and compared as strings
 
@@ -463,25 +392,11 @@ Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `c
 **Matters when:** `df-harness` is promoted, or the timeout is changed.
 
 **Fix:** Pass the timeout in as a field on `Server`/`McpTool`, like `setup_timeout`, and add a test against a fake MCP server that lists tools but never answers `tools/call`.
-### TD-65 (S2, S16). The run-state list for "no longer commandable" is repeated in SQL
-
-`crates/df-agent-channel/src/runs.rs`, `crates/df-agent-channel/src/session.rs`, `crates/df-db/src/tasks.rs`
-
-Tracked in [#123].
-
-`state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled')` is written out in `runs.rs` (`set_idle_tx`), `session.rs` (`start_finalizing`) and the `queue_message` CASE in `df-db/src/tasks.rs`. It restates `RunState::is_terminal` plus `Finalizing`.
-
-The terminal list `state NOT IN ('succeeded', 'failed', 'cancelled')` is repeated in `df-db/src/tasks.rs` (`request_stop_tx`, `has_active_run`) and `df-db/src/egress.rs`; `df-agent-channel/src/runs.rs` has its own `terminal_states!` macro (code review of `iter2-cancel`, S4, 2026-11-02).
-
-**Matters when:** a run state is added or changed; all three statements have to change together.
-
-**Fix:** Put the list in one `RunState` constant next to `is_terminal` and bind it with `= ANY($n)`, plus a second constant for the terminal states.
-
 ### TD-66 (S15). `start_finalizing` takes a flag argument
 
-`crates/df-agent-channel/src/session.rs`
+`crates/df-db/src/runs.rs`
 
-`start_finalizing(&self, only_idle: bool)` runs one of two different UPDATE statements; the call sites `start_finalizing(true)` and `start_finalizing(false)` don't show the difference.
+`start_finalizing(tx, lock, only_idle: bool)` runs one of two different UPDATE statements; the call sites `start_finalizing(true)` and `start_finalizing(false)` don't show the difference.
 
 **Matters when:** a third finalize variant appears.
 
@@ -499,7 +414,7 @@ The session tests use a 1 s `keepAliveSeconds` and the budget test a 3 s wall cl
 
 ### TD-70 (S6). `hidden: false` spelled out at 48 `ContentBlock` literals
 
-`crates/` (for example `df-agent-channel/src/transcript.rs`, `df-db/src/tasks.rs`, `df-web/src/task_pages/tests/`, `factory-agent/src/tests/`)
+`crates/` (for example `df-db/src/transcript.rs`, `df-db/src/tasks.rs`, `df-web/src/task_pages/tests/`, `factory-agent/src/tests/`)
 
 Adding `ContentBlock.hidden` meant editing every hand-built block, including about six near-identical `fn text(t: &str) -> ContentBlock` test helpers.
 
@@ -632,7 +547,7 @@ Origin of TD-92: CodeRabbit review of PR #87 (`iter2-continuation-summary`, 2026
 
 ### TD-92 (CR1). The continuation summary reads every earlier transcript event of the task
 
-`crates/df-agent-channel/src/summary.rs` (`EVENTS_QUERY`, `continuation_summary`)
+`crates/df-db/src/transcript.rs` (`continuation_events`), `crates/df-agent-channel/src/summary.rs` (`continuation_summary`)
 
 On each `Assign` of a follow-up run, `continuation_summary` loads every event of the task's earlier runs with the four summary kinds (`fetch_all`, no `LIMIT`) before it folds them and applies the 64 KiB cap. This is deliberate (`iter2-continuation-summary` design D1): there is no row window, so old history is lost only to the cap. The query already skips raw tool input and output.
 
@@ -721,9 +636,9 @@ Origin of TD-101: code review of `forge-activity-transcript` (`df-db`, `df-agent
 
 ### TD-101 (S17). Lock-wait polling loop copied across tests
 
-`crates/df-db/src/{git_pushes,transcript,tasks}/tests.rs`, `crates/df-agent-channel/src/{session,runs}/tests.rs`, `crates/df-web/src/task_pages/tests/reset_workspace.rs`
+`crates/df-db/src/{git_pushes,transcript,tasks,runs}/tests.rs`, `crates/df-agent-channel/src/session/tests.rs`, `crates/df-web/src/task_pages/tests/reset_workspace.rs`
 
-Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activity`, each with its own copy of the query. The copy in `crates/df-agent-channel/src/runs/tests.rs:645` does not filter on `datname = current_database()`: `migrated_pool` databases share one server, so a lock wait in another test's database can end the loop early and the test can pass without exercising the lock order.
+Lock-order tests wait until a backend waits for a lock by polling `pg_stat_activity`, each with its own copy of the query. The copy in `crates/df-db/src/runs/tests.rs` (`message_queued_while_the_run_ends_is_not_stranded`) does not filter on `datname = current_database()`: `migrated_pool` databases share one server, so a lock wait in another test's database can end the loop early and the test can pass without exercising the lock order.
 
 **Matters when:** more lock-order tests are added, or the `runs` test passes on a broken lock order.
 
@@ -888,6 +803,5 @@ The test caps the compiled `app.css` below 52,000 bytes. `ui-settings-list-rows`
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
-[#123]: https://github.com/prskr/dark-factory/issues/123
 [#125]: https://github.com/prskr/dark-factory/issues/125
 [#141]: https://github.com/prskr/dark-factory/pull/141

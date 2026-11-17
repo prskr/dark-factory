@@ -4,7 +4,8 @@
 use df_core::{
     DependencyKind, ExistingBranch, Principal, TaskKey, matches_agent_branch, sanitize_title,
 };
-use df_db::{DbError, NewDependency, NewTask, TaskPlacement, place_on_branch};
+use df_db::tasks::child_task_id;
+use df_db::{DbError, NewDependency, NewTask, TaskPlacement, catalog, get_task, place_on_branch};
 use serde_json::{Value, json};
 
 use super::{Outcome, text_arg};
@@ -20,10 +21,7 @@ pub(super) async fn create_task(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let persona_name = text_arg(args, "persona").unwrap_or_default();
-    let persona: Option<uuid::Uuid> = sqlx::query_scalar("SELECT id FROM personas WHERE name = $1")
-        .bind(&persona_name)
-        .fetch_optional(&ctx.pool)
-        .await?;
+    let persona = catalog::persona_id_by_name(&ctx.pool, &persona_name).await?;
     let Some(persona) = persona else {
         return Ok(Outcome::error(format!(
             "unknown persona `{persona_name}`; choose one from list_personas"
@@ -108,24 +106,21 @@ async fn resolve_branch(
 
 /// Every persona with its description, ordered by name.
 pub(super) async fn list_personas(ctx: &ChannelContext) -> Result<Outcome, ChannelError> {
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT name, description FROM personas ORDER BY name")
-            .fetch_all(&ctx.pool)
-            .await?;
+    let rows = catalog::list_personas(&ctx.pool).await?;
     let text = rows
         .iter()
-        .map(|(name, description)| {
-            if description.is_empty() {
-                format!("- {name}")
+        .map(|persona| {
+            if persona.description.is_empty() {
+                format!("- {}", persona.name)
             } else {
-                format!("- {name}: {description}")
+                format!("- {}: {}", persona.name, persona.description)
             }
         })
         .collect::<Vec<_>>()
         .join("\n");
     let personas: Vec<Value> = rows
         .iter()
-        .map(|(name, description)| json!({ "name": name, "description": description }))
+        .map(|persona| json!({ "name": persona.name, "description": persona.description }))
         .collect();
     let mut outcome = Outcome::ok(text);
     outcome.structured = Some(json!({ "personas": personas }));
@@ -143,20 +138,11 @@ pub(super) async fn send_message(
     if text.trim().is_empty() {
         return Ok(Outcome::error("the text is empty"));
     }
-    let child: Option<uuid::Uuid> = match key.parse::<TaskKey>() {
-        Ok(key) => {
-            sqlx::query_scalar(
-                "SELECT id FROM tasks WHERE project_id = $1 AND key = $2 AND parent_id = $3",
-            )
-            .bind(rc.project.id.as_uuid())
-            .bind(key.to_string())
-            .bind(rc.task.id.as_uuid())
-            .fetch_optional(&ctx.pool)
-            .await?
-        }
+    let child = match key.parse::<TaskKey>() {
+        Ok(key) => child_task_id(&ctx.pool, rc.project.id, &key, rc.task.id).await?,
         Err(_invalid) => None,
     };
-    let Some(child) = child.map(df_core::TaskId::from_uuid) else {
+    let Some(child) = child else {
         return Ok(Outcome::error(format!(
             "`{key}` is not a child of this task; you can message only tasks you created"
         )));
@@ -168,10 +154,11 @@ pub(super) async fn send_message(
         Err(held @ DbError::BranchHeld { .. }) => return Ok(Outcome::error(held.to_string())),
         Err(e) => return Err(e.into()),
     };
-    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
-        .bind(child.as_uuid())
-        .fetch_one(&mut *tx)
-        .await?;
+    let status = get_task(&mut *tx, child)
+        .await?
+        .ok_or_else(|| ChannelError::InvalidData(format!("task {child} vanished")))?
+        .status
+        .to_string();
     tx.commit().await?;
     let mut outcome = Outcome::ok(format!(
         "Queued as prompt {}; {key} is now {status}. End your turn: you are woken when it ends.",

@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::blobs::sha256_hex;
 use crate::pool::DbError;
-use crate::transcript::{append_control_event, factory_event, lock_run_and_task};
+use crate::transcript::{TranscriptWriter, factory_event, lock_run_and_task};
 
 /// An artifact without its content.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -119,13 +119,11 @@ pub async fn write_artifact(
             size: meta.size.unsigned_abs(),
         })),
     });
-    append_control_event(
-        &mut tx,
-        &lock,
-        &format!("artifact:{}", new.call_id),
-        &written,
-    )
-    .await?;
+    let mut transcript = TranscriptWriter::new(&lock);
+    transcript
+        .append_control(&mut tx, &format!("artifact:{}", new.call_id), &written)
+        .await?;
+    transcript.finish(&mut tx).await?;
     tx.commit().await?;
     Ok(meta)
 }

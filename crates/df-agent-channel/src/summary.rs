@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use df_db::transcript::continuation_events;
 use df_proto::transcript::v1::ToolCallStatus;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -16,29 +17,6 @@ pub(crate) const SUMMARY_MAX_BYTES: usize = 64 * 1024;
 /// Share of the summary reserved for task title and description.
 const SUMMARY_HEADER_MAX_BYTES: usize = 4 * 1024;
 const SEPARATOR: &str = "\n\n";
-
-/// Selects the four kinds of other runs as flat columns (no raw tool input or output). The text
-/// of a user message holds its visible blocks only (`hidden` blocks are left out).
-const EVENTS_QUERY: &str = "
-SELECT run_id, kind,
-  COALESCE(payload ->> 'turnId', '') AS turn_id,
-  COALESCE(payload #>> '{agentMessageChunk,messageId}', '') AS message_id,
-  COALESCE(CASE kind
-    WHEN 'user_message' THEN
-      (SELECT string_agg(b.block #>> '{text,text}', E'\\n' ORDER BY b.ord)
-         FROM jsonb_array_elements(payload #> '{userMessage,content}')
-              WITH ORDINALITY AS b(block, ord)
-        WHERE COALESCE((b.block ->> 'hidden')::boolean, false) = false)
-    ELSE payload #>> '{agentMessageChunk,content,text,text}'
-  END, '') AS text,
-  COALESCE(payload #>> '{toolCall,toolCallId}', payload #>> '{toolCallUpdate,toolCallId}', '')
-    AS tool_call_id,
-  COALESCE(payload #>> '{toolCall,title}', payload #>> '{toolCallUpdate,title}') AS title,
-  COALESCE(payload #>> '{toolCall,status}', payload #>> '{toolCallUpdate,status}') AS status
-FROM transcript_events
-WHERE task_id = $1 AND run_id <> $2
-  AND kind IN ('user_message', 'agent_message_chunk', 'tool_call', 'tool_call_update')
-ORDER BY id";
 
 /// A transcript event the fold reads. Which fields are set depends on `kind`: `text` for
 /// messages (visible text of a user message), `message_id` for agent chunks, `turn_id`,
@@ -117,11 +95,7 @@ pub(crate) async fn continuation_summary(
     pool: &PgPool,
     rc: &RunContext,
 ) -> Result<String, ChannelError> {
-    let rows: Vec<EventRow> = sqlx::query_as(EVENTS_QUERY)
-        .bind(rc.task.id.as_uuid())
-        .bind(rc.run.id.as_uuid())
-        .fetch_all(pool)
-        .await?;
+    let rows = continuation_events(pool, rc.task.id, rc.run.id).await?;
     let events: Vec<SummaryEvent> = rows
         .into_iter()
         .filter_map(|row| {
@@ -142,19 +116,6 @@ pub(crate) async fn continuation_summary(
         .collect();
     let header = format!("# {}\n\n{}", rc.task.title, rc.task.description);
     Ok(render_summary(header, &events))
-}
-
-/// A row of [`EVENTS_QUERY`], bound by column name.
-#[derive(sqlx::FromRow)]
-struct EventRow {
-    run_id: Uuid,
-    kind: String,
-    turn_id: String,
-    message_id: String,
-    text: String,
-    tool_call_id: String,
-    title: Option<String>,
-    status: Option<String>,
 }
 
 /// `(run_id, turn_id, tool_call_id)`: the harness id is unique within a turn only.

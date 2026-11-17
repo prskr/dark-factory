@@ -87,7 +87,7 @@ impl Env {
             .unwrap();
         let run = insert_run(&self.pool, task.id).await;
         for prompt in prompts {
-            mark_prompt_delivered(&self.pool, prompt.id, run)
+            mark_prompt_delivered(&self.pool, task.id, prompt.id, run)
                 .await
                 .unwrap();
         }

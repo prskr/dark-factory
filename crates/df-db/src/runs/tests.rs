@@ -1,18 +1,145 @@
-//! Tests of the run rows: start query, run end mapping and resume plan.
+//! Tests of the run rows: start query, run end mapping and resume plan (container-backed).
 
 use chrono::TimeDelta;
-use df_core::CAPACITY_DETAIL;
+use df_core::config::{RunsConfig, SchedulingConfig};
+use df_core::{CAPACITY_DETAIL, PersonaId, ProjectId};
 
 use super::*;
-use crate::testing::{Env, task_resume_state};
+use crate as df_db;
+use crate::tasks::tests::seed_project_and_persona;
+use crate::{NewTask, TaskRow, create_task};
 
 /// `runs.maxAutoResumes` of the tests.
 const MAX_AUTO_RESUMES: u32 = 3;
 
-fn config() -> ChannelConfig {
-    let mut config = ChannelConfig::default();
-    config.runs.max_auto_resumes = MAX_AUTO_RESUMES;
-    config
+/// The resume policy of the tests.
+struct Policy {
+    max_auto_resumes: u32,
+    resume_backoff: TimeDelta,
+}
+
+fn config() -> Policy {
+    Policy {
+        max_auto_resumes: MAX_AUTO_RESUMES,
+        resume_backoff: SchedulingConfig::default().resume_backoff(),
+    }
+}
+
+async fn end_run(
+    pool: &PgPool,
+    end: &RunEnd,
+    policy: &Policy,
+) -> Result<Option<EndedRun>, DbError> {
+    super::end_run(
+        pool,
+        end,
+        &EventSinks::default(),
+        policy.max_auto_resumes,
+        policy.resume_backoff,
+    )
+    .await
+}
+
+/// Project `DF`, persona "Linus" and task `DF-1` with its undelivered assignment prompt.
+struct Env {
+    pool: PgPool,
+    project_id: ProjectId,
+    persona_id: PersonaId,
+    task: TaskRow,
+}
+
+impl Env {
+    async fn new(pool: PgPool) -> Self {
+        let (project_id, persona_id) =
+            seed_project_and_persona(&pool, &"DF".parse().unwrap(), "Linus")
+                .await
+                .unwrap();
+        let task = new_task(&pool, project_id, persona_id, "Fix login").await;
+        Self {
+            pool,
+            project_id,
+            persona_id,
+            task,
+        }
+    }
+
+    /// Creates a run for the task in `state` with pod IP `127.0.0.1`.
+    async fn insert_run(&self, task_id: TaskId, number: i64, state: &str) -> RunId {
+        let run_id = RunId::new();
+        sqlx::query(
+            "INSERT INTO runs (id, task_id, number, state, pod_ip) VALUES ($1, $2, $3, $4, '127.0.0.1')",
+        )
+        .bind(run_id.as_uuid())
+        .bind(task_id.as_uuid())
+        .bind(number)
+        .bind(state)
+        .execute(&self.pool)
+        .await
+        .unwrap();
+        run_id
+    }
+
+    /// Creates a task of the seeded project on the existing `branch`.
+    async fn task_on_branch(&self, branch: &str, pr: Option<df_db::AttachedPr>) -> TaskRow {
+        let (task, _) = df_db::create_task_on(
+            &self.pool,
+            new_task_input(self.project_id, self.persona_id, "Existing branch"),
+            df_db::TaskPlacement {
+                branch: Some(df_core::ExistingBranch::parse(branch, "main").unwrap()),
+                attached_pr: pr,
+            },
+        )
+        .await
+        .unwrap();
+        task
+    }
+
+    /// A board member as the actor of UI actions.
+    #[expect(clippy::unused_self, reason = "reads like the other fixture helpers")]
+    fn human(&self) -> Principal {
+        Principal::human(df_core::UserId::new(), "Ada")
+    }
+}
+
+fn new_task_input(project_id: ProjectId, persona_id: PersonaId, title: &str) -> NewTask {
+    NewTask {
+        project_id,
+        persona_id,
+        title: Some(title.into()),
+        description: String::new(),
+        issue_number: None,
+        created_by: Principal::system("test"),
+        parent_id: None,
+        depends_on: Vec::new(),
+    }
+}
+
+async fn new_task(
+    pool: &PgPool,
+    project_id: ProjectId,
+    persona_id: PersonaId,
+    title: &str,
+) -> TaskRow {
+    create_task(pool, new_task_input(project_id, persona_id, title))
+        .await
+        .unwrap()
+        .0
+}
+
+/// Status, resume time and resume count of a task, as stored.
+#[derive(Debug, sqlx::FromRow)]
+struct TaskResumeState {
+    status: String,
+    resume_at: Option<DateTime<Utc>>,
+    auto_resumes: i32,
+}
+
+async fn task_resume_state(pool: &PgPool, task_id: TaskId) -> TaskResumeState {
+    sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
+        .bind(task_id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -337,7 +464,7 @@ async fn a_lost_sandbox_resumes_after_the_configured_resume_backoff() {
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     let mut config = config();
-    config.scheduling.resume_backoff_seconds = 5;
+    config.resume_backoff = TimeDelta::seconds(5);
 
     let before = Utc::now();
     end_run(&pool, &end_with(run_id, RunOutcome::SandboxLost), &config)
@@ -356,18 +483,9 @@ async fn a_lost_sandbox_resumes_after_the_configured_resume_backoff() {
 
 /// A task of project `DF` in `status`, due at `due` (`resume_at`, or `updated_at` when None).
 async fn due_task(env: &Env, key: &str, status: &str, resume_at: &str) -> TaskId {
-    let (task, _) = df_db::create_task(
-        &env.ctx.pool,
-        df_db::NewTask {
-            project_id: env.project_id,
-            persona_id: env.persona_id,
-            title: Some(key.into()),
-            description: String::new(),
-            issue_number: None,
-            created_by: Principal::system("test"),
-            parent_id: None,
-            depends_on: Vec::new(),
-        },
+    let (task, _) = create_task(
+        &env.pool,
+        new_task_input(env.project_id, env.persona_id, key),
     )
     .await
     .unwrap();
@@ -375,7 +493,7 @@ async fn due_task(env: &Env, key: &str, status: &str, resume_at: &str) -> TaskId
         .bind(task.id.as_uuid())
         .bind(status)
         .bind(resume_at)
-        .execute(&env.ctx.pool)
+        .execute(&env.pool)
         .await
         .unwrap();
     task.id
@@ -384,7 +502,7 @@ async fn due_task(env: &Env, key: &str, status: &str, resume_at: &str) -> TaskId
 async fn park_seed_task(env: &Env) {
     sqlx::query("UPDATE tasks SET status = 'waiting' WHERE id = $1")
         .bind(env.task.id.as_uuid())
-        .execute(&env.ctx.pool)
+        .execute(&env.pool)
         .await
         .unwrap();
 }
@@ -579,7 +697,7 @@ async fn message_queued_while_the_run_ends_is_not_stranded() {
     sqlx::query(
         "INSERT INTO task_messages (id, task_id, author, content) VALUES ($1, $2, '{}', '[]')",
     )
-    .bind(uuid::Uuid::now_v7())
+    .bind(Uuid::now_v7())
     .bind(env.task.id.as_uuid())
     .execute(&mut *queueing)
     .await
@@ -719,8 +837,8 @@ async fn a_completion_releases_the_dependent_and_wakes_the_parent_in_one_transac
         .execute(&pool)
         .await
         .unwrap();
-    let new_task = |title: &str, parent: Option<TaskId>, depends_on: Vec<df_db::NewDependency>| {
-        df_db::NewTask {
+    let new_task =
+        |title: &str, parent: Option<TaskId>, depends_on: Vec<df_db::NewDependency>| NewTask {
             project_id: env.project_id,
             persona_id: env.persona_id,
             title: Some(title.into()),
@@ -729,16 +847,15 @@ async fn a_completion_releases_the_dependent_and_wakes_the_parent_in_one_transac
             created_by: Principal::system("test"),
             parent_id: parent,
             depends_on,
-        }
-    };
-    let (child, _) = df_db::create_task(&pool, new_task("Implement", Some(env.task.id), vec![]))
+        };
+    let (child, _) = create_task(&pool, new_task("Implement", Some(env.task.id), vec![]))
         .await
         .unwrap();
     let on_child = vec![df_db::NewDependency {
         key: child.key.clone(),
         kind: df_core::DependencyKind::Completion,
     }];
-    let (review, _) = df_db::create_task(&pool, new_task("Review", Some(env.task.id), on_child))
+    let (review, _) = create_task(&pool, new_task("Review", Some(env.task.id), on_child))
         .await
         .unwrap();
     assert_eq!(review.status, TaskStatus::AwaitingDependencies);
@@ -766,4 +883,258 @@ async fn a_completion_releases_the_dependent_and_wakes_the_parent_in_one_transac
     .await
     .unwrap();
     assert_eq!(woken, 1);
+}
+
+async fn state_of(pool: &PgPool, run_id: RunId) -> String {
+    sqlx::query_scalar("SELECT state FROM runs WHERE id = $1")
+        .bind(run_id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Locks the run and its task as the session does, then moves the run to `finalizing`.
+async fn finalize(pool: &PgPool, env: &Env, run_id: RunId, only_idle: bool) -> bool {
+    let mut tx = pool.begin().await.unwrap();
+    let lock = crate::transcript::lock_run_and_task(&mut tx, run_id, env.task.id)
+        .await
+        .unwrap();
+    let moved = start_finalizing(&mut tx, &lock, only_idle).await.unwrap();
+    tx.commit().await.unwrap();
+    moved
+}
+
+#[tokio::test]
+async fn the_idle_release_is_blocked_by_an_undelivered_message() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // The seeded message is undelivered.
+    let run_id = env.insert_run(env.task.id, 1, "awaiting_input").await;
+
+    assert!(!finalize(&pool, &env, run_id, true).await);
+    assert_eq!(state_of(&pool, run_id).await, "awaiting_input");
+
+    deliver_all(&pool, env.task.id).await;
+    assert!(finalize(&pool, &env, run_id, true).await);
+    assert_eq!(state_of(&pool, run_id).await, "finalizing");
+}
+
+#[tokio::test]
+async fn the_idle_release_moves_only_an_awaiting_input_run() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    deliver_all(&pool, env.task.id).await;
+    let run_id = env.insert_run(env.task.id, 1, "running").await;
+
+    assert!(!finalize(&pool, &env, run_id, true).await);
+    assert_eq!(state_of(&pool, run_id).await, "running");
+}
+
+#[tokio::test]
+async fn the_budget_cancel_moves_a_run_from_any_commandable_state_once() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // An undelivered message does not matter here.
+    for (number, state) in [
+        (1, "pending"),
+        (2, "connecting"),
+        (3, "preparing"),
+        (4, "running"),
+        (5, "awaiting_input"),
+    ] {
+        let run_id = env.insert_run(env.task.id, number, state).await;
+        assert!(finalize(&pool, &env, run_id, false).await, "{state}");
+        assert_eq!(state_of(&pool, run_id).await, "finalizing", "{state}");
+        // Already ending: nothing to move.
+        assert!(!finalize(&pool, &env, run_id, false).await, "{state}");
+        end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
+            .await
+            .unwrap();
+        assert!(!finalize(&pool, &env, run_id, false).await, "ended {state}");
+    }
+}
+
+#[tokio::test]
+async fn the_persisted_sequence_and_the_completion_summary_are_stored() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.insert_run(env.task.id, 1, "running").await;
+
+    set_last_persisted_seq(&pool, run_id, 7).await.unwrap();
+    set_completion_summary(&pool, run_id, "done and dusted")
+        .await
+        .unwrap();
+
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!(run.last_persisted_seq, 7);
+    let summary: String = sqlx::query_scalar("SELECT completion_summary FROM runs WHERE id = $1")
+        .bind(run_id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(summary, "done and dusted");
+    assert!(matches!(
+        set_last_persisted_seq(&pool, run_id, u64::MAX).await,
+        Err(DbError::InvalidData(_))
+    ));
+}
+
+#[tokio::test]
+async fn the_previous_harness_session_is_the_newest_earlier_one() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    for (number, session) in [(1, "first"), (2, "second"), (3, "")] {
+        let run_id = env.insert_run(env.task.id, number, "succeeded").await;
+        sqlx::query("UPDATE runs SET harness_session_id = $2 WHERE id = $1")
+            .bind(run_id.as_uuid())
+            .bind(session)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let previous = |number| previous_harness_session_id(&pool, env.task.id, number);
+    assert_eq!(previous(4).await.unwrap().as_deref(), Some("second"));
+    assert_eq!(previous(2).await.unwrap().as_deref(), Some("first"));
+    assert_eq!(previous(1).await.unwrap(), None);
+    let run_id = env.insert_run(env.task.id, 4, "running").await;
+    assert_eq!(
+        completion_summary(&pool, run_id).await.unwrap().as_deref(),
+        Some("")
+    );
+    assert_eq!(completion_summary(&pool, RunId::new()).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn persist_state_reads_state_and_sequence_in_one_row() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.insert_run(env.task.id, 1, "awaiting_input").await;
+    set_last_persisted_seq(&pool, run_id, 3).await.unwrap();
+
+    assert_eq!(
+        persist_state(&pool, run_id).await.unwrap(),
+        Some(PersistState {
+            state: RunState::AwaitingInput,
+            last_persisted_seq: 3
+        })
+    );
+    assert_eq!(persist_state(&pool, RunId::new()).await.unwrap(), None);
+}
+
+/// Limits of the timeout tests: connect 100 s, budget 1000 s + 2 × 10 s grace, stop 120 s.
+fn limits() -> RunsConfig {
+    RunsConfig {
+        connect_timeout_seconds: 100,
+        max_wall_clock_seconds: 1000,
+        cancel_grace_seconds: 10,
+        ..RunsConfig::default()
+    }
+}
+
+/// A run of a task of its own in `state`, `started_ago` seconds old, connected and stop-requested
+/// the given number of seconds ago.
+async fn aged_run(
+    env: &Env,
+    state: &str,
+    started_ago: i64,
+    connected_ago: Option<i64>,
+    stop_ago: Option<i64>,
+) -> RunId {
+    let task = new_task(&env.pool, env.project_id, env.persona_id, state).await;
+    let run_id = RunId::new();
+    sqlx::query(
+        "INSERT INTO runs (id, task_id, number, state, started_at, connected_at, stop_requested_at)
+         VALUES ($1, $2, 1, $3, now() - $4 * interval '1 second',
+                 now() - $5::bigint * interval '1 second', now() - $6::bigint * interval '1 second')",
+    )
+    .bind(run_id.as_uuid())
+    .bind(task.id.as_uuid())
+    .bind(state)
+    .bind(started_ago)
+    .bind(connected_ago)
+    .bind(stop_ago)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    run_id
+}
+
+async fn overdue(pool: &PgPool, cfg: &RunsConfig) -> Vec<RunId> {
+    list_overdue_runs(pool, Utc::now(), cfg)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|run| run.id)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_fresh_stop_request_on_an_unconnected_run_is_overdue() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let stopped = aged_run(&env, "connecting", 1, None, Some(1)).await;
+    let fresh_but_connected = aged_run(&env, "running", 1, Some(1), Some(1)).await;
+    assert_eq!(overdue(&pool, &limits()).await, [stopped]);
+    assert!(
+        !overdue(&pool, &limits())
+            .await
+            .contains(&fresh_but_connected)
+    );
+}
+
+#[tokio::test]
+async fn a_stop_request_past_the_stop_timeout_is_overdue_while_the_budget_remains() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let timed_out = aged_run(&env, "running", 300, Some(300), Some(121)).await;
+    aged_run(&env, "running", 300, Some(300), Some(119)).await;
+    assert_eq!(overdue(&pool, &limits()).await, [timed_out]);
+}
+
+#[tokio::test]
+async fn a_run_past_its_connect_timeout_is_overdue() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let late = aged_run(&env, "connecting", 101, None, None).await;
+    aged_run(&env, "provisioning", 99, None, None).await;
+    // A connected run is not subject to the connect timeout.
+    aged_run(&env, "running", 500, Some(10), None).await;
+    assert_eq!(overdue(&pool, &limits()).await, [late]);
+}
+
+#[tokio::test]
+async fn a_run_past_its_hard_stop_is_overdue() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    // Hard stop: 1000 s budget + 2 × 10 s grace after the connect.
+    let late = aged_run(&env, "finalizing", 2000, Some(1021), None).await;
+    aged_run(&env, "running", 2000, Some(1019), None).await;
+    assert_eq!(overdue(&pool, &limits()).await, [late]);
+}
+
+#[tokio::test]
+async fn runs_within_all_limits_and_without_a_stop_request_are_not_overdue() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    aged_run(&env, "pending", 10, None, None).await;
+    aged_run(&env, "running", 500, Some(400), None).await;
+    let ended = aged_run(&env, "succeeded", 5000, Some(4000), Some(3000)).await;
+    assert!(!overdue(&pool, &limits()).await.contains(&ended));
+    assert!(overdue(&pool, &limits()).await.is_empty());
+}
+
+#[tokio::test]
+async fn unrepresentable_budgets_do_not_fail_the_query_and_mean_no_deadline() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let cfg = RunsConfig {
+        connect_timeout_seconds: u64::MAX,
+        max_wall_clock_seconds: u64::MAX,
+        ..limits()
+    };
+    let stopped = aged_run(&env, "connecting", 5000, None, Some(1)).await;
+    aged_run(&env, "provisioning", 5000, None, None).await;
+    aged_run(&env, "running", 5000, Some(5000), None).await;
+    assert_eq!(overdue(&pool, &cfg).await, [stopped]);
 }

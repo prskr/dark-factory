@@ -13,6 +13,37 @@ allow-print-in-tests = true
 excessive-nesting-threshold = 5
 
 # Tests and tools use `tempfile` for temporary files (AGENTS.md, "Tests").
+#
+# Database access only via `df-db` (AGENTS.md, "Database access"): `df-db`, `df-e2e` and
+# `df-test-postgres` opt out at crate level, `df-web/src/auth/store.rs` at module level, test code
+# with `#[cfg_attr(test, expect(...))]` (and `#![expect]` in `test-util` fixture modules and integration test files). Passing a `PgPool` or a `Transaction` stays allowed.
 disallowed-methods = [
     { path = "std::env::temp_dir", reason = "use `tempfile`; never write to fixed paths" },
+    { path = "sqlx::query", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_as", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_scalar", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_with", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_as_with", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_scalar_with", reason = "database access only via `df-db`" },
+    { path = "sqlx::raw_sql", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::execute", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::execute_many", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::fetch", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::fetch_many", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::fetch_all", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::fetch_one", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::fetch_optional", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::prepare", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::prepare_with", reason = "database access only via `df-db`" },
+    { path = "sqlx::Executor::describe", reason = "database access only via `df-db`" },
+]
+
+disallowed-macros = [
+    { path = "sqlx::query", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_as", reason = "database access only via `df-db`" },
+    { path = "sqlx::query_scalar", reason = "database access only via `df-db`" },
+]
+
+disallowed-types = [
+    { path = "sqlx::QueryBuilder", reason = "database access only via `df-db`" },
 ]

@@ -3,6 +3,14 @@
 //!
 //! Every decision is derived from the database, so any replica can serve any reconnect.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::disallowed_methods,
+        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+    )
+)]
+
 use std::sync::Arc;
 
 use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig, VolumesConfig};
@@ -23,7 +31,6 @@ pub mod server;
 pub mod session;
 pub mod summary;
 pub mod tools;
-pub mod transcript;
 pub mod webhooks;
 
 #[cfg(feature = "test-util")]

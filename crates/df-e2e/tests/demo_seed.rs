@@ -1,6 +1,11 @@
 //! The demo profile of the seed (`seed --demo`): what it writes into a migrated database, that a
 //! second run changes nothing and that it leaves the end-to-end fixtures alone.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the test reads the seeded database directly (AGENTS.md, \"Database access\")"
+)]
+
 use anyhow::Result;
 use df_db::MIGRATOR;
 use df_e2e::seed::{self, demo};

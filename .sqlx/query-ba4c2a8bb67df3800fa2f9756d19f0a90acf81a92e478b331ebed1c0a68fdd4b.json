@@ -1,0 +1,328 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,\n            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        WHERE t.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "title_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "title_source"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "project_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "project_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "repo_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "repo_url"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "issue_tracker_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "issue_tracker_url"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "persona_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "persona_harness",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "harness"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "persona_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "issue_number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "issue_number"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "status_line",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "status_line"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "pr_number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_number"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "pr_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_url"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "pr_title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_title"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "pr_attached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_attached"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "branch"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "resume_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "resume_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "auto_resumes",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "auto_resumes"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "created_by",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "creator_task_key?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "parent_key?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "parent_title?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "title"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ba4c2a8bb67df3800fa2f9756d19f0a90acf81a92e478b331ebed1c0a68fdd4b"
+}

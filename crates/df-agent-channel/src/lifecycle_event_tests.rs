@@ -3,12 +3,13 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, RunId, RunOutcome, SandboxEvent};
+use df_db::runs::RunEnd;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::task::JoinSet;
 
 use crate::retention::Retention;
-use crate::runs::{RunEnd, end_run};
+use crate::runs::end_run;
 use crate::testing::{Env, recorded_events};
 use crate::{ChannelConfig, Scheduler};
 

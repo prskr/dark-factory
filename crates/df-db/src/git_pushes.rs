@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::pool::DbError;
 use crate::push_checks::{PushFinding, PushingTask, react_to_push};
-use crate::transcript::{RunTaskLock, append_control_event, forge_event, lock_run_and_task};
+use crate::transcript::{RunTaskLock, TranscriptWriter, forge_event, lock_run_and_task};
 
 /// Verdict of a push as stored in `git_pushes.verdict`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,7 +237,9 @@ async fn append_branch_pushed(
         })),
     });
     let source_key = format!("push:{}", record.push_id);
-    append_control_event(tx, lock, &source_key, &event).await?;
+    let mut transcript = TranscriptWriter::new(lock);
+    transcript.append_control(tx, &source_key, &event).await?;
+    transcript.finish(tx).await?;
     Ok(())
 }
 

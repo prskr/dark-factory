@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE runs SET state = 'connecting', pod_ip = $2,\n            sandbox_started_at = COALESCE(sandbox_started_at, now())\n        WHERE id = $1 AND state = ANY($3)\n        RETURNING task_id, provisioning_started_at IS NOT NULL AS \"provisioning_began!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "provisioning_began!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "13ec8a12e632bd9f42c338b4bf8b10bad6951f0599a682bdf77517ddb0880960"
+}

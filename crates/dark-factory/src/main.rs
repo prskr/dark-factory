@@ -1,5 +1,13 @@
 //! Dark Factory control plane, database migration, and egress gateway binary.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::disallowed_methods,
+        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+    )
+)]
+
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;

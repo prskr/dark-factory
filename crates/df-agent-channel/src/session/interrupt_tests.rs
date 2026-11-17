@@ -7,6 +7,7 @@ use super::tests::{
 };
 use super::*;
 use crate::testing::Env;
+use df_db::publish;
 
 /// The `(by, turn_id)` of the interrupts sent.
 fn sent_interrupts(

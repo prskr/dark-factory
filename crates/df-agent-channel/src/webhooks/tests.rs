@@ -3,11 +3,12 @@
 use df_core::seams::ReviewVerdict;
 use df_core::testing::{FakeForgeClient, ForgeCall};
 use df_core::{IntegrationError, Principal, RunOutcome};
+use df_db::runs::RunEnd;
 use df_db::tasks::list_undelivered_messages;
 use serde_json::Value;
 
 use super::*;
-use crate::runs::{RunEnd, end_run};
+use crate::runs::end_run;
 use crate::testing::Env;
 
 const REPO: &str = "https://git.example.org/Peter/dark-factory";

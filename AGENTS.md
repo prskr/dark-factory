@@ -28,6 +28,10 @@ Rust code, including generated Rust code, MUST keep building with plain `cargo` 
 - `sqlx` query metadata is checked in under `.sqlx/` (offline mode is the default via `.cargo/config.toml`). After adding or changing a `sqlx::query!` / `query_as!` macro, regenerate it (see `docs/development.md`, "Updating `sqlx` Offline Metadata") and commit the result.
 - Other generated code that Bazel needs but `cargo` cannot produce must not exist. If a generator is needed, make sure `build.rs` or checked-in output covers the plain `cargo` path as well.
 
+## Database access
+
+Production code reads and writes the database only through `df-db`: every query lives in the `df-db` module of the table it touches, as a checked `query!`/`query_as!`. Other crates call those functions and may pass a `PgPool` or a `Transaction` around, but never use `sqlx::query*`, `sqlx::raw_sql`, `sqlx::QueryBuilder` or `sqlx::Executor` methods with SQL text. Clippy enforces it (`disallowed-methods`, `disallowed-macros` and `disallowed-types` in `clippy.toml`). Exceptions: `df-web/src/auth/store.rs` (`web_sessions`, a session-store adapter that picks its SQL at runtime), `df-e2e` and `df-test-postgres`, and test code: `#[cfg_attr(test, expect(...))]` at crate roots, `#![expect]` in integration test files and in `test-util` fixture modules (for example `df-agent-channel/src/testing.rs`). See skill `rust`, "Database access".
+
 ## General Rules
 
 Prioritize simplicity. If there is a simple solution that might be sufficient for a high percentage of cases, suggest that one instead of a - supposedly - "perfect" solution that is significantly more complicated.

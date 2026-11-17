@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::assign::{build_assign, load_run_context};
-use crate::runs::get_run;
 use crate::testing::Env;
 use df_core::{RunId, TaskId};
+use df_db::runs::get_run;
 use df_proto::transcript::v1::ToolCallStatus;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -536,7 +536,11 @@ async fn forge_activity_stays_out_of_the_assign_summary() -> anyhow::Result<()> 
     });
     let mut tx = pool.begin().await?;
     let lock = df_db::transcript::lock_run_and_task(&mut tx, run1, env.task.id).await?;
-    df_db::transcript::append_control_event(&mut tx, &lock, "pr-opened:12", &opened).await?;
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
+    writer
+        .append_control(&mut tx, "pr-opened:12", &opened)
+        .await?;
+    writer.finish(&mut tx).await?;
     tx.commit().await?;
 
     let summary = run_two_summary(&env, &pool, run1).await?;
@@ -574,7 +578,11 @@ async fn factory_activity_stays_out_of_the_assign_summary() -> anyhow::Result<()
     });
     let mut tx = pool.begin().await?;
     let lock = df_db::transcript::lock_run_and_task(&mut tx, run1, env.task.id).await?;
-    df_db::transcript::append_control_event(&mut tx, &lock, "artifact:c1", &written).await?;
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
+    writer
+        .append_control(&mut tx, "artifact:c1", &written)
+        .await?;
+    writer.finish(&mut tx).await?;
     tx.commit().await?;
 
     let summary = run_two_summary(&env, &pool, run1).await?;
@@ -623,6 +631,8 @@ async fn stored_events_of_a_previous_run_become_summary_entries() -> anyhow::Res
     ];
     let blobs = df_db::PgBlobStore::new(pool.clone());
     let mut tx = pool.begin().await?;
+    let lock = df_db::transcript::lock_run_and_task(&mut tx, run1, task).await?;
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
     for (seq, kind) in (1..).zip(kinds) {
         let event = wire::Event {
             schema_version: 1,
@@ -630,9 +640,10 @@ async fn stored_events_of_a_previous_run_become_summary_entries() -> anyhow::Res
             turn_id: "t".into(),
             kind: Some(kind),
         };
-        let prepared = crate::transcript::prepare(&blobs, seq, event).await?;
-        crate::transcript::insert(&mut tx, task, run1, &prepared).await?;
+        let prepared = df_db::transcript::prepare(&blobs, seq, event).await?;
+        writer.append_runtime(&mut tx, &prepared).await?;
     }
+    writer.finish(&mut tx).await?;
     tx.commit().await?;
 
     let summary = run_two_summary(&env, &pool, run1).await?;
