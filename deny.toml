@@ -23,6 +23,11 @@ ignore = [
     # signatures with the provider's public keys: no secret integers. Revisit when `openidconnect`
     # moves to elliptic-curve 0.14.
     { id = "RUSTSEC-2026-0387", reason = "crypto-bigint: only public-key ECDSA verification" },
+    # `chrono` is unmaintained (no fixed release); not a vulnerability. Besides our own crates it is
+    # pulled in by sqlx, openidconnect, oauth2, rmcp, schemars and pbjson-types, so dropping it from
+    # our code alone does not clear the advisory. Revisit when those dependencies move to `jiff` or
+    # `time` (backlog row in product/iterations/roadmap.md).
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: required by sqlx, openidconnect, oauth2 and others" },
 ]
 
 [licenses]
