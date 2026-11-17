@@ -2,6 +2,10 @@
 //! fakes of `df-core` and a PostgreSQL database per test.
 
 #![expect(
+    clippy::disallowed_methods,
+    reason = "the tests read and seed the database directly (AGENTS.md, \"Database access\")"
+)]
+#![expect(
     clippy::too_many_lines,
     reason = "scenario tests set up and check a whole run"
 )]

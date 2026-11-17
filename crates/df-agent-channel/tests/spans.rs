@@ -3,9 +3,9 @@
 //! A test binary of its own: tracing caches which callsites are enabled per process, and tests
 //! running in parallel threads make that cache race with a scoped subscriber.
 
-use df_agent_channel::runs::get_run;
 use df_agent_channel::session::run;
 use df_agent_channel::testing::Env;
+use df_db::runs::get_run;
 use df_proto::agent::v1::{AgentMessage, Hello, agent_message};
 use df_proto::transcript::v1 as wire;
 use opentelemetry::trace::TracerProvider as _;

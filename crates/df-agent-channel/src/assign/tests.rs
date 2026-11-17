@@ -1,10 +1,10 @@
 //! Tests of the assignment: prompt sections, harness files and `Assign` of a run.
 
+use df_db::runs::get_run;
 use df_proto::agent::v1::RewritePolicy as RewritePolicyProto;
 
 use super::*;
 use crate::ChannelConfig;
-use crate::runs::get_run;
 use crate::testing::Env;
 
 /// The default adapter command of `claude-code`: Node.js running the adapter, no shell.

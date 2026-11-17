@@ -46,6 +46,12 @@ pub enum DbError {
     RoleManagement(String),
 }
 
+/// Checks that the database answers a query (readiness probe).
+pub async fn ping(pool: &PgPool) -> Result<(), DbError> {
+    sqlx::query!("SELECT 1 AS one").fetch_one(pool).await?;
+    Ok(())
+}
+
 /// Maximum length of a PostgreSQL identifier (`NAMEDATALEN - 1` = 63 bytes).
 pub const MAX_SQL_IDENTIFIER_LEN: usize = 63;
 

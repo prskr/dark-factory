@@ -4,12 +4,16 @@
 
 use std::time::Duration;
 
-use df_core::{Principal, ProviderError, RunId, SandboxProvider, TaskId, TaskKey, TaskVolumeSpec};
-use sqlx::{PgPool, Postgres, Transaction};
+use chrono::{DateTime, Utc};
+use df_core::{
+    Principal, ProviderError, RunId, RunState, SandboxProvider, TaskId, TaskKey, TaskVolumeSpec,
+};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::lifecycle_events::{self, Event, EventSinks, VolumeDestroyedReason};
 use crate::pool::DbError;
+use crate::runs::state_list;
 
 /// Upper bound of one volume deletion; the task row stays locked meanwhile.
 pub const DELETE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -43,6 +47,46 @@ pub async fn lock_task(
     .ok_or_else(|| DbError::NotFound(format!("task `{task_id}` not found")))?;
     key.parse()
         .map_err(|e| DbError::InvalidData(format!("task key `{key}`: {e}")))
+}
+
+/// The tasks whose volume is due for deletion, oldest first (`iter2-task-volume-lifecycle`
+/// design D1): not deleted yet, without a non-terminal run, and whose last run ended before the
+/// later applicable cutoff. `closed_cutoff` applies to completed and cancelled tasks,
+/// `any_cutoff` to every task (`None`: never); a task with a merged PR is due at once
+/// (`iter3-webhooks` design D4). A task without runs never had a volume and never matches.
+/// `only` narrows the result to one task, to check again that it is still due under its lock.
+pub async fn due_for_retention(
+    executor: impl PgExecutor<'_>,
+    closed_cutoff: Option<DateTime<Utc>>,
+    any_cutoff: Option<DateTime<Utc>>,
+    only: Option<TaskId>,
+) -> Result<Vec<(TaskId, String)>, DbError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT t.id, t.key FROM tasks t
+        WHERE t.volume_deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($4))
+          AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)
+              < GREATEST(
+                  CASE WHEN t.status IN ('completed', 'cancelled') THEN $1::timestamptz END,
+                  $2::timestamptz,
+                  CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END
+              )
+          AND ($3::uuid IS NULL OR t.id = $3)
+        ORDER BY t.created_at
+        "#,
+        closed_cutoff,
+        any_cutoff,
+        only.map(|task| task.as_uuid()),
+        &state_list(RunState::TERMINAL)
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (TaskId::from_uuid(row.id), row.key))
+        .collect())
 }
 
 /// What a volume deletion needs besides the task: why, where events go and how long it may take.

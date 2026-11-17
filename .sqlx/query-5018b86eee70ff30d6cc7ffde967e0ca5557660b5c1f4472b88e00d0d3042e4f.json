@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO tool_calls (call_id, run_id, tool_name, arguments)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (call_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5018b86eee70ff30d6cc7ffde967e0ca5557660b5c1f4472b88e00d0d3042e4f"
+}

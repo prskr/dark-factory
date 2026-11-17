@@ -11,7 +11,7 @@ The transcript row of a written artifact and the live refresh of the Artifacts t
 ## Decision
 
 - **A family `FactoryActivity` next to `ForgeActivity`** in `darkfactory.transcript.v1` (`Event.kind` 20) for things the control plane did for a task that a board member should see. The first variant is `ArtifactWritten` (name, `ArtifactKind` enum text/image, MIME type, size; never the content). Later variants (an agent woken by another task, an incoming webhook event) are new fields of its oneof.
-- **Written by the control plane only,** through `df_db::transcript::append_control_event` (same storage, locking, live delivery as forge activity). The runtime channel drops it, the runtime ignores it, the agent never receives it.
+- **Written by the control plane only,** through `df_db::transcript::TranscriptWriter::append_control` (same storage, locking, live delivery as forge activity). The runtime channel drops it, the runtime ignores it, the agent never receives it.
 - **Written in the artifact's transaction, keyed per call:** source key `artifact:<call_id>`, run row locked before the task row (ADR-0042). A rejected write stores no event.
 - **The web UI renders the event** as the artifact row and no longer inspects tool calls. The harness's tool row stays for every harness.
 

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tasks SET\n            harness_session_id = CASE WHEN $2 <> '' THEN $2 ELSE harness_session_id END,\n            diverged = diverged OR $3, updated_at = now()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "af5c0ea0d52126ac7a09998814ac804410233c00f3329ee509a8b60ba321b993"
+}

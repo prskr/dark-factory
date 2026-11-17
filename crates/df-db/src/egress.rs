@@ -3,7 +3,7 @@
 //! Changes to entries write an audit entry and publish `egress_policy` in the transaction that
 //! changes them, so the notification reaches the gateways only for committed changes.
 
-use df_core::{CredentialRef, CredentialRefId, RequestId, RewritePolicy, SecretKeyRef};
+use df_core::{CredentialRef, CredentialRefId, RequestId, RewritePolicy, RunState, SecretKeyRef};
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -13,6 +13,7 @@ use crate::catalog::Actor;
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 use crate::requests::Scope;
+use crate::runs::state_list;
 
 mod deny;
 
@@ -221,8 +222,9 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
            JOIN projects p ON p.id = t.project_id
            LEFT JOIN credential_refs c ON c.id = p.forge_credential_id
            WHERE r.pod_ip IS NOT NULL
-             AND r.state NOT IN ('succeeded', 'failed', 'cancelled')
-           ORDER BY r.started_at, r.id"#
+             AND r.state <> ALL($1)
+           ORDER BY r.started_at, r.id"#,
+        &state_list(RunState::TERMINAL)
     )
     .fetch_all(pool)
     .await?;

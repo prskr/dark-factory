@@ -4,12 +4,12 @@ use chrono::{DateTime, Utc};
 use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
     DependencyKind, ExistingBranch, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey,
-    PromptId, RunId, TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource, is_satisfied,
-    placeholder_title, sanitize_title, system_reason, title_too_long,
+    PromptId, RunId, RunState, TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource,
+    is_satisfied, placeholder_title, sanitize_title, system_reason, title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
@@ -676,10 +676,12 @@ pub async fn queue_resume_prompt_tx(
     Ok(inserted > 0)
 }
 
-/// Marks a queued prompt as delivered by `run_id` when its `UserMessage` event is persisted.
-/// Idempotent: returns `true` if a row existed for `prompt_id`.
+/// Marks a queued prompt of `task_id` as delivered by `run_id` when its `UserMessage` event is
+/// persisted. Idempotent: returns `true` if a row of that task existed for `prompt_id`; a prompt
+/// of another task is left alone.
 pub async fn mark_prompt_delivered(
-    pool: &PgPool,
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
     prompt_id: PromptId,
     run_id: RunId,
 ) -> Result<bool, DbError> {
@@ -688,19 +690,56 @@ pub async fn mark_prompt_delivered(
         UPDATE task_messages
         SET delivered_run_id = COALESCE(delivered_run_id, $2),
             delivered_at = COALESCE(delivered_at, now())
-        WHERE id = $1
+        WHERE id = $1 AND task_id = $3
         "#,
         prompt_id.as_uuid(),
-        run_id.as_uuid()
+        run_id.as_uuid(),
+        task_id.as_uuid()
     )
-    .execute(pool)
+    .execute(executor)
     .await?;
 
     Ok(result.rows_affected() > 0)
 }
 
+/// The task `key` of `project_id` if `parent` is its parent task.
+pub async fn child_task_id(
+    executor: impl PgExecutor<'_>,
+    project_id: ProjectId,
+    key: &TaskKey,
+    parent: TaskId,
+) -> Result<Option<TaskId>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT id FROM tasks WHERE project_id = $1 AND key = $2 AND parent_id = $3",
+        project_id.as_uuid(),
+        key.to_string(),
+        parent.as_uuid()
+    )
+    .fetch_optional(executor)
+    .await?
+    .map(TaskId::from_uuid))
+}
+
+/// Whether a message of the task was queued after `at`, delivered or not.
+pub async fn has_message_queued_after(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+    at: DateTime<Utc>,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND queued_at > $2) AS "queued!""#,
+        task_id.as_uuid(),
+        at
+    )
+    .fetch_one(executor)
+    .await?)
+}
+
 /// Fetches a task by its [`TaskId`].
-pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>, DbError> {
+pub async fn get_task(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+) -> Result<Option<TaskRow>, DbError> {
     let row = sqlx::query!(
         r#"
         SELECT
@@ -714,7 +753,7 @@ pub async fn get_task(pool: &PgPool, task_id: TaskId) -> Result<Option<TaskRow>,
         "#,
         task_id.as_uuid()
     )
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
 
     row.map(|r| {
@@ -1152,15 +1191,18 @@ pub(crate) async fn request_stop_tx(
 ) -> Result<Option<RunId>, DbError> {
     let run: Option<Uuid> = sqlx::query_scalar(
         "UPDATE runs SET stop_requested_at = clock_timestamp(),
-             state = CASE WHEN state IN ('preparing', 'running', 'awaiting_input')
-                          THEN 'finalizing' ELSE state END
+             state = CASE WHEN state = ANY($3) THEN 'finalizing' ELSE state END
          WHERE task_id = $1 AND stop_requested_at IS NULL
-           AND state NOT IN ('succeeded', 'failed', 'cancelled')
-           AND ($2 OR state <> 'finalizing')
+           AND state <> ALL($2)
          RETURNING id",
     )
     .bind(task_id.as_uuid())
-    .bind(scope == StopScope::IncludingFinalizing)
+    .bind(if scope == StopScope::IncludingFinalizing {
+        RunState::TERMINAL
+    } else {
+        RunState::NOT_COMMANDABLE
+    })
+    .bind(RunState::RUNTIME_UP)
     .fetch_optional(&mut **tx)
     .await?;
     let run_id = run.map(RunId::from_uuid);
@@ -1176,9 +1218,10 @@ pub(crate) async fn has_active_run(
 ) -> Result<bool, DbError> {
     Ok(sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM runs
-         WHERE task_id = $1 AND state NOT IN ('succeeded', 'failed', 'cancelled'))",
+         WHERE task_id = $1 AND state <> ALL($2))",
     )
     .bind(task_id.as_uuid())
+    .bind(RunState::TERMINAL)
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -1221,6 +1264,8 @@ async fn set_title_in(
 
 #[cfg(test)]
 mod branch_tests;
+#[cfg(test)]
+mod delivery_tests;
 #[cfg(test)]
 mod dependency_tests;
 #[cfg(test)]

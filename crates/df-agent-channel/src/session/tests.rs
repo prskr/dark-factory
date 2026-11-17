@@ -132,7 +132,7 @@ async fn transcript_writes_wait_for_the_task_lock() {
     .unwrap();
     let ctx = env.ctx.clone();
     let write =
-        tokio::spawn(async move { persist_batch(&ctx, &rc, vec![msg(1, text_event())]).await });
+        tokio::spawn(async move { persist_batch(&ctx, &rc, vec![msg(1, text_event())], 0).await });
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -436,7 +436,7 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
     .expect("start_finalizing did not wait for the run lock");
 
     // Without the run lock first, `start_finalizing` now holds the task row: deadlock.
-    crate::runs::lock_task(&mut other, task_id).await.unwrap();
+    df_db::runs::lock_task(&mut other, task_id).await.unwrap();
     other.commit().await.unwrap();
     assert!(finalizing.await.unwrap().unwrap());
 }
@@ -560,7 +560,7 @@ async fn a_message_for_an_idle_run_starts_no_run_and_is_forwarded_at_once() {
 
     assert_eq!(state_and_status(&env, run_id).await.1, "running");
     assert!(
-        crate::runs::start_queued_runs(&pool, 10, 100)
+        df_db::runs::start_queued_runs(&pool, 10, 100)
             .await
             .unwrap()
             .is_empty()

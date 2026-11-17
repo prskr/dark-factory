@@ -12,7 +12,7 @@ use df_core::task_transition::{
     ActiveRun, ChildEnd, ChildEnded, Effect, First, Notice, PrState, TaskEvent, TaskSnapshot,
     Transition, transition,
 };
-use df_core::{Principal, RunId, TaskId, is_satisfied};
+use df_core::{Principal, RunId, RunState, TaskId, is_satisfied};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -361,10 +361,10 @@ async fn load_snapshot(
     let active_run: String = sqlx::query_scalar(
         "SELECT CASE
              WHEN EXISTS (SELECT 1 FROM runs WHERE task_id = $1 AND stop_requested_at IS NULL
-                          AND state NOT IN ('finalizing', 'succeeded', 'failed', 'cancelled'))
+                          AND state <> ALL($2))
                  THEN 'connected'
              WHEN EXISTS (SELECT 1 FROM runs WHERE task_id = $1 AND stop_requested_at IS NOT NULL
-                          AND state NOT IN ('succeeded', 'failed', 'cancelled'))
+                          AND state <> ALL($3))
                  THEN 'stop_requested'
              WHEN EXISTS (SELECT 1 FROM runs WHERE task_id = $1 AND state = 'finalizing')
                  THEN 'finalizing'
@@ -372,6 +372,8 @@ async fn load_snapshot(
          END",
     )
     .bind(task_id.as_uuid())
+    .bind(RunState::NOT_COMMANDABLE)
+    .bind(RunState::TERMINAL)
     .fetch_one(&mut **tx)
     .await?;
     let ever_ran: bool =

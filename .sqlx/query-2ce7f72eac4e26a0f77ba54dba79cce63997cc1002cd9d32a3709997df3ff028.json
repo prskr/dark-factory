@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE runs SET state = 'provisioning',\n            provisioning_started_at = COALESCE(provisioning_started_at, now())\n        WHERE id = $1 AND state = 'pending'\n        RETURNING task_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2ce7f72eac4e26a0f77ba54dba79cce63997cc1002cd9d32a3709997df3ff028"
+}

@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use df_core::{RepoRef, RunId, TaskId};
+use df_db::get_task;
 use df_db::outbox::RetryPolicy;
 use df_db::tasks::{PR_SYNC_KIND, PrSyncJob};
 use sqlx::{Postgres, Transaction};
@@ -25,11 +26,9 @@ pub(crate) async fn enqueue_open_after_push(
     task_id: TaskId,
     run_id: RunId,
 ) -> Result<bool, ChannelError> {
-    let has_pr: Option<bool> =
-        sqlx::query_scalar("SELECT pr_number IS NOT NULL FROM tasks WHERE id = $1")
-            .bind(task_id.as_uuid())
-            .fetch_optional(&mut **tx)
-            .await?;
+    let has_pr = get_task(&mut **tx, task_id)
+        .await?
+        .map(|task| task.pr_number.is_some());
     if has_pr != Some(false) {
         return Ok(false);
     }
@@ -46,25 +45,6 @@ pub(crate) async fn enqueue_open_after_push(
 async fn enqueue(tx: &mut Transaction<'_, Postgres>, job: PrSyncJob) -> Result<(), ChannelError> {
     df_db::outbox::enqueue(tx, PR_SYNC_KIND, &serde_json::to_value(job)?).await?;
     Ok(())
-}
-
-/// Takes the per-task lock of the PR forge handlers (`task-pr:<id>`), also across control-plane
-/// replicas. It is released when the returned transaction ends, on every path including a
-/// dropped future.
-///
-/// ponytail: only outbox jobs take it, and the dispatcher runs at most `MAX_IN_FLIGHT` (8) of
-/// them, so at most 8 pooled connections wait or hold it across forge calls (design D5). Add a
-/// separate lock connection pool if the dispatcher's concurrency grows.
-pub(crate) async fn lock_task_pr(
-    pool: &sqlx::PgPool,
-    task_id: TaskId,
-) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("task-pr:{task_id}"))
-        .execute(&mut *tx)
-        .await?;
-    Ok(tx)
 }
 
 /// Owner and name from the last two path segments of a repository URL.

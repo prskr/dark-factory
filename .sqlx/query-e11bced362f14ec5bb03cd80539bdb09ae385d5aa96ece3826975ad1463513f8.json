@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.key AS \"key!\", p.name AS \"name!\",\n               count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1))\n                   AS \"task_count!\"\n        FROM projects p\n        LEFT JOIN tasks t ON t.project_id = p.id\n        GROUP BY p.id\n        ORDER BY p.name, p.key\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "task_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "e11bced362f14ec5bb03cd80539bdb09ae385d5aa96ece3826975ad1463513f8"
+}

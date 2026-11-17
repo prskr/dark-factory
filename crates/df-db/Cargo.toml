@@ -28,6 +28,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
 df-test-postgres.workspace = true
 image.workspace = true
 static_assertions.workspace = true

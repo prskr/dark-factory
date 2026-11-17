@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,\n                  p.key AS project_key, t.persona_id, p.repo_url,\n                  COALESCE(t.base_branch, p.base_branch) AS \"base_branch!\", t.branch AS task_branch,\n                  p.branch_rewrite_policy,\n                  c.id AS \"credential_id?\", c.name AS \"credential_name?\",\n                  c.secret_name AS \"secret_name?\", c.secret_key AS \"secret_key?\"\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           LEFT JOIN credential_refs c ON c.id = p.forge_credential_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state NOT IN ('succeeded', 'failed', 'cancelled')\n           ORDER BY r.started_at, r.id",
+  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,\n                  p.key AS project_key, t.persona_id, p.repo_url,\n                  COALESCE(t.base_branch, p.base_branch) AS \"base_branch!\", t.branch AS task_branch,\n                  p.branch_rewrite_policy,\n                  c.id AS \"credential_id?\", c.name AS \"credential_name?\",\n                  c.secret_name AS \"secret_name?\", c.secret_key AS \"secret_key?\"\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           LEFT JOIN credential_refs c ON c.id = p.forge_credential_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state <> ALL($1)\n           ORDER BY r.started_at, r.id",
   "describe": {
     "columns": [
       {
@@ -176,7 +176,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "TextArray"
+      ]
     },
     "nullable": [
       false,
@@ -197,5 +199,5 @@
       false
     ]
   },
-  "hash": "aeed00d455d2cc0d2a686d240b7fe4179149eef0194e80e4de4d588d6bc20ce8"
+  "hash": "8776185642112f338388d4c0cb3debfa40f0e09948b3792923f6f86439863a72"
 }

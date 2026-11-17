@@ -15,32 +15,9 @@ use tokio::time::MissedTickBehavior;
 
 use crate::ChannelContext;
 use crate::error::ChannelError;
-use crate::runs::terminal_states;
 
 /// Interval between two scans.
 pub const SCAN_INTERVAL: Duration = Duration::from_hours(1);
-
-/// Tasks whose volume is due for deletion (alias `t`). `$1` is the cutoff of closed tasks, `$2`
-/// the one of every task (`NULL`: never); a task with a merged PR is due at once (`infinity`,
-/// `iter3-webhooks` design D4). `GREATEST` ignores `NULL`, so the later applicable cutoff wins.
-/// A task without runs never had a volume: its last run end is `NULL`, it never matches.
-macro_rules! due {
-    () => {
-        concat!(
-            "t.volume_deleted_at IS NULL
-             AND NOT EXISTS (
-                 SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state NOT IN ",
-            terminal_states!(),
-            ")
-             AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)
-                 < GREATEST(
-                     CASE WHEN t.status IN ('completed', 'cancelled') THEN $1::timestamptz END,
-                     $2::timestamptz,
-                     CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END
-                 )"
-        )
-    };
-}
 
 /// The retention scan of one control plane replica; only the leader runs it.
 pub struct Retention {
@@ -89,15 +66,8 @@ impl Retention {
             before(now, cfg.retain_after_close_seconds),
             before(now, cfg.idle_ttl_seconds),
         );
-        let candidates: Vec<(uuid::Uuid, String)> = sqlx::query_as(concat!(
-            "SELECT t.id, t.key FROM tasks t WHERE ",
-            due!(),
-            " ORDER BY t.created_at"
-        ))
-        .bind(cutoffs.0)
-        .bind(cutoffs.1)
-        .fetch_all(&self.ctx.pool)
-        .await?;
+        let candidates =
+            volumes::due_for_retention(&self.ctx.pool, cutoffs.0, cutoffs.1, None).await?;
 
         let mut deleted = 0;
         for (task_id, key) in candidates {
@@ -120,22 +90,15 @@ impl Retention {
     /// an error the transaction rolls back.
     async fn delete_volume(
         &self,
-        task_id: uuid::Uuid,
+        task_id: TaskId,
         key: &str,
         cutoffs: (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
     ) -> Result<bool, ChannelError> {
         let mut tx = self.ctx.pool.begin().await?;
-        let task_key = volumes::lock_task(&mut tx, TaskId::from_uuid(task_id)).await?;
-        let still_due: bool = sqlx::query_scalar(concat!(
-            "SELECT EXISTS (SELECT 1 FROM tasks t WHERE t.id = $3 AND ",
-            due!(),
-            ")"
-        ))
-        .bind(cutoffs.0)
-        .bind(cutoffs.1)
-        .bind(task_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let task_key = volumes::lock_task(&mut tx, task_id).await?;
+        let still_due = !volumes::due_for_retention(&mut *tx, cutoffs.0, cutoffs.1, Some(task_id))
+            .await?
+            .is_empty();
         if !still_due {
             return Ok(false);
         }
@@ -148,7 +111,7 @@ impl Retention {
         let volume = volumes::delete_volume(
             &mut tx,
             self.ctx.provider.as_ref(),
-            TaskId::from_uuid(task_id),
+            task_id,
             task_key,
             deletion,
         )

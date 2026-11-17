@@ -8,11 +8,12 @@ use async_trait::async_trait;
 use df_core::{ForgeClient, PullRequestUpdate, TaskStatus};
 use df_db::catalog::get_project_by_key;
 use df_db::outbox::{JobError, OutboxHandler, RetryPolicy};
+use df_db::task_updates::lock_task_pr;
 use df_db::tasks::{MARK_DRAFT_KIND, MarkDraftJob, get_task};
 use serde_json::Value;
 use sqlx::PgPool;
 
-use super::{forge_retry_policy, lock_task_pr};
+use super::forge_retry_policy;
 
 /// One forge call per attempt.
 const LEASE: Duration = Duration::from_secs(30);

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT payload FROM transcript_events\n         WHERE run_id = $1 AND kind = $3 AND payload -> 'toolCall' ->> 'toolCallId' = $2\n         ORDER BY seq LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "transcript_events",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d900162b9bed65054c87c2c21fc2bfb2efba9d34ae3d6a5418318da3964316f1"
+}

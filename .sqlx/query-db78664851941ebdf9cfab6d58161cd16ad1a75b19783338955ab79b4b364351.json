@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.key FROM tasks t\n        WHERE t.volume_deleted_at IS NULL\n          AND NOT EXISTS (\n              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($4))\n          AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)\n              < GREATEST(\n                  CASE WHEN t.status IN ('completed', 'cancelled') THEN $1::timestamptz END,\n                  $2::timestamptz,\n                  CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END\n              )\n          AND ($3::uuid IS NULL OR t.id = $3)\n        ORDER BY t.created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "db78664851941ebdf9cfab6d58161cd16ad1a75b19783338955ab79b4b364351"
+}

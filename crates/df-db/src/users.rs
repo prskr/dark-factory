@@ -14,16 +14,16 @@ pub async fn upsert_user(
     subject: &str,
     display_name: &str,
 ) -> Result<UserId, DbError> {
-    let id: Uuid = sqlx::query_scalar(
+    let id = sqlx::query_scalar!(
         "INSERT INTO users (id, issuer, subject, display_name) VALUES ($1, $2, $3, $4)
          ON CONFLICT (issuer, subject)
          DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = now()
          RETURNING id",
+        Uuid::now_v7(),
+        issuer,
+        subject,
+        display_name
     )
-    .bind(Uuid::now_v7())
-    .bind(issuer)
-    .bind(subject)
-    .bind(display_name)
     .fetch_one(pool)
     .await?;
     Ok(UserId::from_uuid(id))

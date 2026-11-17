@@ -13,7 +13,9 @@ use df_core::{
     TaskStatus, UserId,
 };
 use df_db::tasks::{create_task_on_tx, text_block};
-use df_db::transcript::{append_control_event, factory_event, forge_event, lock_run_and_task};
+use df_db::transcript::{
+    RunTaskLock, TranscriptWriter, factory_event, forge_event, lock_run_and_task,
+};
 use df_db::{AttachedPr, NewDependency, NewTask, PgPool, TaskMessageRow, TaskPlacement};
 use df_proto::transcript::v1::{
     self as pb, ArtifactWritten, BranchPushed, Event, FactoryActivity, ForgeActivity,
@@ -606,6 +608,19 @@ async fn write_artifacts(
         set_event_time(tx, id, written_ago).await?;
     }
     Ok(())
+}
+
+/// Appends one control-plane event in its own writer, so its notification goes out at once.
+async fn append_control_event(
+    tx: &mut Transaction<'_, Postgres>,
+    lock: &RunTaskLock,
+    source_key: &str,
+    event: &Event,
+) -> Result<Option<i64>> {
+    let mut writer = TranscriptWriter::new(lock);
+    let id = writer.append_control(tx, source_key, event).await?;
+    writer.finish(tx).await?;
+    Ok(id)
 }
 
 async fn set_event_time(

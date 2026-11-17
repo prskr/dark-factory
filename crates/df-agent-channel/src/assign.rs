@@ -10,8 +10,10 @@ use df_core::harness::{
 };
 use df_core::model_provider::ProviderModel;
 use df_core::{LandlockMode, PersonaId, Principal, ProjectId, RewritePolicy, TaskId};
+use df_db::catalog;
 use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::push_policy;
+use df_db::runs::{RunRow, previous_harness_session_id};
 use df_db::{
     TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
 };
@@ -26,7 +28,6 @@ use serde::Deserialize;
 use sqlx::PgPool;
 
 use crate::error::ChannelError;
-use crate::runs::RunRow;
 use crate::{ChannelContext, GitProxy};
 
 const FACTORY_TOOLS_JSON: &str = include_str!("../../../contract/mcp/factory-tools.v2.json");
@@ -99,41 +100,17 @@ impl RunContext {
     }
 }
 
-#[derive(sqlx::FromRow)]
-struct ProjectRecord {
-    key: String,
-    repo_url: String,
-    image: String,
-    base_branch: String,
-    adapter_command: Vec<String>,
-    #[sqlx(try_from = "String")]
-    branch_rewrite_policy: RewritePolicy,
-    agent_branch_globs: Vec<String>,
-}
-
-#[derive(sqlx::FromRow)]
-struct PersonaRecord {
-    name: String,
-    system_prompt: String,
-    harness: String,
-    model: String,
-    model_provider_id: uuid::Uuid,
-}
-
 /// Loads task, project and persona of `run`.
 pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, ChannelError> {
     let task = get_task(pool, run.task_id)
         .await?
         .ok_or_else(|| ChannelError::InvalidData(format!("task of run {} is missing", run.id)))?;
 
-    let project: ProjectRecord = sqlx::query_as(
-        "SELECT key, repo_url, image, base_branch, adapter_command, branch_rewrite_policy,
-                agent_branch_globs
-         FROM projects WHERE id = $1",
-    )
-    .bind(task.project_id.as_uuid())
-    .fetch_one(pool)
-    .await?;
+    let project = catalog::get_project(pool, task.project_id.as_uuid())
+        .await?
+        .ok_or_else(|| {
+            ChannelError::InvalidData(format!("project of task {} is missing", task.id))
+        })?;
     let project = ProjectInfo {
         id: task.project_id,
         key: project.key,
@@ -145,12 +122,11 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         agent_branch_globs: project.agent_branch_globs,
     };
 
-    let persona: PersonaRecord = sqlx::query_as(
-        "SELECT name, system_prompt, harness, model, model_provider_id FROM personas WHERE id = $1",
-    )
-    .bind(task.persona_id.as_uuid())
-    .fetch_one(pool)
-    .await?;
+    let persona = catalog::get_persona(pool, task.persona_id.as_uuid())
+        .await?
+        .ok_or_else(|| {
+            ChannelError::InvalidData(format!("persona of task {} is missing", task.id))
+        })?;
     let persona = PersonaInfo {
         id: task.persona_id,
         name: persona.name,
@@ -464,15 +440,7 @@ async fn continuation(
     if rc.run.number <= 1 {
         return Ok(None);
     }
-    let previous: Option<String> = sqlx::query_scalar(
-        "SELECT harness_session_id FROM runs
-         WHERE task_id = $1 AND number < $2 AND harness_session_id <> ''
-         ORDER BY number DESC LIMIT 1",
-    )
-    .bind(rc.task.id.as_uuid())
-    .bind(rc.run.number)
-    .fetch_optional(pool)
-    .await?;
+    let previous = previous_harness_session_id(pool, rc.task.id, rc.run.number).await?;
     Ok(Some(Continuation {
         harness_session_id: previous.unwrap_or_else(|| rc.task.harness_session_id.clone()),
         summary: crate::summary::continuation_summary(pool, rc).await?,

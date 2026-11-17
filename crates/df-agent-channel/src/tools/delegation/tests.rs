@@ -337,7 +337,7 @@ async fn clearing_the_agent_branches_leaves_a_running_task_on_its_branch() {
     let run_id = env
         .insert_run(df_core::TaskId::from_uuid(task_id), 1, "running")
         .await;
-    let run = crate::runs::get_run(&env.ctx.pool, run_id)
+    let run = df_db::runs::get_run(&env.ctx.pool, run_id)
         .await
         .unwrap()
         .unwrap();

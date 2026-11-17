@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transcript_events\n                (task_id, run_id, source_key, schema_version, occurred_at, kind, payload)\n            VALUES ($1, $2, $3, $4, now(), $5, $6)\n            ON CONFLICT (run_id, source_key) DO NOTHING\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transcript_events",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "97b40538201c05416b1aa252c19b5f8421293e21415da9c874c8a1ae9e4a460b"
+}

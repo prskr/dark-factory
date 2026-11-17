@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.run_id, COALESCE(u.model, 'unknown') AS \"model_id!\",\n               COALESCE(SUM(u.input_tokens), 0)::bigint AS \"input_tokens!\",\n               COALESCE(SUM(u.output_tokens), 0)::bigint AS \"output_tokens!\",\n               COALESCE(SUM(u.cache_read_tokens), 0)::bigint AS \"cache_read_tokens!\",\n               COALESCE(SUM(u.cache_write_tokens), 0)::bigint AS \"cache_write_tokens!\"\n        FROM model_usage u JOIN runs r ON r.id = u.run_id\n        WHERE r.task_id = $1 AND u.usage_known\n        GROUP BY u.run_id, u.model\n        ORDER BY u.run_id, 2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_usage",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "model_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f1c67f5124103f4d0491c7cc95eeb0558baec99647bde204465d1c683f95ab88"
+}

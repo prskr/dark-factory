@@ -11,18 +11,20 @@ use chrono::{DateTime, Utc};
 use df_core::{
     ForgeClient, IntegrationError, NewPullRequest, PullRequest, RunId, TaskId, TaskStatus,
 };
-use df_db::TaskRow;
-use df_db::outbox::{JobError, OutboxHandler, RetryPolicy};
-use df_db::tasks::{PR_SYNC_KIND, PrSyncJob, get_task};
-use df_db::transcript::{append_control_event, forge_event, lock_run_and_task};
-use df_db::{Notification, publish};
+use df_db::catalog::get_project;
+use df_db::outbox::{JobError, OutboxHandler, RetryPolicy, has_unfinished_pr_open_job};
+use df_db::runs::completion_summary;
+use df_db::task_updates::lock_task_pr;
+use df_db::tasks::{PR_SYNC_KIND, PrSyncJob, get_task, has_message_queued_after};
+use df_db::transcript::{TranscriptWriter, forge_event, lock_run_and_task};
+use df_db::{DbError, TaskRow};
 use df_proto::transcript::v1::{
     ForgeActivity, PullRequestOpened, PullRequestReady, forge_activity,
 };
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use super::{forge_retry_policy, lock_task_pr, repo_ref};
+use super::{forge_retry_policy, repo_ref};
 use crate::error::ChannelError;
 
 /// The lease covers up to five forge calls at the default plugin call timeout of 30 s.
@@ -89,31 +91,17 @@ impl PrSyncHandler {
         Ok(())
     }
 
-    async fn project(&self, task: &TaskRow) -> Result<Option<Project>, sqlx::Error> {
-        let row: Option<(String, String)> =
-            sqlx::query_as("SELECT repo_url, base_branch FROM projects WHERE id = $1")
-                .bind(task.project_id.as_uuid())
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row.map(|(repo_url, base_branch)| Project {
-            repo_url,
-            base_branch: task.base_branch(&base_branch).to_owned(),
+    async fn project(&self, task: &TaskRow) -> Result<Option<Project>, DbError> {
+        let project = get_project(&self.pool, task.project_id.as_uuid()).await?;
+        Ok(project.map(|project| Project {
+            base_branch: task.base_branch(&project.base_branch).to_owned(),
+            repo_url: project.repo_url,
         }))
     }
 
     /// Whether another `pr.sync` job of the task that opens the PR has not finished.
-    async fn open_job_pending(&self, task: &TaskRow) -> Result<bool, sqlx::Error> {
-        sqlx::query_scalar(
-            "SELECT EXISTS (
-                 SELECT 1 FROM outbox
-                 WHERE kind = $1 AND payload ->> 'task_id' = $2
-                   AND (payload ->> 'open')::boolean
-                   AND done_at IS NULL AND gave_up_at IS NULL)",
-        )
-        .bind(PR_SYNC_KIND)
-        .bind(task.id.to_string())
-        .fetch_one(&self.pool)
-        .await
+    async fn open_job_pending(&self, task: &TaskRow) -> Result<bool, DbError> {
+        has_unfinished_pr_open_job(&self.pool, task.id).await
     }
 
     /// Opens (or finds) the draft PR of the task and records it; returns the PR the task has
@@ -131,10 +119,10 @@ impl PrSyncHandler {
         if let Some(recorded) = RecordedPr::read(&mut tx, task.id).await? {
             return Ok(Some(recorded));
         }
-        let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
-            .bind(task.id.as_uuid())
-            .fetch_one(&mut *tx)
-            .await?;
+        let status = get_task(&mut *tx, task.id)
+            .await?
+            .ok_or_else(|| ChannelError::InvalidData("task vanished".into()))?
+            .status;
         let (head, base) = (task.branch.clone(), project.base_branch.clone());
         let existing = self
             .forge
@@ -143,10 +131,7 @@ impl PrSyncHandler {
         // A board member marked the task done or cancelled it without a PR: a push of its
         // stopped run must not open one. A PR opened before (its recording was lost) is still
         // recorded.
-        let closed = matches!(
-            status.parse::<TaskStatus>().map_err(df_db::DbError::from)?,
-            TaskStatus::Completed | TaskStatus::Cancelled
-        );
+        let closed = matches!(status, TaskStatus::Completed | TaskStatus::Cancelled);
         // Any PR the factory did not create itself counts as found.
         let mut found = existing.is_some();
         let pr = if let Some(pr) = existing {
@@ -192,14 +177,7 @@ impl PrSyncHandler {
         run_id: Option<RunId>,
     ) -> Result<(), ChannelError> {
         let mut tx = lock_task_pr(&self.pool, task.id).await?;
-        let reopened: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND queued_at > $2)",
-        )
-        .bind(task.id.as_uuid())
-        .bind(ready_at)
-        .fetch_one(&mut *tx)
-        .await?;
-        if reopened {
+        if has_message_queued_after(&mut *tx, task.id, ready_at).await? {
             tracing::info!(task_id = %task.id, "task was reopened; the pull request stays a draft");
             return Ok(());
         }
@@ -215,7 +193,9 @@ impl PrSyncHandler {
             });
             let lock = lock_run_and_task(&mut tx, run_id, task.id).await?;
             let key = format!("pr-ready:{}", pr.number);
-            append_control_event(&mut tx, &lock, &key, &ready).await?;
+            let mut transcript = TranscriptWriter::new(&lock);
+            transcript.append_control(&mut tx, &key, &ready).await?;
+            transcript.finish(&mut tx).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -228,11 +208,7 @@ impl PrSyncHandler {
         number: u64,
         run_id: RunId,
     ) -> Result<(), ChannelError> {
-        let summary: Option<String> =
-            sqlx::query_scalar("SELECT completion_summary FROM runs WHERE id = $1")
-                .bind(run_id.as_uuid())
-                .fetch_optional(&self.pool)
-                .await?;
+        let summary = completion_summary(&self.pool, run_id).await?;
         match summary.filter(|s| !s.is_empty()) {
             Some(summary) => {
                 self.forge
@@ -284,14 +260,10 @@ impl RecordedPr {
         tx: &mut Transaction<'_, Postgres>,
         task_id: TaskId,
     ) -> Result<Option<Self>, ChannelError> {
-        let row: (Option<i64>, Option<String>, bool) =
-            sqlx::query_as("SELECT pr_number, pr_url, pr_attached FROM tasks WHERE id = $1")
-                .bind(task_id.as_uuid())
-                .fetch_one(&mut **tx)
-                .await?;
-        row.0
-            .map(|number| Self::from_row(number, row.1, row.2))
-            .transpose()
+        let task = get_task(&mut **tx, task_id)
+            .await?
+            .ok_or_else(|| ChannelError::InvalidData("task vanished".into()))?;
+        Self::of_task(&task)
     }
 
     fn from_row(number: i64, url: Option<String>, attached: bool) -> Result<Self, ChannelError> {
@@ -351,29 +323,15 @@ async fn record_pr(
     pr: &PullRequest,
     attached: bool,
 ) -> Result<RecordedPr, ChannelError> {
-    let number = i64::try_from(pr.id.number).map_err(|_out_of_range| {
-        ChannelError::InvalidData("pull request number out of range".into())
-    })?;
     let lock = match run_id {
         Some(run_id) => Some(lock_run_and_task(tx, run_id, task.id).await?),
         None => None,
     };
-    let updated = sqlx::query(
-        "UPDATE tasks SET pr_number = $2, pr_url = $3, pr_attached = $4, updated_at = now()
-         WHERE id = $1 AND pr_number IS NULL",
-    )
-    .bind(task.id.as_uuid())
-    .bind(number)
-    .bind(&pr.url)
-    .bind(attached)
-    .execute(&mut **tx)
-    .await?;
-    if updated.rows_affected() == 0 {
+    if !df_db::task_updates::record_pr(tx, task.id, pr.id.number, &pr.url, attached).await? {
         return RecordedPr::read(tx, task.id).await?.ok_or_else(|| {
             ChannelError::InvalidData("pull request vanished from the task".into())
         });
     }
-    publish(&mut **tx, &Notification::TaskChanged { task_id: task.id }).await?;
     if let Some(lock) = lock {
         let opened = forge_event(ForgeActivity {
             kind: Some(forge_activity::Kind::PullRequestOpened(PullRequestOpened {
@@ -383,7 +341,9 @@ async fn record_pr(
             })),
         });
         let key = format!("pr-opened:{}", pr.id.number);
-        append_control_event(tx, &lock, &key, &opened).await?;
+        let mut transcript = TranscriptWriter::new(&lock);
+        transcript.append_control(tx, &key, &opened).await?;
+        transcript.finish(tx).await?;
     }
     Ok(RecordedPr {
         number: pr.id.number,

@@ -91,11 +91,10 @@ async fn pull_request_number(
     ctx: &ChannelContext,
     rc: &RunContext,
 ) -> Result<Option<u64>, ChannelError> {
-    let number: Option<i64> = sqlx::query_scalar("SELECT pr_number FROM tasks WHERE id = $1")
-        .bind(rc.task.id.as_uuid())
-        .fetch_one(&ctx.pool)
-        .await?;
-    Ok(number.and_then(|n| u64::try_from(n).ok()))
+    let task = df_db::get_task(&ctx.pool, rc.task.id)
+        .await?
+        .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?;
+    Ok(task.pr_number.and_then(|n| u64::try_from(n).ok()))
 }
 
 /// Which list of the result an item belongs to; the value indexes per-kind counts.

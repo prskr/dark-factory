@@ -4,6 +4,14 @@
 //! behind OIDC login. Other crates reuse [`layout`] and [`auth::require_board_member`] for their
 //! own pages.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::disallowed_methods,
+        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+    )
+)]
+
 mod artifacts;
 pub mod assets;
 pub mod auth;
@@ -117,8 +125,8 @@ fn base_routes(pool: PgPool, lifecycle_public_key: Option<Arc<str>>) -> Router {
 }
 
 async fn readyz(State(pool): State<PgPool>) -> (StatusCode, &'static str) {
-    match tokio::time::timeout(READY_TIMEOUT, sqlx::query("SELECT 1").execute(&pool)).await {
-        Ok(Ok(_)) => (StatusCode::OK, "ready"),
+    match tokio::time::timeout(READY_TIMEOUT, df_db::ping(&pool)).await {
+        Ok(Ok(())) => (StatusCode::OK, "ready"),
         _ => (StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
     }
 }

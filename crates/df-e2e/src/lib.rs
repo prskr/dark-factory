@@ -5,6 +5,12 @@
 //! not show from Forgejo and the database. All targets come from the environment ([`E2eEnv`]),
 //! nothing here is specific to the kind cluster of `just e2e-local`.
 
+#![expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+)]
+
 pub mod browser;
 pub mod data;
 pub mod db;

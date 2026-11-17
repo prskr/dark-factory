@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 FROM outbox\n            WHERE kind = $1 AND payload ->> 'task_id' = $2\n              AND (payload ->> 'open')::boolean\n              AND done_at IS NULL AND gave_up_at IS NULL) AS \"pending!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b8c535838138995c1eba45f6410641e5b015dfa5174b5e02426ac58aa4049c3d"
+}

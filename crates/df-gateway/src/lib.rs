@@ -4,6 +4,14 @@
 //! `dark-factory gateway` runs [`proxy`], [`tail`] and [`watch`] (no database access). The
 //! control plane serves [`control::PolicyService`] and relays logs with [`control::Relay`].
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::disallowed_methods,
+        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+    )
+)]
+
 pub mod control;
 pub(crate) mod convert;
 mod count;

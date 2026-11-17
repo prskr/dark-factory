@@ -1,0 +1,39 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5,\n                    image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9,\n                    webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12,\n                    updated_at = now()\n                WHERE id = $1 RETURNING id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8e68de493f44ac44172b16d66a4473927ca5f84ae59398fbeb0f93b22193da30"
+}

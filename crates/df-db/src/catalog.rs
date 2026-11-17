@@ -9,7 +9,7 @@ use df_core::glob::protected_glob;
 use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, CredentialRefId, Principal, SecretKeyRef};
 use serde::Serialize;
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
@@ -53,7 +53,7 @@ pub struct ProjectInput {
 }
 
 /// A stored project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectRecord {
     pub id: Uuid,
     pub key: String,
@@ -64,9 +64,7 @@ pub struct ProjectRecord {
     pub base_branch: String,
     pub adapter_command: Vec<String>,
     pub forge_credential_id: Option<Uuid>,
-    #[sqlx(try_from = "String")]
     pub webhook_wake: WebhookWake,
-    #[sqlx(try_from = "String")]
     pub branch_rewrite_policy: RewritePolicy,
     pub agent_branch_globs: Vec<String>,
     /// Whether tasks exist.
@@ -87,7 +85,7 @@ pub struct PersonaInput {
 }
 
 /// A stored persona.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PersonaRecord {
     pub id: Uuid,
     pub name: String,
@@ -98,7 +96,6 @@ pub struct PersonaRecord {
     pub model_provider_id: Uuid,
 }
 
-#[derive(FromRow)]
 struct CredentialRow {
     id: Uuid,
     name: String,
@@ -119,32 +116,48 @@ impl From<CredentialRow> for CredentialRef {
     }
 }
 
-/// `SELECT` of a project with a trailing clause (`WHERE ...`/`ORDER BY ...`).
-macro_rules! select_project {
-    ($tail:literal) => {
-        concat!(
-            "SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch, \
-             p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy, p.agent_branch_globs, \
-             EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS has_tasks \
-             FROM projects p ",
-            $tail
-        )
-    };
+/// A project row as `query_as!` reads it; the enum columns are parsed by [`ProjectRecord::try_from`].
+struct ProjectRow {
+    id: Uuid,
+    key: String,
+    name: String,
+    repo_url: String,
+    issue_tracker_url: Option<String>,
+    image: String,
+    base_branch: String,
+    adapter_command: Vec<String>,
+    forge_credential_id: Option<Uuid>,
+    webhook_wake: String,
+    branch_rewrite_policy: String,
+    agent_branch_globs: Vec<String>,
+    has_tasks: bool,
 }
 
-/// `SELECT` of a persona with a trailing clause.
-macro_rules! select_persona {
-    ($tail:literal) => {
-        concat!(
-            "SELECT id, name, description, system_prompt, harness, model, \
-             model_provider_id FROM personas ",
-            $tail
-        )
-    };
+impl TryFrom<ProjectRow> for ProjectRecord {
+    type Error = DbError;
+
+    fn try_from(row: ProjectRow) -> Result<Self, DbError> {
+        Ok(Self {
+            id: row.id,
+            key: row.key,
+            name: row.name,
+            repo_url: row.repo_url,
+            issue_tracker_url: row.issue_tracker_url,
+            image: row.image,
+            base_branch: row.base_branch,
+            adapter_command: row.adapter_command,
+            forge_credential_id: row.forge_credential_id,
+            webhook_wake: row.webhook_wake.parse()?,
+            branch_rewrite_policy: row.branch_rewrite_policy.parse()?,
+            agent_branch_globs: row.agent_branch_globs,
+            has_tasks: row.has_tasks,
+        })
+    }
 }
 
 pub async fn list_credential_refs(pool: &PgPool) -> Result<Vec<CredentialRef>, DbError> {
-    let rows: Vec<CredentialRow> = sqlx::query_as(
+    let rows = sqlx::query_as!(
+        CredentialRow,
         "SELECT id, name, secret_name, secret_key FROM credential_refs ORDER BY name",
     )
     .fetch_all(pool)
@@ -153,49 +166,117 @@ pub async fn list_credential_refs(pool: &PgPool) -> Result<Vec<CredentialRef>, D
 }
 
 pub async fn get_credential_ref(pool: &PgPool, id: Uuid) -> Result<Option<CredentialRef>, DbError> {
-    let row: Option<CredentialRow> = sqlx::query_as(
-        "SELECT id, name, secret_name, secret_key FROM credential_refs WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+    let row = get_credential_row(pool, id).await?;
     Ok(row.map(Into::into))
 }
 
+async fn get_credential_row(
+    executor: impl PgExecutor<'_>,
+    id: Uuid,
+) -> Result<Option<CredentialRow>, sqlx::Error> {
+    sqlx::query_as!(
+        CredentialRow,
+        "SELECT id, name, secret_name, secret_key FROM credential_refs WHERE id = $1",
+        id
+    )
+    .fetch_optional(executor)
+    .await
+}
+
 pub async fn list_projects(pool: &PgPool) -> Result<Vec<ProjectRecord>, DbError> {
-    Ok(sqlx::query_as(select_project!("ORDER BY p.key"))
-        .fetch_all(pool)
-        .await?)
+    sqlx::query_as!(
+        ProjectRow,
+        r#"
+        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
+               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
+               p.agent_branch_globs,
+               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
+        FROM projects p ORDER BY p.key
+        "#
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(ProjectRecord::try_from)
+    .collect()
 }
 
 pub async fn get_project_by_key(
     pool: &PgPool,
     key: &str,
 ) -> Result<Option<ProjectRecord>, DbError> {
-    Ok(sqlx::query_as(select_project!("WHERE p.key = $1"))
-        .bind(key)
-        .fetch_optional(pool)
-        .await?)
+    sqlx::query_as!(
+        ProjectRow,
+        r#"
+        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
+               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
+               p.agent_branch_globs,
+               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
+        FROM projects p WHERE p.key = $1
+        "#,
+        key
+    )
+    .fetch_optional(pool)
+    .await?
+    .map(ProjectRecord::try_from)
+    .transpose()
 }
 
-pub async fn get_project(pool: &PgPool, id: Uuid) -> Result<Option<ProjectRecord>, DbError> {
-    Ok(sqlx::query_as(select_project!("WHERE p.id = $1"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?)
+pub async fn get_project(
+    executor: impl PgExecutor<'_>,
+    id: Uuid,
+) -> Result<Option<ProjectRecord>, DbError> {
+    sqlx::query_as!(
+        ProjectRow,
+        r#"
+        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
+               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
+               p.agent_branch_globs,
+               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
+        FROM projects p WHERE p.id = $1
+        "#,
+        id
+    )
+    .fetch_optional(executor)
+    .await?
+    .map(ProjectRecord::try_from)
+    .transpose()
 }
 
 pub async fn list_personas(pool: &PgPool) -> Result<Vec<PersonaRecord>, DbError> {
-    Ok(sqlx::query_as(select_persona!("ORDER BY name"))
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as!(
+        PersonaRecord,
+        "SELECT id, name, description, system_prompt, harness, model, model_provider_id
+         FROM personas ORDER BY name"
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
-pub async fn get_persona(pool: &PgPool, id: Uuid) -> Result<Option<PersonaRecord>, DbError> {
-    Ok(sqlx::query_as(select_persona!("WHERE id = $1"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?)
+pub async fn get_persona(
+    executor: impl PgExecutor<'_>,
+    id: Uuid,
+) -> Result<Option<PersonaRecord>, DbError> {
+    Ok(sqlx::query_as!(
+        PersonaRecord,
+        "SELECT id, name, description, system_prompt, harness, model, model_provider_id
+         FROM personas WHERE id = $1",
+        id
+    )
+    .fetch_optional(executor)
+    .await?)
+}
+
+/// The id of the persona named `name`.
+pub async fn persona_id_by_name(
+    executor: impl PgExecutor<'_>,
+    name: &str,
+) -> Result<Option<Uuid>, DbError> {
+    Ok(
+        sqlx::query_scalar!("SELECT id FROM personas WHERE name = $1", name)
+            .fetch_optional(executor)
+            .await?,
+    )
 }
 
 /// Creates (`id` is `None`) or updates a credential reference and audits the change.
@@ -208,10 +289,11 @@ pub async fn save_credential_ref(
     let mut tx = pool.begin().await?;
     let before: Option<CredentialRow> = match id {
         Some(id) => Some(
-            sqlx::query_as(
+            sqlx::query_as!(
+                CredentialRow,
                 "SELECT id, name, secret_name, secret_key FROM credential_refs WHERE id = $1 FOR UPDATE",
+                id
             )
-            .bind(id)
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?,
@@ -219,22 +301,42 @@ pub async fn save_credential_ref(
         None => None,
     };
     let row: CredentialRow = match &before {
-        Some(b) => sqlx::query_as(
-            "UPDATE credential_refs SET name = $2, secret_name = $3, secret_key = $4, updated_at = now() \
-             WHERE id = $1 RETURNING id, name, secret_name, secret_key",
-        )
-        .bind(b.id),
-        None => sqlx::query_as(
-            "INSERT INTO credential_refs (id, name, secret_name, secret_key) VALUES ($1, $2, $3, $4) \
-             RETURNING id, name, secret_name, secret_key",
-        )
-        .bind(Uuid::now_v7()),
+        Some(b) => {
+            sqlx::query_as!(
+                CredentialRow,
+                r#"
+                UPDATE credential_refs
+                SET name = $2, secret_name = $3, secret_key = $4, updated_at = now()
+                WHERE id = $1
+                RETURNING id AS "id!", name AS "name!", secret_name AS "secret_name!",
+                          secret_key AS "secret_key!"
+                "#,
+                b.id,
+                input.name,
+                input.secret_name,
+                input.secret_key
+            )
+            .fetch_one(&mut *tx)
+            .await
+        }
+        None => {
+            sqlx::query_as!(
+                CredentialRow,
+                r#"
+                INSERT INTO credential_refs (id, name, secret_name, secret_key)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id AS "id!", name AS "name!", secret_name AS "secret_name!",
+                          secret_key AS "secret_key!"
+                "#,
+                Uuid::now_v7(),
+                input.name,
+                input.secret_name,
+                input.secret_key
+            )
+            .fetch_one(&mut *tx)
+            .await
+        }
     }
-    .bind(&input.name)
-    .bind(&input.secret_name)
-    .bind(&input.secret_key)
-    .fetch_one(&mut *tx)
-    .await
     .map_err(|e| conflict_or(e, "a credential reference with this name already exists"))?;
 
     let before_input = before.map(|b| CredentialRefInput {
@@ -294,16 +396,14 @@ async fn save_project_in(
 ) -> Result<ProjectRecord, DbError> {
     let before: Option<ProjectRecord> = match id {
         Some(id) => {
-            sqlx::query("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE")
-                .bind(id)
+            sqlx::query!("SELECT 1 AS one FROM projects WHERE id = $1 FOR UPDATE", id)
                 .fetch_optional(&mut **tx)
                 .await?
                 .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?;
             Some(
-                sqlx::query_as(select_project!("WHERE p.id = $1"))
-                    .bind(id)
-                    .fetch_one(&mut **tx)
-                    .await?,
+                get_project(&mut **tx, id)
+                    .await?
+                    .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?,
             )
         }
         None => None,
@@ -320,41 +420,62 @@ async fn save_project_in(
             "the key cannot change after creation".into(),
         ));
     }
-    let row_id: Uuid = match &before {
-        Some(b) => sqlx::query_scalar(
-            "UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5, \
-             image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9, \
-             webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12, updated_at = now() \
-             WHERE id = $1 RETURNING id",
-        )
-        .bind(b.id),
-        None => sqlx::query_scalar(
-            "INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image, base_branch, \
-             forge_credential_id, adapter_command, webhook_wake, branch_rewrite_policy, \
-             agent_branch_globs) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
-        )
-        .bind(Uuid::now_v7()),
+    let row_id = match &before {
+        Some(b) => {
+            sqlx::query_scalar!(
+                r#"
+                UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5,
+                    image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9,
+                    webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12,
+                    updated_at = now()
+                WHERE id = $1 RETURNING id
+                "#,
+                b.id,
+                input.key,
+                input.name,
+                input.repo_url,
+                input.issue_tracker_url,
+                input.image,
+                input.base_branch,
+                input.forge_credential_id,
+                &input.adapter_command,
+                input.webhook_wake.as_str(),
+                input.branch_rewrite_policy.as_str(),
+                &input.agent_branch_globs
+            )
+            .fetch_one(&mut **tx)
+            .await
+        }
+        None => {
+            sqlx::query_scalar!(
+                r#"
+                INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image,
+                    base_branch, forge_credential_id, adapter_command, webhook_wake,
+                    branch_rewrite_policy, agent_branch_globs)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id
+                "#,
+                Uuid::now_v7(),
+                input.key,
+                input.name,
+                input.repo_url,
+                input.issue_tracker_url,
+                input.image,
+                input.base_branch,
+                input.forge_credential_id,
+                &input.adapter_command,
+                input.webhook_wake.as_str(),
+                input.branch_rewrite_policy.as_str(),
+                &input.agent_branch_globs
+            )
+            .fetch_one(&mut **tx)
+            .await
+        }
     }
-    .bind(&input.key)
-    .bind(&input.name)
-    .bind(&input.repo_url)
-    .bind(&input.issue_tracker_url)
-    .bind(&input.image)
-    .bind(&input.base_branch)
-    .bind(input.forge_credential_id)
-    .bind(&input.adapter_command)
-    .bind(input.webhook_wake.as_str())
-    .bind(input.branch_rewrite_policy.as_str())
-    .bind(&input.agent_branch_globs)
-    .fetch_one(&mut **tx)
-    .await
     .map_err(|e| conflict_or(e, "a project with this key already exists"))?;
 
-    let record: ProjectRecord = sqlx::query_as(select_project!("WHERE p.id = $1"))
-        .bind(row_id)
-        .fetch_one(&mut **tx)
-        .await?;
+    let record = get_project(&mut **tx, row_id)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("project `{row_id}`")))?;
     let before_input = before.as_ref().map(project_input);
     audit(
         tx,
@@ -386,37 +507,60 @@ pub async fn save_persona(
     let mut tx = pool.begin().await?;
     let before: Option<PersonaRecord> = match id {
         Some(id) => Some(
-            sqlx::query_as(select_persona!("WHERE id = $1 FOR UPDATE"))
-                .bind(id)
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| DbError::NotFound(format!("persona `{id}`")))?,
+            sqlx::query_as!(
+                PersonaRecord,
+                "SELECT id, name, description, system_prompt, harness, model, model_provider_id
+                 FROM personas WHERE id = $1 FOR UPDATE",
+                id
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("persona `{id}`")))?,
         ),
         None => None,
     };
-    let record: PersonaRecord = match &before {
-        Some(b) => sqlx::query_as(
-            "UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5, \
-             model_provider_id = $6, description = $7, updated_at = now() WHERE id = $1 \
-             RETURNING id, name, description, system_prompt, harness, model, model_provider_id",
-        )
-        .bind(b.id),
-        None => sqlx::query_as(
-            "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id, \
-             description) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             RETURNING id, name, description, system_prompt, harness, model, model_provider_id",
-        )
-        .bind(Uuid::now_v7()),
+    let record_id = match &before {
+        Some(b) => {
+            sqlx::query_scalar!(
+                r#"
+                UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5,
+                    model_provider_id = $6, description = $7, updated_at = now()
+                WHERE id = $1 RETURNING id
+                "#,
+                b.id,
+                input.name,
+                input.system_prompt,
+                input.harness,
+                input.model,
+                input.model_provider_id,
+                input.description
+            )
+            .fetch_one(&mut *tx)
+            .await
+        }
+        None => {
+            sqlx::query_scalar!(
+                r#"
+                INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id,
+                    description)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+                "#,
+                Uuid::now_v7(),
+                input.name,
+                input.system_prompt,
+                input.harness,
+                input.model,
+                input.model_provider_id,
+                input.description
+            )
+            .fetch_one(&mut *tx)
+            .await
+        }
     }
-    .bind(&input.name)
-    .bind(&input.system_prompt)
-    .bind(&input.harness)
-    .bind(&input.model)
-    .bind(input.model_provider_id)
-    .bind(&input.description)
-    .fetch_one(&mut *tx)
-    .await
     .map_err(|e| conflict_or(e, "a persona with this name already exists"))?;
+    let record = get_persona(&mut *tx, record_id)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("persona `{record_id}`")))?;
 
     let before_input = before.map(|b| PersonaInput {
         name: b.name,

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5,\n                    model_provider_id = $6, description = $7, updated_at = now()\n                WHERE id = $1 RETURNING id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "71dc2dfb4a30941657051641019141f8cb703bc48e8e5e46d721b8ae5ecb5042"
+}
