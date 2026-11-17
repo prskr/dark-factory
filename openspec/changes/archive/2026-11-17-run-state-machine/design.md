@@ -144,6 +144,7 @@ The states, commands, lifecycle events and task events stay the same, with these
 - A run that is `finalizing` for `stop` or `done` gets no second `Cancel` with the budget text when its budget deadline passes; it keeps its reason.
 - A run `finalizing` for `idle` still gets the budget `Cancel` (the budget takes over the reason, see decision 3), and a stream that starts after the budget deadline sends that `Cancel`, never the idle `Release`.
 - A reconnect of an unchanged run publishes no `RunChanged`. Every consumer of `RunChanged` only re-reads state.
+- A run stopped before it connected, whose sandbox connects before the scheduler ends it, moves to `finalizing` with reason `stop` on `Connected`, so the session sends the stop `Cancel`. Before, it moved to `preparing` and was only torn down at the stop timeout.
 
 ## Risks / Trade-offs
 

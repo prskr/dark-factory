@@ -36,7 +36,7 @@ Requires `db-write-ownership`. Before starting, re-measure the tables in design.
 ## 5. Documentation and integration
 
 - [x] 5.1 Set ADR-0055's "Run state stays where it is" bullet to point to ADR-0061 and update ADR-0061's status line to "Accepted". In `docs/architecture.md`, drop the "target" mark from `run_transition` in the `df-core` row.
-- [x] 5.2 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-file-length`, `SQLX_OFFLINE=true cargo build --workspace`, `bazel --bazelrc=.bazelrc.agents test //crates/df-core/... //crates/df-db/... //crates/df-agent-channel/... //crates/factory-agent/...` and `just e2e-local` (or report that it could not run); all pass.
+- [x] 5.2 Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-file-length`, `SQLX_OFFLINE=true cargo build --workspace`, `bazel --bazelrc=.bazelrc.agents test //crates/df-core/... //crates/df-db/... //crates/df-agent-channel/... //crates/factory-agent/...` and `just e2e-local` (or report that it could not run); all pass. Bazel and e2e ran locally after iteration 1; on the final revision they ran in CI (`bazel` and `e2e` jobs of PR #246).
 
 ## Workflow follow-up
 
