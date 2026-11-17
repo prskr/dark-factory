@@ -22,6 +22,7 @@ The caller passes:
 - Read the standards files and the whole diff. Read surrounding code where a hunk alone is not enough to judge.
 - Report (a) every violation of a documented standard, citing file and rule, and (b) baseline smells you spot, naming the smell and quoting the hunk.
 - Documented standards can be hard violations. Baseline smells are always judgement calls. A documented repo standard overrides the baseline.
+- Check architectural boundaries against `docs/architecture.md` when it is among the standards files: a new workspace dependency in a `Cargo.toml` that the crate table does not allow, code placed in a crate that does not own it (SQL outside `df-db` except the exceptions of rule 2, wire types in domain rules, infrastructure reused through a domain or adapter crate, a control-plane crate in `factory-agent`), and a change that moves ownership or adds a crate without updating `docs/architecture.md`. These are hard violations; cite the rule number. A row marked **target** binds new code (don't add to what the target removes) but is not a finding for code the diff does not touch.
 - Check that every new or renamed test is named after the behavior it asserts. A name that is only a topic (`test_parser`), or that refers to a review, finding or ticket, is a finding (`cargo xtask check-test-names` only catches the numbered patterns).
 - Skip anything tooling already enforces (rustfmt, clippy, typos, machete).
 - Only report what you can point to in the diff. No speculation without evidence.

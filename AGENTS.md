@@ -57,6 +57,8 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 
 Read `docs/development.md` for the local setup (PostgreSQL, `DATABASE_URL`, coverage, pinned linters).
 
+Crate ownership and allowed dependencies: `docs/architecture.md`. Place new code in the crate that owns it there; a new workspace dependency or a new crate updates that file in the same change.
+
 ### Key Technologies
 
 - **Language:** Rust (edition 2024, toolchain from `rust-toolchain.toml`), `unsafe_code` is forbidden workspace-wide
