@@ -160,7 +160,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Live refresh of deny rules (and project hosts) on an open traffic page, without a reconnect | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
 | Editing egress rules (the edit dialog is drawn; see the roadmap line `egress-rule-editing`) | decided | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
 | SQL paging of the egress rules (today all rules are loaded and sliced in memory), when lists exceed a few hundred rules | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |
-| Convert the remaining runtime-checked queries of `df-db` to `query!`/`query_as!` (`egress`, `task_events`, `model_providers`, `tasks`, `requests`, `artifacts`, `projects`, `model_usage`, `notify`, `webhooks`, `outbox`; `migrate`/`pool` stay runtime-built) | idea | `openspec/changes/db-write-ownership` (Out of Scope) |
+| Convert the remaining runtime-checked queries of `df-db` to `query!`/`query_as!` (`egress`, `task_events`, `model_providers`, `tasks`, `requests`, `artifacts`, `projects`, `model_usage`, `notify`, `webhooks`, `outbox`; `migrate`/`pool` stay runtime-built) | idea | `openspec/changes/archive/2026-11-17-db-write-ownership` (Out of Scope) |
 | `dark-factory egress tail` CLI | idea | [`design/egress.md`](../../design/egress.md) §8 |
 | Org chart between personas (`reports_to`, delegation allowlists, who may hire whom), per-project persona rosters | idea | ADR-0043 |
 | Read-only task mode that rejects a reviewer's pushes, only if reviewers commit in practice | idea | ADR-0041 |
