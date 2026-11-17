@@ -24,7 +24,7 @@ services:
   # the browser reaches the web UI and Dex on 127.0.0.1 like a local browser; keep the version in
   # sync with the `playwright` entry of .mcp.json.
   playwright:
-    image: mcr.microsoft.com/playwright/mcp:v0.0.85@sha256:cc70a6922ff856f3aba0fe97d0d94220dc9a7f367f6d332facc6d81d9a91e60e
+    image: mcr.microsoft.com/playwright/mcp:v0.0.85@sha256:8ca417ff2a3660b770d7dd4a293bd179d0f3c29d0d5fb5bc43d3be617b1566a2
     profiles: ["design"]
     network_mode: host
     command: ["--isolated", "--host", "127.0.0.1", "--port", "8931"]
