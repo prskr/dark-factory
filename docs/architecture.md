@@ -43,7 +43,7 @@ flowchart TD
 | Crate | Owns | May depend on (workspace) | Status |
 |---|---|---|---|
 | `dark-factory` | The binary and its subcommands; config loading; wiring of adapters (composition root) | any crate | current |
-| `df-core` | Domain types and rules: IDs, task state machine (`task_transition`), routing, webhook rules, the trait seams (`SandboxProvider`, `ForgeClient`, `SecretStore`), configuration types (`config`) | `df-artifact-types`, `df-sandbox-contract` | current (`df-sandbox-contract`: target) |
+| `df-core` | Domain types and rules: IDs, task and run state machines (`task_transition`, `run_transition`: target), routing, webhook rules, the trait seams (`SandboxProvider`, `ForgeClient`, `SecretStore`), configuration types (`config`) | `df-artifact-types`, `df-sandbox-contract` | current (`df-sandbox-contract`: target) |
 | `df-db` | The schema, migrations and every SQL query; sole user of `sqlx` queries | `df-core`, `df-proto` | target: `db-write-ownership` |
 | `df-proto` | Generated protobuf/gRPC wire types | none | current |
 | `df-web` | Web UI and its HTTP handlers; data access through `df-db` | `df-core`, `df-db`, `df-proto` | current |
@@ -60,6 +60,9 @@ flowchart TD
 | `factory-agent` | The sandbox runtime: runs the harness over ACP, talks to the agent port | `df-proto`, `df-sandbox-contract`, `df-artifact-types`, `df-telemetry` | target: `sandbox-contract-and-tls` (today also `df-core`) |
 | `df-harness` | Native ACP harness spike, kept as the starting point of the custom harness | none | current |
 | `plugins/*` | Forge plugins (WASM) | `forge-common` only | current |
+| `df-test-postgres` | PostgreSQL test containers for database tests (dev-dependency only) | none | current |
+| `fake-acp-agent` | Scripted ACP agent for tests (dev-dependency only) | none | current |
+| `df-e2e` | End-to-end suite and demo seed; may run SQL (rule 2) | `df-core`, `df-db`, `df-proto` | current |
 
 ## Rules
 

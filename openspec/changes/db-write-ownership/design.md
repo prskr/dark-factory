@@ -36,7 +36,7 @@ Production reads outside `df-db`: the files above plus `retention.rs`, `summary.
 - Clippy keeps it that way.
 
 **Non-Goals:**
-- Merging the run state machine into `df_core::task_transition` or changing allowed transitions. Rejected: this change moves code, it does not redesign it.
+- Modeling run transitions as a pure function like `task_transition` (ADR-0055), or changing which transitions are allowed: change `run-state-machine` (ADR-0061). This change only moves the code; afterwards the transitions sit in `df_db::runs` and `task_events.rs:finalize_idle_run`.
 - Converting the other runtime-checked queries of `df-db` (proposal, Out of Scope).
 - A trait for the storage layer. Rejected (decision 1).
 
@@ -125,7 +125,7 @@ Alternative: `cargo xtask check-db-writes`, a text match for `INSERT`/`UPDATE`/`
 
 ### 8. Prompt delivery, turn state and kind names (TD-19, TD-45)
 
-- `mark_prompt_delivered` becomes executor-generic and gets the `task_id` scope; `append_runtime` calls it instead of its own `UPDATE`.
+- `mark_prompt_delivered` becomes executor-generic and gets the `task_id` scope; `append_runtime` calls it instead of its own `UPDATE`, and only when the `(run, seq)` insert stored a new event that carries a `prompt_id`, as `transcript::insert` does today. A duplicate event leaves delivery unchanged.
 - `turn_open` / `last_turn_event` move to `df_db::transcript`.
 - Event kind names (`turn_started`, `turn_ended`, …) become constants in `df_db::transcript`, used by `kind_name`, the session's `match` and the SQL bind.
 
@@ -138,7 +138,7 @@ Alternative: `cargo xtask check-db-writes`, a text match for `INSERT`/`UPDATE`/`
   3. the connect timeout (not connected yet, `started_at` + `connect_timeout_seconds`);
   4. the hard stop (connected states, `COALESCE(connected_at, started_at)` + `max_wall_clock_seconds` + 2 × `cancel_grace_seconds`).
 
-  The filter may return more runs than get ended, never fewer: `enforce_timeouts` keeps its Rust match as the final decision. The intervals come from the same constants and `RunsConfig` fields the Rust check uses, bound as parameters.
+  The filter may return more runs than get ended, never fewer: `enforce_timeouts` keeps its Rust match as the final decision. The intervals come from the same constants and `RunsConfig` fields the Rust check uses, bound as parameters. An interval that `after` can't represent (for example a `u64::MAX` budget) is bound as `NULL`, and its branch tests `$n IS NOT NULL AND …`. The query then never fails on it, and that branch matches nothing, the same as "no deadline" in Rust.
 
 ### 10. `.sqlx/` metadata (TD-33)
 
