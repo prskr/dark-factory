@@ -15,7 +15,7 @@
   - `enforce_timeouts`.
   
   `set_run_state_tx` is deleted.
-- New column `runs.finalize_reason` (`idle`, `budget`, `stop`, `done`). The session picks `Release` or `Cancel` from it alone. The session flags `human_cancel_sent`, `release_sent` and the loop's `cancel_sent` become one "command sent on this stream" flag. `ended` comes from the applier's result.
+- New column `runs.finalize_reason` (`idle`, `budget`, `stop`, `done`). The session picks `Release` or `Cancel` from it alone. The session flags `human_cancel_sent`, `release_sent` and the loop's `cancel_sent` become one record of the last command sent on this stream. `ended` comes from the applier's result.
 - `factory-agent`: `RunControl` replaces the four flags `released`, `cancelled`, `end_run_requested` and `await_input_requested`, with one function deciding the outcome at the end of a turn.
 - `apply_phase`: the runtime never sends `Preparing` or `Finalizing` (`factory-agent` sends only `Running` and `AwaitingInput`; task 1.1 confirms this). Both phases map to no event and are logged at `debug`. `Connected` already moves the run to `preparing`.
 - Docs:

@@ -39,7 +39,7 @@ In `df-gateway`, `convert` goes from `pub(crate) mod` to `pub mod`, and the func
 
 ### 3. Tests move with their modules
 
-`control/tests.rs`, `control/relay/` and `control/usage_records/tests.rs` move along. `relay/tests.rs` connects through `link::PlainConnector`, which is `#[cfg(test)] pub(crate)`. It becomes `#[cfg(any(test, feature = "test-util"))] pub` behind a new `test-util` feature of `df-gateway`, and `df-gateway-control` takes `df-gateway` with `test-util` as a dev-dependency (`docs/architecture.md`, rule 1). The database tests keep the `no-remote-exec` tag in the new `BUILD.bazel`. `df-gateway`'s `BUILD.bazel` loses its database test targets (if any test outside `control/` needs the database, it fails to compile and shows up during the move).
+`control/tests.rs`, `control/relay/` and `control/usage_records/tests.rs` move along. `relay/tests.rs` connects through `link::PlainConnector`, which is `#[cfg(test)] pub(crate)`. The struct and its `GrpcConnector` impl (gated separately today) both become `#[cfg(any(test, feature = "test-util"))]`, the struct `pub`, behind a new `test-util` feature of `df-gateway`, and `df-gateway-control` takes `df-gateway` with `test-util` as a dev-dependency (`docs/architecture.md`, rule 1). The database tests keep the `no-remote-exec` tag in the new `BUILD.bazel`. `df-gateway`'s `BUILD.bazel` loses its database test targets (if any test outside `control/` needs the database, it fails to compile and shows up during the move).
 
 ## Risks / Trade-offs
 
