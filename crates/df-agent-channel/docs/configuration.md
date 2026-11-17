@@ -110,19 +110,22 @@ stateDiagram-v2
     awaiting_input --> running: PhaseChanged RUNNING (follow-up prompt)
     awaiting_input --> finalizing: idle deadline (Release) or mark done (Cancel)
     awaiting_input --> failed: sandbox_lost
-    running --> finalizing: PhaseChanged FINALIZING
+    preparing --> finalizing: wall-clock budget (Cancel)
+    running --> finalizing: wall-clock budget (Cancel)
+    awaiting_input --> finalizing: wall-clock budget (Cancel)
+    finalizing --> finalizing: mark done (Cancel after the idle Release)
     finalizing --> succeeded: RunReport completed / end_turn / limit_reached / rate_limited
     finalizing --> cancelled: RunReport cancelled
     finalizing --> failed: RunReport failed
     finalizing --> failed: sandbox_lost
     preparing --> failed: sandbox_lost
     running --> failed: sandbox_lost, hard stop
-    preparing --> finalizing: human stop (Cancel)
-    running --> finalizing: human stop (Cancel)
-    awaiting_input --> finalizing: human stop (Cancel)
-    pending --> cancelled: human stop
-    provisioning --> cancelled: human stop
-    connecting --> cancelled: human stop
+    preparing --> finalizing: human stop / PR merge (Cancel)
+    running --> finalizing: human stop / PR merge (Cancel)
+    awaiting_input --> finalizing: human stop / PR merge (Cancel)
+    pending --> cancelled: human stop / PR merge
+    provisioning --> cancelled: human stop / PR merge
+    connecting --> cancelled: human stop / PR merge
     finalizing --> cancelled: stop timeout (120 s)
 ```
 
@@ -151,6 +154,53 @@ If prompts are still undelivered when a run ends with an outcome other than `fai
 marked done, or whose pull request was merged (`completed`), keeps its status when its run ends,
 unless prompts are undelivered.
 
+### Run transitions
+
+Every change of `runs.state` goes through one function of `df-core`
+(`run_transition::run_transition`, ADR-0061); `df_db::apply_run_event` locks the run row, applies
+the result and runs its effects (publish `run_changed`, sandbox lifecycle events, the task events
+of a turn or of the run end) in the caller's transaction. An event that changes nothing, such as a
+repeated connect, writes and publishes nothing. Stopping a run that already ended is rejected.
+
+The events and what raises them:
+
+| Event | Raised by |
+|-------|-----------|
+| provisioning started, sandbox started | the scheduler, the sandbox provider |
+| connected | the runtime's first `Hello` |
+| turn started, turn ended | the runtime's phases `RUNNING` and `AWAITING_INPUT` |
+| finalize (`idle`, `budget`, `done`) | the idle timer, the budget timer, a board member marking the task done |
+| stop requested | a board member stopping the run or cancelling the task, the merge of the pull request |
+| ended | the `RunReport`, a lost or failed sandbox |
+| overdue | the scheduler's timeout enforcement; it ends the run only if the run is still overdue when its row is locked |
+
+The runtime phases `PREPARING` and `FINALIZING` change nothing; the control plane moves a run to
+`preparing` on `Hello` and to `finalizing` itself.
+
+`runs.finalize_reason` is written when a run becomes `finalizing`. The command a session sends
+follows from it alone, once per stream, also after a reconnect or on another replica:
+
+| `finalize_reason` | Set by | Command |
+|-------------------|--------|---------|
+| `idle` | the idle deadline (`runs.keepAliveSeconds`) | `Release` |
+| `budget` | the wall-clock budget (`runs.maxWallClockSeconds` + `runs.cancelGraceSeconds`) | `Cancel` ("wall-clock budget exceeded") |
+| `stop` | a board member's stop, cancelling the task, or the merge of the pull request | `Cancel` ("run stopped by a board member") |
+| `done` | a board member marking the task done | `Cancel` ("task marked done") |
+
+A reason can change while the run is `finalizing`, and a session that already sent the command of
+the old reason sends the new one once:
+
+- the budget takes over a run that is `finalizing` for `idle`: `Cancel` after the `Release`;
+- a board member marking the task done takes over a run that is `finalizing` for `idle`: `Cancel`
+  ("task marked done") after the `Release`;
+- a stop that cancels the task takes over a run that is `finalizing` for `idle` or `budget`:
+  `Cancel` ("run stopped by a board member"), after the `Release` or the budget `Cancel`;
+- a run that is `finalizing` for `stop`, `done` or `budget` keeps its reason, except for the stop
+  above; the budget and a done task never replace each other.
+
+A session that connects after the budget deadline sends the budget `Cancel`, never an idle
+`Release`.
+
 ### Task transitions and delegation
 
 Every change of `tasks.status` goes through one function of `df-core`
@@ -177,7 +227,7 @@ source `agent`; a retried call (same `call_id`) returns the stored key and creat
 A board member stops the active run (`POST /tasks/{key}/stop`) or cancels the task (`POST /tasks/{key}/cancel`, which stops the run too). Both set `runs.stop_requested_at`.
 
 - A connected run in `preparing`, `running` or `awaiting_input` moves to `finalizing`; the session holding the stream sends `Cancel`, the runtime reports `cancelled` and the task becomes `waiting`. A run that is already `finalizing` is not marked by a stop (cancelling the task still marks it).
-- A run without a connection (`pending`, `provisioning`, `connecting`) is ended `cancelled` by the scheduler on the next notification or tick and its sandbox is torn down. The task volume is kept.
+- A run without a connection (`pending`, `provisioning`, `connecting`) is ended `cancelled` by the scheduler on the next notification or tick and its sandbox is torn down. The task volume is kept. If the sandbox connects first, the run moves to `finalizing` (reason `stop`) and the session sends `Cancel` as for a connected run.
 - A stopped run that has not ended 120 s after the stop is torn down and ends `cancelled` with detail `stop-timeout` (volume kept).
 - Task status `cancelled` is kept when the run ends. A message reopens the task (`queued`); the next run starts after the stopped run ended.
 - Only messages queued after the stop requeue the task at run end; older undelivered messages leave it `waiting`. Cancelling discards the undelivered messages and closes the pending requests (`task-cancelled`).
@@ -189,8 +239,9 @@ After a normal turn end the runtime reports `AWAITING_INPUT`: the run becomes `a
 and the task `waiting` (it stays `running` while a message is undelivered). The replica holding
 the stream sends `Release` at the last persisted `TurnEnded` + `runs.keepAliveSeconds`; a replica
 that takes over, or a run that reconnects after the deadline, computes the same deadline. Before it
-sends `Release` (or `Cancel` for a task marked done) the control plane moves the run to
-`finalizing`; no prompt is sent to a `finalizing` run, a message queued meanwhile makes the task
+sends `Release` the control plane moves the run to `finalizing` with reason `idle`, and a session
+that connects later sends the command of the stored reason ([Run transitions](#run-transitions));
+no prompt is sent to a `finalizing` run, a message queued meanwhile makes the task
 `queued` and the run end starts the next run. A message for an `awaiting_input` run sets the task
 `running`, starts no run and is forwarded at once.
 

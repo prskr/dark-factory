@@ -3,9 +3,11 @@
 use super::*;
 use crate::testing::gated::{Gate, GatedProvider};
 use crate::testing::{Env, task_resume_state};
+use df_core::config::RunsConfig;
+use df_core::run_transition::cancel_deadline;
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, TaskStatus};
-use df_db::runs::get_run;
+use df_db::runs::{get_run, list_overdue_runs};
 use sqlx::PgPool;
 
 /// One pass of the production code: start and provision what is queued, then enforce
@@ -847,8 +849,37 @@ fn huge_budgets_mean_no_deadline_instead_of_a_panic() {
         ..RunsConfig::default()
     };
     assert_eq!(cancel_deadline(Utc::now(), &cfg), None);
-    assert_eq!(hard_stop(Utc::now(), &cfg), None);
-    assert!(!is_before(after(Utc::now(), u64::MAX), Utc::now()));
+}
+
+#[tokio::test]
+async fn a_run_that_connected_after_being_listed_is_not_ended() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let scheduler = Scheduler::new(env.ctx.clone());
+    let now = Utc::now();
+    tick(&scheduler, now).await.unwrap();
+    let late = now + chrono::Duration::seconds(601);
+    let run_id = only_run(&pool).await.id;
+    let cfg = &env.ctx.config.runs;
+    // The enforcement listed the run as overdue ...
+    let listed = list_overdue_runs(&pool, late, cfg).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|run| run.id).collect::<Vec<_>>(),
+        [run_id]
+    );
+    // ... and the runtime connects before the decision.
+    df_db::runs::mark_connected(&pool, run_id).await.unwrap();
+
+    assert!(
+        finish_overdue(&env.ctx, run_id, late)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let run = only_run(&pool).await;
+    assert_eq!(run.state, RunState::Preparing);
+    assert_eq!(teardowns(&env), 0);
 }
 
 #[tokio::test]

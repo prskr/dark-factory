@@ -25,7 +25,7 @@ The code doesn't treat it as one state machine. Eight statements in `df-db` (`cr
   - `Rejected` is a command the status doesn't allow (marking a running task done). An event that changes nothing returns an empty transition, not an error.
 - **One applier in `df-db`** (`apply_task_event`) locks the task (its run rows first, then the task row; for an event from another task only the task row), loads the snapshot, calls `transition`, writes the result and executes the effects **in the caller's transaction**. An effect on another task becomes an event for that task, applied in the same transaction from a work queue. Nothing is sent asynchronously.
 - **Other tasks' state is read inside the transaction, not through messages.** A dependency is satisfied according to its target's row (ADR-0052), and scope checks such as "the caller is the parent" read rows directly.
-- **Run state stays where it is.** `runs.state` and the scheduler's slot accounting are not part of the task state machine. They raise task events.
+- **Run state follows its own function** ([ADR-0061](0061-run-transitions-through-one-transition-function.md)). `runs.state` is not part of the task state machine; the scheduler's slot accounting stays outside both. A run raises task events.
 
 ## Consequences
 

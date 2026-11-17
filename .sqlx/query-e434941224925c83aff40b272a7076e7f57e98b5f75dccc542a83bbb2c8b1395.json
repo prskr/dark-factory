@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at\n        FROM runs WHERE id = $1\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs\n        WHERE state <> ALL($1)\n          AND (\n            (stop_requested_at IS NOT NULL AND state = ANY($2))\n            OR (stop_requested_at IS NOT NULL AND $3::bigint IS NOT NULL\n                AND stop_requested_at + $3::bigint * interval '1 second' < $4)\n            OR (state = ANY($2) AND $5::bigint IS NOT NULL\n                AND started_at + $5::bigint * interval '1 second' < $4)\n            OR (state = ANY($6) AND $7::bigint IS NOT NULL\n                AND COALESCE(connected_at, started_at) + $7::bigint * interval '1 second' < $4)\n          )\n        ORDER BY started_at\n        ",
   "describe": {
     "columns": [
       {
@@ -134,11 +134,28 @@
             "name": "stop_requested_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "finalize_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "finalize_reason"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "TextArray",
+        "Int8"
       ]
     },
     "nullable": [
@@ -153,8 +170,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "f803bbd1382772d2d441ef6cf21652cba5eeca408ed05ce77ac85362190ee893"
+  "hash": "e434941224925c83aff40b272a7076e7f57e98b5f75dccc542a83bbb2c8b1395"
 }

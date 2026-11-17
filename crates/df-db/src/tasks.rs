@@ -1,6 +1,7 @@
 //! Task management persistence operations (`specs/task-management/spec.md`).
 
 use chrono::{DateTime, Utc};
+use df_core::run_transition::RunEvent;
 use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
     DependencyKind, ExistingBranch, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey,
@@ -15,6 +16,8 @@ use uuid::Uuid;
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::run_events::{RunEnv, apply_run_event};
+use crate::runs::active_run_of_task;
 use crate::task_events::{apply_task_event, execute_effects};
 
 /// Outbox kind that marks a task's open pull request as draft again; payload [`MarkDraftJob`].
@@ -1189,27 +1192,36 @@ pub(crate) async fn request_stop_tx(
     task_id: TaskId,
     scope: StopScope,
 ) -> Result<Option<RunId>, DbError> {
-    let run: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE runs SET stop_requested_at = clock_timestamp(),
-             state = CASE WHEN state = ANY($3) THEN 'finalizing' ELSE state END
-         WHERE task_id = $1 AND stop_requested_at IS NULL
-           AND state <> ALL($2)
-         RETURNING id",
+    let Some(run_id) = active_run_of_task(&mut **tx, task_id).await? else {
+        return Ok(None);
+    };
+    let applied =
+        apply_run_event(tx, run_id, RunEvent::StopRequested(scope), &RunEnv::none()).await?;
+    Ok(applied.filter(|applied| applied.changed).map(|_| run_id))
+}
+
+/// Records what a run that ended reported for its task: the harness session (kept if empty) and
+/// whether the task branch diverged (sticky).
+pub(crate) async fn record_run_report(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+    harness_session_id: &str,
+    diverged: bool,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"
+        UPDATE tasks SET
+            harness_session_id = CASE WHEN $2 <> '' THEN $2 ELSE harness_session_id END,
+            diverged = diverged OR $3, updated_at = now()
+        WHERE id = $1
+        "#,
+        task_id.as_uuid(),
+        harness_session_id,
+        diverged
     )
-    .bind(task_id.as_uuid())
-    .bind(if scope == StopScope::IncludingFinalizing {
-        RunState::TERMINAL
-    } else {
-        RunState::NOT_COMMANDABLE
-    })
-    .bind(RunState::RUNTIME_UP)
-    .fetch_optional(&mut **tx)
+    .execute(executor)
     .await?;
-    let run_id = run.map(RunId::from_uuid);
-    if let Some(run_id) = run_id {
-        publish(&mut **tx, &Notification::RunChanged { run_id, task_id }).await?;
-    }
-    Ok(run_id)
+    Ok(())
 }
 
 pub(crate) async fn has_active_run(

@@ -44,15 +44,15 @@ Commands a session sends for a `finalizing` run, as `reconcile_finalizing` (`ses
 
 ```rust
 pub struct RunSnapshot {
+    pub run_id: RunId,
     pub state: RunState,
-    /// `overdue` needs the time for the stop timeout.
+    /// A time, not a bool: `overdue` needs it for the stop timeout.
     pub stop_requested_at: Option<DateTime<Utc>>,
-    pub connected: bool,
+    pub connected_at: Option<DateTime<Utc>>, // budget start: connected_at, else started_at
     pub provisioning_began: bool,
     pub finalize_reason: Option<FinalizeReason>,
     pub undelivered_messages: bool,
     pub started_at: DateTime<Utc>,
-    pub budget_start: DateTime<Utc>,
 }
 
 pub enum RunEvent {
@@ -65,23 +65,25 @@ pub enum RunEvent {
     StopRequested(StopScope),
     Ended(RunEnd),
     /// Becomes `Ended` if `overdue` says so on the locked snapshot (decision 4).
-    Overdue { now: DateTime<Utc>, limits: RunLimits },
+    Overdue { now: DateTime<Utc>, limits: RunsConfig },
 }
 
 pub struct RunTransition {
     pub state: RunState,
-    pub set: RunFields,          // timestamps, pod_ip, outcome fields, finalize_reason
-    pub effects: Vec<RunEffect>, // Publish, Lifecycle(Event), Task(TaskEvent)
+    pub set: RunFields,          // timestamps (stamps), pod_ip, outcome fields, finalize_reason
+    pub effects: Vec<RunEffect>, // Publish, Sandbox* (lifecycle events), Task(TaskCue)
 }
 ```
 
+`limits` is the existing `RunsConfig`, not a new type. The applier takes a `RunEnv` (the lifecycle sinks and the resume policy of the task event for a run end) next to the event; `RunEnv::new(events, max_auto_resumes, resume_backoff)` builds it, `RunEnv::events_only(events)` serves the events that enqueue lifecycle events but end no run, and `RunEnv::none()` the events that need neither. It returns `Option<AppliedRun>` (`None` for a missing run).
+
 `RunEnd` moves from `df_db::runs` to `df-core` with it. The overdue causes (stop timeout, connect timeout, hard stop) produce `Ended` with the outcome and detail used today. Insertion stays in `start_queued_runs`: a new run has no snapshot. The insert writes `pending` and raises task `RunStarted` as today. `run_transition` starts at `pending`.
 
-An event that changes nothing returns an empty transition, like a repeated `Connected` or `TurnEnded` on a `finalizing` run. `Rejected` is reserved for commands, of which runs have one: `StopRequested` on a terminal run. Callers that return whether something changed (`begin_provisioning`, `mark_started`, `start_finalizing`) keep their `bool` from "the transition changed the state".
+An event that changes nothing returns an empty transition, like a repeated `Connected` or `TurnEnded` on a `finalizing` run. `Rejected` is reserved for commands, of which runs have one: `StopRequested` on a terminal run. Callers that return whether something changed (`begin_provisioning`, `mark_started`, `start_finalizing`) keep their `bool` from "the transition changed the run" (it has effects), which also covers a change of the reason alone.
 
 ### 2. Applier and lock order
 
-`apply_run_event(tx, run_id, event, actor)` does the following:
+`apply_run_event(tx, run_id, event, env)` does the following:
 - `SELECT … FOR UPDATE` on the run;
 - reads the undelivered flag (the task lock is taken first where the rule needs it, see below);
 - calls `run_transition`;
@@ -100,14 +102,16 @@ In the other direction, the task applier's effects `FinalizeIdleRun` and `StopRu
 - `Finalize(reason)`;
 - `StopRequested`, which writes `stop` only if the run moves to `finalizing`.
 
+On a run that is already `finalizing`, `Finalize(reason)` replaces `idle` with a `Cancel` reason (`budget`, `done`) and changes nothing else (state unchanged, publish), so the stream that sent the `Release` sends that `Cancel` once. A `Cancel` reason is never replaced. That keeps today's precedence: the budget timer sends its `Cancel` after an idle `Release` (`session.rs:271`), and a task marked done gets its `Cancel` on an idle-finalizing run (`session.rs:358`). A session that starts after the budget deadline applies `Finalize(Budget)` before its first reconcile, so it never sends an idle `Release` then.
+
 A `StopRequested` with `IncludingFinalizing` on a run that is already `finalizing` sets `stop_requested_at` and changes the reason to `stop`. That's today's effect: `stop_requested_at` makes `reconcile_finalizing` send the stop `Cancel`.
 
-On a run that is already `finalizing`, `Finalize(reason)` replaces `idle` with a `Cancel` reason (`budget`, `done`) and changes nothing else. A `Cancel` reason is never replaced by `idle`. That keeps today's precedence: the budget timer sends its `Cancel` after an idle `Release` (`session.rs:271`), and a task marked done gets its `Cancel` on an idle-finalizing run (`session.rs:358`).
-
-`FinalizeReason::command()` returns `Release` for `idle` and `Cancel(reason text)` for the others. `reconcile_finalizing` becomes:
+`FinalizeReason::command()` returns `Release` for `idle` and `Cancel(reason text)` for the others, and alone decides between them. The session records the last command it sent on its stream (`command_sent: Option<RunCommand>`), not a "sent" flag. `reconcile_finalizing` becomes:
 1. read the run;
-2. return if it's not `finalizing`, or this stream already sent this command (the one `command()` returns for the current reason). A stream that sent `Release` for an idle run still sends the stop `Cancel` when a stop changes the reason to `stop`, as today's code does (its human-cancel check ignores `release_sent`);
-3. otherwise send `command()`.
+2. return if it's not `finalizing`, or this stream already sent that same command;
+3. otherwise send `command()` and record it.
+
+So a stop that changes the reason of a released run (`idle` → `stop`) sends the `Cancel` after the `Release`, once.
 
 The budget timer goes through `Finalize(Budget)` and then sends its `Cancel` the same way. It stops calling `start_finalizing(false)` and `send_cancel` separately.
 
@@ -115,7 +119,7 @@ The budget timer goes through `Finalize(Budget)` and then sends its `Cancel` the
 
 ### 4. Timeouts
 
-`overdue(&RunSnapshot, now, &RunLimits) -> Option<RunEvent>` is the `match` of `enforce_timeouts` (`scheduler.rs:420`) moved verbatim, so the four branches and their order don't change. `enforce_timeouts` lists candidates with `list_overdue_runs` (from `db-write-ownership`, decision 9). For each, it calls `apply_run_event(Overdue { now, limits })`. The applier evaluates `overdue` on the locked snapshot and applies the resulting `Ended`, or nothing if the run moved meanwhile. `finish_run` (teardown) follows as today when a run was ended.
+`overdue(&RunSnapshot, now, &RunsConfig) -> Option<RunEvent>` is the `match` of `enforce_timeouts` (`scheduler.rs:420`) moved verbatim, so the four branches and their order don't change. `enforce_timeouts` lists candidates with `list_overdue_runs` (from `db-write-ownership`, decision 9). For each, it calls `apply_run_event(Overdue { now, limits }, env)`. The applier evaluates `overdue` on the locked snapshot and applies the resulting `Ended`, or nothing if the run moved meanwhile. `finish_run` (teardown) follows as today when a run was ended.
 
 ### 5. Runtime: `RunControl`
 
@@ -125,11 +129,21 @@ The budget timer goes through `Finalize(Budget)` and then sends its `Cancel` the
 struct RunControl { cancelled: bool, released: bool, end_run_after_turn: bool, await_input: bool }
 ```
 
-It gets methods `on_cancel`, `on_release`, `on_end_run_requested`, `on_await_input` and `turn_outcome(&self) -> TurnOutcome`. `turn_outcome` holds the precedence that is spread over `runner.rs:1059-1140` today (cancel before release before end-run before await-input). The guard is never held across `.await`. The cancel-safe `select!` branch at `runner.rs:473` keeps its single idempotent side effect, now `on_cancel`.
+It gets methods `on_cancel`, `on_release`, `on_end_run_requested`, `on_await_input` and `turn_outcome(&self) -> Option<ControlOutcome>`. `turn_outcome` holds the precedence that is spread over `runner.rs:1059-1140` today: cancel before end-run before release. `await_input` only picks `Blocked` over `Released` within a release; `release_outcome()` returns `Blocked` whenever `await_input` is set, whatever else is set, as before. The guard is never held across `.await`. The cancel-safe `select!` branch at `runner.rs:473` keeps its single idempotent side effect, now `on_cancel`.
 
 ### 6. Diagram checked by a test
 
 `crates/df-core/docs/run-transitions.md` has a Mermaid state diagram and an event table, written by hand from the arms of `run_transition`. A test checks that every `RunState`, `RunEvent` and `FinalizeReason` appears in it (as `the_status_diagram_names_every_status_and_event` does for tasks).
+
+## Intended differences
+
+The states, commands, lifecycle events and task events stay the same, with these exceptions that follow from storing the reason:
+
+- A PR merge (`StopRun(ActiveOnly)`) now stores `stop` and the session sends `Cancel("run stopped by a board member")` instead of `Cancel("task marked done")`. The runtime ignores the reason text.
+- A run that is already `finalizing` for `idle` or `budget` gets no extra `Cancel` on a merge: `ActiveOnly` leaves a `finalizing` run alone.
+- A run that is `finalizing` for `stop` or `done` gets no second `Cancel` with the budget text when its budget deadline passes; it keeps its reason.
+- A run `finalizing` for `idle` still gets the budget `Cancel` (the budget takes over the reason, see decision 3), and a stream that starts after the budget deadline sends that `Cancel`, never the idle `Release`.
+- A reconnect of an unchanged run publishes no `RunChanged`. Every consumer of `RunChanged` only re-reads state.
 
 ## Risks / Trade-offs
 

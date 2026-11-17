@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at\n        FROM runs\n        WHERE state = ANY($1) AND started_at < $2 AND stop_requested_at IS NULL\n        ORDER BY started_at\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs WHERE state <> ALL($1) ORDER BY started_at\n        ",
   "describe": {
     "columns": [
       {
@@ -134,12 +134,22 @@
             "name": "stop_requested_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "finalize_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "finalize_reason"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "TextArray",
-        "Timestamptz"
+        "TextArray"
       ]
     },
     "nullable": [
@@ -154,8 +164,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "b7bced517dc858fddc937e351094ea1437cf94994702603c747f938dc7379ca3"
+  "hash": "9e6e9987b7f5d78e1388221bd7ede98a96988259ab496a60e3377ae4fc8917ca"
 }

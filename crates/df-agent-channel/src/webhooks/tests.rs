@@ -1,9 +1,9 @@
 //! Tests of applying parsed webhook events: project match, routing, filters and the merge.
 
+use df_core::run_transition::RunEnd;
 use df_core::seams::ReviewVerdict;
 use df_core::testing::{FakeForgeClient, ForgeCall};
 use df_core::{IntegrationError, Principal, RunOutcome};
-use df_db::runs::RunEnd;
 use df_db::tasks::list_undelivered_messages;
 use serde_json::Value;
 

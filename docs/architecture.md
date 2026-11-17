@@ -43,7 +43,7 @@ flowchart TD
 | Crate | Owns | May depend on (workspace) | Status |
 |---|---|---|---|
 | `dark-factory` | The binary and its subcommands; config loading; wiring of adapters (composition root) | any crate | current |
-| `df-core` | Domain types and rules: IDs, task and run state machines (`task_transition`, `run_transition`: target), routing, webhook rules, the trait seams (`SandboxProvider`, `ForgeClient`, `SecretStore`), configuration types (`config`) | `df-artifact-types`, `df-sandbox-contract` | current (`df-sandbox-contract`: target) |
+| `df-core` | Domain types and rules: IDs, task and run state machines (`task_transition`, `run_transition`), routing, webhook rules, the trait seams (`SandboxProvider`, `ForgeClient`, `SecretStore`), configuration types (`config`) | `df-artifact-types`, `df-sandbox-contract` | current (`df-sandbox-contract`: target) |
 | `df-db` | The schema, migrations and every SQL query; sole user of `sqlx` queries | `df-core`, `df-proto` | current |
 | `df-proto` | Generated protobuf/gRPC wire types | none | current |
 | `df-web` | Web UI and its HTTP handlers; data access through `df-db` | `df-core`, `df-db`, `df-proto` | current |

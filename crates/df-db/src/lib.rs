@@ -27,6 +27,7 @@ pub mod pool;
 pub mod projects;
 pub mod push_checks;
 pub mod requests;
+pub mod run_events;
 pub mod runs;
 pub mod task_events;
 pub mod task_updates;
@@ -50,6 +51,7 @@ pub use notify::{Notification, Notifier, publish};
 pub use placement::{PlacementError, place_on_branch};
 pub use pool::{DbError, build_connect_options, connect_pool, ping, validate_sql_identifier};
 pub use projects::{ForgeTarget, forge_target};
+pub use run_events::apply_run_event;
 pub use sqlx::PgPool;
 pub use task_events::apply_task_event;
 pub use tasks::{

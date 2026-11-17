@@ -1,10 +1,10 @@
 //! The `pr.sync` job enqueued at the end of a run, driven by the outbox dispatcher
 //! (scenarios "Forge down at completion" and "Restart at completion").
 
+use df_core::run_transition::RunEnd;
 use df_core::testing::ForgeCall;
 use df_core::{RunId, RunOutcome};
 use df_db::outbox::Dispatcher;
-use df_db::runs::RunEnd;
 
 use super::*;
 use crate::ChannelConfig;

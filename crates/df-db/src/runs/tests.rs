@@ -30,14 +30,9 @@ async fn end_run(
     end: &RunEnd,
     policy: &Policy,
 ) -> Result<Option<EndedRun>, DbError> {
-    super::end_run(
-        pool,
-        end,
-        &EventSinks::default(),
-        policy.max_auto_resumes,
-        policy.resume_backoff,
-    )
-    .await
+    let events = EventSinks::default();
+    let env = RunEnv::new(&events, policy.max_auto_resumes, policy.resume_backoff);
+    super::end_run(pool, end, &env).await
 }
 
 /// Project `DF`, persona "Linus" and task `DF-1` with its undelivered assignment prompt.
@@ -156,9 +151,7 @@ async fn blocked_run_is_terminal_and_blocks_the_task() {
     assert_eq!(status_of(&pool, env.task.id).await, "blocked");
     // No further phase changes are accepted for it.
     let mut tx = pool.begin().await.unwrap();
-    set_idle_tx(&mut tx, run_id, env.task.id, true)
-        .await
-        .unwrap();
+    set_idle_tx(&mut tx, run_id, true).await.unwrap();
     tx.commit().await.unwrap();
     let state: String = sqlx::query_scalar("SELECT state FROM runs WHERE id = $1")
         .bind(run_id.as_uuid())
@@ -894,12 +887,12 @@ async fn state_of(pool: &PgPool, run_id: RunId) -> String {
 }
 
 /// Locks the run and its task as the session does, then moves the run to `finalizing`.
-async fn finalize(pool: &PgPool, env: &Env, run_id: RunId, only_idle: bool) -> bool {
+async fn finalize(pool: &PgPool, env: &Env, run_id: RunId, reason: FinalizeReason) -> bool {
     let mut tx = pool.begin().await.unwrap();
     let lock = crate::transcript::lock_run_and_task(&mut tx, run_id, env.task.id)
         .await
         .unwrap();
-    let moved = start_finalizing(&mut tx, &lock, only_idle).await.unwrap();
+    let moved = start_finalizing(&mut tx, &lock, reason).await.unwrap();
     tx.commit().await.unwrap();
     moved
 }
@@ -911,11 +904,11 @@ async fn the_idle_release_is_blocked_by_an_undelivered_message() {
     // The seeded message is undelivered.
     let run_id = env.insert_run(env.task.id, 1, "awaiting_input").await;
 
-    assert!(!finalize(&pool, &env, run_id, true).await);
+    assert!(!finalize(&pool, &env, run_id, FinalizeReason::Idle).await);
     assert_eq!(state_of(&pool, run_id).await, "awaiting_input");
 
     deliver_all(&pool, env.task.id).await;
-    assert!(finalize(&pool, &env, run_id, true).await);
+    assert!(finalize(&pool, &env, run_id, FinalizeReason::Idle).await);
     assert_eq!(state_of(&pool, run_id).await, "finalizing");
 }
 
@@ -926,7 +919,7 @@ async fn the_idle_release_moves_only_an_awaiting_input_run() {
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "running").await;
 
-    assert!(!finalize(&pool, &env, run_id, true).await);
+    assert!(!finalize(&pool, &env, run_id, FinalizeReason::Idle).await);
     assert_eq!(state_of(&pool, run_id).await, "running");
 }
 
@@ -943,14 +936,23 @@ async fn the_budget_cancel_moves_a_run_from_any_commandable_state_once() {
         (5, "awaiting_input"),
     ] {
         let run_id = env.insert_run(env.task.id, number, state).await;
-        assert!(finalize(&pool, &env, run_id, false).await, "{state}");
+        assert!(
+            finalize(&pool, &env, run_id, FinalizeReason::Budget).await,
+            "{state}"
+        );
         assert_eq!(state_of(&pool, run_id).await, "finalizing", "{state}");
         // Already ending: nothing to move.
-        assert!(!finalize(&pool, &env, run_id, false).await, "{state}");
+        assert!(
+            !finalize(&pool, &env, run_id, FinalizeReason::Budget).await,
+            "{state}"
+        );
         end_run(&pool, &end_with(run_id, RunOutcome::Cancelled), &config())
             .await
             .unwrap();
-        assert!(!finalize(&pool, &env, run_id, false).await, "ended {state}");
+        assert!(
+            !finalize(&pool, &env, run_id, FinalizeReason::Budget).await,
+            "ended {state}"
+        );
     }
 }
 

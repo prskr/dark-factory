@@ -8,17 +8,20 @@
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
 
+use df_core::run_transition::{FinalizeReason, RunEvent};
 use df_core::task_transition::{
     ActiveRun, ChildEnd, ChildEnded, Effect, First, Notice, PrState, TaskEvent, TaskSnapshot,
     Transition, transition,
 };
-use df_core::{Principal, RunId, RunState, TaskId, is_satisfied};
+use df_core::{Principal, RunState, TaskId, is_satisfied};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::run_events::{RunEnv, apply_run_event};
+use crate::runs::active_run_of_task;
 use crate::tasks::{
     MARK_DRAFT_KIND, MarkDraftJob, PR_SYNC_KIND, PrSyncJob, clock_under_task_lock,
     lock_runs_then_task, request_stop_tx,
@@ -445,28 +448,16 @@ async fn write_status(
     Ok(())
 }
 
-/// An idle run (`awaiting_input`) becomes `finalizing`, so the replica holding its stream
-/// cancels it: no prompt reaches it from here on.
+/// An idle run (`awaiting_input`) becomes `finalizing`, and one that is `finalizing` for `idle`
+/// (released) takes `done` as its reason, so the replica holding its stream cancels it: no
+/// prompt reaches it from here on. `run_transition` decides for every other state.
 async fn finalize_idle_run(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
 ) -> Result<(), DbError> {
-    let idle_run: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE runs SET state = 'finalizing' WHERE task_id = $1 AND state = 'awaiting_input'
-         RETURNING id",
-    )
-    .bind(task_id.as_uuid())
-    .fetch_optional(&mut **tx)
-    .await?;
-    if let Some(run_id) = idle_run {
-        publish(
-            &mut **tx,
-            &Notification::RunChanged {
-                run_id: RunId::from_uuid(run_id),
-                task_id,
-            },
-        )
-        .await?;
+    if let Some(run_id) = active_run_of_task(&mut **tx, task_id).await? {
+        let event = RunEvent::Finalize(FinalizeReason::Done);
+        apply_run_event(tx, run_id, event, &RunEnv::none()).await?;
     }
     Ok(())
 }

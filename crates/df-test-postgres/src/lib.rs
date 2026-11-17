@@ -123,6 +123,32 @@ pub async fn migrated_pool(migrator: &Migrator) -> PgPool {
     server.database_from(Some(&template)).await
 }
 
+/// Waits until a connection of the pool's database waits for a lock, for a test that holds a row
+/// and checks that another transaction queues behind it.
+///
+/// # Panics
+/// When no connection waits for a lock within 10 seconds.
+pub async fn wait_for_lock_wait(pool: &PgPool) {
+    let wait = async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await
+            .expect("read pg_stat_activity");
+            if waiting > 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), wait)
+        .await
+        .expect("no connection waited for a lock within 10 s");
+}
+
 /// Runs `start` on the first call and stores its outcome, a failure included.
 async fn get_or_start<T>(
     cell: &OnceCell<Result<T, String>>,

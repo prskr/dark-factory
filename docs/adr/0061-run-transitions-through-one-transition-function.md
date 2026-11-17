@@ -1,6 +1,6 @@
 # ADR-0061: Run transitions through one transition function
 
-- **Status:** Accepted (planned, `run-state-machine`)
+- **Status:** Accepted
 - **Date:** 2026-11-17
 - **Related:** [ADR-0055](0055-task-transitions-through-one-transition-function.md) (amends "Run state stays where it is"), [ADR-0016](0016-runs-and-triggers.md), [ADR-0049](0049-lifecycle-events-outbox-and-ed25519-signatures.md)
 
