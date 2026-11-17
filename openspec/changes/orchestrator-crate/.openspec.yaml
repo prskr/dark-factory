@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-17
+# Pure refactor: code moves between crates, no requirement or observable behavior changes.
+skip_specs: true
