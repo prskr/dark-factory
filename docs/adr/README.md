@@ -64,3 +64,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0058](0058-hermetic-c-toolchain.md) | Hermetic C toolchain for Linux exec tools and remote execution | Accepted |
 | [ADR-0059](0059-repository-file-reads-through-the-forge-plugin.md) | Repository file reads through the forge plugin | Accepted |
 | [ADR-0060](0060-project-image-builds.md) | Project image builds | Accepted |
+| [ADR-0061](0061-run-transitions-through-one-transition-function.md) | Run transitions through one transition function | Accepted (planned, `run-state-machine`) |

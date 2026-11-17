@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-17
+# Refactor: run transitions move behind one function; no requirement or observable behavior changes.
+skip_specs: true
