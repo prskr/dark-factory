@@ -19,6 +19,7 @@ pub mod harness;
 pub mod hidden_paths;
 pub mod mcp;
 pub mod outbox;
+pub mod run_control;
 pub mod runner;
 pub mod runtime_handler;
 pub mod runtime_socket;

@@ -4,21 +4,20 @@
 //! The state lists of the queries come from [`RunState`] constants and are bound as arrays, so a
 //! new state is added in one place.
 
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use df_core::config::RunsConfig;
-use df_core::task_transition::{RunEnded, TaskEvent};
+use df_core::run_transition::{FinalizeReason, RunEnd, RunEvent, STOP_TIMEOUT_SECONDS};
+use df_core::task_transition::TaskEvent;
 use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskStatus};
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::lifecycle_events::{self, Event, EventSinks};
+use crate::lifecycle_events::EventSinks;
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
+use crate::run_events::{RunEnv, apply_run_event};
 use crate::task_events::apply_task_event;
 use crate::transcript::RunTaskLock;
-
-/// Time a stopped run gets to report before its sandbox is torn down (design D1).
-pub const STOP_TIMEOUT_SECONDS: u64 = 120;
 
 /// Key of the instance-wide advisory lock that serializes the slot accounting of
 /// [`start_queued_runs`] across replicas.
@@ -62,6 +61,8 @@ pub struct RunRow {
     pub connected_at: Option<DateTime<Utc>>,
     /// When a board member stopped the run (design D1); `None` for a run nobody stopped.
     pub stop_requested_at: Option<DateTime<Utc>>,
+    /// Why the run is `finalizing`; `None` for a run that is not.
+    pub finalize_reason: Option<FinalizeReason>,
 }
 
 impl RunRow {
@@ -84,6 +85,7 @@ struct RunRecord {
     started_at: DateTime<Utc>,
     connected_at: Option<DateTime<Utc>>,
     stop_requested_at: Option<DateTime<Utc>>,
+    finalize_reason: Option<String>,
 }
 
 impl TryFrom<RunRecord> for RunRow {
@@ -104,6 +106,7 @@ impl TryFrom<RunRecord> for RunRow {
             started_at: r.started_at,
             connected_at: r.connected_at,
             stop_requested_at: r.stop_requested_at,
+            finalize_reason: r.finalize_reason.map(|r| r.parse()).transpose()?,
         })
     }
 }
@@ -117,7 +120,7 @@ pub async fn get_run(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
         FROM runs WHERE id = $1
         "#,
         run_id.as_uuid()
@@ -163,7 +166,7 @@ pub async fn list_active_runs(executor: impl PgExecutor<'_>) -> Result<Vec<RunRo
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
         FROM runs WHERE state <> ALL($1) ORDER BY started_at
         "#,
         &state_list(RunState::TERMINAL)
@@ -185,7 +188,7 @@ pub async fn list_unprovisioned_runs(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
         FROM runs
         WHERE state = ANY($1) AND started_at < $2 AND stop_requested_at IS NULL
         ORDER BY started_at
@@ -223,7 +226,7 @@ pub async fn list_overdue_runs(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
         FROM runs
         WHERE state <> ALL($1)
           AND (
@@ -345,7 +348,8 @@ pub async fn start_queued_runs(
                       outcome, detail AS "detail!", pod_ip,
                       last_persisted_seq AS "last_persisted_seq!",
                       harness_session_id AS "harness_session_id!",
-                      started_at AS "started_at!", connected_at, stop_requested_at
+                      started_at AS "started_at!", connected_at, stop_requested_at,
+                      finalize_reason
             "#,
             RunId::new().as_uuid(),
             task.id
@@ -362,47 +366,6 @@ pub async fn start_queued_runs(
     Ok(started)
 }
 
-/// Moves a non-terminal run to `state` (and optionally records the pod IP). Returns whether the
-/// run was changed.
-pub async fn set_run_state(
-    pool: &PgPool,
-    run_id: RunId,
-    state: RunState,
-    pod_ip: Option<&str>,
-) -> Result<bool, DbError> {
-    let mut tx = pool.begin().await?;
-    let changed = set_run_state_tx(&mut tx, run_id, state, pod_ip).await?;
-    tx.commit().await?;
-    Ok(changed)
-}
-
-/// Transactional variant of [`set_run_state`].
-pub async fn set_run_state_tx(
-    tx: &mut Transaction<'_, Postgres>,
-    run_id: RunId,
-    state: RunState,
-    pod_ip: Option<&str>,
-) -> Result<bool, DbError> {
-    let task_id = sqlx::query_scalar!(
-        r#"
-        UPDATE runs SET state = $2, pod_ip = COALESCE($3, pod_ip)
-        WHERE id = $1 AND state <> ALL($4) AND state <> $2
-        RETURNING task_id
-        "#,
-        run_id.as_uuid(),
-        state.as_str(),
-        pod_ip,
-        &state_list(RunState::TERMINAL)
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(task_id) = task_id else {
-        return Ok(false);
-    };
-    notify_run(tx, run_id, TaskId::from_uuid(task_id)).await?;
-    Ok(true)
-}
-
 /// Applies the runtime's idle phases: `idle` moves the run to `awaiting_input` and the task to
 /// `waiting` (unless a message is undelivered, then the task stays `running` and the session
 /// forwards it), otherwise back to `running` for both. A `finalizing` or terminal run is never
@@ -412,69 +375,15 @@ pub async fn set_run_state_tx(
 pub async fn set_idle_tx(
     tx: &mut Transaction<'_, Postgres>,
     run_id: RunId,
-    task_id: TaskId,
     idle: bool,
 ) -> Result<(), DbError> {
-    let state = if idle {
-        RunState::AwaitingInput
-    } else {
-        RunState::Running
-    };
-    let changed = sqlx::query_scalar!(
-        r#"
-        UPDATE runs SET state = $2
-        WHERE id = $1 AND state <> ALL($3) AND state <> $2
-        RETURNING task_id
-        "#,
-        run_id.as_uuid(),
-        state.as_str(),
-        &state_list(RunState::NOT_COMMANDABLE)
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    if changed.is_none() {
-        return Ok(());
-    }
-    notify_run(tx, run_id, task_id).await?;
     let event = if idle {
-        TaskEvent::TurnEnded
+        RunEvent::TurnEnded
     } else {
-        TaskEvent::TurnStarted
+        RunEvent::TurnStarted
     };
-    apply_task_event(tx, task_id, event, &Principal::system("run.turn")).await?;
+    apply_run_event(tx, run_id, event, &RunEnv::none()).await?;
     Ok(())
-}
-
-/// Final state of a run, from a `RunReport` or from the control plane's own failure handling.
-#[derive(Debug, Clone)]
-pub struct RunEnd {
-    pub run_id: RunId,
-    pub outcome: RunOutcome,
-    pub detail: String,
-    pub retry_after: Option<DateTime<Utc>>,
-    pub harness_session_id: String,
-    pub task_branch_sha: String,
-    pub wip_sha: String,
-    pub diverged: bool,
-    /// The runtime pushed the task branch (`WorkspaceState`).
-    pub task_branch_pushed: bool,
-}
-
-impl RunEnd {
-    /// An end caused by the control plane (timeout, lost or failed sandbox).
-    pub fn failure(run_id: RunId, outcome: RunOutcome, detail: impl Into<String>) -> Self {
-        Self {
-            run_id,
-            outcome,
-            detail: detail.into(),
-            retry_after: None,
-            harness_session_id: String::new(),
-            task_branch_sha: String::new(),
-            wip_sha: String::new(),
-            diverged: false,
-            task_branch_pushed: false,
-        }
-    }
 }
 
 /// Result of [`end_run`].
@@ -526,18 +435,16 @@ pub async fn has_undelivered_message(
 /// terminal (another replica or an earlier report ended it). The caller tears the sandbox down.
 ///
 /// A run whose provisioning began emits `sandbox.provisioning_failed` (outcome
-/// `provisioning_failed`) or `sandbox.destroyed`. `max_auto_resumes` and `resume_backoff` are
-/// the resume policy for infrastructure failures (`runs.maxAutoResumes`,
+/// `provisioning_failed`) or `sandbox.destroyed`. `env` carries the lifecycle sinks and the
+/// resume policy for infrastructure failures (`runs.maxAutoResumes`,
 /// `scheduling.resumeBackoffSeconds`).
 pub async fn end_run(
     pool: &PgPool,
     end: &RunEnd,
-    events: &EventSinks,
-    max_auto_resumes: u32,
-    resume_backoff: TimeDelta,
+    env: &RunEnv<'_>,
 ) -> Result<Option<EndedRun>, DbError> {
     let mut tx = pool.begin().await?;
-    let ended = end_run_tx(&mut tx, end, events, max_auto_resumes, resume_backoff).await?;
+    let ended = end_run_tx(&mut tx, end, env).await?;
     tx.commit().await?;
     Ok(ended)
 }
@@ -546,77 +453,47 @@ pub async fn end_run(
 pub async fn end_run_tx(
     tx: &mut Transaction<'_, Postgres>,
     end: &RunEnd,
-    events: &EventSinks,
-    max_auto_resumes: u32,
-    resume_backoff: TimeDelta,
+    env: &RunEnv<'_>,
 ) -> Result<Option<EndedRun>, DbError> {
-    let run_state = end.outcome.run_state();
-    let ended = sqlx::query_as!(
-        EndedRow,
-        r#"
-        UPDATE runs SET state = $2, outcome = $3, detail = $4, retry_after = $5,
-            harness_session_id = CASE WHEN $6 <> '' THEN $6 ELSE harness_session_id END,
-            task_branch_sha = $7, wip_sha = $8, ended_at = now()
-        WHERE id = $1 AND state <> ALL($9)
-        RETURNING task_id AS "task_id!", stop_requested_at, provisioning_started_at,
-                  sandbox_started_at, ended_at
-        "#,
-        end.run_id.as_uuid(),
-        run_state.as_str(),
-        end.outcome.as_str(),
-        end.detail,
-        end.retry_after,
-        end.harness_session_id,
-        end.task_branch_sha,
-        end.wip_sha,
-        &state_list(RunState::TERMINAL)
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(ended) = ended else {
-        return Ok(None);
+    apply_end(tx, end.run_id, RunEvent::Ended(end.clone()), env).await
+}
+
+/// Ends the run if it is overdue at `now` on the row as it is now (under its lock), by
+/// [`df_core::run_transition::overdue`]; `None` if it is not (it moved since it was listed) or was
+/// ended already. The caller tears the sandbox down when the run ended.
+pub async fn end_overdue(
+    pool: &PgPool,
+    run_id: RunId,
+    now: DateTime<Utc>,
+    limits: &RunsConfig,
+    env: &RunEnv<'_>,
+) -> Result<Option<EndedRun>, DbError> {
+    let event = RunEvent::Overdue {
+        now,
+        limits: limits.clone(),
     };
-    let task_id = TaskId::from_uuid(ended.task_id);
-    let stop_requested_at = ended.stop_requested_at;
-    if let Some(event) = ended.sandbox_event(end) {
-        lifecycle_events::enqueue(tx, events, &event).await?;
-    }
+    let mut tx = pool.begin().await?;
+    let ended = apply_end(&mut tx, run_id, event, env).await?;
+    tx.commit().await?;
+    Ok(ended)
+}
 
-    // The applier locks the task row, as `queue_message` does before it inserts. Waiting for
-    // that lock makes a message queued concurrently visible to the rules, instead of the task
-    // becoming `waiting` with it stranded.
-    let event = TaskEvent::RunEnded(RunEnded {
-        run_id: end.run_id,
-        outcome: end.outcome,
-        detail: end.detail.clone(),
-        retry_after: end.retry_after,
-        task_branch_pushed: end.task_branch_pushed,
-        stop_requested_at,
-        max_auto_resumes,
-        resume_backoff,
-        now: Utc::now(),
-    });
-    let next = apply_task_event(tx, task_id, event, &Principal::system("run.ended")).await?;
-    sqlx::query!(
-        r#"
-        UPDATE tasks SET
-            harness_session_id = CASE WHEN $2 <> '' THEN $2 ELSE harness_session_id END,
-            diverged = diverged OR $3, updated_at = now()
-        WHERE id = $1
-        "#,
-        task_id.as_uuid(),
-        end.harness_session_id,
-        end.diverged
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    notify_run(tx, end.run_id, task_id).await?;
-    Ok(Some(EndedRun {
-        task_id,
-        run_state,
-        task_status: next.status,
-    }))
+async fn apply_end(
+    tx: &mut Transaction<'_, Postgres>,
+    run_id: RunId,
+    event: RunEvent,
+    env: &RunEnv<'_>,
+) -> Result<Option<EndedRun>, DbError> {
+    let applied = apply_run_event(tx, run_id, event, env).await?;
+    Ok(applied
+        .filter(|applied| applied.changed)
+        .and_then(|applied| {
+            Some(EndedRun {
+                task_id: applied.task_id,
+                run_state: applied.state,
+                task_status: applied.task_status?,
+            })
+        }))
 }
 
 /// Records that the sandbox of `run_id` is up at `pod_ip`: `pending`/`provisioning` → `connecting`,
@@ -627,65 +504,22 @@ pub async fn mark_started(
     run_id: RunId,
     pod_ip: &str,
 ) -> Result<bool, DbError> {
-    let mut tx = pool.begin().await?;
-    let started = sqlx::query!(
-        r#"
-        UPDATE runs SET state = 'connecting', pod_ip = $2,
-            sandbox_started_at = COALESCE(sandbox_started_at, now())
-        WHERE id = $1 AND state = ANY($3)
-        RETURNING task_id, provisioning_started_at IS NOT NULL AS "provisioning_began!"
-        "#,
-        run_id.as_uuid(),
-        pod_ip,
-        &state_list(NOT_STARTED)
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(started) = started else {
-        return Ok(false);
+    let event = RunEvent::SandboxStarted {
+        pod_ip: pod_ip.to_string(),
     };
-    if started.provisioning_began {
-        lifecycle_events::enqueue(&mut tx, events, &Event::SandboxProvisioned { run_id }).await?;
-    }
-    notify_run(&mut tx, run_id, TaskId::from_uuid(started.task_id)).await?;
-    tx.commit().await?;
-    Ok(true)
+    apply_in_tx(pool, events, run_id, event).await
 }
 
 /// Records the runtime's first connect and moves an early run to `preparing`. Returns the run as
 /// it is now, `None` if it is already terminal.
 pub async fn mark_connected(pool: &PgPool, run_id: RunId) -> Result<Option<RunRow>, DbError> {
-    let record = sqlx::query_as!(
-        RunRecord,
-        r#"
-        UPDATE runs SET connected_at = COALESCE(connected_at, now()),
-            state = CASE WHEN state = ANY($2) THEN 'preparing' ELSE state END
-        WHERE id = $1 AND state <> ALL($3)
-        RETURNING id AS "id!", task_id AS "task_id!", number AS "number!", state AS "state!",
-                  outcome, detail AS "detail!", pod_ip,
-                  last_persisted_seq AS "last_persisted_seq!",
-                  harness_session_id AS "harness_session_id!",
-                  started_at AS "started_at!", connected_at, stop_requested_at
-        "#,
-        run_id.as_uuid(),
-        &state_list(UNCONNECTED),
-        &state_list(RunState::TERMINAL)
-    )
-    .fetch_optional(pool)
-    .await?;
-    let Some(record) = record else {
-        return Ok(None);
-    };
-    let run = RunRow::try_from(record)?;
-    publish(
-        pool,
-        &Notification::RunChanged {
-            run_id,
-            task_id: run.task_id,
-        },
-    )
-    .await?;
-    Ok(Some(run))
+    let mut tx = pool.begin().await?;
+    apply_run_event(&mut tx, run_id, RunEvent::Connected, &RunEnv::none()).await?;
+    let run = get_run(&mut *tx, run_id)
+        .await?
+        .filter(|run| !run.state.is_terminal());
+    tx.commit().await?;
+    Ok(run)
 }
 
 /// The scheduler picks `run_id`: `pending` → `provisioning`, sets `provisioning_started_at` and
@@ -695,63 +529,55 @@ pub async fn begin_provisioning(
     events: &EventSinks,
     run_id: RunId,
 ) -> Result<bool, DbError> {
-    let mut tx = pool.begin().await?;
-    let task_id = sqlx::query_scalar!(
-        r#"
-        UPDATE runs SET state = 'provisioning',
-            provisioning_started_at = COALESCE(provisioning_started_at, now())
-        WHERE id = $1 AND state = 'pending'
-        RETURNING task_id
-        "#,
-        run_id.as_uuid()
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(task_id) = task_id else {
-        return Ok(false);
-    };
-    lifecycle_events::enqueue(&mut tx, events, &Event::SandboxProvisioning { run_id }).await?;
-    notify_run(&mut tx, run_id, TaskId::from_uuid(task_id)).await?;
-    tx.commit().await?;
-    Ok(true)
+    apply_in_tx(pool, events, run_id, RunEvent::ProvisioningStarted).await
 }
 
-/// Moves the run to `finalizing` in a transaction that holds the run and task row locks (`lock`,
-/// the lock `queue_message` takes), so a message queued meanwhile is either seen here or sees the
-/// run `finalizing` and queues the task for the next run. With `only_idle` the move happens only
-/// for an `awaiting_input` run without an undelivered message (the idle `Release`); otherwise for
-/// any run that is commandable (the budget `Cancel`). Returns whether the run was moved.
+/// Moves the run to `finalizing` for `reason` in a transaction that holds the run and task row
+/// locks (`lock`, the lock `queue_message` takes), so a message queued meanwhile is either seen
+/// here or sees the run `finalizing` and queues the task for the next run. Returns whether the
+/// run was moved: [`FinalizeReason::Idle`] only moves an `awaiting_input` run without an
+/// undelivered message, [`FinalizeReason::Budget`] any run that is not ending.
 pub async fn start_finalizing(
     tx: &mut Transaction<'_, Postgres>,
     lock: &RunTaskLock,
-    only_idle: bool,
+    reason: FinalizeReason,
 ) -> Result<bool, DbError> {
-    let (run_id, task_id) = (lock.run_id(), lock.task_id());
-    let moved = if only_idle {
-        !has_undelivered_message(tx, task_id, None).await?
-            && sqlx::query!(
-                "UPDATE runs SET state = 'finalizing' WHERE id = $1 AND state = 'awaiting_input'",
-                run_id.as_uuid()
-            )
-            .execute(&mut **tx)
-            .await?
-            .rows_affected()
-                > 0
-    } else {
-        sqlx::query!(
-            "UPDATE runs SET state = 'finalizing' WHERE id = $1 AND state <> ALL($2)",
-            run_id.as_uuid(),
-            &state_list(RunState::NOT_COMMANDABLE)
-        )
-        .execute(&mut **tx)
-        .await?
-        .rows_affected()
-            > 0
-    };
-    if moved {
-        notify_run(tx, run_id, task_id).await?;
-    }
-    Ok(moved)
+    let applied = apply_run_event(
+        tx,
+        lock.run_id(),
+        RunEvent::Finalize(reason),
+        &RunEnv::none(),
+    )
+    .await?;
+    Ok(applied.is_some_and(|applied| applied.changed))
+}
+
+/// Applies `event` in a transaction of its own; whether it changed the run.
+async fn apply_in_tx(
+    pool: &PgPool,
+    events: &EventSinks,
+    run_id: RunId,
+    event: RunEvent,
+) -> Result<bool, DbError> {
+    let mut tx = pool.begin().await?;
+    let applied = apply_run_event(&mut tx, run_id, event, &RunEnv::events_only(events)).await?;
+    tx.commit().await?;
+    Ok(applied.is_some_and(|applied| applied.changed))
+}
+
+/// The task's run that has not ended, if it has one.
+pub(crate) async fn active_run_of_task(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+) -> Result<Option<RunId>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT id FROM runs WHERE task_id = $1 AND state <> ALL($2)",
+        task_id.as_uuid(),
+        &state_list(RunState::TERMINAL)
+    )
+    .fetch_optional(executor)
+    .await?
+    .map(RunId::from_uuid))
 }
 
 /// Records that the messages up to `seq` of the run are persisted.
@@ -816,34 +642,6 @@ pub async fn previous_harness_session_id(
     )
     .fetch_optional(executor)
     .await?)
-}
-
-/// What [`end_run_tx`] reads back from the run it ended.
-struct EndedRow {
-    task_id: Uuid,
-    stop_requested_at: Option<DateTime<Utc>>,
-    provisioning_started_at: Option<DateTime<Utc>>,
-    sandbox_started_at: Option<DateTime<Utc>>,
-    ended_at: Option<DateTime<Utc>>,
-}
-
-impl EndedRow {
-    /// The closing sandbox event of a run whose provisioning began (design D2 pairing).
-    fn sandbox_event(&self, end: &RunEnd) -> Option<Event> {
-        self.provisioning_started_at?;
-        if end.outcome == RunOutcome::ProvisioningFailed {
-            return Some(Event::SandboxProvisioningFailed {
-                run_id: end.run_id,
-                error: end.detail.clone(),
-            });
-        }
-        Some(Event::SandboxDestroyed {
-            run_id: end.run_id,
-            outcome: end.outcome,
-            started_at: self.sandbox_started_at,
-            ended_at: self.ended_at.unwrap_or_else(Utc::now),
-        })
-    }
 }
 
 async fn notify_run(

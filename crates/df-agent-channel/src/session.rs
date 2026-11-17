@@ -5,21 +5,23 @@
 //! produces the same commands.
 
 use std::collections::HashSet;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use df_core::{RunOutcome, RunState, TaskStatus};
+use df_core::run_transition::{FinalizeReason, RunCommand, RunEnd, cancel_deadline};
+use df_core::{RunOutcome, RunState};
 use df_db::runs::{
-    EndedRun, RunEnd, RunRow, get_run, mark_connected, persist_state, set_idle_tx,
-    set_last_persisted_seq, set_run_state_tx, start_finalizing,
+    EndedRun, RunRow, get_run, mark_connected, persist_state, set_idle_tx, set_last_persisted_seq,
+    start_finalizing,
 };
 use df_db::task_updates::mark_diverged;
 use df_db::transcript::{
     KIND_TURN_ENDED, KIND_TURN_STARTED, RunTaskLock, TranscriptWriter, last_turn_end,
     lock_run_and_task, turn_open,
 };
-use df_db::{Notification, PgBlobStore, get_task, transcript};
+use df_db::{Notification, PgBlobStore, transcript};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, Assign, Cancel, ControlMessage, HelloAck, Interrupt, Prompts, PushReport,
@@ -39,7 +41,6 @@ use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts}
 use crate::error::ChannelError;
 use crate::metrics::Observation;
 use crate::runs::end_run_tx;
-use crate::scheduler::cancel_deadline;
 use crate::{ChannelContext, pr, tools};
 
 /// Time the runtime has to send `Hello` after the stream was accepted.
@@ -118,8 +119,7 @@ where
         tasks: JoinSet::new(),
         ended: false,
         idle_at: None,
-        human_cancel_sent: false,
-        release_sent: false,
+        command_sent: None,
     };
     let result = session.serve(inbound, hello_ack, assign, stop).await;
     session.drain().await;
@@ -142,10 +142,10 @@ struct Session {
     /// `runs.keepAliveSeconds`. `None` unless the run is `awaiting_input` and no prompt is in
     /// flight.
     idle_at: Option<Instant>,
-    /// This session sent `Cancel` because the task was marked done or the run was stopped.
-    human_cancel_sent: bool,
-    /// This session sent `Release`.
-    release_sent: bool,
+    /// The command this stream got for the run's `finalize_reason`, so it is sent once per
+    /// stream: again only after a reconnect (the first one was lost with the old stream) or when
+    /// the reason changes (a stop of a released run).
+    command_sent: Option<RunCommand>,
 }
 
 /// What a persisted batch asks the session to do afterwards.
@@ -196,26 +196,29 @@ impl Session {
         // A run that was idle (or already released) before this stream existed: a replica that
         // takes over computes the same deadline from the persisted turn end.
         self.refresh_idle().await?;
+        // A stream that starts after the budget deadline sends the budget `Cancel`, not the idle
+        // `Release` of a run that was released before.
+        if self.budget_spent() {
+            self.start_finalizing(FinalizeReason::Budget).await?;
+        }
         if !self.reconcile_finalizing().await? {
             return Ok(());
         }
 
         let mut notifications = self.ctx.notifier.subscribe();
-        let cancel_at = cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs);
-        let cancel_in = cancel_at.map_or(MAX_TIMER, |at| {
-            (at - Utc::now())
-                .to_std()
-                .unwrap_or_default()
-                .min(MAX_TIMER)
-        });
-        let cancel = tokio::time::sleep(cancel_in);
-        tokio::pin!(cancel);
-        let mut cancel_sent = cancel_at.is_none();
+        // The budget timer fires once; `None` once it did, or without a deadline.
+        let mut budget = self.budget_timer();
 
         loop {
             let idle = async {
                 match self.idle_at {
                     Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
+            let budget_due = async {
+                match budget.as_mut() {
+                    Some(timer) => timer.await,
                     None => std::future::pending().await,
                 }
             };
@@ -268,14 +271,14 @@ impl Session {
                         return Ok(());
                     }
                 }
-                () = &mut cancel, if !cancel_sent => {
-                    cancel_sent = true;
+                () = budget_due => {
+                    budget = None;
                     if !self.active().await? {
                         return Ok(());
                     }
                     // `finalizing` first: no prompt may reach a run that is being cancelled.
-                    self.start_finalizing(false).await?;
-                    if !self.send_cancel("wall-clock budget exceeded").await {
+                    self.start_finalizing(FinalizeReason::Budget).await?;
+                    if !self.reconcile_finalizing().await? {
                         return Ok(());
                     }
                 }
@@ -289,6 +292,26 @@ impl Session {
         }
     }
 
+    /// When the budget `Cancel` is due; `None` if the configured budget has no deadline.
+    fn budget_deadline(&self) -> Option<DateTime<Utc>> {
+        cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs)
+    }
+
+    /// Whether the budget deadline of the run has passed.
+    fn budget_spent(&self) -> bool {
+        self.budget_deadline().is_some_and(|at| at <= Utc::now())
+    }
+
+    /// The timer of the budget `Cancel`; `None` if the configured budget has no deadline.
+    fn budget_timer(&self) -> Option<Pin<Box<tokio::time::Sleep>>> {
+        let at = self.budget_deadline()?;
+        let wait = (at - Utc::now())
+            .to_std()
+            .unwrap_or_default()
+            .min(MAX_TIMER);
+        Some(Box::pin(tokio::time::sleep(wait)))
+    }
+
     /// Releases the idle run at its deadline: `finalizing` first (in the transaction that checks
     /// for undelivered messages), then `Release`. Returns `false` once the peer is gone or the
     /// run ended.
@@ -297,23 +320,21 @@ impl Session {
         if !self.active().await? {
             return Ok(false);
         }
-        if !self.start_finalizing(true).await? {
+        if !self.start_finalizing(FinalizeReason::Idle).await? {
             return Ok(true);
         }
-        self.release_sent = true;
-        Ok(self.send_release().await)
+        self.reconcile_finalizing().await
     }
 
-    /// Moves the run to `finalizing` in a transaction that holds the task row lock (the one
-    /// `queue_message` takes), so a message queued meanwhile is either seen here or sees the
-    /// run `finalizing` and queues the task for the next run. With `only_idle` the move happens
-    /// only for an `awaiting_input` run without an undelivered message (the idle `Release`);
-    /// otherwise for any run that is not ending yet (the budget `Cancel`). Returns whether the
-    /// run was moved.
-    async fn start_finalizing(&self, only_idle: bool) -> Result<bool, ChannelError> {
+    /// Moves the run to `finalizing` for `reason` in a transaction that holds the task row lock
+    /// (the one `queue_message` takes), so a message queued meanwhile is either seen here or sees
+    /// the run `finalizing` and queues the task for the next run. Idle only moves an
+    /// `awaiting_input` run without an undelivered message (the `Release`); the budget any run
+    /// that is not ending yet (the `Cancel`). Returns whether the run was moved.
+    async fn start_finalizing(&self, reason: FinalizeReason) -> Result<bool, ChannelError> {
         let mut tx = self.ctx.pool.begin().await?;
         let lock = lock_run_and_task(&mut tx, self.rc.run.id, self.rc.task.id).await?;
-        let moved = start_finalizing(&mut tx, &lock, only_idle).await?;
+        let moved = start_finalizing(&mut tx, &lock, reason).await?;
         tx.commit().await?;
         Ok(moved)
     }
@@ -338,10 +359,11 @@ impl Session {
         Ok(())
     }
 
-    /// Commands for a run the control plane has moved to `finalizing`: `Cancel` when the task was
-    /// marked done or the run stopped, `Release` when the idle deadline passed (again after a
-    /// reconnect, when the first one was lost with the old stream). Returns `false` once the peer
-    /// is gone or the run ended.
+    /// Sends the command of the run's `finalize_reason` to a run the control plane has moved to
+    /// `finalizing`, once per stream: `Release` after the idle deadline, `Cancel` for the budget,
+    /// a stop or a done task. A stream that starts later (reconnect, another replica) sends it
+    /// again, because the first one may have been lost with the old stream. Returns `false` once
+    /// the peer is gone or the run ended.
     async fn reconcile_finalizing(&mut self) -> Result<bool, ChannelError> {
         let Some(run) = get_run(&self.ctx.pool, self.rc.run.id).await? else {
             return Ok(false);
@@ -352,37 +374,18 @@ impl Session {
         if run.state != RunState::Finalizing {
             return Ok(true);
         }
-        let status = get_task(&self.ctx.pool, self.rc.task.id)
-            .await?
-            .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?
-            .status;
-        if status == TaskStatus::Completed || run.stop_requested_at.is_some() {
-            if self.human_cancel_sent {
-                return Ok(true);
-            }
-            self.human_cancel_sent = true;
-            let reason = if status == TaskStatus::Completed {
-                "task marked done"
-            } else {
-                "run stopped by a board member"
-            };
-            return Ok(self.send_cancel(reason).await);
-        }
-        // A budget `Cancel` also leaves the run `finalizing`. Once the budget deadline has passed
-        // the budget timer sends it (also on a replica that takes over after the first one was
-        // lost), so an idle `Release` must not follow.
-        let budget_cancelled = cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs)
-            .is_some_and(|at| at <= Utc::now());
-        if budget_cancelled
-            || self.release_sent
-            || last_turn_end(&self.ctx.pool, self.rc.run.id)
-                .await?
-                .is_none()
-        {
+        let Some(command) = run.finalize_reason.map(FinalizeReason::command) else {
+            tracing::warn!(run_id = %run.id, "a finalizing run without a finalize reason");
+            return Ok(true);
+        };
+        if self.command_sent == Some(command) {
             return Ok(true);
         }
-        self.release_sent = true;
-        Ok(self.send_release().await)
+        self.command_sent = Some(command);
+        Ok(match command {
+            RunCommand::Release => self.send_release().await,
+            RunCommand::Cancel(reason) => self.send_cancel(reason).await,
+        })
     }
 
     /// Handles a `RunInterrupt` notification; other notifications are not for it. Returns `false`
@@ -797,20 +800,19 @@ async fn apply_phase(
     phase: RunPhase,
 ) -> Result<bool, ChannelError> {
     match phase {
-        RunPhase::Preparing => {
-            set_run_state_tx(tx, rc.run.id, RunState::Preparing, None).await?;
-        }
-        RunPhase::Finalizing => {
-            set_run_state_tx(tx, rc.run.id, RunState::Finalizing, None).await?;
+        // The control plane decides these two itself (`Connected` moves the run to `preparing`,
+        // a finalize or stop to `finalizing`); the runtime never sends them.
+        RunPhase::Preparing | RunPhase::Finalizing => {
+            tracing::debug!(run_id = %rc.run.id, ?phase, "ignoring a phase the control plane owns");
         }
         // The task row is locked by the caller: a message queued concurrently is either
         // visible here or waits for this transaction.
         RunPhase::Running => {
-            set_idle_tx(tx, rc.run.id, rc.task.id, false).await?;
+            set_idle_tx(tx, rc.run.id, false).await?;
             return Ok(true);
         }
         RunPhase::AwaitingInput => {
-            set_idle_tx(tx, rc.run.id, rc.task.id, true).await?;
+            set_idle_tx(tx, rc.run.id, true).await?;
             return Ok(true);
         }
         RunPhase::Unspecified => {}
@@ -924,6 +926,8 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
     }
 }
 
+#[cfg(test)]
+mod command_tests;
 #[cfg(test)]
 mod interrupt_tests;
 #[cfg(test)]

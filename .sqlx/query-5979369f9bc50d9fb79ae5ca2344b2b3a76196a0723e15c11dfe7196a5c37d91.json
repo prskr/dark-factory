@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE runs SET connected_at = COALESCE(connected_at, now()),\n            state = CASE WHEN state = ANY($2) THEN 'preparing' ELSE state END\n        WHERE id = $1 AND state <> ALL($3)\n        RETURNING id AS \"id!\", task_id AS \"task_id!\", number AS \"number!\", state AS \"state!\",\n                  outcome, detail AS \"detail!\", pod_ip,\n                  last_persisted_seq AS \"last_persisted_seq!\",\n                  harness_session_id AS \"harness_session_id!\",\n                  started_at AS \"started_at!\", connected_at, stop_requested_at\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id!",
+        "name": "id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "task_id!",
+        "name": "task_id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "number!",
+        "name": "number",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "state!",
+        "name": "state",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "detail!",
+        "name": "detail",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +82,7 @@
       },
       {
         "ordinal": 7,
-        "name": "last_persisted_seq!",
+        "name": "last_persisted_seq",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -93,7 +93,7 @@
       },
       {
         "ordinal": 8,
-        "name": "harness_session_id!",
+        "name": "harness_session_id",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +104,7 @@
       },
       {
         "ordinal": 9,
-        "name": "started_at!",
+        "name": "started_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -134,13 +134,22 @@
             "name": "stop_requested_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "finalize_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "finalize_reason"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "TextArray",
-        "TextArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -155,8 +164,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "02802caa64e4648b58b0dbb94a22caaf515e0fc02f1b334ca95e4634d65706bb"
+  "hash": "5979369f9bc50d9fb79ae5ca2344b2b3a76196a0723e15c11dfe7196a5c37d91"
 }

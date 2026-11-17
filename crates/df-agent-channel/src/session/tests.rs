@@ -319,6 +319,32 @@ async fn idle_phases_do_not_reopen_a_finalizing_run() {
     );
 }
 
+#[tokio::test]
+async fn the_preparing_and_finalizing_phases_leave_a_running_run_unchanged() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = run_of_running_task(&env, "running").await;
+
+    run_session(
+        &env,
+        run_id,
+        vec![
+            hello(),
+            msg(1, phase(RunPhase::Preparing)),
+            msg(2, phase(RunPhase::Finalizing)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        state_and_status(&env, run_id).await,
+        (RunState::Running, "running".to_string())
+    );
+    let run = get_run(&pool, run_id).await.unwrap().unwrap();
+    assert_eq!(run.finalize_reason, None);
+}
+
 /// Persists a `TurnEnded` of the run that occurred at `at`.
 async fn persist_turn_end(env: &Env, run_id: df_core::RunId, at: DateTime<Utc>) {
     sqlx::query(
@@ -416,24 +442,9 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
         .await
         .unwrap();
     let task_id = env.task.id;
-    let finalizing = tokio::spawn(async move { session.start_finalizing(false).await });
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let waiting: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM pg_stat_activity
-                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            if waiting > 0 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("start_finalizing did not wait for the run lock");
+    let finalizing =
+        tokio::spawn(async move { session.start_finalizing(FinalizeReason::Budget).await });
+    df_test_postgres::wait_for_lock_wait(&pool).await;
 
     // Without the run lock first, `start_finalizing` now holds the task row: deadlock.
     df_db::runs::lock_task(&mut other, task_id).await.unwrap();
@@ -457,14 +468,30 @@ async fn a_budget_cancel_is_never_followed_by_a_release() {
     persist_turn_end(&env, run_id, Utc::now()).await;
     let (mut session, mut rx) = session_for(&env, run_id).await;
 
-    // The session that sent the budget `Cancel` sees its own `finalizing` run.
-    assert!(session.start_finalizing(false).await.unwrap());
+    // The budget timer moves the run to `finalizing`; its stored reason is the budget.
+    assert!(
+        session
+            .start_finalizing(FinalizeReason::Budget)
+            .await
+            .unwrap()
+    );
     assert!(session.reconcile_finalizing().await.unwrap());
-    // A replica that takes over later sees the same.
+    // A replica that takes over later sends the same command.
     let (mut other, mut other_rx) = session_for(&env, run_id).await;
     assert!(other.reconcile_finalizing().await.unwrap());
+    // Once per stream.
+    assert!(session.reconcile_finalizing().await.unwrap());
+    assert!(other.reconcile_finalizing().await.unwrap());
 
-    assert!(rx.try_recv().is_err() && other_rx.try_recv().is_err());
+    for rx in [&mut rx, &mut other_rx] {
+        let sent: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|m| m.ok().and_then(|c| c.body))
+            .collect();
+        assert!(
+            matches!(sent.as_slice(), [control_message::Body::Cancel(_)]),
+            "{sent:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -662,8 +689,7 @@ pub(super) async fn session_for(
         tasks: JoinSet::new(),
         ended: false,
         idle_at: None,
-        human_cancel_sent: false,
-        release_sent: false,
+        command_sent: None,
     };
     (session, rx)
 }

@@ -32,6 +32,7 @@ use crate::harness::{
     setup_session,
 };
 use crate::outbox::Outbox;
+use crate::run_control::{ControlOutcome, RunControl, SharedControl};
 use crate::runtime_handler::{DriverRuntimeHandler, OpenToolCalls, SharedToolCalls};
 use crate::runtime_socket::RuntimeSocketServer;
 use crate::sandbox::probe::{KernelProbe, LandlockProbe};
@@ -258,7 +259,7 @@ pub async fn run_session(params: RunDriverParams) -> anyhow::Result<RunExecution
     let _inbound_guard = spawn_inbound_loop(inbound_rx, &shared, cancel_tx);
 
     // A cancel that arrived before Assign: don't clone, push or start the harness
-    if shared.cancelled.load(Ordering::SeqCst) {
+    if shared.control.get().is_cancelled() {
         return Ok(end_run_early(
             &ctx.outbound_tx,
             RunOutcome::Cancelled,
@@ -462,15 +463,14 @@ struct IdleSignals<'a> {
     prompt_queue: &'a Mutex<PromptQueue>,
     /// Notified when a prompt was queued or `Release` arrived.
     wake: &'a Notify,
-    released: &'a AtomicBool,
-    cancelled: &'a AtomicBool,
+    control: &'a SharedControl,
 }
 
 /// Waits (harness session kept up) until a prompt is queued, `Cancel` or `Release` arrives, or
 /// the wall-clock budget (`remaining`) ends. Nothing else ends the wait, in particular not a lost
 /// control plane stream: the connection manager reconnects underneath the run.
 ///
-/// Cancel-safe: the only side effect is the `cancelled` flag, which is idempotent.
+/// Cancel-safe: the only side effect is recording `Cancel`, which is idempotent.
 async fn wait_for_input(
     signals: IdleSignals<'_>,
     cancel_rx: &mut Option<broadcast::Receiver<String>>,
@@ -479,8 +479,7 @@ async fn wait_for_input(
     let IdleSignals {
         prompt_queue,
         wake,
-        released,
-        cancelled,
+        control,
     } = signals;
     let budget = tokio::time::sleep(remaining.unwrap_or(NO_DEADLINE));
     tokio::pin!(budget);
@@ -490,20 +489,20 @@ async fn wait_for_input(
         tokio::pin!(notified);
         notified.as_mut().enable();
 
-        if cancelled.load(Ordering::SeqCst) {
+        if control.get().is_cancelled() {
             return IdleWake::Cancel;
         }
         if prompt_queue.lock().await.has_queued() {
             return IdleWake::Prompt;
         }
-        if released.load(Ordering::SeqCst) {
+        if control.get().is_released() {
             return IdleWake::Release;
         }
         tokio::select! {
             () = &mut notified => {}
             recv = recv_broadcast(cancel_rx) => match recv {
                 Ok(_reason) => {
-                    cancelled.store(true, Ordering::SeqCst);
+                    control.update(RunControl::on_cancel);
                     return IdleWake::Cancel;
                 }
                 Err(broadcast::error::RecvError::Closed) => *cancel_rx = None,
@@ -543,18 +542,14 @@ struct RunContext {
 #[derive(Clone)]
 struct RunShared {
     pending_tool_calls: SharedToolCalls,
-    end_run_requested: Arc<AtomicBool>,
-    /// A blocking request of the current turn (`ToolCallResult.await_input_after_turn`).
-    await_input_requested: Arc<AtomicBool>,
-    cancelled: Arc<AtomicBool>,
+    /// The commands of the control plane (`Cancel`, `Release`, a finished or blocking tool call).
+    control: SharedControl,
     /// Carries the name of a board member who interrupts the turn. Not stored: a turn subscribes
     /// when it starts, so an `Interrupt` outside a turn reaches nobody.
     interrupt_tx: broadcast::Sender<Interrupt>,
     prompt_queue: Arc<Mutex<PromptQueue>>,
     /// Wakes the idle wait: a prompt was queued or `Release` arrived.
     input_wake: Arc<Notify>,
-    /// Sticky: a `Release` that arrives before the wait starts still ends it.
-    released: Arc<AtomicBool>,
     /// Reports of completed turns; shared so they survive a driver error.
     push_reports: Arc<Mutex<Vec<PushReport>>>,
 }
@@ -563,13 +558,14 @@ impl RunShared {
     fn new(cancel_requested: bool) -> Self {
         Self {
             pending_tool_calls: Arc::new(Mutex::new(OpenToolCalls::default())),
-            end_run_requested: Arc::new(AtomicBool::new(false)),
-            await_input_requested: Arc::new(AtomicBool::new(false)),
-            cancelled: Arc::new(AtomicBool::new(cancel_requested)),
+            control: SharedControl::new(if cancel_requested {
+                RunControl::cancelled()
+            } else {
+                RunControl::default()
+            }),
             interrupt_tx: broadcast::channel(16).0,
             prompt_queue: Arc::new(Mutex::new(PromptQueue::new())),
             input_wake: Arc::new(Notify::new()),
-            released: Arc::new(AtomicBool::new(false)),
             push_reports: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -650,11 +646,11 @@ async fn handle_control_message(
             shared.input_wake.notify_one();
         }
         Some(control_message::Body::Release(_)) => {
-            shared.released.store(true, Ordering::SeqCst);
+            shared.control.update(RunControl::on_release);
             shared.input_wake.notify_one();
         }
         Some(control_message::Body::Cancel(c)) => {
-            shared.cancelled.store(true, Ordering::SeqCst);
+            shared.control.update(RunControl::on_cancel);
             cancel_tx.send(c.reason).ok(); // receiver may be gone
         }
         Some(control_message::Body::Interrupt(i)) => {
@@ -662,7 +658,7 @@ async fn handle_control_message(
         }
         Some(control_message::Body::ToolCallResult(res)) => {
             if res.end_run_after_turn {
-                shared.end_run_requested.store(true, Ordering::SeqCst);
+                shared.control.update(RunControl::on_end_run_requested);
             }
             // `end_run_after_turn` holds for a late result too (an interrupt cancelled the call,
             // but the control plane completed the task). A blocking request that no call waits
@@ -670,7 +666,7 @@ async fn handle_control_message(
             let waiting = shared.pending_tool_calls.lock().await.take(&res.call_id);
             if let Some(tx) = waiting {
                 if res.await_input_after_turn {
-                    shared.await_input_requested.store(true, Ordering::SeqCst);
+                    shared.control.update(RunControl::on_await_input);
                 }
                 tx.send(res).ok(); // receiver may be gone
             }
@@ -1055,10 +1051,11 @@ impl Turns {
                 return end;
             }
             let turn = self.run_turn(cx).await;
+            let commanded = self.shared.control.get().turn_outcome();
             let input = TurnOutcomeInput {
-                cancelled: self.shared.cancelled.load(Ordering::SeqCst),
+                cancelled: commanded == Some(ControlOutcome::Cancelled),
                 interrupted: self.interrupted_by.is_some(),
-                end_run_after_turn: self.shared.end_run_requested.load(Ordering::SeqCst),
+                end_run_after_turn: commanded == Some(ControlOutcome::Completed),
                 rate_limited: turn.rate_limited,
                 wall_clock_exceeded: turn.wall_clock_exceeded,
                 stop_reason: turn.stop_reason,
@@ -1094,7 +1091,7 @@ impl Turns {
             (RunOutcome::LimitReached, "Wall clock budget exceeded")
         } else if self.budget.is_turn_limit_reached() {
             (RunOutcome::LimitReached, "Turn budget reached")
-        } else if self.shared.cancelled.load(Ordering::SeqCst) {
+        } else if self.shared.control.get().is_cancelled() {
             (RunOutcome::Cancelled, "Run cancelled by control plane")
         } else if self.shared.prompt_queue.lock().await.is_empty() {
             (
@@ -1132,9 +1129,7 @@ impl Turns {
 
     /// Takes the queued prompts into a new turn and returns the ACP prompt blocks.
     async fn begin_turn(&mut self) -> Vec<ContentBlock> {
-        self.shared
-            .await_input_requested
-            .store(false, Ordering::SeqCst);
+        self.shared.control.update(RunControl::on_turn_start);
         self.turn_index += 1;
         let turn_id = format!("turn_{}", self.turn_index);
         self.translator.lock().await.set_turn_id(&turn_id);
@@ -1203,14 +1198,14 @@ impl Turns {
                 }
                 recv_res = recv_broadcast(&mut self.cancel_rx) => match recv_res {
                     Ok(_reason) => {
-                        self.shared.cancelled.store(true, Ordering::SeqCst);
+                        self.shared.control.update(RunControl::on_cancel);
                         needs_cancel = true;
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         self.cancel_rx = None;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        needs_cancel = self.shared.cancelled.load(Ordering::SeqCst);
+                        needs_cancel = self.shared.control.get().is_cancelled();
                     }
                 },
                 recv_res = recv_broadcast(&mut interrupt_rx) => match recv_res {
@@ -1354,8 +1349,7 @@ impl Turns {
             IdleSignals {
                 prompt_queue: &self.shared.prompt_queue,
                 wake: &self.shared.input_wake,
-                released: &self.shared.released,
-                cancelled: &self.shared.cancelled,
+                control: &self.shared.control,
             },
             &mut self.cancel_rx,
             self.budget.remaining_wall_clock(),
@@ -1367,11 +1361,13 @@ impl Turns {
                 return None;
             }
             IdleWake::Cancel => (RunOutcome::Cancelled, "Run cancelled by control plane"),
-            IdleWake::Release if self.shared.await_input_requested.load(Ordering::SeqCst) => (
-                RunOutcome::Blocked,
-                "Nobody answered the blocking question in time",
-            ),
-            IdleWake::Release => (RunOutcome::EndTurn, "Released while waiting for input"),
+            IdleWake::Release => match self.shared.control.get().release_outcome() {
+                ControlOutcome::Blocked => (
+                    RunOutcome::Blocked,
+                    "Nobody answered the blocking question in time",
+                ),
+                _ => (RunOutcome::EndTurn, "Released while waiting for input"),
+            },
             // No work was cut off, so this is not LimitReached.
             IdleWake::BudgetEnded => (
                 RunOutcome::EndTurn,

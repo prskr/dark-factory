@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use df_core::config::RunsConfig;
 use df_core::{
     CAPACITY_DETAIL, ProjectKey, ProviderError, RunId, RunOutcome, RunSandboxSpec, RunState,
     SandboxEvent, TaskVolumeSpec,
@@ -23,10 +22,11 @@ use tokio::task::JoinSet;
 use crate::ChannelContext;
 use crate::assign::load_run_context;
 use crate::error::ChannelError;
-use crate::runs::{finish_run, teardown};
+use crate::runs::{finish_overdue, finish_run, teardown};
+use df_core::run_transition::RunEnd;
 use df_db::runs::{
-    RunEnd, RunRow, STOP_TIMEOUT_SECONDS, begin_provisioning, get_run, list_active_runs,
-    list_overdue_runs, list_unprovisioned_runs, mark_started, start_queued_runs,
+    RunRow, begin_provisioning, get_run, list_active_runs, list_overdue_runs,
+    list_unprovisioned_runs, mark_started, start_queued_runs,
 };
 
 /// Age of a run without a sandbox after which the tick provisions it again (design D4).
@@ -411,54 +411,13 @@ impl Scheduler {
     /// otherwise), fails runs that never connected and runs that outlived budget plus two grace
     /// periods (the first one is for `Cancel`, sent by the session holding the stream).
     pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), ChannelError> {
-        let cfg = &self.ctx.config.runs;
         let mut first_error = None;
-        // The query selects a superset of the runs this match ends; the match decides.
-        for run in list_overdue_runs(&self.ctx.pool, now, cfg).await? {
-            let end = match run.state {
-                // A human stopped a run that has no connection to send `Cancel` to.
-                RunState::Pending | RunState::Provisioning | RunState::Connecting
-                    if run.stop_requested_at.is_some() =>
-                {
-                    RunEnd::failure(run.id, RunOutcome::Cancelled, "stopped")
-                }
-                _ if is_before(
-                    run.stop_requested_at
-                        .and_then(|at| after(at, STOP_TIMEOUT_SECONDS)),
-                    now,
-                ) =>
-                {
-                    RunEnd::failure(run.id, RunOutcome::Cancelled, "stop-timeout")
-                }
-                RunState::Pending | RunState::Provisioning | RunState::Connecting
-                    if is_before(after(run.started_at, cfg.connect_timeout_seconds), now) =>
-                {
-                    RunEnd::failure(
-                        run.id,
-                        RunOutcome::ConnectTimeout,
-                        format!(
-                            "the sandbox did not connect within {} s",
-                            cfg.connect_timeout_seconds
-                        ),
-                    )
-                }
-                RunState::Preparing
-                | RunState::Running
-                | RunState::AwaitingInput
-                | RunState::Finalizing
-                    if is_before(hard_stop(run.budget_start(), cfg), now) =>
-                {
-                    RunEnd::failure(
-                        run.id,
-                        RunOutcome::Failed,
-                        "the run did not stop after the wall-clock budget and was torn down",
-                    )
-                }
-                _ => continue,
-            };
+        // The query selects a superset of the runs that are overdue; `overdue` decides, on the
+        // locked row (`df_core::run_transition::overdue`).
+        for run in list_overdue_runs(&self.ctx.pool, now, &self.ctx.config.runs).await? {
             // One run failing must not stop the enforcement for the others.
-            if let Err(e) = finish_run(&self.ctx, &end).await {
-                tracing::error!(error = %e, run_id = %end.run_id, "failed to end a timed out run");
+            if let Err(e) = finish_overdue(&self.ctx, run.id, now).await {
+                tracing::error!(error = %e, run_id = %run.id, "failed to end a timed out run");
                 first_error.get_or_insert(e);
             }
         }
@@ -493,35 +452,6 @@ impl Drop for InFlight {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.run_id);
     }
-}
-
-/// `start` plus `seconds`; `None` if that is not representable, which configuration treats as
-/// "never".
-fn after(start: DateTime<Utc>, seconds: u64) -> Option<DateTime<Utc>> {
-    let delta = chrono::TimeDelta::try_seconds(i64::try_from(seconds).ok()?)?;
-    start.checked_add_signed(delta)
-}
-
-fn is_before(deadline: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-    deadline.is_some_and(|d| d < now)
-}
-
-fn hard_stop(start: DateTime<Utc>, cfg: &RunsConfig) -> Option<DateTime<Utc>> {
-    after(
-        start,
-        cfg.max_wall_clock_seconds
-            .saturating_add(cfg.cancel_grace_seconds.saturating_mul(2)),
-    )
-}
-
-/// When the session should send `Cancel`: wall-clock budget plus one grace period after the
-/// runtime connected. `None` if the configured budget is too large to represent (no limit).
-pub fn cancel_deadline(budget_start: DateTime<Utc>, cfg: &RunsConfig) -> Option<DateTime<Utc>> {
-    after(
-        budget_start,
-        cfg.max_wall_clock_seconds
-            .saturating_add(cfg.cancel_grace_seconds),
-    )
 }
 
 #[cfg(test)]

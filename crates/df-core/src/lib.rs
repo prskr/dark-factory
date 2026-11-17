@@ -15,6 +15,7 @@ pub mod lifecycle;
 pub mod model_provider;
 pub mod public_address;
 pub mod routing;
+pub mod run_transition;
 pub mod seams;
 pub mod task_transition;
 #[cfg(any(test, feature = "test-util"))]

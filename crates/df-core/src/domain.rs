@@ -363,6 +363,18 @@ impl RunState {
         matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
 
+    /// Returns `true` if the runtime has not opened its stream yet (`pending`, `provisioning`,
+    /// `connecting`).
+    pub const fn is_unconnected(&self) -> bool {
+        matches!(self, Self::Pending | Self::Provisioning | Self::Connecting)
+    }
+
+    /// Returns `true` if the runtime is up and the run is not ending; pinned against
+    /// [`Self::RUNTIME_UP`].
+    pub const fn is_runtime_up(&self) -> bool {
+        matches!(self, Self::Preparing | Self::Running | Self::AwaitingInput)
+    }
+
     /// Returns `true` if a board member can still stop the run: it is neither over nor ending.
     pub const fn can_stop(&self) -> bool {
         !self.is_terminal() && !matches!(self, Self::Finalizing)
@@ -755,11 +767,11 @@ mod tests {
                 !state.can_stop(),
                 "{s}"
             );
-            let up = matches!(
-                state,
-                RunState::Preparing | RunState::Running | RunState::AwaitingInput
+            assert_eq!(
+                RunState::RUNTIME_UP.contains(&s),
+                state.is_runtime_up(),
+                "{s}"
             );
-            assert_eq!(RunState::RUNTIME_UP.contains(&s), up, "{s}");
         }
     }
 

@@ -66,10 +66,6 @@ impl RunTaskLock {
     pub(crate) fn run_id(&self) -> RunId {
         self.run_id
     }
-
-    pub(crate) fn task_id(&self) -> TaskId {
-        self.task_id
-    }
 }
 
 /// Locks the run row, then the task row, until `tx` ends.

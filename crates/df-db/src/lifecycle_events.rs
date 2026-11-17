@@ -24,6 +24,14 @@ pub struct EventSinks {
 }
 
 impl EventSinks {
+    /// Sinks that record nothing, for a `static`.
+    pub const fn disabled() -> Self {
+        Self {
+            enabled: false,
+            instance: Vec::new(),
+        }
+    }
+
     pub fn new(config: &LifecycleEventsConfig) -> Self {
         Self {
             enabled: config.enabled(),

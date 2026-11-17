@@ -1,9 +1,9 @@
 //! Tests of the lifecycle events the scheduler, the run end and the volume deletions emit.
 
 use chrono::{DateTime, TimeDelta, Utc};
+use df_core::run_transition::RunEnd;
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, RunId, RunOutcome, SandboxEvent};
-use df_db::runs::RunEnd;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::task::JoinSet;
