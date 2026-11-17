@@ -33,13 +33,13 @@ Alternative: move those modules into a third crate (`df-gateway-link`) that both
 
 ### 2. Module layout keeps the paths
 
-`crates/df-gateway-control/src/lib.rs` takes the content of `control/mod.rs` (same `pub mod` and `pub use` items), and each module keeps its file name. `crate::control::X` becomes `crate::X`, `crate::{convert, flow, link, peer}` becomes `df_gateway::{…}`. `dark-factory` replaces `df_gateway::control::` with `df_gateway_control::`.
+`crates/df-gateway-control/src/lib.rs` takes the content of `control/mod.rs` (same `pub mod` and `pub use` items), and each module keeps its file name. `crate::control::X` becomes `crate::X`, `crate::{convert, flow, link, peer, tail}` becomes `df_gateway::{…}` (`tail` is used by `relay/tests.rs`). `dark-factory` replaces `df_gateway::control::` with `df_gateway_control::`.
 
 In `df-gateway`, `convert` goes from `pub(crate) mod` to `pub mod`, and the functions the control side imports (`wire_api_to_proto`, `scheme_to_proto`, `wire_api_from_proto`) go from `pub(crate)` to `pub`, unchanged otherwise.
 
 ### 3. Tests move with their modules
 
-`control/tests.rs`, `control/relay/` and `control/usage_records/tests.rs` move along. The database tests keep the `no-remote-exec` tag in the new `BUILD.bazel`. `df-gateway`'s `BUILD.bazel` loses its database test targets (if any test outside `control/` needs the database, it fails to compile and shows up during the move).
+`control/tests.rs`, `control/relay/` and `control/usage_records/tests.rs` move along. `relay/tests.rs` connects through `link::PlainConnector`, which is `#[cfg(test)] pub(crate)`. It becomes `#[cfg(any(test, feature = "test-util"))] pub` behind a new `test-util` feature of `df-gateway`, and `df-gateway-control` takes `df-gateway` with `test-util` as a dev-dependency (`docs/architecture.md`, rule 1). The database tests keep the `no-remote-exec` tag in the new `BUILD.bazel`. `df-gateway`'s `BUILD.bazel` loses its database test targets (if any test outside `control/` needs the database, it fails to compile and shows up during the move).
 
 ## Risks / Trade-offs
 

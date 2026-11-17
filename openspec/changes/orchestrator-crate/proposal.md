@@ -37,7 +37,7 @@ None. Pure refactor: `skip_specs: true` in `.openspec.yaml`.
 
 - Renaming `df-agent-channel`. Rejected: after the split the name describes what is left.
 - Moving the forge-calling tool handlers (`update_pull_request`, `comment_on_issue`) into `df-orchestrator`. Rejected: they are agent-facing tool handlers; they call `df-orchestrator` and `df-db` functions.
-- Changing the run state machine (`df_core::task_transition`, `df_db::runs`). Rejected.
+- Changing the run state machine (`df_db::runs`): change `run-state-machine` (ADR-0061). Best landed first, since it shrinks `runs` and `scheduler`.
 
 ## Impact
 
