@@ -45,7 +45,8 @@ Commands a session sends for a `finalizing` run, as `reconcile_finalizing` (`ses
 ```rust
 pub struct RunSnapshot {
     pub state: RunState,
-    pub stop_requested: bool,
+    /// `overdue` needs the time for the stop timeout.
+    pub stop_requested_at: Option<DateTime<Utc>>,
     pub connected: bool,
     pub provisioning_began: bool,
     pub finalize_reason: Option<FinalizeReason>,
@@ -101,9 +102,11 @@ In the other direction, the task applier's effects `FinalizeIdleRun` and `StopRu
 
 A `StopRequested` with `IncludingFinalizing` on a run that is already `finalizing` sets `stop_requested_at` and changes the reason to `stop`. That's today's effect: `stop_requested_at` makes `reconcile_finalizing` send the stop `Cancel`.
 
+On a run that is already `finalizing`, `Finalize(reason)` replaces `idle` with a `Cancel` reason (`budget`, `done`) and changes nothing else. A `Cancel` reason is never replaced by `idle`. That keeps today's precedence: the budget timer sends its `Cancel` after an idle `Release` (`session.rs:271`), and a task marked done gets its `Cancel` on an idle-finalizing run (`session.rs:358`).
+
 `FinalizeReason::command()` returns `Release` for `idle` and `Cancel(reason text)` for the others. `reconcile_finalizing` becomes:
 1. read the run;
-2. return if it's not `finalizing`, or this stream already sent its command;
+2. return if it's not `finalizing`, or this stream already sent this command (the one `command()` returns for the current reason). A stream that sent `Release` for an idle run still sends the stop `Cancel` when a stop changes the reason to `stop`, as today's code does (its human-cancel check ignores `release_sent`);
 3. otherwise send `command()`.
 
 The budget timer goes through `Finalize(Budget)` and then sends its `Cancel` the same way. It stops calling `start_finalizing(false)` and `send_cancel` separately.
