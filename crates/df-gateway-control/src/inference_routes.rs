@@ -11,7 +11,7 @@ use df_db::model_providers::RunModelProvider;
 use df_proto::gateway::v1 as pb;
 use secrecy::ExposeSecret;
 
-use crate::convert::{scheme_to_proto, wire_api_to_proto};
+use df_gateway::convert::{scheme_to_proto, wire_api_to_proto};
 
 /// The route of `run`: the wire API of its persona's model, the upstream of every API the
 /// provider offers and the headers rendered for the run. `None` (with a warning) if the
@@ -222,7 +222,8 @@ mod tests {
             )
         })
         .collect();
-        let sent = crate::inference::headers::upstream_headers(&client, &route, "sk-real").unwrap();
+        let sent =
+            df_gateway::inference::headers::upstream_headers(&client, &route, "sk-real").unwrap();
         assert_eq!(sent.get("api-key").unwrap(), "sk-real");
         assert!(sent.get("authorization").is_none());
         assert_eq!(sent.get_all("api-key").iter().count(), 1);

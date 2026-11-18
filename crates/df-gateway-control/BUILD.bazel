@@ -1,0 +1,83 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "df_gateway_control",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_gateway_control",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-gateway:df_gateway",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+alias(
+    name = "df-gateway-control",
+    actual = ":df_gateway_control",
+)
+
+# Same crate on the `test-util` variant of `df-gateway`, for tests of crates that also link that
+# variant (`dark-factory`): both must see one `GrpcConnector`.
+rust_library(
+    name = "df_gateway_control_test_util",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_gateway_control",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//crates:__subpackages__"],
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-gateway:df_gateway_test_util",
+        "//crates/df-proto:df_proto",
+    ],
+)
+
+# Rebuilt from source (instead of `crate = ":df_gateway_control"`) so that the tests can use the
+# `test-util` variants of `df-gateway`, `df-tls` (test PKI) and `df-telemetry` (metric probe)
+# without the library linking them.
+rust_test(
+    name = "df_gateway_control_test",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_gateway_control",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    tags = ["no-remote-exec"],
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-gateway:df_gateway_test_util",
+        "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_test_util",
+        "//crates/df-test-postgres:df_test_postgres",
+        "//crates/df-tls:df_tls_test_util",
+    ],
+)

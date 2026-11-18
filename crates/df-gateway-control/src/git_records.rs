@@ -181,7 +181,7 @@ mod tests {
             }],
             verdict: pb::PushVerdict::Accepted.into(),
             bytes: 7,
-            duration: Some(crate::flow::duration_proto(Duration::from_secs(1))),
+            duration: Some(df_gateway::flow::duration_proto(Duration::from_secs(1))),
             ..Default::default()
         }
     }

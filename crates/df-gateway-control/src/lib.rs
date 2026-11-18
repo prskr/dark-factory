@@ -1,6 +1,14 @@
 //! The control plane's side of the gateway links: the internal server (`PolicyWatch`,
 //! `GatewayGit`, `GatewayEvents` and the stale push scan) and the `Tail` relay.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::disallowed_methods,
+        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
+    )
+)]
+
 pub mod denial_events;
 pub mod git_records;
 mod inference_routes;

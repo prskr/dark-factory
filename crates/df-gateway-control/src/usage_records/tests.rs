@@ -93,7 +93,7 @@ fn message(run: Uuid, model: &str, input: u64, output: u64) -> pb::UsageRecord {
     pb::UsageRecord {
         request_id: Uuid::now_v7().to_string(),
         run_id: run.to_string(),
-        at: Some(crate::flow::timestamp_now()),
+        at: Some(df_gateway::flow::timestamp_now()),
         model: model.into(),
         wire_api: pb::WireApi::AnthropicMessages.into(),
         upstream_status: 200,

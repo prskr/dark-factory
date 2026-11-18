@@ -11,11 +11,9 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 base64.workspace = true
-chrono.workspace = true
 axum.workspace = true
 bytes.workspace = true
 df-core.workspace = true
-df-db.workspace = true
 df-proto.workspace = true
 df-sandbox-contract.workspace = true
 df-telemetry = { workspace = true, features = ["http"] }
@@ -36,7 +34,6 @@ ipnet.workspace = true
 opentelemetry.workspace = true
 regex.workspace = true
 rustls.workspace = true
-secrecy.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
@@ -54,14 +51,16 @@ uuid.workspace = true
 webpki-roots.workspace = true
 x509-parser.workspace = true
 
+[features]
+# `link::PlainConnector` for tests of crates that talk over the gateway link.
+test-util = []
+
 [dev-dependencies]
 anyhow.workspace = true
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
-sqlx.workspace = true
 df-telemetry = { workspace = true, features = ["http", "test-util"] }
-df-test-postgres.workspace = true
 df-tls = { workspace = true, features = ["test-util"] }
 rcgen.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

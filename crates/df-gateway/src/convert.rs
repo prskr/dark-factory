@@ -1,11 +1,15 @@
 //! Conversions between the model provider types of `df-core` and the gateway wire contract
 //! (`darkfactory.gateway.v1`), shared by the control plane side and the inference endpoint.
+//! Public because `df-gateway-control` is the other end of the gateway link and uses the
+//! `*_to_proto` conversions and `wire_api_from_proto`.
 
 use df_core::model_provider::{CredentialScheme, WireApi};
 use df_proto::gateway::v1 as pb;
 
 /// The wire API of the wire contract, `None` if unspecified or unknown.
-pub(crate) fn wire_api_from_proto(api: i32) -> Option<WireApi> {
+///
+/// Public for `df-gateway-control`, the other end of the gateway link.
+pub fn wire_api_from_proto(api: i32) -> Option<WireApi> {
     match pb::WireApi::try_from(api).ok()? {
         pb::WireApi::AnthropicMessages => Some(WireApi::AnthropicMessages),
         pb::WireApi::OpenaiChat => Some(WireApi::OpenAiChat),
@@ -15,7 +19,9 @@ pub(crate) fn wire_api_from_proto(api: i32) -> Option<WireApi> {
 }
 
 /// The wire API in the wire contract.
-pub(crate) const fn wire_api_to_proto(api: WireApi) -> pb::WireApi {
+///
+/// Public for `df-gateway-control`, the other end of the gateway link.
+pub const fn wire_api_to_proto(api: WireApi) -> pb::WireApi {
     match api {
         WireApi::AnthropicMessages => pb::WireApi::AnthropicMessages,
         WireApi::OpenAiChat => pb::WireApi::OpenaiChat,
@@ -35,7 +41,9 @@ pub(crate) fn scheme_from_proto(scheme: i32) -> Option<CredentialScheme> {
 }
 
 /// The credential scheme in the wire contract.
-pub(crate) const fn scheme_to_proto(scheme: CredentialScheme) -> pb::CredentialScheme {
+///
+/// Public for `df-gateway-control`, the other end of the gateway link.
+pub const fn scheme_to_proto(scheme: CredentialScheme) -> pb::CredentialScheme {
     match scheme {
         CredentialScheme::XApiKey => pb::CredentialScheme::XApiKey,
         CredentialScheme::Bearer => pb::CredentialScheme::Bearer,

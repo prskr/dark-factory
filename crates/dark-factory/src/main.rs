@@ -772,14 +772,14 @@ fn egress_log_relay(
         tls_paths(tls),
         cfg.gateway.identity_name(&cfg.instance_name),
     );
-    let directory = df_gateway::control::DnsDirectory::new(
+    let directory = df_gateway_control::DnsDirectory::new(
         service,
         cfg.gateway.internal_grpc_port,
         Arc::new(connector),
     );
-    let relay = df_gateway::control::Relay::new(
+    let relay = df_gateway_control::Relay::new(
         Arc::new(directory),
-        df_gateway::control::relay::DISCOVERY_INTERVAL,
+        df_gateway_control::relay::DISCOVERY_INTERVAL,
     )
     .with_max_age(cfg.gateway.buffer_max_age());
     Some(Arc::new(RelayFlows(relay)))
@@ -790,14 +790,14 @@ struct PolicySources {
     pool: PgPool,
     notifier: Arc<df_db::Notifier>,
     secrets: Arc<dyn df_core::SecretStore>,
-    git: df_gateway::control::snapshot::GitSettings,
+    git: df_gateway_control::snapshot::GitSettings,
     metrics: Arc<df_agent_channel::Metrics>,
 }
 
 /// Records the tokens of stored gateway usage records as `df.agent.tokens`.
 struct AgentTokens(Arc<df_agent_channel::Metrics>);
 
-impl df_gateway::control::TokenCounter for AgentTokens {
+impl df_gateway_control::TokenCounter for AgentTokens {
     fn record_tokens(&self, model: &str, counts: [(&'static str, u64); 4]) {
         self.0.record_tokens(model, counts);
     }
@@ -815,7 +815,7 @@ impl PolicySources {
             pool: pool.clone(),
             notifier: notifier.clone(),
             secrets: secrets.clone(),
-            git: df_gateway::control::snapshot::GitSettings::from_config(&cfg.agent, &cfg.network),
+            git: df_gateway_control::snapshot::GitSettings::from_config(&cfg.agent, &cfg.network),
             metrics: metrics.clone(),
         }
     }
@@ -829,7 +829,7 @@ async fn serve_policy_watch(
     stop: watch::Receiver<bool>,
 ) {
     let token = tokio_util::sync::CancellationToken::new();
-    let service = df_gateway::control::PolicyService::new(
+    let service = df_gateway_control::PolicyService::new(
         sources.pool,
         sources.notifier,
         sources.secrets,
@@ -842,7 +842,7 @@ async fn serve_policy_watch(
         cancel.cancel();
     };
     let (served, ()) = tokio::join!(
-        df_gateway::control::serve_internal(
+        df_gateway_control::serve_internal(
             service,
             Arc::new(AgentTokens(sources.metrics)),
             incoming,

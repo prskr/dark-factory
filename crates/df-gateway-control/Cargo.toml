@@ -1,0 +1,38 @@
+[package]
+name = "df-gateway-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+df-core.workspace = true
+df-db.workspace = true
+df-gateway.workspace = true
+df-proto.workspace = true
+futures.workspace = true
+secrecy.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+df-gateway = { workspace = true, features = ["test-util"] }
+df-telemetry = { workspace = true, features = ["test-util"] }
+df-test-postgres.workspace = true
+df-tls = { workspace = true, features = ["test-util"] }
+gix.workspace = true
+hyper.workspace = true
+opentelemetry.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

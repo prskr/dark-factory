@@ -79,6 +79,7 @@ df-artifact-types = { path = "crates/df-artifact-types" }
 df-core = { path = "crates/df-core" }
 df-db = { path = "crates/df-db" }
 df-gateway = { path = "crates/df-gateway" }
+df-gateway-control = { path = "crates/df-gateway-control" }
 df-k8s = { path = "crates/df-k8s" }
 df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }

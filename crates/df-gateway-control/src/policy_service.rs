@@ -180,7 +180,7 @@ impl Watch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::tests::{TestSecrets, git_settings};
+    use crate::tests::{TestSecrets, git_settings};
 
     fn watch(changes: broadcast::Receiver<Notification>) -> Watch {
         Watch {

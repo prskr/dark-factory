@@ -23,8 +23,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tonic::transport::Channel;
 
-use crate::flow::{AgedEvents, DEFAULT_MAX_AGE, MIN_MAX_AGE, cutoff};
-use crate::link::{GrpcConnector, LinkError};
+use df_gateway::flow::{AgedEvents, DEFAULT_MAX_AGE, MIN_MAX_AGE, cutoff};
+use df_gateway::link::{GrpcConnector, LinkError};
 
 /// How often the gateway pods are looked up.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(5);
