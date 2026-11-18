@@ -15,6 +15,7 @@ const HUMAN: &str = "peter@example.org";
 const TASK: TaskRefs<'static> = TaskRefs {
     task_branch: "refs/heads/factory/task/DF-7",
     wip_branch: "refs/heads/factory/wip/DF-7",
+    base_branch: "refs/heads/factory/task/DF-6",
 };
 
 /// A bare mirror (what the forge has) and a working repository whose commits are pushed.
@@ -341,6 +342,25 @@ fn commits_of_wip_branches_and_other_tasks_are_not_upstream() {
     let view = r.view(&tip, MAX_COMMITS).unwrap();
 
     assert_eq!(commit_ids(&view), [oid(&tip), oid(&other), oid(&wip)]);
+}
+
+// A task based on another task's branch starts on commits that are not its own, among them the
+// merge commits the forge made for the base task's subtask merges (not the agent's identity).
+#[test]
+fn commits_of_the_base_branch_are_upstream() {
+    let r = Repos::new();
+    r.write("readme.md", b"base\n");
+    r.commit("base");
+    r.publish("HEAD:refs/heads/main");
+    r.write("base-task.txt", b"base task\n");
+    r.commit("base task");
+    r.publish("HEAD:refs/heads/factory/task/DF-6");
+    r.write("agent.txt", b"agent\n");
+    let tip = r.commit("agent");
+
+    let view = r.view(&tip, MAX_COMMITS).unwrap();
+
+    assert_eq!(commit_ids(&view), [oid(&tip)]);
 }
 
 #[test]

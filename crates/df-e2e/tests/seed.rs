@@ -36,6 +36,10 @@ async fn assert_repositories_of_the_projects(pool: &df_db::PgPool) -> Result<()>
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario checks every seeded project"
+)]
 async fn seed_writes_the_demo_data() -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
 
@@ -111,6 +115,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         ),
         (data::LIFECYCLE_PROJECT_KEY, data::DEMO_SCRIPT),
         (data::RESEARCH_PROJECT_KEY, data::RESEARCH_SCRIPT),
+        (data::TASK_TREE_PROJECT_KEY, data::TASK_TREE_SCRIPT),
         (data::INTERRUPT_PROJECT_KEY, data::INTERRUPT_SCRIPT),
         (data::LANDLOCK_PROJECT_KEY, data::LANDLOCK_SCRIPT),
     ] {

@@ -19,6 +19,9 @@ pub enum OrchestratorError {
     Secret(#[from] SecretError),
     #[error(transparent)]
     Integration(#[from] IntegrationError),
+    /// The forge refused to create the branch of a base task; the run fails with this reason.
+    #[error("base branch: {0}")]
+    BaseBranch(IntegrationError),
     #[error("serialization error: {0}")]
     Json(#[from] serde_json::Error),
     /// A stored value is not a known enum value.

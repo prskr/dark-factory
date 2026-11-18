@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE sub AS (\n             SELECT id, status, key AS root_key, 0 AS depth FROM tasks WHERE id = $1\n             UNION ALL\n             SELECT t.id, t.status, s.root_key, s.depth + 1\n             FROM tasks t JOIN sub s ON t.parent_id = s.id\n         )\n         SELECT id AS \"id!\", depth AS \"depth!\", root_key AS \"root_key!\" FROM sub\n         WHERE depth = 0 OR status <> ALL($2)\n         ORDER BY depth, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "depth!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "root_key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "40b9a03c19341a0580f88c4c0d25f7778a3577a815162e0d7724994feaa877eb"
+}

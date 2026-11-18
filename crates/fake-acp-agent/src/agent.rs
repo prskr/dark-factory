@@ -22,7 +22,9 @@ use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
 
 use crate::model::{ModelEnv, ModelStep};
-use crate::script::{EndStep, FetchStep, McpStep, PlanStep, Script, Step, ToolCallStep, Turn};
+use crate::script::{
+    EndStep, FetchStep, McpStep, PlanStep, RetryStep, Script, Step, ToolCallStep, Turn,
+};
 
 /// Pause between the attempts of a `fetch` step.
 const FETCH_RETRY: Duration = Duration::from_secs(1);
@@ -504,6 +506,36 @@ pub(crate) fn fetch_attempt_limit(
         .clamp(Duration::from_secs(1), FETCH_ATTEMPT)
 }
 
+/// Calls the tool until it answers without an error, at most `retry.attempts` times (once without
+/// `retry`), pausing `retry.delay_seconds` between calls. A cancelled turn stops the retries; the
+/// last outcome is returned.
+pub(crate) async fn call_with_retry<F, Fut>(
+    retry: Option<&RetryStep>,
+    cancel_notify: &Notify,
+    cancelled: &AtomicBool,
+    mut call: F,
+) -> Result<rmcp::model::CallToolResult, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<rmcp::model::CallToolResult, String>>,
+{
+    let (attempts, delay) = retry.map_or((1, 0), |r| (r.attempts.max(1), r.delay_seconds));
+    let mut attempt = 1;
+    loop {
+        let outcome = call().await;
+        let failed = outcome
+            .as_ref()
+            .map_or(true, |res| res.is_error == Some(true));
+        if !failed || attempt >= attempts {
+            return outcome;
+        }
+        attempt += 1;
+        if sleep_unless_cancelled(Duration::from_secs(delay), cancel_notify, cancelled).await {
+            return outcome;
+        }
+    }
+}
+
 /// Sleeps for `duration` unless the turn is or gets cancelled; returns whether it was.
 pub(crate) async fn sleep_unless_cancelled(
     duration: Duration,
@@ -559,13 +591,21 @@ async fn play_mcp(mcp_step: McpStep, ctx: &mut TurnContext, cx: &ConnectionTo<Cl
     send_update(cx, &ctx.session_id, SessionUpdate::ToolCall(call));
 
     let args = substitute_vars(&mcp_step.args, &ctx.vars);
-    let outcome = match matched_server {
-        Some(stdio) => call_mcp_tool(&stdio, &mcp_step.tool, &args).await,
-        None => Err(format!(
-            "MCP server '{}' not found in session",
-            mcp_step.server
-        )),
-    };
+    let outcome = call_with_retry(
+        mcp_step.retry.as_ref(),
+        &ctx.cancel_notify,
+        &ctx.cancelled,
+        || async {
+            match &matched_server {
+                Some(stdio) => call_mcp_tool(stdio, &mcp_step.tool, &args).await,
+                None => Err(format!(
+                    "MCP server '{}' not found in session",
+                    mcp_step.server
+                )),
+            }
+        },
+    )
+    .await;
     let (tool_result_text, status) = match outcome {
         Ok(res) if res.is_error == Some(true) => (
             serde_json::to_string(&res).unwrap_or_default(),

@@ -102,6 +102,28 @@ pub async fn child_described(pool: &PgPool, parent: &str, text: &str) -> Result<
     .with_context(|| format!("child of task {parent} described by `{text}`"))
 }
 
+/// The key of the base task of task `key`, if it has one.
+pub async fn base_task_of(pool: &PgPool, key: &str) -> Result<Option<String>> {
+    sqlx::query_scalar!(
+        "SELECT b.key FROM tasks t JOIN tasks b ON b.id = t.base_task_id WHERE t.key = $1",
+        key
+    )
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("base task of task {key}"))
+}
+
+/// Whether the merge of the pull request of task `key` is recorded (`tasks.pr_merged_at`).
+pub async fn pull_request_merged(pool: &PgPool, key: &str) -> Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT pr_merged_at IS NOT NULL AS "merged!" FROM tasks WHERE key = $1"#,
+        key
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("merge of the pull request of task {key}"))
+}
+
 /// Number of messages an agent queued on task `key`.
 pub async fn agent_messages(pool: &PgPool, key: &str) -> Result<i64> {
     sqlx::query_scalar!(

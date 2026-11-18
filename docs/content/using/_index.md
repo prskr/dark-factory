@@ -37,3 +37,4 @@ Set up in this order:
 6. [Delegation](delegation.md): agents that create tasks for other agents and wake when they end.
 7. [Hidden paths](hidden-paths.md): keep files out of the agent's workspace.
 8. [Existing branches](existing-branches.md): tasks on a branch that exists, attached pull requests and rebases.
+9. [Build a feature in iterations](build-a-feature.md): a feature agent that merges its iterations' pull requests into its own branch.

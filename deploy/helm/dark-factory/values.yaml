@@ -236,6 +236,14 @@ scheduling:
   # First retry delay of the pull request actions; it doubles up to 10 minutes (1 to 600).
   forgeRetryBaseSeconds: 30
 
+# Limits of delegation in the task tree (`create_task`); exceeding one is an error for the agent.
+tasks:
+  # Most ancestors a task created by an agent may have (a task with this many ancestors cannot
+  # create subtasks).
+  maxDepth: 5
+  # Open subtasks a task may have at once; finished subtasks do not count.
+  maxOpenSubtasks: 10
+
 # Limits of task artifacts (`write_artifact`). Bytes are at most 8388608 (8 MiB, the most the
 # runtime sends). An image is also limited to 8000 px per side.
 artifacts:

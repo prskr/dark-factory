@@ -160,6 +160,19 @@ pub struct McpStep {
     /// Variable name to JSON pointer into the call's structured result, saved for later calls.
     #[serde(default)]
     pub save: BTreeMap<String, String>,
+    /// Calls the tool again while it answers with an error (or the call fails), for a result that
+    /// needs time on the control plane, such as a pull request that opens asynchronously.
+    #[serde(default)]
+    pub retry: Option<RetryStep>,
+}
+
+/// How often and how long between calls an `mcp` step is repeated.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetryStep {
+    /// Calls in total, the first one included.
+    pub attempts: u32,
+    /// Seconds between two calls.
+    pub delay_seconds: u64,
 }
 
 /// Scripted plan details.

@@ -241,9 +241,9 @@ mod tests {
         // Tailwind's automatic source detection scans the working directory, which in a Bazel
         // sandbox is the whole execroot (~90 KB of CSS). Minified with `@source "../src"` only,
         // the stylesheet is about 25 KB (51 KB with the pages' variants, among them the row
-        // cover's `after:` and `focus-visible:after:` classes).
+        // cover's `after:` and `focus-visible:after:` classes, the Subtasks tab and its chip).
         let css = app_css().expect("app.css is embedded");
-        assert!(css.len() < 52_000, "app.css is {} bytes", css.len());
+        assert!(css.len() < 54_000, "app.css is {} bytes", css.len());
     }
 
     #[test]

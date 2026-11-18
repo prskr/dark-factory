@@ -186,6 +186,28 @@ async fn open_creates_and_records_a_draft_with_default_title_and_body() {
     assert_eq!(f.pr_number().await, Some(1));
 }
 
+// Scenario "Push of a task with a base task".
+#[tokio::test]
+async fn the_draft_of_a_task_with_a_base_task_targets_the_base_tasks_branch() {
+    let f = Fixture::new().await;
+    let based = f.env.task_based_on(&f.env.task).await;
+    let job = PrSyncJob {
+        task_id: based.id,
+        run_id: None,
+        open: true,
+        ready: None,
+    };
+
+    f.run(job).await.unwrap();
+
+    let created = f.creates();
+    assert_eq!(created.len(), 1);
+    assert_eq!(
+        (created[0].head.as_str(), created[0].base.as_str()),
+        ("factory/task/DF-2", "factory/task/DF-1")
+    );
+}
+
 #[tokio::test]
 async fn stored_title_and_body_are_used() {
     let f = Fixture::new().await;

@@ -262,6 +262,13 @@
         "forgeRetryBaseSeconds": { "type": "integer", "minimum": 1, "maximum": 600 }
       }
     },
+    "tasks": {
+      "type": "object",
+      "properties": {
+        "maxDepth": { "type": "integer", "minimum": 1 },
+        "maxOpenSubtasks": { "type": "integer", "minimum": 1 }
+      }
+    },
     "artifacts": {
       "type": "object",
       "properties": {

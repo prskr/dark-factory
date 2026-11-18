@@ -274,6 +274,25 @@ async fn related_tasks_are_own_ancestors_descendants_and_dependencies() {
     );
 }
 
+// Scenario of `iter3-task-tree`: a reviewer based on the implementation reads its artifacts.
+#[tokio::test]
+async fn a_task_reads_the_artifacts_of_its_base_task_but_not_the_reverse() {
+    let env = env().await;
+    let implementation = env.task(None, &[]).await;
+    let reviewer = env.task(None, &[]).await;
+    let other = env.task(None, &[]).await;
+    sqlx::query("UPDATE tasks SET base_task_id = $2 WHERE id = $1")
+        .bind(reviewer.id.as_uuid())
+        .bind(implementation.id.as_uuid())
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    assert!(readable(&env, &reviewer, "DF-1").await, "base task");
+    assert!(!readable(&env, &implementation, "DF-2").await, "dependent");
+    assert!(!readable(&env, &other, "DF-1").await, "unrelated");
+}
+
 #[tokio::test]
 async fn the_child_ended_message_lists_the_artifacts_of_the_child_only() {
     let env = env().await;

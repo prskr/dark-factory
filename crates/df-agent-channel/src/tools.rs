@@ -348,6 +348,7 @@ async fn run_handler(
         }
         "list_artifacts" => artifacts::list_artifacts(ctx, rc, args).await,
         "read_artifact" => artifacts::read_artifact(ctx, rc, args).await,
+        "merge_subtask_pr" => delegation::merge_subtask_pr(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -456,6 +457,9 @@ async fn complete_task(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let task_id = rc.task.id;
+    if let Some(blocked) = delegation::open_subtasks_outcome(ctx, rc).await? {
+        return Ok(blocked);
+    }
     let mut tx = ctx.pool.begin().await?;
     set_completion_summary(
         &mut *tx,
@@ -693,7 +697,7 @@ mod tests {
 
     #[test]
     fn embedded_schemas_compile() {
-        assert_eq!(VALIDATORS.len(), 15);
+        assert_eq!(VALIDATORS.len(), 16);
     }
 
     #[tokio::test]
@@ -863,6 +867,22 @@ mod tests {
             _: u64,
             _: PullRequestUpdate,
         ) -> Result<df_core::PullRequest, IntegrationError> {
+            panic!("not used")
+        }
+        async fn merge_pull_request(
+            &self,
+            _: &df_core::ProjectId,
+            _: u64,
+            _: &str,
+        ) -> Result<(), IntegrationError> {
+            panic!("not used")
+        }
+        async fn create_branch(
+            &self,
+            _: &df_core::ProjectId,
+            _: &str,
+            _: &str,
+        ) -> Result<(), IntegrationError> {
             panic!("not used")
         }
         async fn list_pull_request_feedback(

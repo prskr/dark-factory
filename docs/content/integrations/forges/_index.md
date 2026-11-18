@@ -86,6 +86,11 @@ plugins:
       digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
+**Plugin and control plane versions go together.** The interface the control plane calls
+(`pull-requests`) gained `merge` and `create-branch` for task trees; a plugin image built before
+that fails to load. Both in-tree plugins have them, so keep the plugin images at the chart's
+`appVersion`; the contract is in `contract/README.md`.
+
 **Upgrade a plugin**: set the new `plugins.<name>.image.tag` (or `digest`) and run `helm upgrade`.
 The control plane rolls; a plugin image that cannot be pulled keeps the new pod in
 `ContainerCreating` while the old pods keep serving.

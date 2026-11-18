@@ -352,6 +352,24 @@ pub trait ForgeClient: Send + Sync {
         ch: PullRequestUpdate,
     ) -> Result<PullRequest, IntegrationError>;
 
+    /// Merges pull request `number` if its head is still `head_sha`, with the repository's merge
+    /// style. A moved head, a conflict or a failed check is `Conflict` or `InvalidInput`; a pull
+    /// request already merged with that head counts as success.
+    async fn merge_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), IntegrationError>;
+
+    /// Creates the branch `name` at the tip of the branch `from`; `Conflict` if `name` exists.
+    async fn create_branch(
+        &self,
+        p: &ProjectId,
+        name: &str,
+        from: &str,
+    ) -> Result<(), IntegrationError>;
+
     /// Takes pull request `number` out of draft (ready for review).
     async fn mark_pull_request_ready(
         &self,

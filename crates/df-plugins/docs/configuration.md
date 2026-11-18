@@ -209,8 +209,8 @@ values route `github.com` to it.
 
 2. Create a fine-grained personal access token for an account with write access, restricted to the
    project's repositories ("Only select repositories"), with the repository permissions Pull
-   requests read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata
-   read. A classic token needs `repo`. `list-feedback` reads each reviewer's repository permission
+   requests read/write, Issues read/write, Contents read/write (Git clone and push, branch creation
+   and the merge of a pull request) and Metadata read. A classic token needs `repo`. `list-feedback` reads each reviewer's repository permission
    (`GET .../collaborators/{username}/permission`), which needs the account's write access.
 3. Store it in a Secret in the instance namespace (`sandbox.instanceNamespace`), for example
    `kubectl -n dark-factory create secret generic github-token --from-file=token=<file with the token>`.
@@ -322,7 +322,9 @@ backlog has an item for a lookup that works without repository admin.
 
 ### Forgejo token scopes
 
-The bot account's token needs `write:repository` (create and update pull requests, read branches),
+The bot account's token needs `write:repository` (create and update pull requests, read branches,
+merge pull requests and create branches for `merge_subtask_pr` and base tasks; the account needs
+merge permission on the repository for the merge),
 `write:issue` (comments on issues and pull requests) and `read:user` (`list-feedback` reads the
 token's own account to label its comments `bot`; Forgejo 15 answers 403 without this scope).
 Read-only use needs `read:repository`, `read:issue` and `read:user`.

@@ -46,6 +46,9 @@ data:
       tickMillis: {{ .Values.scheduling.tickMillis }}
       resumeBackoffSeconds: {{ .Values.scheduling.resumeBackoffSeconds }}
       forgeRetryBaseSeconds: {{ .Values.scheduling.forgeRetryBaseSeconds }}
+    tasks:
+      maxDepth: {{ .Values.tasks.maxDepth }}
+      maxOpenSubtasks: {{ .Values.tasks.maxOpenSubtasks }}
     artifacts:
       maxTextBytes: {{ .Values.artifacts.maxTextBytes | int64 }}
       maxImageBytes: {{ .Values.artifacts.maxImageBytes | int64 }}

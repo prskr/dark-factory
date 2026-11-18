@@ -699,6 +699,35 @@ fn invalid_artifact_limits_are_rejected_naming_the_option() {
 }
 
 #[test]
+fn task_tree_limits_default_to_depth_5_and_10_open_subtasks() {
+    let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
+    assert_eq!(cfg.tasks.max_depth, 5);
+    assert_eq!(cfg.tasks.max_open_subtasks, 10);
+    assert_eq!(cfg.tasks, TasksConfig::default());
+}
+
+#[test]
+fn task_tree_limits_can_be_overridden() {
+    let yaml = format!("{MINIMAL_DB}tasks:\n  maxDepth: 2\n  maxOpenSubtasks: 3\n");
+    let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
+    assert_eq!((cfg.tasks.max_depth, cfg.tasks.max_open_subtasks), (2, 3));
+}
+
+#[test]
+fn a_task_tree_limit_of_zero_is_rejected_naming_the_option() {
+    for (body, option) in [
+        ("maxDepth: 0", "tasks.maxDepth"),
+        ("maxOpenSubtasks: 0", "tasks.maxOpenSubtasks"),
+    ] {
+        let yaml = format!("{MINIMAL_DB}tasks:\n  {body}\n");
+        let err = InstanceConfig::from_yaml_str(&yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(option), "{err}");
+    }
+}
+
+#[test]
 fn scheduling_defaults_are_the_waits_of_the_control_plane() {
     let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
 

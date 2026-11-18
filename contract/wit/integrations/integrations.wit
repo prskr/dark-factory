@@ -246,6 +246,16 @@ interface pull-requests {
 
     update: func(id: pull-request-ref, changes: pull-request-update) -> result<pull-request, error>;
 
+    /// Merges the open pull request if its head is still `head-sha`, with the repository's
+    /// merge style. A moved head, a merge conflict or a failed required check yields `conflict`
+    /// or `invalid-input` with the forge's message; a pull request already merged with that
+    /// head counts as success.
+    merge: func(id: pull-request-ref, head-sha: string) -> result<_, error>;
+
+    /// Creates the branch `name` at the tip of the branch `from`; `conflict` if `name` exists,
+    /// `not-found` or `invalid-input` if `from` doesn't.
+    create-branch: func(repo: repo-ref, name: string, %from: string) -> result<_, error>;
+
     /// PR comments, reviews and review threads. With `since` (RFC 3339) only
     /// PR comments and reviews created or updated at or after it, and threads
     /// with at least one such review comment, each with all its comments.

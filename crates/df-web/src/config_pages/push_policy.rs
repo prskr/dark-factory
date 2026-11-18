@@ -10,7 +10,7 @@ use crate::components::FormErrors;
 use crate::components::forms::INPUT_CLASS;
 
 /// Fields of the tab, so a re-rendered form opens the tab with the error.
-pub(crate) const FIELDS: [&str; 9] = [
+pub(crate) const FIELDS: [&str; 10] = [
     "protected_globs",
     "hidden_globs",
     "protected_mode",
@@ -19,6 +19,7 @@ pub(crate) const FIELDS: [&str; 9] = [
     "max_blob_mib",
     "linear_history",
     "branch_rewrite_policy",
+    "subtask_merge",
     "agent_branch_globs",
 ];
 

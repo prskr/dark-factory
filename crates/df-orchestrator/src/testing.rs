@@ -185,6 +185,30 @@ impl Fixture {
         task.id
     }
 
+    /// Creates a task of the seeded project whose base task is `base`.
+    pub async fn task_based_on(&self, base: &TaskRow) -> TaskRow {
+        let (task, _) = df_db::create_task_on(
+            &self.pool,
+            NewTask {
+                project_id: self.project_id,
+                persona_id: self.persona_id,
+                title: Some("Based on another task".into()),
+                description: String::new(),
+                issue_number: None,
+                created_by: df_core::Principal::system("test"),
+                parent_id: None,
+                depends_on: Vec::new(),
+            },
+            df_db::TaskPlacement {
+                base_task: Some(base.key.clone()),
+                ..df_db::TaskPlacement::default()
+            },
+        )
+        .await
+        .expect("create a task on a base task");
+        task
+    }
+
     /// Creates a task of the seeded project on the existing `branch`, attached to `pr`.
     pub async fn task_on_branch(&self, branch: &str, pr: Option<df_db::AttachedPr>) -> TaskRow {
         let (task, _) = df_db::create_task_on(
@@ -204,6 +228,7 @@ impl Fixture {
                     df_core::ExistingBranch::parse(branch, "main").expect("a valid test branch"),
                 ),
                 attached_pr: pr,
+                ..df_db::TaskPlacement::default()
             },
         )
         .await

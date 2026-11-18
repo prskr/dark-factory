@@ -22,6 +22,7 @@ use df_db::Notifier;
 use df_db::lifecycle_events::EventSinks;
 use sqlx::PgPool;
 
+pub mod base_branch;
 pub mod error;
 pub mod pr;
 pub mod retention;

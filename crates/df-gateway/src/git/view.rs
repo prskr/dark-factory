@@ -51,6 +51,10 @@ const FACTORY_TASK_NAMESPACE: &str = "refs/heads/factory/task/";
 pub struct TaskRefs<'a> {
     pub task_branch: &'a str,
     pub wip_branch: &'a str,
+    /// The branch the run's workspace starts on: the default branch, or the branch of the base
+    /// task. Its commits count as upstream: they passed the checks when the base task pushed
+    /// them, or are the merges the forge made for its subtask merges.
+    pub base_branch: &'a str,
 }
 
 impl TaskRefs<'_> {
@@ -59,6 +63,7 @@ impl TaskRefs<'_> {
         // The task branch of a task on an existing branch (`renovate/serde-1.x`) has no namespace
         // of its own: other tasks' branches are the `factory/task/` ones.
         name == self.task_branch
+            || name == self.base_branch
             || !(name.starts_with(FACTORY_TASK_NAMESPACE) || in_namespace_of(name, self.wip_branch))
     }
 }

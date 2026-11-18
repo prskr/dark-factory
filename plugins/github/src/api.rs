@@ -30,7 +30,11 @@ const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
 /// GitHub's message when a repository or instance rejects native drafts.
 const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
+/// Like [`QUERY_VALUE`], but a branch name keeps its `/` in a path.
+const REF_PATH: &AsciiSet = &QUERY_VALUE.remove(b'/');
+
 mod feedback;
+mod merge;
 
 pub use forge_common::http::Method;
 

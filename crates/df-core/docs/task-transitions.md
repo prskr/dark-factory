@@ -64,7 +64,7 @@ stateDiagram-v2
 | `TurnStarted`, `TurnEnded` | the idle phase of the run | `waiting` ⇄ `running` |
 | `RunEnded` | the end of a run | by outcome; a cancelled or done task stays so, a waiting message requeues |
 | `MarkedDone` | a human, or the merge of the pull request | `completed` |
-| `Cancelled` | a human | `cancelled` |
+| `Cancelled` | a human; also `Cancelled { via }` for each descendant of the cancelled task (below) | `cancelled` |
 | `DependencySatisfied` | an effect of the target's completion or done | `awaiting_dependencies` → `queued` with the last dependency |
 | `ChildEnded` | an effect of a child's completion, done, failure or cancel | none; queues a `task.child_ended` message, which is a `MessageQueued` |
 
@@ -79,3 +79,19 @@ transaction, dependents first, then the parent:
 | `RunEnded` ending in `failed` | | | failed |
 | `MarkedDone` | `first_done_at` | yes | done |
 | `Cancelled` | | | cancelled |
+
+## Cancelling a subtree
+
+`df_db::cancel_task` cancels a task together with its descendants that are not `completed`,
+`failed` or `cancelled`, in one transaction. It locks the run rows of all of them, then their task
+rows, and applies `Cancelled` top-down: `{ via: None }` for the cancelled task, `{ via: <its key> }`
+for each descendant, so every task has its own `task.cancel` audit entry, with `via` in the
+descendants'. A parent is `cancelled` before its children's `NotifyParent` effects run, so
+`ChildEnded` ignores it: no `task.child_ended` message is queued in the subtree, and only the
+parent of the cancelled task is woken. Dependents outside the subtree stay as they are.
+
+## Notifying the parent's page
+
+A transition that changes the status of a task with a parent also publishes `TaskChanged` for the
+parent (`Notice::ParentTaskChanged`), because the Subtasks tab of the parent's details shows the
+status and the progress.

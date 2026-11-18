@@ -4,9 +4,9 @@
 //! transaction. Credential references hold the name of a Kubernetes Secret and a key, never a
 //! value.
 
-use df_core::RewritePolicy;
 use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, CredentialRefId, Principal, SecretKeyRef};
+use df_core::{RewritePolicy, SubtaskMerge};
 use df_sandbox_contract::glob::protected_glob;
 use serde::Serialize;
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
@@ -50,6 +50,8 @@ pub struct ProjectInput {
     pub branch_rewrite_policy: RewritePolicy,
     /// Globs of the existing branches an agent may start tasks on (`create_task`).
     pub agent_branch_globs: Vec<String>,
+    /// Who merges the pull requests of subtasks into their parent's branch.
+    pub subtask_merge: SubtaskMerge,
 }
 
 /// A stored project.
@@ -67,6 +69,7 @@ pub struct ProjectRecord {
     pub webhook_wake: WebhookWake,
     pub branch_rewrite_policy: RewritePolicy,
     pub agent_branch_globs: Vec<String>,
+    pub subtask_merge: SubtaskMerge,
     /// Whether tasks exist.
     pub has_tasks: bool,
 }
@@ -130,6 +133,7 @@ struct ProjectRow {
     webhook_wake: String,
     branch_rewrite_policy: String,
     agent_branch_globs: Vec<String>,
+    subtask_merge: String,
     has_tasks: bool,
 }
 
@@ -150,6 +154,7 @@ impl TryFrom<ProjectRow> for ProjectRecord {
             webhook_wake: row.webhook_wake.parse()?,
             branch_rewrite_policy: row.branch_rewrite_policy.parse()?,
             agent_branch_globs: row.agent_branch_globs,
+            subtask_merge: row.subtask_merge.parse()?,
             has_tasks: row.has_tasks,
         })
     }
@@ -189,7 +194,7 @@ pub async fn list_projects(pool: &PgPool) -> Result<Vec<ProjectRecord>, DbError>
         r#"
         SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
                p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
-               p.agent_branch_globs,
+               p.agent_branch_globs, p.subtask_merge,
                EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
         FROM projects p ORDER BY p.key
         "#
@@ -210,7 +215,7 @@ pub async fn get_project_by_key(
         r#"
         SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
                p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
-               p.agent_branch_globs,
+               p.agent_branch_globs, p.subtask_merge,
                EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
         FROM projects p WHERE p.key = $1
         "#,
@@ -231,7 +236,7 @@ pub async fn get_project(
         r#"
         SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,
                p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,
-               p.agent_branch_globs,
+               p.agent_branch_globs, p.subtask_merge,
                EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS "has_tasks!"
         FROM projects p WHERE p.id = $1
         "#,
@@ -427,7 +432,7 @@ async fn save_project_in(
                 UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5,
                     image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9,
                     webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12,
-                    updated_at = now()
+                    subtask_merge = $13, updated_at = now()
                 WHERE id = $1 RETURNING id
                 "#,
                 b.id,
@@ -441,7 +446,8 @@ async fn save_project_in(
                 &input.adapter_command,
                 input.webhook_wake.as_str(),
                 input.branch_rewrite_policy.as_str(),
-                &input.agent_branch_globs
+                &input.agent_branch_globs,
+                input.subtask_merge.as_str()
             )
             .fetch_one(&mut **tx)
             .await
@@ -451,8 +457,8 @@ async fn save_project_in(
                 r#"
                 INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image,
                     base_branch, forge_credential_id, adapter_command, webhook_wake,
-                    branch_rewrite_policy, agent_branch_globs)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id
+                    branch_rewrite_policy, agent_branch_globs, subtask_merge)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
                 "#,
                 Uuid::now_v7(),
                 input.key,
@@ -465,7 +471,8 @@ async fn save_project_in(
                 &input.adapter_command,
                 input.webhook_wake.as_str(),
                 input.branch_rewrite_policy.as_str(),
-                &input.agent_branch_globs
+                &input.agent_branch_globs,
+                input.subtask_merge.as_str()
             )
             .fetch_one(&mut **tx)
             .await
@@ -614,6 +621,7 @@ fn project_input(p: &ProjectRecord) -> ProjectInput {
         webhook_wake: p.webhook_wake,
         branch_rewrite_policy: p.branch_rewrite_policy,
         agent_branch_globs: p.agent_branch_globs.clone(),
+        subtask_merge: p.subtask_merge,
     }
 }
 
@@ -676,6 +684,7 @@ mod tests {
             webhook_wake: WebhookWake::Members,
             branch_rewrite_policy: RewritePolicy::default(),
             agent_branch_globs: df_core::default_agent_branch_globs(),
+            subtask_merge: SubtaskMerge::default(),
         }
     }
 
@@ -788,6 +797,32 @@ mod tests {
         let updated = audit_details(&pool, "project.update").await;
         assert_eq!(updated[0]["before"]["branch_rewrite_policy"], "with-lease");
         assert_eq!(updated[0]["after"]["branch_rewrite_policy"], "never");
+    }
+
+    #[tokio::test]
+    async fn subtask_merge_defaults_to_human_and_changes_are_audited() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        let (principal, roles) = actor();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let p = save_project(&pool, actor, None, &project("DF", None))
+            .await
+            .unwrap();
+        assert_eq!(p.subtask_merge, SubtaskMerge::Human);
+
+        let mut input = project("DF", None);
+        input.subtask_merge = SubtaskMerge::ParentAgent;
+        save_project(&pool, actor, Some(p.id), &input)
+            .await
+            .unwrap();
+
+        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
+        assert_eq!(stored.subtask_merge, SubtaskMerge::ParentAgent);
+        let updated = audit_details(&pool, "project.update").await;
+        assert_eq!(updated[0]["before"]["subtask_merge"], "human");
+        assert_eq!(updated[0]["after"]["subtask_merge"], "parent-agent");
     }
 
     #[tokio::test]

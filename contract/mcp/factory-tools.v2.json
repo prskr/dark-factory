@@ -1,5 +1,5 @@
 {
-  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question and request_approval, plus read_pull_request_feedback and comment_on_pull_request, plus create_task, list_personas and send_message, plus write_artifact, list_artifacts and read_artifact (iteration 3). The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
+  "$comment": "Factory MCP tools v2 (iteration 2): v1 plus ask_question and request_approval, plus read_pull_request_feedback and comment_on_pull_request, plus create_task, list_personas and send_message, plus write_artifact, list_artifacts and read_artifact, plus merge_subtask_pr (iteration 3). The control plane sends these as Assign.tools; the runtime's MCP proxy serves them to the harness as server 'factory' (Claude Code shows them as mcp__factory__<name>). Calls are executed by the control plane, scoped to the run's task.",
   "version": 2,
   "tools": [
     {
@@ -111,7 +111,7 @@
     {
       "name": "complete_task",
       "title": "Complete task",
-      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: ask it with ask_question instead. Also call it when the instructions leave nothing to do (already done, nothing to change, question answered), with a summary that says why: if you end your turn without it, the task waits for a human.",
+      "description": "Declare this task done. Commit all work first. The run ends after your current turn, the remaining commits are pushed and the pull request is marked ready for review. Don't call this when you need input from a human: ask it with ask_question instead. Also call it when the instructions leave nothing to do (already done, nothing to change, question answered), with a summary that says why: if you end your turn without it, the task waits for a human. It fails while a subtask of yours is still open (not finished, or based on your branch with a pull request that is not merged); the error names the subtasks.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -275,7 +275,7 @@
     {
       "name": "create_task",
       "title": "Create a task",
-      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued). Use branch to hand an existing branch (for example a failing Renovate pull request) to a persona.",
+      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued). Use branch to hand an existing branch (for example a failing Renovate pull request) to a persona. Use base_task to start the new task from another task's branch. There are limits on how deep tasks may nest and how many open subtasks one task may have; exceeding one is an error.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -328,6 +328,11 @@
             "minLength": 1,
             "maxLength": 200,
             "description": "Work on this existing branch of the repository instead of a new one, for example renovate/serde-1.x. Without a leading refs/heads/. The branch must exist when the task starts. If it has exactly one open pull request, the task is attached to it: you and the task may comment on it, but its title, description and draft state are never changed. Only branches that match the project's agent branches (by default renovate/** and dependabot/**) are allowed. Fails for the project's base branch, factory/ branches and a branch another open task works on."
+          },
+          "base_task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key of a task of this project (not done, failed or cancelled) whose branch the new task starts from and whose pull request it targets, for example DF-20 for a reviewer that needs the implementation's commits. Pass your own key to build on your own branch (iterations of a feature). The base task cannot be changed later; once it is done, the new task follows that task's own base branch. Cannot be combined with branch."
           }
         },
         "required": [
@@ -430,7 +435,7 @@
     {
       "name": "list_artifacts",
       "title": "List artifacts",
-      "description": "List the artifacts of a task with name, type (text or image), MIME type, size in bytes and update time. Without task it lists your own. You can list the artifacts of your own task, your ancestors (parent, its parent and so on), your descendants (all levels) and the tasks you depend on. Any other task, and a task that does not exist, gives the same error \"task not found or not related\". The children you created are named in the message that wakes you when they end (for example DF-22/findings.md).",
+      "description": "List the artifacts of a task with name, type (text or image), MIME type, size in bytes and update time. Without task it lists your own. You can list the artifacts of your own task, your ancestors (parent, its parent and so on), your descendants (all levels), the tasks you depend on and your base task. Any other task, and a task that does not exist, gives the same error \"task not found or not related\". The children you created are named in the message that wakes you when they end (for example DF-22/findings.md).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -482,6 +487,31 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      }
+    },
+    {
+      "name": "merge_subtask_pr",
+      "title": "Merge a subtask's pull request",
+      "description": "Merge the pull request of one of your subtasks into your own task branch, so that the next iteration starts from it. It works only if the project allows it (a board member set the project's subtask merge to parent-agent), the subtask is a child of yours whose base task is your own task, and it is in review with a pull request. The merge uses the head commit the subtask last pushed and the repository's merge style; the subtask becomes done. Conflicts, failed required checks and a moved head come back as errors with the forge's reason and change nothing. Returns the merged pull request's URL. Merging into the default branch stays with humans.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key of the subtask, for example DF-31."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
       }
     }
   ]

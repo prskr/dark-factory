@@ -1177,6 +1177,126 @@ async fn retry_pause_runs_out_without_a_cancel() {
     assert!(!was_cancelled);
 }
 
+fn tool_result(is_error: bool) -> rmcp::model::CallToolResult {
+    if is_error {
+        rmcp::model::CallToolResult::error(vec![])
+    } else {
+        rmcp::model::CallToolResult::success(vec![])
+    }
+}
+
+fn retry(attempts: u32) -> crate::script::RetryStep {
+    crate::script::RetryStep {
+        attempts,
+        delay_seconds: 2,
+    }
+}
+
+#[test]
+fn an_mcp_step_parses_its_retry_option() {
+    let yaml = "
+sessions:
+  new:
+    - - mcp:
+          server: factory
+          tool: merge_subtask_pr
+          retry:
+            attempts: 30
+            delay_seconds: 2
+      - mcp:
+          server: factory
+          tool: list_artifacts
+  loaded: []
+";
+    let script = Script::from_yaml_str(yaml).unwrap();
+    let steps = &script.sessions.new[0].steps;
+    let retries: Vec<_> = steps
+        .iter()
+        .map(|s| match s {
+            crate::script::Step::Mcp(m) => m.retry.clone(),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(retries, [Some(retry(30)), None]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tool_that_errors_twice_is_called_three_times_and_then_succeeds() {
+    let calls = AtomicUsize::new(0);
+
+    let result = crate::agent::call_with_retry(
+        Some(&retry(5)),
+        &Notify::new(),
+        &AtomicBool::new(false),
+        || async { Ok(tool_result(calls.fetch_add(1, Ordering::SeqCst) < 2)) },
+    )
+    .await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_ne!(result.unwrap().is_error, Some(true));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_attempts_cap_the_calls_and_the_last_error_is_returned() {
+    let calls = AtomicUsize::new(0);
+
+    let result = crate::agent::call_with_retry(
+        Some(&retry(4)),
+        &Notify::new(),
+        &AtomicBool::new(false),
+        || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(tool_result(true))
+        },
+    )
+    .await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(result.unwrap().is_error, Some(true));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_step_without_retry_calls_the_tool_once() {
+    let calls = AtomicUsize::new(0);
+
+    crate::agent::call_with_retry(None, &Notify::new(), &AtomicBool::new(false), || async {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Ok(tool_result(true))
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancel_during_the_pause_stops_the_retries() {
+    let notify = Arc::new(Notify::new());
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let calls = AtomicUsize::new(0);
+    let (n, c) = (Arc::clone(&notify), Arc::clone(&cancelled));
+    let notifier = std::sync::Mutex::new(None);
+
+    let result = crate::agent::call_with_retry(Some(&retry(10)), &notify, &cancelled, || {
+        // Cancels while the first pause runs.
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            let (n, c) = (Arc::clone(&n), Arc::clone(&c));
+            *notifier.lock().unwrap() = Some(tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                c.store(true, Ordering::SeqCst);
+                n.notify_waiters();
+            }));
+        }
+        async { Ok(tool_result(true)) }
+    })
+    .await;
+    let notifier = notifier.into_inner().unwrap().expect("notifier started");
+    notifier.await.unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(result.unwrap().is_error, Some(true));
+}
+
 #[test]
 fn when_steps_are_played_only_for_a_prompt_with_their_text() {
     let script = Script::from_yaml_str(

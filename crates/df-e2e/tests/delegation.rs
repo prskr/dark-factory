@@ -7,8 +7,8 @@
 
 use anyhow::Result;
 use df_core::TaskStatus;
-use df_e2e::fixture::{self, World};
-use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually, status_reached};
+use df_e2e::fixture;
+use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually};
 use df_e2e::{data, db};
 
 /// The prompt markers of `crates/fake-acp-agent/scripts/delegation.yaml` and `research.yaml`.
@@ -34,10 +34,10 @@ async fn coordinator_delegates_implementation_and_review_and_relays_the_next_rou
 
             // The implementation completes, which releases the review; both wake the coordinator,
             // whose relay of the review reopens the implementation for a second completion.
-            let implementation = child_of(&world, &coordinator, IMPLEMENTATION).await?;
-            let review = child_of(&world, &coordinator, REVIEW).await?;
-            wait_for_runs(&world, &implementation, 2).await?;
-            wait_for_runs(&world, &review, 1).await?;
+            let implementation = world.child_of(&coordinator, IMPLEMENTATION).await?;
+            let review = world.child_of(&coordinator, REVIEW).await?;
+            world.wait_for_runs(&implementation, 2).await?;
+            world.wait_for_runs(&review, 1).await?;
             for key in [&implementation, &review] {
                 let status = db::task_status(&world.pool, key).await?;
                 assert_eq!(status, TaskStatus::InReview, "{key}");
@@ -89,8 +89,8 @@ async fn a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact() -> 
                 )
                 .await?;
 
-            let researcher = child_of(&world, &coordinator, RESEARCH).await?;
-            wait_for_runs(&world, &researcher, 1).await?;
+            let researcher = world.child_of(&coordinator, RESEARCH).await?;
+            world.wait_for_runs(&researcher, 1).await?;
             let artifact = format!("{researcher}/{}", data::RESEARCH_ARTIFACT);
             eventually(
                 "the coordinator to read the findings",
@@ -129,35 +129,6 @@ async fn a_researcher_hands_its_findings_to_the_coordinator_as_an_artifact() -> 
                 .session
                 .expect_text(data::RESEARCH_FINDING, UI_TIMEOUT)
                 .await
-        },
-    )
-    .await
-}
-
-/// Waits until `coordinator` has created the child that `marker` identifies; returns its key.
-async fn child_of(world: &World, coordinator: &str, marker: &str) -> Result<String> {
-    eventually(
-        &format!("{coordinator} to create the child with {marker}"),
-        RUN_TIMEOUT,
-        || db::child_described(&world.pool, coordinator, marker),
-    )
-    .await
-}
-
-/// Waits until task `key` has ended `runs` runs and is in review.
-async fn wait_for_runs(world: &World, key: &str, runs: i64) -> Result<()> {
-    eventually(
-        &format!("task {key} to have {runs} finished run(s)"),
-        RUN_TIMEOUT,
-        || async {
-            // The count first: the status read then follows the runs it counted. Fails at once,
-            // naming the status, when the task ended in another final status.
-            let ended = db::completed_runs(&world.pool, key).await?;
-            let in_review = status_reached(
-                db::task_status(&world.pool, key).await?,
-                TaskStatus::InReview,
-            )?;
-            Ok((in_review.is_some() && ended >= runs).then_some(()))
         },
     )
     .await

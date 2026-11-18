@@ -276,3 +276,71 @@ async fn plain_http_is_denied_without_opening_a_connection() -> anyhow::Result<(
     );
     Ok(())
 }
+
+/// `merge` reads the pull request and the repository's merge style, then merges pinned to the head.
+#[tokio::test]
+async fn merge_pins_the_head_and_uses_the_repository_merge_style() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/o/r/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/o/r"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"default_merge_style": "rebase"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/o/r/pulls/7/merge"))
+        .and(body_json(
+            json!({"Do": "rebase", "head_commit_id": "abc123"}),
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    client(&server)?
+        .merge_pull_request(&ProjectId::new(), 7, "abc123")
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn merge_of_a_moved_head_is_a_conflict() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/o/r/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pr("DF-1: Fix login")))
+        .mount(&server)
+        .await;
+    let err = client(&server)?
+        .merge_pull_request(&ProjectId::new(), 7, "moved")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, IntegrationError::Conflict(_)), "{err}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_branch_posts_to_the_branches_endpoint() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/o/r/branches"))
+        .and(body_json(
+            json!({"new_branch_name": "factory/task/DF-30", "old_ref_name": "main"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({"name": "factory/task/DF-30"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    client(&server)?
+        .create_branch(&ProjectId::new(), "factory/task/DF-30", "main")
+        .await?;
+    Ok(())
+}

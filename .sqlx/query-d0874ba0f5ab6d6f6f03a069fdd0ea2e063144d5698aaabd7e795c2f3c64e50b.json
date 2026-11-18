@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,\n               p.name AS project_name, ps.name AS persona_name,\n               t.status, t.status_line, t.resume_at, t.created_at, t.updated_at\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        WHERE ($1::text[] IS NULL OR t.status = ANY($1))\n          AND ($2::text IS NULL OR p.key = $2)\n        ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,\n                 CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,\n                 t.id DESC\n        ",
+  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,\n               p.name AS project_name, ps.name AS persona_name,\n               t.status, t.status_line, t.resume_at,\n               COALESCE(sub.done, 0) AS \"subtasks_done!\", COALESCE(sub.total, 0) AS \"subtasks_total!\",\n               t.created_at, t.updated_at\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN LATERAL (\n            SELECT count(*) FILTER (WHERE s.status = ANY($4)) AS done,\n                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total\n            FROM tasks s WHERE s.parent_id = t.id\n        ) sub ON true\n        WHERE ($1::text[] IS NULL OR t.status = ANY($1))\n          AND ($2::text IS NULL OR p.key = $2)\n        ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,\n                 CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,\n                 t.id DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,18 @@
       },
       {
         "ordinal": 10,
+        "name": "subtasks_done!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "subtasks_total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +137,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -140,7 +152,8 @@
       "Left": [
         "TextArray",
         "Text",
-        "Text"
+        "Text",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -154,9 +167,11 @@
       false,
       false,
       true,
+      null,
+      null,
       false,
       false
     ]
   },
-  "hash": "e33c6b61501f70ef2f89cf0d240ef9207ba536fab8b09a9f4481cfe4df0e5607"
+  "hash": "d0874ba0f5ab6d6f6f03a069fdd0ea2e063144d5698aaabd7e795c2f3c64e50b"
 }

@@ -722,7 +722,7 @@
           "FILE:@@//crates/df-tls/Cargo.toml 1b9c57ce640cf835b331a7a97e37feeb560412b2f4c87420171372476c559e87",
           "FILE:@@//crates/df-web/Cargo.toml 2891b8189236f8fef9323eb68c75abc345c75780698147ade823a9c9ffa4904a",
           "FILE:@@//crates/factory-agent/Cargo.toml f991c3ef809c1d5040ce31acce84956c7752dd41332c4ac38c3311d8e29d4511",
-          "FILE:@@//crates/fake-acp-agent/Cargo.toml a1a9a7229f9fe9d2d3006c0c43fa89be63c49b4941db27d797d33c9e48b1503f",
+          "FILE:@@//crates/fake-acp-agent/Cargo.toml c476205600873cd95c7cf8febe02f823da6855197783e0ef24d4861a5deecadd",
           "FILE:@@//plugins/forge-common/Cargo.toml 3501f444b5d5f1bed52fd433a8d4182eeab5beb18b9c31b442904adcb1be3f7b",
           "FILE:@@//plugins/forgejo/Cargo.toml 01eaff16e417a19ba2a8b6c105647117b32d19d06966655102dd6fffa1873ad5",
           "FILE:@@//plugins/github/Cargo.toml 81b2239b58222457c94d6e8a190d36b3073f05636cc2e9580386cfe99a9abc15",

@@ -441,7 +441,7 @@ async fn a_message_to_a_final_task_whose_branch_is_taken_names_the_holder_and_qu
     };
     let placement = || df_db::TaskPlacement {
         branch: Some(df_core::ExistingBranch::parse("fix/login", "main").unwrap()),
-        attached_pr: None,
+        ..df_db::TaskPlacement::default()
     };
     let (old, _) = df_db::create_task_on(&app.pool, on_branch("old"), placement())
         .await

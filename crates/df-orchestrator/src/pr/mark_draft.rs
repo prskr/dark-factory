@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use df_core::{ForgeClient, PullRequestUpdate, TaskStatus};
-use df_db::catalog::get_project_by_key;
 use df_db::outbox::{JobError, OutboxHandler, RetryPolicy};
 use df_db::task_updates::lock_task_pr;
 use df_db::tasks::{MARK_DRAFT_KIND, MarkDraftJob, get_task};
@@ -73,19 +72,12 @@ impl OutboxHandler for MarkDraftHandler {
         }
         let number = u64::try_from(number)
             .map_err(|e| JobError::GiveUp(format!("invalid pull request number {number}: {e}")))?;
-        let project = get_project_by_key(&self.pool, task.key.project().as_ref())
+        let base = df_db::base_branch(&self.pool, task.id)
             .await
-            .map_err(|e| JobError::Retry(format!("project of task `{}`: {e}", task.id)))?;
-        let Some(project) = project else {
-            return Ok(());
-        };
+            .map_err(|e| JobError::Retry(format!("base branch of task `{}`: {e}", task.id)))?;
         let open = self
             .forge
-            .find_open_pull_request(
-                &task.project_id,
-                &task.branch,
-                task.base_branch(&project.base_branch),
-            )
+            .find_open_pull_request(&task.project_id, &task.branch, &base)
             .await
             .map_err(|e| JobError::Retry(format!("PR #{number}: {e}")))?;
         // A closed or merged PR is left as it is, and so is one that is a draft already.

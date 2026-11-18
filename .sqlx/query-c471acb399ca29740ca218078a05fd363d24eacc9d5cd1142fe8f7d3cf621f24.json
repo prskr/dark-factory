@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,\n               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,\n               p.agent_branch_globs,\n               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS \"has_tasks!\"\n        FROM projects p WHERE p.key = $1\n        ",
+  "query": "\n        SELECT p.id, p.key, p.name, p.repo_url, p.issue_tracker_url, p.image, p.base_branch,\n               p.adapter_command, p.forge_credential_id, p.webhook_wake, p.branch_rewrite_policy,\n               p.agent_branch_globs, p.subtask_merge,\n               EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id) AS \"has_tasks!\"\n        FROM projects p WHERE p.key = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -137,6 +137,17 @@
       },
       {
         "ordinal": 12,
+        "name": "subtask_merge",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "subtask_merge"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
         "name": "has_tasks!",
         "type_info": "Bool",
         "origin": "Expression"
@@ -160,8 +171,9 @@
       false,
       false,
       false,
+      false,
       null
     ]
   },
-  "hash": "53dc27888b3d175292d61e4e841be1e6e25766cba3d58ec0dddf258f9bc389d5"
+  "hash": "c471acb399ca29740ca218078a05fd363d24eacc9d5cd1142fe8f7d3cf621f24"
 }

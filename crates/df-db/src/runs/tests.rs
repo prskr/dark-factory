@@ -82,6 +82,7 @@ impl Env {
             df_db::TaskPlacement {
                 branch: Some(df_core::ExistingBranch::parse(branch, "main").unwrap()),
                 attached_pr: pr,
+                ..df_db::TaskPlacement::default()
             },
         )
         .await

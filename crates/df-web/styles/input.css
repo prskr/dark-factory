@@ -213,14 +213,19 @@
     flex-direction: column;
     min-height: 0;
   }
-  /* The Artifacts tab of the details replaces the overview; the strip of a collapsed column
-     (inside the overview) stays. */
+  /* Of the Overview, Subtasks and Artifacts panels of the details only the open tab shows; the
+     strip of a collapsed column (inside the overview) stays. */
   .ws-details[data-tab="artifacts"] .ws-overview,
-  .ws-details[data-tab="overview"] .ws-artifacts {
+  .ws-details[data-tab="subtasks"] .ws-overview,
+  .ws-details[data-tab="overview"] .ws-subtasks,
+  .ws-details[data-tab="artifacts"] .ws-subtasks,
+  .ws-details[data-tab="overview"] .ws-artifacts,
+  .ws-details[data-tab="subtasks"] .ws-artifacts {
     display: none;
   }
   @media (min-width: 1280px) {
-    .ws[data-collapsed="true"] .ws-details[data-tab="artifacts"] .ws-overview {
+    .ws[data-collapsed="true"] .ws-details[data-tab="artifacts"] .ws-overview,
+    .ws[data-collapsed="true"] .ws-details[data-tab="subtasks"] .ws-overview {
       display: flex;
     }
   }

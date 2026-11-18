@@ -35,6 +35,13 @@ pub enum DbError {
     /// A dependency of a new task names a task that is not in the project, or names one twice.
     #[error("invalid dependency `{0}`")]
     InvalidDependency(String),
+    /// The `base_task` of a new task is no task of the project, or one that is Done, failed or
+    /// cancelled.
+    #[error("invalid base task `{0}`")]
+    InvalidBaseTask(String),
+    /// A new task would exceed `tasks.maxDepth` or `tasks.maxOpenSubtasks`.
+    #[error("{0}")]
+    DelegationLimit(#[from] crate::tasks::DelegationLimit),
     /// The branch of a new or reopened task is held by another open task of the project
     /// (`tasks_open_branch`). `task` is `None` when only the unique index noticed it.
     #[error("{}", branch_held_message(task.as_ref()))]

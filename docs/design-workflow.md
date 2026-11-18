@@ -58,10 +58,10 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks | Main task workspace and its variants (status menu, stop, cancel, reset, rename, blocked question, rate limited, user message with code and its dark preview), profile menu, Requests · deny always |
 | Tasks - Queue | Queued messages: many, editing one |
 | Tasks - Status | Task status `in_review` |
-| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed, description collapsed and expanded |
+| Tasks - Details Sidebar | Details sidebar: collapsed, many runs, runs collapsed, awaiting dependencies, dependencies collapsed, overview with base task, description collapsed and expanded |
 | Tasks - Phone | Phone boards of tasks and requests, profile menu (main component `Profile menu`) |
 | Tasks - Artifacts | Artifacts of a task: details tab with cards, split view (Preview, Source, image), task list collapsed, bookmarkable artifact page; phone details sheet and artifact page |
-| Tasks - Roadmap | Task boards for features that are not built yet (details tabs) |
+| Tasks - Subtasks | Task tree: Subtasks tab with progress and per-subtask chips, done/total chip on task rows; board "Later · details tabs, sub-tasks" is the superseded first draft |
 | Flows (filter, new task) | Project filter, new task composer |
 | Request Inbox | Request inbox |
 | Config - Projects | Projects: two-line list rows in the settings area, new-project modal, project settings page and its tabs (general, security, context, integrations with its states); phone |
@@ -153,6 +153,8 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Details Sidebar / Desktop · runs collapsed | `/tasks/<id>` | manual seed (not built): task with runs | 1440 |
 | Tasks - Details Sidebar / Desktop · awaiting dependencies | `/tasks/<id>` | manual seed (not built): task DF-23 `awaiting_dependencies` (persona Grace), created by the agent of DF-19 (persona CEO) with parent DF-19; dependencies DF-20 (`completion`, satisfied) and DF-22 (`done`, not satisfied); dependant DF-24 (`done`); no runs, no PR | 1440 |
 | Tasks - Details Sidebar / Desktop · dependencies collapsed | `/tasks/<id>` | as Desktop · awaiting dependencies after DF-22 is done; DF-23 `running` with run #1 | 1440 |
+| Tasks - Details Sidebar / Desktop · overview, base task | `/tasks/<id>` | as Desktop · dependencies collapsed; DF-23 created with `base_task: DF-20`; no subtasks, no artifacts (no tabs) | 1440 |
+| Tasks - Subtasks / Desktop · subtasks tab | `/tasks/<id>` | task DF-12 `running` with direct subtasks DF-13 `completed`, DF-16 `in_review`, DF-17 `running` (two subtasks of its own, one `completed`), DF-18 `cancelled`; Subtasks tab open; DF-12 row chip 2/3 | 1440 |
 | Tasks - Queue / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Tasks - Details Sidebar / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines | 1440 |
 | Tasks / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question | 1440 |

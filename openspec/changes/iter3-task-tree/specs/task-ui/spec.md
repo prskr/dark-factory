@@ -18,7 +18,7 @@ The task details column SHALL have two tabs: Overview, holding the details shown
 - **THEN** the Overview shows `DF-20` with its title as a link
 
 ### Requirement: Subtask progress on task rows
-A task row in the task list SHALL show a done/total chip when the task has subtasks. Done SHALL count direct subtasks that are `in_review` or `completed`; total SHALL count direct subtasks that are not `cancelled`. Subtasks SHALL appear as ordinary rows in the flat list, and the chip SHALL update live.
+A task row in the task list SHALL show a done/total chip when the task has subtasks that are not `cancelled`. Done SHALL count direct subtasks that are `in_review` or `completed`; total SHALL count direct subtasks that are not `cancelled`. Subtasks SHALL appear as ordinary rows in the flat list, and the chip SHALL update live.
 
 #### Scenario: Partial progress
 - **WHEN** `DF-30` has subtasks `in_review`, `completed`, `failed` and `cancelled`
@@ -26,4 +26,8 @@ A task row in the task list SHALL show a done/total chip when the task has subta
 
 #### Scenario: No subtasks
 - **WHEN** a task has no subtasks
+- **THEN** its row shows no chip
+
+#### Scenario: Only cancelled subtasks
+- **WHEN** every subtask of a task is `cancelled`
 - **THEN** its row shows no chip

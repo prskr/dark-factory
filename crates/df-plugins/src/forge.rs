@@ -245,6 +245,40 @@ impl PluginForgeClient {
         .map(convert::from_pull_request)
     }
 
+    pub(crate) async fn merge_pull_request(
+        &self,
+        target: &RepoTarget,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), IntegrationError> {
+        let id = convert::pull_request_ref(&target.repo, number);
+        self.call(target, |plugin, store| {
+            let (id, head_sha) = (id.clone(), head_sha.to_string());
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_merge(store, &id, &head_sha).await
+            })
+        })
+        .await
+    }
+
+    pub(crate) async fn create_branch(
+        &self,
+        target: &RepoTarget,
+        name: &str,
+        from: &str,
+    ) -> Result<(), IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        self.call(target, |plugin, store| {
+            let (repo, name, from) = (repo.clone(), name.to_string(), from.to_string());
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_create_branch(store, &repo, &name, &from).await
+            })
+        })
+        .await
+    }
+
     pub(crate) async fn list_pull_request_feedback(
         &self,
         target: &RepoTarget,

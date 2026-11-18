@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,\n                  p.key AS project_key, t.persona_id, p.repo_url,\n                  COALESCE(t.base_branch, p.base_branch) AS \"base_branch!\", t.branch AS task_branch,\n                  p.branch_rewrite_policy,\n                  c.id AS \"credential_id?\", c.name AS \"credential_name?\",\n                  c.secret_name AS \"secret_name?\", c.secret_key AS \"secret_key?\"\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           LEFT JOIN credential_refs c ON c.id = p.forge_credential_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state <> ALL($1)\n           ORDER BY r.started_at, r.id",
+  "query": "SELECT r.id AS run_id, r.pod_ip AS \"pod_ip!\", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,\n                  p.key AS project_key, t.persona_id, p.repo_url,\n                  eb.branch AS \"base_branch!\", t.branch AS task_branch,\n                  p.branch_rewrite_policy,\n                  c.id AS \"credential_id?\", c.name AS \"credential_name?\",\n                  c.secret_name AS \"secret_name?\", c.secret_key AS \"secret_key?\"\n           FROM runs r\n           JOIN tasks t ON t.id = r.task_id\n           JOIN projects p ON p.id = t.project_id\n           -- The effective base branch, as `tasks::base_branch` resolves it.\n           CROSS JOIN LATERAL (\n               WITH RECURSIVE chain AS (\n                   SELECT id, base_task_id, base_branch, 0 AS depth FROM tasks WHERE id = t.id\n                   UNION ALL\n                   SELECT b.id, b.base_task_id, b.base_branch, c.depth + 1\n                   FROM chain c JOIN tasks b ON b.id = c.base_task_id\n                   WHERE b.status = 'completed'\n               )\n               SELECT COALESCE(open_base.branch, last.base_branch, p.base_branch) AS branch\n               FROM (SELECT * FROM chain ORDER BY depth DESC LIMIT 1) last\n               LEFT JOIN tasks open_base ON open_base.id = last.base_task_id\n           ) eb\n           LEFT JOIN credential_refs c ON c.id = p.forge_credential_id\n           WHERE r.pod_ip IS NOT NULL\n             AND r.state <> ALL($1)\n           ORDER BY r.started_at, r.id",
   "describe": {
     "columns": [
       {
@@ -199,5 +199,5 @@
       false
     ]
   },
-  "hash": "8776185642112f338388d4c0cb3debfa40f0e09948b3792923f6f86439863a72"
+  "hash": "2e91770bc7212691980929c31270b76619ce44d5a3085282fcb126e3f5a85853"
 }

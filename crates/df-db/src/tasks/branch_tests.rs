@@ -30,7 +30,7 @@ async fn env() -> Env {
 fn placement(branch: &str) -> TaskPlacement {
     TaskPlacement {
         branch: Some(ExistingBranch::parse(branch, "main").unwrap()),
-        attached_pr: None,
+        ..TaskPlacement::default()
     }
 }
 
@@ -171,6 +171,7 @@ async fn creation_with_an_attached_pr_stores_number_url_base_and_flag() {
         .create_on(TaskPlacement {
             branch: Some(ExistingBranch::parse("fix/cve", "main").unwrap()),
             attached_pr: Some(attached),
+            ..TaskPlacement::default()
         })
         .await
         .unwrap();
@@ -241,12 +242,16 @@ async fn the_effective_base_branch_is_the_attached_pr_base_before_the_project_ba
                 url: "u".into(),
                 base: "release/1.2".into(),
             }),
+            ..TaskPlacement::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(plain.base_branch("main"), "main");
-    assert_eq!(attached.base_branch("main"), "release/1.2");
+    assert_eq!(base_branch(&env.pool, plain.id).await.unwrap(), "main");
+    assert_eq!(
+        base_branch(&env.pool, attached.id).await.unwrap(),
+        "release/1.2"
+    );
     assert!(attached.on_existing_branch() && plain.on_existing_branch());
     let own = env.create_on(TaskPlacement::default()).await.unwrap();
     assert!(!own.on_existing_branch());

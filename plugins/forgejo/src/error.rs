@@ -8,7 +8,8 @@ pub(crate) fn from_status(status: u16, retry_after: Option<u32>, body: &[u8]) ->
     match status {
         404 => Error::NotFound(message),
         401 | 403 => Error::Unauthorized(message),
-        409 => Error::Conflict(message),
+        // Merge: the pull request is not mergeable (conflict, failed check, still being checked).
+        405 | 409 => Error::Conflict(message),
         _ if message.contains("already exists") => Error::Conflict(message),
         422 => Error::InvalidInput(message),
         429 => Error::RateLimited(RateLimit {

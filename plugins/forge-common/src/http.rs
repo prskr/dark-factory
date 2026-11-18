@@ -16,6 +16,7 @@ const WRITE_CHUNK: usize = 4096;
 pub enum Method {
     Get,
     Post,
+    Put,
     Patch,
 }
 
@@ -25,6 +26,7 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Put => "PUT",
             Self::Patch => "PATCH",
         }
     }
@@ -102,6 +104,7 @@ pub fn send(request: &RawRequest<'_>) -> Result<RawResponse, TransportError> {
     out.set_method(&match request.method {
         Method::Get => WasiMethod::Get,
         Method::Post => WasiMethod::Post,
+        Method::Put => WasiMethod::Put,
         Method::Patch => WasiMethod::Patch,
     })
     .and(out.set_scheme(Some(&match request.scheme {
@@ -240,6 +243,7 @@ mod tests {
     #[test]
     fn methods_are_named_as_in_a_request_line() {
         assert_eq!(Method::Patch.name(), "PATCH");
+        assert_eq!(Method::Put.name(), "PUT");
     }
 
     #[test]

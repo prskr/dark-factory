@@ -57,5 +57,6 @@ pub async fn place_on_branch(
     Ok(TaskPlacement {
         branch: Some(branch),
         attached_pr,
+        ..TaskPlacement::default()
     })
 }

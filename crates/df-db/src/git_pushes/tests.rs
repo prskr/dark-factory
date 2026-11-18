@@ -457,3 +457,44 @@ async fn a_final_verdict_waits_for_the_run_lock_before_it_touches_the_task_row()
 fn new_id() -> Uuid {
     RunId::new().as_uuid()
 }
+
+async fn task_of(pool: &PgPool, run: RunId) -> TaskId {
+    let id: Uuid = sqlx::query_scalar("SELECT task_id FROM runs WHERE id = $1")
+        .bind(run.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    TaskId::from_uuid(id)
+}
+
+fn push_of(run: RunId, branch: &str, sha: char, verdict: PushVerdict) -> PushRecord {
+    let mut push = record(run, new_id(), verdict);
+    push.refs[0].name = format!("refs/heads/{branch}");
+    push.refs[0].new_sha = sha.to_string().repeat(40);
+    push
+}
+
+#[tokio::test]
+async fn the_last_accepted_head_is_the_newest_accepted_task_branch_push() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let run = seed_run(&pool).await;
+    let task = task_of(&pool, run).await;
+    assert_eq!(last_accepted_head(&pool, task).await.unwrap(), None);
+
+    let branch = "factory/task/DF-1";
+    for push in [
+        push_of(run, branch, 'a', PushVerdict::Accepted),
+        push_of(run, branch, 'b', PushVerdict::Accepted),
+        // Not the newest accepted head: refused, another branch, or still in flight.
+        push_of(run, branch, 'c', PushVerdict::Rejected),
+        push_of(run, "factory/wip/DF-1", 'd', PushVerdict::Accepted),
+        push_of(run, branch, 'e', PushVerdict::Forwarding),
+    ] {
+        record_push(&pool, &push).await.unwrap();
+    }
+
+    assert_eq!(
+        last_accepted_head(&pool, task).await.unwrap(),
+        Some("b".repeat(40))
+    );
+}

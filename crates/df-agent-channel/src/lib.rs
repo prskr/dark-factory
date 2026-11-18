@@ -42,6 +42,8 @@ pub struct ChannelConfig {
     pub git_proxy: GitProxy,
     /// Limits of task artifacts.
     pub artifacts: df_core::ArtifactsConfig,
+    /// Limits of delegation in the task tree.
+    pub tasks: df_core::config::TasksConfig,
     /// Whether the sandboxes confine the harness; the system prompt tells the agent.
     pub landlock: df_sandbox_contract::LandlockMode,
 }
@@ -56,6 +58,7 @@ impl From<&InstanceConfig> for ChannelConfig {
                 port: cfg.gateway.git_port,
             },
             artifacts: cfg.artifacts,
+            tasks: cfg.tasks,
             landlock: cfg.sandbox.provisioning.landlock,
         }
     }

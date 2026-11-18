@@ -243,6 +243,27 @@ async fn append_branch_pushed(
     Ok(())
 }
 
+/// The commit the task's branch was last updated to by an accepted push through the Git proxy:
+/// the head a merge of its pull request is requested for (`task-tree` "Merge outcome"). `None`
+/// if no push of the task branch was accepted.
+pub async fn last_accepted_head(pool: &PgPool, task_id: TaskId) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT u.ref ->> 'new_sha' AS "new_sha!"
+         FROM git_pushes p
+         JOIN runs r ON r.id = p.run_id
+         JOIN tasks t ON t.id = r.task_id
+         CROSS JOIN LATERAL jsonb_array_elements(p.refs) WITH ORDINALITY AS u(ref, n)
+         WHERE t.id = $1 AND p.verdict = 'accepted'
+           AND u.ref ->> 'name' = 'refs/heads/' || t.branch
+           AND u.ref ->> 'verdict' = 'accepted'
+         ORDER BY p.created_at DESC, p.updated_at DESC, u.n DESC
+         LIMIT 1"#,
+        task_id.as_uuid()
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
 /// Marks `forwarding` records older than `older_than` as `unknown`; returns how many.
 pub async fn mark_stale_forwarding(pool: &PgPool, older_than: Duration) -> Result<u64, DbError> {
     let seconds = older_than.as_secs_f64();

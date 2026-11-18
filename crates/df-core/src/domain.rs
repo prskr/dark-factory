@@ -161,6 +161,20 @@ impl TaskStatus {
     /// task is not in it and waits for the idle time like any other. For SQL like [`Self::DONE`].
     pub const CLOSED: &'static [Self] = &[Self::Completed, Self::Cancelled];
 
+    /// The statuses in which a subtask no longer holds back its parent's completion (unless it
+    /// has an unmerged PR into the parent's branch, see `task-tree` "Open subtasks"). For SQL
+    /// like [`Self::DONE`].
+    pub const SUBTASK_FINISHED: &'static [Self] = &[
+        Self::InReview,
+        Self::Completed,
+        Self::Failed,
+        Self::Cancelled,
+    ];
+
+    /// The statuses a subtask counts as done in its parent's progress: `in_review` and
+    /// `completed`. For SQL like [`Self::DONE`].
+    pub const SUBTASK_DONE: &'static [Self] = &[Self::InReview, Self::Completed];
+
     pub const fn group(&self) -> StatusGroup {
         // Every variant is named, so a new one fails to compile until it is grouped; a test pins
         // `DONE` to the `Done` arm.

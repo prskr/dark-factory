@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE chain AS (\n             SELECT id, project_id, base_task_id, base_branch, 0 AS depth\n             FROM tasks WHERE id = $1\n             UNION ALL\n             SELECT b.id, b.project_id, b.base_task_id, b.base_branch, c.depth + 1\n             FROM chain c JOIN tasks b ON b.id = c.base_task_id\n             WHERE b.status = 'completed'\n         )\n         SELECT COALESCE(open_base.branch, c.base_branch, p.base_branch) AS \"branch!\"\n         FROM (SELECT * FROM chain ORDER BY depth DESC LIMIT 1) c\n         JOIN projects p ON p.id = c.project_id\n         LEFT JOIN tasks open_base ON open_base.id = c.base_task_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "branch!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "034c38feee00db5736d94cefc3d4bc165e05bd8249ba35a7afddb140ed62ead5"
+}

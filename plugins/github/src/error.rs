@@ -23,7 +23,8 @@ pub(crate) fn from_response(response: &Response, now: u64) -> Error {
     match status {
         401 | 403 => Error::Unauthorized(body.message),
         404 => Error::NotFound(format!("{} ({NOT_FOUND_HINT})", body.message)),
-        409 => Error::Conflict(body.message),
+        // Merge: the pull request is not mergeable; 409: the head moved.
+        405 | 409 => Error::Conflict(body.message),
         422 => validation_failed(body),
         _ => Error::Upstream(UpstreamError {
             status,
@@ -83,14 +84,16 @@ fn retry_after(response: &Response, now: u64) -> u32 {
     }
 }
 
-/// A 422 for a duplicate pull request is a conflict, any other is invalid input.
+/// A 422 for a duplicate pull request or an existing branch is a conflict, any other is invalid
+/// input.
 fn validation_failed(body: Body) -> Error {
     let messages: Vec<String> = std::iter::once(body.message)
         .chain(body.errors.into_iter().filter_map(|e| e.message))
         .collect();
-    let duplicate = messages
-        .iter()
-        .any(|m| m.to_lowercase().contains("pull request already exists"));
+    let duplicate = messages.iter().any(|m| {
+        let m = m.to_lowercase();
+        m.contains("pull request already exists") || m.contains("reference already exists")
+    });
     let joined = messages.join("; ");
     if duplicate {
         Error::Conflict(joined)

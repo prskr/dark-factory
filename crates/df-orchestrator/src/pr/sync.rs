@@ -93,8 +93,11 @@ impl PrSyncHandler {
 
     async fn project(&self, task: &TaskRow) -> Result<Option<Project>, DbError> {
         let project = get_project(&self.pool, task.project_id.as_uuid()).await?;
-        Ok(project.map(|project| Project {
-            base_branch: task.base_branch(&project.base_branch).to_owned(),
+        let Some(project) = project else {
+            return Ok(None);
+        };
+        Ok(Some(Project {
+            base_branch: df_db::base_branch(&self.pool, task.id).await?,
             repo_url: project.repo_url,
         }))
     }

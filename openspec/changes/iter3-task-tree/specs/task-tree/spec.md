@@ -7,7 +7,7 @@ Defines how tasks build on each other's branches and how the task tree is bounde
 ## ADDED Requirements
 
 ### Requirement: Base task at creation
-`create_task` SHALL accept an optional `base_task` (task key). The base task SHALL be a task of the run's project that is not Done (`completed`), `failed` or `cancelled`; the caller's own task is allowed. Any other value SHALL produce an error result naming the key and create nothing. The base task SHALL NOT change after creation.
+`create_task` SHALL accept an optional `base_task` (task key). The base task SHALL be a task of the run's project that is not Done (`completed`), `failed` or `cancelled`; the caller's own task is allowed. Any other value SHALL produce an error result naming the key and create nothing. The base task SHALL NOT change after creation. `base_task` and `branch` (an existing branch) are mutually exclusive: together they SHALL produce an error result and create nothing.
 
 #### Scenario: Reviewer based on the implementation
 - **WHEN** the agent of `DF-19` creates `DF-21` with `base_task: "DF-20"`
@@ -40,19 +40,27 @@ A task's base branch SHALL be the task branch of its base task, or the project's
 - **WHEN** `DF-21`'s base task `DF-20` is Done and `DF-21` runs again
 - **THEN** `DF-21`'s base branch is `main`
 
-### Requirement: Base branch created on first start
-When a task with a base task starts its first run, the control plane SHALL create the base task's task branch through the forge from the base task's own base branch, unless the branch already exists. If creating it fails, the run SHALL end `failed` with the forge's reason and the task SHALL become `failed`.
+### Requirement: Base branch created on start
+When a run of a task with a base task that is not Done starts, the control plane SHALL create the base task's task branch through the forge from the base task's own base branch, unless the branch already exists. If creating it fails, the run SHALL end `failed` with the forge's reason and the task SHALL become `failed`.
 
 #### Scenario: Coordinator without commits
 - **WHEN** `DF-31` (base task `DF-30`) starts its first run and `DF-30` has never pushed
 - **THEN** `factory/task/DF-30` is created from `main` before the runtime prepares the workspace
+
+#### Scenario: Start after a forge failure
+- **WHEN** the first start of `DF-31` failed because the forge refused the branch, and a message starts it again
+- **THEN** the branch is created before the runtime prepares the workspace
 
 #### Scenario: Branch already pushed
 - **WHEN** `DF-21` (base task `DF-20`) starts its first run and `factory/task/DF-20` exists
 - **THEN** the branch is left as is and the run starts
 
 ### Requirement: Open subtasks
-A subtask SHALL count as open if its status is not `in_review`, `completed`, `failed` or `cancelled`, or if its base task is its parent, it has a PR, and it is neither `completed` nor `cancelled`.
+A subtask SHALL count as open if its status is not `in_review`, `completed`, `failed` or `cancelled`, or if its base task is its parent, it is neither `completed` nor `cancelled`, and it either has a PR or the job that opens its PR is still pending.
+
+#### Scenario: PR about to open
+- **WHEN** subtask `DF-31` of `DF-30` has base task `DF-30`, is `in_review` and its draft PR has not been opened yet
+- **THEN** `DF-31` is open
 
 #### Scenario: Research subtask finished
 - **WHEN** subtask `DF-22` of `DF-20` has no PR and is `in_review`
@@ -97,7 +105,7 @@ Cancelling a task SHALL also cancel each of its descendants that is not `complet
 - **THEN** `DF-40` stays `awaiting_dependencies`
 
 ### Requirement: Delegation limits
-`create_task` SHALL produce an error result naming the limit and create nothing if the new task would have more ancestors than `tasks.maxDepth` (instance setting, default 5), or if the caller's task already has `tasks.maxOpenSubtasks` open subtasks (instance setting, default 10).
+`create_task` SHALL produce an error result naming the limit and create nothing if the new task would have more ancestors than `tasks.maxDepth` (instance setting, default 5), or if the caller's task already has `tasks.maxOpenSubtasks` open subtasks (instance setting, default 10). Both settings SHALL be at least 1; the instance configuration SHALL refuse 0 at load.
 
 #### Scenario: Too deep
 - **WHEN** a task with 5 ancestors calls `create_task` with default limits
@@ -131,7 +139,11 @@ Cancelling a task SHALL also cancel each of its descendants that is not `complet
 - **THEN** the result has `is_error: true` and the PR stays open
 
 ### Requirement: Merge outcome
-The merge SHALL be requested for the head commit last pushed by the subtask. On success the subtask SHALL become Done (`completed`, merge time recorded, audit entry `task.done` with the calling agent) as for a merge reported by the forge, and the call SHALL return the merged PR's URL. A forge error, such as a merge conflict, a failed required check or a moved head, SHALL produce an error result with the forge's reason and change nothing.
+The merge SHALL be requested for the head commit last pushed by the subtask. On success the subtask SHALL become Done (`completed`, merge time recorded, audit entry `task.done` with the calling agent) as for a merge reported by the forge, and the call SHALL return the merged PR's URL. A forge error SHALL produce an error result with the forge's reason and change nothing. A subtask that became `completed` or `cancelled` while the forge merged SHALL keep that status, and the result SHALL say so.
+
+#### Scenario: Cancelled during the merge
+- **WHEN** `DF-31` is cancelled while the forge merges its PR
+- **THEN** the PR is merged, the result returns its URL and says `DF-31` stays cancelled, and `DF-31` remains `cancelled`
 
 #### Scenario: Merged
 - **WHEN** `merge_subtask_pr` merges `DF-31`'s PR

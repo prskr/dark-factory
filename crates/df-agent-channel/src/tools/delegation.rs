@@ -5,14 +5,20 @@ use df_core::{
     DependencyKind, ExistingBranch, Principal, TaskKey, matches_agent_branch, sanitize_title,
 };
 use df_db::tasks::child_task_id;
-use df_db::{DbError, NewDependency, NewTask, TaskPlacement, catalog, get_task, place_on_branch};
+use df_db::{
+    DbError, NewDependency, NewTask, TaskPlacement, catalog, get_task, open_subtasks,
+    place_on_branch,
+};
 use serde_json::{Value, json};
 
 use super::{Outcome, text_arg};
+
+mod merge;
 use crate::ChannelContext;
 use crate::error::ChannelError;
 use df_orchestrator::OrchestratorError;
 use df_orchestrator::run_context::RunContext;
+pub(super) use merge::merge_subtask_pr;
 
 /// Creates a task in the run's project with the run's task as parent and the run's agent as
 /// creator.
@@ -39,10 +45,17 @@ pub(super) async fn create_task(
         Ok(depends_on) => depends_on,
         Err(problem) => return Ok(Outcome::error(problem)),
     };
-    let placement = match resolve_branch(ctx, rc, args).await {
+    let mut placement = match resolve_branch(ctx, rc, args).await {
         Ok(placement) => placement,
         Err(problem) => return Ok(Outcome::error(problem)),
     };
+    placement.limits = Some(ctx.config.tasks);
+    if let Some(base) = text_arg(args, "base_task") {
+        match base.parse::<TaskKey>() {
+            Ok(key) => placement.base_task = Some(key),
+            Err(_invalid) => return Ok(Outcome::error(invalid_base_task(&base))),
+        }
+    }
     let input = NewTask {
         project_id: rc.project.id,
         persona_id: df_core::PersonaId::from_uuid(persona),
@@ -65,9 +78,43 @@ pub(super) async fn create_task(
         Err(DbError::InvalidDependency(key)) => Ok(Outcome::error(format!(
             "invalid dependency `{key}`: it is not a task of this project, or it is listed twice"
         ))),
+        Err(DbError::InvalidBaseTask(key)) => Ok(Outcome::error(invalid_base_task(&key))),
+        Err(limit @ DbError::DelegationLimit(_)) => Ok(Outcome::error(limit.to_string())),
         Err(held @ DbError::BranchHeld { .. }) => Ok(Outcome::error(held.to_string())),
         Err(e) => Err(e.into()),
     }
+}
+
+fn invalid_base_task(key: &str) -> String {
+    format!(
+        "invalid base_task `{key}`: it is not a task of this project, or it is done, failed or cancelled"
+    )
+}
+
+/// The error result of `complete_task` while subtasks are open (`task-tree` "Completion blocked
+/// by open subtasks"); `None` when none is.
+pub(super) async fn open_subtasks_outcome(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+) -> Result<Option<Outcome>, ChannelError> {
+    let open = open_subtasks(&ctx.pool, rc.task.id).await?;
+    if open.is_empty() {
+        return Ok(None);
+    }
+    let list = open
+        .iter()
+        .map(|subtask| match &subtask.pr_url {
+            Some(url) => format!("{} (PR {url})", subtask.key),
+            None => subtask.key.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Some(Outcome::error(format!(
+        "you cannot complete the task yet: these subtasks are still open: {list}. A subtask is open \
+         until it is finished (in review without a pull request into your branch, done, failed or \
+         cancelled). End your turn to be woken when they end, or merge their pull requests with \
+         merge_subtask_pr if the project allows it; then call complete_task again."
+    ))))
 }
 
 /// The placement of the `branch` argument: validated, matched against the project's agent
@@ -207,4 +254,8 @@ fn parse_dependencies(args: &Value) -> Result<Vec<NewDependency>, String> {
 }
 
 #[cfg(test)]
+mod merge_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;

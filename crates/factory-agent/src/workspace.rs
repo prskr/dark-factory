@@ -209,7 +209,8 @@ async fn clone_workspace(
 
     // Start from origin/<task branch> if the remote has it, else from the base branch
     let task_remote_ref = format!("origin/{}", workspace.task_branch);
-    let start_point = if ref_exists(git, &task_remote_ref).await {
+    let has_remote_task = ref_exists(git, &task_remote_ref).await;
+    let start_point = if has_remote_task {
         match git.git_output(&["rev-parse", &task_remote_ref]).await {
             Ok(sha) => store_remote_sha(git, &sha),
             // Only the lease is lost: pushes stay plain until the next fetch records a sha.
@@ -227,11 +228,62 @@ async fn clone_workspace(
     };
     git.git_output(&["checkout", "-B", &workspace.task_branch, &start_point])
         .await?;
+    follow_base(git, workspace, has_remote_task).await;
 
     restore_wip_snapshot(git, workspace).await?;
 
     let head_sha = git.current_head().await.unwrap_or_default();
     Ok(PrepareResult::clean(head_sha))
+}
+
+/// Moves the checked-out task branch to `origin/<base>` while it has no commits of its own: its
+/// tip, and the remote task branch's when there is one, is an ancestor of the base (a reviewer
+/// based on another task follows that task's new commits). The remote task branch moves along
+/// with a plain fast-forward push; a branch the remote doesn't have is not created. A task on an
+/// existing branch is never moved. A failure leaves the branch as it is: the next prepare tries
+/// again.
+async fn follow_base(git: &Git, workspace: &Workspace, has_remote_task: bool) {
+    if workspace.existing_branch {
+        return;
+    }
+    if let Err(error) = try_follow_base(git, workspace, has_remote_task).await {
+        tracing::warn!(error = %error, task_branch = %workspace.task_branch, "could not move the task branch to its base");
+    }
+}
+
+async fn try_follow_base(
+    git: &Git,
+    workspace: &Workspace,
+    has_remote_task: bool,
+) -> anyhow::Result<()> {
+    let base_ref = format!("origin/{}", workspace.base_branch);
+    if !ref_exists(git, &base_ref).await {
+        return Ok(());
+    }
+    let (head, base) = (
+        git.current_head().await?,
+        git.git_output(&["rev-parse", &base_ref]).await?,
+    );
+    if head == base || !git.is_ancestor(&head, &base).await {
+        return Ok(());
+    }
+    let task_remote_ref = format!("origin/{}", workspace.task_branch);
+    if has_remote_task && !git.is_ancestor(&task_remote_ref, &base).await {
+        return Ok(());
+    }
+    git.git_output(&["merge", "--ff-only", &base_ref]).await?;
+    if !has_remote_task {
+        return Ok(());
+    }
+    let refspec = format!("{0}:{0}", workspace.task_branch);
+    let pushed = git.push("origin", &refspec, Force::No).await?;
+    if pushed.status.success() {
+        store_remote_sha(git, &base);
+    } else {
+        // The remote task branch stays behind; the sync below reports what differs.
+        tracing::warn!(task_branch = %workspace.task_branch, "the remote task branch could not follow the base");
+    }
+    Ok(())
 }
 
 /// Restores the files of `origin/<wip branch>` into the work tree if that branch exists: the
@@ -314,6 +366,8 @@ async fn sync_existing_workspace(
         git.git_output(&["checkout", "-B", &workspace.task_branch, &start_point])
             .await?;
     }
+
+    follow_base(git, workspace, has_remote_task).await;
 
     let mut result = if has_remote_task {
         sync_with_remote_task_branch(git, workspace, &task_remote_ref).await?

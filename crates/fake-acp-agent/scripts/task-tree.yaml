@@ -1,0 +1,160 @@
+# Script of the task tree scenarios of the e2e suite (project `TT`, subtask merges by the parent
+# agent, no webhook): one script serves both coordinators and their children, told apart by markers
+# in their prompts. No key is predicted: a coordinator saves the keys of the tasks it creates and
+# its own key (`${me}`, `${impl}`, `${one}`), kept in the working directory for its later turns, so
+# the scenarios repeat against the same database. Every turn plays the same `when` blocks, because
+# a woken coordinator may be a live or a resumed session.
+#
+# `[tt-coord-review]`: creates the implementation and a review that depends on its completion and
+# builds on its branch (`base_task`). The implementation commits a file and completes; the review
+# lists its `git log` and files, which show that commit, and completes.
+#
+# `[tt-coord-feature]`: creates two iterations on its own branch (`base_task` = itself), the second
+# after the first is done. Each iteration commits a file and completes (the second lists its `git
+# log`, which shows the first one's merge). The coordinator is woken after each completion, merges
+# the pull request with `merge_subtask_pr` (retried every 2 s while the control plane has not
+# opened it yet, which it does right after the run ended) and completes after the second merge.
+sessions:
+  new:
+    - &turn
+      - when:
+          prompt_contains: "[tt-coord-review]"
+          steps:
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Greeting implementation
+                  prompt: "[tt-impl] Write the implementation file."
+                save:
+                  impl: /key
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Greeting review
+                  prompt: "[tt-review] Review the implementation in your workspace."
+                  base_task: "${impl}"
+                  depends_on:
+                    - task: "${impl}"
+                      kind: completion
+            - say: "Delegated the implementation and its review."
+      - when:
+          prompt_contains: "[tt-impl]"
+          steps:
+            - say: "Writing the implementation file."
+            - shell: |
+                printf 'implementation\n' > tt-implementation.txt
+                git add tt-implementation.txt
+                git commit -q -m 'Add the implementation file'
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Implementation written."
+      - when:
+          prompt_contains: "[tt-review]"
+          steps:
+            - say_shell: "git log --oneline -5; ls"
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Reviewed the implementation in the workspace."
+      - when:
+          prompt_contains: "[tt-coord-feature]"
+          steps:
+            - mcp:
+                server: factory
+                tool: list_artifacts
+                save:
+                  me: /task
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Iteration one
+                  prompt: "[tt-one] Add the first file."
+                  base_task: "${me}"
+                save:
+                  one: /key
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Iteration two
+                  prompt: "[tt-two] Add the second file."
+                  base_task: "${me}"
+                  depends_on:
+                    - task: "${one}"
+                      kind: done
+                save:
+                  two: /key
+            - say: "Delegated both iterations; waiting for them."
+      - when:
+          prompt_contains: "[tt-one]"
+          steps:
+            - say: "Adding the first file."
+            - shell: |
+                printf 'one\n' > tt-one.txt
+                git add tt-one.txt
+                git commit -q -m 'Add iteration one file'
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "First iteration done."
+      - when:
+          prompt_contains: "[tt-two]"
+          steps:
+            - say_shell: "git log --oneline -5; ls"
+            - shell: |
+                printf 'two\n' > tt-two.txt
+                git add tt-two.txt
+                git commit -q -m 'Add iteration two file'
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Second iteration done."
+      - when:
+          prompt_contains: '"Iteration one" completed'
+          steps:
+            - mcp:
+                server: factory
+                tool: merge_subtask_pr
+                args:
+                  task: "${one}"
+                retry: &pr_opens
+                  attempts: 30
+                  delay_seconds: 2
+            - say: "Merged the first iteration."
+      - when:
+          prompt_contains: '"Iteration two" completed'
+          steps:
+            - mcp:
+                server: factory
+                tool: merge_subtask_pr
+                args:
+                  task: "${two}"
+                retry: *pr_opens
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Both iterations are merged."
+      - end: end_turn
+    - *turn
+    - *turn
+    - *turn
+    - *turn
+  loaded:
+    - *turn
+    - *turn
+    - *turn
+    - *turn
+    - *turn

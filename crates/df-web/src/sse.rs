@@ -27,12 +27,13 @@ use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::WebState;
+use crate::artifacts::details_heading;
 use crate::auth::CurrentUser;
 use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
     CancelNote, Filters, ListQuery, ResumeNote, composer_action, dependencies_region,
     details_region, head_region, interruptible, load_detail, pending_region, runs_region,
-    task_rows,
+    subtasks_panel, task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -105,10 +106,11 @@ struct DetailStream {
     /// Id of the last transcript row read.
     cursor: i64,
     folder: Folder,
-    /// Re-render the six regions at the next opportunity.
+    /// Re-render the regions at the next opportunity.
     check_regions: bool,
-    /// Last sent markup of head, details, runs, pending list and composer action.
-    regions: [String; 6],
+    /// Last sent markup of head, details, dependencies, runs, pending list, composer action, the
+    /// details heading (tabs) and the Subtasks tab.
+    regions: [String; 8],
     /// Pause before the next read to coalesce chunks.
     settle: Option<Duration>,
 }
@@ -223,6 +225,9 @@ impl DetailStream {
             return Ok(Vec::new());
         };
         let mut data = load_detail(&self.state, task).await?;
+        let artifacts = df_db::artifacts::list_artifacts(&self.state.pool, self.task_id)
+            .await?
+            .len();
         // A message the transcript already shows is delivered, whether or not `delivered_at` is
         // committed yet.
         data.pending.retain(|m| {
@@ -254,6 +259,8 @@ impl DetailStream {
                 None,
             ),
             composer_action(&data.task.key, interruptible(&data.runs)),
+            details_heading(data.subtasks.len(), artifacts, false),
+            subtasks_panel(&data.subtasks),
         ];
         let mut changed = Vec::new();
         for (slot, (id, markup)) in self.regions.iter_mut().zip(
@@ -264,6 +271,8 @@ impl DetailStream {
                 "#runs",
                 "#pending",
                 "#composer-action",
+                "#ws-details-heading",
+                "#panel-subtasks",
             ]
             .into_iter()
             .zip(rendered),

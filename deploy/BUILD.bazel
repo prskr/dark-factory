@@ -239,6 +239,7 @@ image_layer(
         "/opt/harness/scripts/rate-limit-short.yaml": "//crates/fake-acp-agent:scripts/rate-limit-short.yaml",
         "/opt/harness/scripts/rate-limit.yaml": "//crates/fake-acp-agent:scripts/rate-limit.yaml",
         "/opt/harness/scripts/research.yaml": "//crates/fake-acp-agent:scripts/research.yaml",
+        "/opt/harness/scripts/task-tree.yaml": "//crates/fake-acp-agent:scripts/task-tree.yaml",
         "/opt/harness/scripts/webhook.yaml": "//crates/fake-acp-agent:scripts/webhook.yaml",
     },
     file_metadata = {
@@ -260,6 +261,7 @@ image_layer(
         "/opt/harness/scripts/rate-limit-short.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/rate-limit.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/research.yaml": file_metadata(mode = "0644"),
+        "/opt/harness/scripts/task-tree.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/webhook.yaml": file_metadata(mode = "0644"),
     },
     include_runfiles = False,

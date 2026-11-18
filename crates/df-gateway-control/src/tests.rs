@@ -1123,6 +1123,7 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
         webhook_wake: project.webhook_wake,
         branch_rewrite_policy: project.branch_rewrite_policy,
         agent_branch_globs: project.agent_branch_globs,
+        subtask_merge: project.subtask_merge,
     };
     let mut policy = PushPolicy::default();
     policy.protected_globs.push("deploy/**".into());

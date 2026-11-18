@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image,\n                    base_branch, forge_credential_id, adapter_command, webhook_wake,\n                    branch_rewrite_policy, agent_branch_globs)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id\n                ",
+  "query": "\n                INSERT INTO projects (id, key, name, repo_url, issue_tracker_url, image,\n                    base_branch, forge_credential_id, adapter_command, webhook_wake,\n                    branch_rewrite_policy, agent_branch_globs, subtask_merge)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id\n                ",
   "describe": {
     "columns": [
       {
@@ -28,12 +28,13 @@
         "TextArray",
         "Text",
         "Text",
-        "TextArray"
+        "TextArray",
+        "Text"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "1ea4578e096de11053e76d02837e3c649625674da059f0bb3ff89f1245432ac7"
+  "hash": "2fc6eb5456df2ac10738c875534e7cf64efc72812dd8485f4dd3a60c5bca9825"
 }

@@ -108,6 +108,7 @@ impl RefChecks<'_> {
         let task = TaskRefs {
             task_branch: &self.push.route.task_branch,
             wip_branch: &self.push.route.wip_branch,
+            base_branch: &self.push.route.base_branch,
         };
         let view = self
             .objects

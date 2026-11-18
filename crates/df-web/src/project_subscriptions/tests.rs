@@ -213,6 +213,7 @@ async fn unrestricted_targets_accept_plain_http_and_internal_hosts() {
     let with_credentials = app
         .post(
             PAGE,
+            // Throwaway test credentials; kingfisher:ignore
             &form(&[("url", "http://user:secret@10.0.0.5/hook")]),
             &cookie,
         )
@@ -321,6 +322,7 @@ async fn unknown_projects_and_other_projects_subscriptions_are_not_found() {
             webhook_wake: df_core::webhooks::WebhookWake::Members,
             branch_rewrite_policy: df_core::RewritePolicy::default(),
             agent_branch_globs: df_core::default_agent_branch_globs(),
+            subtask_merge: df_core::SubtaskMerge::default(),
         },
     )
     .await

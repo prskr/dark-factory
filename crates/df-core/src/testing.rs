@@ -234,6 +234,16 @@ pub enum ForgeCall {
         thread: String,
         body: String,
     },
+    MergePullRequest {
+        project_id: ProjectId,
+        number: u64,
+        head_sha: String,
+    },
+    CreateBranch {
+        project_id: ProjectId,
+        name: String,
+        from: String,
+    },
     Whoami {
         project_id: ProjectId,
     },
@@ -266,6 +276,8 @@ struct ForgeState {
     bot_login: Option<String>,
     roles: HashMap<String, AuthorRole>,
     whoami_results: VecDeque<Result<String, IntegrationError>>,
+    merge_results: VecDeque<Result<(), IntegrationError>>,
+    create_branch_results: VecDeque<Result<(), IntegrationError>>,
 }
 
 /// In-memory fake [`ForgeClient`] that records calls and supports both default
@@ -410,6 +422,25 @@ impl FakeForgeClient {
             .lock()
             .expect("lock poisoned")
             .reply_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `merge_pull_request`; without one the pull request becomes
+    /// merged.
+    pub fn push_merge_pull_request_result(&self, res: Result<(), IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .merge_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `create_branch`; without one the call succeeds.
+    pub fn push_create_branch_result(&self, res: Result<(), IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .create_branch_results
             .push_back(res);
     }
 
@@ -582,6 +613,42 @@ impl ForgeClient for FakeForgeClient {
             pr.draft = draft;
         }
         Ok(pr.clone())
+    }
+
+    async fn merge_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::MergePullRequest {
+            project_id: *p,
+            number,
+            head_sha: head_sha.to_string(),
+        });
+        if let Some(scripted) = state.merge_results.pop_front() {
+            return scripted;
+        }
+        if let Some(pr) = state.pull_requests.get_mut(&(*p, number)) {
+            pr.state = PullRequestState::Merged;
+        }
+        Ok(())
+    }
+
+    async fn create_branch(
+        &self,
+        p: &ProjectId,
+        name: &str,
+        from: &str,
+    ) -> Result<(), IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::CreateBranch {
+            project_id: *p,
+            name: name.to_string(),
+            from: from.to_string(),
+        });
+        state.create_branch_results.pop_front().unwrap_or(Ok(()))
     }
 
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError> {

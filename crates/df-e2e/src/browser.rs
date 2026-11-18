@@ -587,6 +587,15 @@ impl Session {
             .context("open the runs")
     }
 
+    /// Selects the "Subtasks" tab of the details column of the open task.
+    pub async fn open_subtasks_tab(&self) -> Result<()> {
+        self.page
+            .locator("#tab-subtasks")
+            .click(None)
+            .await
+            .context("open the subtasks tab")
+    }
+
     /// Opens the closed "Dependencies" disclosure of the open task (it is open only while the
     /// task awaits its dependencies).
     pub async fn open_dependencies(&self) -> Result<()> {

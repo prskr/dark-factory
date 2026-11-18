@@ -3,6 +3,7 @@
 
 mod dependencies;
 mod resume;
+mod subtasks;
 mod view;
 
 use axum::extract::{Form, Path, Query, State};
@@ -32,6 +33,7 @@ use crate::sse;
 use crate::transcript::{Folder, render_transcript};
 pub(crate) use dependencies::dependencies_region;
 pub(crate) use resume::ResumeNote;
+pub(crate) use subtasks::tab_panel as subtasks_panel;
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
     interruptible, list_column, pending_region, runs_region, task_rows,
@@ -89,6 +91,8 @@ pub(crate) struct DetailData {
     pub dependencies: Dependencies,
     pub runs: Vec<RunView>,
     pub pending: Vec<df_db::TaskMessageRow>,
+    /// The direct subtasks, for the Subtasks tab.
+    pub subtasks: Vec<df_db::task_views::SubtaskItem>,
 }
 
 pub(crate) async fn load_detail(
@@ -96,16 +100,18 @@ pub(crate) async fn load_detail(
     task: TaskDetail,
 ) -> Result<DetailData, df_db::DbError> {
     let id = TaskId::from_uuid(task.id);
-    let (runs, pending, dependencies) = tokio::try_join!(
+    let (runs, pending, dependencies, subtasks) = tokio::try_join!(
         df_db::task_views::list_runs(&state.pool, id),
         df_db::list_undelivered_messages(&state.pool, id),
-        df_db::task_views::list_dependencies(&state.pool, id)
+        df_db::task_views::list_dependencies(&state.pool, id),
+        df_db::task_views::list_subtasks(&state.pool, id)
     )?;
     Ok(DetailData {
         task,
         dependencies,
         runs,
         pending,
+        subtasks,
     })
 }
 
@@ -132,6 +138,7 @@ struct Selected {
     max_auto_resumes: u32,
     requests: Vec<crate::requests::CardData>,
     artifacts: Vec<crate::artifacts::ArtifactCard>,
+    subtasks: Vec<df_db::task_views::SubtaskItem>,
 }
 
 /// Renders the workspace page; the transcript and details columns exist only for a selected task.
@@ -215,6 +222,7 @@ fn selected_columns(s: &Selected) -> Markup {
             &s.runs,
             &CancelNote::new(&s.runs, &s.pending),
             &ResumeNote::new(&s.detail, &s.runs, s.max_auto_resumes),
+            &s.subtasks,
             &s.artifacts,
         ))
     }
@@ -299,6 +307,7 @@ async fn task_detail(
         max_auto_resumes: state.max_auto_resumes,
         requests,
         artifacts,
+        subtasks: data.subtasks,
     };
     workspace(&state, &user, &query.filters(), Some(selected)).await
 }
