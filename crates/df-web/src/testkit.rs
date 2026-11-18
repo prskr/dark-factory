@@ -719,6 +719,7 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
             webhook_wake: df_core::webhooks::WebhookWake::Members,
             branch_rewrite_policy: df_core::RewritePolicy::default(),
             agent_branch_globs: df_core::default_agent_branch_globs(),
+            subtask_merge: df_core::SubtaskMerge::default(),
         },
     )
     .await

@@ -181,6 +181,7 @@ async fn insert_task(
                 url: url.clone(),
                 base: "main".into(),
             }),
+            ..TaskPlacement::default()
         },
         _ => TaskPlacement::default(),
     };

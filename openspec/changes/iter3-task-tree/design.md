@@ -48,15 +48,15 @@ Alternative: store the base branch name on the task at creation. Rejected, becau
 
 Cycles can't form: `base_task_id` references an existing task at creation and never changes.
 
-### D3: Base branch creation at first start
+- **Push checks**: the run's effective base branch counts as upstream (`push-checks`, "Checked commits"). A subtask based on its parent starts on commits that are not its own, among them the forge's merge commits of `merge_subtask_pr`, which carry the forge account's identity. Checking them against the agent identity would reject every push of the next iteration (found by the e2e suite). `TaskRefs` gets the run's `base_branch` (`GitRoute.base_branch`), and the walk stops at that ref like at the task's own branch.
 
-In `build_assign`, for a run that is the task's first (`run_number = 1`) and a task with `base_task_id`:
-- call `pull-requests.create-branch(repo, factory/task/<base key>, base_branch(base task))`;
+### D3: Base branch creation at start
+
+In the scheduler's provisioning (`df_orchestrator::base_branch::ensure_base_branch`, before the volume and sandbox), for every run of a task with `base_task_id` whose base task is not Done:
+- call `pull-requests.create-branch(repo, <base task's branch>, base_branch(base task))`;
 - treat `conflict` as "exists".
 
-Any other error fails the start: the run ends `failed` with detail `base branch: <forge message>`, through the existing start-failure path.
-
-Only the first run creates the branch. Later runs find it, or, if the base task got merged meanwhile, use the fallback from D2.
+Any other error fails the start: the run ends `failed` (not `provisioning_failed`, which would auto-resume into the same error) with detail `base branch: <forge message>`. Every start asks, so a run that failed at the forge does not leave the next start (after a message) without the branch; the cost is one cheap forge call per start. A Done base task needs no branch: D2 falls back to its own base.
 
 Alternative: create the branch at `create_task`. Rejected, because the task may be `awaiting_dependencies` for a long time, and ADR-0052 keeps such tasks free of branches.
 
@@ -76,8 +76,11 @@ Tasks without a base task get the same behaviour against the default branch, whi
 
 ```sql
 status NOT IN ('in_review','completed','failed','cancelled')
-OR (base_task_id = parent_id AND pr_number IS NOT NULL AND status NOT IN ('completed','cancelled'))
+OR (base_task_id = parent_id AND status NOT IN ('completed','cancelled')
+    AND (pr_number IS NOT NULL OR a `pr.sync` job with `open` for the task is pending))
 ```
+
+The pending job closes the window between the run end (which wakes the parent) and the job that opens the PR. A limits value of 0 is rejected when the configuration loads (at least 1).
 
 - **`complete_task`**: calls it before storing the summary. A non-empty result returns an `is_error` result and the turn continues. Mark done (human) doesn't call it.
 - **Limits**: `create_task` checks the following under the existing transaction, after the parent row lock taken there:
@@ -103,21 +106,20 @@ Alternative: a `CancelChildren` effect of the `Cancelled` arm. It would lock chi
 
 ### D7: Merging subtask PRs
 
-`merge_subtask_pr` lives in `crates/df-agent-channel/src/tools/delegation.rs`, next to `create_task`. Within one transaction:
-1. Lock the subtask row.
-2. Check, in this order, with one error message each:
-   - the subtask is a subtask of the run's task;
-   - `projects.subtask_merge = 'parent-agent'`;
-   - `base_task_id` = the run's task;
-   - status `in_review`;
-   - the subtask has a PR.
-3. Read the head SHA from the subtask's last accepted task-branch push (`git_pushes`).
+`merge_subtask_pr` lives in `crates/df-agent-channel/src/tools/delegation/merge.rs`, next to `create_task`. The checks read the subtask in one query (no lock held across the forge call); in this order, with one error message each:
+1. the subtask is a subtask of the run's task;
+2. `projects.subtask_merge = 'parent-agent'`;
+3. `base_task_id` = the run's task;
+4. status `in_review`;
+5. the subtask has a PR.
 
-Then, outside the transaction, call `pull-requests.merge(pr, head-sha)`. A forge call doesn't belong inside a row lock.
+Then the head SHA is read from the subtask's last accepted task-branch push (`git_pushes`), and `pull-requests.merge(pr, head-sha)` is called. A forge call doesn't belong inside a row lock.
 
 On success:
-- In a new transaction, set `pr_merged_at` if it is null and run the mark-done path with the agent principal (audit `task.done`, reason `pr.merged.by_parent`). The mark-ready call is skipped as for the webhook path, and the effects of the `MarkedDone` event release dependents and wake the caller, as intended (ADR-0052).
-- Then `ensure_draft` for the caller's task opens its PR (spec "PR after a subtask merge").
+- In a new transaction, lock the subtask's run rows and then its task row (the global order of D6) and read its status again. Unless it became `completed` or `cancelled` meanwhile, set `pr_merged_at` if it is null and run the mark-done path with the calling agent as actor (audit `task.done`; the actor identifies the agent, there is no separate reason). The mark-ready call is skipped as for the webhook path, and the effects of the `MarkedDone` event release dependents and wake the caller, as intended (ADR-0052). If the subtask can no longer be marked done, the tool still reports the merge with the PR URL and says why: a `completed` subtask is already done, a `cancelled` one stays cancelled (the merge event leaves it unchanged, so no webhook changes that).
+- In the same transaction a `pr.sync` job with `open` is enqueued for the caller's task, which opens its PR (spec "PR after a subtask merge").
+
+The subtask's PR is opened by a `pr.sync` job after the push, while the run end wakes the parent at once. A subtask based on its parent therefore counts as open (D5) while such a job is pending, and `merge_subtask_pr` answers "no pull request yet, call again" in that window.
 
 A later merge webhook finds `pr_merged_at` set and does nothing (`iter3-webhooks` D4). The `call_id` store makes retries return the stored result.
 
@@ -143,11 +145,21 @@ create-branch: func(repo: repo-ref, name: string, %from: string) -> result<_, er
 
 The spike "merging with the project's merge method" (`iteration-3.md` §7) is the first task and confirms these fields against Forgejo.
 
+**Spike result (Forgejo 11.0.16, run in a container, SQLite, admin token):**
+- `GET /repos/{o}/{r}` returns `default_merge_style` (`merge` on a fresh repository) and the `allow_*` flags.
+- `POST /repos/{o}/{r}/pulls/{n}/merge` with `{"Do": "<default_merge_style>", "head_commit_id": "<sha>"}`:
+  - merged: `200` with an empty body (not JSON);
+  - moved head: `409 {"message": "head out of date"}`;
+  - not mergeable (conflict, or mergeability still being computed on a fresh PR, message `Please try again later`): `405`;
+  - already merged: `405` with an empty message, so it can't be told from a conflict. The plugin therefore reads the PR first (`GET .../pulls/{n}`) and answers `ok` for a merged PR with the same head, `conflict` for another head, `invalid-input` for a closed one.
+- `POST /repos/{o}/{r}/branches` with `{"new_branch_name", "old_ref_name"}`: `201`; existing name `409 "The branch already exists."`; unknown `old_ref_name` `500 "object does not exist [id: ...]"`, which the plugin maps to `not-found`.
+- Mapping: `405` and `409` are `conflict` in both plugins. GitHub was not run live: its fields are taken from the REST documentation. Its merge is `PUT` with `sha` and `merge_method`; its "Reference already exists" `422` is `conflict`. Both plugins read the PR before merging (as above); GitHub reads the repository flags for the method.
+
 Alternative: a new `branches` capability interface. Rejected: host detection would change, and branch creation only exists for PR bases.
 
 ### D9: Web UI
 
-- **Details column** (`df-web`): an Alpine component `detailsTabs` in `assets/details-tabs.js` holds the active tab and remembers it per browser (try/catch around storage). The tabs render server-side: Overview is today's markup plus the base task link, and Subtasks is a list. Both re-render on `TaskChanged` of the task or of any direct subtask; the subtask event is published to the parent too: every transition that changes the status of a task with a parent adds the effect `Publish(TaskChanged { parent })`, a rule in `transition` itself.
+- **Details column** (`df-web`): the existing `tabs` component (`scripts/tabs.ts`, from `iter3-artifacts`) holds the active tab; there is no second tab component and the active tab is not remembered. The tabs render server-side: Overview is today's markup plus the base task link, and Subtasks is a list. Both re-render on `TaskChanged` of the task or of any direct subtask; the subtask event is published to the parent too: every transition that changes the status of a task with a parent adds the effect `Publish(TaskChanged { parent })`, a rule in `transition` itself.
 - **Chip**: the task list query adds two counts per row from a `LEFT JOIN LATERAL` over direct subtasks.
 - **Project form**: a select with the two values and one hint line each.
 
@@ -155,7 +167,7 @@ Alternative: a new `branches` capability interface. Rejected: host detection wou
 
 - **Step 1**: the e2e scenario creates `DF-21` with `base_task: DF-20` and asserts the reviewer's workspace contains `DF-20`'s commit (fake agent `run` step `git log`).
 - **Step 4**: a project with `subtask_merge: parent-agent`. The fake feature agent creates two iterations with `base_task` = itself, the second with `depends_on: done` on the first. The first iteration commits and completes, the feature agent calls `merge_subtask_pr`, and the second starts with the merge on its base.
-- **Forge**: the fake forge (`crates/df-e2e`) gets the `merge` and `create-branch` endpoints of Forgejo's API.
+- **Forge**: the e2e suite runs against a real Forgejo, which has the merge and branch endpoints; no fake forge endpoints are needed.
 
 ## Risks / Trade-offs
 
@@ -164,6 +176,7 @@ Alternative: a new `branches` capability interface. Rejected: host detection wou
 - [Merging uses a SHA from Dark Factory's push records; a push outside Dark Factory moves the head] → The forge rejects the merge (head mismatch) and the agent gets the error.
 - [Prepare fast-forward pushes to the remote on every run for a task without own commits] → Only when the tips differ; it is a no-op otherwise.
 - [The GitHub merge method is guessed from repository flags, not configured] → Fine for the demo forge (Forgejo uses the repository default). A project setting can follow if someone needs a different method.
+- [The base branch counts as upstream: commits on it that passed only under a subtask's task-scoped exceptions, or that humans pushed there, are not checked again for every task based on that branch] → Accepted: that branch is those tasks' PR target and already holds the commits.
 - [Subtree cancel locks the whole subtree] → Bounded by the limits (depth 5, 10 open subtasks per level), and cancel is rare.
 
 ## Migration Plan

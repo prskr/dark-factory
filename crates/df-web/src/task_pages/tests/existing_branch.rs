@@ -51,7 +51,7 @@ async fn hold_branch(app: &TestApp, seed: &Seed, branch: &str) {
         },
         df_db::TaskPlacement {
             branch: Some(ExistingBranch::parse(branch, "main").unwrap()),
-            attached_pr: None,
+            ..df_db::TaskPlacement::default()
         },
     )
     .await

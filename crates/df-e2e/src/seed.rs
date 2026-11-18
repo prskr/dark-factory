@@ -30,6 +30,8 @@ struct SeedProject {
     /// Repository of the owner the project is linked to.
     repository: &'static str,
     hidden: &'static [&'static str],
+    /// Who merges the pull requests of subtasks.
+    subtask_merge: df_core::SubtaskMerge,
 }
 
 /// Writes the well-known data into the database behind `pool`.
@@ -47,17 +49,21 @@ pub async fn run(pool: &PgPool) -> Result<()> {
         script,
         repository,
         hidden,
+        subtask_merge,
     } in projects()
     {
-        let wanted = project_input(
-            key,
-            name,
-            &data::repo_url_of(repository),
-            None,
-            data::PROJECT_IMAGE,
-            data::adapter_command(script),
-            credential,
-        );
+        let wanted = ProjectInput {
+            subtask_merge,
+            ..project_input(
+                key,
+                name,
+                &data::repo_url_of(repository),
+                None,
+                data::PROJECT_IMAGE,
+                data::adapter_command(script),
+                credential,
+            )
+        };
         ensure_project(pool, actor, &wanted, hidden).await?;
     }
     Ok(())
@@ -85,17 +91,19 @@ pub(crate) fn project_input(
         webhook_wake: df_core::webhooks::WebhookWake::Members,
         branch_rewrite_policy: df_core::RewritePolicy::default(),
         agent_branch_globs: df_core::default_agent_branch_globs(),
+        subtask_merge: df_core::SubtaskMerge::default(),
     }
 }
 
 /// The projects of the end-to-end suite.
-fn projects() -> [SeedProject; 14] {
+fn projects() -> [SeedProject; 15] {
     let project = |key, name, script| SeedProject {
         key,
         name,
         script,
         repository: data::FORGE_REPO,
         hidden: &[],
+        subtask_merge: df_core::SubtaskMerge::default(),
     };
     [
         project(data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
@@ -160,6 +168,14 @@ fn projects() -> [SeedProject; 14] {
             data::RESEARCH_PROJECT_NAME,
             data::RESEARCH_SCRIPT,
         ),
+        SeedProject {
+            subtask_merge: df_core::SubtaskMerge::ParentAgent,
+            ..project(
+                data::TASK_TREE_PROJECT_KEY,
+                data::TASK_TREE_PROJECT_NAME,
+                data::TASK_TREE_SCRIPT,
+            )
+        },
         project(
             data::INTERRUPT_PROJECT_KEY,
             data::INTERRUPT_PROJECT_NAME,
@@ -345,7 +361,8 @@ pub(crate) async fn ensure_project(
                 && p.base_branch == wanted.base_branch
                 && p.adapter_command == wanted.adapter_command
                 && p.forge_credential_id == wanted.forge_credential_id
-                && p.webhook_wake == wanted.webhook_wake =>
+                && p.webhook_wake == wanted.webhook_wake
+                && p.subtask_merge == wanted.subtask_merge =>
         {
             p.id
         }

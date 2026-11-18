@@ -67,6 +67,7 @@ Out of scope:
 - `factory-tools`: new tool `merge_subtask_pr`.
 - `configuration-management`: project setting `subtask_merge`.
 - `forgejo-integration`, `github-integration`: `merge` and `create-branch`.
+- `push-checks`: the run's base branch counts as upstream.
 - `task-ui`: Overview and Subtasks tabs, base task link, done/total chip on task rows.
 
 ## Impact

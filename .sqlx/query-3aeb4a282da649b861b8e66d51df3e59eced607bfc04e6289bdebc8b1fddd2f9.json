@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.ref ->> 'new_sha' AS \"new_sha!\"\n         FROM git_pushes p\n         JOIN runs r ON r.id = p.run_id\n         JOIN tasks t ON t.id = r.task_id\n         CROSS JOIN LATERAL jsonb_array_elements(p.refs) WITH ORDINALITY AS u(ref, n)\n         WHERE t.id = $1 AND p.verdict = 'accepted'\n           AND u.ref ->> 'name' = 'refs/heads/' || t.branch\n           AND u.ref ->> 'verdict' = 'accepted'\n         ORDER BY p.created_at DESC, p.updated_at DESC, u.n DESC\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "new_sha!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3aeb4a282da649b861b8e66d51df3e59eced607bfc04e6289bdebc8b1fddd2f9"
+}

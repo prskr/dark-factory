@@ -20,6 +20,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinSet;
 
 use crate::OrchestratorContext;
+use crate::base_branch::ensure_base_branch;
 use crate::error::OrchestratorError;
 use crate::run_context::load_run_context;
 use crate::runs::{finish_overdue, finish_run, teardown};
@@ -301,7 +302,12 @@ impl Scheduler {
             OrchestratorError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
             _ => error.to_string(),
         };
-        let end = RunEnd::failure(run_id, RunOutcome::ProvisioningFailed, detail);
+        // A refused base branch is no infrastructure failure: a resume would fail the same way.
+        let outcome = match error {
+            OrchestratorError::BaseBranch(_) => RunOutcome::Failed,
+            _ => RunOutcome::ProvisioningFailed,
+        };
+        let end = RunEnd::failure(run_id, outcome, detail);
         if let Err(e) = finish_run(&self.ctx, &end).await {
             tracing::error!(error = %e, run_id = %run_id, "failed to record provisioning failure");
         }
@@ -327,6 +333,8 @@ impl Scheduler {
             tracing::info!(run_id = %run_id, "run ended before its sandbox was created; skipping provisioning");
             return Ok(());
         }
+
+        ensure_base_branch(&self.ctx, &rc).await?;
 
         let volume = TaskVolumeSpec::for_task(rc.task.key.clone());
         let volume_name = volume.volume_name.clone();
@@ -454,5 +462,7 @@ impl Drop for InFlight {
     }
 }
 
+#[cfg(test)]
+mod base_branch_tests;
 #[cfg(test)]
 mod tests;

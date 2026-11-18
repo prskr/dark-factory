@@ -197,7 +197,7 @@ Deviations from the design in this section:
 - Control plane → `Assign { run_id, task, workspace, harness, tools, budgets, continuation }`, followed by harness credentials and the queued prompts. Budgets cover wall-clock time, tokens and turns; both runtime and control plane enforce them.
 
 ### 6.2 Prepare workspace
-Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. A task started from an existing branch (ADR-0025) uses that branch as its task branch and still snapshots to `factory/wip/<key>`; the control plane sends the stored branch as `Workspace.task_branch`, so prepare and finalize don't distinguish it either. A branch missing at the first prepare fails the task. `<base>` is the project's default branch, the base of an attached pull request, or for tasks with a `base_task` (including subtasks based on their parent) that task's branch (ADR-0034, ADR-0041); the control plane resolves it and sends it as `Workspace.base_branch`, so prepare and finalize don't distinguish the cases.
+Branch naming: task branch `factory/task/<key>`, WIP snapshot branch `factory/wip/<key>` (e.g. `factory/task/DF-42`). These must not nest: Git can't hold both `refs/heads/factory/<key>` and `refs/heads/factory/<key>/wip`. A task started from an existing branch (ADR-0025) uses that branch as its task branch and still snapshots to `factory/wip/<key>`; the control plane sends the stored branch as `Workspace.task_branch`, so prepare and finalize don't distinguish it either. A branch missing at the first prepare fails the task. `<base>` is the task's effective base branch (`df_db::base_branch`, `task-tree` "Effective base branch"): the branch of its base task (`tasks.branch`; including subtasks based on their parent), or once the base task is Done that task's own base branch, applied recursively; without a base task the base of an attached pull request, else the project's default branch (ADR-0034, ADR-0041). The control plane resolves it and sends it as `Workspace.base_branch` (the Git route and the PR base use the same value), so prepare and finalize don't distinguish the cases. Before the first run of a task with a base task starts, the scheduler creates the base task's branch from that task's own base branch through the forge if the branch doesn't exist (a refused creation ends the run `failed` with `base branch: <reason>`), so the clone below finds it.
 
 ```
 if /data/repo/.git does not exist:
@@ -207,12 +207,14 @@ if /data/repo/.git does not exist:
                                        git checkout -B <task branch> origin/<task branch>
     elif the task is on an existing branch: fail prepare (BranchMissing), push nothing
     else:                              git checkout -B <task branch> origin/<base>
+    follow the base (below)
     remote_sha := origin/<task branch> as fetched (kept in /data/runtime/remote_sha, §6.4)
     if origin has factory/wip/<key>:   restore WIP files into the worktree
                                        (git restore --source=<wip> --worktree -- <paths that differ from HEAD, except hidden paths>)
 else:
     sanitize: rewrite .git/config (§7), regenerate harness config (§6.3)
     git fetch origin <base> <task branch>
+    follow the base (below)
     if local has commits not on origin (failed earlier push): push them first (§6.5)
     compare local vs origin task branch:
         equal         → nothing to do
@@ -224,9 +226,14 @@ else:
                         (agent instruction or human decision, per project policy)
     remote_sha := origin/<task branch> after the fetch (when equal), a fast-forward or a successful push;
                   a diverged prepare keeps the stored value
-    if the task branch has no own commits (ancestor of origin/<base>):
-        git merge --ff-only origin/<base>   # follow the base (ADR-0041); on failure leave it as is
 no git clean — preserving caches is the purpose of the PVC
+
+follow the base (ADR-0041, before the WIP restore; never for a task on an existing branch):
+    if the local task branch tip, and origin/<task branch> if there is one, are ancestors of origin/<base>
+    and the tip differs from origin/<base>  (the task has no commits of its own):
+        git merge --ff-only origin/<base>
+        if origin has <task branch>:  git push origin <task branch>:<task branch>   # plain fast-forward; a branch origin lacks is not created
+    on failure: leave the branch as it is, warn; the next prepare tries again
 ```
 
 Blobless clone rather than shallow: full commit graph for `log`/`blame`, cheap rebases onto an updated base, blobs fetched on demand.

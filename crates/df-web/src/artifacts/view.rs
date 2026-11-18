@@ -132,18 +132,24 @@ pub(crate) fn cards(task_key: &str, artifacts: &[ArtifactCard]) -> Markup {
     }
 }
 
-/// The heading of the details column: "Details" while the task has no artifact, else the tab bar.
+/// The heading of the details column: "Details" while the task has neither subtasks nor an
+/// artifact, else the tab bar (Overview, Subtasks, Artifacts: the last two when there are any).
 /// `oob` makes it replace the heading in the page (response of the tab fragment).
-pub(crate) fn details_heading(count: usize, oob: bool) -> Markup {
+pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> Markup {
     html! {
         div id="ws-details-heading" hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
-            @if count == 0 {
+            @if subtasks == 0 && artifacts == 0 {
                 h2 class="text-base font-semibold" { "Details" }
             } @else {
                 // The `tabs` component sits on the details panel (`details_panel_with_heading`).
                 div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm font-medium" {
                     (tab_button("overview", "panel-overview", html! { "Overview" }))
-                    (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " span class="rounded-full bg-sunk px-1.5 text-xs" { (count) } }))
+                    @if subtasks > 0 {
+                        (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " span class="rounded-full bg-sunk px-1.5 text-xs" { (subtasks) } }))
+                    }
+                    @if artifacts > 0 {
+                        (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " span class="rounded-full bg-sunk px-1.5 text-xs" { (artifacts) } }))
+                    }
                 }
             }
         }
@@ -155,7 +161,7 @@ pub(crate) fn details_heading(count: usize, oob: bool) -> Markup {
 fn tab_button(id: &str, panel: &str, label: Markup) -> Markup {
     let first = id == INITIAL_DETAILS_TAB;
     html! {
-        button type="button" role="tab" id={"tab-" (id)} data-tab=(id) aria-controls=(panel)
+        button type="button" role="tab" id={"tab-" (id)} data-tab=(id) aria-controls=(panel) class="min-h-11 lg:min-h-8"
             aria-selected=(first) tabindex=(if first { "0" } else { "-1" })
             ":aria-selected"={"tab === '" (id) "'"} ":tabindex"={"tab === '" (id) "' ? 0 : -1"}
             "x-on:click"={"tab = '" (id) "'"} ":class"={"tab === '" (id) "' ? 'text-ink' : 'text-muted'"} { (label) }

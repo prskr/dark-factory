@@ -33,7 +33,9 @@ pub struct MarkDraftJob {
 /// Outbox kind for the forge actions of a task's pull request; payload [`PrSyncJob`].
 pub const PR_SYNC_KIND: &str = "pr.sync";
 
-/// Payload of a [`PR_SYNC_KIND`] job (`pr-forge-outbox` design D1).
+/// Payload of a [`PR_SYNC_KIND`] job (`pr-forge-outbox` design D1). `open_subtasks` reads the
+/// fields `task_id` and `open` from the JSON in SQL (`tasks/tree.rs`), as does
+/// `outbox::has_unfinished_pr_open_job`: renaming either needs both queries changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrSyncJob {
     pub task_id: TaskId,
@@ -89,6 +91,12 @@ pub struct TaskPlacement {
     pub branch: Option<ExistingBranch>,
     /// The open PR of the existing branch the task attaches to.
     pub attached_pr: Option<AttachedPr>,
+    /// The task of the project whose branch the new task starts from (`task-tree`). It must not
+    /// be Done, failed or cancelled; [`DbError::InvalidBaseTask`] otherwise.
+    pub base_task: Option<TaskKey>,
+    /// The delegation limits of the creating agent, checked in the creation's transaction with
+    /// the parent as the creating task; [`DbError::DelegationLimit`] when exceeded.
+    pub limits: Option<df_core::config::TasksConfig>,
 }
 
 /// An open PR a new task is attached to.
@@ -128,6 +136,8 @@ pub struct TaskRow {
     pub harness_session_id: String,
     pub created_by: Principal,
     pub parent_id: Option<TaskId>,
+    /// The task whose branch this one starts from and whose PR it targets; fixed at creation.
+    pub base_task_id: Option<TaskId>,
     /// The branch the task commits to (`factory/task/<KEY>` unless it started on an existing one).
     pub branch: String,
     /// The base of the PR the task is attached to, when it differs from the project's.
@@ -142,13 +152,6 @@ impl TaskRow {
     /// Whether the task started on an existing branch rather than its own `factory/task/<KEY>`.
     pub fn on_existing_branch(&self) -> bool {
         self.branch != self.key.task_branch()
-    }
-
-    /// The task's effective base branch: the base of the PR it is attached to
-    /// (`tasks.base_branch`), else `project_base` (`iter3-branch-workflows` design D2; the base
-    /// task of `iter3-task-tree` comes first once it lands).
-    pub fn base_branch<'a>(&'a self, project_base: &'a str) -> &'a str {
-        self.base_branch.as_deref().unwrap_or(project_base)
     }
 }
 
@@ -241,12 +244,19 @@ pub async fn create_task_on_tx(
     placement: TaskPlacement,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
     // The project row lock of the allocation serializes creations; the check names the holder.
-    let (task_key, number) = allocate_task_key(tx, input.project_id).await?;
+    let (task_key, _) = allocate_task_key(tx, input.project_id).await?;
     if let Some(branch) = &placement.branch
         && let Some(holder) =
             open_branch_holder(tx, input.project_id, branch.as_str(), None).await?
     {
         return Err(DbError::BranchHeld { task: Some(holder) });
+    }
+    let base_task_id = match &placement.base_task {
+        Some(key) => Some(tree::resolve_base_task(tx, input.project_id, key).await?),
+        None => None,
+    };
+    if let (Some(limits), Some(parent)) = (placement.limits, input.parent_id) {
+        tree::check_limits(tx, parent, limits).await?;
     }
     let resolved = resolve_dependencies(tx, &input).await?;
     let user_title = input.title.as_deref().and_then(sanitize_title);
@@ -261,9 +271,9 @@ pub async fn create_task_on_tx(
         &input,
         &placement,
         task_key,
-        number,
         user_title.as_deref(),
         created.status,
+        base_task_id,
     )
     .await?;
     for (target, kind) in resolved.targets {
@@ -293,6 +303,10 @@ pub async fn create_task_on_tx(
     )
     .await?;
     debug_assert!(followups.is_empty(), "Created yields no follow-up work");
+    // The Subtasks tab and the progress chip of the parent show the new subtask.
+    if let Some(parent) = input.parent_id {
+        publish(&mut **tx, &Notification::TaskChanged { task_id: parent }).await?;
+    }
     Ok((task_row, message_row))
 }
 
@@ -389,10 +403,12 @@ async fn insert_task(
     input: &NewTask,
     placement: &TaskPlacement,
     task_key: TaskKey,
-    allocated_number: i64,
     user_title: Option<&str>,
     status: TaskStatus,
+    base_task_id: Option<TaskId>,
 ) -> Result<TaskRow, DbError> {
+    let allocated_number = i64::try_from(task_key.number())
+        .map_err(|_overflow| DbError::InvalidData("task number out of range".into()))?;
     let branch = placement.branch.as_ref().map_or_else(
         || task_key.task_branch(),
         |branch| branch.as_str().to_owned(),
@@ -419,10 +435,10 @@ async fn insert_task(
         r#"
         INSERT INTO tasks (
             id, project_id, number, key, title, title_source, description,
-            persona_id, issue_number, status, created_by, parent_id,
+            persona_id, issue_number, status, created_by, parent_id, base_task_id,
             branch, base_branch, pr_number, pr_url, pr_attached
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
@@ -441,6 +457,7 @@ async fn insert_task(
         status.as_str(),
         created_by,
         input.parent_id.map(|id| id.as_uuid()),
+        base_task_id.map(|id| id.as_uuid()),
         branch,
         attached.map(|pr| pr.base.as_str()),
         attached.map(|pr| pr.number),
@@ -471,6 +488,7 @@ async fn insert_task(
         harness_session_id: row.harness_session_id,
         created_by: input.created_by.clone(),
         parent_id: input.parent_id,
+        base_task_id,
         branch,
         base_branch: attached.map(|pr| pr.base.clone()),
         pr_attached: attached.is_some(),
@@ -751,7 +769,7 @@ pub async fn get_task(
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
-            diverged, harness_session_id, created_by, parent_id,
+            diverged, harness_session_id, created_by, parent_id, base_task_id,
             branch, base_branch, pr_attached, created_at, updated_at
         FROM tasks
         WHERE id = $1
@@ -797,6 +815,7 @@ pub async fn get_task(
             harness_session_id: r.harness_session_id,
             created_by: serde_json::from_value(r.created_by)?,
             parent_id: r.parent_id.map(TaskId::from_uuid),
+            base_task_id: r.base_task_id.map(TaskId::from_uuid),
             branch: r.branch,
             base_branch: r.base_branch,
             pr_attached: r.pr_attached,
@@ -1155,11 +1174,13 @@ async fn open_turn_id(
 
 /// A board member cancels a task (design D2): one transaction sets `cancelled`, discards the
 /// undelivered messages, closes the pending requests (`task-cancelled`), stops the active run
-/// as in [`stop_run`] and audits `task.cancel`. A `completed` or `cancelled` task is rejected
-/// with [`DbError::Conflict`]. The PR and the issue are not touched.
+/// as in [`stop_run`] and audits `task.cancel`. The same happens to each descendant that is not
+/// `completed`, `failed` or `cancelled` (`task-tree` "Cancelling a subtree", `tree::cancel_subtree`).
+/// A `completed` or `cancelled` task is rejected with [`DbError::Conflict`]. The PR and the issue
+/// are not touched.
 pub async fn cancel_task(pool: &PgPool, task_id: TaskId, actor: Principal) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    apply_task_event(&mut tx, task_id, TaskEvent::Cancelled, &actor).await?;
+    tree::cancel_subtree(&mut tx, task_id, &actor).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1273,8 +1294,16 @@ async fn set_title_in(
     Ok(changed)
 }
 
+mod tree;
+pub use tree::{
+    DelegationLimit, OpenSubtask, SubtaskToMerge, base_branch, lock_task_status, open_subtasks,
+    subtask_to_merge,
+};
+
 #[cfg(test)]
 mod branch_tests;
+#[cfg(test)]
+mod cancel_tree_tests;
 #[cfg(test)]
 mod delivery_tests;
 #[cfg(test)]
@@ -1285,3 +1314,5 @@ mod interrupt_tests;
 pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod tree_tests;

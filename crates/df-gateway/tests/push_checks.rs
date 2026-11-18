@@ -32,7 +32,13 @@ const LIMIT: Duration = Duration::from_secs(60);
 const KEY: &str = "DF-7";
 const BRANCH: &str = "refs/heads/factory/task/DF-7";
 const WIP: &str = "refs/heads/factory/wip/DF-7";
+/// The base branch of the run: the branch of the base task `DF-6`.
+const BASE: &str = "refs/heads/factory/task/DF-6";
+/// The task branch of another task, not the run's base branch.
+const OTHER: &str = "refs/heads/factory/task/DF-8";
 const BOT: &str = "bot@factory.test";
+/// The identity of the forge's own commits, such as the merge commit of a subtask merge.
+const FORGE: &str = "forge@example.com";
 
 /// A forge with `app.git` and a gateway in front of it that runs the push checks for task `DF-7`
 /// of project `DF`.
@@ -162,11 +168,11 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
         upstream_url: format!("https://127.0.0.1:{forge_port}/app.git"),
         task_branch: BRANCH.into(),
         wip_branch: WIP.into(),
+        base_branch: BASE.into(),
         credential_ref: "forge".into(),
         commit_name: "Bot".into(),
         commit_email: BOT.into(),
         rewrite_policy: RewritePolicy::WithLease.into(),
-        ..GitRoute::default()
     };
     let sandbox = Sandbox {
         run_id: "run-DF-7".into(),
@@ -207,6 +213,11 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
 
 /// Writes `content` to `file` and commits it with the instance's commit identity.
 fn commit(work: &Path, file: &str, content: &str) -> Result<()> {
+    commit_as(work, file, content, "Bot", BOT)
+}
+
+/// Writes `content` to `file` and commits it as `name` <`email`>, author and committer.
+fn commit_as(work: &Path, file: &str, content: &str, name: &str, email: &str) -> Result<()> {
     let path = work.join(file);
     std::fs::create_dir_all(path.parent().context("file without a parent")?)?;
     std::fs::write(path, content)?;
@@ -215,9 +226,9 @@ fn commit(work: &Path, file: &str, content: &str) -> Result<()> {
         work,
         &[
             "-c",
-            "user.name=Bot",
+            &format!("user.name={name}"),
             "-c",
-            &format!("user.email={BOT}"),
+            &format!("user.email={email}"),
             "commit",
             "-q",
             "-m",
@@ -339,20 +350,12 @@ async fn a_rebase_of_a_commit_by_another_author_is_rejected_by_the_identity_chec
         .display()
         .to_string();
     // A bot's branch on the forge: one commit authored and committed by Renovate.
-    std::fs::write(work.join("dep.txt"), "serde 1.0.1\n")?;
-    git(&work, &["add", "dep.txt"])?;
-    git(
+    commit_as(
         &work,
-        &[
-            "-c",
-            "user.name=Renovate",
-            "-c",
-            "user.email=renovate@bot.test",
-            "commit",
-            "-q",
-            "-m",
-            "Update serde",
-        ],
+        "dep.txt",
+        "serde 1.0.1\n",
+        "Renovate",
+        "renovate@bot.test",
     )?;
     git(&work, &["push", "-q", &forge, &format!("HEAD:{BRANCH}")])?;
     let pushed = gateway.forge_head()?.context("the bot branch")?;
@@ -417,10 +420,7 @@ async fn a_secret_from_another_tasks_branch_is_scanned_on_the_task_branch() -> R
     let work = gateway.client()?;
     let token = github_token("E5f6");
     commit(&work, "config.py", &format!("TOKEN = \"{token}\"\n"))?;
-    git(
-        &work,
-        &["push", "-q", "origin", "HEAD:refs/heads/factory/task/DF-8"],
-    )?;
+    git(&work, &["push", "-q", "origin", &format!("HEAD:{OTHER}")])?;
 
     let task = gateway.push(&work).await?;
 
@@ -432,6 +432,37 @@ async fn a_secret_from_another_tasks_branch_is_scanned_on_the_task_branch() -> R
     );
     assert_eq!(gateway.forge_head()?, None);
     assert_eq!(gateway.records.last()?.verdict, PushVerdict::Rejected);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_of_the_base_branch_with_a_foreign_identity_is_not_checked_again() -> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    commit_as(&work, "merged.txt", "merged\n", "Forge", FORGE)?;
+    git(&work, &["push", "-q", "origin", &format!("HEAD:{BASE}")])?;
+    commit(&work, "next.txt", "the next iteration\n")?;
+
+    let task = gateway.push(&work).await?;
+
+    assert!(task.status.success(), "{}", stderr(&task));
+    assert!(gateway.records.last()?.findings.is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_with_a_foreign_identity_on_a_branch_that_is_not_the_base_is_rejected()
+-> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    commit_as(&work, "merged.txt", "merged\n", "Forge", FORGE)?;
+    git(&work, &["push", "-q", "origin", &format!("HEAD:{OTHER}")])?;
+    commit(&work, "next.txt", "the next iteration\n")?;
+
+    let task = gateway.push(&work).await?;
+
+    assert!(!task.status.success());
+    assert!(stderr(&task).contains("df:identity"), "{}", stderr(&task));
     Ok(())
 }
 

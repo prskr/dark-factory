@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5,\n                    image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9,\n                    webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12,\n                    updated_at = now()\n                WHERE id = $1 RETURNING id\n                ",
+  "query": "\n                UPDATE projects SET key = $2, name = $3, repo_url = $4, issue_tracker_url = $5,\n                    image = $6, base_branch = $7, forge_credential_id = $8, adapter_command = $9,\n                    webhook_wake = $10, branch_rewrite_policy = $11, agent_branch_globs = $12,\n                    subtask_merge = $13, updated_at = now()\n                WHERE id = $1 RETURNING id\n                ",
   "describe": {
     "columns": [
       {
@@ -28,12 +28,13 @@
         "TextArray",
         "Text",
         "Text",
-        "TextArray"
+        "TextArray",
+        "Text"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "8e68de493f44ac44172b16d66a4473927ca5f84ae59398fbeb0f93b22193da30"
+  "hash": "f9a9ec1b54d70e73424ea8b3eef620c400f9a23b70e43575f9a635f58b3f7270"
 }

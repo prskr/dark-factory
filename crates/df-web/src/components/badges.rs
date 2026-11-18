@@ -51,6 +51,20 @@ impl Tone {
         }
     }
 
+    /// Border of a status ring: the foreground token of the tone.
+    pub const fn ring_class(self) -> &'static str {
+        match self {
+            Self::Running => "border-status-running-fg",
+            Self::Waiting => "border-status-waiting-fg",
+            Self::Queued => "border-status-queued-fg",
+            Self::Completed => "border-status-completed-fg",
+            Self::Failed => "border-status-failed-fg",
+            Self::Cancelled => "border-muted",
+            Self::Limited => "border-status-limited-fg",
+            Self::Review => "border-status-review-fg",
+        }
+    }
+
     /// Tone of a task status.
     pub const fn of_status(status: TaskStatus) -> Self {
         match status {

@@ -12,6 +12,28 @@ use uuid::Uuid;
 
 use crate::pool::DbError;
 
+/// How far the direct subtasks of a task are (`task-ui`, "Subtask progress on task rows"): done
+/// counts those `in_review` or `completed`, total those that are not `cancelled`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SubtaskProgress {
+    pub done: i64,
+    pub total: i64,
+}
+
+impl SubtaskProgress {
+    /// The progress of subtasks in these statuses. The list queries count the same way in SQL
+    /// (`TaskStatus::SUBTASK_DONE`, `cancelled` left out of the total).
+    pub fn of(statuses: impl IntoIterator<Item = TaskStatus>) -> Self {
+        statuses
+            .into_iter()
+            .fold(Self::default(), |mut progress, status| {
+                progress.done += i64::from(TaskStatus::SUBTASK_DONE.contains(&status));
+                progress.total += i64::from(status != TaskStatus::Cancelled);
+                progress
+            })
+    }
+}
+
 /// One row of the task list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListItem {
@@ -27,6 +49,8 @@ pub struct TaskListItem {
     pub status_line: String,
     /// When the scheduler may start the task's next run.
     pub resume_at: Option<DateTime<Utc>>,
+    /// Progress of the direct subtasks; total 0 for a task without subtasks.
+    pub subtasks: SubtaskProgress,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -43,6 +67,8 @@ struct TaskListRow {
     status: String,
     status_line: String,
     resume_at: Option<DateTime<Utc>>,
+    subtasks_done: i64,
+    subtasks_total: i64,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -62,6 +88,10 @@ impl TryFrom<TaskListRow> for TaskListItem {
             status: row.status,
             status_line: row.status_line,
             resume_at: row.resume_at,
+            subtasks: SubtaskProgress {
+                done: row.subtasks_done,
+                total: row.subtasks_total,
+            },
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -129,6 +159,9 @@ pub struct TaskDetail {
     pub creator_task_key: Option<String>,
     pub parent_key: Option<String>,
     pub parent_title: Option<String>,
+    /// The task whose branch this one builds on.
+    pub base_task_key: Option<String>,
+    pub base_task_title: Option<String>,
 }
 
 /// A task detail as `query_as!` reads it.
@@ -159,6 +192,8 @@ struct TaskDetailRow {
     creator_task_key: Option<String>,
     parent_key: Option<String>,
     parent_title: Option<String>,
+    base_task_key: Option<String>,
+    base_task_title: Option<String>,
 }
 
 impl TryFrom<TaskDetailRow> for TaskDetail {
@@ -192,6 +227,8 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             creator_task_key: row.creator_task_key,
             parent_key: row.parent_key,
             parent_title: row.parent_title,
+            base_task_key: row.base_task_key,
+            base_task_title: row.base_task_title,
         })
     }
 }
@@ -292,10 +329,17 @@ pub async fn list_task_items(
         r#"
         SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,
                p.name AS project_name, ps.name AS persona_name,
-               t.status, t.status_line, t.resume_at, t.created_at, t.updated_at
+               t.status, t.status_line, t.resume_at,
+               COALESCE(sub.done, 0) AS "subtasks_done!", COALESCE(sub.total, 0) AS "subtasks_total!",
+               t.created_at, t.updated_at
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
         JOIN personas ps ON ps.id = t.persona_id
+        LEFT JOIN LATERAL (
+            SELECT count(*) FILTER (WHERE s.status = ANY($4)) AS done,
+                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total
+            FROM tasks s WHERE s.parent_id = t.id
+        ) sub ON true
         WHERE ($1::text[] IS NULL OR t.status = ANY($1))
           AND ($2::text IS NULL OR p.key = $2)
         ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
@@ -306,7 +350,8 @@ pub async fn list_task_items(
         "#,
         statuses.as_deref(),
         filter.project_key,
-        order_key(filter.sort)
+        order_key(filter.sort),
+        &status_list(TaskStatus::SUBTASK_DONE)
     )
     .fetch_all(pool)
     .await?
@@ -360,13 +405,15 @@ pub async fn get_task_detail_by_key(
             ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
-            parent.key AS "parent_key?", parent.title AS "parent_title?"
+            parent.key AS "parent_key?", parent.title AS "parent_title?",
+            base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
         JOIN personas ps ON ps.id = t.persona_id
         LEFT JOIN tasks creator ON creator.id =
             CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
         LEFT JOIN tasks parent ON parent.id = t.parent_id
+        LEFT JOIN tasks base ON base.id = t.base_task_id
         WHERE t.key = $1
         "#,
         key
@@ -386,13 +433,15 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
             ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
-            parent.key AS "parent_key?", parent.title AS "parent_title?"
+            parent.key AS "parent_key?", parent.title AS "parent_title?",
+            base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
         JOIN personas ps ON ps.id = t.persona_id
         LEFT JOIN tasks creator ON creator.id =
             CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
         LEFT JOIN tasks parent ON parent.id = t.parent_id
+        LEFT JOIN tasks base ON base.id = t.base_task_id
         WHERE t.id = $1
         "#,
         id.as_uuid()
@@ -401,6 +450,60 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
     .await?
     .map(TaskDetail::try_from)
     .transpose()
+}
+
+/// A direct subtask of a task, a row of its Subtasks tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtaskItem {
+    pub key: String,
+    pub title: String,
+    pub title_source: TitleSource,
+    pub status: TaskStatus,
+    /// The subtask's own subtasks.
+    pub subtasks: SubtaskProgress,
+}
+
+struct SubtaskRecord {
+    key: String,
+    title: String,
+    title_source: String,
+    status: String,
+    subtasks_done: i64,
+    subtasks_total: i64,
+}
+
+/// The direct subtasks of `parent` by task number, each with the progress of its own.
+pub async fn list_subtasks(pool: &PgPool, parent: TaskId) -> Result<Vec<SubtaskItem>, DbError> {
+    sqlx::query_as!(
+        SubtaskRecord,
+        r#"
+        SELECT s.key, s.title, s.title_source, s.status,
+               count(g.id) FILTER (WHERE g.status = ANY($2)) AS "subtasks_done!",
+               count(g.id) FILTER (WHERE g.status <> 'cancelled') AS "subtasks_total!"
+        FROM tasks s LEFT JOIN tasks g ON g.parent_id = s.id
+        WHERE s.parent_id = $1
+        GROUP BY s.id
+        ORDER BY s.number
+        "#,
+        parent.as_uuid(),
+        &status_list(TaskStatus::SUBTASK_DONE)
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|r| {
+        Ok(SubtaskItem {
+            key: r.key,
+            title: r.title,
+            title_source: r.title_source.parse()?,
+            status: r.status.parse()?,
+            subtasks: SubtaskProgress {
+                done: r.subtasks_done,
+                total: r.subtasks_total,
+            },
+        })
+    })
+    .collect()
 }
 
 struct DependencyRecord {

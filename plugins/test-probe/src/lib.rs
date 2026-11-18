@@ -176,6 +176,14 @@ impl PullRequestsGuest for Probe {
         Err(Error::Internal("not supported by the probe".to_string()))
     }
 
+    fn merge(id: PullRequestRef, _: String) -> Result<(), Error> {
+        rate_limited_on_429(&format!("/pulls/{}/merge", id.number))
+    }
+
+    fn create_branch(_: RepoRef, _: String, _: String) -> Result<(), Error> {
+        rate_limited_on_429("/branches")
+    }
+
     fn list_feedback(id: PullRequestRef, since: Option<String>) -> Result<Feedback, Error> {
         rate_limited_on_429(&format!("/pulls/{}/feedback", id.number))?;
         let at = "2026-11-02T10:00:00Z".to_string();

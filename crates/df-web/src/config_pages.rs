@@ -93,6 +93,8 @@ pub(crate) struct ProjectForm {
     /// `never` or `with-lease`; empty when the form doesn't carry the field (the stored value
     /// stays on an edit, the default applies to a new project).
     branch_rewrite_policy: String,
+    /// `human` or `parent-agent`; empty like `branch_rewrite_policy`.
+    subtask_merge: String,
     /// One glob per line; missing when the form doesn't carry the field (the stored globs stay on
     /// an edit, the defaults apply to a new project). An empty field means no agent branches.
     agent_branch_globs: Option<String>,
@@ -227,6 +229,7 @@ fn validate_project(
                 RewritePolicy::default()
             })
     };
+    let subtask_merge = branches::parse_subtask_merge(&mut errors, &form.subtask_merge);
     let agent_branch_globs =
         branches::parse_agent_branches(&mut errors, form.agent_branch_globs.as_deref());
     errors.into_result(ProjectInput {
@@ -242,6 +245,7 @@ fn validate_project(
         webhook_wake,
         branch_rewrite_policy,
         agent_branch_globs,
+        subtask_merge,
     })
 }
 
@@ -745,6 +749,7 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
             .unwrap_or_default(),
         webhook_wake: p.webhook_wake.as_str().to_string(),
         branch_rewrite_policy: p.branch_rewrite_policy.as_str().to_string(),
+        subtask_merge: p.subtask_merge.as_str().to_string(),
         agent_branch_globs: Some(p.agent_branch_globs.join("\n")),
         tab: String::new(),
         push: PushPolicyForm::from_policy(push_policy),
@@ -961,6 +966,7 @@ fn project_form(
                 (form_group("Push checks", push_policy::panel(&values.push, errors)))
                 (form_group("Branches", branches::group(
                     &values.branch_rewrite_policy,
+                    &values.subtask_merge,
                     values.agent_branch_globs.as_deref().unwrap_or_default(),
                     errors,
                 )))
@@ -1308,6 +1314,12 @@ fn keep_stored_branch_settings(form: &mut ProjectForm, stored: &ProjectRecord) {
             .branch_rewrite_policy
             .as_str()
             .clone_into(&mut form.branch_rewrite_policy);
+    }
+    if form.subtask_merge.is_empty() {
+        stored
+            .subtask_merge
+            .as_str()
+            .clone_into(&mut form.subtask_merge);
     }
     if form.agent_branch_globs.is_none() {
         form.agent_branch_globs = Some(stored.agent_branch_globs.join("\n"));

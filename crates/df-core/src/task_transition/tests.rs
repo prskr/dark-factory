@@ -1,5 +1,7 @@
 //! Tests of the task status rules, one per rule of the status machine.
 
+use serde_json::json;
+
 use super::*;
 use TaskStatus::*;
 
@@ -470,7 +472,7 @@ fn a_merge_completes_every_task_but_the_final_ones_and_enqueues_no_pr_job() {
 #[test]
 fn cancelling_discards_messages_stops_the_run_and_is_rejected_for_final_statuses() {
     for status in TaskStatus::ALL {
-        let result = transition(&snapshot(*status), TaskEvent::Cancelled);
+        let result = transition(&snapshot(*status), TaskEvent::Cancelled { via: None });
         if matches!(status, Completed | Cancelled) {
             assert_eq!(result, Err(Rejected::Cancel(*status)));
             continue;
@@ -573,11 +575,90 @@ fn marking_done_records_done_and_notifies_dependents_and_parent() {
 
 #[test]
 fn cancelling_notifies_the_parent_only() {
-    let next = apply(&snapshot(AwaitingDependencies), TaskEvent::Cancelled);
+    let next = apply(
+        &snapshot(AwaitingDependencies),
+        TaskEvent::Cancelled { via: None },
+    );
     assert_eq!(
         notified(&next),
         [&Effect::NotifyParent(ChildEnd::Cancelled)]
     );
+}
+
+fn audit_details(next: &Transition) -> &serde_json::Value {
+    next.effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Audit { details, .. } => Some(details),
+            _ => None,
+        })
+        .expect("an audit effect")
+}
+
+// Scenario "Feature cancelled": every cancelled task has its own audit entry; a descendant's
+// names the task whose cancellation took it along.
+#[test]
+fn cancelling_with_a_via_task_names_it_in_the_audit_details() {
+    let root = apply(&snapshot(Running), TaskEvent::Cancelled { via: None });
+    assert_eq!(audit_details(&root), &json!({"old_status": Running}));
+
+    let descendant = apply(
+        &snapshot(Running),
+        TaskEvent::Cancelled {
+            via: Some("DF-30".into()),
+        },
+    );
+    assert_eq!(
+        audit_details(&descendant),
+        &json!({"old_status": Running, "via": "DF-30"})
+    );
+}
+
+fn with_parent(status: TaskStatus) -> TaskSnapshot {
+    TaskSnapshot {
+        has_parent: true,
+        ..snapshot(status)
+    }
+}
+
+#[test]
+fn a_status_change_of_a_task_with_a_parent_publishes_the_parent() {
+    let cases = [
+        (Waiting, TaskEvent::MessageQueued),
+        (Waiting, TaskEvent::TurnStarted),
+        (Running, TaskEvent::TurnEnded),
+        (Waiting, TaskEvent::MarkedDone(DoneBy::Board)),
+        (Waiting, TaskEvent::Cancelled { via: None }),
+        (Running, TaskEvent::RunEnded(end(RunOutcome::Completed))),
+    ];
+    for (status, event) in cases {
+        let name = event_name(&event);
+        let next = apply(&with_parent(status), event.clone());
+        assert_ne!(next.status, status, "{name}");
+        assert!(
+            has(&next, &Effect::Publish(Notice::ParentTaskChanged)),
+            "{name}: {:?}",
+            next.effects
+        );
+        let orphan = apply(&snapshot(status), event);
+        assert!(
+            !has(&orphan, &Effect::Publish(Notice::ParentTaskChanged)),
+            "{name} without a parent"
+        );
+    }
+}
+
+#[test]
+fn an_event_that_keeps_the_status_does_not_publish_the_parent() {
+    for (status, event) in [
+        (Running, TaskEvent::TurnStarted),
+        (Waiting, TaskEvent::TurnEnded),
+        (Running, TaskEvent::RunStarted),
+    ] {
+        let next = apply(&with_parent(status), event);
+        assert_eq!(next.status, status);
+        assert!(!has(&next, &Effect::Publish(Notice::ParentTaskChanged)));
+    }
 }
 
 #[test]
@@ -689,7 +770,7 @@ fn event_name(event: &TaskEvent) -> &'static str {
         TaskEvent::TurnEnded => "TurnEnded",
         TaskEvent::RunEnded(_) => "RunEnded",
         TaskEvent::MarkedDone(_) => "MarkedDone",
-        TaskEvent::Cancelled => "Cancelled",
+        TaskEvent::Cancelled { .. } => "Cancelled",
         TaskEvent::DependencySatisfied => "DependencySatisfied",
         TaskEvent::ChildEnded(_) => "ChildEnded",
     }
@@ -710,7 +791,7 @@ fn the_status_diagram_names_every_status_and_event() {
         TaskEvent::TurnEnded,
         TaskEvent::RunEnded(end(RunOutcome::Completed)),
         TaskEvent::MarkedDone(DoneBy::Board),
-        TaskEvent::Cancelled,
+        TaskEvent::Cancelled { via: None },
         TaskEvent::DependencySatisfied,
         TaskEvent::ChildEnded(child(ChildEnd::Done)),
     ];

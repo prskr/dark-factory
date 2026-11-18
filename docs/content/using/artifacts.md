@@ -30,8 +30,8 @@ A rejected write leaves an existing artifact unchanged and tells the agent which
 `path` is read by the runtime in the sandbox: it is absolute, lies under `/data/repo` or `/tmp`,
 passes through no symlink and names a regular file of at most 8 MiB. Anything else fails the call.
 
-An agent can read the artifacts of its own task, its ancestors, its descendants (all levels) and the
-tasks it depends on (`depends_on`). Any other task, and a task that does not exist,
+An agent can read the artifacts of its own task, its ancestors, its descendants (all levels), the
+tasks it depends on (`depends_on`) and its base task (`base_task`). Any other task, and a task that does not exist,
 gives the same error "task not found or not related". What an agent reads from another task is
 marked as data written by another agent; reads of other tasks are recorded in the audit log with the
 target task and the artifact.

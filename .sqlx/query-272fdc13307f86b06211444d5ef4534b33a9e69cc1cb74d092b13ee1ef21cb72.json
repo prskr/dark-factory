@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id, t.parent_id, t.base_task_id, t.status, t.pr_number, t.pr_url, p.subtask_merge\n         FROM tasks t JOIN projects p ON p.id = t.project_id\n         WHERE t.project_id = $1 AND t.key = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "base_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "pr_number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_number"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "pr_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_url"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "subtask_merge",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "subtask_merge"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "272fdc13307f86b06211444d5ef4534b33a9e69cc1cb74d092b13ee1ef21cb72"
+}

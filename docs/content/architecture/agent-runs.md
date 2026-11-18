@@ -66,7 +66,10 @@ sequenceDiagram
    passed. Up to `runs.maxConcurrent` runs (default 4) are active at a time; further due tasks wait,
    oldest first. A task never has two active runs. The scheduler notices a due resume time on its
    tick (`scheduling.tickMillis`, 5 s by default), so a due task starts within one tick.
-2. **Provisioning.** The control plane ensures the task volume exists, creates the sandbox pod (the
+2. **Provisioning.** For a run of a task with a [base task](../using/delegation.md#base-task)
+   the control plane first creates the base task's branch through the forge, unless it exists; a
+   refusal ends the run `failed` with `base branch: <reason>`. It ensures the task volume exists,
+   creates the sandbox pod (the
    project's image with the runtime and harness mounted read-only, the configured runtime class) and a
    NetworkPolicy for the run.
 3. **Connecting.** The runtime dials the control plane with its pod certificate. The control plane
@@ -77,7 +80,9 @@ sequenceDiagram
    a transcript summary).
 4. **Preparing.** The runtime clones or updates the workspace through the Git proxy and writes its
    own `.git/config` and sparse checkout patterns; files below [hidden
-   paths](../using/hidden-paths.md) are left out or removed. Anything left on the volume is treated
+   paths](../using/hidden-paths.md) are left out or removed. A task branch without commits of its
+   own is moved to the tip of its base branch (and, if it exists, on the remote), so a reviewer
+   based on another task sees that task's new commits. Anything left on the volume is treated
    as untrusted.
 5. **Turns.** The harness works on the prompt. Every message and tool call is streamed to the
    control plane and stored as the task's transcript. After a turn with new commits the runtime
@@ -147,10 +152,11 @@ the run's task, and at most once per `call_id`.
 | Tool | Purpose |
 | --- | --- |
 | `update_pull_request`, `comment_on_issue`, `report_progress`, `set_task_title` | Shape the pull request, comment on the linked issue, set the status line and the title |
-| `complete_task` | Ends the run after the turn; the task goes to review |
+| `complete_task` | Ends the run after the turn; the task goes to review. Fails while the task has [open subtasks](../using/delegation.md#completing-with-open-subtasks) |
 | `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task |
 | `read_pull_request_feedback`, `comment_on_pull_request` | Read and answer reviews |
-| `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project; `send_message` acts only on children of the run's task |
+| `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project, optionally on a [base task](../using/delegation.md#base-task) and within the [limits](../using/delegation.md#limits); `send_message` acts only on children of the run's task |
+| `merge_subtask_pr` | Merges the pull request of a subtask based on the run's task into the run's task branch, if the project allows it ([Build a feature in iterations](../using/build-a-feature.md)) |
 | `write_artifact`, `list_artifacts`, `read_artifact` | [Artifacts](../using/artifacts.md): write named text and image files on the own task, list and read those of related tasks |
 
 ## Pull request actions

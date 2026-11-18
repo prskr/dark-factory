@@ -156,6 +156,51 @@ impl TryFrom<String> for RewritePolicy {
     }
 }
 
+/// Who merges the pull requests of a task's subtasks into the task's branch (project setting
+/// `subtask_merge`). Merges into the default branch always stay with humans.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubtaskMerge {
+    /// Board members merge them.
+    #[default]
+    Human,
+    /// The agent of the parent task may merge them with `merge_subtask_pr`.
+    ParentAgent,
+}
+
+impl SubtaskMerge {
+    /// Every value, in the order of a select.
+    pub const ALL: &'static [Self] = &[Self::Human, Self::ParentAgent];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::ParentAgent => "parent-agent",
+        }
+    }
+}
+
+impl fmt::Display for SubtaskMerge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SubtaskMerge {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "human" => Ok(Self::Human),
+            "parent-agent" => Ok(Self::ParentAgent),
+            other => Err(ParseEnumError {
+                kind: "subtask merge",
+                value: other.to_owned(),
+            }),
+        }
+    }
+}
+
 /// The agent branch globs of a new project.
 pub fn default_agent_branch_globs() -> Vec<String> {
     DEFAULT_AGENT_BRANCH_GLOBS.map(str::to_owned).to_vec()
@@ -187,6 +232,17 @@ mod tests {
 
     fn parse(name: &str) -> Result<ExistingBranch, BranchError> {
         ExistingBranch::parse(name, "main")
+    }
+
+    #[test]
+    fn subtask_merge_defaults_to_human_and_round_trips() {
+        assert_eq!(SubtaskMerge::default(), SubtaskMerge::Human);
+        for value in SubtaskMerge::ALL {
+            assert_eq!(value.as_str().parse::<SubtaskMerge>().unwrap(), *value);
+            let json = serde_json::to_string(value).unwrap();
+            assert_eq!(json, format!("\"{value}\""));
+        }
+        assert!("anyone".parse::<SubtaskMerge>().is_err());
     }
 
     #[test]

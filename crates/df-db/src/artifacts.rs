@@ -179,7 +179,7 @@ pub async fn read_artifact_content(
 }
 
 /// The task with `key` if `reader` may read its artifacts: the reader itself, an ancestor, a
-/// descendant, a task the reader depends on. `None` for an unknown key and for an unrelated task
+/// descendant, a task the reader depends on, its base task. `None` for an unknown key and for an unrelated task
 /// alike.
 pub async fn readable_task(
     pool: &PgPool,
@@ -205,6 +205,7 @@ pub async fn readable_task(
              OR t.id IN (SELECT id FROM ancestors)
              OR t.id IN (SELECT id FROM descendants)
              OR t.id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id = $1)
+             OR t.id = (SELECT base_task_id FROM tasks WHERE id = $1)
          )",
     )
     .bind(reader.as_uuid())

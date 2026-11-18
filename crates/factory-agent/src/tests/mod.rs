@@ -30,6 +30,7 @@ mod runner_idle;
 mod runner_runtime;
 mod transcript;
 mod workspace;
+mod workspace_base;
 mod workspace_finalize;
 
 /// A `Release`, as the control plane sends it once the idle deadline passed. The runtime keeps

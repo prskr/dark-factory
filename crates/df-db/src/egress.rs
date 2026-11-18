@@ -213,13 +213,26 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
     let rows = sqlx::query!(
         r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,
                   p.key AS project_key, t.persona_id, p.repo_url,
-                  COALESCE(t.base_branch, p.base_branch) AS "base_branch!", t.branch AS task_branch,
+                  eb.branch AS "base_branch!", t.branch AS task_branch,
                   p.branch_rewrite_policy,
                   c.id AS "credential_id?", c.name AS "credential_name?",
                   c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
            FROM runs r
            JOIN tasks t ON t.id = r.task_id
            JOIN projects p ON p.id = t.project_id
+           -- The effective base branch, as `tasks::base_branch` resolves it.
+           CROSS JOIN LATERAL (
+               WITH RECURSIVE chain AS (
+                   SELECT id, base_task_id, base_branch, 0 AS depth FROM tasks WHERE id = t.id
+                   UNION ALL
+                   SELECT b.id, b.base_task_id, b.base_branch, c.depth + 1
+                   FROM chain c JOIN tasks b ON b.id = c.base_task_id
+                   WHERE b.status = 'completed'
+               )
+               SELECT COALESCE(open_base.branch, last.base_branch, p.base_branch) AS branch
+               FROM (SELECT * FROM chain ORDER BY depth DESC LIMIT 1) last
+               LEFT JOIN tasks open_base ON open_base.id = last.base_task_id
+           ) eb
            LEFT JOIN credential_refs c ON c.id = p.forge_credential_id
            WHERE r.pod_ip IS NOT NULL
              AND r.state <> ALL($1)

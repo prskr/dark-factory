@@ -198,6 +198,7 @@ pub(crate) fn task_rows(
                         div class="flex items-center gap-2" {
                             span class="font-mono text-xs text-faint" { (t.key) }
                             @if let Some(status) = status { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
+                            (super::subtasks::chip(t.subtasks))
                             time datetime=(t.updated_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(t.updated_at)) }
                         }
                         div title=(t.title) class={"mt-0.5 truncate text-[15px] font-medium" @if t.title_source == TitleSource::Placeholder { " italic text-muted" }} { (t.title) }
@@ -622,6 +623,12 @@ pub(crate) fn details_region(
             html! { a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) } " " span class="font-normal text-muted" { (title) } },
         ));
     }
+    if let (Some(key), Some(title)) = (&task.base_task_key, &task.base_task_title) {
+        properties.push((
+            "Base task",
+            html! { a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) " · " (title) } },
+        ));
+    }
     if resume.count > 0 {
         properties.push((
             "Resumes",
@@ -939,17 +946,19 @@ pub(super) fn details_column(
     runs: &[RunView],
     cancel: &CancelNote,
     resume: &ResumeNote,
+    subtasks: &[df_db::task_views::SubtaskItem],
     artifacts: &[crate::artifacts::ArtifactCard],
 ) -> Markup {
-    let tabbed = !artifacts.is_empty();
+    let tabbed = !artifacts.is_empty() || !subtasks.is_empty();
     details_panel_with_heading(
         "Details",
-        crate::artifacts::details_heading(artifacts.len(), false),
+        crate::artifacts::details_heading(subtasks.len(), artifacts.len(), false),
         html! {
-            // The stylesheet hides this panel while the Artifacts tab is open.
+            // The stylesheet hides this panel while another tab is open.
             div id="panel-overview" role=[tabbed.then_some("tabpanel")] aria-labelledby=[tabbed.then_some("tab-overview")] class="ws-overview" {
                 (details_region(task, cancel, resume, None)) (super::dependencies::dependencies_region(deps, task.status)) (runs_region(&task.key, runs, task.persona_model.as_deref()))
             }
+            (super::subtasks::tab_panel(subtasks))
             (crate::artifacts::tab_panel(&task.key, artifacts))
         },
     )

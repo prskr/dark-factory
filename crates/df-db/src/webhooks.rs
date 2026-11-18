@@ -100,6 +100,17 @@ pub async fn complete_on_merge_tx(
     task_id: TaskId,
     login: &str,
 ) -> Result<bool, DbError> {
+    complete_on_merge_as_tx(tx, task_id, login, &Principal::system(MERGED_REASON)).await
+}
+
+/// [`complete_on_merge_tx`] for a merge that Dark Factory requested itself
+/// (`merge_subtask_pr`): `actor`, the agent of the parent task, is the actor of the audit entry.
+pub async fn complete_on_merge_as_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    login: &str,
+    actor: &Principal,
+) -> Result<bool, DbError> {
     lock_runs_then_task(tx, task_id).await?;
     let merged: Option<bool> =
         sqlx::query_scalar("SELECT pr_merged_at IS NOT NULL FROM tasks WHERE id = $1")
@@ -115,11 +126,10 @@ pub async fn complete_on_merge_tx(
     )
     .execute(&mut **tx)
     .await?;
-    let actor = Principal::system(MERGED_REASON);
     let done = TaskEvent::MarkedDone(DoneBy::Merge {
         login: login.to_string(),
     });
-    apply_task_event(tx, task_id, done, &actor).await?;
+    apply_task_event(tx, task_id, done, actor).await?;
     Ok(true)
 }
 

@@ -77,7 +77,10 @@ async fn apply_one(
     event: TaskEvent,
     actor: &Principal,
 ) -> Result<(Transition, Vec<Followup>), DbError> {
-    if matches!(event, TaskEvent::MarkedDone(_) | TaskEvent::Cancelled) {
+    if matches!(
+        event,
+        TaskEvent::MarkedDone(_) | TaskEvent::Cancelled { .. }
+    ) {
         lock_runs_then_task(tx, task_id).await?;
     }
     let after = match &event {
@@ -150,6 +153,18 @@ pub(crate) async fn execute_effects(
                 )
                 .with_details(&details)?;
                 write_audit_entry(&mut **tx, &entry).await?;
+            }
+            Effect::Publish(Notice::ParentTaskChanged) => {
+                let parent = sqlx::query_scalar!(
+                    "SELECT parent_id FROM tasks WHERE id = $1",
+                    task_id.as_uuid()
+                )
+                .fetch_one(&mut **tx)
+                .await?;
+                if let Some(parent) = parent {
+                    let task_id = TaskId::from_uuid(parent);
+                    publish(&mut **tx, &Notification::TaskChanged { task_id }).await?;
+                }
             }
             Effect::Publish(notice) => {
                 publish(&mut **tx, &notification(*notice, task_id)).await?;
@@ -311,7 +326,7 @@ fn dependency_satisfied(
 
 fn notification(notice: Notice, task_id: TaskId) -> Notification {
     match notice {
-        Notice::TaskChanged => Notification::TaskChanged { task_id },
+        Notice::TaskChanged | Notice::ParentTaskChanged => Notification::TaskChanged { task_id },
         Notice::TaskMessageQueued => Notification::TaskMessageQueued { task_id },
         Notice::TaskMessageChanged => Notification::TaskMessageChanged { task_id },
     }
@@ -333,6 +348,7 @@ struct TaskRowFacts {
     auto_resumes: i32,
     has_pr: bool,
     merged: bool,
+    has_parent: bool,
 }
 
 /// Locks the task row and reads what the rules need. With `after`, only messages queued after
@@ -345,7 +361,7 @@ async fn load_snapshot(
 ) -> Result<TaskSnapshot, DbError> {
     let row: Option<TaskRowFacts> = sqlx::query_as(
         "SELECT status, resume_at, auto_resumes, pr_number IS NOT NULL AS has_pr,
-             pr_merged_at IS NOT NULL AS merged
+             pr_merged_at IS NOT NULL AS merged, parent_id IS NOT NULL AS has_parent
          FROM tasks WHERE id = $1 FOR UPDATE",
     )
     .bind(task_id.as_uuid())
@@ -357,6 +373,7 @@ async fn load_snapshot(
         auto_resumes,
         has_pr,
         merged,
+        has_parent,
     }) = row
     else {
         return Err(DbError::NotFound(format!("task `{task_id}` not found")));
@@ -427,6 +444,7 @@ async fn load_snapshot(
             (true, false) => PrState::Unmerged,
             (true, true) => PrState::Merged,
         },
+        has_parent,
     })
 }
 

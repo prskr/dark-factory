@@ -10,13 +10,14 @@ webhook; webhooks add the merge of a pull request as a signal ([Forge webhooks](
 
 ## The tools
 
-Every task of an agent gets three more [factory tools](../architecture/agent-runs.md#agent-tools):
+Every task of an agent gets four more [factory tools](../architecture/agent-runs.md#agent-tools):
 
 | Tool | What it does |
 | --- | --- |
 | `list_personas` | Returns the name and the [description](setup.md#personas) of every persona, ordered by name. |
-| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on` and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches)). The caller becomes the **parent**. Returns the key and the status of the new task. |
+| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on`, optional `base_task` ([below](#base-task)) and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches); not together with `base_task`). The caller becomes the **parent**. Returns the key and the status of the new task. Fails when a [limit](#limits) is reached. |
 | `send_message` | Queues a message on a child of the caller, with the same effect as your message in the task view. The caller cannot message any other task. |
+| `merge_subtask_pr` | Merges the pull request of a subtask into the caller's own task branch ([below](#merge-subtask-pull-requests)). Only if the project's `subtask_merge` setting is *Parent agent*. |
 
 Tasks created in the UI have no parent. A task created by an agent shows that agent as its creator
 in the details.
@@ -39,6 +40,73 @@ does not start it; the first run receives it with the assignment.
 
 Marking a task done by hand satisfies `done` dependencies on it, also without webhooks. Cancelling
 a waiting task discards its assignment.
+
+## Base task
+
+`base_task` is the key of a task of the same project that is not done, failed or cancelled. The new
+task's branch starts from the base task's branch and its pull request targets that branch, so a
+reviewer sees the implementation it reviews (`base_task` = the implementation) and the iterations of
+a feature build on each other (`base_task` = the caller's own key). It is set at creation and never
+changes. A key that is unknown, in another project or over is an error; nothing is created.
+
+- **The base branch** of a task is the branch of its base task. Once the base task is done (merged),
+  the base task's own base branch applies instead, recursively, so the task follows the default
+  branch again. Without a base task it is the base of the attached pull request, or the project's
+  base branch. The workspace, the Git proxy's route and the pull request use the same value.
+- **The base task's branch is created** through the forge, from the base task's own base branch,
+  whenever a run of the new task starts, unless it exists. If the forge refuses it, the run ends
+  `failed` with `base branch: <reason>` and the task becomes `failed`; the next start (after a
+  message) asks again.
+- **The workspace follows it**: when a task's branch has no commits of its own, the start of each
+  run moves it (locally and, if it exists there, on the remote) to the tip of the base branch. A
+  task with commits of its own, and a task on an existing branch, is left as it is.
+- **Artifacts**: an agent may read the artifacts of its base task ([Artifacts](artifacts.md)).
+
+## Limits
+
+Two instance settings bound delegation; `create_task` fails with an error naming the setting and
+creates nothing ([reference](../reference/agent-channel/configuration.md)):
+
+| Setting | Default | Counts |
+| --- | --- | --- |
+| `tasks.maxDepth` | `5` | The ancestors of the new task: a task with that many ancestors cannot create subtasks. |
+| `tasks.maxOpenSubtasks` | `10` | The caller's open subtasks. |
+
+A subtask is **open** until it is finished: its status is `in_review`, `completed`, `failed` or
+`cancelled`, unless it is based on the caller (`base_task`) and is neither `completed` nor
+`cancelled` and either has a pull request or the job that opens its pull request is still pending
+(the parent is woken when the run ends, before that job ran): such an iteration is open until its
+pull request is merged. Tasks you
+create in the UI are not limited.
+
+## Completing with open subtasks
+
+`complete_task` fails while the task has open subtasks. The error lists their keys and, where they
+have one, their pull request; the run does not end, and the agent can end its turn to be woken
+when they end or merge the pull requests. **Mark done** in the status menu is not gated.
+
+## Merge subtask pull requests
+
+`merge_subtask_pr` takes the key of a subtask and merges its pull request into the caller's task
+branch. It works only if all of these hold, and otherwise answers with an error that names the
+condition and changes nothing:
+
+- the project's **Subtask merges** setting is *Parent agent* ([Projects](setup.md#projects));
+- the task is a subtask of the caller, and its base task is the caller;
+- the subtask is `in_review` and has a pull request.
+
+The merge is requested for the commit the subtask last pushed and uses the repository's merge style
+(Forgejo: its default merge style; GitHub: merge commit if allowed, else squash, else rebase). A
+forge refusal, such as a conflict, a failed required check or a head that moved, comes back as an
+error with the forge's reason; the subtask stays in review. On success the subtask becomes done
+(audit entry `task.done` with the calling agent, the merge time recorded as for a merge reported by
+the forge), the tool returns the merged pull request's URL, the caller is woken as for any done
+subtask, and the caller's own draft pull request is opened if it has none (a failure there is
+retried and never fails the merge). A later merge webhook for the same pull request changes nothing. Merges into the default branch stay with humans.
+
+If the subtask became `completed` or `cancelled` while the forge merged, the tool still returns the
+merged pull request's URL and says so: the subtask "is already done" or "was cancelled meanwhile
+and stays cancelled". Its status is left as it is.
 
 ## The parent wakes when a child ends
 
@@ -105,14 +173,19 @@ With webhooks a merged pull request does it.
 
 ## In the task view
 
-The details of a task show **Created by** and **Parent** after the branch, and a collapsible
+The details of a task show **Created by**, **Parent** and, for a task with a base task, **Base task**
+(`DF-20 · Implement`, a link) after the branch, and a collapsible
 **Dependencies** section between the properties and the runs: *Waits for* (each dependency with its
 kind and whether it is satisfied) and *Needed by* (the tasks that wait for this one, with their
 status). It is open while the task awaits its dependencies and updates live. The section is absent
 for a task in no dependency.
 
-## Limits
+A task with subtasks has a **Subtasks** tab: how many of its direct subtasks are done, a progress
+bar and a row per subtask (status ring, title, key and status, and the done/total chip of a subtask
+with subtasks of its own). In the task list a task with subtasks shows `done/total` next to its
+status: done counts the subtasks that are in review or done, total those that are not cancelled.
+Both update when a subtask changes status or is created. Cancelling a task also cancels its open
+descendants ([Tasks](tasks.md#interrupt-stop-mark-done-cancel)).
 
-There is no limit yet on the depth of the task tree, the number of children or relayed messages;
-watch the transcript and cancel a task that runs away. A persona is not restricted in whom it may
-delegate to.
+There is no limit on relayed messages between a parent and its children; watch the transcript and
+cancel a task that runs away. A persona is not restricted in whom it may delegate to.

@@ -149,6 +149,26 @@ impl ForgeClient for ForgeRouter {
         client.update_pull_request(&target, number, ch).await
     }
 
+    async fn merge_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.merge_pull_request(&target, number, head_sha).await
+    }
+
+    async fn create_branch(
+        &self,
+        p: &ProjectId,
+        name: &str,
+        from: &str,
+    ) -> Result<(), IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.create_branch(&target, name, from).await
+    }
+
     async fn list_pull_request_feedback(
         &self,
         p: &ProjectId,

@@ -67,6 +67,20 @@ pub const WEBHOOK_SECRET: &str = "e2e-webhook-secret";
 pub const DELEGATION_PROJECT_KEY: &str = "DG";
 pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
 
+/// Project whose fake agents build on each other's branches (`iter3-task-tree`, demo steps 1 and
+/// 4); its `subtask_merge` is `parent-agent`; tasks are `TT-<n>`.
+pub const TASK_TREE_PROJECT_KEY: &str = "TT";
+pub const TASK_TREE_PROJECT_NAME: &str = "Task Tree";
+
+/// What `task-tree.yaml` marks its tasks with, and the file and commit message of the
+/// implementation the reviewer finds in its workspace.
+pub const TASK_TREE_IMPLEMENTATION: &str = "[tt-impl]";
+pub const TASK_TREE_REVIEW: &str = "[tt-review]";
+pub const TASK_TREE_ITERATION_ONE: &str = "[tt-one]";
+pub const TASK_TREE_ITERATION_TWO: &str = "[tt-two]";
+pub const TASK_TREE_COMMIT: &str = "Add the implementation file";
+pub const TASK_TREE_FILE: &str = "tt-implementation.txt";
+
 /// Project whose fake agent works on existing branches (attached pull requests, rebase with
 /// lease); tasks are `EB-<n>`. The prompt markers tell the two scenarios apart.
 pub const EXISTING_BRANCH_PROJECT_KEY: &str = "EB";
@@ -196,6 +210,7 @@ pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const EXISTING_BRANCH_SCRIPT: &str = "/opt/harness/scripts/existing-branch.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
+pub const TASK_TREE_SCRIPT: &str = "/opt/harness/scripts/task-tree.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
 pub const LANDLOCK_SCRIPT: &str = "/opt/harness/scripts/landlock.yaml";
 

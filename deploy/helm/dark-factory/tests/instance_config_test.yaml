@@ -360,6 +360,33 @@ tests:
           pattern: 'artifacts:\n  maxTextBytes: 1048576\n  maxImageBytes: 3932160\n  maxPerTask: 50\n'
         documentIndex: 0
 
+  - it: renders the task tree limits with their defaults
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'tasks:\n  maxDepth: 5\n  maxOpenSubtasks: 10\n'
+        documentIndex: 0
+
+  - it: renders the task tree limits that are set
+    template: configmap.yaml
+    set:
+      tasks.maxDepth: 3
+      tasks.maxOpenSubtasks: 20
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'tasks:\n  maxDepth: 3\n  maxOpenSubtasks: 20\n'
+        documentIndex: 0
+
+  - it: rejects a task tree limit of zero
+    template: configmap.yaml
+    set:
+      tasks.maxDepth: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: maxDepth
+
   - it: renders the scheduling waits with their defaults
     template: configmap.yaml
     asserts:

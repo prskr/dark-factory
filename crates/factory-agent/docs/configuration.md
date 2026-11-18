@@ -165,6 +165,14 @@ These are compiled in and not configurable.
   keeps the stored `remote_sha`, so a later rewrite that drops the other side's commits is rejected
   and a second prepare reports the divergence again. The file is written without following links
   (`remote_sha` is replaced, not written through).
+- **Following the base branch.** `Workspace.base_branch` is the task's effective base branch (the
+  branch of its base task, or the default branch). After the fetch, before the WIP restore and for
+  fresh and existing workspaces, a task branch whose tip, and whose remote tip if there is one, is
+  an ancestor of `origin/<base_branch>` (it has no commits of its own) and differs from it is
+  moved there with `git merge --ff-only`, and the remote task branch follows with a plain push of
+  `<task_branch>:<task_branch>`. A task branch the remote lacks is not created by this. A failure
+  leaves the branch as it is and logs a warning; the next prepare tries again. Nothing moves with
+  `Workspace.existing_branch`.
 - **Existing branches.** With `Workspace.existing_branch` a fresh workspace checks out
   `origin/<task_branch>`. If the remote lacks it, prepare fails with `the branch `<name>` does not
   exist on the remote` (`PrepareError::BranchMissing`), nothing is pushed, and the run ends `FAILED`

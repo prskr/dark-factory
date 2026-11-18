@@ -60,6 +60,8 @@ pub struct RunContext {
     pub task: TaskRow,
     pub project: ProjectInfo,
     pub persona: PersonaInfo,
+    /// The task's effective base branch when the context was loaded (`df_db::base_branch`).
+    pub base_branch: String,
 }
 
 impl RunContext {
@@ -68,9 +70,10 @@ impl RunContext {
         &self.task.branch
     }
 
-    /// The task's effective base branch: the base of its attached PR, else the project's.
+    /// The task's effective base branch: its base task's branch, the base of its attached PR or
+    /// the project's.
     pub fn base_branch(&self) -> &str {
-        self.task.base_branch(&self.project.base_branch)
+        &self.base_branch
     }
 
     pub fn wip_branch(&self) -> String {
@@ -114,11 +117,14 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         model_provider_id: persona.model_provider_id,
     };
 
+    let base_branch = df_db::base_branch(pool, task.id).await?;
+
     Ok(RunContext {
         run,
         task,
         project,
         persona,
+        base_branch,
     })
 }
 

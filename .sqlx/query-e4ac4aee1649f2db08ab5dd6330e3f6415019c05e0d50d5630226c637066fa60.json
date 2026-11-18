@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE chain AS (\n             SELECT parent_id FROM tasks WHERE id = $1\n             UNION ALL\n             SELECT t.parent_id FROM chain c JOIN tasks t ON t.id = c.parent_id\n         )\n         SELECT count(*) AS \"ancestors!\" FROM chain WHERE parent_id IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ancestors!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e4ac4aee1649f2db08ab5dd6330e3f6415019c05e0d50d5630226c637066fa60"
+}

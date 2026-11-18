@@ -55,6 +55,14 @@ impl PullRequestsGuest for ForgejoPlugin {
         instance()?.update(&id, changes)
     }
 
+    fn merge(id: PullRequestRef, head_sha: String) -> Result<(), Error> {
+        instance()?.merge(&id, &head_sha)
+    }
+
+    fn create_branch(repo: RepoRef, name: String, from: String) -> Result<(), Error> {
+        instance()?.create_branch(&repo, &name, &from)
+    }
+
     fn list_feedback(id: PullRequestRef, since: Option<String>) -> Result<Feedback, Error> {
         instance()?.list_feedback(&id, since.as_deref())
     }

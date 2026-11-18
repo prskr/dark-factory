@@ -30,6 +30,8 @@ pub struct TaskSnapshot {
     /// after the stop count: the earlier ones wait for the next message.
     pub undelivered_messages: bool,
     pub pr: PrState,
+    /// The task has a parent, whose Subtasks tab shows this task's status.
+    pub has_parent: bool,
 }
 
 impl TaskSnapshot {
@@ -44,6 +46,7 @@ impl TaskSnapshot {
             unsatisfied_dependencies: 0,
             undelivered_messages: false,
             pr: PrState::None,
+            has_parent: false,
         }
     }
 }
@@ -143,7 +146,11 @@ pub enum TaskEvent {
     TurnEnded,
     RunEnded(RunEnded),
     MarkedDone(DoneBy),
-    Cancelled,
+    /// A board member cancelled the task. `via` is the key of the task whose cancellation took
+    /// this one along (a descendant of a cancelled task); `None` for the task cancelled itself.
+    Cancelled {
+        via: Option<String>,
+    },
     /// A task this one depends on completed or became done (an effect of that task's event).
     DependencySatisfied,
     /// A child of this task ended (an effect of the child's event).
@@ -172,6 +179,8 @@ pub enum StopScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Notice {
     TaskChanged,
+    /// The same for the parent of the transitioned task, whose Subtasks tab lists it.
+    ParentTaskChanged,
     TaskMessageQueued,
     TaskMessageChanged,
 }
@@ -265,8 +274,17 @@ impl Transition {
     }
 }
 
-/// The new state of `task` after `event`, or the reason the status does not allow it.
+/// The new state of `task` after `event`, or the reason the status does not allow it. A change of
+/// status of a task with a parent also publishes the parent, whose Subtasks tab shows it.
 pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, Rejected> {
+    let next = apply_event(task, event)?;
+    if task.has_parent && next.status != task.status {
+        return Ok(next.with(Effect::Publish(Notice::ParentTaskChanged)));
+    }
+    Ok(next)
+}
+
+fn apply_event(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, Rejected> {
     Ok(match event {
         TaskEvent::Created => created(task),
         TaskEvent::MessageQueued => message_queued(task),
@@ -276,7 +294,7 @@ pub fn transition(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, R
         TaskEvent::TurnEnded => turn_ended(task),
         TaskEvent::RunEnded(end) => run_ended(task, &end),
         TaskEvent::MarkedDone(by) => return marked_done(task, by),
-        TaskEvent::Cancelled => return cancelled(task),
+        TaskEvent::Cancelled { via } => return cancelled(task, via),
         TaskEvent::DependencySatisfied => dependency_satisfied(task),
         TaskEvent::ChildEnded(child) => child_ended(task, &child),
     })
@@ -544,9 +562,13 @@ fn marked_done(task: &TaskSnapshot, by: DoneBy) -> Result<Transition, Rejected> 
     }
 }
 
-fn cancelled(task: &TaskSnapshot) -> Result<Transition, Rejected> {
+fn cancelled(task: &TaskSnapshot, via: Option<String>) -> Result<Transition, Rejected> {
     if !task.status.can_cancel() {
         return Err(Rejected::Cancel(task.status));
+    }
+    let mut details = json!({ "old_status": task.status });
+    if let (Some(via), Some(object)) = (via, details.as_object_mut()) {
+        object.insert("via".into(), json!(via));
     }
     Ok(Transition {
         status: TaskStatus::Cancelled,
@@ -560,7 +582,7 @@ fn cancelled(task: &TaskSnapshot) -> Result<Transition, Rejected> {
     })
     .with(Effect::Audit {
         action: "task.cancel",
-        details: json!({ "old_status": task.status }),
+        details,
     })
     .with(Effect::Publish(Notice::TaskMessageChanged))
     .with(Effect::Publish(Notice::TaskChanged))

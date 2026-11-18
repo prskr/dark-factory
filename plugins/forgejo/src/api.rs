@@ -13,6 +13,7 @@ use forge_common::http;
 use forge_common::log::Log;
 
 mod feedback;
+mod merge;
 
 const PAGE_SIZE: usize = 50;
 
@@ -233,6 +234,18 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
         path: String,
         body: Option<serde_json::Value>,
     ) -> Result<R, Failure> {
+        let response = self.send_checked(method, path, body)?;
+        Ok(serde_json::from_slice(&response.body)
+            .map_err(|e| Error::Internal(format!("unexpected Forgejo response: {e}")))?)
+    }
+
+    /// Sends the request and returns the response of a 2xx status, without reading its body.
+    fn send_checked(
+        &self,
+        method: Method,
+        path: String,
+        body: Option<serde_json::Value>,
+    ) -> Result<Response, Failure> {
         let body = body
             .map(|b| serde_json::to_vec(&b))
             .transpose()
@@ -248,8 +261,7 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
                 ),
             });
         }
-        Ok(serde_json::from_slice(&response.body)
-            .map_err(|e| Error::Internal(format!("unexpected Forgejo response: {e}")))?)
+        Ok(response)
     }
 
     fn pull_request(&self, repo: RepoRef, pr: ApiPullRequest) -> PullRequest {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,\n            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, parent_id, base_task_id,\n            branch, base_branch, pr_attached, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,28 @@
       },
       {
         "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "number",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "key",
         "type_info": "Text",
         "origin": {
@@ -26,7 +48,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 4,
         "name": "title",
         "type_info": "Text",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "title_source",
         "type_info": "Text",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "description",
         "type_info": "Text",
         "origin": {
@@ -59,84 +81,18 @@
         }
       },
       {
-        "ordinal": 5,
-        "name": "project_key",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "projects",
-            "name": "key"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
-        "name": "project_name",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "projects",
-            "name": "name"
-          }
-        }
-      },
-      {
         "ordinal": 7,
-        "name": "repo_url",
-        "type_info": "Text",
+        "name": "persona_id",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "projects",
-            "name": "repo_url"
+            "table": "tasks",
+            "name": "persona_id"
           }
         }
       },
       {
         "ordinal": 8,
-        "name": "issue_tracker_url",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "projects",
-            "name": "issue_tracker_url"
-          }
-        }
-      },
-      {
-        "ordinal": 9,
-        "name": "persona_name",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "personas",
-            "name": "name"
-          }
-        }
-      },
-      {
-        "ordinal": 10,
-        "name": "persona_harness",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "personas",
-            "name": "harness"
-          }
-        }
-      },
-      {
-        "ordinal": 11,
-        "name": "persona_model",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "personas",
-            "name": "model"
-          }
-        }
-      },
-      {
-        "ordinal": 12,
         "name": "issue_number",
         "type_info": "Int8",
         "origin": {
@@ -147,7 +103,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 9,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -158,7 +114,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 10,
         "name": "status_line",
         "type_info": "Text",
         "origin": {
@@ -169,7 +125,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 11,
         "name": "pr_number",
         "type_info": "Int8",
         "origin": {
@@ -180,7 +136,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 12,
         "name": "pr_url",
         "type_info": "Text",
         "origin": {
@@ -191,7 +147,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 13,
         "name": "pr_title",
         "type_info": "Text",
         "origin": {
@@ -202,51 +158,40 @@
         }
       },
       {
-        "ordinal": 18,
-        "name": "pr_attached",
-        "type_info": "Bool",
-        "origin": {
-          "Table": {
-            "table": "tasks",
-            "name": "pr_attached"
-          }
-        }
-      },
-      {
-        "ordinal": 19,
-        "name": "branch",
+        "ordinal": 14,
+        "name": "pr_body",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "tasks",
-            "name": "branch"
+            "name": "pr_body"
           }
         }
       },
       {
-        "ordinal": 20,
-        "name": "resume_at",
-        "type_info": "Timestamptz",
+        "ordinal": 15,
+        "name": "diverged",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "tasks",
-            "name": "resume_at"
+            "name": "diverged"
           }
         }
       },
       {
-        "ordinal": 21,
-        "name": "auto_resumes",
-        "type_info": "Int4",
+        "ordinal": 16,
+        "name": "harness_session_id",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "tasks",
-            "name": "auto_resumes"
+            "name": "harness_session_id"
           }
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 17,
         "name": "created_by",
         "type_info": "Jsonb",
         "origin": {
@@ -257,35 +202,79 @@
         }
       },
       {
-        "ordinal": 23,
-        "name": "creator_task_key?",
+        "ordinal": 18,
+        "name": "parent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "base_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "branch",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "tasks",
-            "name": "key"
+            "name": "branch"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "base_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "pr_attached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_attached"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "created_at"
           }
         }
       },
       {
         "ordinal": 24,
-        "name": "parent_key?",
-        "type_info": "Text",
+        "name": "updated_at",
+        "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "tasks",
-            "name": "key"
-          }
-        }
-      },
-      {
-        "ordinal": 25,
-        "name": "parent_title?",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "tasks",
-            "name": "title"
+            "name": "updated_at"
           }
         }
       }
@@ -307,22 +296,21 @@
       true,
       false,
       false,
-      false,
       true,
-      false,
-      false,
       true,
       true,
       true,
       false,
-      false,
-      true,
       false,
       false,
       true,
       true,
-      true
+      false,
+      true,
+      false,
+      false,
+      false
     ]
   },
-  "hash": "ba4c2a8bb67df3800fa2f9756d19f0a90acf81a92e478b331ebed1c0a68fdd4b"
+  "hash": "a0be890ca3f577694261918dad8acde27b8e57522c91c57808797d4e0c4e8c62"
 }

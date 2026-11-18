@@ -47,13 +47,17 @@ async fn tab(State(state): State<WebState>, Path(key): Path<String>) -> Response
         Ok(None) => return not_found("The task"),
         Err(e) => return internal_error(&e),
     };
-    let artifacts = match load_cards(&state, TaskId::from_uuid(task.id)).await {
-        Ok(artifacts) => artifacts,
+    let id = TaskId::from_uuid(task.id);
+    let (artifacts, subtasks) = match tokio::try_join!(
+        load_cards(&state, id),
+        df_db::task_views::list_subtasks(&state.pool, id)
+    ) {
+        Ok(loaded) => loaded,
         Err(e) => return internal_error(&e),
     };
     html! {
         (cards(&task.key, &artifacts))
-        (details_heading(artifacts.len(), true))
+        (details_heading(subtasks.len(), artifacts.len(), true))
     }
     .into_response()
 }

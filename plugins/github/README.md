@@ -41,6 +41,8 @@ fails as `upstream` until the project's URL is updated.
 | `find-open` | `GET .../pulls?state=open&head={owner}:{head}&base={base}&per_page=100`, then the entry whose head and base match exactly; one request, since GitHub allows one open pull request per head and base |
 | `get` | `GET .../pulls/{number}` |
 | `update` | `GET .../pulls/{number}` when title or draft change, GraphQL `markPullRequestReadyForReview` / `convertPullRequestToDraft` (with the pull request's `node_id`) for the native draft state, `PATCH .../pulls/{number}` for title and body; a final `GET` when only the native draft state changed |
+| `merge` | `GET .../pulls/{number}` (a merged pull request with the same head is success, another head is `conflict`, a closed one `invalid-input`, a moved head `conflict` without a merge request), `GET /repos/{owner}/{repo}` for `allow_merge_commit`, `allow_squash_merge` and `allow_rebase_merge`, then `PUT .../pulls/{number}/merge` with `sha` and `merge_method` (`merge`, else `squash`, else `rebase`); `405` (not mergeable) and `409` (head changed) are `conflict` |
+| `create-branch` | `GET .../git/ref/heads/{from}` for the tip, then `POST .../git/refs` with `ref: refs/heads/{name}` and `sha`; a `422` "Reference already exists" is `conflict`, an unknown `from` is `not-found` |
 | issues `get` | `GET .../issues/{number}` |
 | issues `add-comment` | `POST .../issues/{number}/comments` (pull request numbers work as issue numbers) |
 | `list-feedback` | one GraphQL query: `viewer.login`, and the pull request's `comments`, `reviews` and `reviewThreads` (each `last: 100`, the newest items); then `GET .../collaborators/{username}/permission` once per distinct author with association `OWNER`, `MEMBER` or `COLLABORATOR` |

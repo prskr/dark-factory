@@ -23,7 +23,8 @@ pub mod title;
 pub mod webhooks;
 
 pub use branch::{
-    BranchError, ExistingBranch, RewritePolicy, default_agent_branch_globs, matches_agent_branch,
+    BranchError, ExistingBranch, RewritePolicy, SubtaskMerge, default_agent_branch_globs,
+    matches_agent_branch,
 };
 pub use config::{
     ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,

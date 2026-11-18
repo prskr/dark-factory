@@ -34,7 +34,8 @@ fn embedded_tools_are_exactly_the_factory_tools() {
             "send_message",
             "write_artifact",
             "list_artifacts",
-            "read_artifact"
+            "read_artifact",
+            "merge_subtask_pr"
         ]
     );
     let first = &tool_descriptors()[0];
@@ -162,7 +163,7 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
     assert_eq!(workspace.base_branch, "main");
     assert_eq!(workspace.rewrite_policy(), RewritePolicyProto::WithLease);
     assert!(!workspace.existing_branch);
-    assert_eq!(assign.tools.len(), 15);
+    assert_eq!(assign.tools.len(), 16);
     assert_eq!(assign.task.expect("task").task_key, "DF-1");
     assert!(assign.continuation.is_none());
     let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {
@@ -182,6 +183,45 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
             .seconds,
         7200
     );
+    Ok(())
+}
+
+// Scenarios "Based on a task" and "Base task merged" of `task-tree`.
+#[tokio::test]
+async fn the_workspace_base_branch_is_the_base_tasks_branch_until_that_task_is_done()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let reviewer = env.task_based_on(&env.task).await;
+    let run_id = env.insert_run(reviewer.id, 1, "connecting").await;
+    let run = get_run(&pool, run_id).await?.expect("run");
+
+    let rc = load_run_context(&pool, run.clone()).await?;
+    let workspace = build_assign(&env.ctx, &rc)
+        .await?
+        .workspace
+        .expect("workspace");
+    assert_eq!(workspace.base_branch, "factory/task/DF-1");
+    assert_eq!(workspace.task_branch, "factory/task/DF-2");
+    // The Git proxy's route names the same base.
+    let route_base = || async {
+        let routes = df_db::egress::active_runs(&pool).await?;
+        let route = routes.into_iter().find(|r| r.task_key == "DF-2");
+        anyhow::Ok(route.expect("route of DF-2").base_branch)
+    };
+    assert_eq!(route_base().await?, "factory/task/DF-1");
+
+    sqlx::query("UPDATE tasks SET status = 'completed' WHERE id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await?;
+    let rc = load_run_context(&pool, run).await?;
+    let workspace = build_assign(&env.ctx, &rc)
+        .await?
+        .workspace
+        .expect("workspace");
+    assert_eq!(workspace.base_branch, "main");
+    assert_eq!(route_base().await?, "main");
     Ok(())
 }
 

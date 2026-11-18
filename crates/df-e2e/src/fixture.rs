@@ -76,6 +76,36 @@ impl World {
         db::wait_for_status(&self.pool, key, status).await
     }
 
+    /// Waits until `coordinator` has created the child that `marker` identifies (the marker of
+    /// the prompt it was created with); returns its key.
+    pub async fn child_of(&self, coordinator: &str, marker: &str) -> Result<String> {
+        eventually(
+            &format!("{coordinator} to create the child with {marker}"),
+            crate::wait::RUN_TIMEOUT,
+            || db::child_described(&self.pool, coordinator, marker),
+        )
+        .await
+    }
+
+    /// Waits until task `key` has ended `runs` runs and is in review; fails at once, naming the
+    /// status, when it ended in another final status.
+    pub async fn wait_for_runs(&self, key: &str, runs: i64) -> Result<()> {
+        eventually(
+            &format!("task {key} to have {runs} finished run(s)"),
+            crate::wait::RUN_TIMEOUT,
+            || async {
+                // The count first: the status read then follows the runs it counted.
+                let ended = db::completed_runs(&self.pool, key).await?;
+                let in_review = crate::wait::status_reached(
+                    db::task_status(&self.pool, key).await?,
+                    df_core::TaskStatus::InReview,
+                )?;
+                Ok((in_review.is_some() && ended >= runs).then_some(()))
+            },
+        )
+        .await
+    }
+
     /// The client of the bot for repository `repository` of the owner.
     pub fn forgejo_for(&self, repository: &str) -> Result<Forgejo> {
         Ok(

@@ -44,6 +44,14 @@ The task view has three columns: the task list, the transcript and the details.
   no usage are counted separately ("2 requests without usage") instead of as zero. The task
   description is a collapsible section: **Description** with a chevron shows only its header while
   closed, and the first three lines of the text when opened.
+  A task that builds on another task's branch shows it as **Base task** below the parent, as a link
+  (`DF-20 · Implement`).
+- **Subtasks**: a task with subtasks gets a Subtasks tab next to Overview. It shows how many of the
+  direct subtasks are done (in review or done, cancelled ones left out), as "2 of 3 done" with a
+  percentage and a progress bar, and one row per subtask with a status ring, the title, its key
+  and status, and a done/total chip when the subtask has subtasks of its own. The same chip sits
+  next to the status badge of a task row in the list (`2/3`); subtasks stay ordinary rows of the
+  flat list. Both update live ([delegation](delegation.md#in-the-task-view)).
 - **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
   Artifacts tab with a card per artifact; an artifact opens next to the transcript.
 
@@ -153,8 +161,8 @@ From the status menu in the details:
 | Action | Effect |
 | --- | --- |
 | **Stop run** (also the button in the run row under *Runs*) | Ends the current run; the agent finalizes (pushes, snapshots) and the task waits for your next message. |
-| **Mark done** | The task becomes `completed` and its pull request is marked ready for review (a background job, retried if the forge is down). |
-| **Cancel task** | Stops the run, discards queued messages and closes pending requests. The pull request stays as it is. A new message reopens the task. |
+| **Mark done** | The task becomes `completed` and its pull request is marked ready for review (a background job, retried if the forge is down). Open subtasks do not stop you, unlike the agent's `complete_task`. |
+| **Cancel task** | Stops the run, discards queued messages and closes pending requests. The pull request stays as it is. A new message reopens the task. Its subtasks, and theirs, that are not done, failed or cancelled are cancelled the same way, each with its own audit entry; no wake-up message is queued inside the subtree, and the task's parent is woken as for any cancel. |
 | **Reset workspace** | Deletes the task's volume (not possible while a run is active). Committed work and the WIP snapshot stay in Git; the next run clones again. |
 
 All of them, and Interrupt (`run.interrupt`), are audited with your name and need the same permission.

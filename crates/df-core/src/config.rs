@@ -89,6 +89,8 @@ pub struct InstanceConfig {
     pub artifacts: ArtifactsConfig,
     #[serde(default)]
     pub scheduling: SchedulingConfig,
+    #[serde(default)]
+    pub tasks: TasksConfig,
 }
 
 impl InstanceConfig {
@@ -103,6 +105,7 @@ impl InstanceConfig {
         cfg.lifecycle_events.validate()?;
         cfg.artifacts.validate()?;
         cfg.scheduling.validate()?;
+        cfg.tasks.validate()?;
         cfg.sandbox.provisioning.validate()?;
         if cfg.auth.is_some() && cfg.public_url.is_none() {
             return Err(ConfigError::Invalid(
@@ -818,6 +821,51 @@ fn default_resume_backoff_seconds() -> u64 {
 
 fn default_forge_retry_base_seconds() -> u64 {
     30
+}
+
+/// Limits of delegation in the task tree (spec `task-tree`, "Delegation limits").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TasksConfig {
+    /// Most ancestors a task created by an agent may have.
+    #[serde(default = "default_tasks_max_depth")]
+    pub max_depth: u32,
+    /// Open subtasks a task may have at once.
+    #[serde(default = "default_tasks_max_open_subtasks")]
+    pub max_open_subtasks: u32,
+}
+
+impl Default for TasksConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: default_tasks_max_depth(),
+            max_open_subtasks: default_tasks_max_open_subtasks(),
+        }
+    }
+}
+
+impl TasksConfig {
+    fn validate(self) -> Result<(), ConfigError> {
+        for (option, value) in [
+            ("maxDepth", self.max_depth),
+            ("maxOpenSubtasks", self.max_open_subtasks),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Invalid(format!(
+                    "`tasks.{option}` must be at least 1: with 0 no agent can create a task"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_tasks_max_depth() -> u32 {
+    5
+}
+
+fn default_tasks_max_open_subtasks() -> u32 {
+    10
 }
 
 /// Limits of task artifacts (spec `task-artifacts`).

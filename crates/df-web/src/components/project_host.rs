@@ -148,6 +148,7 @@ pub(crate) fn test_project(repo: &str, issue: Option<&str>, credential: bool) ->
         webhook_wake: df_core::webhooks::WebhookWake::Members,
         branch_rewrite_policy: df_core::RewritePolicy::default(),
         agent_branch_globs: df_core::default_agent_branch_globs(),
+        subtask_merge: df_core::SubtaskMerge::default(),
         has_tasks: false,
     }
 }

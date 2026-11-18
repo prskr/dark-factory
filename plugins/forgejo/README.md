@@ -31,6 +31,8 @@ Title prefixes, timestamps, the stderr log and the `wasi:http` transport are sha
 | `find-open` | `GET /api/v1/repos/{owner}/{repo}/pulls?state=open&page=N&limit=50`, filtered by head and base branch; pages are read until a match or an empty page (the server may cap `limit`) |
 | `get` | `GET .../pulls/{index}` |
 | `update` | `PATCH .../pulls/{index}` (preceded by a `GET` when title or draft change) |
+| `merge` | `GET .../pulls/{index}` (a merged pull request with the same head is success, another head is `conflict`, a closed one `invalid-input`, a moved head `conflict` without a merge request), `GET /api/v1/repos/{owner}/{repo}` for `default_merge_style`, then `POST .../pulls/{index}/merge` with `Do` and `head_commit_id`; the success is a `200` with an empty body, `405` (not mergeable, also while Forgejo still checks a fresh pull request: "Please try again later") and `409` (head out of date) are `conflict` |
+| `create-branch` | `POST .../branches` with `new_branch_name` and `old_ref_name` (`201`); an existing branch is `409` → `conflict`, an unknown `old_ref_name` is a `500` "object does not exist" that the plugin maps to `not-found` |
 | issues `get` | `GET .../issues/{index}` |
 | issues `add-comment` | `POST .../issues/{index}/comments` (pull request numbers work as issue numbers) |
 | `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments[?since=]` (PR comments, one request), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` for each of the 20 newest submitted reviews, `GET .../collaborators/{login}/permission` once per distinct non-bot author |
