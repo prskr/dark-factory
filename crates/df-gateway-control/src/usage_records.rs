@@ -10,7 +10,7 @@ use df_proto::gateway::v1::gateway_usage_server::GatewayUsage;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::convert;
+use df_gateway::convert;
 
 /// Counts the tokens of stored usage records (`df.agent.tokens`). A trait, so the binary decides
 /// which metrics registry it records into.

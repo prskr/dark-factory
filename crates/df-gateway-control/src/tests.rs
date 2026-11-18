@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use super::snapshot::{self, GitSettings};
 use super::{PolicyService, serve_internal};
-use crate::link::{GrpcConnector, MtlsConnector};
+use df_gateway::link::{GrpcConnector, MtlsConnector};
 
 /// Tokens are not checked here.
 struct NoTokens;
@@ -908,7 +908,7 @@ async fn an_entry_added_on_one_replica_reaches_a_gateway_on_another_within_a_sec
     use df_db::catalog::Actor;
     use df_db::{EntryKind, add_entry};
 
-    use crate::policy::{Request, decide};
+    use df_gateway::policy::{Request, decide};
 
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let seed = seed(&pool).await?;
@@ -919,7 +919,7 @@ async fn an_entry_added_on_one_replica_reaches_a_gateway_on_another_within_a_sec
     let (files, _dir) = gateway_credentials(&pki)?;
 
     let (policy_tx, mut policy) = tokio::sync::watch::channel(None);
-    let watcher = tokio::spawn(crate::watch::run(
+    let watcher = tokio::spawn(df_gateway::watch::run(
         Arc::new(gateway_connector(files)),
         replica_b.addr.to_string(),
         "gw-0".into(),
@@ -927,7 +927,7 @@ async fn an_entry_added_on_one_replica_reaches_a_gateway_on_another_within_a_sec
         Duration::from_millis(50),
         Arc::default(),
     ));
-    let allows = |policy: &Option<Arc<crate::policy::Policy>>| {
+    let allows = |policy: &Option<Arc<df_gateway::policy::Policy>>| {
         decide(
             policy.as_deref(),
             "10.1.0.7".parse().unwrap(),
@@ -1073,10 +1073,10 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
     };
     use df_db::push_checks::PushPolicy;
 
-    use crate::git::checks::{
+    use df_gateway::git::checks::{
         Check, CheckPolicy, Identity, ScanError, SecretMatch, SecretMatcher, Target, check_push,
     };
-    use crate::git::view::{AddedBlob, AddedCommit, PathChange, PushView};
+    use df_gateway::git::view::{AddedBlob, AddedCommit, PathChange, PushView};
 
     struct NoSecrets;
     impl SecretMatcher for NoSecrets {
@@ -1092,7 +1092,7 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
     let replica = Replica::start(&pool, &pki).await?;
     let (files, _dir) = gateway_credentials(&pki)?;
     let (policy_tx, mut received) = tokio::sync::watch::channel(None);
-    let watcher = tokio::spawn(crate::watch::run(
+    let watcher = tokio::spawn(df_gateway::watch::run(
         Arc::new(gateway_connector(files)),
         replica.addr.to_string(),
         "gw-0".into(),
@@ -1100,7 +1100,7 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
         Duration::from_millis(50),
         Arc::default(),
     ));
-    let protects_deploy = |policy: &Option<Arc<crate::policy::Policy>>| {
+    let protects_deploy = |policy: &Option<Arc<df_gateway::policy::Policy>>| {
         policy
             .as_deref()
             .and_then(|policy| policy.push_policy("DF"))
@@ -1205,7 +1205,7 @@ async fn an_exception_approved_on_one_replica_reaches_a_gateway_on_another_withi
     let replica_b = Replica::start(&pool, &pki).await?;
     let (files, _dir) = gateway_credentials(&pki)?;
     let (policy_tx, mut policy) = tokio::sync::watch::channel(None);
-    let watcher = tokio::spawn(crate::watch::run(
+    let watcher = tokio::spawn(df_gateway::watch::run(
         Arc::new(gateway_connector(files)),
         replica_b.addr.to_string(),
         "gw-0".into(),
@@ -1214,7 +1214,7 @@ async fn an_exception_approved_on_one_replica_reaches_a_gateway_on_another_withi
         Arc::default(),
     ));
     let ip = "10.1.0.7".parse()?;
-    let excepted = |policy: &Option<Arc<crate::policy::Policy>>| {
+    let excepted = |policy: &Option<Arc<df_gateway::policy::Policy>>| {
         policy
             .as_deref()
             .is_some_and(|policy| policy.exceptions(ip) == ["path:CODEOWNERS"])

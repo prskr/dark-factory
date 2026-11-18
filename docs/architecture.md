@@ -12,7 +12,7 @@ flowchart TD
     web[df-web]
     orch[df-orchestrator<br/>target]
     chan[df-agent-channel<br/>agent port]
-    gwc[df-gateway-control<br/>target]
+    gwc[df-gateway-control]
     gw[df-gateway<br/>data plane]
     k8s[df-k8s]
     plug[df-plugins]
@@ -49,8 +49,8 @@ flowchart TD
 | `df-web` | Web UI and its HTTP handlers; data access through `df-db` | `df-core`, `df-db`, `df-proto`, `df-sandbox-contract` | current |
 | `df-agent-channel` | The agent port: mTLS gRPC server, agent sessions (persistence, acks, prompts), the `Assign` message with the continuation summary, factory tools, run metrics | `df-orchestrator`, `df-db`, `df-core`, `df-proto`, `df-tls`, `df-sandbox-contract` | target: `orchestrator-crate` |
 | `df-orchestrator` | Control-plane orchestration: scheduler, run lifecycle (`finish_run`, teardown), run context loading, PR lifecycle, webhook application, volume retention | `df-db`, `df-core`, `df-proto` (transcript payloads, rule 3) | target: `orchestrator-crate` |
-| `df-gateway` | Egress data plane: proxy, git proxy, inference proxy, policy watch, log tail, the gateway link; no database | `df-core`, `df-proto`, `df-tls`, `df-telemetry`, `df-sandbox-contract` | target: `gateway-control-crate` |
-| `df-gateway-control` | The control plane's side of the gateway links: policy service, git/usage/denial records, inference routes, log relay | `df-gateway` (link and flow API, peer check, wire conversions), `df-db`, `df-core`, `df-proto` | target: `gateway-control-crate` |
+| `df-gateway` | Egress data plane: proxy, git proxy, inference proxy, policy watch, log tail, the gateway link (`test-util` feature: `link::PlainConnector`); no database | `df-core`, `df-proto`, `df-tls`, `df-telemetry`, `df-sandbox-contract` | current |
+| `df-gateway-control` | The control plane's side of the gateway links: policy service, git/usage/denial records, inference routes, log relay | `df-gateway` (link and flow API, peer check, wire conversions), `df-db`, `df-core`, `df-proto` | current |
 | `df-k8s` | The Kubernetes adapter: sandbox provider, secret store, leader-election lease, `NetworkPolicy` reconciliation, startup RBAC checks | `df-core`, `df-telemetry`, `df-sandbox-contract` | current |
 | `df-plugins` | WASM plugin host for forge plugins | `df-core` | current |
 | `df-tls` | TLS and mTLS: certificate reload, mTLS listener, peer identity from client certificates, test PKI (`test-util`) | none | current |
@@ -66,7 +66,7 @@ flowchart TD
 
 ## Rules
 
-1. **Dependency direction.** A crate depends only on the crates listed for it above. This covers normal dependencies; dev-dependencies may add the test crates (`df-test-postgres`, `fake-acp-agent`) and the `test-util` features of crates already listed, and `df-telemetry` with `test-util` (log capture, metric probe) in any crate. Domain (`df-core`) and wire types (`df-proto`) never depend on adapters, storage or binaries. Only `dark-factory` depends on `df-k8s`.
+1. **Dependency direction.** A crate depends only on the crates listed for it above. This covers normal dependencies; dev-dependencies may add the test crates (`df-test-postgres`, `fake-acp-agent`) and the `test-util` features of crates already listed, and `df-telemetry` with `test-util` (log capture, metric probe) and `df-tls` with `test-util` (test PKI) in any crate. Domain (`df-core`) and wire types (`df-proto`) never depend on adapters, storage or binaries. Only `dark-factory` depends on `df-k8s`.
 2. **Database access only via `df-db`.** Other crates call `df-db` functions and never run `sqlx` queries; they may pass `PgPool`/`Transaction` through. Exceptions: crate level `df-db`, `df-e2e` and `df-test-postgres`; module level `df-web/src/auth/store.rs` (`web_sessions`); test code, including `test-util` fixture modules. Enforced by clippy (`disallowed-methods`, `disallowed-macros`, `disallowed-types` in `clippy.toml`).
 3. **Wire types at the edges.** `df-proto` types are used by the gRPC edges (`df-agent-channel`, `df-gateway`, `df-gateway-control`, `factory-agent`, `dark-factory`) and as the stored or rendered payload format (`df-db`, `df-web`, `df-orchestrator`) where a decision says so: transcript events as canonical protobuf JSON (ADR-0017, `transcript-storage`) and egress flow events. Domain rules take `df-core` types, not wire types.
 4. **Infrastructure in infrastructure crates.** TLS, telemetry and the sandbox contract live in their own crates. A crate never depends on another domain or adapter crate only to reuse its infrastructure.

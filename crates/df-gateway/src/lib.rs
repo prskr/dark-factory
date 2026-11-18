@@ -1,19 +1,9 @@
-//! The egress gateway: allowlisting HTTP(S) proxy for sandboxes (`design/egress.md`), and the
-//! control plane's side of its policy and log links.
+//! The egress gateway: allowlisting HTTP(S) proxy for sandboxes (`design/egress.md`).
 //!
 //! `dark-factory gateway` runs [`proxy`], [`tail`] and [`watch`] (no database access). The
-//! control plane serves [`control::PolicyService`] and relays logs with [`control::Relay`].
+//! control plane's side of the links lives in `df-gateway-control`.
 
-#![cfg_attr(
-    test,
-    expect(
-        clippy::disallowed_methods,
-        reason = "test fixtures read and seed the database directly (AGENTS.md, \"Database access\")"
-    )
-)]
-
-pub mod control;
-pub(crate) mod convert;
+pub mod convert;
 mod count;
 pub mod denials;
 pub mod flow;

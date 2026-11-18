@@ -1,6 +1,6 @@
 # df-gateway
 
-The egress gateway of Dark Factory (`design/egress.md`, ADR-0029): an allowlisting HTTP(S) proxy that is the only way from sandboxes to external hosts, plus the control plane's side of its links.
+The egress gateway of Dark Factory (`design/egress.md`, ADR-0029): an allowlisting HTTP(S) proxy that is the only way from sandboxes to external hosts. The control plane's side of its links lives in `crates/df-gateway-control`.
 
 `dark-factory gateway` runs it. It has no database credentials and no Kubernetes API token: everything it knows arrives from the control plane over `darkfactory.gateway.v1` ([`contract/proto/darkfactory/gateway/v1/gateway.proto`](../../contract/proto/darkfactory/gateway/v1/gateway.proto)).
 

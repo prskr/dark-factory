@@ -24,6 +24,7 @@ df-agent-channel.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 df-gateway.workspace = true
+df-gateway-control.workspace = true
 df-k8s.workspace = true
 df-plugins.workspace = true
 df-proto.workspace = true

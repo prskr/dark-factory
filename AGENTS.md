@@ -52,6 +52,7 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 - `crates/dark-factory` – the main binary (control plane, `migrate` command)
 - `crates/df-core`, `crates/df-db`, `crates/df-proto`, `crates/df-web` – domain logic, PostgreSQL storage (`sqlx`, migrations), generated protobuf/gRPC types, web UI
 - `crates/df-telemetry` – logging setup (`LogFormat`, `RUST_LOG`) shared by the binaries; features `clap` (`ValueEnum`), `http` (request span middleware), `otel` (OpenTelemetry; control plane and gateway only), `test-util` (log capture, metric probe)
+- `crates/df-gateway`, `crates/df-gateway-control` – the egress gateway (data plane, no database; feature `test-util` exposes `link::PlainConnector`) and the control plane's side of its links (policy service, records, log relay; uses `df-db`)
 - `crates/df-sandbox-contract` – what control plane and sandbox runtime share about the sandbox: path constants, path globs, `LandlockMode`
 - `crates/df-tls` – mTLS acceptor with certificate reload, peer identity from client certificates; feature `test-util` (`TestPki`)
 - `crates/factory-agent` – the sandbox runtime that runs a coding harness over ACP and talks to the control plane (see `crates/factory-agent/docs/`)

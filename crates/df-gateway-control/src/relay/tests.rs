@@ -12,9 +12,9 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 
 use super::*;
-use crate::flow::FlowLog;
-use crate::link::PlainConnector;
-use crate::tail;
+use df_gateway::flow::FlowLog;
+use df_gateway::link::PlainConnector;
+use df_gateway::tail;
 
 /// A maximum age that keeps the events with small test timestamps.
 const FOREVER: Duration = Duration::from_secs(u32::MAX as u64);
@@ -529,7 +529,7 @@ async fn a_viewer_that_comes_back_does_not_wait_for_the_backlog_again() {
 #[test]
 fn merged_does_not_buffer_or_forward_a_late_event_that_is_already_expired() {
     let merged = Merged::new(Duration::from_secs(3600));
-    let now = crate::flow::timestamp_now().seconds;
+    let now = df_gateway::flow::timestamp_now().seconds;
     let event = |host: &str, phase: Phase, flow_id: u64, age: i64| FlowEvent {
         host: host.into(),
         phase: phase.into(),
@@ -558,7 +558,7 @@ fn merged_does_not_buffer_or_forward_a_late_event_that_is_already_expired() {
 #[test]
 fn merged_drops_expired_events_on_subscribe_and_on_insert() {
     let merged = Merged::new(Duration::from_secs(3600));
-    let now = crate::flow::timestamp_now().seconds;
+    let now = df_gateway::flow::timestamp_now().seconds;
     let event = |host: &str, phase: Phase, flow_id: u64, age: i64| FlowEvent {
         host: host.into(),
         phase: phase.into(),

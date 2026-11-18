@@ -324,7 +324,7 @@ Both use hand-written class strings instead of a documented component; `docs/des
 
 ### TD-49 (S13). Flow reasons and rule scopes are scattered string literals
 
-`crates/df-gateway/src/proxy.rs` (reasons such as `upstream-failed`, `private-destination`, `sni-mismatch`, `removed-from-allowlist`, `gateway-shutdown`), `crates/df-gateway/src/control/snapshot.rs` and `crates/df-db/src/egress.rs` (`"project"` / `"instance"` scope)
+`crates/df-gateway/src/proxy.rs` (reasons such as `upstream-failed`, `private-destination`, `sni-mismatch`, `removed-from-allowlist`, `gateway-shutdown`), `crates/df-gateway-control/src/snapshot.rs` and `crates/df-db/src/egress.rs` (`"project"` / `"instance"` scope)
 
 `Denial::reason()` covers only the policy denials; the other reasons are literals at their call sites, and the HTTP status is picked by comparing reason strings (S25). The scope is derived with the same `if project_id.is_some()` in two crates.
 
@@ -364,7 +364,7 @@ Each timed operation repeats `let started = Instant::now(); let result = op().aw
 
 ### TD-61 (S4). `FlowLog` and `Merged` repeat the age-prune steps
 
-`crates/df-gateway/src/flow.rs` (`FlowLog`), `crates/df-gateway/src/control/relay.rs` (`Merged`)
+`crates/df-gateway/src/flow.rs` (`FlowLog`), `crates/df-gateway-control/src/relay.rs` (`Merged`)
 
 Both hold `max_age` plus `Mutex<AgedEvents>` and repeat the same three steps: `cutoff(max_age)`, `prune_if_due`, `unexpired`. `with_max_age` and the `MIN_MAX_AGE` clamp are also written twice.
 
@@ -738,7 +738,7 @@ builder.
 
 ### TD-120. Live rows of the traffic page stopped once
 
-`crates/df-gateway/src/control/relay.rs` (viewer sessions, pod streams), `crates/df-web/src/egress/log/mod.rs` (`events`)
+`crates/df-gateway-control/src/relay.rs` (viewer sessions, pod streams), `crates/df-web/src/egress/log/mod.rs` (`events`)
 
 In one full `just e2e-local` run on a fresh cluster (2026-11-07), the traffic page of a task whose fetch the proxy denied once a second showed one row and then nothing for 300 s, in two viewers. The gateway had buffered 237 events of that task; a page loaded afterwards showed all of them. Not reproduced in the following runs, cause unknown. The control plane logged no `tail stream failed`.
 

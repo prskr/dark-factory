@@ -40,7 +40,7 @@ pub(crate) struct SandboxWiring {
 }
 
 /// The live egress log: the relay to the gateway pods.
-pub(crate) struct RelayFlows(pub(crate) df_gateway::control::Relay);
+pub(crate) struct RelayFlows(pub(crate) df_gateway_control::Relay);
 
 impl df_web::egress::FlowSource for RelayFlows {
     fn subscribe(&self) -> futures::stream::BoxStream<'static, df_proto::gateway::v1::FlowEvent> {

@@ -16,7 +16,7 @@ use super::denial_events::DenialEvents;
 use super::git_records::{GitRecords, scan_stale_pushes};
 use super::policy_service::PolicyService;
 use super::usage_records::{TokenCounter, UsageRecords};
-use crate::peer::require_dns_san;
+use df_gateway::peer::require_dns_san;
 
 /// Serves `PolicyWatch`, `GatewayGit` and `GatewayEvents` on `incoming`, and runs the stale push
 /// scan, until

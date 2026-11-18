@@ -104,14 +104,15 @@ impl GrpcConnector for MtlsConnector {
 }
 
 /// Unencrypted channels, for tests of components that do not care about TLS.
-#[cfg(test)]
-pub(crate) struct PlainConnector;
+#[cfg(any(test, feature = "test-util"))]
+pub struct PlainConnector;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 #[async_trait]
 impl GrpcConnector for PlainConnector {
     async fn connect(&self, authority: &str) -> Result<Channel, LinkError> {
         Ok(Endpoint::from_shared(format!("http://{authority}"))?
+            .connect_timeout(CONNECT_TIMEOUT)
             .connect()
             .await?)
     }
