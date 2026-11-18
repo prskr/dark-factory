@@ -39,6 +39,9 @@ pub mod users;
 pub mod volumes;
 pub mod webhooks;
 
+#[cfg(test)]
+mod index_predicates;
+
 pub use audit::{AuditLogRow, CredentialRefAuditDetails, NewAuditEntry, write_audit_entry};
 pub use blobs::{BlobRow, PgBlobStore, sha256_hex};
 pub use egress::{

@@ -9,7 +9,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::pool::DbError;
 use crate::task_events::apply_task_event;
-use crate::task_views::statuses_of;
+use crate::task_views::{status_list, statuses_of};
 use crate::tasks::{lock_runs_then_task, queue_message_tx, text_block};
 
 /// `system` reason of the `task.done` audit entry of a merged pull request.
@@ -51,11 +51,11 @@ pub async fn target_tasks(
         Target::Branch(branch) => {
             sqlx::query_scalar!(
                 "SELECT id FROM tasks WHERE project_id = $1 AND branch = $2
-                 ORDER BY (status NOT IN ('completed', 'failed', 'cancelled')) DESC,
-                          created_at DESC, id DESC
+                 ORDER BY (status <> ALL($3)) DESC, created_at DESC, id DESC
                  LIMIT 1",
                 project_id.as_uuid(),
                 branch,
+                &status_list(TaskStatus::DONE),
             )
             .fetch_all(pool)
             .await?

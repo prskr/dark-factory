@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 FROM task_messages\n            WHERE task_id = $1 AND undelivered\n              AND ($2::timestamptz IS NULL OR queued_at > $2)) AS \"undelivered!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "undelivered!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b8fcf3ab9d2fdfdc0d6efaa12da29d0cf93bb23b7ca616c0f213cc4906252574"
+}

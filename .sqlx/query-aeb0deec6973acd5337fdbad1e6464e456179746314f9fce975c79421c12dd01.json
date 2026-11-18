@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.resume_at IS NOT NULL AS \"resumed!\" FROM tasks t\n        WHERE t.status IN ('queued', 'rate_limited')\n          AND (t.resume_at IS NULL OR t.resume_at <= now())\n          AND NOT EXISTS (\n              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))\n        ORDER BY COALESCE(t.resume_at, t.updated_at), t.created_at\n        LIMIT $1\n        FOR UPDATE OF t SKIP LOCKED\n        ",
+  "query": "\n        SELECT t.id, t.resume_at IS NOT NULL AS \"resumed!\" FROM tasks t\n        WHERE t.status = ANY($3)\n          AND (t.resume_at IS NULL OR t.resume_at <= now())\n          AND NOT EXISTS (\n              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))\n        ORDER BY COALESCE(t.resume_at, t.updated_at), t.created_at\n        LIMIT $1\n        FOR UPDATE OF t SKIP LOCKED\n        ",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,7 @@
     "parameters": {
       "Left": [
         "Int8",
+        "TextArray",
         "TextArray"
       ]
     },
@@ -32,5 +33,5 @@
       null
     ]
   },
-  "hash": "bcd360fc5f235059c1b662f355fcc87b1addae671620c750c136611eda702479"
+  "hash": "aeb0deec6973acd5337fdbad1e6464e456179746314f9fce975c79421c12dd01"
 }

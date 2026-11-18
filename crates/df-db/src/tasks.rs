@@ -19,6 +19,7 @@ use crate::pool::DbError;
 use crate::run_events::{RunEnv, apply_run_event};
 use crate::runs::active_run_of_task;
 use crate::task_events::{apply_task_event, execute_effects};
+use crate::task_views::status_list;
 
 /// Outbox kind that marks a task's open pull request as draft again; payload [`MarkDraftJob`].
 pub const MARK_DRAFT_KIND: &str = "pr.mark_draft";
@@ -488,11 +489,12 @@ async fn open_branch_holder(
     let key: Option<String> = sqlx::query_scalar(
         "SELECT key FROM tasks
          WHERE project_id = $1 AND branch = $2 AND id IS DISTINCT FROM $3
-           AND status NOT IN ('completed', 'failed', 'cancelled')",
+           AND status <> ALL($4)",
     )
     .bind(project.as_uuid())
     .bind(branch)
     .bind(except.map(|id| id.as_uuid()))
+    .bind(status_list(TaskStatus::DONE))
     .fetch_optional(conn)
     .await?;
     key.map(|key| {
@@ -666,7 +668,7 @@ pub async fn queue_resume_prompt_tx(
          SELECT $1, $2, $3, $4
          WHERE NOT EXISTS (
              SELECT 1 FROM task_messages
-             WHERE task_id = $2 AND delivered_at IS NULL AND discarded_at IS NULL
+             WHERE task_id = $2 AND undelivered
          )",
     )
     .bind(PromptId::new().as_uuid())
@@ -845,7 +847,7 @@ pub async fn list_undelivered_messages(
         SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
                forwarded_at
         FROM task_messages
-        WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL
+        WHERE task_id = $1 AND undelivered
         ORDER BY queued_at ASC, id ASC
         "#,
         task_id.as_uuid()
@@ -866,8 +868,7 @@ pub async fn claim_held_back_messages(
         MessageRecord,
         r#"
         UPDATE task_messages SET forwarded_at = now()
-        WHERE task_id = $1 AND delivered_at IS NULL AND forwarded_at IS NULL
-          AND discarded_at IS NULL
+        WHERE task_id = $1 AND held_back
         RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
                   forwarded_at
         "#,
@@ -901,8 +902,7 @@ pub async fn edit_queued_message(
     let old = sqlx::query_scalar!(
         r#"
         SELECT content FROM task_messages
-        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
-          AND discarded_at IS NULL AND author->>'kind' = 'human'
+        WHERE id = $1 AND task_id = $2 AND held_back AND author->>'kind' = 'human'
         FOR UPDATE
         "#,
         prompt_id.as_uuid(),
@@ -955,8 +955,7 @@ pub async fn remove_queued_message(
     let old = sqlx::query_scalar!(
         r#"
         DELETE FROM task_messages
-        WHERE id = $1 AND task_id = $2 AND delivered_at IS NULL AND forwarded_at IS NULL
-          AND discarded_at IS NULL AND author->>'kind' = 'human'
+        WHERE id = $1 AND task_id = $2 AND held_back AND author->>'kind' = 'human'
         RETURNING content
         "#,
         prompt_id.as_uuid(),

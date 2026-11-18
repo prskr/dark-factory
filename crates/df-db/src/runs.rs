@@ -17,6 +17,7 @@ use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 use crate::run_events::{RunEnv, apply_run_event};
 use crate::task_events::apply_task_event;
+use crate::task_views::status_list;
 use crate::transcript::RunTaskLock;
 
 /// Key of the instance-wide advisory lock that serializes the slot accounting of
@@ -318,7 +319,7 @@ pub async fn start_queued_runs(
     let tasks = sqlx::query!(
         r#"
         SELECT t.id, t.resume_at IS NOT NULL AS "resumed!" FROM tasks t
-        WHERE t.status IN ('queued', 'rate_limited')
+        WHERE t.status = ANY($3)
           AND (t.resume_at IS NULL OR t.resume_at <= now())
           AND NOT EXISTS (
               SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))
@@ -327,7 +328,8 @@ pub async fn start_queued_runs(
         FOR UPDATE OF t SKIP LOCKED
         "#,
         limit.min(free),
-        &state_list(RunState::TERMINAL)
+        &state_list(RunState::TERMINAL),
+        &status_list(TaskStatus::WAITS_FOR_RESUME)
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -421,7 +423,7 @@ pub async fn has_undelivered_message(
         r#"
         SELECT EXISTS (
             SELECT 1 FROM task_messages
-            WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL
+            WHERE task_id = $1 AND undelivered
               AND ($2::timestamptz IS NULL OR queued_at > $2)) AS "undelivered!"
         "#,
         task_id.as_uuid(),

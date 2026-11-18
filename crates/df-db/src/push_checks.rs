@@ -623,7 +623,7 @@ async fn undelivered_feedback(
     Ok(sqlx::query_scalar!(
         r#"SELECT EXISTS (
              SELECT 1 FROM task_messages
-             WHERE task_id = $1 AND delivered_at IS NULL
+             WHERE task_id = $1 AND undelivered
                AND author->>'kind' = 'system' AND author->>'reason' = $2
            ) AS "exists!""#,
         task_id.as_uuid(),

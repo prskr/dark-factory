@@ -104,6 +104,12 @@ pub enum RequestState {
 }
 
 impl RequestState {
+    /// Whether the request still waits for a decision; the partial index
+    /// `agent_requests_pending_idx` selects the same rows.
+    pub const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
