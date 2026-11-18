@@ -26,6 +26,7 @@ df-db.workspace = true
 df-gateway.workspace = true
 df-gateway-control.workspace = true
 df-k8s.workspace = true
+df-orchestrator.workspace = true
 df-plugins.workspace = true
 df-proto.workspace = true
 df-telemetry = { workspace = true, features = ["clap", "http", "otel"] }
@@ -48,6 +49,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 df-agent-channel = { workspace = true, features = ["test-util"] }
+df-orchestrator = { workspace = true, features = ["test-util"] }
 df-telemetry = { workspace = true, features = ["clap", "http", "otel", "test-util"] }
 df-test-postgres.workspace = true
 df-tls = { workspace = true, features = ["test-util"] }

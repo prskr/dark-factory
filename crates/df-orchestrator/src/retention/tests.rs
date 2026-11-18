@@ -161,12 +161,12 @@ async fn task_without_runs_is_never_a_candidate() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
     set_status(&pool, env.task.id, "completed").await;
-    env.ctx.config = Arc::new(crate::ChannelConfig {
+    env.ctx.config = Arc::new(crate::OrchestratorConfig {
         volumes: df_core::config::VolumesConfig {
             retain_after_close_seconds: 0,
             idle_ttl_seconds: 0,
         },
-        ..crate::ChannelConfig::default()
+        ..crate::OrchestratorConfig::default()
     });
 
     let scanned = Retention::new(env.ctx.clone())

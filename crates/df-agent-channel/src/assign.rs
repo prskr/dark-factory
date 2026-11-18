@@ -1,19 +1,18 @@
-//! Everything derived from database rows for a run: the loaded run context, `Assign` and the
-//! prompts to deliver (design D1, D5, D8).
+//! Everything derived from database rows for a run that goes on the wire: `Assign` and the
+//! prompts to deliver (design D1, D5, D8). The loaded run context is `df_orchestrator::run_context`.
 
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use df_core::harness::{self, ConfigInput, HarnessProfile, INFERENCE_PATH, PLACEHOLDER_KEY};
 use df_core::model_provider::ProviderModel;
-use df_core::{PersonaId, Principal, ProjectId, RewritePolicy, TaskId};
-use df_db::catalog;
+use df_core::{Principal, RewritePolicy, TaskId};
 use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::push_policy;
-use df_db::runs::{RunRow, previous_harness_session_id};
-use df_db::{
-    TaskMessageRow, TaskRow, claim_held_back_messages, get_task, list_undelivered_messages,
-};
+use df_db::runs::previous_harness_session_id;
+use df_db::{TaskMessageRow, claim_held_back_messages, list_undelivered_messages};
+use df_orchestrator::OrchestratorError;
+use df_orchestrator::run_context::RunContext;
 use df_proto::agent::v1::{
     AcpHarness, Assign, Budgets, CommitIdentity, Continuation, Harness, HarnessFile, Prompt,
     RewritePolicy as RewritePolicyProto, TaskRef, ToolAnnotations, ToolDescriptor, Workspace,
@@ -30,118 +29,6 @@ use crate::error::ChannelError;
 use crate::{ChannelContext, GitProxy};
 
 const FACTORY_TOOLS_JSON: &str = include_str!("../../../contract/mcp/factory-tools.v2.json");
-
-/// Project columns the channel needs.
-#[derive(Debug, Clone)]
-pub struct ProjectInfo {
-    pub id: ProjectId,
-    pub key: String,
-    pub repo_url: String,
-    pub image: String,
-    pub base_branch: String,
-    /// Command that starts the adapter in the project image; empty means the harness image.
-    pub adapter_command: Vec<String>,
-    pub rewrite_policy: RewritePolicy,
-    /// Globs of the existing branches an agent may start tasks on.
-    pub agent_branch_globs: Vec<String>,
-}
-
-impl ProjectInfo {
-    /// The command that starts the adapter: the project's own, otherwise the harness default.
-    pub fn adapter_command(&self, harness_default: &[String]) -> Vec<String> {
-        if self.adapter_command.is_empty() {
-            harness_default.to_vec()
-        } else {
-            self.adapter_command.clone()
-        }
-    }
-
-    /// Whether the sandbox mounts the harness image; not when the project image brings its own
-    /// adapter.
-    pub fn mounts_harness(&self) -> bool {
-        self.adapter_command.is_empty()
-    }
-}
-
-/// Persona columns the channel needs.
-#[derive(Debug, Clone)]
-pub struct PersonaInfo {
-    pub id: PersonaId,
-    pub name: String,
-    pub system_prompt: String,
-    pub harness: String,
-    pub model: String,
-    pub model_provider_id: uuid::Uuid,
-}
-
-/// A run with its task, project and persona, loaded once per stream.
-#[derive(Debug, Clone)]
-pub struct RunContext {
-    pub run: RunRow,
-    pub task: TaskRow,
-    pub project: ProjectInfo,
-    pub persona: PersonaInfo,
-}
-
-impl RunContext {
-    /// The task's stored branch.
-    pub fn task_branch(&self) -> &str {
-        &self.task.branch
-    }
-
-    /// The task's effective base branch: the base of its attached PR, else the project's.
-    pub fn base_branch(&self) -> &str {
-        self.task.base_branch(&self.project.base_branch)
-    }
-
-    pub fn wip_branch(&self) -> String {
-        self.task.key.wip_branch()
-    }
-}
-
-/// Loads task, project and persona of `run`.
-pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, ChannelError> {
-    let task = get_task(pool, run.task_id)
-        .await?
-        .ok_or_else(|| ChannelError::InvalidData(format!("task of run {} is missing", run.id)))?;
-
-    let project = catalog::get_project(pool, task.project_id.as_uuid())
-        .await?
-        .ok_or_else(|| {
-            ChannelError::InvalidData(format!("project of task {} is missing", task.id))
-        })?;
-    let project = ProjectInfo {
-        id: task.project_id,
-        key: project.key,
-        repo_url: project.repo_url,
-        image: project.image,
-        base_branch: project.base_branch,
-        adapter_command: project.adapter_command,
-        rewrite_policy: project.branch_rewrite_policy,
-        agent_branch_globs: project.agent_branch_globs,
-    };
-
-    let persona = catalog::get_persona(pool, task.persona_id.as_uuid())
-        .await?
-        .ok_or_else(|| {
-            ChannelError::InvalidData(format!("persona of task {} is missing", task.id))
-        })?;
-    let persona = PersonaInfo {
-        id: task.persona_id,
-        name: persona.name,
-        system_prompt: persona.system_prompt,
-        harness: persona.harness,
-        model: persona.model,
-        model_provider_id: persona.model_provider_id,
-    };
-
-    Ok(RunContext {
-        run,
-        task,
-        project,
-        persona,
-    })
-}
 
 #[derive(Deserialize)]
 struct ToolsFile {
@@ -214,10 +101,10 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
     let harness_name = rc.persona.harness.as_str();
     let (profile, defaults) = harness::profile(harness_name)
         .zip(config.harness.adapter_command(harness_name))
-        .ok_or_else(|| ChannelError::InvalidData(format!("unknown harness {harness_name}")))?;
+        .ok_or_else(|| OrchestratorError::InvalidData(format!("unknown harness {harness_name}")))?;
     let (provider, model) = persona_model(ctx, rc).await?;
     harness::check_compatible(harness_name, model.wire_api, provider.input.scheme).map_err(
-        |error| ChannelError::InvalidData(format!("persona {}: {error}", rc.persona.name)),
+        |error| OrchestratorError::InvalidData(format!("persona {}: {error}", rc.persona.name)),
     )?;
     let command = rc.project.adapter_command(defaults);
     let mut env: std::collections::HashMap<String, String> = config
@@ -278,7 +165,8 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         tools: tool_descriptors(),
         budgets: Some(Budgets {
             max_wall_clock: Some(Duration {
-                seconds: i64::try_from(config.runs.max_wall_clock_seconds).unwrap_or(i64::MAX),
+                seconds: i64::try_from(ctx.orch.config.runs.max_wall_clock_seconds)
+                    .unwrap_or(i64::MAX),
                 nanos: 0,
             }),
             max_turns: None,
@@ -354,13 +242,13 @@ async fn persona_model(
         df_db::model_providers::get_model_provider(&ctx.pool, rc.persona.model_provider_id)
             .await?
             .ok_or_else(|| {
-                ChannelError::InvalidData(format!(
+                OrchestratorError::InvalidData(format!(
                     "model provider of persona {} is missing",
                     rc.persona.name
                 ))
             })?;
     let model = provider.model(&rc.persona.model).cloned().ok_or_else(|| {
-        ChannelError::InvalidData(format!(
+        OrchestratorError::InvalidData(format!(
             "model {} of persona {} is not a model of provider {}",
             rc.persona.model, rc.persona.name, provider.input.name
         ))

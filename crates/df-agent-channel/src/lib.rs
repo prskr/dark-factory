@@ -1,5 +1,6 @@
-//! Control plane end of the agent protocol v1: the mTLS agent port, run scheduling and state
-//! machine, transcript persistence, factory tools, pull request lifecycle.
+//! Control plane end of the agent protocol v1: the mTLS agent port, agent sessions with
+//! transcript persistence, the `Assign` message and the factory tools. Run scheduling, the run
+//! end, the pull request lifecycle and retention are `df-orchestrator`.
 //!
 //! Every decision is derived from the database, so any replica can serve any reconnect.
 
@@ -13,53 +14,36 @@
 
 use std::sync::Arc;
 
-use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig, RunsConfig, VolumesConfig};
-use df_core::{ForgeClient, InstanceConfig, SandboxProvider, SecretStore};
-use df_db::Notifier;
-use df_db::lifecycle_events::EventSinks;
-use sqlx::PgPool;
+use df_core::InstanceConfig;
+use df_core::config::{AgentConfig, GatewayConfig, HarnessConfig};
+use df_orchestrator::OrchestratorContext;
 
 pub mod assign;
 pub mod error;
 pub mod metrics;
-pub mod pr;
-pub mod retention;
-pub mod runs;
-pub mod scheduler;
 pub mod server;
 pub mod session;
 pub mod summary;
 pub mod tools;
-pub mod webhooks;
 
 #[cfg(feature = "test-util")]
 pub mod testing;
 
-#[cfg(test)]
-mod lifecycle_event_tests;
-
 pub use error::ChannelError;
 pub use metrics::Metrics;
-pub use retention::Retention;
-pub use scheduler::Scheduler;
 pub use server::{AgentService, serve};
 
-/// The sections of the instance configuration the agent channel reads.
+/// The sections of the instance configuration the agent port reads; the orchestration's are
+/// `df_orchestrator::OrchestratorConfig`.
 #[derive(Debug, Clone, Default)]
 pub struct ChannelConfig {
     pub agent: AgentConfig,
     pub harness: HarnessConfig,
-    pub runs: RunsConfig,
-    pub volumes: VolumesConfig,
     pub git_proxy: GitProxy,
-    /// Receivers of lifecycle events; off by default.
-    pub events: EventSinks,
     /// Limits of task artifacts.
     pub artifacts: df_core::ArtifactsConfig,
     /// Whether the sandboxes confine the harness; the system prompt tells the agent.
     pub landlock: df_sandbox_contract::LandlockMode,
-    /// The scheduler's tick and the resume backoff.
-    pub scheduling: df_core::config::SchedulingConfig,
 }
 
 impl From<&InstanceConfig> for ChannelConfig {
@@ -67,16 +51,12 @@ impl From<&InstanceConfig> for ChannelConfig {
         Self {
             agent: cfg.agent.clone(),
             harness: cfg.harness.clone(),
-            runs: cfg.runs.clone(),
-            volumes: cfg.volumes.clone(),
             git_proxy: GitProxy {
                 host: cfg.gateway.git_host_name(&cfg.instance_name),
                 port: cfg.gateway.git_port,
             },
-            events: EventSinks::new(&cfg.lifecycle_events),
             artifacts: cfg.artifacts,
             landlock: cfg.sandbox.provisioning.landlock,
-            scheduling: cfg.scheduling,
         }
     }
 }
@@ -98,19 +78,25 @@ impl Default for GitProxy {
     }
 }
 
-/// Everything the agent port, the sessions and the scheduler of one replica share.
+/// Everything the agent port and the sessions of one replica share: the orchestration context
+/// (`pool`, `notifier`, `provider`, `forge`, `secrets` are reachable on it through `Deref`) and
+/// the port's own parts.
 #[derive(Clone)]
 pub struct ChannelContext {
-    pub pool: PgPool,
-    pub notifier: Arc<Notifier>,
-    pub provider: Arc<dyn SandboxProvider>,
-    pub forge: Arc<dyn ForgeClient>,
-    pub secrets: Arc<dyn SecretStore>,
+    pub orch: OrchestratorContext,
     pub config: Arc<ChannelConfig>,
     pub metrics: Arc<Metrics>,
     /// The approval types of this instance, shared with the web UI. Empty until a change adds
     /// types; the tools that raise approvals (`request_approval`) resolve them here.
     pub approval_types: df_db::requests::ApprovalTypes,
+}
+
+impl std::ops::Deref for ChannelContext {
+    type Target = OrchestratorContext;
+
+    fn deref(&self) -> &OrchestratorContext {
+        &self.orch
+    }
 }
 
 #[cfg(test)]

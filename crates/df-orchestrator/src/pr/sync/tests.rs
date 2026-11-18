@@ -164,7 +164,7 @@ fn bad_gateway() -> IntegrationError {
 #[test]
 fn a_negative_stored_pull_request_number_is_invalid_data() {
     let error = RecordedPr::from_row(-1, None, false).err().unwrap();
-    assert!(matches!(error, ChannelError::InvalidData(_)));
+    assert!(matches!(error, OrchestratorError::InvalidData(_)));
     assert_eq!(RecordedPr::from_row(7, None, false).unwrap().number, 7);
 }
 

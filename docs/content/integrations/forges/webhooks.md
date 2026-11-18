@@ -245,7 +245,7 @@ Accepted events that do not wake a task are logged at `debug`. Raise the level o
 
 ```yaml
 controlPlane:
-  logLevel: info,dark_factory::forge=debug,df_agent_channel::webhooks=debug,df_db::webhooks=debug
+  logLevel: info,dark_factory::forge=debug,df_orchestrator::webhooks=debug,df_db::webhooks=debug
 ```
 
 | Debug message | Cause |

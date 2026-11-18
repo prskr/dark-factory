@@ -14,18 +14,18 @@ use df_db::outbox::RetryPolicy;
 use df_db::tasks::{PR_SYNC_KIND, PrSyncJob};
 use sqlx::{Postgres, Transaction};
 
-use crate::error::ChannelError;
+use crate::error::OrchestratorError;
 
 pub mod mark_draft;
 pub mod sync;
 
 /// Enqueues `pr.sync { open, run_id }` for a task-branch push ahead of base, unless the task has
 /// a PR recorded. Returns whether a job was enqueued.
-pub(crate) async fn enqueue_open_after_push(
+pub async fn enqueue_open_after_push(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
     run_id: RunId,
-) -> Result<bool, ChannelError> {
+) -> Result<bool, OrchestratorError> {
     let has_pr = get_task(&mut **tx, task_id)
         .await?
         .map(|task| task.pr_number.is_some());
@@ -42,13 +42,16 @@ pub(crate) async fn enqueue_open_after_push(
     Ok(true)
 }
 
-async fn enqueue(tx: &mut Transaction<'_, Postgres>, job: PrSyncJob) -> Result<(), ChannelError> {
+async fn enqueue(
+    tx: &mut Transaction<'_, Postgres>,
+    job: PrSyncJob,
+) -> Result<(), OrchestratorError> {
     df_db::outbox::enqueue(tx, PR_SYNC_KIND, &serde_json::to_value(job)?).await?;
     Ok(())
 }
 
 /// Owner and name from the last two path segments of a repository URL.
-pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
+pub fn repo_ref(repo_url: &str) -> Result<RepoRef, OrchestratorError> {
     let path = repo_url.split_once("://").map_or(repo_url, |(_, rest)| {
         rest.split_once('/').map_or("", |(_, p)| p)
     });
@@ -59,7 +62,7 @@ pub fn repo_ref(repo_url: &str) -> Result<RepoRef, ChannelError> {
             owner: owner.to_string(),
             name: name.to_string(),
         }),
-        _ => Err(ChannelError::InvalidData(format!(
+        _ => Err(OrchestratorError::InvalidData(format!(
             "repository URL `{repo_url}` has no owner/name path"
         ))),
     }

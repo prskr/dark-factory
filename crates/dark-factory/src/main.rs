@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand};
-use df_agent_channel::{ChannelConfig, ChannelContext, Scheduler};
+use df_agent_channel::{ChannelConfig, ChannelContext};
 use df_core::InstanceConfig;
 use df_core::config::DEFAULT_CONFIG_PATH;
 use df_core::public_address::ProjectTargets;
@@ -25,6 +25,7 @@ use df_db::PgPool;
 use df_gateway::git::policy_checks::PolicyChecks;
 use df_gateway::git::secret_rules::SecretRules;
 use df_gateway::git::upstream::ForgeUpstream;
+use df_orchestrator::{OrchestratorConfig, OrchestratorContext, Scheduler};
 use df_telemetry::logging;
 use df_telemetry::otel as telemetry;
 use df_tls::TlsReloader;
@@ -303,6 +304,21 @@ async fn run_serve_command(
     .await
 }
 
+/// The agent port's context: the replica's orchestration context plus the port's own parts.
+fn channel_context(
+    cfg: &InstanceConfig,
+    orch: OrchestratorContext,
+    metrics: Arc<df_agent_channel::Metrics>,
+    approval_types: df_db::requests::ApprovalTypes,
+) -> ChannelContext {
+    ChannelContext {
+        orch,
+        config: Arc::new(ChannelConfig::from(cfg)),
+        metrics,
+        approval_types,
+    }
+}
+
 /// Runs the control plane on the given listeners until `shutdown` resolves: UI/health port, the
 /// mTLS agent port with its run scheduler, and the internal gRPC port.
 async fn serve<B, F>(
@@ -369,16 +385,15 @@ where
     )?;
     let metrics: Arc<df_agent_channel::Metrics> = Arc::default();
     let ctx_policy = PolicySources::new(&cfg, &pool, &notifier, &secrets, &metrics);
-    let ctx = ChannelContext {
+    let orch = OrchestratorContext {
         notifier,
         pool,
         provider,
         forge,
         secrets,
-        config: Arc::new(ChannelConfig::from(&cfg)),
-        metrics,
-        approval_types,
+        config: Arc::new(OrchestratorConfig::from(&cfg)),
     };
+    let ctx = channel_context(&cfg, orch.clone(), metrics, approval_types);
 
     let http_port = http_listener.local_addr()?.port();
     let agent_port = agent_listener.local_addr()?.port();
@@ -409,9 +424,9 @@ where
     });
     let scheduler_stop = stop_rx.clone();
     if let Some(is_leader) = is_leader {
-        spawn_leader_tasks(&mut listeners, &ctx, is_leader, &stop_rx, delivery)?;
+        spawn_leader_tasks(&mut listeners, &orch, is_leader, &stop_rx, delivery)?;
     }
-    listeners.spawn(async move { Scheduler::new(ctx).run(stopped(scheduler_stop)).await });
+    listeners.spawn(async move { Scheduler::new(orch).run(stopped(scheduler_stop)).await });
     listeners.spawn(serve_policy_watch(
         cfg.gateway.identity_name(&cfg.instance_name),
         ctx_policy,
@@ -444,7 +459,7 @@ fn lifecycle_delivery(
 /// waits for `is_leader` itself.
 fn spawn_leader_tasks(
     listeners: &mut JoinSet<()>,
-    ctx: &ChannelContext,
+    ctx: &OrchestratorContext,
     is_leader: watch::Receiver<bool>,
     stop: &watch::Receiver<bool>,
     delivery: lifecycle_events::Delivery,
@@ -460,7 +475,7 @@ fn spawn_leader_tasks(
     )?;
     let (dispatcher_leader, dispatcher_stop) = (is_leader.clone(), stop.clone());
     listeners.spawn(async move { dispatcher.run(dispatcher_leader, dispatcher_stop).await });
-    let retention = df_agent_channel::Retention::new(ctx.clone());
+    let retention = df_orchestrator::Retention::new(ctx.clone());
     let retention_stop = stop.clone();
     listeners.spawn(async move { retention.run(is_leader, retention_stop).await });
     Ok(())

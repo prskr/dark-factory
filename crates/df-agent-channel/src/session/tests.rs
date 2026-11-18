@@ -360,7 +360,7 @@ async fn persist_turn_end(env: &Env, run_id: df_core::RunId, at: DateTime<Utc>) 
 }
 
 fn with_keep_alive(env: &mut Env, seconds: u64) {
-    env.ctx.config = Arc::new(ChannelConfig {
+    env.ctx.orch.config = Arc::new(OrchestratorConfig {
         runs: df_core::config::RunsConfig {
             keep_alive_seconds: seconds,
             ..Default::default()
@@ -456,7 +456,7 @@ async fn start_finalizing_takes_the_run_lock_before_the_task_lock() {
 async fn a_budget_cancel_is_never_followed_by_a_release() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    env.ctx.config = Arc::new(ChannelConfig {
+    env.ctx.orch.config = Arc::new(OrchestratorConfig {
         runs: df_core::config::RunsConfig {
             max_wall_clock_seconds: 0,
             cancel_grace_seconds: 0,
@@ -498,7 +498,7 @@ async fn a_budget_cancel_is_never_followed_by_a_release() {
 async fn the_budget_cancel_finalizes_the_run_first_and_no_prompt_follows() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    env.ctx.config = Arc::new(ChannelConfig {
+    env.ctx.orch.config = Arc::new(OrchestratorConfig {
         runs: df_core::config::RunsConfig {
             max_wall_clock_seconds: 0,
             cancel_grace_seconds: 0,
@@ -667,9 +667,11 @@ async fn no_prompt_is_sent_to_a_finalizing_run_and_its_end_queues_the_task() {
     assert!(sent_prompt_ids(&mut rx).is_empty());
 
     let end = RunEnd::failure(run_id, RunOutcome::EndTurn, "");
-    let mut config = ChannelConfig::default();
+    let mut config = OrchestratorConfig::default();
     config.runs.max_auto_resumes = 3;
-    crate::runs::end_run(&pool, &end, &config).await.unwrap();
+    df_orchestrator::runs::end_run(&pool, &end, &config)
+        .await
+        .unwrap();
     assert_eq!(state_and_status(&env, run_id).await.1, "queued");
 }
 

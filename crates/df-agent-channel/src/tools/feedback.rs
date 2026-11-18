@@ -6,8 +6,9 @@ use serde_json::Value;
 
 use super::{Outcome, forge_error, text_arg};
 use crate::ChannelContext;
-use crate::assign::RunContext;
 use crate::error::ChannelError;
+use df_orchestrator::OrchestratorError;
+use df_orchestrator::run_context::RunContext;
 
 /// Upper bound of the serialized feedback result.
 /// `ponytail:` fixed; make it configurable if agents with small context windows need less.
@@ -93,7 +94,7 @@ async fn pull_request_number(
 ) -> Result<Option<u64>, ChannelError> {
     let task = df_db::get_task(&ctx.pool, rc.task.id)
         .await?
-        .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?;
+        .ok_or_else(|| OrchestratorError::InvalidData("task of the run is missing".into()))?;
     Ok(task.pr_number.and_then(|n| u64::try_from(n).ok()))
 }
 

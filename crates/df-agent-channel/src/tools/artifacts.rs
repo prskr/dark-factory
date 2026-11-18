@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 
 use super::{Outcome, text_arg, text_block};
 use crate::ChannelContext;
-use crate::assign::RunContext;
 use crate::error::ChannelError;
+use df_orchestrator::run_context::RunContext;
 
 /// Largest page of `read_artifact` text.
 const PAGE_BYTES: usize = 64 * 1024;

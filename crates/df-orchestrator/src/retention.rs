@@ -13,20 +13,20 @@ use df_db::volumes::{self, DELETE_TIMEOUT};
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
-use crate::ChannelContext;
-use crate::error::ChannelError;
+use crate::OrchestratorContext;
+use crate::error::OrchestratorError;
 
 /// Interval between two scans.
 pub const SCAN_INTERVAL: Duration = Duration::from_hours(1);
 
 /// The retention scan of one control plane replica; only the leader runs it.
 pub struct Retention {
-    ctx: ChannelContext,
+    ctx: OrchestratorContext,
     delete_timeout: Duration,
 }
 
 impl Retention {
-    pub fn new(ctx: ChannelContext) -> Self {
+    pub fn new(ctx: OrchestratorContext) -> Self {
         Self {
             ctx,
             delete_timeout: DELETE_TIMEOUT,
@@ -51,7 +51,7 @@ impl Retention {
 
     /// Deletes the volumes that are due at `now`, each in its own transaction; a failed deletion
     /// is logged and the scan goes on. Returns the number of deleted volumes.
-    pub async fn scan(&self, now: DateTime<Utc>) -> Result<usize, ChannelError> {
+    pub async fn scan(&self, now: DateTime<Utc>) -> Result<usize, OrchestratorError> {
         self.scan_until(now, || false).await
     }
 
@@ -60,7 +60,7 @@ impl Retention {
         &self,
         now: DateTime<Utc>,
         stopping: impl Fn() -> bool,
-    ) -> Result<usize, ChannelError> {
+    ) -> Result<usize, OrchestratorError> {
         let cfg = &self.ctx.config.volumes;
         let cutoffs = (
             before(now, cfg.retain_after_close_seconds),
@@ -93,7 +93,7 @@ impl Retention {
         task_id: TaskId,
         key: &str,
         cutoffs: (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
-    ) -> Result<bool, ChannelError> {
+    ) -> Result<bool, OrchestratorError> {
         let mut tx = self.ctx.pool.begin().await?;
         let task_key = volumes::lock_task(&mut tx, task_id).await?;
         let still_due = !volumes::due_for_retention(&mut *tx, cutoffs.0, cutoffs.1, Some(task_id))

@@ -36,12 +36,16 @@ use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tonic::Status;
 
-use crate::ChannelConfig;
-use crate::assign::{RunContext, build_assign, load_run_context, pending_prompts};
+use df_orchestrator::pr;
+use df_orchestrator::run_context::{RunContext, load_run_context};
+use df_orchestrator::runs::end_run_tx;
+use df_orchestrator::{OrchestratorConfig, OrchestratorError};
+
+use crate::ChannelContext;
+use crate::assign::{build_assign, pending_prompts};
 use crate::error::ChannelError;
 use crate::metrics::Observation;
-use crate::runs::end_run_tx;
-use crate::{ChannelContext, pr, tools};
+use crate::tools;
 
 /// Time the runtime has to send `Hello` after the stream was accepted.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -91,7 +95,9 @@ where
         .map_err(ChannelError::from)?
         .filter(|r| !r.state.is_terminal())
         .ok_or_else(|| Status::unauthenticated("run is not active"))?;
-    let mut rc = load_run_context(&ctx.pool, run).await?;
+    let mut rc = load_run_context(&ctx.pool, run)
+        .await
+        .map_err(ChannelError::from)?;
     // A run that connected before has had a stream.
     let _connection = ctx
         .metrics
@@ -294,7 +300,7 @@ impl Session {
 
     /// When the budget `Cancel` is due; `None` if the configured budget has no deadline.
     fn budget_deadline(&self) -> Option<DateTime<Utc>> {
-        cancel_deadline(self.rc.run.budget_start(), &self.ctx.config.runs)
+        cancel_deadline(self.rc.run.budget_start(), &self.ctx.orch.config.runs)
     }
 
     /// Whether the budget deadline of the run has passed.
@@ -355,7 +361,7 @@ impl Session {
         let Some(turn_end) = last_turn_end(&self.ctx.pool, self.rc.run.id).await? else {
             return Ok(());
         };
-        self.idle_at = idle_instant(turn_end, self.ctx.config.runs.keep_alive_seconds);
+        self.idle_at = idle_instant(turn_end, self.ctx.orch.config.runs.keep_alive_seconds);
         Ok(())
     }
 
@@ -556,7 +562,7 @@ impl Session {
         }
         if let Some(ended) = effects.run_end {
             self.ended = true;
-            crate::runs::teardown(&self.ctx, self.rc.run.id).await;
+            df_orchestrator::runs::teardown(&self.ctx.orch, self.rc.run.id).await;
             tracing::info!(
                 run_id = %self.rc.run.id,
                 task_id = %ended.task_id,
@@ -608,9 +614,9 @@ async fn persist_batch(
     let lock = lock_run_and_task(&mut tx, rc.run.id, rc.task.id).await?;
     let start = persist_state(&mut *tx, rc.run.id)
         .await?
-        .ok_or_else(|| ChannelError::InvalidData("run is missing".into()))?
+        .ok_or_else(|| OrchestratorError::InvalidData("run is missing".into()))?
         .last_persisted_seq;
-    let mut applied = BatchApply::new(&lock, start, Arc::clone(&ctx.config));
+    let mut applied = BatchApply::new(&lock, start, Arc::clone(&ctx.orch.config));
 
     for msg in batch {
         if matches!(msg.body, Some(agent_message::Body::Hello(_))) || msg.seq <= applied.last {
@@ -679,8 +685,8 @@ async fn prepare_transcript_events(
 
 /// What applying the messages of a batch has produced so far.
 struct BatchApply<'l> {
-    /// The channel configuration, for the run end.
-    config: Arc<ChannelConfig>,
+    /// The orchestration configuration, for the run end.
+    config: Arc<OrchestratorConfig>,
     /// Writes the transcript events of the batch and publishes the notification once.
     writer: TranscriptWriter<'l>,
     /// Sequence number of the last message applied (or already persisted).
@@ -694,7 +700,7 @@ struct BatchApply<'l> {
 }
 
 impl<'l> BatchApply<'l> {
-    fn new(lock: &'l RunTaskLock, last: u64, config: Arc<ChannelConfig>) -> Self {
+    fn new(lock: &'l RunTaskLock, last: u64, config: Arc<OrchestratorConfig>) -> Self {
         Self {
             config,
             writer: TranscriptWriter::new(lock),

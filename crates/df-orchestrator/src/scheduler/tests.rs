@@ -12,7 +12,7 @@ use sqlx::PgPool;
 
 /// One pass of the production code: start and provision what is queued, then enforce
 /// timeouts.
-async fn tick(scheduler: &Scheduler, now: DateTime<Utc>) -> Result<(), ChannelError> {
+async fn tick(scheduler: &Scheduler, now: DateTime<Utc>) -> Result<(), OrchestratorError> {
     let mut provisions = JoinSet::new();
     let ticked = scheduler.tick(&mut provisions, now).await;
     while provisions.join_next().await.is_some() {}
@@ -342,7 +342,7 @@ async fn due_rate_limited_task_resumes_with_a_continuation_prompt() {
 
     assert_eq!(list_runs(&pool).await.len(), 2);
     assert_eq!(undelivered_authors(&pool, &env).await, [resume_author()]);
-    let prompts = crate::assign::pending_prompts(&pool, env.task.id, false)
+    let queued = df_db::list_undelivered_messages(&pool, env.task.id)
         .await
         .unwrap();
     let expected = df_proto::transcript::v1::ContentBlock {
@@ -354,7 +354,7 @@ async fn due_rate_limited_task_resumes_with_a_continuation_prompt() {
         hidden: false,
     };
     assert_eq!(
-        prompts.iter().map(|p| &p.content).collect::<Vec<_>>(),
+        queued.iter().map(|row| &row.content).collect::<Vec<_>>(),
         [&vec![expected]]
     );
 }
@@ -886,14 +886,14 @@ async fn a_run_that_connected_after_being_listed_is_not_ended() {
 async fn enforcing_timeouts_with_unbounded_budgets_does_not_panic() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    env.ctx.config = Arc::new(crate::ChannelConfig {
+    env.ctx.config = Arc::new(crate::OrchestratorConfig {
         runs: RunsConfig {
             max_wall_clock_seconds: u64::MAX,
             connect_timeout_seconds: u64::MAX,
             cancel_grace_seconds: u64::MAX,
             ..RunsConfig::default()
         },
-        ..crate::ChannelConfig::default()
+        ..crate::OrchestratorConfig::default()
     });
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     Scheduler::new(env.ctx.clone())
@@ -1360,7 +1360,7 @@ async fn a_task_that_becomes_due_starts_within_the_configured_tick() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let mut ctx = env.ctx.clone();
-    ctx.config = Arc::new(crate::ChannelConfig {
+    ctx.config = Arc::new(crate::OrchestratorConfig {
         scheduling: df_core::config::SchedulingConfig {
             tick_millis: 50,
             ..df_core::config::SchedulingConfig::default()

@@ -19,9 +19,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use df_agent_channel::ChannelContext;
 use df_agent_channel::testing::{Env, POD_SAN, RuntimeClient, TestServer};
-use df_agent_channel::{ChannelConfig, ChannelContext};
 use df_core::{PeerIdentity, RunId, RunOutcome, RunState};
+use df_orchestrator::OrchestratorConfig;
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, PhaseChanged, PushReport, PushStatus, PushTarget, RunPhase, RunReport,
@@ -569,10 +570,10 @@ async fn prompt_queued_during_a_run_is_delivered_and_not_resent_once_confirmed()
 async fn cancel_is_sent_when_the_wall_clock_budget_and_grace_are_over() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool).await;
-    let mut config = ChannelConfig::default();
+    let mut config = OrchestratorConfig::default();
     config.runs.max_wall_clock_seconds = 0;
     config.runs.cancel_grace_seconds = 0;
-    env.ctx.config = Arc::new(config);
+    env.ctx.orch.config = Arc::new(config);
     let run_id = env.running_run().await;
     let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
     let client = pki.pod_client(POD_SAN).map_err(anyhow::Error::from_boxed)?;
@@ -1157,9 +1158,9 @@ async fn secret_values_never_appear_in_logs() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
-    use df_agent_channel::Scheduler;
     use df_core::SandboxEvent;
     use df_core::testing::ForgeCall;
+    use df_orchestrator::Scheduler;
 
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
 
@@ -1167,7 +1168,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
     let client = pki.pod_client(POD_SAN).map_err(anyhow::Error::from_boxed)?;
     let server = TestServer::start(env.ctx.clone(), &pki).await?;
-    let scheduler = Scheduler::new(env.ctx.clone());
+    let scheduler = Scheduler::new(env.ctx.orch.clone());
     // The production loop starts and provisions the runs.
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let looping = scheduler.clone();
@@ -1239,7 +1240,7 @@ async fn task_to_follow_up_run_end_to_end() -> anyhow::Result<()> {
     let dispatcher = df_db::outbox::Dispatcher::new(
         pool.clone(),
         env.ctx.notifier.clone(),
-        vec![Arc::new(df_agent_channel::pr::sync::PrSyncHandler::new(
+        vec![Arc::new(df_orchestrator::pr::sync::PrSyncHandler::new(
             pool.clone(),
             Arc::new(env.forge.clone()),
             Duration::from_secs(30),

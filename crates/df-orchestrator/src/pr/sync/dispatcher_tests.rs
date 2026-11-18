@@ -7,7 +7,7 @@ use df_core::{RunId, RunOutcome};
 use df_db::outbox::Dispatcher;
 
 use super::*;
-use crate::ChannelConfig;
+use crate::OrchestratorConfig;
 use crate::runs::end_run;
 use crate::testing::Env;
 
@@ -26,7 +26,7 @@ async fn completed_run() -> Env {
         task_branch_pushed: true,
         ..RunEnd::failure(run, RunOutcome::Completed, "")
     };
-    end_run(&pool, &end, &ChannelConfig::default())
+    end_run(&pool, &end, &OrchestratorConfig::default())
         .await
         .unwrap();
     env
@@ -192,7 +192,7 @@ async fn a_message_that_waited_for_the_run_end_keeps_the_pr_a_draft() {
         task_branch_pushed: true,
         ..RunEnd::failure(run, RunOutcome::Completed, "")
     };
-    end_run(pool, &end, &ChannelConfig::default())
+    end_run(pool, &end, &OrchestratorConfig::default())
         .await
         .unwrap();
     df_db::tasks::queue_message_tx(

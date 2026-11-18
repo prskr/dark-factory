@@ -81,6 +81,7 @@ df-db = { path = "crates/df-db" }
 df-gateway = { path = "crates/df-gateway" }
 df-gateway-control = { path = "crates/df-gateway-control" }
 df-k8s = { path = "crates/df-k8s" }
+df-orchestrator = { path = "crates/df-orchestrator" }
 df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }
 df-sandbox-contract = { path = "crates/df-sandbox-contract" }

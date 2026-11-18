@@ -1316,6 +1316,7 @@ dependencies = [
  "df-gateway",
  "df-gateway-control",
  "df-k8s",
+ "df-orchestrator",
  "df-plugins",
  "df-proto",
  "df-telemetry",
@@ -1557,6 +1558,7 @@ dependencies = [
  "df-agent-channel",
  "df-core",
  "df-db",
+ "df-orchestrator",
  "df-proto",
  "df-sandbox-contract",
  "df-telemetry",
@@ -1794,6 +1796,30 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "df-orchestrator"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "df-core",
+ "df-db",
+ "df-orchestrator",
+ "df-proto",
+ "df-telemetry",
+ "df-test-postgres",
+ "futures",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
  "tracing",
  "uuid",
 ]
