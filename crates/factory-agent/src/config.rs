@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use df_core::LandlockMode;
+use df_sandbox_contract::LandlockMode;
 
 /// Environment variables expected by the sandbox runtime.
 pub const ENV_CONTROL_PLANE_ADDR: &str = "DF_CONTROL_PLANE_ADDR";
@@ -15,9 +15,9 @@ pub const ENV_LANDLOCK: &str = "DF_LANDLOCK";
 pub const ENV_RUNTIME_SOCK: &str = "DF_RUNTIME_SOCK";
 pub const ENV_LOG_FORMAT: &str = "DF_LOG_FORMAT";
 
-pub const DEFAULT_TLS_DIR: &str = df_core::harness::SANDBOX_TLS_DIR;
-pub const DEFAULT_DATA_DIR: &str = df_core::harness::SANDBOX_DATA_DIR;
-pub const DEFAULT_RUN_DIR: &str = df_core::harness::SANDBOX_RUN_DIR;
+pub const DEFAULT_TLS_DIR: &str = df_sandbox_contract::paths::SANDBOX_TLS_DIR;
+pub const DEFAULT_DATA_DIR: &str = df_sandbox_contract::paths::SANDBOX_DATA_DIR;
+pub const DEFAULT_RUN_DIR: &str = df_sandbox_contract::paths::SANDBOX_RUN_DIR;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -149,7 +149,7 @@ mod tests {
         };
         assert_eq!(
             layout.ca_file(),
-            std::path::Path::new(df_core::harness::INSTANCE_CA_PATH)
+            std::path::Path::new(df_sandbox_contract::paths::INSTANCE_CA_PATH)
         );
     }
 
@@ -162,11 +162,11 @@ mod tests {
         };
         assert_eq!(
             layout.repo_dir(),
-            std::path::Path::new(df_core::harness::SANDBOX_REPO_DIR)
+            std::path::Path::new(df_sandbox_contract::paths::SANDBOX_REPO_DIR)
         );
         assert_eq!(
             layout.home_dir(),
-            std::path::Path::new(df_core::harness::SANDBOX_HOME_DIR)
+            std::path::Path::new(df_sandbox_contract::paths::SANDBOX_HOME_DIR)
         );
     }
 

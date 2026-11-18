@@ -370,7 +370,7 @@ async fn a_lost_control_plane_stream_does_not_end_the_wait() {
             data_dir: temp.path().join("data"),
             run_dir: temp.path().join("conn-runtime"),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
     let conn_outbox = std::sync::Arc::new(tokio::sync::Mutex::new(
         Outbox::open(&config.layout.run_dir, "run-idle", 1024 * 1024, 64 * 1024).unwrap(),

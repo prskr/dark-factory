@@ -2,7 +2,7 @@
 //! branches (`configuration-management`, "Projects"; design D10, D11).
 
 use df_core::RewritePolicy;
-use df_core::glob::protected_glob;
+use df_sandbox_contract::glob::protected_glob;
 use maud::{Markup, html};
 
 use super::push_policy::{GlobsField, globs, globs_field};

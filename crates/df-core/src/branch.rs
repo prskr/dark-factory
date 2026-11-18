@@ -165,7 +165,7 @@ pub fn default_agent_branch_globs() -> Vec<String> {
 /// compile matches nothing (they are validated when a project is saved).
 pub fn matches_agent_branch<S: AsRef<str>>(globs: &[S], branch: &str) -> bool {
     globs.iter().any(|glob| {
-        crate::glob::protected_glob(glob.as_ref())
+        df_sandbox_contract::glob::protected_glob(glob.as_ref())
             .is_ok_and(|glob| glob.compile_matcher().is_match(branch))
     })
 }

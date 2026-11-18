@@ -4,12 +4,9 @@
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
-use df_core::harness::{
-    self, ConfigInput, HarnessProfile, INFERENCE_PATH, INSTANCE_CA_PATH, PLACEHOLDER_KEY,
-    SANDBOX_HOME_DIR, SANDBOX_REPO_DIR,
-};
+use df_core::harness::{self, ConfigInput, HarnessProfile, INFERENCE_PATH, PLACEHOLDER_KEY};
 use df_core::model_provider::ProviderModel;
-use df_core::{LandlockMode, PersonaId, Principal, ProjectId, RewritePolicy, TaskId};
+use df_core::{PersonaId, Principal, ProjectId, RewritePolicy, TaskId};
 use df_db::catalog;
 use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::push_policy;
@@ -24,6 +21,8 @@ use df_proto::agent::v1::{
 };
 use df_proto::pbjson_types::{Duration, Timestamp};
 use df_proto::transcript::v1 as transcript;
+use df_sandbox_contract::LandlockMode;
+use df_sandbox_contract::paths::{INSTANCE_CA_PATH, SANDBOX_HOME_DIR, SANDBOX_REPO_DIR};
 use serde::Deserialize;
 use sqlx::PgPool;
 

@@ -230,7 +230,7 @@ impl RunScenario {
             continuation: None,
             release_up_front: false,
             timeouts: Timeouts::default(),
-            confinement: Confinement::new(df_core::LandlockMode::Disabled),
+            confinement: Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
             harness_bin: None,
             base_env: std::env::vars_os().collect(),
         })

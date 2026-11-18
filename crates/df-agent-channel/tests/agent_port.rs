@@ -19,7 +19,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use df_agent_channel::testing::{ClientCert, Env, POD_SAN, RuntimeClient, TestPki, TestServer};
+use df_agent_channel::testing::{Env, POD_SAN, RuntimeClient, TestServer};
 use df_agent_channel::{ChannelConfig, ChannelContext};
 use df_core::{PeerIdentity, RunId, RunOutcome, RunState};
 use df_proto::agent::v1::RunOutcome as WireOutcome;
@@ -31,6 +31,7 @@ use df_proto::transcript::v1::{
     AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
     event,
 };
+use df_tls::testing::{ClientCert, TestPki};
 use sqlx::PgPool;
 use tonic::Code;
 
@@ -343,7 +344,7 @@ async fn replayed_messages_are_dropped_and_the_ack_covers_the_batch() -> anyhow:
 #[tokio::test]
 async fn a_timing_sent_while_the_stream_was_down_is_replayed_and_recorded_once()
 -> anyhow::Result<()> {
-    let probe = df_agent_channel::metrics::probe::Probe::new();
+    let probe = df_telemetry::testing::Probe::new();
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let metrics = Arc::new(df_agent_channel::Metrics::new(&probe.meter()));
     let h = Harness::start_with(pool, metrics).await?;

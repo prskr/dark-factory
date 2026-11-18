@@ -37,7 +37,7 @@ pub fn require_dns_san<T>(request: &Request<T>, name: &str) -> Result<(), Status
 #[cfg(test)]
 mod tests {
     use super::*;
-    use df_agent_channel::testing::TestPki;
+    use df_tls::testing::TestPki;
     use rustls::pki_types::{CertificateDer, pem::PemObject};
 
     #[test]

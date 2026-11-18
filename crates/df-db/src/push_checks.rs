@@ -5,11 +5,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 
-use df_core::glob::hidden_glob;
 use df_core::system_reason::PUSH_REJECTED;
 use df_core::{Principal, RequestId, TaskId, TaskStatus};
 use df_proto::gateway::v1 as pb;
 use df_proto::push_reasons::{PUSH_TOO_LARGE, finding_reason};
+use df_sandbox_contract::glob::hidden_glob;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

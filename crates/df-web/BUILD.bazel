@@ -170,6 +170,7 @@ rust_library(
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-sandbox-contract:df_sandbox_contract",
     ],
 )
 
@@ -200,10 +201,10 @@ rust_test(
     tags = ["no-remote-exec"],
     deps = all_crate_deps(normal_dev = True) + [
         ":build_script",
-        "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
     ],
 )

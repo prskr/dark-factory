@@ -11,7 +11,7 @@ workspace = true
 [features]
 default = []
 # PKI and scripted runtime client for tests of this and dependent crates.
-test-util = ["dep:opentelemetry_sdk", "dep:rcgen", "dep:tempfile", "df-core/test-util"]
+test-util = ["dep:tempfile", "df-core/test-util", "df-tls/test-util"]
 
 [dependencies]
 async-trait.workspace = true
@@ -19,24 +19,21 @@ chrono.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 df-proto.workspace = true
+df-sandbox-contract.workspace = true
+df-tls.workspace = true
 futures.workspace = true
 jsonschema.workspace = true
 opentelemetry.workspace = true
-opentelemetry_sdk = { workspace = true, features = ["testing"], optional = true }
-rcgen = { workspace = true, optional = true }
-rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
-tokio-rustls.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-x509-parser.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
@@ -45,6 +42,8 @@ df-agent-channel = { path = ".", features = ["test-util"] }
 df-core = { workspace = true, features = ["test-util"] }
 df-telemetry = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
+df-tls = { workspace = true, features = ["test-util"] }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing-opentelemetry.workspace = true

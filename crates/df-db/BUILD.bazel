@@ -37,6 +37,7 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         "//crates/df-core:df_core",
         "//crates/df-proto:df_proto",
+        "//crates/df-sandbox-contract:df_sandbox_contract",
     ],
 )
 

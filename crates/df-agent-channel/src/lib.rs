@@ -21,7 +21,6 @@ use sqlx::PgPool;
 
 pub mod assign;
 pub mod error;
-pub mod identity;
 pub mod metrics;
 pub mod pr;
 pub mod retention;
@@ -43,7 +42,7 @@ pub use error::ChannelError;
 pub use metrics::Metrics;
 pub use retention::Retention;
 pub use scheduler::Scheduler;
-pub use server::{AgentService, MtlsIncoming, TlsError, TlsReloader, mtls_incoming, serve};
+pub use server::{AgentService, serve};
 
 /// The sections of the instance configuration the agent channel reads.
 #[derive(Debug, Clone, Default)]
@@ -58,7 +57,7 @@ pub struct ChannelConfig {
     /// Limits of task artifacts.
     pub artifacts: df_core::ArtifactsConfig,
     /// Whether the sandboxes confine the harness; the system prompt tells the agent.
-    pub landlock: df_core::LandlockMode,
+    pub landlock: df_sandbox_contract::LandlockMode,
     /// The scheduler's tick and the resume backoff.
     pub scheduling: df_core::config::SchedulingConfig,
 }
@@ -125,10 +124,10 @@ mod config_tests {
             let cfg = InstanceConfig::from_yaml_str(&format!("{database}{extra}")).unwrap();
             ChannelConfig::from(&cfg).landlock
         };
-        assert_eq!(landlock(""), df_core::LandlockMode::Enforce);
+        assert_eq!(landlock(""), df_sandbox_contract::LandlockMode::Enforce);
         assert_eq!(
             landlock("sandbox:\n  landlock: disabled\n"),
-            df_core::LandlockMode::Disabled
+            df_sandbox_contract::LandlockMode::Disabled
         );
     }
 }

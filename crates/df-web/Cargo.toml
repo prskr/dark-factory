@@ -17,6 +17,7 @@ comrak.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 df-proto.workspace = true
+df-sandbox-contract.workspace = true
 futures.workspace = true
 hex.workspace = true
 maud.workspace = true
@@ -39,8 +40,8 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-df-agent-channel = { workspace = true, features = ["test-util"] }
 df-core = { workspace = true, features = ["test-util"] }
+df-telemetry = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 http-body-util.workspace = true
 insta.workspace = true

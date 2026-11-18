@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
-use df_agent_channel::metrics::probe::Probe;
 use df_proto::gateway::v1::gateway_usage_server::{GatewayUsage, GatewayUsageServer};
+use df_telemetry::testing::Probe;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::TcpListenerStream;

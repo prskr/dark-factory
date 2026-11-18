@@ -1,13 +1,32 @@
-use df_agent_channel::metrics::probe::Probe;
+use df_telemetry::testing::Probe;
+use opentelemetry::KeyValue;
 
 use super::*;
 
-/// Records into the agent channel's metrics like the binary does.
-struct Counter(df_agent_channel::Metrics);
+/// Counts into `df.agent.tokens` like the binary does (model and token type as attributes), or
+/// nowhere.
+struct Counter(Option<opentelemetry::metrics::Counter<u64>>);
+
+impl Counter {
+    fn on(probe: &Probe) -> Self {
+        Self(Some(probe.meter().u64_counter("df.agent.tokens").build()))
+    }
+}
 
 impl TokenCounter for Counter {
     fn record_tokens(&self, model: &str, counts: [(&'static str, u64); 4]) {
-        self.0.record_tokens(model, counts);
+        let Some(tokens) = &self.0 else {
+            return;
+        };
+        for (token_type, count) in counts.into_iter().filter(|(_, count)| *count > 0) {
+            tokens.add(
+                count,
+                &[
+                    KeyValue::new("model", model.to_owned()),
+                    KeyValue::new("token_type", token_type),
+                ],
+            );
+        }
     }
 }
 
@@ -107,10 +126,7 @@ async fn a_report_twice_stores_each_request_once_and_counts_its_tokens_once() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let run = run(&pool).await;
     let probe = Probe::new();
-    let service = UsageRecords::new(
-        pool.clone(),
-        Arc::new(Counter(df_agent_channel::Metrics::new(&probe.meter()))),
-    );
+    let service = UsageRecords::new(pool.clone(), Arc::new(Counter::on(&probe)));
     let batch = vec![message(run, "claude-sonnet-5-5", 100, 20)];
 
     report(&service, batch.clone()).await;
@@ -132,10 +148,7 @@ async fn a_report_twice_stores_each_request_once_and_counts_its_tokens_once() {
 async fn records_of_unknown_runs_and_invalid_records_are_dropped_and_the_rest_is_stored() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let run = run(&pool).await;
-    let service = UsageRecords::new(
-        pool.clone(),
-        Arc::new(Counter(df_agent_channel::Metrics::default())),
-    );
+    let service = UsageRecords::new(pool.clone(), Arc::new(Counter(None)));
     let invalid = pb::UsageRecord {
         request_id: "not-a-uuid".into(),
         ..message(run, "m", 1, 1)
@@ -159,10 +172,7 @@ async fn a_request_without_usage_is_stored_as_unknown_and_counts_no_tokens() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let run = run(&pool).await;
     let probe = Probe::new();
-    let service = UsageRecords::new(
-        pool.clone(),
-        Arc::new(Counter(df_agent_channel::Metrics::new(&probe.meter()))),
-    );
+    let service = UsageRecords::new(pool.clone(), Arc::new(Counter::on(&probe)));
     let unknown = pb::UsageRecord {
         usage_known: false,
         upstream_status: 0,

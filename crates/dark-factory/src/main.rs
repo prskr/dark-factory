@@ -27,6 +27,7 @@ use df_gateway::git::secret_rules::SecretRules;
 use df_gateway::git::upstream::ForgeUpstream;
 use df_telemetry::logging;
 use df_telemetry::otel as telemetry;
+use df_tls::TlsReloader;
 use kube::Client;
 #[cfg(any(test, feature = "dev-tools"))]
 use sandbox::UnconfiguredBackend;
@@ -322,8 +323,7 @@ where
         .tls
         .as_ref()
         .context("`agent.tls` (certFile, keyFile, clientCaFile) must be configured")?;
-    let tls = df_agent_channel::TlsReloader::load(tls_config).await?;
-    let internal_tls = df_agent_channel::TlsReloader::load(tls_config).await?;
+    let (tls, internal_tls) = load_tls_pair(tls_config).await?;
     let delivery = lifecycle_delivery(&cfg, dev.project_targets())?;
     let plugin_engine = df_plugins::PluginEngine::new()?;
     let mut forge_plugins =
@@ -415,7 +415,7 @@ where
     listeners.spawn(serve_policy_watch(
         cfg.gateway.identity_name(&cfg.instance_name),
         ctx_policy,
-        df_agent_channel::mtls_incoming(internal_listener, internal_tls),
+        df_tls::mtls_incoming(internal_listener, internal_tls),
         stop_rx.clone(),
     ));
     for task in sandbox_tasks {
@@ -528,15 +528,15 @@ async fn run_gateway_command(
     };
     let outside = df_gateway::gateway::Outside {
         connector: Arc::new(df_gateway::link::MtlsConnector::new(
-            tls.clone(),
+            tls_paths(&tls),
             control_plane_name,
         )),
         resolver: Arc::new(df_gateway::resolve::SystemResolver::new()?),
         dialer: Arc::new(df_gateway::proxy::TcpDialer),
     };
-    let tail = df_agent_channel::mtls_incoming(
+    let tail = df_tls::mtls_incoming(
         internal_listener,
-        df_agent_channel::TlsReloader::load(&tls).await?,
+        TlsReloader::load(&tls_paths(&tls)).await?,
     );
 
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -741,6 +741,27 @@ struct EgressDeps {
     services: Option<Arc<dyn df_web::egress::ServiceLookup>>,
 }
 
+/// The PEM files of `agent.tls`, as `df-tls` takes them.
+fn tls_paths(config: &df_core::config::AgentTlsConfig) -> df_tls::TlsPaths {
+    df_tls::TlsPaths {
+        cert_file: config.cert_file.clone(),
+        key_file: config.key_file.clone(),
+        client_ca_file: config.client_ca_file.clone(),
+    }
+}
+
+/// Two reloaders over the PEM files of `agent.tls`: one for the agent port, one for the internal
+/// port.
+async fn load_tls_pair(
+    config: &df_core::config::AgentTlsConfig,
+) -> Result<(TlsReloader, TlsReloader), df_tls::TlsError> {
+    let paths = tls_paths(config);
+    Ok((
+        TlsReloader::load(&paths).await?,
+        TlsReloader::load(&paths).await?,
+    ))
+}
+
 /// The relay to the gateway pods; none without `gateway.headlessService`.
 fn egress_log_relay(
     cfg: &InstanceConfig,
@@ -748,7 +769,7 @@ fn egress_log_relay(
 ) -> Option<Arc<dyn df_web::egress::FlowSource>> {
     let service = cfg.gateway.headless_service.as_deref()?;
     let connector = df_gateway::link::MtlsConnector::new(
-        tls.clone(),
+        tls_paths(tls),
         cfg.gateway.identity_name(&cfg.instance_name),
     );
     let directory = df_gateway::control::DnsDirectory::new(
@@ -804,7 +825,7 @@ impl PolicySources {
 async fn serve_policy_watch(
     gateway: String,
     sources: PolicySources,
-    incoming: df_agent_channel::MtlsIncoming,
+    incoming: df_tls::MtlsIncoming,
     stop: watch::Receiver<bool>,
 ) {
     let token = tokio_util::sync::CancellationToken::new();
@@ -1203,13 +1224,14 @@ mod tests {
 
     #[tokio::test]
     async fn serve_runs_the_agent_port_next_to_the_ui_port() -> anyhow::Result<()> {
-        use df_agent_channel::testing::{POD_SAN, RuntimeClient, TestPki, TestServer};
+        use df_agent_channel::testing::{POD_SAN, RuntimeClient, TestServer};
+        use df_tls::testing::TestPki;
 
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
 
         let pki = TestPki::new().map_err(anyhow::Error::from_boxed)?;
         let dir = tempfile::tempdir()?;
-        let files = pki.write_agent_tls(dir.path())?;
+        let files = pki.write_server_tls(dir.path())?;
         let tls = format!(
             "agent:\n  tls:\n    certFile: {}\n    keyFile: {}\n    clientCaFile: {}\n",
             files.cert_file.display(),
@@ -1318,7 +1340,7 @@ mod tests {
         let sa_client = get_dev_sa_client().await;
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let dir = tempfile::tempdir()?;
-        let pki = df_agent_channel::testing::TestPki::new().map_err(anyhow::Error::from_boxed)?;
+        let pki = df_tls::testing::TestPki::new().map_err(anyhow::Error::from_boxed)?;
         let mut cfg = serve_config(&pool, dir.path(), Some(&agent_tls_yaml(&pki, dir.path())?));
         // The chart's Roles and ClusterRoles only cover `dark-factory-dev-sandboxes`.
         cfg.sandbox.provisioning.namespace = "default".to_string();
@@ -1360,7 +1382,7 @@ mod tests {
         let sa_client = get_dev_sa_client().await;
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let dir = tempfile::tempdir()?;
-        let pki = df_agent_channel::testing::TestPki::new().map_err(anyhow::Error::from_boxed)?;
+        let pki = df_tls::testing::TestPki::new().map_err(anyhow::Error::from_boxed)?;
         let mut cfg = serve_config(&pool, dir.path(), Some(&agent_tls_yaml(&pki, dir.path())?));
         cfg.sandbox.provisioning.namespace = "dark-factory-dev-sandboxes".to_string();
         cfg.sandbox.provisioning.instance_namespace = "dark-factory-dev".to_string();
@@ -1406,10 +1428,10 @@ mod tests {
     }
 
     fn agent_tls_yaml(
-        pki: &df_agent_channel::testing::TestPki,
+        pki: &df_tls::testing::TestPki,
         dir: &std::path::Path,
     ) -> anyhow::Result<String> {
-        let files = pki.write_agent_tls(dir)?;
+        let files = pki.write_server_tls(dir)?;
         Ok(format!(
             "agent:\n  tls:\n    certFile: {}\n    keyFile: {}\n    clientCaFile: {}\n",
             files.cert_file.display(),

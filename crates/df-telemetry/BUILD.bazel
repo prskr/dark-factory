@@ -58,7 +58,8 @@ rust_library(
 
 # `all_crate_deps` lists the optional dependencies whatever the features are, so the slim
 # variants name their (few) dependencies. The list must match the non-optional `[dependencies]` of
-# Cargo.toml plus those of the features the slim targets enable (today `clap`).
+# Cargo.toml plus those of the features the slim targets enable (today `clap`, and `test-util` for
+# the test variant).
 _SLIM_DEPS = [
     "@crates//:clap",
     "@crates//:tracing",
@@ -74,12 +75,20 @@ _SLIM_DEPS = [
         edition = "2024",
         lint_config = ":lints",
         rustc_env_files = _VERSION_ENV,
-        deps = _SLIM_DEPS,
+        deps = _SLIM_DEPS + deps,
     )
-    for name, features in {
-        "df_telemetry_slim": _SLIM,
-        "df_telemetry_slim_test_util": _SLIM + ["test-util"],
-    }.items()
+    for name, features, deps in [
+        ("df_telemetry_slim", _SLIM, []),
+        # `test-util` has the metric probe, which needs the OpenTelemetry SDK.
+        (
+            "df_telemetry_slim_test_util",
+            _SLIM + ["test-util"],
+            [
+                "@crates//:opentelemetry",
+                "@crates//:opentelemetry_sdk",
+            ],
+        ),
+    ]
 ]
 
 alias(

@@ -520,7 +520,7 @@ async fn run_with_workspace(
     let (_inbound_tx, inbound_rx) = tokio::sync::mpsc::channel(10);
     let (outbound_tx, _outbound_rx) = tokio::sync::mpsc::channel(100);
     let params = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign: Assign {
             run_id: "run-early-failure".to_string(),

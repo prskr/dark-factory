@@ -100,7 +100,6 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-101 | low   | `df-db`, `df-agent-channel` tests | Lock-wait polling loop copied across tests; one copy counts server-wide |
 | TD-106 | low   | `plugins/forgejo`, `plugins/github` | Webhook parsing helpers are copied between the forge plugins |
 | TD-107 | low   | `df-db` webhooks | `complete_on_merge_tx` does task-lifecycle work outside `tasks.rs` |
-| TD-109 | low   | `df-web` tests | Dev-dependency on `df-agent-channel` only for the metric probe |
 | TD-112 | low   | `plugins/forgejo` webhooks | `review` and `closed` repeat the pull request event parsing |
 | TD-113 | low   | `df-plugins` tests | Three plugin client helpers repeat the same call |
 | TD-115 | medium | `dark-factory` webhooks | A failed webhook delivery is lost until an operator redelivers it |
@@ -205,7 +204,7 @@ After a `RunReport` the session awaits `runs::teardown` before it reads the next
 
 Tracked in [#121].
 
-`crates/df-agent-channel/src/server.rs` (`serve`, `AgentService::stop_sessions`, `accept_loop`)
+`crates/df-agent-channel/src/server.rs` (`serve`, `AgentService::stop_sessions`) and `crates/df-tls/src/reload.rs` (`accept_loop`)
 
 `stop_sessions` clears the sessions before tonic stops accepting streams and sends GOAWAY, and the TLS acceptor is only aborted after the server returns. A runtime that reconnects in that window starts a session that keeps graceful shutdown waiting until `SHUTDOWN_GRACE` (30 s) ends and `abort_all` runs.
 
@@ -273,11 +272,11 @@ The kubelet sends SIGKILL at the same moment the supervisor gives up. Today the 
 
 ### TD-26. Small duplicates and indirections
 
-`crates/df-agent-channel/src/session.rs` (`stop_requested`), `crates/dark-factory/src/main.rs` (`stopped`), `crates/df-agent-channel/src/scheduler.rs` (`Scheduler::start_runs`), `crates/df-agent-channel/src/testing.rs` (`anyhow_free`)
+`crates/df-agent-channel/src/session.rs` (`stop_requested`), `crates/dark-factory/src/main.rs` (`stopped`), `crates/df-agent-channel/src/scheduler.rs` (`Scheduler::start_runs`)
 
-`stop_requested` and `stopped` do the same `watch` wait but treat a dropped sender differently (never stop vs. stop). `start_runs` only forwards to `start_queued_runs`; `anyhow_free` is an alias module.
+`stop_requested` and `stopped` do the same `watch` wait but treat a dropped sender differently (never stop vs. stop). `start_runs` only forwards to `start_queued_runs`.
 
-**Fix:** One shared helper with the dropped-sender behavior stated in its doc; inline the wrapper and the alias.
+**Fix:** One shared helper with the dropped-sender behavior stated in its doc; inline the wrapper.
 
 ### TD-27. Container-backed tests cannot run on remote workers or in agent sandboxes
 
@@ -663,16 +662,6 @@ The function locks runs, requests a stop and writes a message block. For that, `
 **Matters when:** the task lifecycle in `tasks.rs` changes and the copy of its rules in `webhooks.rs` is missed.
 
 **Fix:** move `complete_on_merge_tx` into `tasks.rs`, call it from the webhooks module and make the helpers private again.
-
-### TD-109 (S9). Dev-dependency on `df-agent-channel` only for the metric probe
-
-`crates/df-web/Cargo.toml` (`df-agent-channel` with `test-util`)
-
-`df-web` tests use only `metrics::probe::Probe` from `df-agent-channel`.
-
-**Matters when:** `df-agent-channel` starts to depend on `df-web`, or its test build gets slow.
-
-**Fix:** move the metric probe to a lower crate (for example `df-telemetry` with `test-util`) and depend on that.
 
 ### TD-112 (S13). `review` and `closed` repeat the pull request event parsing
 

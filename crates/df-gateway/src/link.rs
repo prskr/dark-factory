@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use df_core::config::AgentTlsConfig;
+use df_tls::TlsPaths;
 use thiserror::Error;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
@@ -59,13 +59,13 @@ impl From<tonic::Status> for CallError {
 /// mTLS with the instance's certificate, key and CA. The files are read on every connect, so a
 /// certificate renewed by cert-manager is used by the next connection.
 pub struct MtlsConnector {
-    tls: AgentTlsConfig,
+    tls: TlsPaths,
     /// Name the peer's certificate must carry.
     server_name: String,
 }
 
 impl MtlsConnector {
-    pub fn new(tls: AgentTlsConfig, server_name: impl Into<String>) -> Self {
+    pub fn new(tls: TlsPaths, server_name: impl Into<String>) -> Self {
         Self {
             tls,
             server_name: server_name.into(),

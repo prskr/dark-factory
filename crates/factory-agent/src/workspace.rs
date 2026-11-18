@@ -7,7 +7,6 @@ use std::path::Path;
 
 use anyhow::Context as _;
 
-use df_core::glob::{GlobSet, hidden_glob_set};
 use df_proto::agent::v1::{
     PushReport, PushStatus, PushTarget, RewritePolicy, RunOutcome, RunReport, Workspace,
     WorkspaceState,
@@ -15,6 +14,7 @@ use df_proto::agent::v1::{
 use df_proto::gateway::v1::PushCheck;
 use df_proto::push_reasons::{NON_FAST_FORWARD, PUSH_TOO_LARGE};
 use df_proto::transcript::v1::{Notice, NoticeLevel};
+use df_sandbox_contract::glob::{GlobSet, hidden_glob_set};
 
 use crate::git::{
     DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Force, Git, GitConfigParams,

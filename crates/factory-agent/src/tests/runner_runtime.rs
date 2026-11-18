@@ -224,7 +224,7 @@ async fn test_df_harness_complete_task_ends_run_completed() {
     });
 
     let params = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign,
         initial_prompts,
@@ -455,7 +455,7 @@ sessions:
         .with_ssl_ca_info(&ca_path);
 
     let params1 = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign: assign1,
         initial_prompts: initial_prompts1,
@@ -622,7 +622,7 @@ sessions:
         .with_ssl_ca_info(&ca_path);
 
     let params2 = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign: assign2,
         initial_prompts: initial_prompts2,
@@ -831,7 +831,7 @@ async fn test_manual_claude_acp_run() {
     let git = Git::new(&repo_dir).allow_protocols(["file", "https"]);
 
     let params = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign,
         initial_prompts,
@@ -879,7 +879,7 @@ async fn test_cancel_before_assign_skips_prepare() {
     let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel(100);
 
     let params = RunDriverParams {
-        confinement: crate::runner::Confinement::new(df_core::LandlockMode::Disabled),
+        confinement: crate::runner::Confinement::new(df_sandbox_contract::LandlockMode::Disabled),
         harness_base_env: std::env::vars_os().collect(),
         assign: Assign {
             run_id: "run-cancel-before-assign".to_string(),

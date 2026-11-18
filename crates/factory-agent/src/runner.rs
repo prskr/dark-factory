@@ -15,13 +15,13 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
 use std::ffi::OsString;
 
-use df_core::LandlockMode;
 use df_proto::agent::v1::{
     AgentMessage, Assign, ControlMessage, Interrupt, PhaseChanged, Prompt, PushReport, PushStatus,
     RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, Workspace, agent_message,
     control_message,
 };
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason};
+use df_sandbox_contract::LandlockMode;
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::git::Git;

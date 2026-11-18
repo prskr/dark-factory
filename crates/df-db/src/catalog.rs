@@ -5,9 +5,9 @@
 //! value.
 
 use df_core::RewritePolicy;
-use df_core::glob::protected_glob;
 use df_core::webhooks::WebhookWake;
 use df_core::{CredentialRef, CredentialRefId, Principal, SecretKeyRef};
+use df_sandbox_contract::glob::protected_glob;
 use serde::Serialize;
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
