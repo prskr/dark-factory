@@ -11,13 +11,19 @@ workspace = true
 [features]
 default = []
 # PKI and scripted runtime client for tests of this and dependent crates.
-test-util = ["dep:tempfile", "df-core/test-util", "df-tls/test-util"]
+test-util = [
+    "dep:tempfile",
+    "df-core/test-util",
+    "df-orchestrator/test-util",
+    "df-tls/test-util",
+]
 
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
 df-core.workspace = true
 df-db.workspace = true
+df-orchestrator.workspace = true
 df-proto.workspace = true
 df-sandbox-contract.workspace = true
 df-tls.workspace = true

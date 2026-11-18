@@ -866,7 +866,7 @@ fn is_quota_rejection(err: &kube::Error) -> bool {
 /// the watch was down are only noticed by comparing what was known with what the relist
 /// returned. Only objects seen by this process are known; after a control plane restart nothing
 /// is known; a run whose pod disappeared meanwhile is ended by the scheduler's startup sweep
-/// (`Scheduler::sweep_lost_sandboxes` in `df-agent-channel`).
+/// (`Scheduler::sweep_lost_sandboxes` in `df-orchestrator`).
 #[derive(Default)]
 struct EventTracker {
     started: HashSet<RunId>,

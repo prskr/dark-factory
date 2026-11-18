@@ -11,7 +11,7 @@ use df_db::webhooks::{
 };
 use sqlx::PgPool;
 
-use crate::error::ChannelError;
+use crate::error::OrchestratorError;
 
 /// Applies the events of a webhook delivery.
 pub struct WebhookApplier {
@@ -27,7 +27,7 @@ impl WebhookApplier {
     /// Applies `events` to every project on the event's repository. An event that names no
     /// task or does not pass the filters is dropped with a debug event. Fails when the database
     /// or a needed forge lookup fails.
-    pub async fn apply(&self, events: &[ParsedEvent]) -> Result<(), ChannelError> {
+    pub async fn apply(&self, events: &[ParsedEvent]) -> Result<(), OrchestratorError> {
         if events.is_empty() {
             return Ok(());
         }
@@ -51,7 +51,7 @@ impl WebhookApplier {
         &self,
         project: &WebhookProject,
         event: &WebhookEvent,
-    ) -> Result<(), ChannelError> {
+    ) -> Result<(), OrchestratorError> {
         let Some(target) = event.target() else {
             tracing::debug!(project_id = %project.id, ?event, "webhook event names no factory task");
             return Ok(());
@@ -74,7 +74,7 @@ impl WebhookApplier {
         &self,
         task_id: TaskId,
         event: &WebhookEvent,
-    ) -> Result<(), ChannelError> {
+    ) -> Result<(), OrchestratorError> {
         let mut tx = self.pool.begin().await?;
         if let WebhookEvent::PullRequestClosed {
             merged: true,
@@ -99,7 +99,7 @@ impl WebhookApplier {
         &self,
         project: &WebhookProject,
         event: &WebhookEvent,
-    ) -> Result<bool, ChannelError> {
+    ) -> Result<bool, OrchestratorError> {
         let Some(author) = event.feedback_author() else {
             return Ok(true);
         };

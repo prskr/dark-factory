@@ -6,10 +6,10 @@ use df_proto::agent::v1::{ToolCallRequest, ToolCallResult};
 use df_proto::transcript::v1::{blob_data, content_block};
 use serde_json::{Value, json};
 
-use crate::assign::RunContext;
 use crate::testing::Env;
 use crate::tools::execute;
 use crate::tools::tests::{call, message, setup};
+use df_orchestrator::run_context::RunContext;
 
 const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
 

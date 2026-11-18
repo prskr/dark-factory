@@ -21,8 +21,10 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::ChannelContext;
-use crate::assign::{RunContext, tool_input_schemas};
+use crate::assign::tool_input_schemas;
 use crate::error::ChannelError;
+use df_orchestrator::OrchestratorError;
+use df_orchestrator::run_context::RunContext;
 
 mod artifacts;
 mod delegation;
@@ -280,7 +282,7 @@ async fn rehydrate_images(
             continue;
         };
         let blob = blobs.get(&sha).await?.ok_or_else(|| {
-            ChannelError::InvalidData(format!("blob {sha} of a stored tool result is missing"))
+            OrchestratorError::InvalidData(format!("blob {sha} of a stored tool result is missing"))
         })?;
         image.data = Some(BlobData {
             source: Some(blob_data::Source::Inline(blob.data.into())),
@@ -364,7 +366,7 @@ async fn update_pull_request(
     let (title, body) = (text_arg(args, "title"), text_arg(args, "body"));
     let attached = get_task(&ctx.pool, rc.task.id)
         .await?
-        .ok_or_else(|| ChannelError::InvalidData("task of the run is missing".into()))?
+        .ok_or_else(|| OrchestratorError::InvalidData("task of the run is missing".into()))?
         .pr_attached;
     if attached {
         return Ok(Outcome::error(
@@ -636,11 +638,11 @@ fn forge_error(err: &IntegrationError) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assign::load_run_context;
     use crate::testing::Env;
     use df_core::testing::ForgeCall;
     use df_core::{Comment, ForgeClient, RateLimit};
     use df_db::runs::get_run;
+    use df_orchestrator::run_context::load_run_context;
     use sqlx::PgPool;
 
     pub(super) async fn setup(pool: PgPool) -> (Env, RunContext) {
@@ -813,7 +815,7 @@ mod tests {
             seen: observed.clone(),
         };
         let mut ctx = env.ctx.clone();
-        ctx.forge = std::sync::Arc::new(forge);
+        ctx.orch.forge = std::sync::Arc::new(forge);
 
         execute(&ctx, &rc, request).await;
 
@@ -949,7 +951,7 @@ mod tests {
             .create_pull_request(
                 &rc.project.id,
                 df_core::NewPullRequest {
-                    repo: crate::pr::repo_ref(&rc.project.repo_url).unwrap(),
+                    repo: df_orchestrator::pr::repo_ref(&rc.project.repo_url).unwrap(),
                     head: "factory/task/DF-1".into(),
                     base: "main".into(),
                     title: "t".into(),

@@ -1,0 +1,38 @@
+[package]
+name = "df-orchestrator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Database seeding and fakes for tests of this and dependent crates.
+test-util = ["df-core/test-util"]
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+df-core.workspace = true
+df-db.workspace = true
+df-proto.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+df-core = { workspace = true, features = ["test-util"] }
+df-orchestrator = { path = ".", features = ["test-util"] }
+df-telemetry = { workspace = true, features = ["test-util"] }
+df-test-postgres.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util"] }

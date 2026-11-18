@@ -25,6 +25,7 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-orchestrator:df_orchestrator",
         "//crates/df-proto:df_proto",
         "//crates/df-sandbox-contract:df_sandbox_contract",
         "//crates/df-tls:df_tls",
@@ -51,6 +52,7 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-orchestrator:df_orchestrator_test_util",
         "//crates/df-proto:df_proto",
         "//crates/df-sandbox-contract:df_sandbox_contract",
         "//crates/df-tls:df_tls_test_util",
@@ -72,6 +74,7 @@ rust_test(
     deps = all_crate_deps(normal_dev = True) + [
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-orchestrator:df_orchestrator_test_util",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
@@ -95,6 +98,7 @@ rust_test(
         ":df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
+        "//crates/df-orchestrator:df_orchestrator_test_util",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",

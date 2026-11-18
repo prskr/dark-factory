@@ -25,7 +25,7 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::{forge_retry_policy, repo_ref};
-use crate::error::ChannelError;
+use crate::error::OrchestratorError;
 
 /// The lease covers up to five forge calls at the default plugin call timeout of 30 s.
 const LEASE: Duration = Duration::from_mins(3);
@@ -112,7 +112,7 @@ impl PrSyncHandler {
         task: &TaskRow,
         project: &Project,
         run_id: Option<RunId>,
-    ) -> Result<Option<RecordedPr>, ChannelError> {
+    ) -> Result<Option<RecordedPr>, OrchestratorError> {
         // Serialize per task, also across control-plane replicas: the lock is held until the PR
         // is recorded, so a second caller sees the PR the first one opened.
         let mut tx = lock_task_pr(&self.pool, task.id).await?;
@@ -121,7 +121,7 @@ impl PrSyncHandler {
         }
         let status = get_task(&mut *tx, task.id)
             .await?
-            .ok_or_else(|| ChannelError::InvalidData("task vanished".into()))?
+            .ok_or_else(|| OrchestratorError::InvalidData("task vanished".into()))?
             .status;
         let (head, base) = (task.branch.clone(), project.base_branch.clone());
         let existing = self
@@ -152,7 +152,9 @@ impl PrSyncHandler {
                         .find_open_pull_request(&task.project_id, &head, &base)
                         .await?
                         .ok_or_else(|| {
-                            ChannelError::InvalidData("conflicting pull request vanished".into())
+                            OrchestratorError::InvalidData(
+                                "conflicting pull request vanished".into(),
+                            )
                         })?
                 }
                 Err(e) => return Err(e.into()),
@@ -175,7 +177,7 @@ impl PrSyncHandler {
         pr: &RecordedPr,
         ready_at: DateTime<Utc>,
         run_id: Option<RunId>,
-    ) -> Result<(), ChannelError> {
+    ) -> Result<(), OrchestratorError> {
         let mut tx = lock_task_pr(&self.pool, task.id).await?;
         if has_message_queued_after(&mut *tx, task.id, ready_at).await? {
             tracing::info!(task_id = %task.id, "task was reopened; the pull request stays a draft");
@@ -207,7 +209,7 @@ impl PrSyncHandler {
         task: &TaskRow,
         number: u64,
         run_id: RunId,
-    ) -> Result<(), ChannelError> {
+    ) -> Result<(), OrchestratorError> {
         let summary = completion_summary(&self.pool, run_id).await?;
         match summary.filter(|s| !s.is_empty()) {
             Some(summary) => {
@@ -249,7 +251,7 @@ struct RecordedPr {
 
 impl RecordedPr {
     /// The PR of the task row, if it has one. A negative stored number is `InvalidData`.
-    fn of_task(task: &TaskRow) -> Result<Option<Self>, ChannelError> {
+    fn of_task(task: &TaskRow) -> Result<Option<Self>, OrchestratorError> {
         task.pr_number
             .map(|number| Self::from_row(number, task.pr_url.clone(), task.pr_attached))
             .transpose()
@@ -259,16 +261,20 @@ impl RecordedPr {
     async fn read(
         tx: &mut Transaction<'_, Postgres>,
         task_id: TaskId,
-    ) -> Result<Option<Self>, ChannelError> {
+    ) -> Result<Option<Self>, OrchestratorError> {
         let task = get_task(&mut **tx, task_id)
             .await?
-            .ok_or_else(|| ChannelError::InvalidData("task vanished".into()))?;
+            .ok_or_else(|| OrchestratorError::InvalidData("task vanished".into()))?;
         Self::of_task(&task)
     }
 
-    fn from_row(number: i64, url: Option<String>, attached: bool) -> Result<Self, ChannelError> {
+    fn from_row(
+        number: i64,
+        url: Option<String>,
+        attached: bool,
+    ) -> Result<Self, OrchestratorError> {
         let number = u64::try_from(number).map_err(|_negative| {
-            ChannelError::InvalidData("stored pull request number out of range".into())
+            OrchestratorError::InvalidData("stored pull request number out of range".into())
         })?;
         Ok(Self {
             number,
@@ -293,7 +299,7 @@ fn new_pull_request(
     repo_url: &str,
     head: String,
     base: String,
-) -> Result<NewPullRequest, ChannelError> {
+) -> Result<NewPullRequest, OrchestratorError> {
     let default_body = if task.description.trim().is_empty() {
         format!("Task: {}", task.key)
     } else {
@@ -322,14 +328,14 @@ async fn record_pr(
     run_id: Option<RunId>,
     pr: &PullRequest,
     attached: bool,
-) -> Result<RecordedPr, ChannelError> {
+) -> Result<RecordedPr, OrchestratorError> {
     let lock = match run_id {
         Some(run_id) => Some(lock_run_and_task(tx, run_id, task.id).await?),
         None => None,
     };
     if !df_db::task_updates::record_pr(tx, task.id, pr.id.number, &pr.url, attached).await? {
         return RecordedPr::read(tx, task.id).await?.ok_or_else(|| {
-            ChannelError::InvalidData("pull request vanished from the task".into())
+            OrchestratorError::InvalidData("pull request vanished from the task".into())
         });
     }
     if let Some(lock) = lock {

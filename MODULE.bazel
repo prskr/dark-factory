@@ -212,6 +212,7 @@ crate.from_cargo(
         "//crates/df-gateway-control:Cargo.toml",
         "//crates/df-harness:Cargo.toml",
         "//crates/df-k8s:Cargo.toml",
+        "//crates/df-orchestrator:Cargo.toml",
         "//crates/df-plugins:Cargo.toml",
         "//crates/df-proto:Cargo.toml",
         "//crates/df-sandbox-contract:Cargo.toml",

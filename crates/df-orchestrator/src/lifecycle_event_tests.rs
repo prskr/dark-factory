@@ -11,7 +11,7 @@ use tokio::task::JoinSet;
 use crate::retention::Retention;
 use crate::runs::end_run;
 use crate::testing::{Env, recorded_events};
-use crate::{ChannelConfig, Scheduler};
+use crate::{OrchestratorConfig, Scheduler};
 
 /// One scheduler pass: start and provision what is queued.
 async fn tick(scheduler: &Scheduler) {
@@ -93,7 +93,7 @@ async fn begun_run(env: &Env, state: &str, started: bool) -> RunId {
     run_id
 }
 
-fn config_of(env: &Env) -> &ChannelConfig {
+fn config_of(env: &Env) -> &OrchestratorConfig {
     &env.ctx.config
 }
 

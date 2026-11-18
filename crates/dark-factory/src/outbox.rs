@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use df_agent_channel::pr::mark_draft::MarkDraftHandler;
-use df_agent_channel::pr::sync::PrSyncHandler;
 use df_core::ForgeClient;
 use df_core::config::SchedulingConfig;
 use df_db::outbox::{Dispatcher, OutboxHandler};
 use df_db::{Notifier, PgPool};
+use df_orchestrator::pr::mark_draft::MarkDraftHandler;
+use df_orchestrator::pr::sync::PrSyncHandler;
 use opentelemetry::metrics::Meter;
 
 use crate::lifecycle_events::Delivery;

@@ -30,7 +30,7 @@ Rust code, including generated Rust code, MUST keep building with plain `cargo` 
 
 ## Database access
 
-Production code reads and writes the database only through `df-db`: every query lives in the `df-db` module of the table it touches, as a checked `query!`/`query_as!`. Other crates call those functions and may pass a `PgPool` or a `Transaction` around, but never use `sqlx::query*`, `sqlx::raw_sql`, `sqlx::QueryBuilder` or `sqlx::Executor` methods with SQL text. Clippy enforces it (`disallowed-methods`, `disallowed-macros` and `disallowed-types` in `clippy.toml`). Exceptions: `df-web/src/auth/store.rs` (`web_sessions`, a session-store adapter that picks its SQL at runtime), `df-e2e` and `df-test-postgres`, and test code: `#[cfg_attr(test, expect(...))]` at crate roots, `#![expect]` in integration test files and in `test-util` fixture modules (for example `df-agent-channel/src/testing.rs`). See skill `rust`, "Database access".
+Production code reads and writes the database only through `df-db`: every query lives in the `df-db` module of the table it touches, as a checked `query!`/`query_as!`. Other crates call those functions and may pass a `PgPool` or a `Transaction` around, but never use `sqlx::query*`, `sqlx::raw_sql`, `sqlx::QueryBuilder` or `sqlx::Executor` methods with SQL text. Clippy enforces it (`disallowed-methods`, `disallowed-macros` and `disallowed-types` in `clippy.toml`). Exceptions: `df-web/src/auth/store.rs` (`web_sessions`, a session-store adapter that picks its SQL at runtime), `df-e2e` and `df-test-postgres`, and test code: `#[cfg_attr(test, expect(...))]` at crate roots, `#![expect]` in integration test files and in `test-util` fixture modules (for example `df-orchestrator/src/testing.rs`). See skill `rust`, "Database access".
 
 ## General Rules
 
@@ -55,6 +55,8 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 - `crates/df-gateway`, `crates/df-gateway-control` – the egress gateway (data plane, no database; feature `test-util` exposes `link::PlainConnector`) and the control plane's side of its links (policy service, records, log relay; uses `df-db`)
 - `crates/df-sandbox-contract` – what control plane and sandbox runtime share about the sandbox: path constants, path globs, `LandlockMode`
 - `crates/df-tls` – mTLS acceptor with certificate reload, peer identity from client certificates; feature `test-util` (`TestPki`)
+- `crates/df-orchestrator` – control-plane orchestration: run scheduler, run end and sandbox teardown, run context loading, pull request lifecycle, forge webhook application, task volume retention (`OrchestratorContext`; feature `test-util` exposes `testing::Env`); never depends on `df-agent-channel`
+- `crates/df-agent-channel` – the agent port: mTLS gRPC server, agent sessions, the `Assign` message, factory tools, run metrics; builds on `df-orchestrator` (`ChannelContext` wraps `OrchestratorContext`; feature `test-util` exposes the test server and runtime client)
 - `crates/factory-agent` – the sandbox runtime that runs a coding harness over ACP and talks to the control plane (see `crates/factory-agent/docs/`)
 - `crates/fake-acp-agent` – scripted ACP agent used in tests
 - `crates/df-e2e` – end-to-end suite (Playwright) and seed program for `just e2e-local`; cargo only, no Bazel targets

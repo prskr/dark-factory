@@ -1,10 +1,11 @@
 //! Tests of the continuation summary.
 
 use super::*;
-use crate::assign::{build_assign, load_run_context};
+use crate::assign::build_assign;
 use crate::testing::Env;
 use df_core::{RunId, TaskId};
 use df_db::runs::get_run;
+use df_orchestrator::run_context::load_run_context;
 use df_proto::transcript::v1::ToolCallStatus;
 use serde_json::{Value, json};
 use sqlx::PgPool;

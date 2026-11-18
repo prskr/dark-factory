@@ -1,6 +1,7 @@
 //! Tests of the assignment: prompt sections, harness files and `Assign` of a run.
 
 use df_db::runs::get_run;
+use df_orchestrator::run_context::load_run_context;
 use df_proto::agent::v1::RewritePolicy as RewritePolicyProto;
 
 use super::*;
@@ -12,40 +13,6 @@ const CLAUDE_ADAPTER: [&str; 2] = [
     "/opt/harness/claude-code/bin/node",
     "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js",
 ];
-
-fn project(command: &[&str]) -> ProjectInfo {
-    ProjectInfo {
-        id: ProjectId::new(),
-        key: "DF".into(),
-        repo_url: "https://git.example.org/o/r.git".into(),
-        image: "img".into(),
-        base_branch: "main".into(),
-        adapter_command: command.iter().map(ToString::to_string).collect(),
-        rewrite_policy: RewritePolicy::WithLease,
-        agent_branch_globs: Vec::new(),
-    }
-}
-
-#[test]
-fn default_adapter_command_comes_from_the_harness_and_the_image_is_mounted() {
-    let project = project(&[]);
-    let harness = df_core::config::ClaudeCodeConfig::default();
-    assert_eq!(
-        project.adapter_command(&harness.adapter_command),
-        harness.adapter_command
-    );
-    assert!(project.mounts_harness());
-}
-
-#[test]
-fn project_adapter_command_replaces_the_default_and_skips_the_mount() {
-    let project = project(&["/opt/harness/bin/fake-acp-agent"]);
-    assert_eq!(
-        project.adapter_command(&CLAUDE_ADAPTER.map(String::from)),
-        ["/opt/harness/bin/fake-acp-agent"]
-    );
-    assert!(!project.mounts_harness());
-}
 
 #[test]
 fn embedded_tools_are_exactly_the_factory_tools() {
@@ -762,5 +729,44 @@ async fn assign_of_a_task_on_an_existing_branch_carries_it_the_pr_base_and_the_p
     assert_eq!(workspace.base_branch, "release/1.2");
     assert!(workspace.existing_branch);
     assert_eq!(workspace.rewrite_policy(), RewritePolicyProto::Never);
+    Ok(())
+}
+
+/// A resumed run of a task whose prompts were all delivered starts with the resume prompt of
+/// the system, so the agent has a turn to continue in.
+#[tokio::test]
+async fn a_resumed_run_is_prompted_with_the_system_resume_prompt() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    sqlx::query("DELETE FROM task_messages WHERE task_id = $1")
+        .bind(env.task.id.as_uuid())
+        .execute(&pool)
+        .await?;
+    let mut tx = pool.begin().await?;
+    assert!(df_db::tasks::queue_resume_prompt_tx(&mut tx, env.task.id).await?);
+    tx.commit().await?;
+
+    let prompts = pending_prompts(&pool, env.task.id, false).await?;
+
+    let [prompt] = prompts.as_slice() else {
+        anyhow::bail!("expected one prompt, got {}", prompts.len());
+    };
+    let [block] = prompt.content.as_slice() else {
+        anyhow::bail!("expected one content block");
+    };
+    assert_eq!(
+        block.kind,
+        Some(df_proto::transcript::v1::content_block::Kind::Text(
+            df_proto::transcript::v1::TextContent {
+                text: df_db::tasks::RESUME_PROMPT.into(),
+            }
+        ))
+    );
+    assert_eq!(
+        prompt.author,
+        Some(principal(&Principal::system(
+            df_core::system_reason::RUN_RESUMED
+        )))
+    );
     Ok(())
 }

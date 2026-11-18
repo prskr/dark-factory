@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use df_agent_channel::webhooks::WebhookApplier;
 use df_core::config::WebhookSecretConfig;
 use df_core::routing::{ForgeRoutes, RoutingTable};
 use df_core::{IntegrationError, PluginConfig, ProjectId, SecretKeyRef, SecretStore};
 use df_db::PgPool;
+use df_orchestrator::webhooks::WebhookApplier;
 use df_plugins::{
     ForgeRouter, ForgeTarget, PluginEngine, PluginForgeClient, PluginHost, ProjectDirectory,
     WebhookError,
@@ -777,7 +777,7 @@ mod tests {
     #[tokio::test]
     async fn signed_forgejo_delivery_is_verified_parsed_and_queued_for_its_task() {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
-        let env = df_agent_channel::testing::Env::new(pool.clone()).await;
+        let env = df_orchestrator::testing::Env::new(pool.clone()).await;
         sqlx::query("UPDATE projects SET repo_url = 'http://localhost:13000/peter/demo'")
             .execute(&pool)
             .await

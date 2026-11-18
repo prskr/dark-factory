@@ -43,6 +43,6 @@ None. Pure refactor: `skip_specs: true` in `.openspec.yaml`.
 
 - New crate: `crates/df-orchestrator` (`Cargo.toml`, `BUILD.bazel` with `no-remote-exec` database tests, `MODULE.bazel` manifest entry, `[workspace.dependencies]`, lock files).
 - Changed: `df-agent-channel` (`lib.rs`, `assign.rs`, `runs.rs`, `scheduler.rs`, `pr/`, `webhooks.rs`, `retention.rs`, `error.rs`, `testing.rs`, `session.rs`, `tools.rs`), `dark-factory` (`main.rs`, `forge.rs`, `outbox.rs`, tests).
-- Contributor docs: `docs/architecture.md`, `AGENTS.md` (project overview). No published docs change.
+- Contributor docs: `docs/architecture.md`, `AGENTS.md` (project overview). One published page changes: the log filter target `df_agent_channel::webhooks` becomes `df_orchestrator::webhooks` in `docs/content/integrations/forges/webhooks.md`.
 - Dependencies: no new external crates.
 - Order: after `db-write-ownership` (it moves the run, task and transcript SQL out of these modules, so far less code moves here) and after `sandbox-contract-and-tls` (TLS leaves the crate first). Independent of `gateway-control-crate`.

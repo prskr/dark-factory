@@ -9,8 +9,8 @@ use df_proto::transcript::v1::ToolCallStatus;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::assign::RunContext;
 use crate::error::ChannelError;
+use df_orchestrator::run_context::RunContext;
 
 /// Upper bound of `Continuation.summary`, header included.
 pub(crate) const SUMMARY_MAX_BYTES: usize = 64 * 1024;

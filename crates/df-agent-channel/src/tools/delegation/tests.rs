@@ -178,7 +178,7 @@ async fn list_personas_returns_names_with_descriptions_ordered_by_name() {
 
 async fn child_of(
     env: &crate::testing::Env,
-    rc: &crate::assign::RunContext,
+    rc: &df_orchestrator::run_context::RunContext,
     parent: bool,
 ) -> String {
     let input = df_db::NewTask {
@@ -257,7 +257,7 @@ async fn send_message_refuses_tasks_that_are_not_children_and_empty_text() {
 /// Opens a PR from `head` into `base` on the fake forge.
 async fn open_pr(
     env: &crate::testing::Env,
-    rc: &crate::assign::RunContext,
+    rc: &df_orchestrator::run_context::RunContext,
     head: &str,
     base: &str,
 ) {
@@ -265,7 +265,7 @@ async fn open_pr(
         .create_pull_request(
             &rc.project.id,
             df_core::NewPullRequest {
-                repo: crate::pr::repo_ref(&rc.project.repo_url).unwrap(),
+                repo: df_orchestrator::pr::repo_ref(&rc.project.repo_url).unwrap(),
                 head: head.into(),
                 base: base.into(),
                 title: "t".into(),
@@ -341,7 +341,7 @@ async fn clearing_the_agent_branches_leaves_a_running_task_on_its_branch() {
         .await
         .unwrap()
         .unwrap();
-    let child = crate::assign::load_run_context(&env.ctx.pool, run)
+    let child = df_orchestrator::run_context::load_run_context(&env.ctx.pool, run)
         .await
         .unwrap();
     let workspace = crate::assign::build_assign(&env.ctx, &child)

@@ -1,8 +1,8 @@
 # Architecture: crates and boundaries
 
-Target picture of the workspace: which crate owns what and which crate may depend on which. Reviewers check changes against it (Standards axis). Items marked **target** are not built yet; the column "Status" names the change that builds them. A change that adds a workspace dependency edge or moves ownership updates this file in the same change.
+The workspace: which crate owns what and which crate may depend on which. Reviewers check changes against it (Standards axis). The column "Status" is `current` for what is built; a change that plans a crate marks it **target** with the change's name until it is built. A change that adds a workspace dependency edge or moves ownership updates this file in the same change.
 
-## Dependency graph (target)
+## Dependency graph
 
 Arrows point from a crate to its dependencies. Test-only crates (`df-test-postgres`, `df-e2e`, `fake-acp-agent`) and `tools/xtask` are left out.
 
@@ -10,7 +10,7 @@ Arrows point from a crate to its dependencies. Test-only crates (`df-test-postgr
 flowchart TD
     bin[dark-factory<br/>binary, composition root]
     web[df-web]
-    orch[df-orchestrator<br/>target]
+    orch[df-orchestrator]
     chan[df-agent-channel<br/>agent port]
     gwc[df-gateway-control]
     gw[df-gateway<br/>data plane]
@@ -47,8 +47,8 @@ flowchart TD
 | `df-db` | The schema, migrations and every SQL query; sole user of `sqlx` queries | `df-core`, `df-proto`, `df-sandbox-contract` | current |
 | `df-proto` | Generated protobuf/gRPC wire types | none | current |
 | `df-web` | Web UI and its HTTP handlers; data access through `df-db` | `df-core`, `df-db`, `df-proto`, `df-sandbox-contract` | current |
-| `df-agent-channel` | The agent port: mTLS gRPC server, agent sessions (persistence, acks, prompts), the `Assign` message with the continuation summary, factory tools, run metrics | `df-orchestrator`, `df-db`, `df-core`, `df-proto`, `df-tls`, `df-sandbox-contract` | target: `orchestrator-crate` |
-| `df-orchestrator` | Control-plane orchestration: scheduler, run lifecycle (`finish_run`, teardown), run context loading, PR lifecycle, webhook application, volume retention | `df-db`, `df-core`, `df-proto` (transcript payloads, rule 3) | target: `orchestrator-crate` |
+| `df-agent-channel` | The agent port: mTLS gRPC server, agent sessions (persistence, acks, prompts), the `Assign` message with the continuation summary, factory tools, run metrics | `df-orchestrator`, `df-db`, `df-core`, `df-proto`, `df-tls`, `df-sandbox-contract` | current |
+| `df-orchestrator` | Control-plane orchestration: scheduler, run lifecycle (`finish_run`, teardown), run context loading, PR lifecycle, webhook application, volume retention | `df-db`, `df-core`, `df-proto` (transcript payloads, rule 3) | current |
 | `df-gateway` | Egress data plane: proxy, git proxy, inference proxy, policy watch, log tail, the gateway link (`test-util` feature: `link::PlainConnector`); no database | `df-core`, `df-proto`, `df-tls`, `df-telemetry`, `df-sandbox-contract` | current |
 | `df-gateway-control` | The control plane's side of the gateway links: policy service, git/usage/denial records, inference routes, log relay | `df-gateway` (link and flow API, peer check, wire conversions), `df-db`, `df-core`, `df-proto` | current |
 | `df-k8s` | The Kubernetes adapter: sandbox provider, secret store, leader-election lease, `NetworkPolicy` reconciliation, startup RBAC checks | `df-core`, `df-telemetry`, `df-sandbox-contract` | current |

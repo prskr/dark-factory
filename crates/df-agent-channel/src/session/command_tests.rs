@@ -132,7 +132,7 @@ async fn the_budget_sends_cancel_on_the_stream_that_sent_the_release() {
 async fn a_stream_after_the_budget_deadline_cancels_a_run_released_before() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
-    env.ctx.config = Arc::new(ChannelConfig {
+    env.ctx.orch.config = Arc::new(OrchestratorConfig {
         runs: df_core::config::RunsConfig {
             max_wall_clock_seconds: 0,
             cancel_grace_seconds: 0,
@@ -201,7 +201,7 @@ async fn a_run_finalizing_for_a_stop_or_a_done_task_gets_one_cancel_with_its_own
     for reason in [FinalizeReason::Stop, FinalizeReason::Done] {
         let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
         let mut env = Env::new(pool.clone()).await;
-        env.ctx.config = Arc::new(ChannelConfig {
+        env.ctx.orch.config = Arc::new(OrchestratorConfig {
             runs: df_core::config::RunsConfig {
                 max_wall_clock_seconds: 0,
                 cancel_grace_seconds: 0,

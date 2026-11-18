@@ -19,9 +19,9 @@ use futures::StreamExt;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinSet;
 
-use crate::ChannelContext;
-use crate::assign::load_run_context;
-use crate::error::ChannelError;
+use crate::OrchestratorContext;
+use crate::error::OrchestratorError;
+use crate::run_context::load_run_context;
 use crate::runs::{finish_overdue, finish_run, teardown};
 use df_core::run_transition::RunEnd;
 use df_db::runs::{
@@ -45,14 +45,14 @@ const SWEEP_CONCURRENCY: usize = 8;
 /// Scheduler of one control plane replica.
 #[derive(Clone)]
 pub struct Scheduler {
-    ctx: ChannelContext,
+    ctx: OrchestratorContext,
     /// Runs this replica is provisioning; a tick starts no second attempt for them. Another
     /// replica may still retry such a run (design D2); creation is idempotent.
     in_flight: Arc<Mutex<HashSet<RunId>>>,
 }
 
 impl Scheduler {
-    pub fn new(ctx: ChannelContext) -> Self {
+    pub fn new(ctx: OrchestratorContext) -> Self {
         Self {
             ctx,
             in_flight: Arc::default(),
@@ -116,7 +116,7 @@ impl Scheduler {
         &self,
         background: &mut JoinSet<()>,
         now: DateTime<Utc>,
-    ) -> Result<(), ChannelError> {
+    ) -> Result<(), OrchestratorError> {
         self.reprovision_stale(background, now).await;
         self.start_in_background(background).await;
         self.enforce_timeouts(now).await
@@ -238,7 +238,7 @@ impl Scheduler {
         };
         let permanent = matches!(
             e,
-            ChannelError::Provider(ProviderError::Capacity(_) | ProviderError::InvalidSpec(_))
+            OrchestratorError::Provider(ProviderError::Capacity(_) | ProviderError::InvalidSpec(_))
         );
         if permanent && matches!(self.ctx.provider.sandbox_exists(run_id).await, Ok(false)) {
             self.fail_provisioning(run_id, &e).await;
@@ -248,7 +248,7 @@ impl Scheduler {
     }
 
     /// Creates `pending` runs for due tasks.
-    async fn start_runs(&self) -> Result<Vec<RunRow>, ChannelError> {
+    async fn start_runs(&self) -> Result<Vec<RunRow>, OrchestratorError> {
         Ok(start_queued_runs(
             &self.ctx.pool,
             START_BATCH,
@@ -277,7 +277,7 @@ impl Scheduler {
     async fn provision_or_fail(&self, run: RunRow) {
         let run_id = run.id;
         if let Err(e) = self.provision(run).await {
-            if let ChannelError::Provider(ProviderError::Unavailable(_)) = &e {
+            if let OrchestratorError::Provider(ProviderError::Unavailable(_)) = &e {
                 // ponytail: design D2 – no backoff. Once the run is older than 60 s,
                 // `reprovision_stale` retries it every tick, costing one `sandbox_exists` list
                 // plus up to two lookups per rule every 5 s, until the pod exists or
@@ -296,9 +296,9 @@ impl Scheduler {
 
     /// Ends the run as `provisioning_failed`; a capacity rejection requeues the task without
     /// counting a resume.
-    async fn fail_provisioning(&self, run_id: RunId, error: &ChannelError) {
+    async fn fail_provisioning(&self, run_id: RunId, error: &OrchestratorError) {
         let detail = match error {
-            ChannelError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
+            OrchestratorError::Provider(ProviderError::Capacity(_)) => CAPACITY_DETAIL.to_string(),
             _ => error.to_string(),
         };
         let end = RunEnd::failure(run_id, RunOutcome::ProvisioningFailed, detail);
@@ -309,7 +309,7 @@ impl Scheduler {
 
     /// Moves the run to `provisioning`, ensures the task volume and creates the sandbox. Errors
     /// are recorded by [`Self::provision_or_fail`].
-    async fn provision(&self, run: RunRow) -> Result<(), ChannelError> {
+    async fn provision(&self, run: RunRow) -> Result<(), OrchestratorError> {
         let run_id = run.id;
         let rc = load_run_context(&self.ctx.pool, run).await?;
         let provider = &self.ctx.provider;
@@ -334,7 +334,7 @@ impl Scheduler {
         df_db::volumes::volume_ensured(&self.ctx.pool, events, rc.task.id, run_id).await?;
 
         let project_key = ProjectKey::new(rc.project.key.clone())
-            .map_err(|e| ChannelError::InvalidData(e.to_string()))?;
+            .map_err(|e| OrchestratorError::InvalidData(e.to_string()))?;
         let spec = RunSandboxSpec {
             run_id,
             run_number: u64::try_from(rc.run.number).unwrap_or(1),
@@ -378,7 +378,7 @@ impl Scheduler {
     }
 
     /// Applies a sandbox lifecycle event: `Started` → `connecting`, `Gone` → `sandbox_lost`.
-    pub async fn handle_event(&self, event: SandboxEvent) -> Result<(), ChannelError> {
+    pub async fn handle_event(&self, event: SandboxEvent) -> Result<(), OrchestratorError> {
         match event {
             SandboxEvent::Started { run_id, pod_ip } => {
                 mark_started(
@@ -410,7 +410,7 @@ impl Scheduler {
     /// Ends runs a board member stopped (at once without a connection, after the stop timeout
     /// otherwise), fails runs that never connected and runs that outlived budget plus two grace
     /// periods (the first one is for `Cancel`, sent by the session holding the stream).
-    pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), ChannelError> {
+    pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), OrchestratorError> {
         let mut first_error = None;
         // The query selects a superset of the runs that are overdue; `overdue` decides, on the
         // locked row (`df_core::run_transition::overdue`).

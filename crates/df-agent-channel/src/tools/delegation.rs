@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 
 use super::{Outcome, text_arg};
 use crate::ChannelContext;
-use crate::assign::RunContext;
 use crate::error::ChannelError;
+use df_orchestrator::OrchestratorError;
+use df_orchestrator::run_context::RunContext;
 
 /// Creates a task in the run's project with the run's task as parent and the run's agent as
 /// creator.
@@ -156,7 +157,7 @@ pub(super) async fn send_message(
     };
     let status = get_task(&mut *tx, child)
         .await?
-        .ok_or_else(|| ChannelError::InvalidData(format!("task {child} vanished")))?
+        .ok_or_else(|| OrchestratorError::InvalidData(format!("task {child} vanished")))?
         .status
         .to_string();
     tx.commit().await?;
