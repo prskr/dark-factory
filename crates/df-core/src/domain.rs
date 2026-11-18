@@ -64,11 +64,7 @@ impl StatusSet {
                 TaskStatus::InReview,
                 TaskStatus::LimitReached,
             ],
-            Self::Done => &[
-                TaskStatus::Completed,
-                TaskStatus::Cancelled,
-                TaskStatus::Failed,
-            ],
+            Self::Done => TaskStatus::DONE,
             Self::Queued => &[TaskStatus::Queued],
             Self::Running => &[TaskStatus::Running, TaskStatus::RateLimited],
         }
@@ -151,7 +147,23 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    /// The final statuses (`StatusGroup::Done`). For SQL, bound as `status = ANY($n)` /
+    /// `<> ALL($n)` through [`Self::as_str`]; the partial index `tasks_open_branch` repeats the
+    /// list and a `df-db` test pins it.
+    pub const DONE: &'static [Self] = &[Self::Completed, Self::Cancelled, Self::Failed];
+
+    /// The statuses that wait for the scheduler to start the next run, possibly at a resume time.
+    /// For SQL like [`Self::DONE`].
+    pub const WAITS_FOR_RESUME: &'static [Self] = &[Self::Queued, Self::RateLimited];
+
+    /// The statuses of a task a board member closed: `completed` and `cancelled`. Retention
+    /// deletes the volume of such a task after `volumes.retainAfterCloseSeconds`; a `failed`
+    /// task is not in it and waits for the idle time like any other. For SQL like [`Self::DONE`].
+    pub const CLOSED: &'static [Self] = &[Self::Completed, Self::Cancelled];
+
     pub const fn group(&self) -> StatusGroup {
+        // Every variant is named, so a new one fails to compile until it is grouped; a test pins
+        // `DONE` to the `Done` arm.
         match self {
             Self::Queued | Self::Running | Self::RateLimited => StatusGroup::Active,
             Self::AwaitingDependencies
@@ -160,6 +172,14 @@ impl TaskStatus {
             | Self::InReview
             | Self::LimitReached => StatusGroup::Waiting,
             Self::Completed | Self::Cancelled | Self::Failed => StatusGroup::Done,
+        }
+    }
+
+    /// `slice.contains(self)` for a `const fn`.
+    const fn is_in(self, slice: &[Self]) -> bool {
+        match slice {
+            [first, rest @ ..] => *first as u8 == self as u8 || self.is_in(rest),
+            [] => false,
         }
     }
 
@@ -177,7 +197,7 @@ impl TaskStatus {
     /// Whether a task in this status waits for the scheduler to start its next run, possibly at
     /// a resume time.
     pub const fn waits_for_resume(&self) -> bool {
-        matches!(self, Self::Queued | Self::RateLimited)
+        self.is_in(Self::WAITS_FOR_RESUME)
     }
 
     pub const ALL: &'static [Self] = &[
@@ -724,6 +744,37 @@ mod tests {
         }
         for status in [Queued, Running, Completed] {
             assert!(!status.can_mark_done(), "{status}");
+        }
+    }
+
+    #[test]
+    fn the_done_statuses_are_the_members_of_the_done_group_and_set() {
+        let done: Vec<_> = TaskStatus::ALL
+            .iter()
+            .filter(|s| s.group() == StatusGroup::Done)
+            .collect();
+        assert_eq!(done, TaskStatus::DONE.iter().collect::<Vec<_>>());
+        assert_eq!(TaskStatus::DONE, StatusSet::Done.statuses());
+    }
+
+    #[test]
+    fn closed_statuses_are_completed_and_cancelled_but_not_failed() {
+        assert_eq!(
+            TaskStatus::CLOSED,
+            [TaskStatus::Completed, TaskStatus::Cancelled]
+        );
+    }
+
+    #[test]
+    fn the_resume_statuses_are_those_that_wait_for_resume() {
+        use TaskStatus::*;
+        assert_eq!(TaskStatus::WAITS_FOR_RESUME, [Queued, RateLimited]);
+        for status in TaskStatus::ALL {
+            assert_eq!(
+                status.waits_for_resume(),
+                TaskStatus::WAITS_FOR_RESUME.contains(status),
+                "{status}"
+            );
         }
     }
 

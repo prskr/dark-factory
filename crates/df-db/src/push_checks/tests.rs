@@ -612,6 +612,30 @@ async fn no_second_feedback_while_one_is_undelivered_or_for_a_retried_record() {
 }
 
 #[tokio::test]
+async fn a_discarded_feedback_does_not_suppress_the_feedback_of_the_next_rejected_push() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let seed = seed(&pool).await;
+
+    record(
+        &pool,
+        &push(
+            &seed,
+            PushVerdict::Rejected,
+            vec![secret(CheckMode::Reject)],
+        ),
+    )
+    .await;
+    sqlx::query("UPDATE task_messages SET discarded_at = now() WHERE task_id = $1")
+        .bind(seed.task.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    record(&pool, &push(&seed, PushVerdict::Rejected, vec![identity()])).await;
+
+    assert_eq!(feedback_texts(&pool, seed.task).await.len(), 1);
+}
+
+#[tokio::test]
 async fn a_too_large_task_branch_push_queues_its_reason_up_to_the_cap() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let seed = seed(&pool).await;

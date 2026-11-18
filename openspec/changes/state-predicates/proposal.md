@@ -10,8 +10,8 @@ The rules that ask "is this run over", "is this task done" or "is this message s
 
 - **Message delivery:** two stored generated columns on `task_messages` replace the hand-written predicates:
   - `undelivered` (`delivered_at IS NULL AND discarded_at IS NULL`) replaces 5 copies (`tasks.rs`, `task_events.rs`, `runs.rs`), plus the copy in `push_checks.rs`, which fixes the bug above;
-  - `held_back` (`delivered_at IS NULL AND forwarded_at IS NULL`, the messages a human may still edit or withdraw) replaces 3 copies in `tasks.rs`.
-- **Task status sets:** `TaskStatus` gets `DONE` (`completed`, `failed`, `cancelled`, the members of `StatusGroup::Done`) and `WAITS_FOR_RESUME` (`queued`, `rate_limited`). The SQL lists in `tasks.rs` (`open_branch_holder`, the resume query of `start_queued_runs`) and in `webhooks.rs` bind these constants with `= ANY($n)` / `<> ALL($n)`, like the run-state constants of `db-write-ownership`.
+  - `held_back` (`delivered_at IS NULL AND forwarded_at IS NULL AND discarded_at IS NULL`, the messages a human may still edit or withdraw) replaces 3 copies in `tasks.rs`.
+- **Task status sets:** `TaskStatus` gets `DONE` (`completed`, `failed`, `cancelled`, the members of `StatusGroup::Done`), `WAITS_FOR_RESUME` (`queued`, `rate_limited`) and `CLOSED` (`completed`, `cancelled`; `failed` excluded on purpose: the retention of task volumes). The SQL lists in `tasks.rs` (`open_branch_holder`, the resume query of `start_queued_runs`), in `webhooks.rs` and in `volumes.rs` (`due_for_retention`) bind these constants with `= ANY($n)` / `<> ALL($n)`, like the run-state constants of `db-write-ownership`.
 - **Run states:** the remaining literal lists in `df-db/src/task_events.rs` (the `ActiveRun` snapshot query) bind `RunState::TERMINAL` and `NOT_COMMANDABLE`.
 - **Partial indexes:** a `df-db` test reads the predicates of `runs_one_active_per_task_idx`, `tasks_open_branch` and the `task_messages` indexes from `pg_indexes` and compares them with the constants. SQL index predicates can't bind parameters, so they stay literal; the test makes drift fail.
 - **Requests:** `RequestState::is_pending`. `df-web/src/requests.rs:149` uses it.
@@ -38,8 +38,8 @@ None. The bug fix restores the behavior `push-checks` already specifies. `skip_s
 
 ## Impact
 
-- Code: `df-core` (`domain.rs`), `df-db` (`tasks.rs`, `task_events.rs`, `push_checks.rs`, `requests.rs`, the queries that read `task_messages`, a new migration), `df-agent-channel` (`webhooks.rs`; `runs.rs` and `transcript.rs` already sit in `df-db` after `db-write-ownership`), `df-web` (`requests.rs`).
+- Code: `df-core` (`domain.rs`), `df-db` (`tasks.rs`, `volumes.rs`, `task_events.rs`, `push_checks.rs`, `requests.rs`, the queries that read `task_messages`, a new migration), `df-agent-channel` (`webhooks.rs`; `runs.rs` and `transcript.rs` already sit in `df-db` after `db-write-ownership`), `df-web` (`requests.rs`).
 - Schema: one migration adds a stored generated column and may switch existing partial indexes to it. No data migration.
 - `.sqlx/` metadata regenerated for the changed queries.
-- Docs: `rust` skill. No published docs change: the bug fix restores specified behavior.
+- Docs: `rust` skill; `docs/content/security/git-proxy.md` gets a "Feedback messages" paragraph that states the rule the bug fix restores.
 - Order: after `db-write-ownership` (it moves the queries this change edits and adds the `RunState` constants). Independent of `run-state-machine`.

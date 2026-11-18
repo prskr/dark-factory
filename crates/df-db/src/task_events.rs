@@ -401,7 +401,7 @@ async fn load_snapshot(
     let undelivered_messages: bool = sqlx::query_scalar(
         "SELECT EXISTS (
              SELECT 1 FROM task_messages
-             WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL
+             WHERE task_id = $1 AND undelivered
                AND ($2::timestamptz IS NULL OR queued_at > $2))",
     )
     .bind(task_id.as_uuid())
@@ -468,7 +468,7 @@ async fn discard_messages(
 ) -> Result<u64, DbError> {
     Ok(sqlx::query(
         "UPDATE task_messages SET discarded_at = now()
-         WHERE task_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL",
+         WHERE task_id = $1 AND undelivered",
     )
     .bind(task_id.as_uuid())
     .execute(&mut **tx)

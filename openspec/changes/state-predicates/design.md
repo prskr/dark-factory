@@ -7,9 +7,10 @@ See proposal.md. Copies of each predicate, measured on today's code (before `db-
 | Predicate | Copies |
 |---|---|
 | message undelivered (`delivered_at IS NULL AND discarded_at IS NULL`) | `tasks.rs:666`, `:806`; `task_events.rs:399`, `:478`; `df-agent-channel/src/runs.rs:393`; **`push_checks.rs:626` without `discarded_at`** |
-| message held back (`delivered_at IS NULL AND forwarded_at IS NULL`) | `tasks.rs:827`, `:862`, `:916` |
+| message held back (`delivered_at IS NULL AND forwarded_at IS NULL AND discarded_at IS NULL`) | `tasks.rs:827`, `:862`, `:916` |
 | task done (`completed`, `failed`, `cancelled`) | `tasks.rs:488`, `webhooks.rs:54`, index `tasks_open_branch` (`20261112000001`), `StatusGroup::Done` |
 | task waits for resume (`queued`, `rate_limited`) | `df-agent-channel/src/runs.rs:198` (SQL), `TaskStatus::waits_for_resume` |
+| task closed (`completed`, `cancelled`; `failed` excluded on purpose) | `volumes.rs:due_for_retention` |
 | run terminal / not commandable | `task_events.rs:364`, `:367` (rest after TD-65), index `runs_one_active_per_task_idx` |
 | request pending | `df-web/src/requests.rs:149` (Rust), index `agent_requests_pending_idx` |
 
@@ -26,7 +27,7 @@ See proposal.md. Copies of each predicate, measured on today's code (before `db-
 
 ### 1. Generated columns for the message predicates
 
-`task_messages` gets `undelivered boolean GENERATED ALWAYS AS (delivered_at IS NULL AND discarded_at IS NULL) STORED` and `held_back ... (delivered_at IS NULL AND forwarded_at IS NULL) STORED`. Queries write `WHERE undelivered` / `WHERE held_back`. `task_messages_task_undelivered_idx` is recreated with `WHERE undelivered`. Today it uses `WHERE delivered_at IS NULL` and still covers discarded rows.
+`task_messages` gets `undelivered boolean GENERATED ALWAYS AS (delivered_at IS NULL AND discarded_at IS NULL) STORED` and `held_back ... (delivered_at IS NULL AND forwarded_at IS NULL AND discarded_at IS NULL) STORED`. Queries write `WHERE undelivered` / `WHERE held_back`. `task_messages_task_undelivered_idx` is recreated with `WHERE undelivered`. Today it uses `WHERE delivered_at IS NULL` and still covers discarded rows.
 
 Alternatives:
 - A SQL constant in Rust concatenated into queries. Rejected: `query!` takes a string literal; `db-write-ownership` removes the `concat!` macros for that reason.
@@ -34,7 +35,7 @@ Alternatives:
 
 ### 2. Enum constants bound with `= ANY`
 
-`TaskStatus::DONE` and `TaskStatus::WAITS_FOR_RESUME` follow the `RunState::TERMINAL` pattern of `db-write-ownership`: a `&'static [Self]` constant, a method that checks membership, and SQL that binds the `as_str` list as `text[]`. `StatusGroup::Done` is derived from `DONE`. A unit test pins each constant against the method that it replaces or backs.
+`TaskStatus::DONE` and `TaskStatus::WAITS_FOR_RESUME` follow the `RunState::TERMINAL` pattern of `db-write-ownership`: a `&'static [Self]` constant, a method that checks membership, and SQL that binds the `as_str` list as `text[]`. `TaskStatus::group()` names every variant (an exhaustive match, so a new status fails to compile until it is grouped) and a test pins `DONE` to its `Done` arm; `StatusSet::Done` and `waits_for_resume` derive from the constants. A unit test pins each constant against the method that it replaces or backs.
 
 ### 3. Partial indexes pinned by a test
 

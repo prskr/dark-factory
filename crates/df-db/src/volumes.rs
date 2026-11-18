@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use df_core::{
-    Principal, ProviderError, RunId, RunState, SandboxProvider, TaskId, TaskKey, TaskVolumeSpec,
+    Principal, ProviderError, RunId, RunState, SandboxProvider, TaskId, TaskKey, TaskStatus,
+    TaskVolumeSpec,
 };
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 
@@ -14,6 +15,7 @@ use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::lifecycle_events::{self, Event, EventSinks, VolumeDestroyedReason};
 use crate::pool::DbError;
 use crate::runs::state_list;
+use crate::task_views::status_list;
 
 /// Upper bound of one volume deletion; the task row stays locked meanwhile.
 pub const DELETE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -69,7 +71,7 @@ pub async fn due_for_retention(
               SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($4))
           AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)
               < GREATEST(
-                  CASE WHEN t.status IN ('completed', 'cancelled') THEN $1::timestamptz END,
+                  CASE WHEN t.status = ANY($5) THEN $1::timestamptz END,
                   $2::timestamptz,
                   CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END
               )
@@ -79,7 +81,8 @@ pub async fn due_for_retention(
         closed_cutoff,
         any_cutoff,
         only.map(|task| task.as_uuid()),
-        &state_list(RunState::TERMINAL)
+        &state_list(RunState::TERMINAL),
+        &status_list(TaskStatus::CLOSED)
     )
     .fetch_all(executor)
     .await?;

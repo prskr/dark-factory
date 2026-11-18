@@ -587,10 +587,12 @@ pub async fn transcript_after(
 }
 
 pub(crate) fn statuses_of(set: StatusSet) -> Vec<String> {
-    set.statuses()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect()
+    status_list(set.statuses())
+}
+
+/// A status list as the `text[]` argument of `status = ANY($n)` / `status <> ALL($n)`.
+pub(crate) fn status_list(statuses: &[TaskStatus]) -> Vec<String> {
+    statuses.iter().map(|s| s.as_str().to_string()).collect()
 }
 
 /// Number of tasks of a project in each status that has any.

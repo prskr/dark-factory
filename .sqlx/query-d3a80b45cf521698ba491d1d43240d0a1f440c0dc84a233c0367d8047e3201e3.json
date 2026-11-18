@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (\n             SELECT 1 FROM task_messages\n             WHERE task_id = $1 AND delivered_at IS NULL\n               AND author->>'kind' = 'system' AND author->>'reason' = $2\n           ) AS \"exists!\"",
+  "query": "SELECT EXISTS (\n             SELECT 1 FROM task_messages\n             WHERE task_id = $1 AND undelivered\n               AND author->>'kind' = 'system' AND author->>'reason' = $2\n           ) AS \"exists!\"",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "426428dd2f7146d0587e339c9d5da9fa70d4567d4c713b9bc663912d198b7b78"
+  "hash": "d3a80b45cf521698ba491d1d43240d0a1f440c0dc84a233c0367d8047e3201e3"
 }

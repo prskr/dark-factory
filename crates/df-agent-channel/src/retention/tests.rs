@@ -140,6 +140,23 @@ async fn volumes_within_their_retention_are_kept() {
 }
 
 #[tokio::test]
+async fn failed_task_keeps_its_volume_after_the_grace_period_until_it_is_idle() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    set_status(&pool, env.task.id, "failed").await;
+    ended_run(&env, env.task.id, 1, days_ago(8)).await;
+
+    assert_eq!(
+        Retention::new(env.ctx.clone())
+            .scan(Utc::now())
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(deleted_volumes(&env.provider).is_empty());
+}
+
+#[tokio::test]
 async fn task_without_runs_is_never_a_candidate() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;

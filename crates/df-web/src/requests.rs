@@ -146,7 +146,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
     let row = &card.row;
     let id = card_id(row.id);
     let target = format!("#{id}");
-    let pending = row.state == RequestState::Pending;
+    let pending = row.state.is_pending();
     let kind_label = match row.kind {
         RequestKind::Question => "Question".to_string(),
         RequestKind::Approval => row.approval_type.clone().unwrap_or_default(),

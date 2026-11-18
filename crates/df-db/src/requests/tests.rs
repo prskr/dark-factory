@@ -16,6 +16,19 @@ fn every_request_state_parses_from_its_name() {
 }
 
 #[test]
+fn only_the_pending_state_is_pending() {
+    assert!(RequestState::Pending.is_pending());
+    for state in [
+        RequestState::Answered,
+        RequestState::Approved,
+        RequestState::Denied,
+        RequestState::Closed,
+    ] {
+        assert!(!state.is_pending(), "{state:?}");
+    }
+}
+
+#[test]
 fn an_unknown_request_state_is_an_error_naming_it() {
     let error = "reopened"
         .parse::<RequestState>()

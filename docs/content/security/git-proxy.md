@@ -79,6 +79,11 @@ for exactly these findings, and the agent's next push passes them; findings in `
 rejected. The agent gets a message with the masked findings either way. Board members change the
 modes on the project's **Security** tab.
 
+**Feedback messages.** A rejected push queues one message for the agent, unless an earlier one still
+waits for delivery or the task already got three since its last accepted push. A message that was
+discarded (the task was cancelled or marked done) no longer waits, so the next rejected push after
+a resume queues a new one.
+
 ## Push records
 
 Git traffic is not part of the **Network traffic** graph or the egress log, which show only
