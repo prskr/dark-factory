@@ -1,4 +1,4 @@
-//! Captures log output in tests.
+//! Test helpers: capture of log output and an in-memory metric [`Probe`].
 
 use std::sync::{Arc, Mutex};
 
@@ -6,6 +6,10 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 
 use crate::logging::{LogFormat, subscriber};
+
+mod probe;
+
+pub use probe::Probe;
 
 /// Log output captured by [`capture`] or [`buffer`].
 #[derive(Clone, Default)]

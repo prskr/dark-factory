@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::TimeDelta;
+use df_sandbox_contract::LandlockMode;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -449,43 +450,6 @@ impl SandboxProvisioningConfig {
             ))),
             None => Ok(()),
         }
-    }
-}
-
-/// Landlock confinement of the harness (instance-wide).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LandlockMode {
-    /// Every harness runs in a Landlock domain; a run fails if the kernel can't provide one.
-    #[default]
-    Enforce,
-    /// The harness runs unrestricted.
-    Disabled,
-}
-
-impl LandlockMode {
-    /// The spelling used in the instance config and in `DF_LANDLOCK`.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Enforce => "enforce",
-            Self::Disabled => "disabled",
-        }
-    }
-}
-
-/// A Landlock mode other than `enforce` or `disabled`.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid Landlock mode {0:?}: expected `enforce` or `disabled`")]
-pub struct ParseLandlockModeError(String);
-
-impl std::str::FromStr for LandlockMode {
-    type Err = ParseLandlockModeError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        [Self::Enforce, Self::Disabled]
-            .into_iter()
-            .find(|mode| mode.as_str() == value)
-            .ok_or_else(|| ParseLandlockModeError(value.to_string()))
     }
 }
 

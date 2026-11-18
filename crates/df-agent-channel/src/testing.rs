@@ -1,5 +1,5 @@
-//! Test fixtures: private PKI, a server on an ephemeral port, a scripted runtime client and
-//! database seeding. Enabled by the `test-util` feature.
+//! Test fixtures: a server on an ephemeral port (certificates from `df_tls::testing`), a scripted
+//! runtime client and database seeding. Enabled by the `test-util` feature.
 
 #![expect(
     clippy::disallowed_methods,
@@ -18,11 +18,8 @@ use df_db::lifecycle_events::EventSinks;
 use df_db::{NewTask, Notifier, TaskRow, create_task};
 use df_proto::agent::v1::agent_channel_client::AgentChannelClient;
 use df_proto::agent::v1::{AgentMessage, ControlMessage, Hello, agent_message};
-use rcgen::string::Ia5String;
-use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
-    KeyUsagePurpose, SanType,
-};
+use df_tls::TlsReloader;
+use df_tls::testing::{ClientCert, SERVER_NAME, TestPki};
 use sqlx::PgPool;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -30,139 +27,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 use tonic::{Status, Streaming};
 
-use crate::{ChannelConfig, ChannelContext, TlsReloader, serve};
+use crate::{ChannelConfig, ChannelContext, serve};
 
 #[cfg(test)]
 pub(crate) mod gated;
 
-/// Server name of the test server certificate.
-pub const SERVER_NAME: &str = "localhost";
 /// Pod SAN used by [`Env`] for its run.
 pub const POD_SAN: &str = "spiffe://dark-factory/ns/sandboxes/pod/run-pod/uid-1";
-
-/// A client certificate and its key.
-pub struct ClientCert {
-    pub cert_pem: String,
-    pub key_pem: String,
-    pub cert_der: Vec<u8>,
-}
-
-/// An instance CA with a server certificate for [`SERVER_NAME`].
-pub struct TestPki {
-    pub ca_pem: String,
-    pub server_cert_pem: String,
-    pub server_key_pem: String,
-    issuer: Issuer<'static, KeyPair>,
-}
-
-fn ca_params(common_name: &str) -> CertificateParams {
-    let mut params = CertificateParams::default();
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    params
-        .distinguished_name
-        .push(DnType::CommonName, common_name);
-    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
-    params
-}
-
-fn client_cert(issuer: &Issuer<'_, KeyPair>, uri_san: &str) -> anyhow_free::Result<ClientCert> {
-    let mut params = CertificateParams::default();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, "sandbox");
-    params.subject_alt_names = vec![SanType::URI(Ia5String::try_from(uri_san.to_string())?)];
-    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-    let key = KeyPair::generate()?;
-    let cert = params.signed_by(&key, issuer)?;
-    Ok(ClientCert {
-        cert_pem: cert.pem(),
-        key_pem: key.serialize_pem(),
-        cert_der: cert.der().to_vec(),
-    })
-}
-
-/// `Result` with a boxed error, for fixtures.
-pub mod anyhow_free {
-    pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-impl TestPki {
-    pub fn new() -> anyhow_free::Result<Self> {
-        let ca_params = ca_params("Dark Factory Test CA");
-        let ca_key = KeyPair::generate()?;
-        let ca_cert = ca_params.self_signed(&ca_key)?;
-        let issuer = Issuer::new(ca_params, ca_key);
-
-        let mut server = CertificateParams::new(vec![SERVER_NAME.to_string()])?;
-        server.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
-        let server_key = KeyPair::generate()?;
-        let server_cert = server.signed_by(&server_key, &issuer)?;
-
-        Ok(Self {
-            ca_pem: ca_cert.pem(),
-            server_cert_pem: server_cert.pem(),
-            server_key_pem: server_key.serialize_pem(),
-            issuer,
-        })
-    }
-
-    /// A client certificate for a sandbox pod, signed by this CA.
-    pub fn pod_client(&self, uri_san: &str) -> anyhow_free::Result<ClientCert> {
-        client_cert(&self.issuer, uri_san)
-    }
-
-    /// A client certificate signed by an unrelated CA.
-    pub fn rogue_client(uri_san: &str) -> anyhow_free::Result<ClientCert> {
-        let params = ca_params("Rogue CA");
-        let key = KeyPair::generate()?;
-        params.self_signed(&key)?;
-        client_cert(&Issuer::new(params, key), uri_san)
-    }
-
-    /// Like [`Self::write_agent_tls`], but the certificate is for `dns_name` and also valid for
-    /// client authentication: the identity of a peer that is both client and server (gateway,
-    /// control plane).
-    pub fn write_peer_tls(
-        &self,
-        dir: &std::path::Path,
-        dns_name: &str,
-    ) -> anyhow_free::Result<df_core::config::AgentTlsConfig> {
-        let mut params = CertificateParams::new(vec![dns_name.to_string()])?;
-        params.extended_key_usages = vec![
-            ExtendedKeyUsagePurpose::ServerAuth,
-            ExtendedKeyUsagePurpose::ClientAuth,
-        ];
-        let key = KeyPair::generate()?;
-        let cert = params.signed_by(&key, &self.issuer)?;
-        let files = df_core::config::AgentTlsConfig {
-            cert_file: dir.join("tls.crt"),
-            key_file: dir.join("tls.key"),
-            client_ca_file: dir.join("ca.crt"),
-        };
-        std::fs::write(&files.cert_file, cert.pem())?;
-        std::fs::write(&files.key_file, key.serialize_pem())?;
-        std::fs::write(&files.client_ca_file, &self.ca_pem)?;
-        Ok(files)
-    }
-
-    /// Writes `tls.crt`, `tls.key` (server) and `ca.crt` into `dir` and returns the matching
-    /// agent port configuration.
-    pub fn write_agent_tls(
-        &self,
-        dir: &std::path::Path,
-    ) -> std::io::Result<df_core::config::AgentTlsConfig> {
-        let files = df_core::config::AgentTlsConfig {
-            cert_file: dir.join("tls.crt"),
-            key_file: dir.join("tls.key"),
-            client_ca_file: dir.join("ca.crt"),
-        };
-        std::fs::write(&files.cert_file, &self.server_cert_pem)?;
-        std::fs::write(&files.key_file, &self.server_key_pem)?;
-        std::fs::write(&files.client_ca_file, &self.ca_pem)?;
-        Ok(files)
-    }
-}
 
 /// The agent port on an ephemeral loopback port, serving the TLS files of `dir`.
 pub struct TestServer {
@@ -175,7 +46,7 @@ pub struct TestServer {
 impl TestServer {
     pub async fn start(ctx: ChannelContext, pki: &TestPki) -> std::io::Result<Self> {
         let dir = tempfile::tempdir()?;
-        let files = pki.write_agent_tls(dir.path())?;
+        let files = pki.write_server_tls(dir.path())?;
         let tls = TlsReloader::load(&files)
             .await
             .map_err(|e| std::io::Error::other(e.to_string()))?
@@ -208,7 +79,7 @@ impl TestServer {
 
     /// Replaces the served certificate, key and client CA, as cert-manager does on renewal.
     pub fn rotate(&self, pki: &TestPki) -> std::io::Result<()> {
-        pki.write_agent_tls(self.dir.path()).map(|_| ())
+        pki.write_server_tls(self.dir.path()).map(|_| ())
     }
 
     /// Opens a TLS channel; `client` is the certificate to present, if any.

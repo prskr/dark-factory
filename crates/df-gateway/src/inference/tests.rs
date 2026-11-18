@@ -3,8 +3,8 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use df_agent_channel::metrics::probe::Probe;
 use df_proto::gateway::v1 as pb;
+use df_telemetry::testing::Probe;
 use http_body_util::BodyExt;
 use hyper::{Method, StatusCode};
 

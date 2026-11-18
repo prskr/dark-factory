@@ -1,9 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
-use df_agent_channel::metrics::probe::Probe;
 use df_db::Notifier;
 use df_db::outbox::{Dispatcher, enqueue};
+use df_telemetry::testing::Probe;
 use serde_json::json;
 use uuid::Uuid;
 

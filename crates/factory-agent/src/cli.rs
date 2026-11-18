@@ -36,7 +36,7 @@ pub enum Command {
         #[arg(
             long,
             env = crate::config::ENV_RUNTIME_SOCK,
-            default_value = df_core::harness::SANDBOX_RUNTIME_SOCK
+            default_value = df_sandbox_contract::paths::SANDBOX_RUNTIME_SOCK
         )]
         socket: std::path::PathBuf,
     },

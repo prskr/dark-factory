@@ -23,7 +23,7 @@ otel = [
     "dep:tokio",
     "dep:tracing-opentelemetry",
 ]
-test-util = []
+test-util = ["dep:opentelemetry", "dep:opentelemetry_sdk", "opentelemetry_sdk/testing"]
 
 [dependencies]
 axum = { workspace = true, optional = true }

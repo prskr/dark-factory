@@ -5,7 +5,6 @@ pub mod branch;
 pub mod config;
 pub mod domain;
 pub mod forge;
-pub mod glob;
 pub mod harness;
 pub mod header_template;
 pub mod host;
@@ -28,9 +27,9 @@ pub use branch::{
 };
 pub use config::{
     ArtifactsConfig, AuthConfig, AuthScheme, CLAUDE_CODE_HARNESS, ClusterTargetsConfig,
-    ConfigError, DatabaseConfig, InstanceConfig, LandlockMode, MAX_PLUGIN_CALL_TIMEOUT_SECONDS,
-    NetworkConfig, PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig,
-    SandboxSectionConfig, WebhookSecretConfig,
+    ConfigError, DatabaseConfig, InstanceConfig, MAX_PLUGIN_CALL_TIMEOUT_SECONDS, NetworkConfig,
+    PluginConfig, SandboxEndpointsConfig, SandboxProvisioningConfig, SandboxSectionConfig,
+    WebhookSecretConfig,
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,

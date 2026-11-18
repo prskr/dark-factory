@@ -3,8 +3,8 @@
 
 use std::collections::HashSet;
 
-use df_core::glob::{GlobError, hidden_glob_set, protected_glob};
 use df_proto::gateway::v1::{CheckMode, MaskedSecret, PushCheck, PushPolicy};
+use df_sandbox_contract::glob::{GlobError, hidden_glob_set, protected_glob};
 use globset::{GlobMatcher, GlobSet, GlobSetBuilder};
 
 use super::view::{AddedBlob, PushView};

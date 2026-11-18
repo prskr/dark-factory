@@ -1,11 +1,11 @@
 //! Tests of the agent session.
 
 use super::*;
-use crate::metrics::probe::Probe;
 use crate::testing::Env;
 use df_core::testing::SandboxCall;
 use df_proto::agent::v1::{PushStatus, PushTarget, RuntimeOperation, RuntimeTiming};
 use df_proto::transcript::v1 as wire;
+use df_telemetry::testing::Probe;
 
 pub(super) fn msg(seq: u64, body: agent_message::Body) -> AgentMessage {
     AgentMessage {

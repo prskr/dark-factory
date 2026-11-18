@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use axum::body::Body;
 use axum::http::Request;
-use df_agent_channel::metrics::probe::Probe;
+use df_telemetry::testing::Probe;
 use http_body_util::BodyExt as _;
 use tower::ServiceExt as _;
 

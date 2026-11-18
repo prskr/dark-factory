@@ -259,7 +259,7 @@ async fn every_connection_attempt_refreshes_the_ca_copy_for_the_harness() {
             data_dir: temp_dir.path().join("data"),
             run_dir: run_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let handle = crate::connection::ConnectionManager::new(
@@ -305,7 +305,7 @@ async fn a_failed_ca_copy_makes_the_connection_attempt_back_off_instead_of_conne
             data_dir: temp_dir.path().join("data"),
             run_dir,
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
     let manager = crate::connection::ConnectionManager::new(
         config,
@@ -370,7 +370,7 @@ async fn test_scenario_control_plane_restart_and_outbox_replay() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -469,7 +469,7 @@ async fn test_scenario_leftover_from_crashed_run_emits_notice() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -578,7 +578,7 @@ async fn test_scenario_fully_acknowledged_leftover_is_discarded_silently() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -663,7 +663,7 @@ async fn test_scenario_certificate_rotated() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -749,7 +749,7 @@ async fn test_scenario_short_outage_events_queue_in_outbox() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -870,7 +870,7 @@ async fn test_scenario_prompt_resent_after_reconnect_delivered_once() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -1003,7 +1003,7 @@ async fn test_scenario_pending_tool_call_resent_after_reconnect() {
             data_dir: temp_dir.path().join("data"),
             run_dir: runtime_dir.clone(),
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
 
     let reconnect_policy = crate::connection::ReconnectPolicy {
@@ -1184,7 +1184,7 @@ async fn start_flush_test_connection_with(
             data_dir: temp.path().join("data"),
             run_dir: runtime_dir,
         },
-        landlock: df_core::LandlockMode::Enforce,
+        landlock: df_sandbox_contract::LandlockMode::Enforce,
     };
     let handle = crate::connection::ConnectionManager::new(config, outbox, policy).spawn();
     let _ = server.recv_agent_message().await.expect("hello");

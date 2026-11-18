@@ -28,7 +28,7 @@ impl LandlockProbe for FixedProbe {
 
 fn enforced(support: LandlockSupport) -> Confinement {
     Confinement {
-        mode: df_core::LandlockMode::Enforce,
+        mode: df_sandbox_contract::LandlockMode::Enforce,
         probe: Arc::new(FixedProbe(support)),
     }
 }
@@ -136,9 +136,9 @@ async fn disabled_starts_the_harness_directly_and_warns() {
     };
     let aux = tempfile::tempdir().unwrap();
     let (wrapper, record) = recording_wrapper(aux.path());
-    let scenario = scenario
-        .wrapper(wrapper)
-        .confinement(Confinement::new(df_core::LandlockMode::Disabled));
+    let scenario = scenario.wrapper(wrapper).confinement(Confinement::new(
+        df_sandbox_contract::LandlockMode::Disabled,
+    ));
     let (result, _) = scenario.release_up_front().run(|_, _| {}).await;
 
     assert_eq!(result.outcome, RunOutcome::EndTurn, "{result:?}");
@@ -205,7 +205,9 @@ async fn disabled_hides_the_runtime_variables_from_the_harness_but_keeps_the_kep
         scenario.runtime_var(name, value)
     })
     .harness_bin(dump)
-    .confinement(Confinement::new(df_core::LandlockMode::Disabled));
+    .confinement(Confinement::new(
+        df_sandbox_contract::LandlockMode::Disabled,
+    ));
 
     let (result, _) = scenario.release_up_front().run(|_, _| {}).await;
 

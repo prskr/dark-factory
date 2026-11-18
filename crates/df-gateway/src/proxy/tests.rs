@@ -1104,8 +1104,8 @@ async fn every_request_gets_its_own_flow_id_denied_ones_too() -> Result<()> {
     Ok(())
 }
 
-fn probed() -> (df_agent_channel::metrics::probe::Probe, Arc<Metrics>) {
-    let probe = df_agent_channel::metrics::probe::Probe::new();
+fn probed() -> (df_telemetry::testing::Probe, Arc<Metrics>) {
+    let probe = df_telemetry::testing::Probe::new();
     let metrics = Arc::new(Metrics::new(&probe.meter()));
     (probe, metrics)
 }

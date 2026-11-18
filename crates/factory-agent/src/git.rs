@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use anyhow::Context as _;
-use df_core::glob::hidden_glob_set;
 use df_proto::agent::v1::GitConfigEntry;
+use df_sandbox_contract::glob::hidden_glob_set;
 
 pub const PROXY_ENV_VARS: &[&str] = &[
     "HTTPS_PROXY",
@@ -425,7 +425,7 @@ fn sparse_checkout_file(hidden_paths: &[String]) -> std::io::Result<String> {
             format!("invalid hidden path: {error}"),
         )
     })?;
-    let mut patterns = df_core::glob::sparse_patterns(hidden_paths).join("\n");
+    let mut patterns = df_sandbox_contract::glob::sparse_patterns(hidden_paths).join("\n");
     patterns.push('\n');
     Ok(patterns)
 }

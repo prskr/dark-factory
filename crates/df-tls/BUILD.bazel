@@ -1,0 +1,57 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+extract_cargo_lints(
+    name = "lints",
+    manifest = "Cargo.toml",
+    workspace = "//:Cargo.toml",
+)
+
+exports_files(["Cargo.toml"])
+
+# Production library: without the `test-util` feature (no test PKI).
+rust_library(
+    name = "df_tls",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "df_tls",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+alias(
+    name = "df-tls",
+    actual = ":df_tls",
+)
+
+# Same crate with `test-util`, for tests of this and dependent crates only.
+rust_library(
+    name = "df_tls_test_util",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_features = ["test-util"],
+    crate_name = "df_tls",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//crates:__subpackages__"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "df_tls_test",
+    crate = ":df_tls_test_util",
+    # `crate` does not pass on the library's features.
+    crate_features = ["test-util"],
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    deps = all_crate_deps(normal_dev = True),
+)

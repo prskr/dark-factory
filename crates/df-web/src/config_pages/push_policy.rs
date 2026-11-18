@@ -1,8 +1,8 @@
 //! The "Security" tab of the project form: the project's push policy and hidden paths
 //! (iter2-push-checks design D4, `specs/push-checks/spec.md`, "Per-project push policy").
 
-use df_core::glob::{Glob, GlobError, hidden_glob, protected_glob};
 use df_db::push_checks::{CheckMode, PushPolicy};
+use df_sandbox_contract::glob::{Glob, GlobError, hidden_glob, protected_glob};
 use maud::{Markup, html};
 use serde::Deserialize;
 

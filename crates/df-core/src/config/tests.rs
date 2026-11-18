@@ -1,4 +1,5 @@
 use super::*;
+use df_sandbox_contract::LandlockMode;
 use secrecy::ExposeSecret;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -377,15 +378,6 @@ fn sandbox_landlock_defaults_to_enforce_and_reads_disabled() {
     assert_eq!(section.provisioning.landlock, LandlockMode::Enforce);
     let section: SandboxSectionConfig = serde_saphyr::from_str("landlock: disabled").unwrap();
     assert_eq!(section.provisioning.landlock, LandlockMode::Disabled);
-    assert_eq!(LandlockMode::Disabled.as_str(), "disabled");
-    assert_eq!(LandlockMode::Enforce.as_str(), "enforce");
-}
-
-#[test]
-fn landlock_mode_parses_from_its_two_spellings_only() {
-    assert_eq!("enforce".parse(), Ok(LandlockMode::Enforce));
-    assert_eq!("disabled".parse(), Ok(LandlockMode::Disabled));
-    assert!("off".parse::<LandlockMode>().is_err());
 }
 
 #[test]

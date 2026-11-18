@@ -1,20 +1,21 @@
 //! Logging and telemetry setup shared by the binaries.
 //!
 //! - [`logging`] (always): `DF_LOG_FORMAT` and `RUST_LOG` handling and the global subscriber.
-//! - [`testing`] (`test-util`): capture of log output in tests.
+//! - [`testing`] (`test-util`): capture of log output and an in-memory metric probe in tests.
 //! - [`http`] (`http`): the `http.request` span middleware for axum listeners.
 //! - [`otel`] (`otel`): OpenTelemetry metrics and traces from the `OTEL_*` variables.
 //! - `clap`: `clap::ValueEnum` for [`logging::LogFormat`].
 //!
-//! Only the control plane and the gateway enable `http` and `otel`: the sandbox runtime enables
-//! `clap` (and `test-util` in its tests) and so links neither OpenTelemetry nor axum.
+//! Only the control plane and the gateway enable `http` and `otel`: the shipped sandbox runtime
+//! enables only `clap` and so links neither OpenTelemetry nor axum. Its tests enable `test-util`,
+//! which pulls in OpenTelemetry for the metric probe.
 
 #[cfg(feature = "http")]
 pub mod http;
 pub mod logging;
 #[cfg(feature = "otel")]
 pub mod otel;
-#[cfg(any(test, feature = "test-util"))]
+#[cfg(feature = "test-util")]
 pub mod testing;
 
 /// The release version the binary was built with (`DF_VERSION` at build time), or `dev`.

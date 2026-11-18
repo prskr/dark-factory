@@ -4,8 +4,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context as _;
-use df_core::glob::{GlobSet, hidden_glob_set};
 use df_proto::transcript::v1::{Notice, NoticeLevel};
+use df_sandbox_contract::glob::{GlobSet, hidden_glob_set};
 
 use crate::git::{Git, nul_separated};
 

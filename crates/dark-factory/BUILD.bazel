@@ -28,6 +28,7 @@ rust_binary(
         "//crates/df-plugins:df_plugins",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry",
+        "//crates/df-tls:df_tls",
         "//crates/df-web:df_web",
     ],
 )
@@ -54,12 +55,14 @@ rust_binary(
         "//crates/df-plugins:df_plugins",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry",
+        "//crates/df-tls:df_tls",
         "//crates/df-web:df_web",
     ],
 )
 
 # Rebuilt from source (instead of `crate = ":dark-factory"`) so that the tests can use the
-# `test-util` variant of `df-agent-channel` without the binary linking it.
+# `test-util` variants of `df-agent-channel`, `df-tls` and `df-telemetry` without the binary
+# linking them; `df-gateway` and `df-k8s` are linked in the variants that see the same ones.
 rust_test(
     name = "dark_factory_test",
     srcs = glob(["src/**/*.rs"]),
@@ -82,12 +85,13 @@ rust_test(
         "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
-        "//crates/df-gateway:df_gateway",
-        "//crates/df-k8s:df_k8s",
+        "//crates/df-gateway:df_gateway_test_util",
+        "//crates/df-k8s:df_k8s_test_util",
         "//crates/df-plugins:df_plugins",
         "//crates/df-proto:df_proto",
-        "//crates/df-telemetry:df_telemetry",
+        "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
+        "//crates/df-tls:df_tls_test_util",
         "//crates/df-web:df_web",
     ],
 )

@@ -29,7 +29,7 @@ fn test_config() -> ProvisioningConfig {
             runtime_image: "ghcr.io/prskr/dark-factory/runtime:dev".to_string(),
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
-            landlock: df_core::LandlockMode::Enforce,
+            landlock: df_sandbox_contract::LandlockMode::Enforce,
             image_pull_secrets: Vec::new(),
         },
         control_plane_ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),
@@ -396,7 +396,7 @@ fn sandbox_landlock_mode_comes_from_the_sandbox_config() {
         sandbox_env(&config, "DF_LANDLOCK").as_deref(),
         Some("enforce")
     );
-    config.sandbox.landlock = df_core::LandlockMode::Disabled;
+    config.sandbox.landlock = df_sandbox_contract::LandlockMode::Disabled;
     assert_eq!(
         sandbox_env(&config, "DF_LANDLOCK").as_deref(),
         Some("disabled")

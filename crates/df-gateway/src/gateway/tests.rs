@@ -260,7 +260,7 @@ async fn gateway_keeps_its_policy_while_the_control_plane_is_gone_and_resyncs_af
 
 #[tokio::test]
 async fn the_applied_policy_version_is_exported() -> Result<()> {
-    let probe = df_agent_channel::metrics::probe::Probe::new();
+    let probe = df_telemetry::testing::Probe::new();
     let free = std::net::TcpListener::bind("127.0.0.1:0")?;
     let control_plane = free.local_addr()?;
     drop(free);

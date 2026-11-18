@@ -6,14 +6,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
-use df_agent_channel::testing::TestPki;
-use df_agent_channel::{TlsReloader, mtls_incoming};
-use df_core::config::AgentTlsConfig;
 use df_core::{SecretError, SecretKeyRef, SecretStore};
 use df_db::{Notification, Notifier, PgPool};
 use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::gateway_policy_client::GatewayPolicyClient;
 use df_proto::gateway::v1::{PolicyUpdate, PolicyWatchRequest};
+use df_tls::testing::TestPki;
+use df_tls::{TlsPaths, TlsReloader, mtls_incoming};
 use secrecy::SecretString;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -262,7 +261,7 @@ impl Replica {
 }
 
 /// Credentials of a gateway pod signed by the CA of `pki`.
-pub(crate) fn gateway_credentials(pki: &TestPki) -> Result<(AgentTlsConfig, tempfile::TempDir)> {
+pub(crate) fn gateway_credentials(pki: &TestPki) -> Result<(TlsPaths, tempfile::TempDir)> {
     let dir = tempfile::tempdir()?;
     let files = pki
         .write_peer_tls(dir.path(), GATEWAY)
@@ -270,7 +269,7 @@ pub(crate) fn gateway_credentials(pki: &TestPki) -> Result<(AgentTlsConfig, temp
     Ok((files, dir))
 }
 
-pub(crate) fn gateway_connector(files: AgentTlsConfig) -> MtlsConnector {
+pub(crate) fn gateway_connector(files: TlsPaths) -> MtlsConnector {
     MtlsConnector::new(files, CONTROL_PLANE)
 }
 

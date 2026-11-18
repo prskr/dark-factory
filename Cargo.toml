@@ -82,8 +82,10 @@ df-gateway = { path = "crates/df-gateway" }
 df-k8s = { path = "crates/df-k8s" }
 df-plugins = { path = "crates/df-plugins" }
 df-proto = { path = "crates/df-proto" }
+df-sandbox-contract = { path = "crates/df-sandbox-contract" }
 df-telemetry = { path = "crates/df-telemetry" }
 df-test-postgres = { path = "crates/df-test-postgres" }
+df-tls = { path = "crates/df-tls" }
 df-web = { path = "crates/df-web" }
 forge-common = { path = "plugins/forge-common" }
 futures = "0.3"

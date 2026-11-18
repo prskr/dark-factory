@@ -22,11 +22,12 @@ rust_library(
     lint_config = ":lints",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + [
-        "//crates/df-agent-channel:df_agent_channel",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-sandbox-contract:df_sandbox_contract",
         "//crates/df-telemetry:df_telemetry",
+        "//crates/df-tls:df_tls",
     ],
 )
 
@@ -35,9 +36,31 @@ alias(
     actual = ":df_gateway",
 )
 
+# Same crate on the `test-util` variants of `df-tls` and `df-telemetry`, for tests of crates that
+# also link those variants (`dark-factory`): both must see one `TlsPaths` and `LogFormat`.
+rust_library(
+    name = "df_gateway_test_util",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["rules/secrets.yml"],
+    crate_name = "df_gateway",
+    edition = "2024",
+    lint_config = ":lints",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//crates:__subpackages__"],
+    deps = all_crate_deps(normal = True) + [
+        "//crates/df-core:df_core",
+        "//crates/df-db:df_db",
+        "//crates/df-proto:df_proto",
+        "//crates/df-sandbox-contract:df_sandbox_contract",
+        "//crates/df-telemetry:df_telemetry_test_util",
+        "//crates/df-tls:df_tls_test_util",
+    ],
+)
+
 # Rebuilt from source (instead of `crate = ":df_gateway"`) so that the tests can use the
-# `test-util` variants of `df-agent-channel` (test PKI) and `df-telemetry` (log capture) without
-# the library linking them.
+# `test-util` variants of `df-tls` (test PKI) and `df-telemetry` (log capture, metric probe)
+# without the library linking them.
 rust_test(
     name = "df_gateway_test",
     srcs = glob(["src/**/*.rs"]),
@@ -56,12 +79,13 @@ rust_test(
         normal = True,
         normal_dev = True,
     ) + [
-        "//crates/df-agent-channel:df_agent_channel_test_util",
         "//crates/df-core:df_core",
         "//crates/df-db:df_db",
         "//crates/df-proto:df_proto",
+        "//crates/df-sandbox-contract:df_sandbox_contract",
         "//crates/df-telemetry:df_telemetry_test_util",
         "//crates/df-test-postgres:df_test_postgres",
+        "//crates/df-tls:df_tls_test_util",
     ],
 )
 
