@@ -5,15 +5,16 @@ use df_db::task_views::{Dependencies, TaskDetail};
 use maud::{Markup, html};
 
 use crate::components::{Icon, Tone, icon};
+use crate::layout::item_path;
 
 /// The creator of a task: a board member by name, an agent as `KEY · persona` with the key of
-/// the creating task linked.
+/// the creating task or chat linked to its page.
 pub(super) fn creator(task: &TaskDetail) -> Markup {
     match &task.created_by {
         Principal::Human { display_name, .. } => html! { (display_name) },
         Principal::Agent { display_name, .. } => html! {
             @if let Some(key) = &task.creator_task_key {
-                a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) } " · "
+                a href=(item_path(key)) class="text-accent-text hover:underline" { (key) } " · "
             }
             (display_name)
         },

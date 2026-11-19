@@ -1066,6 +1066,45 @@ pub(crate) fn head_of(table: &str) -> &str {
     &table[..table.find("<tbody").unwrap()]
 }
 
+/// A task detail with the given key for render tests without a database: created by a board
+/// member, no parent, no pull request. Tests set the fields they check.
+pub(crate) fn task_detail(key: &str) -> df_db::task_views::TaskDetail {
+    df_db::task_views::TaskDetail {
+        id: uuid::Uuid::nil(),
+        key: key.to_owned(),
+        title: "Plan the Helm chart release".to_owned(),
+        title_source: df_core::TitleSource::User,
+        description: String::new(),
+        project_key: "DF".to_owned(),
+        project_name: "Dark Factory".to_owned(),
+        repo_url: "https://forge.example/df.git".to_owned(),
+        issue_tracker_url: None,
+        persona_name: "Linus".to_owned(),
+        persona_harness: "claude-code".to_owned(),
+        persona_model: None,
+        persona_description: String::new(),
+        issue_number: None,
+        status: df_core::TaskStatus::Waiting,
+        status_line: String::new(),
+        pr_number: None,
+        pr_url: None,
+        pr_title: None,
+        pr_attached: false,
+        archived_at: None,
+        has_pending_request: false,
+        branch: format!("factory/task/{key}"),
+        resume_at: None,
+        auto_resumes: 0,
+        created_by: df_core::Principal::human(df_core::UserId::new(), "Owner"),
+        creator_task_key: None,
+        parent_key: None,
+        parent_title: None,
+        parent_persona_name: None,
+        base_task_key: None,
+        base_task_title: None,
+    }
+}
+
 /// The opening tag of the element at the first occurrence of `marker` (text or attribute): from
 /// the `<` before it to the next `>`.
 pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {

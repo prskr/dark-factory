@@ -3,7 +3,7 @@
 use df_core::{DependencyKind, PersonaId, Principal, ProjectId, TaskId, TaskStatus};
 use df_db::NewDependency;
 
-use crate::testkit::{Seed, TestApp, new_task, seed, set_task_status, text};
+use crate::testkit::{Seed, TestApp, new_task, seed, set_task_status, task_detail, text};
 
 async fn create(
     app: &TestApp,
@@ -74,6 +74,20 @@ async fn an_agent_created_task_shows_its_creator_and_parent_after_the_branch() {
         "{html}"
     );
     assert!(html.contains("Plan the release"), "{html}");
+}
+
+// A chat has no `/tasks/` page: the creator link of a task a chat created goes to the chat page,
+// like its parent link.
+#[test]
+fn the_creator_link_of_a_task_created_by_a_chat_goes_to_the_chat_page() {
+    let mut task = task_detail("DF-4");
+    task.created_by = Principal::agent(PersonaId::new(), "Linus", None, TaskId::new());
+    task.creator_task_key = Some("DF-3-CHAT".to_owned());
+
+    let html = crate::task_pages::dependencies::creator(&task).into_string();
+
+    assert!(html.contains(r#"href="/chats/DF-3-CHAT""#), "{html}");
+    assert!(!html.contains("/tasks/DF-3-CHAT"), "{html}");
 }
 
 #[tokio::test]
