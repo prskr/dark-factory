@@ -66,3 +66,4 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0060](0060-project-image-builds.md) | Project image builds | Accepted |
 | [ADR-0061](0061-run-transitions-through-one-transition-function.md) | Run transitions through one transition function | Accepted |
 | [ADR-0062](0062-persona-identity.md) | Persona identity with a shared forge bot account | Proposed |
+| [ADR-0063](0063-generated-per-persona-signing-keys.md) | Generated per-persona signing keys | Proposed |
