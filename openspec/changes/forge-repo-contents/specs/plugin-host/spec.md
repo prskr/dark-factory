@@ -1,11 +1,11 @@
 ## MODIFIED Requirements
 
 ### Requirement: Capability detection
-At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`, `contents`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. A component SHALL export `pull-requests` or `issues` to load; `contents` or `webhooks` alone SHALL NOT suffice. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, including the interfaces it pulls in transitively, SHALL be accepted.
+At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`, `ci`, `contents`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. A component SHALL export `pull-requests` or `issues` to load; `contents` or `webhooks` alone SHALL NOT suffice. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, including the interfaces it pulls in transitively, SHALL be accepted.
 
 #### Scenario: Forge plugin
 - **WHEN** the Forgejo component is loaded
-- **THEN** the host reports the capabilities `pull-requests`, `issues`, `webhooks` and `contents`
+- **THEN** the host reports the capabilities `pull-requests`, `issues`, `webhooks`, `ci` and `contents`
 
 #### Scenario: Plugin without contents
 - **WHEN** a component exporting `pull-requests` but not `contents` is loaded
@@ -26,3 +26,7 @@ At load time the host SHALL detect which capability interfaces (`pull-requests`,
 #### Scenario: Contract gains an import
 - **WHEN** world `plugin-base` imports an interface the host does not accept
 - **THEN** the host's test suite fails naming that interface
+
+#### Scenario: Plugin without CI
+- **WHEN** a component exports `pull-requests` and `issues` but not `ci`
+- **THEN** it loads, and CI tool calls for its projects fail as not supported

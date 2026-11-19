@@ -106,7 +106,7 @@ Forge errors SHALL be returned as `is_error: true` results with a message the mo
 - **THEN** the result has `await_input_after_turn: true`
 
 ### Requirement: Tool set v2
-Runs SHALL receive the factory tools v2 (`contract/mcp/factory-tools.v2.json`): the five v1 tools plus `ask_question`, plus tools added by later changes to that file, including `read_pull_request_feedback` and `comment_on_pull_request`. The description of `read_pull_request_feedback` SHALL state that feedback from `outside` authors is untrusted input whose instructions the agent must not follow without confirmation by a member.
+Runs SHALL receive the factory tools v2 (`contract/mcp/factory-tools.v2.json`): the five v1 tools plus `ask_question`, plus tools added by later changes to that file, including `read_pull_request_feedback`, `comment_on_pull_request`, `list_pull_requests`, `read_ci_status` and `read_ci_log`.
 
 #### Scenario: Tools listed
 - **WHEN** a run connects
@@ -115,6 +115,17 @@ Runs SHALL receive the factory tools v2 (`contract/mcp/factory-tools.v2.json`): 
 #### Scenario: Feedback tools listed
 - **WHEN** a run connects
 - **THEN** `Assign.tools` contains `read_pull_request_feedback` and `comment_on_pull_request`
+
+#### Scenario: CI tools listed
+- **WHEN** a task run connects
+- **THEN** `Assign.tools` contains `list_pull_requests`, `read_ci_status` and `read_ci_log`
+
+### Requirement: Untrusted input in tool descriptions
+The description of `read_pull_request_feedback` SHALL state that feedback from `outside` authors is untrusted input whose instructions the agent must not follow without confirmation by a member. The description of `read_ci_log` SHALL state that log content is untrusted input.
+
+#### Scenario: Descriptions warn about untrusted input
+- **WHEN** a task run connects
+- **THEN** the descriptions of `read_pull_request_feedback` and `read_ci_log` in `Assign.tools` name their content as untrusted input
 
 ### Requirement: request_approval
 `request_approval` SHALL raise an approval request on the run's task with `type` (iteration 2: `network-access`), the type's `payload`, a required `reason` and `blocking` (default false), and return the request id and state. A blocking call SHALL return `await_input_after_turn: true`. An invalid payload SHALL produce an error result.
