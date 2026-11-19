@@ -90,6 +90,43 @@ fn the_creator_link_of_a_task_created_by_a_chat_goes_to_the_chat_page() {
     assert!(!html.contains("/tasks/DF-3-CHAT"), "{html}");
 }
 
+// A task can depend on a chat, which has no `/tasks/` page: the row of a dependency or dependant
+// links a chat key to `/chats/` and any other key to `/tasks/`.
+#[test]
+fn a_dependency_row_links_a_chat_to_the_chat_page_and_a_task_to_the_task_page() {
+    let deps = df_db::task_views::Dependencies {
+        waits_for: vec![
+            df_db::task_views::DependencyView {
+                key: "DF-3-CHAT".to_owned(),
+                title: "A chat".to_owned(),
+                kind: DependencyKind::Completion,
+                satisfied: false,
+            },
+            df_db::task_views::DependencyView {
+                key: "DF-2".to_owned(),
+                title: "A task".to_owned(),
+                kind: DependencyKind::Done,
+                satisfied: true,
+            },
+        ],
+        needed_by: vec![df_db::task_views::DependantView {
+            key: "DF-6-CHAT".to_owned(),
+            title: "Another chat".to_owned(),
+            kind: DependencyKind::Completion,
+            status: TaskStatus::AwaitingDependencies,
+        }],
+    };
+
+    let html = crate::task_pages::dependencies::dependencies_region(&deps, TaskStatus::Queued)
+        .into_string();
+
+    assert!(html.contains(r#"href="/chats/DF-3-CHAT""#), "{html}");
+    assert!(html.contains(r#"href="/chats/DF-6-CHAT""#), "{html}");
+    assert!(html.contains(r#"href="/tasks/DF-2""#), "{html}");
+    assert!(!html.contains("/tasks/DF-3-CHAT"), "{html}");
+    assert!(!html.contains("/tasks/DF-6-CHAT"), "{html}");
+}
+
 #[tokio::test]
 async fn a_board_member_created_task_shows_the_member_and_no_parent() {
     let app = TestApp::new().await;
