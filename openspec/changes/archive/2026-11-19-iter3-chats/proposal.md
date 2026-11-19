@@ -14,7 +14,7 @@
 - **Topic**: the chat's task title. The agent sets it in the first run; a board member can rename it.
 - **Chat runs**:
   - The persona's system prompt is followed by fixed chat instructions.
-  - Tools: `set_task_title`, `report_progress`, `create_task`, `list_personas`, `send_message` and `request_approval`. A chat run gets no `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`.
+  - Tools: `set_task_title`, `report_progress`, `create_task`, `list_personas`, `send_message`, `request_approval` and the artifact tools (`write_artifact`, `list_artifacts`, `read_artifact`). A chat run gets no `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`.
   - Checkout:
     - A read-only checkout of the project's base branch, reset to `origin/<base>` at the start of every run.
     - There is no task or WIP branch, and the Git proxy rejects every push from a chat run.
@@ -23,7 +23,9 @@
 - **Archiving**:
   - `archived_at` and `archived_by` are attributes; the status is unchanged.
   - Archiving is rejected while the chat is `queued` or `running`, or has an open approval request.
-  - Subtasks are not touched. A subtask that ends still queues its message on an archived chat, but no run starts.
+  - Archiving releases a run of the chat that waits in its keep-alive window.
+  - Subtasks are not touched. A subtask that ends still queues its message on an archived chat, which makes the chat `queued`, but no run starts.
+  - A chat can't be the base task of another task.
   - Unarchiving starts a run when messages are waiting.
   - An archived chat takes no human messages.
 - **Concurrency**:
@@ -99,13 +101,17 @@ Out of scope:
     - `tasks.kind` (`task` | `chat`);
     - `tasks.archived_at` and `tasks.archived_by`;
     - the key check accepts the `-CHAT` suffix;
-  - chat creation, archiving and unarchiving, and the chat-aware scheduler query;
+    - `runs.idle_since`;
+    - `tasks_open_branch` ignores the empty branch of chats;
+    - the SQL function `task_last_activity`;
+  - chat creation, archiving and unarchiving, and the chat-aware scheduler query (`start_queued_runs`, release of idle chat runs);
   - `.sqlx/`.
 - `crates/df-core`: the task kind, the chat key, and the config `runs.maxConcurrentChats`.
+- `crates/df-orchestrator`: the scheduler applies the chat slots.
 - `crates/df-agent-channel`:
   - `build_assign` for chats (instructions, tool subset, no branches);
-  - rejection of `complete_task` and `ask_question` in chats;
-  - the scheduler's chat slots and release of idle chat runs;
+  - rejection of tools not offered to chats;
+  - the session's release of an idle chat run on `release_idle`;
   - the `context_compacted` notice.
 - `crates/df-gateway`: the read-only ref scope for chat runs.
 - `crates/factory-agent`: the read-only prepare (reset to base, no task-branch or WIP pushes).
