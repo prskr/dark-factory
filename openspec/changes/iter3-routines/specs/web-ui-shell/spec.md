@@ -3,11 +3,11 @@
 ## MODIFIED Requirements
 
 ### Requirement: Desktop navigation rail
-At widths of 768 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Tasks, Requests, Routines and Network traffic, and at its bottom a Settings link above the signed-in board member's avatar that opens the profile menu. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
+At widths of 768 px and more, every authenticated page SHALL show a navigation rail with the logo, a new-task action, links to Chats, Tasks, Requests, Routines and Network traffic, and at its bottom a Settings link above the signed-in board member's avatar that opens the profile menu. The links SHALL show icons only; each section's name SHALL be its accessible name and its tooltip. The current section SHALL be marked visually with a bar at the rail's edge and with `aria-current`.
 
 #### Scenario: Rail on the task page
 - **WHEN** a board member opens `/tasks` at 1440 px width
-- **THEN** the rail shows the new-task action, Tasks marked as current, Requests, Routines, Network traffic, Settings and the avatar, and no links to Projects, Personas, Credentials, Model providers or Egress rules and no separate log-out button
+- **THEN** the rail shows the new-task action, Chats, Tasks marked as current, Requests, Routines, Network traffic, Settings and the avatar, and no links to Projects, Personas, Credentials, Model providers or Egress rules and no separate log-out button
 
 #### Scenario: Settings current on a settings page
 - **WHEN** a board member opens `/credentials` at 1440 px width
@@ -16,6 +16,10 @@ At widths of 768 px and more, every authenticated page SHALL show a navigation r
 #### Scenario: Settings current on the projects page
 - **WHEN** a board member opens `/projects` at 1440 px width
 - **THEN** the rail marks Settings as current
+
+#### Scenario: Rail on the chat page
+- **WHEN** a board member opens `/chats` at 1440 px width
+- **THEN** the rail shows Chats above Tasks, marked as current
 
 #### Scenario: Rail on the routines page
 - **WHEN** a board member opens `/routines` at 1440 px width

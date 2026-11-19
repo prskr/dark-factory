@@ -53,6 +53,9 @@ One migration:
 - **`tasks.archived_at`** (`TIMESTAMPTZ NULL`) and **`tasks.archived_by`** (`JSONB NULL`, a human principal), plus a `CHECK` that both are null for `kind = 'task'`, and that `archived_by` is set exactly when `archived_at` is.
 - **`tasks_key_check`**: becomes `^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*(-CHAT)?$`, plus a `CHECK` that the suffix is present exactly when `kind = 'chat'`.
 - **Index**: `(project_id, kind, archived_at)` for the chat list.
+- **Branch**: a chat stores an empty `branch`. The unique index `tasks_open_branch` skips `branch = ''`, so chats never hold a branch.
+- **`runs.idle_since`** (`TIMESTAMPTZ NULL`): set when the run enters `awaiting_input` (it waits in its keep-alive window), cleared when it leaves that state. It orders the idle chat runs for D5.
+- **`task_last_activity(task_id, created_at)`**: SQL function for the last activity of a task (latest transcript event or message, else creation), used by the chat list ordering and its queries.
 
 Alternative: an `archived` status. Unarchiving would then need the previous status, and the status would stop describing the run (decided in the grilling, Q3).
 
@@ -60,7 +63,7 @@ Alternative: an `archived` status. Unarchiving would then need the previous stat
 
 `df_db::chats::create_chat(tx, project, persona, author, text)`:
 - allocates the number with `allocate_task_key`;
-- inserts a task with kind `chat`, key `<KEY>-<n>-CHAT`, no parent, `created_by` = the board member, and a placeholder title derived from the text (source `placeholder`);
+- inserts a task with kind `chat`, key `<KEY>-<n>-CHAT`, an empty branch, no parent, `created_by` = the board member, and a placeholder title derived from the text (source `placeholder`);
 - queues the text as an ordinary human message with `queue_message_tx`, plus the hidden title block from `ask_for_title()`;
 - writes the `chat.create` audit entry.
 
@@ -80,13 +83,13 @@ For `kind = 'chat'`:
   - a chat is never completed.
 
   Alternative: a hidden block in the first message. That block is lost when a new session is seeded with a summary (decided, Q17).
-- **Workspace**: `Workspace` gets `bool read_only = 8` (additive in `darkfactory.agent.v1`). `task_branch` and `wip_branch` stay empty.
-- **Tools**: `tool_descriptors()` is filtered by a `const CHAT_TOOLS: &[&str]`. The dispatch in `tools.rs` rejects any other tool for a chat run with a tool error (`not available in a chat`), so a harness that ignores the list still can't call it.
+- **Workspace**: `Workspace` gets `bool read_only = 11` (additive in `darkfactory.agent.v1`; lower numbers are taken). `task_branch` and `wip_branch` stay empty.
+- **Tools**: `tool_descriptors()` is filtered by a `const CHAT_TOOLS: &[&str]`: the six tools of the `chats` spec plus `write_artifact`, `list_artifacts` and `read_artifact`, which the Artifacts tab and split view need. The dispatch in `tools.rs` rejects any other tool for a chat run with a tool error (`not available in a chat`), so a harness that ignores the list still can't call it.
 
 ### D4: Read-only enforcement
 
 - **Gateway**:
-  - `GitRoute` gets `bool read_only` (additive in `darkfactory.gateway.v1`), and the snapshot sets it for chat runs.
+  - `GitRoute` gets `bool read_only = 9` (additive in `darkfactory.gateway.v1`), and the snapshot sets it for chat runs.
   - `RefScope::rejection()` returns `df:read-only` for every command when the flag is set.
   - Fetch and `ls-refs` are unaffected.
 - **Runtime**: `prepare` with `read_only`:
@@ -102,12 +105,12 @@ For `kind = 'chat'`:
 
 ### D5: Scheduler with two limits
 
-`start_queued_runs` keeps one transaction and the advisory lock:
+`df_db::runs::start_queued_runs`, called by the scheduler in `df-orchestrator`, keeps one transaction and the advisory lock:
 
 - **Free slots**: computes `free_tasks = maxConcurrent - active(kind='task')` and `free_chats = maxConcurrentChats - active(kind='chat')`.
 - **Picking**: selects queued candidates with `kind`, oldest first, skipping archived chats (`archived_at IS NULL`). It takes them while the matching budget lasts.
 - **No free chat slot**:
-  - If queued chats remain, it picks the chat run in `awaiting_input` with the oldest `last_turn_ended_at` and publishes a `ReleaseIdle { run_id }` notification.
+  - If queued chats remain (the same due-task query as the picking), it picks the chat run in `awaiting_input` with the oldest `runs.idle_since` and publishes a `ReleaseIdle { run_id }` notification on the channel `release_idle`.
   - The session owning that run handles it like an expired keep-alive deadline: it sends `Release`, and the task keeps its status.
   - The freed slot is used in the next scheduling pass, triggered by the run ending.
 
@@ -123,14 +126,18 @@ Alternative: a shorter keep-alive for chats. That loses warm sandboxes even when
 - **Archive and unarchive** (`df_db::chats`) raise two new events through `apply_task_event`:
   - `Archived { by }`:
     - rejected while the chat is `queued` or `running`, or has an `agent_requests` row in state `pending` (snapshot field `pending_requests`, read from the chat's own rows);
-    - otherwise the status is unchanged, with the effects `SetArchived(Some(by))` and `Audit(chat.archive)`.
+    - otherwise the status is unchanged, with the effects `SetArchived(Some(by))` and `Audit(chat.archive)`;
+    - the same transaction publishes `ReleaseIdle` for the chat's run in `awaiting_input`, so a warm sandbox doesn't keep a chat slot or receive messages while the chat is archived.
+  - The rule is one function, `archive_rejection`, which the web uses for the disabled Archive action and its reason.
   - `Unarchived`:
     - effects `SetArchived(None)` and `Audit(chat.unarchive)`;
     - the status follows the `MessageQueued` rule when undelivered messages exist, otherwise it is unchanged.
   - Both are rejected for `kind = task`.
 - **Messages**:
   - `queue_message` from the web rejects an archived chat. That is a check at the web edge, not in `transition`, because the child-ended message must still be queued.
-  - The child-ended message is queued regardless: the `ChildEnded` arm treats an archived chat like any open parent. The scheduler's `archived_at IS NULL` filter keeps it from starting a run.
+  - The child-ended message is queued regardless: the `ChildEnded` arm treats an archived chat like any open parent, so the chat becomes `queued` (`running` while its released run still ends). The scheduler's `archived_at IS NULL` filter keeps it from starting a run.
+  - A live run never receives messages of an archived chat: `claim_held_back_messages` skips archived chats, and `Finalize(Idle)` of an archived chat's run ignores undelivered messages (the flag is read under the task row lock, after the run row lock). The messages wait for the unarchive.
+- **Base task**: `create_task` rejects a chat as `base_task` (`InvalidBaseTask`); a chat has no branch to start from.
 - **Volume retention**: treats `archived_at` as the close time of a chat.
 
 ### D7: Compaction notice
@@ -144,7 +151,11 @@ Only the runtime knows whether `session/load` succeeded or a new session was see
   - `/chats/compose`;
   - `/chats/{key}`;
   - `/chats/{key}/events`, `/messages`, `/title`, `/stop`, `/archive`, `/unarchive`;
-  - `/chats/archive` (modal content, with `?q=` search).
+  - `/chats/archive` (modal content, with `?q=` search);
+  - `/chats/events` (SSE stream of the chat list);
+  - `/chats/{key}/interrupt` and `/chats/{key}/messages/{id}` (PATCH, DELETE: edit or withdraw a queued message), as on the task page.
+
+  `/chats/{key}` also serves an archived chat, read-only, with Unarchive in place of the message box.
 
   Handlers reuse the task-page transcript, message box and SSE plumbing with `kind` checks. Task routes return 404 for chat keys and vice versa.
 - **Layout**: `workspace_layout` gets a chat `View`.

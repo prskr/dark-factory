@@ -14,11 +14,15 @@ Every run of a chat SHALL receive the persona's system prompt, then the project 
 - **THEN** its system prompt contains no chat instructions
 
 ### Requirement: Archiving a chat
-Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request other than `project-context`. Archiving SHALL NOT change the chat's subtasks or its pending `project-context` requests.
+Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request other than `project-context`. Archiving SHALL release a run of the chat that waits in its keep-alive window. Archiving SHALL NOT change the chat's subtasks or its pending `project-context` requests.
 
 #### Scenario: Archive an idle chat
 - **WHEN** a board member archives `DF-12-CHAT` in status `waiting`
 - **THEN** the chat is archived, its status stays `waiting` and an audit entry `chat.archive` names the board member
+
+#### Scenario: Archive with an idle run
+- **WHEN** a board member archives `DF-12-CHAT` in status `waiting` while its run waits in its keep-alive window after a turn
+- **THEN** the run is released and the chat's status stays `waiting`
 
 #### Scenario: Archive while running
 - **WHEN** a board member archives `DF-12-CHAT` while its run is active

@@ -1,10 +1,9 @@
-# Spec Delta
+# chats Specification
 
 ## Purpose
-
 Defines chats: conversations of a board member with one persona in one project, stored as tasks of kind `chat`. Covers how a chat starts, its topic, what its runs may do, how it is archived and unarchived, and how chat runs share the instance's capacity.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Starting a chat
 A board member SHALL be able to start a chat in a project by choosing a persona and writing a first message. The chat SHALL be a task of kind `chat` without a parent, created by that board member. The first message SHALL be queued as an ordinary message from the board member, followed by the hidden `set_task_title` instruction. Agents SHALL NOT be able to start chats.
@@ -44,7 +43,7 @@ Every run of a chat SHALL receive the persona's system prompt followed by fixed 
 - **THEN** its system prompt contains no chat instructions
 
 ### Requirement: Tools of a chat run
-A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress` and `request_approval`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
+A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts` and `read_artifact`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
 
 #### Scenario: Delegation from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `create_task` for persona Linus
@@ -55,7 +54,11 @@ A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `s
 - **THEN** the call returns a tool error and the chat's status is unchanged
 
 ### Requirement: Read-only checkout
-A chat run SHALL work in a checkout of the project's base branch, reset to the remote base branch at the start of every run, discarding local changes. A chat SHALL have no task branch, no WIP branch and no pull request.
+A chat run SHALL work in a checkout of the project's base branch, reset to the remote base branch at the start of every run, discarding local changes. A chat SHALL have no task branch, no WIP branch and no pull request, and SHALL NOT be the base task of another task.
+
+#### Scenario: Chat as base task
+- **WHEN** an agent calls `create_task` with `base_task: DF-12-CHAT`
+- **THEN** the call returns a tool error and no task is created
 
 #### Scenario: Base branch moved between runs
 - **WHEN** `main` gained a commit after the previous run of `DF-12-CHAT`, which had left an edited file
@@ -77,11 +80,15 @@ A board member SHALL be able to stop a chat's run and to archive and unarchive a
 - **THEN** the request is rejected and nothing changes
 
 ### Requirement: Archiving a chat
-Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request. Archiving SHALL NOT change the chat's subtasks.
+Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request. Archiving SHALL release a run of the chat that waits in its keep-alive window. Archiving SHALL NOT change the chat's subtasks.
 
 #### Scenario: Archive an idle chat
 - **WHEN** a board member archives `DF-12-CHAT` in status `waiting`
 - **THEN** the chat is archived, its status stays `waiting` and an audit entry `chat.archive` names the board member
+
+#### Scenario: Archive with an idle run
+- **WHEN** a board member archives `DF-12-CHAT` in status `waiting` while its run waits in its keep-alive window after a turn
+- **THEN** the run is released and the chat's status stays `waiting`
 
 #### Scenario: Archive while running
 - **WHEN** a board member archives `DF-12-CHAT` while its run is active
@@ -104,7 +111,7 @@ An archived chat SHALL take no messages from board members and SHALL NOT start r
 
 #### Scenario: Subtask ends while archived
 - **WHEN** subtask `DF-20` of archived `DF-12-CHAT` completes
-- **THEN** a child-ended message is queued on `DF-12-CHAT`, the chat stays archived and no run starts
+- **THEN** a child-ended message is queued on `DF-12-CHAT`, the chat stays archived and becomes `queued`, and no run starts
 
 ### Requirement: Unarchiving a chat
 Unarchiving SHALL clear the archive record and write an audit entry `chat.unarchive`. If messages are queued on the chat, it SHALL become `queued` and start a run under the chat concurrency limit.
