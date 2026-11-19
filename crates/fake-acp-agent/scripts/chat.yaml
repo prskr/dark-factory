@@ -1,0 +1,85 @@
+# Script of the chat scenario of the e2e suite (project `CH`, `iter3-chats`): one script serves the
+# chat and the tasks it creates, told apart by markers in their prompts. No key is predicted: the
+# chat saves the key of the implementation (`${impl}`, kept in the working directory for its later
+# turns). Every turn plays the same `when` blocks, because a woken chat may be a live or a resumed
+# session.
+#
+# 1. `[chat]` sets the topic, creates the implementation and a review that depends on its
+#    completion, and tries to push from its read-only checkout (the Git proxy rejects it; the
+#    output is in the transcript).
+# 2. `[chat-impl]` starts and stays in its turn until a board member interrupts it; the message
+#    `[chat-finish]` that follows completes the task.
+# 3. `[chat-review]` completes when the implementation did.
+# 4. The chat is woken by each child; it says what arrived.
+sessions:
+  new:
+    - &turn
+      - when:
+          prompt_contains: "[chat]"
+          steps:
+            - mcp:
+                server: factory
+                tool: set_task_title
+                args:
+                  title: Helm chart plan
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Chat implementation
+                  prompt: "[chat-impl] Write the chart."
+                save:
+                  impl: /key
+            - mcp:
+                server: factory
+                tool: create_task
+                args:
+                  persona: e2e
+                  title: Chat review
+                  prompt: "[chat-review] Review the chart."
+                  depends_on:
+                    - task: "${impl}"
+                      kind: completion
+            - say_shell: "git push origin HEAD:refs/heads/chat-must-not-push 2>&1 || true"
+            - say: "Delegated the chart; waiting for the children."
+      - when:
+          prompt_contains: "[chat-impl]"
+          steps:
+            - say: "Starting the chart."
+            - end: hang
+      - when:
+          prompt_contains: "[chat-finish]"
+          steps:
+            - say: "Finished the chart."
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Chart written."
+      - when:
+          prompt_contains: "[chat-review]"
+          steps:
+            - say: "Reviewed the chart."
+            - mcp:
+                server: factory
+                tool: complete_task
+                args:
+                  summary: "Chart reviewed."
+      - when:
+          prompt_contains: '"Chat implementation" completed'
+          steps:
+            - say: "The implementation is in."
+      - when:
+          prompt_contains: '"Chat review" completed'
+          steps:
+            - say: "The review is in."
+      - end: end_turn
+    - *turn
+    - *turn
+    - *turn
+  loaded:
+    - *turn
+    - *turn
+    - *turn
+    - *turn

@@ -126,6 +126,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - The task counts of the project list stay underlined accent links in mono; the board "Settings · projects, two-line rows (1350)" draws them as plain numbers in status tones (`ui-settings-list-rows`).
+- The "Context" panel in the Overview of the Chat boards (and "Project context" link) is not built (`iter3-project-context`, undecided).
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
 ## Mapping views to boards
@@ -242,6 +243,29 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks - Artifacts / Phone · artifact page | `/tasks/<key>/artifacts/findings.md` | as Desktop · artifacts tab | 390 |
 | Empty states / Empty · no tasks (phone) | `/tasks` | no active tasks | 390 |
 | Empty states / Empty · no requests | `/requests` | no pending requests | 1440 |
+| Chat / Chat · conversation | `/chats/<key>` | manual seed (not built): project DF with chats DF-12-CHAT (Linus, `running`, topic "Task dependencies plan", artifact `task-dependencies-plan.md`, 3 runs), Grace's "Helm chart for iteration 3" with a pending approval request (needs you, listed first), two idle chats of Ada and Linus; projects WEB, HELM (needs you), DOC without chats; 6 archived chats | 1440 |
+| Chat / Chat · subtasks tab, compaction | `/chats/<key>` | as Chat · conversation; DF-12-CHAT created DF-20 (`running`) and DF-21 (`awaiting_dependencies`) via `create_task`, a `context_compacted` notice expanded; Subtasks tab open | 1440 |
+| Chat / Chat · artifacts tab | `/chats/<key>` | as Chat · conversation; Artifacts tab open | 1440 |
+| Chat / Chat · artifacts tab, scrolled | `/chats/<key>` | as above with seven artifacts, scrolled | 1440 |
+| Chat / Chat · markdown split, sidebars collapsed | `/chats/<key>` | as Chat · conversation; `task-dependencies-plan.md` opened from the transcript, chat list collapsed to the persona strip, details collapsed | 1440 |
+| Chat / Chat · new chat | `/chats?project=DF` | as Chat · conversation; "New chat" clicked, message written | 1440 |
+| Chat / Chat · new chat, persona picker | `/chats?project=DF` | as above; persona picker open | 1440 |
+| Chat / Chat · new chat started | `/chats/<key>` | as above after sending to Grace: DF-25-CHAT `running`, topic not set yet | 1440 |
+| Chat / Chat · empty project | `/chats?project=DOC` | project DOC without chats | 1440 |
+| Chat / Archive · list | `/chats?project=DF` | as Chat · conversation; "Archived chats" clicked | 1440 |
+| Chat / Archive · chat selected, transcript | `/chats?project=DF` | as above; an archived chat selected, Transcript tab | 1440 |
+| Chat / Archive · chat selected, artifacts | `/chats?project=DF` | as above; Artifacts tab | 1440 |
+| Chat / Archive · artifact opened | `/chats?project=DF` | as above; an artifact opened | 1440 |
+| Chat / Phone · chats | `/chats?project=DF` | as Chat · conversation | 390 |
+| Chat / Phone · chat | `/chats/<key>` | as Chat · conversation | 390 |
+| Chat / Phone · chat details | `/chats/<key>` | as above; details sheet open, Overview | 390 |
+| Chat / Phone · chat subtasks | `/chats/<key>` | as Chat · subtasks tab, compaction; details sheet, Subtasks | 390 |
+| Chat / Phone · chat artifacts | `/chats/<key>` | as above; details sheet, Artifacts | 390 |
+| Chat / Phone · artifact opened | `/chats/<key>` | as above; an artifact opened | 390 |
+| Chat / Phone · new chat | `/chats?project=DF` | as Chat · new chat | 390 |
+| Chat / Phone · new chat, persona picker | `/chats?project=DF` | as Chat · new chat, persona picker | 390 |
+| Chat / Phone · archived chats | `/chats?project=DF` | as Archive · list | 390 |
+| Chat / Phone · archived chat | `/chats?project=DF` | as Archive · chat selected, transcript | 390 |
 
 The remaining boards follow the same pattern.
 

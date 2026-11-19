@@ -4,9 +4,10 @@
 mod routes;
 mod view;
 
-pub(crate) use routes::{load_cards, routes};
+pub(crate) use routes::{load_cards, rendered_artifact, routes};
 pub(crate) use view::{
-    ArtifactCard, artifact_row, details_heading, split_args, split_pane, tab_panel,
+    ArtifactCard, Place, artifact_row, card_grid, chat_details_heading, details_heading,
+    split_args, split_pane, tab_panel,
 };
 
 #[cfg(test)]

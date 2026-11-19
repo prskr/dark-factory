@@ -233,6 +233,18 @@ async fn the_split_fragment_has_full_page_and_close_actions_the_page_has_a_way_b
     assert!(!page.contains("aria-label=\"Close artifact\""), "{page}");
 }
 
+// Scenario "Artifact on a phone": the page fills the screen, so the bottom bar and the floating
+// create button hide like on the transcript screen (`data-view="task"`).
+#[tokio::test]
+async fn the_artifact_page_hides_the_bottom_bar_and_the_create_button_on_a_phone() {
+    let (app, cookie) = app_with_task().await;
+    write(&app, "DF-1", "findings.md", b"# F").await;
+
+    let page = text(app.get("/tasks/DF-1/artifacts/findings.md", &cookie).await).await;
+
+    assert!(page.contains("data-view=\"task\""), "{page}");
+}
+
 #[tokio::test]
 async fn unknown_names_and_tasks_give_not_found() {
     let (app, cookie) = app_with_task().await;

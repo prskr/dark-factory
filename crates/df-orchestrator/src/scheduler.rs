@@ -254,6 +254,7 @@ impl Scheduler {
             &self.ctx.pool,
             START_BATCH,
             self.ctx.config.runs.max_concurrent,
+            self.ctx.config.runs.max_concurrent_chats,
         )
         .await?)
     }
@@ -464,5 +465,7 @@ impl Drop for InFlight {
 
 #[cfg(test)]
 mod base_branch_tests;
+#[cfg(test)]
+mod chat_tests;
 #[cfg(test)]
 mod tests;

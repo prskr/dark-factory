@@ -9,6 +9,8 @@ use crate as df_db;
 use crate::tasks::tests::seed_project_and_persona;
 use crate::{NewTask, TaskRow, create_task};
 
+mod chat_start;
+
 /// `runs.maxAutoResumes` of the tests.
 const MAX_AUTO_RESUMES: u32 = 3;
 
@@ -508,7 +510,7 @@ async fn only_due_tasks_start_and_a_rate_limited_one_needs_no_message() {
     park_seed_task(&env).await;
     let due = due_task(&env, "due", "rate_limited", "-1 minute").await;
     due_task(&env, "later", "queued", "5 minutes").await;
-    let started = start_queued_runs(&pool, 10, 4).await.unwrap();
+    let started = start_queued_runs(&pool, 10, 4, 2).await.unwrap();
     assert_eq!(started.iter().map(|r| r.task_id).collect::<Vec<_>>(), [due]);
     let state = task_resume_state(&pool, due).await;
     assert_eq!((state.status.as_str(), state.resume_at), ("running", None));
@@ -535,7 +537,12 @@ async fn a_start_attempt_at_the_limit_releases_the_start_lock_at_once() {
         .await
         .unwrap();
 
-    assert!(start_queued_runs(&stuck, 10, 1).await.unwrap().is_empty());
+    assert!(
+        start_queued_runs(&stuck, 10, 1, 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 
     let mut other = sqlx::PgConnection::connect_with(&pool.connect_options())
         .await
@@ -560,16 +567,16 @@ async fn the_concurrency_limit_holds_further_tasks_and_the_oldest_resume_time_go
     let other = due_task(&env, "busy", "running", "0 seconds").await;
     env.insert_run(other, 1, "running").await;
 
-    let first = start_queued_runs(&pool, 10, 2).await.unwrap();
+    let first = start_queued_runs(&pool, 10, 2, 2).await.unwrap();
     assert_eq!(first.iter().map(|r| r.task_id).collect::<Vec<_>>(), [older]);
     // The limit is reached: nothing more starts until a run ends.
-    assert!(start_queued_runs(&pool, 10, 2).await.unwrap().is_empty());
+    assert!(start_queued_runs(&pool, 10, 2, 2).await.unwrap().is_empty());
     sqlx::query("UPDATE runs SET state = 'succeeded' WHERE task_id = $1")
         .bind(other.as_uuid())
         .execute(&pool)
         .await
         .unwrap();
-    let second = start_queued_runs(&pool, 10, 2).await.unwrap();
+    let second = start_queued_runs(&pool, 10, 2, 2).await.unwrap();
     assert_eq!(
         second.iter().map(|r| r.task_id).collect::<Vec<_>>(),
         [newer]
@@ -591,8 +598,8 @@ async fn two_replicas_fill_the_last_slot_only_once() {
             .await
             .unwrap();
         let (a, b) = tokio::join!(
-            start_queued_runs(&pool, 10, 1),
-            start_queued_runs(&pool, 10, 1)
+            start_queued_runs(&pool, 10, 1, 1),
+            start_queued_runs(&pool, 10, 1, 1)
         );
         let started = a.unwrap().len() + b.unwrap().len();
         assert_eq!(started, 1);

@@ -29,6 +29,9 @@ with a fallback.
 - Completing or cancelling a task closes its pending requests.
 - Raising, deciding and closing are audited.
 
+A request of a [chat](chats.md) is listed like any other; its link opens the chat page, and the
+chat is marked as needing you until the request is decided.
+
 The request card on the task timeline keeps the answer or approval outcome and who decided it.
 The decision message is hidden in the transcript and queued-message stack, so the answer does not
 appear a second time. Its full content still reaches the agent.

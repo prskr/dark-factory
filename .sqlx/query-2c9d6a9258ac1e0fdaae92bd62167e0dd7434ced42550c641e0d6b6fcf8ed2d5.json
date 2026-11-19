@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.kind AS \"kind!\", count(*) AS \"active!\" FROM runs r\n           JOIN tasks t ON t.id = r.task_id WHERE r.state <> ALL($1) GROUP BY t.kind",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "active!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "2c9d6a9258ac1e0fdaae92bd62167e0dd7434ced42550c641e0d6b6fcf8ed2d5"
+}

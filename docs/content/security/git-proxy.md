@@ -44,6 +44,9 @@ Anything else (another branch, a tag, a force-push under the `never` policy, ano
 branch, the key's own `factory/task/<KEY>` while the task works on an existing branch) rejects the
 whole push before the forge is contacted. Git prints the reason, prefixed with `df:`.
 
+The sandbox of a [chat](../using/chats.md) may not push at all: every ref update of a chat run is
+rejected with `df:read-only`, whatever the ref. Fetching works as for a task.
+
 Under `with-lease` the proxy does not check ancestry: it forwards the update with the old value
 the client sent, and the forge rejects it if the branch moved since (`--force-with-lease`). The
 runtime only sends such an update expecting the commit it last pushed or fetched itself. An agent

@@ -8,6 +8,7 @@
 //! - `task_message_changed` `{task_id}` (a queued message was edited or removed)
 //! - `request_changed` `{task_id, request_id}`
 //! - `run_interrupt` `{run_id, by}` (a board member interrupts the turn of the run)
+//! - `release_idle` `{run_id}` (the scheduler needs the slot of an idle chat run)
 //! - `egress_policy` `{}`
 //! - `outbox` `{}` (a job was enqueued)
 
@@ -34,6 +35,7 @@ pub const CHANNEL_TASK_MESSAGE_QUEUED: &str = "task_message_queued";
 pub const CHANNEL_TASK_MESSAGE_CHANGED: &str = "task_message_changed";
 pub const CHANNEL_REQUEST_CHANGED: &str = "request_changed";
 pub const CHANNEL_RUN_INTERRUPT: &str = "run_interrupt";
+pub const CHANNEL_RELEASE_IDLE: &str = "release_idle";
 pub const CHANNEL_EGRESS_POLICY: &str = "egress_policy";
 pub const CHANNEL_OUTBOX: &str = "outbox";
 
@@ -45,6 +47,7 @@ pub const ALL_CHANNELS: &[&str] = &[
     CHANNEL_TASK_MESSAGE_CHANGED,
     CHANNEL_REQUEST_CHANGED,
     CHANNEL_RUN_INTERRUPT,
+    CHANNEL_RELEASE_IDLE,
     CHANNEL_EGRESS_POLICY,
     CHANNEL_OUTBOX,
 ];
@@ -81,6 +84,11 @@ pub enum Notification {
         by: String,
         /// The open turn the interrupt is for (`turn_id` of its `TurnStarted`).
         turn_id: String,
+    },
+    /// A chat is queued and no chat slot is free: the session of this idle chat run releases it
+    /// like an expired keep-alive. Best effort: the scheduler asks again while the chat waits.
+    ReleaseIdle {
+        run_id: RunId,
     },
     EgressPolicy,
     /// An outbox job was enqueued.
@@ -121,6 +129,11 @@ struct RunInterruptPayload {
 }
 
 #[derive(Serialize, Deserialize)]
+struct RunIdPayload {
+    run_id: RunId,
+}
+
+#[derive(Serialize, Deserialize)]
 struct EmptyPayload {}
 
 impl Notification {
@@ -135,6 +148,7 @@ impl Notification {
             Self::TaskMessageChanged { .. } => Some(CHANNEL_TASK_MESSAGE_CHANGED),
             Self::RequestChanged { .. } => Some(CHANNEL_REQUEST_CHANGED),
             Self::RunInterrupt { .. } => Some(CHANNEL_RUN_INTERRUPT),
+            Self::ReleaseIdle { .. } => Some(CHANNEL_RELEASE_IDLE),
             Self::EgressPolicy => Some(CHANNEL_EGRESS_POLICY),
             Self::Outbox => Some(CHANNEL_OUTBOX),
             Self::Reconnected => None,
@@ -171,6 +185,7 @@ impl Notification {
                 by: by.clone(),
                 turn_id: turn_id.clone(),
             }),
+            Self::ReleaseIdle { run_id } => serde_json::to_string(&RunIdPayload { run_id }),
             Self::EgressPolicy | Self::Outbox => serde_json::to_string(&EmptyPayload {}),
             Self::Reconnected => Err(serde::ser::Error::custom(
                 "Notification::Reconnected is local-only and has no wire payload",
@@ -224,6 +239,10 @@ impl Notification {
                     by: p.by,
                     turn_id: p.turn_id,
                 })
+            }
+            CHANNEL_RELEASE_IDLE => {
+                let p: RunIdPayload = serde_json::from_str(payload)?;
+                Ok(Self::ReleaseIdle { run_id: p.run_id })
             }
             CHANNEL_EGRESS_POLICY => {
                 let _: EmptyPayload = serde_json::from_str(payload)?;
@@ -288,8 +307,8 @@ impl Notifier {
         self.tx.subscribe()
     }
 
-    #[cfg(test)]
-    pub(crate) fn subscribers(&self) -> usize {
+    /// How many receivers of [`Self::subscribe`] exist; tests wait on it until a session listens.
+    pub fn subscribers(&self) -> usize {
         self.tx.receiver_count()
     }
 }

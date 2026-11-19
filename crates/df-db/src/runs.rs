@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use df_core::config::RunsConfig;
 use df_core::run_transition::{FinalizeReason, RunEnd, RunEvent, STOP_TIMEOUT_SECONDS};
 use df_core::task_transition::TaskEvent;
-use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskStatus};
+use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskKind, TaskStatus};
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -288,6 +288,7 @@ pub async fn start_queued_runs(
     pool: &PgPool,
     limit: i64,
     max_concurrent: u32,
+    max_concurrent_chats: u32,
 ) -> Result<Vec<RunRow>, DbError> {
     let mut tx = pool.begin().await?;
     let locked = sqlx::query_scalar!(
@@ -302,37 +303,36 @@ pub async fn start_queued_runs(
         tx.rollback().await?;
         return Ok(Vec::new());
     }
-    let active = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "active!" FROM runs WHERE state <> ALL($1)"#,
+    // Tasks and chats have a budget each.
+    let active = sqlx::query!(
+        r#"SELECT t.kind AS "kind!", count(*) AS "active!" FROM runs r
+           JOIN tasks t ON t.id = r.task_id WHERE r.state <> ALL($1) GROUP BY t.kind"#,
         &state_list(RunState::TERMINAL)
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    let free = i64::from(max_concurrent).saturating_sub(active);
-    if free <= 0 {
-        tx.rollback().await?;
-        return Ok(Vec::new());
-    }
-    // ponytail: `updated_at` approximates the time a task became queued; add a status change
-    // column if other writes to a queued task make the order drift.
-    // `resumed`: the task starts from its resume time (rate limit, infrastructure failure).
-    let tasks = sqlx::query!(
-        r#"
-        SELECT t.id, t.resume_at IS NOT NULL AS "resumed!" FROM tasks t
-        WHERE t.status = ANY($3)
-          AND (t.resume_at IS NULL OR t.resume_at <= now())
-          AND NOT EXISTS (
-              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))
-        ORDER BY COALESCE(t.resume_at, t.updated_at), t.created_at
-        LIMIT $1
-        FOR UPDATE OF t SKIP LOCKED
-        "#,
-        limit.min(free),
-        &state_list(RunState::TERMINAL),
-        &status_list(TaskStatus::WAITS_FOR_RESUME)
     )
     .fetch_all(&mut *tx)
     .await?;
+    let active_of = |kind: TaskKind| {
+        active
+            .iter()
+            .find(|row| row.kind == kind.as_str())
+            .map_or(0, |row| row.active)
+    };
+    let free_tasks = i64::from(max_concurrent).saturating_sub(active_of(TaskKind::Task));
+    let free_chats = i64::from(max_concurrent_chats).saturating_sub(active_of(TaskKind::Chat));
+    let mut tasks = Vec::new();
+    for (kind, free) in [(TaskKind::Task, free_tasks), (TaskKind::Chat, free_chats)] {
+        if free > 0 {
+            tasks.extend(due_tasks(&mut tx, kind, limit.min(free)).await?);
+        }
+    }
+    if free_chats <= 0 {
+        release_idle_chat_run(&mut tx).await?;
+    }
+    if tasks.is_empty() {
+        // Releasing a run is published, so the transaction commits.
+        tx.commit().await?;
+        return Ok(Vec::new());
+    }
 
     let actor = Principal::system("run.started");
     let mut started = Vec::with_capacity(tasks.len());
@@ -366,6 +366,71 @@ pub async fn start_queued_runs(
     }
     tx.commit().await?;
     Ok(started)
+}
+
+/// A due task as [`due_tasks`] reads it. `resumed`: the task starts from its resume time (rate
+/// limit, infrastructure failure).
+struct DueTask {
+    id: Uuid,
+    resumed: bool,
+}
+
+/// The oldest due tasks of `kind` without an active run, locked, skipping archived chats: a
+/// message queued on an archived chat starts nothing until it is unarchived. A task is due when
+/// its status waits for resume and its resume time is unset or past.
+///
+/// ponytail: `updated_at` approximates the time a task became queued; add a status change
+/// column if other writes to a queued task make the order drift.
+async fn due_tasks(
+    tx: &mut Transaction<'_, Postgres>,
+    kind: TaskKind,
+    limit: i64,
+) -> Result<Vec<DueTask>, DbError> {
+    Ok(sqlx::query_as!(
+        DueTask,
+        r#"
+        SELECT t.id, t.resume_at IS NOT NULL AS "resumed!" FROM tasks t
+        WHERE t.kind = $4
+          AND t.archived_at IS NULL
+          AND t.status = ANY($3)
+          AND (t.resume_at IS NULL OR t.resume_at <= now())
+          AND NOT EXISTS (
+              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))
+        ORDER BY COALESCE(t.resume_at, t.updated_at), t.created_at
+        LIMIT $1
+        FOR UPDATE OF t SKIP LOCKED
+        "#,
+        limit,
+        &state_list(RunState::TERMINAL),
+        &status_list(TaskStatus::WAITS_FOR_RESUME),
+        kind.as_str()
+    )
+    .fetch_all(&mut **tx)
+    .await?)
+}
+
+/// A chat is due and every chat slot is taken: asks the session of the chat run that has waited
+/// longest after a turn to release it (`ReleaseIdle`). Nothing happens without an idle chat run.
+/// The released chat keeps its status; the next pass starts the queued chat in the freed slot.
+async fn release_idle_chat_run(tx: &mut Transaction<'_, Postgres>) -> Result<(), DbError> {
+    if due_tasks(tx, TaskKind::Chat, 1).await?.is_empty() {
+        return Ok(());
+    }
+    let idle = sqlx::query_scalar!(
+        r#"
+        SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+        WHERE t.kind = 'chat' AND r.state = 'awaiting_input' AND r.stop_requested_at IS NULL
+        ORDER BY r.idle_since, r.started_at
+        LIMIT 1
+        "#
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(run_id) = idle {
+        let run_id = RunId::from_uuid(run_id);
+        publish(&mut **tx, &Notification::ReleaseIdle { run_id }).await?;
+    }
+    Ok(())
 }
 
 /// Applies the runtime's idle phases: `idle` moves the run to `awaiting_input` and the task to
@@ -576,6 +641,21 @@ pub(crate) async fn active_run_of_task(
         "SELECT id FROM runs WHERE task_id = $1 AND state <> ALL($2)",
         task_id.as_uuid(),
         &state_list(RunState::TERMINAL)
+    )
+    .fetch_optional(executor)
+    .await?
+    .map(RunId::from_uuid))
+}
+
+/// The run of the task that waits for the next message in its keep-alive window.
+pub(crate) async fn idle_run_of_task(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+) -> Result<Option<RunId>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT id FROM runs WHERE task_id = $1 AND state = $2",
+        task_id.as_uuid(),
+        RunState::AwaitingInput.as_str()
     )
     .fetch_optional(executor)
     .await?

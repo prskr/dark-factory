@@ -262,7 +262,14 @@ async fn cancel_tasks(world: &World, teardown: &mut Teardown) {
             return;
         }
         for key in fresh {
-            if let Err(e) = cancel(world, &key, &mut teardown.notes).await {
+            // A chat can't be cancelled and its runs end with their turn (`keepAliveSeconds: 0`):
+            // it is only looked at for the tasks it created.
+            let cancelled = if df_core::is_chat_key(&key) {
+                Ok(())
+            } else {
+                cancel(world, &key, &mut teardown.notes).await
+            };
+            if let Err(e) = cancelled {
                 teardown.notes.push(format!("cancel {key}: {e:#}"));
                 teardown.leaked.push(key.clone());
             } else if let Err(e) = wait_for_runs_to_end(&world.pool, &key).await {

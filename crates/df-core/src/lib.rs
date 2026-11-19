@@ -34,7 +34,7 @@ pub use config::{
 };
 pub use domain::{
     CAPACITY_DETAIL, DependencyKind, PERSONA_DESCRIPTION_MAX_CHARS, ParseEnumError, Principal,
-    RunOutcome, RunState, StatusGroup, StatusSet, TaskSort, TaskStatus, is_satisfied,
+    RunOutcome, RunState, StatusGroup, StatusSet, TaskKind, TaskSort, TaskStatus, is_satisfied,
     system_reason,
 };
 pub use forge::ForgeKind;
@@ -42,7 +42,7 @@ pub use ids::{
     CredentialRefId, EgressEntryId, PersonaId, ProjectId, PromptId, RequestId, RunId, TaskId,
     ToolCallId, UserId,
 };
-pub use keys::{KeyError, ProjectKey, TaskKey};
+pub use keys::{KeyError, ProjectKey, TaskKey, is_chat_key};
 pub use lifecycle::{EventType, InstanceSubscription, LifecycleEventsConfig};
 pub use seams::{
     Author, AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,

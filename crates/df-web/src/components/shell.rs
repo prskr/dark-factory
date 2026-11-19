@@ -9,7 +9,8 @@ use crate::requests::count_badge;
 /// Where the docs of every version live (`docs/` of the repository, published per release).
 pub(crate) const DOCS_URL: &str = "https://www.dark-factory.eu/docs";
 
-const SECTIONS: [(Nav, &str, &str, Icon); 3] = [
+const SECTIONS: [(Nav, &str, &str, Icon); 4] = [
+    (Nav::Chats, "/chats", "Chats", Icon::Chat),
     (Nav::Tasks, "/tasks", "Tasks", Icon::Tasks),
     (Nav::Requests, "/requests", "Requests", Icon::Inbox),
     (
@@ -152,12 +153,13 @@ fn rail_link(current: bool, href: &str, label: &str, glyph: Icon, requests: bool
     }
 }
 
-/// Bottom bar below 768 px: Tasks, Requests and Projects at equal widths. Personas and
+/// Bottom bar below 768 px: Chats, Tasks, Requests and Projects at equal widths. Personas and
 /// credentials are not part of it.
 pub fn bottom_bar(active: Nav) -> Markup {
     html! {
         nav id="mobile-menu" aria-label="Main"
             class="bottombar fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-line bg-panel md:hidden [body[data-view=task]_&]:hidden" {
+            (bar_link(active, Nav::Chats, "/chats", "Chats", Icon::Chat))
             (bar_link(active, Nav::Tasks, "/tasks", "Tasks", Icon::Tasks))
             (bar_link(active, Nav::Requests, "/requests", "Requests", Icon::Inbox))
             (bar_link(active, Nav::Projects, "/projects", "Projects", Icon::Projects))
@@ -385,17 +387,36 @@ mod tests {
     }
 
     #[test]
-    fn bottom_bar_shows_tasks_requests_and_projects_without_a_create_action() {
+    fn bottom_bar_shows_chats_tasks_requests_and_projects_without_a_create_action() {
         let html = bottom_bar(Nav::Tasks).into_string();
         assert!(html.contains("md:hidden") && html.contains("min-h-11"));
-        for href in ["/tasks", "/requests", "/projects"] {
+        for href in ["/chats", "/tasks", "/requests", "/projects"] {
             assert!(html.contains(&format!("href=\"{href}\"")), "{href}");
         }
-        assert_eq!(html.matches("flex-1 flex-col").count(), 3, "equal widths");
+        assert!(
+            html.find("href=\"/chats\"").unwrap() < html.find("href=\"/tasks\"").unwrap(),
+            "Chats is the first entry: {html}"
+        );
+        assert_eq!(html.matches("flex-1 flex-col").count(), 4, "equal widths");
         for hidden in ["/personas", "/credentials", "Log out", "logout", "hx-get"] {
             assert!(!html.contains(hidden), "{hidden}");
         }
         assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
+    }
+
+    #[test]
+    fn the_rail_has_chats_above_tasks_and_marks_chats_on_the_chat_page() {
+        let html = rail(Nav::Chats, "/tasks/compose", &shell("Ada", "dev")).into_string();
+        let chats = html
+            .find("href=\"/chats\" aria-label=\"Chats\" title=\"Chats\" aria-current=\"page\"")
+            .expect("Chats marked as current");
+        assert!(chats < html.find("href=\"/tasks\" aria-label=\"Tasks\"").unwrap());
+        assert_eq!(html.matches("aria-current=\"page\"").count(), 1, "{html}");
+        // The rail's create action stays a task, also on the chat page.
+        assert!(html.contains("aria-label=\"New task\""), "{html}");
+        let bar = bottom_bar(Nav::Chats).into_string();
+        let current = &bar[bar.find("aria-current").unwrap()..];
+        assert!(current.contains("Chats"), "{bar}");
     }
 
     #[test]

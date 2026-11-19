@@ -6,13 +6,14 @@ mod resume;
 mod subtasks;
 mod view;
 
-use axum::extract::{Form, Path, Query, State};
+use axum::extract::{Form, FromRequestParts, MatchedPath, Path, Query, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, patch, post};
 use axum::{Extension, Router};
 use df_core::{
-    ExistingBranch, PersonaId, ProjectId, PromptId, TITLE_MAX_CHARS, TaskId, TaskKey,
+    ExistingBranch, PersonaId, ProjectId, PromptId, TITLE_MAX_CHARS, TaskId, TaskKey, TaskKind,
     sanitize_title, title_too_long,
 };
 use df_db::task_views::{Dependencies, RunView, TaskDetail};
@@ -36,9 +37,9 @@ pub(crate) use resume::ResumeNote;
 pub(crate) use subtasks::tab_panel as subtasks_panel;
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
-    interruptible, list_column, pending_region, runs_region, task_rows,
+    interruptible, list_column, message_area, pending_region, runs_region, status_name, task_rows,
 };
-use view::{composer_dialog, composer_form, details_column, message_area};
+use view::{composer_dialog, composer_form, details_column};
 
 /// How many transcript rows the detail page renders at once.
 const PAGE_BATCH: i64 = 1000;
@@ -202,15 +203,7 @@ fn selected_columns(s: &Selected) -> Markup {
             (head_region(&s.detail, None))
             div class="flex min-h-0 flex-1" {
                 div class="flex min-w-0 flex-1 flex-col" {
-                    // Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
-                    // messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
-                    // re-runs `x-init`, so opening another task lands at the bottom too.
-                    div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
-                        x-data="{ pinned: true }"
-                        x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
-                        "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
-                        (render_transcript(s.folder.items(), &timeline_cards(&s.requests)))
-                    }
+                    (transcript_scroll(render_transcript(s.folder.items(), &timeline_cards(&s.requests))))
                     (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
                 }
                 (crate::artifacts::split_pane())
@@ -228,8 +221,24 @@ fn selected_columns(s: &Selected) -> Markup {
     }
 }
 
+/// The scrolling container of the transcript.
+///
+/// Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
+/// messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
+/// re-runs `x-init`, so opening another task lands at the bottom too.
+pub(crate) fn transcript_scroll(transcript: Markup) -> Markup {
+    html! {
+        div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
+            x-data="{ pinned: true }"
+            x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
+            "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
+            (transcript)
+        }
+    }
+}
+
 /// The request cards of a task with the time they were raised, for the timeline.
-fn timeline_cards(
+pub(crate) fn timeline_cards(
     requests: &[crate::requests::CardData],
 ) -> Vec<(chrono::DateTime<chrono::Utc>, Markup)> {
     requests
@@ -251,39 +260,43 @@ async fn task_list(
     workspace(&state, &user, &query.filters(), None).await
 }
 
-async fn task_detail(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    Path(key): Path<String>,
-    Query(query): Query<ListQuery>,
-) -> Response {
-    let task = match task_by_key(&state, &key).await {
-        Ok(task) => task,
-        Err(response) => return *response,
-    };
-    let id = TaskId::from_uuid(task.id);
-    let mut folder =
-        Folder::new(task.persona_name.clone()).with_hidden_blocks(state.show_hidden_blocks);
+/// The transcript of a task or chat as the page shows it: every stored event folded.
+pub(crate) async fn load_folder(
+    state: &WebState,
+    id: TaskId,
+    persona_name: &str,
+) -> Result<Folder, df_db::DbError> {
+    let mut folder = Folder::new(persona_name).with_hidden_blocks(state.show_hidden_blocks);
     loop {
-        let rows = match df_db::task_views::transcript_after(
-            &state.pool,
-            id,
-            folder.last_id(),
-            PAGE_BATCH,
-        )
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => return internal_error(&e),
-        };
+        let rows =
+            df_db::task_views::transcript_after(&state.pool, id, folder.last_id(), PAGE_BATCH)
+                .await?;
         let done = i64::try_from(rows.len()).is_ok_and(|n| n < PAGE_BATCH);
         for row in &rows {
             folder.apply(row);
         }
         if done {
-            break;
+            return Ok(folder);
         }
     }
+}
+
+async fn task_detail(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    section: Section,
+    Path(key): Path<String>,
+    Query(query): Query<ListQuery>,
+) -> Response {
+    let task = match task_by_key(&state, section, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
+    };
+    let id = TaskId::from_uuid(task.id);
+    let folder = match load_folder(&state, id, &task.persona_name).await {
+        Ok(folder) => folder,
+        Err(e) => return internal_error(&e),
+    };
     let data = match load_detail(&state, task).await {
         Ok(data) => data,
         Err(e) => return internal_error(&e),
@@ -496,11 +509,57 @@ fn branch_held_message(branch: &str, holder: Option<TaskKey>) -> String {
     }
 }
 
-/// Loads a task by key; the error is the response to send.
-async fn task_by_key(state: &WebState, key: &str) -> Result<TaskDetail, Box<Response>> {
+/// Which pages a handler serves: the `/tasks` routes or the `/chats` routes, which share the
+/// handlers of messages, stop and interrupt. A key of the other kind is not found.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Section {
+    pub kind: TaskKind,
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Section {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let route = MatchedPath::from_request_parts(parts, state)
+            .await
+            .map_err(|_unrouted| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let kind = if route.as_str().starts_with("/chats") {
+            TaskKind::Chat
+        } else {
+            TaskKind::Task
+        };
+        Ok(Self { kind })
+    }
+}
+
+impl Section {
+    /// The not-found label of an entry of this section.
+    fn what(self) -> &'static str {
+        match self.kind {
+            TaskKind::Chat => "The chat",
+            TaskKind::Task => "The task",
+        }
+    }
+
+    /// Whether `key` is of the kind this section serves.
+    pub(crate) fn serves(self, key: &str) -> bool {
+        df_core::is_chat_key(key) == (self.kind == TaskKind::Chat)
+    }
+}
+
+/// Loads a task or chat by key; the error is the response to send. The key must be of the
+/// section's kind.
+pub(crate) async fn task_by_key(
+    state: &WebState,
+    section: Section,
+    key: &str,
+) -> Result<TaskDetail, Box<Response>> {
+    if !section.serves(key) {
+        return Err(Box::new(not_found(section.what())));
+    }
     match df_db::task_views::get_task_detail_by_key(&state.pool, key).await {
         Ok(Some(task)) => Ok(task),
-        Ok(None) => Err(Box::new(not_found("The task"))),
+        Ok(None) => Err(Box::new(not_found(section.what()))),
         Err(e) => Err(Box::new(internal_error(&e))),
     }
 }
@@ -513,10 +572,11 @@ fn has_choice(options: &[(String, String)], id: &uuid::Uuid) -> bool {
 async fn task_rename(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
     Form(form): Form<TitleForm>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -551,9 +611,10 @@ async fn task_rename(
 async fn task_done(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -568,12 +629,13 @@ async fn task_done(
 
 /// `POST /tasks/{key}/stop`: a board member stops the active run. The page follows through the
 /// live events, so the answer has no content (409 if there is no run to stop).
-async fn task_stop(
+pub(crate) async fn task_stop(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -587,12 +649,13 @@ async fn task_stop(
 /// `POST /tasks/{key}/interrupt`: a board member interrupts the running turn. The page follows
 /// through the live events, so the answer has no content. Without a running turn nothing
 /// happens and the answer is the pending region with the notice (409).
-async fn task_interrupt(
+pub(crate) async fn task_interrupt(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -613,9 +676,10 @@ async fn task_interrupt(
 async fn task_cancel(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -634,9 +698,10 @@ async fn task_cancel(
 async fn task_reset_workspace(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
 ) -> Response {
-    let task = match task_by_key(&state, &key).await {
+    let task = match task_by_key(&state, section, &key).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
@@ -690,22 +755,26 @@ async fn details_answer(
     }
 }
 
-async fn message_create(
+pub(crate) async fn message_create(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path(key): Path<String>,
     Form(form): Form<MessageForm>,
 ) -> Response {
     let Ok(task_key) = key.parse::<TaskKey>() else {
-        return not_found("The task");
+        return not_found(section.what());
     };
-    let task = match task_by_key(&state, &task_key.to_string()).await {
+    let task = match task_by_key(&state, section, &task_key.to_string()).await {
         Ok(task) => task,
         Err(response) => return *response,
     };
     let id = TaskId::from_uuid(task.id);
     let text = form.message.trim();
-    let error = if text.is_empty() {
+    let error = if task.archived_at.is_some() {
+        // An archived chat takes no messages from board members; its subtasks' messages still queue.
+        "This chat is archived. Unarchive it to write to it.".to_string()
+    } else if text.is_empty() {
         "Write a message first.".to_string()
     } else {
         let content = vec![ContentBlock {
@@ -727,6 +796,7 @@ async fn message_create(
         }
     };
     match stack(&state, &task, Some(&error)).await {
+        Ok(body) if task.archived_at.is_some() => (StatusCode::CONFLICT, body).into_response(),
         Ok(body) => invalid(body),
         Err(response) => *response,
     }
@@ -734,13 +804,14 @@ async fn message_create(
 
 /// `PATCH /tasks/{key}/messages/{id}`: replaces the text of a queued message that the agent has
 /// not received yet.
-async fn message_edit(
+pub(crate) async fn message_edit(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path((key, id)): Path<(String, String)>,
     Form(form): Form<MessageForm>,
 ) -> Response {
-    let (task, prompt) = match queued_target(&state, &key, &id).await {
+    let (task, prompt) = match queued_target(&state, section, &key, &id).await {
         Ok(target) => target,
         Err(response) => return *response,
     };
@@ -757,12 +828,13 @@ async fn message_edit(
 
 /// `DELETE /tasks/{key}/messages/{id}`: removes a queued message that the agent has not received
 /// yet.
-async fn message_remove(
+pub(crate) async fn message_remove(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: Section,
     Path((key, id)): Path<(String, String)>,
 ) -> Response {
-    let (task, prompt) = match queued_target(&state, &key, &id).await {
+    let (task, prompt) = match queued_target(&state, section, &key, &id).await {
         Ok(target) => target,
         Err(response) => return *response,
     };
@@ -779,10 +851,11 @@ async fn message_remove(
 /// The task and prompt of a request; the error is the response to send.
 async fn queued_target(
     state: &WebState,
+    section: Section,
     key: &str,
     id: &str,
 ) -> Result<(TaskDetail, PromptId), Box<Response>> {
-    let task = task_by_key(state, key).await?;
+    let task = task_by_key(state, section, key).await?;
     let prompt = id
         .parse::<PromptId>()
         .map_err(|_invalid_id| Box::new(not_found("The message")))?;

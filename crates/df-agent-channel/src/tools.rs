@@ -21,7 +21,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::ChannelContext;
-use crate::assign::tool_input_schemas;
+use crate::assign::{CHAT_TOOLS, tool_input_schemas};
 use crate::error::ChannelError;
 use df_orchestrator::OrchestratorError;
 use df_orchestrator::run_context::RunContext;
@@ -113,6 +113,15 @@ async fn try_execute(
             &Outcome::error(format!("unknown tool `{}`", request.tool_name)),
         ));
     };
+    if rc.is_chat() && !CHAT_TOOLS.contains(&request.tool_name.as_str()) {
+        return Ok(result(
+            &call_id,
+            &Outcome::error(format!(
+                "`{}` is not available in a chat",
+                request.tool_name
+            )),
+        ));
+    }
     let arguments: Value = if request.arguments_json.trim().is_empty() {
         Value::Object(serde_json::Map::new())
     } else {
@@ -638,6 +647,9 @@ fn forge_error(err: &IntegrationError) -> Outcome {
         other => format!("the forge request failed: {other}; retry later"),
     })
 }
+
+#[cfg(test)]
+mod chat_tests;
 
 #[cfg(test)]
 mod tests {

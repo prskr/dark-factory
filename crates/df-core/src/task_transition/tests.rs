@@ -773,6 +773,8 @@ fn event_name(event: &TaskEvent) -> &'static str {
         TaskEvent::Cancelled { .. } => "Cancelled",
         TaskEvent::DependencySatisfied => "DependencySatisfied",
         TaskEvent::ChildEnded(_) => "ChildEnded",
+        TaskEvent::Archived { .. } => "Archived",
+        TaskEvent::Unarchived => "Unarchived",
     }
 }
 
@@ -794,6 +796,10 @@ fn the_status_diagram_names_every_status_and_event() {
         TaskEvent::Cancelled { via: None },
         TaskEvent::DependencySatisfied,
         TaskEvent::ChildEnded(child(ChildEnd::Done)),
+        TaskEvent::Archived {
+            by: Principal::system("test"),
+        },
+        TaskEvent::Unarchived,
     ];
     for event in &events {
         assert!(

@@ -20,7 +20,7 @@ pub(crate) struct ArtifactCard {
 
 /// Where an artifact is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Place {
+pub(crate) enum Place {
     /// The split view of the task page: with a close action.
     Split,
     /// The artifact page.
@@ -28,7 +28,7 @@ pub(super) enum Place {
 }
 
 pub(super) fn artifact_url(task_key: &str, name: &str) -> String {
-    format!("/tasks/{task_key}/artifacts/{name}")
+    format!("{}/artifacts/{name}", crate::layout::item_path(task_key))
 }
 
 fn is_image(meta: &ArtifactMeta) -> bool {
@@ -106,27 +106,56 @@ pub(crate) fn cards(task_key: &str, artifacts: &[ArtifactCard]) -> Markup {
     html! {
         ul id="artifact-cards" class="space-y-3 p-4" {
             @for card in artifacts {
-                @let meta = &card.meta;
                 li {
-                    a href=(artifact_url(task_key, &meta.name)) "x-on:click.prevent"={"open('" (meta.name) "')"}
+                    a href=(artifact_url(task_key, &card.meta.name)) "x-on:click.prevent"={"open('" (card.meta.name) "')"}
                         class="block overflow-hidden rounded-xl border border-line bg-panel hover:border-line-strong" {
-                        @if is_image(meta) {
-                            img src={(artifact_url(task_key, &meta.name)) "/raw"} alt="" loading="lazy"
-                                class="h-28 w-full bg-sunk object-cover";
-                        } @else {
-                            pre class="h-28 overflow-hidden bg-sunk p-3 font-mono text-xs text-muted" { (preview_text(&card.preview)) }
-                        }
-                        div class="space-y-0.5 p-3" {
-                            div class="flex items-center gap-2 text-sm font-medium" {
-                                span class="text-muted" { (icon(if is_image(meta) { Icon::ImageFile } else { Icon::FileText })) }
-                                span class="min-w-0 flex-1 truncate" { (meta.name) }
-                            }
-                            div class="text-xs text-faint" {
-                                (type_label(&meta.mime_type)) " \u{b7} " (size_label(meta.size)) " \u{b7} " (time(meta.updated_at))
-                            }
-                        }
+                        (card_body(task_key, card))
                     }
                 }
+            }
+        }
+    }
+}
+
+/// The cards of an archived chat, several per row. `open_url` is where the card's artifact is
+/// shown: the link swaps it into the modal body.
+pub(crate) fn card_grid(
+    task_key: &str,
+    artifacts: &[ArtifactCard],
+    open_url: impl Fn(&str) -> String,
+) -> Markup {
+    html! {
+        ul class="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3" {
+            @for card in artifacts {
+                @let url = open_url(&card.meta.name);
+                li {
+                    a href=(url) hx-get=(url) hx-target="#archive-body" hx-swap="outerHTML"
+                        class="block overflow-hidden rounded-xl border border-line bg-panel hover:border-line-strong" {
+                        (card_body(task_key, card))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The preview and the caption of a card.
+fn card_body(task_key: &str, card: &ArtifactCard) -> Markup {
+    let meta = &card.meta;
+    html! {
+        @if is_image(meta) {
+            img src={(artifact_url(task_key, &meta.name)) "/raw"} alt="" loading="lazy"
+                class="h-28 w-full bg-sunk object-cover";
+        } @else {
+            pre class="h-28 overflow-hidden bg-sunk p-3 font-mono text-xs text-muted" { (preview_text(&card.preview)) }
+        }
+        div class="space-y-0.5 p-3" {
+            div class="flex items-center gap-2 text-sm font-medium" {
+                span class="text-muted" { (icon(if is_image(meta) { Icon::ImageFile } else { Icon::FileText })) }
+                span class="min-w-0 flex-1 truncate" { (meta.name) }
+            }
+            div class="text-xs text-faint" {
+                (type_label(&meta.mime_type)) " \u{b7} " (size_label(meta.size)) " \u{b7} " (time(meta.updated_at))
             }
         }
     }
@@ -156,6 +185,20 @@ pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> M
     }
 }
 
+/// The heading of the details column of a chat: always the tab bar with the three tabs, the last
+/// two with their counts.
+pub(crate) fn chat_details_heading(subtasks: usize, artifacts: usize, oob: bool) -> Markup {
+    html! {
+        div id="ws-details-heading" hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
+            div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm font-medium" {
+                (tab_button("overview", "panel-overview", html! { "Overview" }))
+                (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " span class="rounded-full bg-sunk px-1.5 text-xs" { (subtasks) } }))
+                (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " span class="rounded-full bg-sunk px-1.5 text-xs" { (artifacts) } }))
+            }
+        }
+    }
+}
+
 /// A tab of the details column, for the `tabs` component (`scripts/tabs.ts`): the first one is
 /// selected until Alpine takes over.
 fn tab_button(id: &str, panel: &str, label: Markup) -> Markup {
@@ -175,7 +218,7 @@ pub(crate) fn tab_panel(task_key: &str, artifacts: &[ArtifactCard]) -> Markup {
     let tabbed = !artifacts.is_empty();
     html! {
         div id="panel-artifacts" role=[tabbed.then_some("tabpanel")] aria-labelledby=[tabbed.then_some("tab-artifacts")] class="ws-details-full ws-artifacts min-h-0 flex-1 overflow-y-auto"
-            hx-get={"/tasks/" (task_key) "/artifacts"} hx-trigger="artifacts-changed from:body"
+            hx-get={(crate::layout::item_path(task_key)) "/artifacts"} hx-trigger="artifacts-changed from:body"
             hx-target="this" hx-swap="innerHTML" {
             (cards(task_key, artifacts))
         }
@@ -239,6 +282,7 @@ pub(crate) fn split_args(task_key: &str) -> String {
         "artifactSplit({})",
         serde_json::json!({
             "key": task_key,
+            "path": crate::layout::item_path(task_key),
             "splitKey": "df.artifact.split",
             "defaultFraction": 0.45,
             "minPane": 320,

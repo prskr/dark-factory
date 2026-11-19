@@ -23,7 +23,8 @@ composer stays open with the error above the buttons and keeps everything you en
 
 ## Follow and steer it
 
-The task view has three columns: the task list, the transcript and the details.
+The task view has three columns: the task list, the transcript and the details. The list and its
+counts hold tasks only; [chats](chats.md) have their own pages under **Chats**.
 
 - **Transcript**: the agent's messages and tool calls (commands, file reads and edits) live, as they
   happen. Forge activity appears in between: pushes to the task branch (with the commit range, or

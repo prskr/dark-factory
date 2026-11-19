@@ -66,7 +66,12 @@ stateDiagram-v2
 | `MarkedDone` | a human, or the merge of the pull request | `completed` |
 | `Cancelled` | a human; also `Cancelled { via }` for each descendant of the cancelled task (below) | `cancelled` |
 | `DependencySatisfied` | an effect of the target's completion or done | `awaiting_dependencies` → `queued` with the last dependency |
-| `ChildEnded` | an effect of a child's completion, done, failure or cancel | none; queues a `task.child_ended` message, which is a `MessageQueued` |
+| `ChildEnded` | an effect of a child's completion, done, failure or cancel | none; queues a `task.child_ended` message, which is a `MessageQueued` (also on an archived chat: it makes the chat `queued`, or `running` while its idle run is still connected; no run starts while the chat is archived) |
+| `Archived` | a human archives a chat | none; rejected while the chat is `queued` or `running` or has a pending request; sets `archived_at`; the effect outside the state machine: the run waiting in `awaiting_input` gets `ReleaseIdle` and is released even if messages wait (they stay queued until the unarchive) |
+| `Unarchived` | a human unarchives a chat | none, or `queued` as for `MessageQueued` when a message waits; clears `archived_at` |
+
+A task of kind `chat` rejects `MarkedDone` and `Cancelled` (`Rejected::Chat`); `Archived` and
+`Unarchived` are rejected for kind `task`.
 
 ## Effects of events on other tasks
 

@@ -96,6 +96,10 @@ fn shipped_scripts_parse() {
     assert_eq!(delegation.sessions.new.len(), 4);
     assert_eq!(delegation.sessions.loaded.len(), 4);
     assert_eq!(delegation.sessions.new[0], delegation.sessions.loaded[3]);
+    let chat = Script::from_yaml_str(include_str!("../scripts/chat.yaml")).unwrap();
+    assert_eq!(chat.sessions.new.len(), 4);
+    assert_eq!(chat.sessions.loaded.len(), 4);
+    assert_eq!(chat.sessions.new[0], chat.sessions.loaded[3]);
     let research = Script::from_yaml_str(include_str!("../scripts/research.yaml")).unwrap();
     assert_eq!(research.sessions.new.len(), 3);
     assert_eq!(research.sessions.loaded.len(), 3);

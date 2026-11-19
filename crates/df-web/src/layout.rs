@@ -13,8 +13,10 @@ use crate::components::{CreateAction, bottom_bar, floating_create, rail, setting
 
 /// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
 /// loaded on every page before Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 7] = [
+pub(crate) const COMPONENT_SCRIPTS: [&str; 9] = [
+    "archiveModal.js",
     "artifactSplit.js",
+    "chatLayout.js",
     "egress-log.js",
     "egress-rule.js",
     "markdown.js",
@@ -37,9 +39,21 @@ pub(crate) const SSE_CLEANUP_SCRIPT: &str = "sse-cleanup.js";
 const HTMX_CONFIG: &str =
     r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"],"defaultSettleDelay":0}"#;
 
+/// The page of a task or chat: `/tasks/<KEY>`, or `/chats/<KEY>` for the key of a chat. The
+/// routes below it (messages, stop, artifacts, ...) have the same names under both.
+pub(crate) fn item_path(key: &str) -> String {
+    if df_core::is_chat_key(key) {
+        format!("/chats/{key}")
+    } else {
+        format!("/tasks/{key}")
+    }
+}
+
 /// The navigation entry a page belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Nav {
+    /// The chat pages.
+    Chats,
     Tasks,
     Projects,
     /// The settings page of one project: a page of the settings area (sidebar marks Projects), and
@@ -78,13 +92,16 @@ impl Nav {
 pub enum View {
     List,
     Task,
+    /// A page of its own that fills the phone screen (an artifact): hides the bottom bar like
+    /// `Task` but is not a screen of the workspace, so it keeps the padding and no popstate rule.
+    Detail,
 }
 
 impl View {
     const fn as_str(self) -> &'static str {
         match self {
             Self::List => "list",
-            Self::Task => "task",
+            Self::Task | Self::Detail => "task",
         }
     }
 }
@@ -143,6 +160,30 @@ pub(crate) fn workspace_layout(
     document(title, Nav::Tasks, Some(view), compose_href, shell, body)
 }
 
+/// Renders a full-width page of the chat workspace. `compose_href` opens the new chat dialog of
+/// the selected project; the rail keeps its new-task action.
+pub(crate) fn chat_layout(
+    title: &str,
+    view: View,
+    compose_href: &str,
+    shell: &Shell,
+    body: Markup,
+) -> Markup {
+    document(title, Nav::Chats, Some(view), compose_href, shell, body)
+}
+
+/// Renders a page of the usual width that fills the phone screen: no bottom bar, no create button.
+pub(crate) fn detail_layout(title: &str, nav: Nav, shell: &Shell, body: Markup) -> Markup {
+    document(
+        title,
+        nav,
+        Some(View::Detail),
+        "/tasks/compose",
+        shell,
+        body,
+    )
+}
+
 fn document(
     title: &str,
     nav: Nav,
@@ -151,6 +192,8 @@ fn document(
     shell: &Shell,
     body: Markup,
 ) -> Markup {
+    // Only the workspace screens follow history navigation and drop the page padding.
+    let workspace = view.filter(|view| *view != View::Detail);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -182,12 +225,13 @@ fn document(
                 // Without the renderer (a `cargo` build without the npm packages) the component
                 // leaves each diagram as source and says so.
                 data-mermaid-src=[get_asset(MERMAID_ASSET).map(|_| asset_url(MERMAID_ASSET))]
-                x-data=[view.map(|_| "")]
-                "x-on:popstate.window"=[view.map(|_| "document.body.dataset.view = /^\\/tasks\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
+                x-data=[workspace.map(|_| "")]
+                "x-on:popstate.window"=[workspace.map(|_|"document.body.dataset.view = /^\\/(tasks|chats)\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
-                    @if nav != Nav::None { (rail(nav, compose_href, shell)) }
+                    // The rail creates tasks everywhere; the chat page's compose link is for the floating button.
+                    @if nav != Nav::None { (rail(nav, if nav == Nav::Chats { "/tasks/compose" } else { compose_href }, shell)) }
                     @if is_settings(nav) { (settings_sidebar(nav)) }
-                    main class={"min-w-0 flex-1 " (if view.is_some() { "" } else { "w-full px-4 py-4 pb-38 md:px-10 md:py-8 md:pb-8" })} {
+                    main class={"min-w-0 flex-1 " (if workspace.is_some() { "" } else { "w-full px-4 py-4 pb-38 md:px-10 md:py-8 md:pb-8" })} {
                         (body)
                     }
                 }
@@ -212,6 +256,10 @@ fn create_action(nav: Nav, compose_href: &str) -> CreateAction<'_> {
         Nav::Projects => CreateAction {
             label: "New project",
             href: "/projects/new",
+        },
+        Nav::Chats => CreateAction {
+            label: "New chat",
+            href: compose_href,
         },
         _ => CreateAction {
             label: "New task",
@@ -609,11 +657,49 @@ mod tests {
     }
 
     #[test]
+    fn the_chat_page_marks_chats_in_rail_and_bar_and_floats_new_chat() {
+        let page = chat_layout(
+            "Chats",
+            View::List,
+            "/chats/compose?project=DF",
+            &Shell::default(),
+            html! {},
+        )
+        .into_string();
+        let rail = nav_html(&page, "desktop-menu");
+        assert_eq!(rail.matches("aria-current=\"page\"").count(), 1, "{rail}");
+        assert!(
+            rail.contains(
+                "href=\"/chats\" aria-label=\"Chats\" title=\"Chats\" aria-current=\"page\""
+            ),
+            "{rail}"
+        );
+        let bar = nav_html(&page, "mobile-menu");
+        let current = &bar[bar.find("aria-current").unwrap()..];
+        assert!(current.contains("Chats"), "{bar}");
+        let button = floating_button(&page);
+        assert!(
+            button.contains("aria-label=\"New chat\"")
+                && button.contains("hx-get=\"/chats/compose?project=DF\""),
+            "{button}"
+        );
+        // The rail creates tasks on every page.
+        assert!(
+            page.contains("aria-label=\"New task\"") && page.contains("hx-get=\"/tasks/compose\"")
+        );
+        assert!(page.contains("data-view=\"list\""));
+        assert!(
+            page.contains("(tasks|chats)"),
+            "back on a phone follows both sections"
+        );
+    }
+
+    #[test]
     fn task_list_on_a_phone_has_the_bottom_bar_and_no_rail_in_view() {
         let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         let bar = nav_html(&page, "mobile-menu");
         assert!(bar.contains("md:hidden"), "bottom bar only below 768 px");
-        for label in ["Tasks", "Requests", "Projects"] {
+        for label in ["Chats", "Tasks", "Requests", "Projects"] {
             assert!(bar.contains(label), "{label}");
         }
         assert!(!bar.contains("aria-label=\"New task\""));

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,\n            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\",\n            base.key AS \"base_task_key?\", base.title AS \"base_task_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        LEFT JOIN tasks base ON base.id = t.base_task_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,\n            ps.harness AS persona_harness, ps.model AS persona_model,\n            ps.description AS persona_description, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,\n            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)\n                AS \"has_pending_request!\",\n            t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\",\n            parent_persona.name AS \"parent_persona_name?\",\n            base.key AS \"base_task_key?\", base.title AS \"base_task_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        LEFT JOIN personas parent_persona ON parent_persona.id = parent.persona_id\n        LEFT JOIN tasks base ON base.id = t.base_task_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -137,6 +137,17 @@
       },
       {
         "ordinal": 12,
+        "name": "persona_description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
         "name": "issue_number",
         "type_info": "Int8",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "status_line",
         "type_info": "Text",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "pr_number",
         "type_info": "Int8",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "pr_url",
         "type_info": "Text",
         "origin": {
@@ -191,7 +202,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "pr_title",
         "type_info": "Text",
         "origin": {
@@ -202,7 +213,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "pr_attached",
         "type_info": "Bool",
         "origin": {
@@ -213,7 +224,24 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
+        "name": "archived_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "has_pending_request!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 22,
         "name": "branch",
         "type_info": "Text",
         "origin": {
@@ -224,7 +252,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 23,
         "name": "resume_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -235,7 +263,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 24,
         "name": "auto_resumes",
         "type_info": "Int4",
         "origin": {
@@ -246,7 +274,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 25,
         "name": "created_by",
         "type_info": "Jsonb",
         "origin": {
@@ -257,7 +285,7 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 26,
         "name": "creator_task_key?",
         "type_info": "Text",
         "origin": {
@@ -268,7 +296,7 @@
         }
       },
       {
-        "ordinal": 24,
+        "ordinal": 27,
         "name": "parent_key?",
         "type_info": "Text",
         "origin": {
@@ -279,7 +307,7 @@
         }
       },
       {
-        "ordinal": 25,
+        "ordinal": 28,
         "name": "parent_title?",
         "type_info": "Text",
         "origin": {
@@ -290,7 +318,18 @@
         }
       },
       {
-        "ordinal": 26,
+        "ordinal": 29,
+        "name": "parent_persona_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 30,
         "name": "base_task_key?",
         "type_info": "Text",
         "origin": {
@@ -301,7 +340,7 @@
         }
       },
       {
-        "ordinal": 27,
+        "ordinal": 31,
         "name": "base_task_title?",
         "type_info": "Text",
         "origin": {
@@ -314,7 +353,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -330,13 +370,6 @@
       false,
       false,
       false,
-      true,
-      false,
-      false,
-      true,
-      true,
-      true,
-      false,
       false,
       true,
       false,
@@ -344,9 +377,20 @@
       true,
       true,
       true,
+      false,
+      true,
+      null,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
       true,
       true
     ]
   },
-  "hash": "d98a1e1d966e3c00137e72b704cc366f66214309f4f0c2e4e8e35d58df41cad5"
+  "hash": "4109bae1e325eacd03b2bf88fcf36061bc6369c5fcb6c3a88e2cfd629d4aefc0"
 }

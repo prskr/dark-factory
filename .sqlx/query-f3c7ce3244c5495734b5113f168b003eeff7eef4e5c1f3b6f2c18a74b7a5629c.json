@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO tasks (\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, created_by, parent_id, base_task_id,\n            branch, base_branch, pr_number, pr_url, pr_attached\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)\n        RETURNING\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, project_id, number, key, title, title_source, description,\n            persona_id, issue_number, status, status_line,\n            pr_number, pr_url, pr_title, pr_body,\n            diverged, harness_session_id, created_by, parent_id, base_task_id,\n            branch, base_branch, pr_attached, archived_at, created_at, updated_at\n        FROM tasks\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -192,6 +192,83 @@
       },
       {
         "ordinal": 17,
+        "name": "created_by",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "parent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "base_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "branch"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "base_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "base_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "pr_attached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "pr_attached"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "archived_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -202,7 +279,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 25,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -215,24 +292,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Uuid",
-        "Int8",
-        "Text",
-        "Jsonb",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Int8",
-        "Text",
-        "Bool"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -254,8 +314,15 @@
       false,
       false,
       false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
       false
     ]
   },
-  "hash": "6df458ee88e9908bab83e41e95f2e0f434459900921ebb3cce31662e462ae463"
+  "hash": "f3c7ce3244c5495734b5113f168b003eeff7eef4e5c1f3b6f2c18a74b7a5629c"
 }

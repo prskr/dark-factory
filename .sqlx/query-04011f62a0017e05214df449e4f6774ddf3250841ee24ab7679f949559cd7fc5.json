@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id\n        WHERE t.kind = 'chat' AND r.state = 'awaiting_input' AND r.stop_requested_at IS NULL\n        ORDER BY r.idle_since, r.started_at\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04011f62a0017e05214df449e4f6774ddf3250841ee24ab7679f949559cd7fc5"
+}

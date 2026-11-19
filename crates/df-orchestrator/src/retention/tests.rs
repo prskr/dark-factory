@@ -90,6 +90,52 @@ async fn closed_tasks_lose_their_volume_after_the_grace_period_once() {
 }
 
 #[tokio::test]
+async fn an_archived_chat_loses_its_volume_after_the_grace_period_and_an_open_chat_keeps_it() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let archived = env.chat().await;
+    let open = env.chat().await;
+    for chat in [&archived, &open] {
+        set_status(&pool, chat.id, "waiting").await;
+        ended_run(&env, chat.id, 1, days_ago(8)).await;
+    }
+    sqlx::query("UPDATE tasks SET archived_at = $2, archived_by = '{}'::jsonb WHERE id = $1")
+        .bind(archived.id.as_uuid())
+        .bind(days_ago(8))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let retention = Retention::new(env.ctx.clone());
+
+    assert_eq!(retention.scan(Utc::now()).await.unwrap(), 1);
+
+    assert_eq!(deleted_volumes(&env.provider), ["task-df-2-chat"]);
+    assert!(volume_deleted_at(&pool, open.id).await.is_none());
+}
+
+#[tokio::test]
+async fn a_chat_archived_recently_keeps_its_volume_whatever_its_last_run_age() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let chat = env.chat().await;
+    set_status(&pool, chat.id, "waiting").await;
+    ended_run(&env, chat.id, 1, days_ago(8)).await;
+    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = '{}'::jsonb WHERE id = $1")
+        .bind(chat.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        Retention::new(env.ctx.clone())
+            .scan(Utc::now())
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;

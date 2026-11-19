@@ -185,6 +185,22 @@ impl Fixture {
         task.id
     }
 
+    /// Starts a chat of the seeded project with the persona; it is `queued`.
+    pub async fn chat(&self) -> TaskRow {
+        let (chat, _) = df_db::chats::create_chat(
+            &self.pool,
+            df_db::chats::NewChat {
+                project_id: self.project_id,
+                persona_id: self.persona_id,
+                author: self.human(),
+                text: "Plan the release".into(),
+            },
+        )
+        .await
+        .expect("start a chat");
+        chat
+    }
+
     /// Creates a task of the seeded project whose base task is `base`.
     pub async fn task_based_on(&self, base: &TaskRow) -> TaskRow {
         let (task, _) = df_db::create_task_on(

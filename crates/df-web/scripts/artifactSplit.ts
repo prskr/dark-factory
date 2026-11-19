@@ -2,7 +2,8 @@
 // `#ws-detail`, see `split_args` in `src/artifacts/view.rs`). The transcript, the details column
 // and the pane all sit inside it.
 //
-// Config: `key` (task key), `splitKey` (localStorage key of the pane's share of the split),
+// Config: `key` (task or chat key), `path` (page of the task or chat, `/tasks/<key>` or `/chats/<key>`; the
+// artifacts are below it), `splitKey` (localStorage key of the pane's share of the split),
 // `defaultFraction` (share when nothing is stored), `minPane` and `minTranscript` (pixels).
 //
 // State:
@@ -24,6 +25,7 @@
 // divider's `dragStart`/`dragMove`/`dragEnd` pointer sequence and `dividerKey(event)` (arrows).
 interface ArtifactSplitConfig {
   key: string;
+  path: string;
   splitKey: string;
   defaultFraction: number;
   minPane: number;
@@ -58,7 +60,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     url(name: string): string {
-      return `/tasks/${cfg.key}/artifacts/${encodeURIComponent(name)}`;
+      return `${cfg.path}/artifacts/${encodeURIComponent(name)}`;
     },
 
     workspace(): { collapsed: boolean; details: boolean } | null {

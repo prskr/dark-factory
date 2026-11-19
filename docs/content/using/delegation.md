@@ -47,7 +47,8 @@ a waiting task discards its assignment.
 task's branch starts from the base task's branch and its pull request targets that branch, so a
 reviewer sees the implementation it reviews (`base_task` = the implementation) and the iterations of
 a feature build on each other (`base_task` = the caller's own key). It is set at creation and never
-changes. A key that is unknown, in another project or over is an error; nothing is created.
+changes. A key that is unknown, in another project, over, or of a chat (a chat has no branch) is an
+error; nothing is created.
 
 - **The base branch** of a task is the branch of its base task. Once the base task is done (merged),
   the base task's own base branch applies instead, recursively, so the task follows the default
@@ -172,6 +173,9 @@ Without webhooks, `done` dependencies are released by marking the target done in
 With webhooks a merged pull request does it.
 
 ## In the task view
+
+The tasks of a [chat](chats.md) have the chat as their parent: the details show it as
+`DF-12-CHAT · Linus · Task dependencies plan`, linked to the chat page.
 
 The details of a task show **Created by**, **Parent** and, for a task with a base task, **Base task**
 (`DF-20 · Implement`, a link) after the branch, and a collapsible

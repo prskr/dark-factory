@@ -584,7 +584,7 @@ pub(crate) async fn insert_run(pool: &PgPool, task: TaskId) -> RunId {
     run_id
 }
 
-pub(super) fn text(t: &str) -> Vec<ContentBlock> {
+pub(crate) fn text(t: &str) -> Vec<ContentBlock> {
     vec![ContentBlock {
         kind: Some(content_block::Kind::Text(TextContent { text: t.into() })),
         hidden: false,

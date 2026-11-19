@@ -158,7 +158,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
                 (chip(&kind_label))
                 @if row.blocking && pending { (tone_badge(Tone::Waiting, "Blocking")) }
                 @if !pending { (tone_badge(state_tone(row.state), row.state.as_str())) }
-                a href={"/tasks/" (card.task_key)} class="font-medium text-accent-text hover:underline" { (card.task_key) }
+                a href=(crate::layout::item_path(&card.task_key)) class="font-medium text-accent-text hover:underline" { (card.task_key) }
                 span class="min-w-0 truncate" { (card.task_title) }
             }
             div class="md-body min-w-0 break-words text-sm [&_p]:my-1" {

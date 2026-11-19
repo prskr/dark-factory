@@ -19,8 +19,9 @@ flowchart LR
   T --> PR[Draft pull request]
 ```
 
-On a desktop screen (768 px and wider), the navigation rail on the left holds Tasks, Requests
-and Network traffic. The **Settings** link (gear) at its bottom opens the projects page inside the
+On a desktop screen (768 px and wider), the navigation rail on the left holds Chats, Tasks,
+Requests and Network traffic. On a phone the bottom bar has Chats, Tasks, Requests and Projects.
+The **Settings** link (gear) at its bottom opens the projects page inside the
 settings area, whose sidebar lists **Projects**, **Personas**, **Credentials**, **Model providers**
 and **Egress rules**, in this order. A project is edited on its settings page at `/projects/<key>`.
 On a phone the settings sidebar is not available; **Projects** is in the bottom bar.
@@ -38,3 +39,4 @@ Set up in this order:
 7. [Hidden paths](hidden-paths.md): keep files out of the agent's workspace.
 8. [Existing branches](existing-branches.md): tasks on a branch that exists, attached pull requests and rebases.
 9. [Build a feature in iterations](build-a-feature.md): a feature agent that merges its iterations' pull requests into its own branch.
+10. [Plan work in a chat](chats.md): talk to a persona, let it hand work to tasks, archive the conversation.

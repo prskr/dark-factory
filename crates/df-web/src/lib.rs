@@ -15,6 +15,7 @@
 mod artifacts;
 pub mod assets;
 pub mod auth;
+mod chat_pages;
 // The asset staging of `build.rs`, compiled here for its tests.
 #[cfg(test)]
 #[path = "../build_assets.rs"]
@@ -135,6 +136,7 @@ async fn readyz(State(pool): State<PgPool>) -> (StatusCode, &'static str) {
 pub fn router(state: WebState) -> Router {
     let pages = Router::new()
         .merge(task_pages::routes())
+        .merge(chat_pages::routes())
         .merge(requests::routes())
         .merge(config_pages::routes())
         .merge(project_subscriptions::routes())

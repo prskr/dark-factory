@@ -17,7 +17,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use df_core::{RequestId, TaskId};
+use df_core::{RequestId, TaskId, TaskKind};
 use df_db::Notification;
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::event;
@@ -29,11 +29,10 @@ use tokio::sync::broadcast;
 use crate::WebState;
 use crate::artifacts::details_heading;
 use crate::auth::CurrentUser;
-use crate::responses::{internal_error, not_found};
 use crate::task_pages::{
-    CancelNote, Filters, ListQuery, ResumeNote, composer_action, dependencies_region,
-    details_region, head_region, interruptible, load_detail, pending_region, runs_region,
-    subtasks_panel, task_rows,
+    CancelNote, ListQuery, ResumeNote, composer_action, dependencies_region, details_region,
+    head_region, interruptible, load_detail, pending_region, runs_region, subtasks_panel,
+    task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
 
@@ -50,18 +49,19 @@ pub(crate) struct AfterQuery {
     after: Option<i64>,
 }
 
-/// `GET /tasks/{key}/events`.
+/// `GET /tasks/{key}/events` and `GET /chats/{key}/events`: the transcript and the regions of the
+/// page of a task or chat.
 pub(crate) async fn task_events(
     State(state): State<WebState>,
     Extension(user): Extension<CurrentUser>,
+    section: crate::task_pages::Section,
     Path(key): Path<String>,
     headers: HeaderMap,
     Query(query): Query<AfterQuery>,
 ) -> Response {
-    let task = match df_db::task_views::get_task_detail_by_key(&state.pool, &key).await {
-        Ok(Some(task)) => task,
-        Ok(None) => return not_found("The task"),
-        Err(e) => return internal_error(&e),
+    let task = match crate::task_pages::task_by_key(&state, section, &key).await {
+        Ok(task) => task,
+        Err(response) => return *response,
     };
     let start = last_event_id(&headers).or(query.after).unwrap_or(0).max(0);
     let folder =
@@ -69,6 +69,7 @@ pub(crate) async fn task_events(
     let task_id = TaskId::from_uuid(task.id);
     let stream = DetailStream {
         task_id,
+        kind: section.kind,
         task_key: task.key.clone(),
         task_title: task.title.clone(),
         requests: HashMap::new(),
@@ -79,7 +80,7 @@ pub(crate) async fn task_events(
         cursor: 0,
         folder,
         check_regions: true,
-        regions: Default::default(),
+        regions: Vec::new(),
         settle: None,
     };
     let events = futures::stream::unfold(stream, |mut s| async move {
@@ -94,6 +95,8 @@ pub(crate) async fn task_events(
 struct DetailStream {
     state: WebState,
     task_id: TaskId,
+    /// A chat's page has other regions than a task's.
+    kind: TaskKind,
     task_key: String,
     task_title: String,
     /// Last sent markup of every request card of the task; absent until the connection sent it.
@@ -108,9 +111,8 @@ struct DetailStream {
     folder: Folder,
     /// Re-render the regions at the next opportunity.
     check_regions: bool,
-    /// Last sent markup of head, details, dependencies, runs, pending list, composer action, the
-    /// details heading (tabs) and the Subtasks tab.
-    regions: [String; 8],
+    /// Last sent markup of every region of [`Self::rendered_regions`], in its order.
+    regions: Vec<String>,
     /// Pause before the next read to coalesce chunks.
     settle: Option<Duration>,
 }
@@ -236,47 +238,10 @@ impl DetailStream {
                 |item| matches!(&item.kind, ItemKind::User { prompt_id, .. } if *prompt_id == id),
             )
         });
-        let rendered = [
-            head_region(&data.task, None),
-            details_region(
-                &data.task,
-                &CancelNote::new(&data.runs, &data.pending),
-                &ResumeNote::new(&data.task, &data.runs, self.state.max_auto_resumes),
-                None,
-            ),
-            dependencies_region(&data.dependencies, data.task.status),
-            runs_region(
-                &data.task.key,
-                &data.runs,
-                data.task.persona_model.as_deref(),
-            ),
-            pending_region(
-                &data.task.key,
-                &data.task.persona_name,
-                data.task.status.as_str(),
-                &data.pending,
-                self.state.show_hidden_blocks,
-                None,
-            ),
-            composer_action(&data.task.key, interruptible(&data.runs)),
-            details_heading(data.subtasks.len(), artifacts, false),
-            subtasks_panel(&data.subtasks),
-        ];
+        let rendered = self.rendered_regions(&data, artifacts).await?;
+        self.regions.resize(rendered.len(), String::new());
         let mut changed = Vec::new();
-        for (slot, (id, markup)) in self.regions.iter_mut().zip(
-            [
-                "#task-head",
-                "#task-details",
-                "#dependencies",
-                "#runs",
-                "#pending",
-                "#composer-action",
-                "#ws-details-heading",
-                "#panel-subtasks",
-            ]
-            .into_iter()
-            .zip(rendered),
-        ) {
+        for (slot, (id, markup)) in self.regions.iter_mut().zip(rendered) {
             let html = markup.0;
             if *slot != html {
                 changed.push(partial(id, "outerMorph", &maud::PreEscaped(html.clone())));
@@ -284,6 +249,70 @@ impl DetailStream {
             }
         }
         Ok(changed)
+    }
+
+    /// The regions of the page as they are now, with their target: head, details,
+    /// dependencies, runs, pending list, composer action, the details heading (tabs) and the
+    /// Subtasks tab of a task; of a chat the same without dependencies, and with the overview.
+    async fn rendered_regions(
+        &self,
+        data: &crate::task_pages::DetailData,
+        artifacts: usize,
+    ) -> Result<Vec<(&'static str, Markup)>, df_db::DbError> {
+        let task = &data.task;
+        let runs = runs_region(&task.key, &data.runs, task.persona_model.as_deref());
+        let pending = pending_region(
+            &task.key,
+            &task.persona_name,
+            task.status.as_str(),
+            &data.pending,
+            self.state.show_hidden_blocks,
+            None,
+        );
+        let composer = composer_action(&task.key, interruptible(&data.runs));
+        let subtasks = subtasks_panel(&data.subtasks);
+        if self.kind == TaskKind::Chat {
+            let base = df_db::base_branch(&self.state.pool, self.task_id).await?;
+            return Ok(vec![
+                ("#chat-head", crate::chat_pages::head_region(task)),
+                (
+                    "#chat-overview",
+                    crate::chat_pages::overview_region(task, &base, None),
+                ),
+                ("#runs", runs),
+                ("#pending", pending),
+                ("#composer-action", composer),
+                (
+                    "#ws-details-heading",
+                    crate::artifacts::chat_details_heading(data.subtasks.len(), artifacts, false),
+                ),
+                ("#panel-subtasks", subtasks),
+            ]);
+        }
+        Ok(vec![
+            ("#task-head", head_region(task, None)),
+            (
+                "#task-details",
+                details_region(
+                    task,
+                    &CancelNote::new(&data.runs, &data.pending),
+                    &ResumeNote::new(task, &data.runs, self.state.max_auto_resumes),
+                    None,
+                ),
+            ),
+            (
+                "#dependencies",
+                dependencies_region(&data.dependencies, task.status),
+            ),
+            ("#runs", runs),
+            ("#pending", pending),
+            ("#composer-action", composer),
+            (
+                "#ws-details-heading",
+                details_heading(data.subtasks.len(), artifacts, false),
+            ),
+            ("#panel-subtasks", subtasks),
+        ])
     }
 
     /// The request cards that changed. The first send of a card by this connection removes the
@@ -382,45 +411,75 @@ pub(crate) async fn task_list_events(
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<ListQuery>,
 ) -> Response {
-    struct ListStream {
+    let filters = query.filters();
+    list_events(
+        state,
+        &user,
+        "#task-rows",
+        |n| {
+            matches!(
+                n,
+                Notification::TaskChanged { .. } | Notification::Reconnected
+            )
+        },
+        move |state| {
+            let filters = filters.clone();
+            async move {
+                let items = df_db::task_views::list_task_items(&state.pool, &filters.to_db())
+                    .await
+                    .inspect_err(|error| tracing::warn!(%error, "task list stream failed"))
+                    .ok()?;
+                Some(task_rows(&items, None, &filters).into_string())
+            }
+        },
+    )
+}
+
+/// An SSE stream of a list: `render` makes the markup of the list on connect and after every
+/// notification `relevant` accepts (a burst settles first), and the stream sends it as a morph of
+/// `target` when it changed. `render` returns `None` to end the stream.
+fn list_events<R, Fut>(
+    state: WebState,
+    user: &CurrentUser,
+    target: &'static str,
+    relevant: fn(&Notification) -> bool,
+    render: R,
+) -> Response
+where
+    R: Fn(WebState) -> Fut + Send + 'static,
+    Fut: Future<Output = Option<String>> + Send,
+{
+    struct ListStream<R> {
         state: WebState,
         rx: broadcast::Receiver<Notification>,
-        filters: Filters,
+        render: R,
         last: String,
         first: bool,
     }
     let stream = ListStream {
         rx: state.notifier.subscribe(),
         state,
-        filters: query.filters(),
+        render,
         last: String::new(),
         first: true,
     };
-    let events = futures::stream::unfold(stream, |mut s| async move {
+    let events = futures::stream::unfold(stream, move |mut s| async move {
         loop {
             if !std::mem::take(&mut s.first) {
                 // Wait for a change, then let a burst of changes settle.
                 match tokio::time::timeout(POLL, s.rx.recv()).await {
                     Ok(Err(broadcast::error::RecvError::Closed)) => return None,
-                    Ok(Ok(Notification::TaskChanged { .. } | Notification::Reconnected)) => {
+                    Ok(Ok(notification)) if relevant(&notification) => {
                         tokio::time::sleep(LIST_DEBOUNCE).await;
                     }
                     Ok(Ok(_)) => continue,
                     Ok(Err(broadcast::error::RecvError::Lagged(_))) | Err(_) => {}
                 }
             }
-            let items =
-                match df_db::task_views::list_task_items(&s.state.pool, &s.filters.to_db()).await {
-                    Ok(items) => items,
-                    Err(error) => {
-                        tracing::warn!(%error, "task list stream failed");
-                        return None;
-                    }
-                };
-            let html = task_rows(&items, None, &s.filters).into_string();
+            let html = (s.render)(s.state.clone()).await?;
             if html != s.last {
-                let body = partial("#task-rows", "outerMorph", &maud::PreEscaped(html.clone()))
-                    .into_string();
+                let body =
+                    partial(target, "outerMorph", &maud::PreEscaped(html.clone())).into_string();
                 s.last = html;
                 return Some((Ok::<_, Infallible>(Event::default().data(body)), s));
             }
@@ -429,6 +488,48 @@ pub(crate) async fn task_list_events(
     Sse::new(events.take_until(tokio::time::sleep(user.until_refresh())))
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ProjectQuery {
+    project: Option<String>,
+}
+
+/// `GET /chats/events?project=KEY`: re-renders the chat list of the project when a chat changes,
+/// so a new reply, a status or a request that needs you reorders it.
+pub(crate) async fn chat_list_events(
+    State(state): State<WebState>,
+    Extension(user): Extension<CurrentUser>,
+    Query(query): Query<ProjectQuery>,
+) -> Response {
+    let project = query.project.unwrap_or_default();
+    list_events(
+        state,
+        &user,
+        "#chat-rows",
+        |n| {
+            matches!(
+                n,
+                Notification::TaskChanged { .. }
+                    | Notification::RequestChanged { .. }
+                    | Notification::TranscriptEvent { .. }
+                    | Notification::Reconnected
+            )
+        },
+        move |state| {
+            let project = project.clone();
+            async move {
+                let (projects, chats) = tokio::try_join!(
+                    df_db::chat_views::list_chat_projects(&state.pool),
+                    df_db::chat_views::list_chats(&state.pool, &project, false, None)
+                )
+                .inspect_err(|error| tracing::warn!(%error, "chat list stream failed"))
+                .ok()?;
+                let project = projects.iter().find(|p| p.key == project)?;
+                Some(crate::chat_pages::chat_rows(&chats, project, None).into_string())
+            }
+        },
+    )
 }
 
 /// Wraps `inner` in a partial that htmx swaps into `target`.

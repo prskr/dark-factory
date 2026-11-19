@@ -63,8 +63,11 @@ sequenceDiagram
 ```
 
 1. **Scheduling.** A task is due when it is `queued` (or `rate_limited`) and its resume time has
-   passed. Up to `runs.maxConcurrent` runs (default 4) are active at a time; further due tasks wait,
-   oldest first. A task never has two active runs. The scheduler notices a due resume time on its
+   passed. Up to `runs.maxConcurrent` runs of tasks (default 4) are active at a time; further due
+   tasks wait, oldest first. [Chats](../using/chats.md) have their own limit,
+   `runs.maxConcurrentChats` (default 2): a chat never waits behind task runs, and a queued chat
+   with no free chat slot makes the chat run that has been idle the longest release its slot. A
+   chat that is archived starts no run. A task never has two active runs. The scheduler notices a due resume time on its
    tick (`scheduling.tickMillis`, 5 s by default), so a due task starts within one tick.
 2. **Provisioning.** For a run of a task with a [base task](../using/delegation.md#base-task)
    the control plane first creates the base task's branch through the forge, unless it exists; a
@@ -201,6 +204,7 @@ the task volume.
 
 Each task has one volume (`task-<key>`), mounted at `/data`. It is a cache: committed work is in
 Git, uncommitted work in the WIP snapshot. Volumes of tasks closed for 7 days, or idle for 30 days,
-are deleted hourly (`volumes.retainAfterCloseSeconds`, `volumes.idleTtlSeconds`), the volume of a
+are deleted hourly (`volumes.retainAfterCloseSeconds`, `volumes.idleTtlSeconds`; an archived chat
+counts as closed from the time it was archived), the volume of a
 task whose pull request was merged at the next hourly check; **Reset workspace**
 in a task's status menu deletes one on demand. The next run re-clones.

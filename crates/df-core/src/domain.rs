@@ -283,6 +283,46 @@ impl FromStr for TaskStatus {
     }
 }
 
+/// What a task is (`tasks.kind`), fixed at creation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskKind {
+    /// Work on a branch that ends in a pull request.
+    Task,
+    /// A conversation of a board member with a persona (key suffix `-CHAT`).
+    Chat,
+}
+
+impl TaskKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Task => "task",
+            Self::Chat => "chat",
+        }
+    }
+}
+
+impl fmt::Display for TaskKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TaskKind {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "task" => Ok(Self::Task),
+            "chat" => Ok(Self::Chat),
+            _ => Err(ParseEnumError {
+                kind: "TaskKind",
+                value: s.to_string(),
+            }),
+        }
+    }
+}
+
 /// How a task depends on another one (`task_dependencies.kind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -664,6 +704,14 @@ mod tests {
         for (outcome, state) in expected {
             assert_eq!(outcome.run_state(), state, "{outcome}");
         }
+    }
+
+    #[test]
+    fn task_kind_roundtrips_through_its_string() {
+        for kind in [TaskKind::Task, TaskKind::Chat] {
+            assert_eq!(TaskKind::from_str(kind.as_str()).unwrap(), kind);
+        }
+        assert!(TaskKind::from_str("epic").is_err());
     }
 
     #[test]

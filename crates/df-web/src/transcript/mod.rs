@@ -737,15 +737,46 @@ fn render_tool(id: &str, tool: &ToolItem) -> Markup {
     if !tool.raw_output.is_empty() {
         blocks.push(("Result".into(), tool.raw_output.clone()));
     }
+    let delegation = delegation_title(tool);
     c::tool_row(&c::ToolRow {
         id,
-        title: &tool.title,
+        title: delegation.as_deref().unwrap_or(&tool.title),
         kind: &tool.kind,
         status: &tool.status,
         locations: &tool.locations,
         blocks: &blocks,
         truncated: tool.truncated,
     })
+}
+
+/// The title of a `create_task` call that created a task: `Created DF-20 · <title> · <persona>`.
+/// `None` for any other call, and for one that has not created a task (yet).
+fn delegation_title(tool: &ToolItem) -> Option<String> {
+    if !tool.title.ends_with("create_task") {
+        return None;
+    }
+    let input: serde_json::Value = serde_json::from_str(&tool.raw_input).ok()?;
+    let (title, persona) = (
+        input.get("title")?.as_str()?,
+        input.get("persona")?.as_str()?,
+    );
+    // "Created DF-20 with status queued. ...": the result names the key.
+    let key = tool
+        .content
+        .iter()
+        .filter_map(|content| match content {
+            ToolContent::Text(text) => Some(text.as_str()),
+            ToolContent::Diff { .. } => None,
+        })
+        .chain(std::iter::once(tool.raw_output.as_str()))
+        .find_map(|text| {
+            let (_, after) = text.split_once("Created ")?;
+            let key = after
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .next()?;
+            key.parse::<df_core::TaskKey>().ok()
+        })?;
+    Some(format!("Created {key} · {title} · {persona}"))
 }
 
 fn diff_text(old: Option<&str>, new: &str) -> String {

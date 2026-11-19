@@ -136,8 +136,13 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
 
                 assert!(!res.is_resumed, "Session should NOT be resumed");
                 assert_ne!(res.session_id, "nonexistent-sess");
-                assert_eq!(res.notices.len(), 1);
-                assert_eq!(res.notices[0].code, "harness.session_resume_failed");
+                let codes: Vec<_> = res.notices.iter().map(|n| n.code.as_str()).collect();
+                assert_eq!(
+                    codes,
+                    ["harness.session_resume_failed", "context_compacted"]
+                );
+                // The notice shows the summary the new session is seeded with.
+                assert_eq!(res.notices[1].message, "Summary of earlier progress");
 
                 // When resume fails, summary IS prepended to first turn's prompts
                 let prepend_summary = if res.is_resumed {
@@ -186,6 +191,61 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
 
     client_task.await.unwrap().unwrap();
     agent_task.abort();
+}
+
+/// The notice codes of `setup_session` for `continuation` against an agent without sessions.
+async fn notice_codes_of_a_new_session(
+    continuation: Option<df_proto::agent::v1::Continuation>,
+) -> Vec<String> {
+    use crate::harness::setup_session;
+    use crate::test_harness::MockAcpAgent;
+    use agent_client_protocol::{Channel, Client};
+
+    let agent_builder = MockAcpAgent::new().with_load_session(true).build();
+    let (transport, peer) = Channel::duplex();
+    let agent_task = tokio::spawn(async move {
+        agent_builder.connect_to(peer).await.unwrap();
+    });
+    let codes = Client
+        .builder()
+        .connect_with(transport, async move |cx| {
+            let temp = tempfile::tempdir().unwrap();
+            let res = setup_session(
+                &cx,
+                &temp.path().join("repo"),
+                continuation.as_ref(),
+                std::path::Path::new("/opt/factory/factory-agent"),
+                std::path::Path::new("/run/factory/runtime.sock"),
+            )
+            .await?;
+            Ok(res.notices.into_iter().map(|n| n.code).collect::<Vec<_>>())
+        })
+        .await
+        .unwrap();
+    agent_task.abort();
+    codes
+}
+
+#[tokio::test]
+async fn a_new_session_seeded_with_a_summary_notices_context_compacted_once() {
+    use df_proto::agent::v1::Continuation;
+
+    // The previous run had no harness session to resume: only the summary carries over.
+    let seeded = notice_codes_of_a_new_session(Some(Continuation {
+        harness_session_id: String::new(),
+        summary: "Earlier work".into(),
+    }))
+    .await;
+    assert_eq!(seeded, ["context_compacted"]);
+
+    let first_run = notice_codes_of_a_new_session(None).await;
+    assert!(first_run.is_empty(), "{first_run:?}");
+    let nothing_to_seed = notice_codes_of_a_new_session(Some(Continuation {
+        harness_session_id: String::new(),
+        summary: String::new(),
+    }))
+    .await;
+    assert!(nothing_to_seed.is_empty(), "{nothing_to_seed:?}");
 }
 
 #[test]
