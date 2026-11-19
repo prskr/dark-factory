@@ -35,7 +35,10 @@ fn embedded_tools_are_exactly_the_factory_tools() {
             "write_artifact",
             "list_artifacts",
             "read_artifact",
-            "merge_subtask_pr"
+            "merge_subtask_pr",
+            "list_pull_requests",
+            "read_ci_status",
+            "read_ci_log"
         ]
     );
     let first = &tool_descriptors()[0];
@@ -94,6 +97,31 @@ fn feedback_description_marks_outside_authors_as_untrusted() {
         .find(|t| t.name == "comment_on_pull_request")
         .unwrap();
     assert!(comment.annotations.as_ref().is_some_and(|a| !a.idempotent));
+}
+
+// Scenario "CI tools listed" of `factory-tools`: the task run's tools, with the warnings.
+#[test]
+fn ci_tools_are_read_only_task_tools_and_the_log_is_marked_untrusted() {
+    let tools = tool_descriptors_for(df_core::TaskKind::Task);
+    let find = |name: &str| tools.iter().find(|t| t.name == name).unwrap();
+    for name in ["list_pull_requests", "read_ci_status", "read_ci_log"] {
+        assert!(find(name).annotations.as_ref().is_some_and(|a| a.read_only));
+    }
+    assert!(find("read_ci_log").description.contains("untrusted input"));
+    assert!(
+        find("read_ci_status")
+            .description
+            .contains("exactly one of pull_request and ref")
+    );
+    let chat: Vec<_> = tool_descriptors_for(df_core::TaskKind::Chat)
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert!(
+        !chat
+            .iter()
+            .any(|n| n.contains("ci_") || n == "list_pull_requests")
+    );
 }
 
 const WRITABLE_SENTENCE: &str = "Writable: /data/repo (workspace), /data/home (your home), \
@@ -163,7 +191,7 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
     assert_eq!(workspace.base_branch, "main");
     assert_eq!(workspace.rewrite_policy(), RewritePolicyProto::WithLease);
     assert!(!workspace.existing_branch);
-    assert_eq!(assign.tools.len(), 16);
+    assert_eq!(assign.tools.len(), 19);
     assert_eq!(assign.task.expect("task").task_key, "DF-1");
     assert!(assign.continuation.is_none());
     let Some(harness_kind::Kind::Acp(acp)) = assign.harness.expect("harness").kind else {

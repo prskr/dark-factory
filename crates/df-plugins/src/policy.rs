@@ -12,6 +12,8 @@ pub(crate) struct HttpPolicy {
     auth_scheme: AuthScheme,
     /// Test servers speak plain HTTP; production policies never set this.
     allow_plain_http: bool,
+    /// Further HTTPS hosts, reached without the credential: `host` or `*.suffix`.
+    extra_hosts: Vec<String>,
 }
 
 impl HttpPolicy {
@@ -33,7 +35,26 @@ impl HttpPolicy {
             credential,
             auth_scheme,
             allow_plain_http: false,
+            extra_hosts: Vec::new(),
         })
+    }
+
+    /// Also allows HTTPS requests to `hosts` (`host` or `*.suffix`), which carry no credential.
+    pub(crate) fn with_extra_hosts(mut self, hosts: &[String]) -> Self {
+        self.extra_hosts = hosts.iter().map(|h| h.to_ascii_lowercase()).collect();
+        self
+    }
+
+    fn is_extra_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        self.extra_hosts
+            .iter()
+            .any(|allowed| match allowed.strip_prefix("*.") {
+                Some(suffix) => host
+                    .strip_suffix(suffix)
+                    .is_some_and(|head| head.ends_with('.')),
+                None => host == *allowed,
+            })
     }
 
     /// Also allows `http` (for tests against a local mock server).
@@ -55,6 +76,11 @@ impl HttpPolicy {
         if !target.host().eq_ignore_ascii_case(self.authority.host())
             || port(target) != port(&self.authority)
         {
+            // Another host gets no credential, whatever the plugin sent.
+            if scheme == Scheme::HTTPS && port(target) == 443 && self.is_extra_host(target.host()) {
+                headers.remove(AUTHORIZATION);
+                return Ok(());
+            }
             return Err(Denied::Host);
         }
         let prefix = match self.auth_scheme {
@@ -149,6 +175,38 @@ mod tests {
             Err(Denied::Scheme)
         );
         assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn extra_hosts_are_admitted_without_a_credential() {
+        let p = policy().with_extra_hosts(&[
+            "*.actions.githubusercontent.com".to_string(),
+            "logs.example.com".to_string(),
+        ]);
+        for url in [
+            "https://pipelines.actions.githubusercontent.com/x?sig=1",
+            "https://a.b.actions.githubusercontent.com/",
+            "https://LOGS.example.com/x",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer fake"));
+            p.admit(&uri(url), &mut headers).unwrap();
+            assert!(headers.get(AUTHORIZATION).is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn extra_hosts_do_not_match_the_suffix_itself_lookalikes_ports_or_plain_http() {
+        let p = policy().with_extra_hosts(&["*.example.com".to_string()]);
+        for url in [
+            "https://example.com/",
+            "https://evilexample.com/",
+            "https://a.example.com.evil.org/",
+            "https://a.example.com:8443/",
+            "http://a.example.com/",
+        ] {
+            assert!(p.admit(&uri(url), &mut HeaderMap::new()).is_err(), "{url}");
+        }
     }
 
     #[test]

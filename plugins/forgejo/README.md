@@ -1,7 +1,7 @@
 # Forgejo plugin
 
-WASI component implementing world `forge` of `contract/wit/integrations` (`pull-requests` and
-`issues`) for Forgejo. Built for `wasm32-wasip2`; run by `df-plugins`. The plugin never sees
+WASI component implementing world `forge` of `contract/wit/integrations` (`pull-requests`,
+`issues`, `webhooks` and `ci`) for Forgejo. Built for `wasm32-wasip2`; run by `df-plugins`. The plugin never sees
 credentials: the host adds `Authorization`.
 
 ```bash
@@ -9,7 +9,7 @@ cargo build -p forgejo-plugin --target wasm32-wasip2 --release   # target/wasm32
 wasm-tools component wit target/wasm32-wasip2/release/forgejo_plugin.wasm
 ```
 
-Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
+Exports: `pull-requests`, `issues`, `webhooks`, `ci`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
 `wasi:cli` (pulled in by `std`) and `darkfactory:integrations/types`.
 
 Title prefixes, timestamps, the stderr log and the `wasi:http` transport are shared with the other forge plugin in `plugins/forge-common`.
@@ -33,6 +33,9 @@ Title prefixes, timestamps, the stderr log and the `wasi:http` transport are sha
 | `update` | `PATCH .../pulls/{index}` (preceded by a `GET` when title or draft change) |
 | `merge` | `GET .../pulls/{index}` (a merged pull request with the same head is success, another head is `conflict`, a closed one `invalid-input`, a moved head `conflict` without a merge request), `GET /api/v1/repos/{owner}/{repo}` for `default_merge_style`, then `POST .../pulls/{index}/merge` with `Do` and `head_commit_id`; the success is a `200` with an empty body, `405` (not mergeable, also while Forgejo still checks a fresh pull request: "Please try again later") and `409` (head out of date) are `conflict` |
 | `create-branch` | `POST .../branches` with `new_branch_name` and `old_ref_name` (`201`); an existing branch is `409` → `conflict`, an unknown `old_ref_name` is a `500` "object does not exist" that the plugin maps to `not-found` |
+| `list-open` | `GET .../pulls?state=open[&poster={login}]&page=N&limit=50` until an empty page; head, head prefix, base and label are matched in the plugin, the author also by Forgejo (`poster`, needs v10 or later: `GET /api/v1/version` first, `unsupported` below). The author and labels of each entry come from `user.login` and `labels` |
+| `ci.status` | `GET .../commits/{ref}/status?page=N&limit=50` until an empty page (one check per status context; the combined state is computed here); on v16 or later also `GET .../actions/runs?head_sha={sha}` and `GET .../actions/runs/{id}/jobs`, which give a check the id of the job whose `<workflow> / <job> (<event>)` context it has (the workflow is the run's `name` or its file's stem). A `404` on the runs (Actions disabled) leaves the checks without job ids |
+| `ci.job-log` | v16 or later (`unsupported` naming v16 below): `GET .../actions/jobs/{id}/logs` with `Range: bytes=-4194304`; a `206` whose `Content-Range` starts after byte 0, or a body longer than 4 MiB (a server that ignores `Range`), sets `head-dropped`. A `404` (unknown or expired job) is `not-found` |
 | issues `get` | `GET .../issues/{index}` |
 | issues `add-comment` | `POST .../issues/{index}/comments` (pull request numbers work as issue numbers) |
 | `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments[?since=]` (PR comments, one request), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` for each of the 20 newest submitted reviews, `GET .../collaborators/{login}/permission` once per distinct non-bot author |

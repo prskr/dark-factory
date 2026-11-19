@@ -158,6 +158,7 @@ the run's task, and at most once per `call_id`.
 | `complete_task` | Ends the run after the turn; the task goes to review. Fails while the task has [open subtasks](../using/delegation.md#completing-with-open-subtasks) |
 | `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task |
 | `read_pull_request_feedback`, `comment_on_pull_request` | Read and answer reviews |
+| `list_pull_requests`, `read_ci_status`, `read_ci_log` | [CI reads](../integrations/forges/ci-reads.md): the open pull requests of the run's project, the CI checks of a pull request or ref, and the log of a job. Read-only, task runs only, never outside the project's repository; job logs are untrusted input |
 | `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project, optionally on a [base task](../using/delegation.md#base-task) and within the [limits](../using/delegation.md#limits); `send_message` acts only on children of the run's task |
 | `merge_subtask_pr` | Merges the pull request of a subtask based on the run's task into the run's task branch, if the project allows it ([Build a feature in iterations](../using/build-a-feature.md)) |
 | `write_artifact`, `list_artifacts`, `read_artifact` | [Artifacts](../using/artifacts.md): write named text and image files on the own task, list and read those of related tasks |

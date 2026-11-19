@@ -6,6 +6,8 @@
 # state alone.
 # `[rebase]`: the main branch moved on. The agent rebases its branch onto it; the runtime pushes
 # the rewritten branch with lease after the turn.
+# `[ci]`: the task is attached to a `renovate/e2e-ci-` branch. The agent lists the open pull
+# requests of such branches, reads the CI status of its checkout's head commit and the log of a job.
 sessions:
   new:
     - &turn
@@ -30,6 +32,33 @@ sessions:
             - shell: |
                 git fetch -q origin main
                 git rebase -q origin/main
+      - when:
+          prompt_contains: "[ci]"
+          steps:
+            - say: "Reading the CI state of the open Renovate pull request."
+            - mcp:
+                server: factory
+                tool: list_pull_requests
+                args:
+                  head_prefix: "renovate/e2e-ci-"
+            # The task is on the pull request's branch: its head commit identifies this run's
+            # check among the checks of every run of the suite.
+            - shell_var:
+                shell: git rev-parse HEAD
+                save: sha
+            - mcp:
+                server: factory
+                tool: read_ci_status
+                args:
+                  ref: "${sha}"
+            # The job id is made up: Forgejo before v16 doesn't serve logs at all, and its Actions
+            # have no runner here, so either way the call is an error result that says why.
+            - mcp:
+                server: factory
+                tool: read_ci_log
+                args:
+                  job: 1
+            - say: "Read the CI state."
       - end: end_turn
   loaded:
     - *turn

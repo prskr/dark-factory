@@ -5,5 +5,7 @@
 pub mod draft;
 pub mod http;
 pub mod log;
+pub mod log_tail;
 pub mod open_filter;
 pub mod timestamp;
+pub mod url;

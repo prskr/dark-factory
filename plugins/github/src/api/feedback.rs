@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use percent_encoding::utf8_percent_encode;
+use forge_common::url;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -16,7 +16,7 @@ use crate::exports::darkfactory::integrations::pull_requests::{
 };
 use forge_common::timestamp::{self, touched_since};
 
-use super::{Clock, Failure, GitHub, Log, Method, QUERY_VALUE, Transport, repo_path};
+use super::{Clock, Failure, GitHub, Log, Method, Transport, repo_path};
 
 /// Pending reviews are left out; only their author could see them.
 const FEEDBACK_QUERY: &str = r"query($owner: String!, $name: String!, $number: Int!) {
@@ -230,7 +230,7 @@ impl<T: Transport, C: Clock, L: Log> Roles<'_, T, C, L> {
         let path = format!(
             "{}/collaborators/{}/permission",
             repo_path(self.repo),
-            utf8_percent_encode(login, QUERY_VALUE)
+            url::encode(login)
         );
         let role = match self
             .github

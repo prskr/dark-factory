@@ -165,6 +165,10 @@ pub enum IntegrationError {
     Config(String),
     #[error("transport error: {0}")]
     Transport(String),
+    /// The forge doesn't offer the operation, e.g. because it is too old, or the plugin has no
+    /// `ci` capability. The message names what is missing.
+    #[error("not supported: {0}")]
+    Unsupported(String),
     #[error("internal plugin error: {0}")]
     Internal(String),
 }
@@ -190,6 +194,64 @@ pub struct PullRequest {
     pub draft: bool,
     pub state: PullRequestState,
     pub head_sha: String,
+}
+
+/// Which open pull requests to list (`pull-requests.open-filter` without `head`); all set fields
+/// apply together.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestFilter {
+    /// The head branch starts with this.
+    pub head_prefix: Option<String>,
+    /// Login of the author.
+    pub author: Option<String>,
+    /// Name of a label the pull request carries.
+    pub label: Option<String>,
+    /// Base branch.
+    pub base: Option<String>,
+}
+
+/// A pull request with its author and labels (`pull-requests.listed-pull-request`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListedPullRequest {
+    pub pr: PullRequest,
+    pub author: String,
+    pub labels: Vec<String>,
+}
+
+/// State of a check or of a whole ref (`ci.ci-state`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CiState {
+    Success,
+    Pending,
+    Failure,
+    /// Only as the state of a ref without checks.
+    None,
+}
+
+/// One check of a ref (`ci.check`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiCheck {
+    pub name: String,
+    pub state: CiState,
+    pub url: Option<String>,
+    /// Id for [`ForgeClient::read_ci_job_log`]; only checks of the forge's own CI have one.
+    pub job_id: Option<u64>,
+}
+
+/// The checks of a ref and their combined state (`ci.ci-status`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiStatus {
+    pub state: CiState,
+    pub checks: Vec<CiCheck>,
+}
+
+/// The end of a job log (`ci.job-log`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiJobLog {
+    pub text: String,
+    /// The log was longer than the plugin keeps; `text` is its end.
+    pub head_dropped: bool,
 }
 
 /// Request to open a pull request (`darkfactory:integrations/pull-requests.new-pull-request`).
@@ -344,6 +406,37 @@ pub trait ForgeClient: Send + Sync {
         p: &ProjectId,
         head: &str,
     ) -> Result<Vec<PullRequest>, IntegrationError>;
+
+    /// The open pull requests of the project's repository that match `filter`, with author and
+    /// labels, in the forge's order.
+    async fn list_pull_requests(
+        &self,
+        p: &ProjectId,
+        filter: &PullRequestFilter,
+    ) -> Result<Vec<ListedPullRequest>, IntegrationError>;
+
+    /// Pull request `number` of the project's repository, whatever its state.
+    async fn get_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+    ) -> Result<PullRequest, IntegrationError>;
+
+    /// The checks of `git_ref` (branch, tag or commit SHA) of the project's repository.
+    /// `Unsupported` if the project's plugin has no `ci` capability.
+    async fn read_ci_status(
+        &self,
+        p: &ProjectId,
+        git_ref: &str,
+    ) -> Result<CiStatus, IntegrationError>;
+
+    /// The end (at most 4 MiB) of the log of CI job `job_id` of the project's repository.
+    /// `Unsupported` if the plugin or the forge can't serve logs.
+    async fn read_ci_job_log(
+        &self,
+        p: &ProjectId,
+        job_id: u64,
+    ) -> Result<CiJobLog, IntegrationError>;
 
     async fn update_pull_request(
         &self,

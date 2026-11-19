@@ -34,6 +34,7 @@ plugins:
 | `plugins.<name>.hosts` | no | `[]` | Repository hosts this plugin serves. Each entry is a string `host[:port]` or a map `{host, apiUrl}`; the map rejects unknown keys. Hosts are DNS names, IPv4 or bracketed IPv6 addresses; they are lowercased, a trailing dot and port `443` are dropped, any other port stays part of the host. A host may be claimed by one entry only. An entry without `hosts` (or with `[]`) is the default plugin; at most one is allowed. |
 | `plugins.<name>.hosts[].apiUrl` | no | `https://<host>` | API base URL for this host. Must start with `https://` and have no userinfo, query or fragment; host lowercased, port `443` and a trailing `/` dropped, the path is kept (`https://ghe.example.org/api/v3`). Becomes the plugin's `base-url` and the only authority its requests may reach. Only valid in the `{host, apiUrl}` form, which rejects unknown keys. |
 | `plugins.<name>.authScheme` | no | `token` | How the project's forge credential is sent: `token` → `Authorization: token <credential>`, `bearer` → `Authorization: Bearer <credential>`. The host sets the header on every request and replaces one set by the plugin. Applies to all hosts of the entry, the default plugin included. |
+| `plugins.<name>.extraHosts` | no | `[]` | Further hosts the plugin may reach over HTTPS (port 443) besides the host of its `base-url`: a host name (`logs.example.org`) or `*.suffix` for every subdomain of `suffix` (not `suffix` itself, not a host that only ends with it). Requests to them carry no credential, whatever the plugin sets. For storage hosts a forge redirects to: the `github` plugin reads job logs from the host GitHub redirects to ([CI reads](ci-reads.md#github-job-logs-and-the-redirect-hosts)). Written to the instance config only when set; the Helm chart sets it for `github`. |
 | `plugins.<name>.settings` | no | `{}` | String map handed to the plugin unchanged. The host adds `base-url` (the route's `apiUrl`; for the default plugin scheme and authority of the project's `repo_url`) and it wins over a configured one. Keys are documented by the plugin (Forgejo: `wip-prefixes`, see `plugins/forgejo/README.md`; GitHub: `draft-mode`, `wip-prefixes`, `api-version`, see `plugins/github/README.md`). |
 | `plugins.<name>.webhookSecret` | no | unset | `{name, key, generate}`: the key `key` of the Kubernetes Secret `name` in the instance namespace holds the shared secret the forge signs webhooks with (HMAC-SHA256). Read once at startup, after the sandbox backend started, and only for plugins that export `webhooks`. Set, it enables `POST /webhooks/<name>`; unset, that endpoint answers `404`. `generate` (default `false`): create the Secret with 32 random bytes, hex-encoded (64 characters), when it does not exist; the control plane never updates an existing Secret. Trailing line breaks of the value are ignored. An existing Secret without the key fails startup. The secret stays in the host: plugins check signatures through `webhook-signature.verify`. The Helm chart sets it from `plugins.<name>.webhookSecret`. A user with the role `admin` reads it in the web UI (a project's settings page, tab Integrations, group Incoming webhook); each read is audited. `webhookSecretFile` is no longer accepted. |
 
@@ -210,7 +211,8 @@ values route `github.com` to it.
 2. Create a fine-grained personal access token for an account with write access, restricted to the
    project's repositories ("Only select repositories"), with the repository permissions Pull
    requests read/write, Issues read/write, Contents read/write (Git clone and push, branch creation
-   and the merge of a pull request) and Metadata read. A classic token needs `repo`. `list-feedback` reads each reviewer's repository permission
+   and the merge of a pull request) and Metadata read. For the [CI tools](ci-reads.md) add Checks read,
+   Commit statuses read and Actions read. A classic token needs `repo`. `list-feedback` reads each reviewer's repository permission
    (`GET .../collaborators/{username}/permission`), which needs the account's write access.
 3. Store it in a Secret in the instance namespace (`sandbox.instanceNamespace`), for example
    `kubectl -n dark-factory create secret generic github-token --from-file=token=<file with the token>`.
@@ -327,7 +329,8 @@ merge pull requests and create branches for `merge_subtask_pr` and base tasks; t
 merge permission on the repository for the merge),
 `write:issue` (comments on issues and pull requests) and `read:user` (`list-feedback` reads the
 token's own account to label its comments `bot`; Forgejo 15 answers 403 without this scope).
-Read-only use needs `read:repository`, `read:issue` and `read:user`.
+Read-only use needs `read:repository`, `read:issue` and `read:user`. The [CI tools](ci-reads.md)
+(commit statuses, Actions jobs and logs) need `read:repository`; job logs need Forgejo v16 or later.
 
 ### Refused requests
 

@@ -59,6 +59,8 @@ GITHUB = "//plugins/github"
 
 PROBE = "//plugins/test-probe"
 
+PROBE_WITHOUT_CI = "//plugins/test-probe:test-probe-without-ci"
+
 IMAGE_FORGEJO = "//deploy:forgejo_plugin"
 
 IMAGE_GITHUB = "//deploy:github_plugin"
@@ -104,6 +106,11 @@ EXTRAS = {
         ],
     )
     for name, components in {
+        "ci": {
+            "FORGEJO_PLUGIN_WASM": FORGEJO,
+            "TEST_PROBE_WASM": PROBE,
+            "TEST_PROBE_WITHOUT_CI_WASM": PROBE_WITHOUT_CI,
+        },
         "forgejo": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "TEST_PROBE_WASM": PROBE,

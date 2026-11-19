@@ -7,9 +7,11 @@
 ///   * `pull-requests` — code forges (Forgejo, GitHub, ...)
 ///   * `issues`        — issue trackers (Forgejo, GitHub, Jira, ...)
 ///   * `webhooks`      — inbound forge webhooks (world `forge`)
+///   * `ci`            — CI status and job logs (world `forge`)
 ///
-/// A forge like Forgejo exports both (world `forge`); an issue-only tracker
-/// exports just `issues` (world `issue-provider`).
+/// A forge like Forgejo exports all of them (world `forge`); an issue-only tracker
+/// exports just `issues` (world `issue-provider`). The host calls `ci` only if the
+/// component exports it.
 ///
 /// Security model:
 ///   * Plugins reach the network only through `wasi:http/outgoing-handler`.
@@ -80,6 +82,9 @@ interface types {
         /// The upstream server couldn't be reached, or the host denied the
         /// request (destination not allowed).
         transport(string),
+        /// The upstream server doesn't offer the operation, e.g. because it is too old.
+        /// The message names what is missing.
+        unsupported(string),
         /// A bug in the plugin.
         internal(string),
     }
@@ -226,21 +231,30 @@ interface pull-requests {
 
     /// Which open pull requests `list-open` returns. All set fields apply together.
     record open-filter {
-        /// Head branch in the repository itself; pull requests from forks never match.
-        head: string,
-        /// Not supported yet: plugins return `invalid-input` when set (`iter3-ci-tools`).
+        /// Head branch in the repository itself; pull requests from forks never match it.
+        /// Unset: any head branch, forks included.
+        head: option<string>,
+        /// Head branch starts with this, e.g. `renovate/`.
         head-prefix: option<string>,
-        /// Not supported yet, see `head-prefix`.
+        /// Login of the author. Forgejo before v10 fails with `unsupported`.
         author: option<string>,
-        /// Not supported yet, see `head-prefix`.
+        /// Name of a label the pull request carries.
         label: option<string>,
-        /// Not supported yet, see `head-prefix`.
+        /// Base branch.
         base: option<string>,
+    }
+
+    /// A pull request with what `list-open` filters by.
+    record listed-pull-request {
+        pr: pull-request,
+        /// Login of the author.
+        author: string,
+        labels: list<string>,
     }
 
     /// Open pull requests of the repository that match `filter`, following the forge's
     /// pagination. Unlike `find-open` it needs no base branch.
-    list-open: func(repo: repo-ref, filter: open-filter) -> result<list<pull-request>, error>;
+    list-open: func(repo: repo-ref, filter: open-filter) -> result<list<listed-pull-request>, error>;
 
     get: func(id: pull-request-ref) -> result<pull-request, error>;
 
@@ -300,6 +314,50 @@ interface issues {
     /// Adds a Markdown comment. Not idempotent: the host only retries when
     /// the error is `rate-limited` or `transport` and accepts rare duplicates.
     add-comment: func(id: issue-ref, body: string) -> result<comment, error>;
+}
+
+/// CI results of a ref and the logs of its jobs.
+interface ci {
+    use types.{repo-ref, error};
+
+    enum ci-state {
+        success,
+        pending,
+        failure,
+        /// Only as the state of a ref without checks.
+        none,
+    }
+
+    record check {
+        /// Check run, status context or job name.
+        name: string,
+        state: ci-state,
+        /// Web URL of the check, if the forge has one.
+        url: option<string>,
+        /// Pass it to `job-log`; only checks of the forge's own CI have one.
+        job-id: option<u64>,
+    }
+
+    record ci-status {
+        /// `failure` if any check failed, else `pending` if any is running, else `success`;
+        /// `none` without checks.
+        state: ci-state,
+        checks: list<check>,
+    }
+
+    record log-tail {
+        /// Plain text.
+        text: string,
+        /// The log was longer than the plugin keeps; `text` is its end.
+        head-dropped: bool,
+    }
+
+    /// The checks of `ref`, a branch, tag or commit SHA.
+    status: func(repo: repo-ref, %ref: string) -> result<ci-status, error>;
+
+    /// At most the last 4 MiB of the log. `not-found` for an unknown or expired job,
+    /// `unsupported` if the forge can't serve logs.
+    job-log: func(repo: repo-ref, job-id: u64) -> result<log-tail, error>;
 }
 
 /// Imported by plugins: checks a webhook signature; the secret stays in the host.
@@ -407,9 +465,20 @@ world issue-provider {
     export issues;
 }
 
-/// A code forge that also hosts issues and receives webhooks, e.g. Forgejo.
-world forge {
+/// What the host needs of every code forge; `ci` is optional.
+world forge-core {
     include pull-request-provider;
     include issue-provider;
     export webhooks;
+}
+
+world ci-provider {
+    include plugin-base;
+    export ci;
+}
+
+/// A code forge that also hosts issues, receives webhooks and reads CI, e.g. Forgejo.
+world forge {
+    include forge-core;
+    include ci-provider;
 }

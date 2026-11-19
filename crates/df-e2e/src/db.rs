@@ -252,6 +252,26 @@ pub async fn transcript_events_containing(pool: &PgPool, key: &str, text: &str) 
     .with_context(|| format!("transcript of task {key}"))
 }
 
+/// Number of transcript events of task `key` that contain both `first` and `second`.
+pub async fn transcript_events_containing_both(
+    pool: &PgPool,
+    key: &str,
+    first: &str,
+    second: &str,
+) -> Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "count!" FROM transcript_events e JOIN tasks t ON t.id = e.task_id
+         WHERE t.key = $1 AND strpos(e.payload::text, $2) > 0
+           AND strpos(e.payload::text, $3) > 0"#,
+        key,
+        first,
+        second
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("transcript of task {key}"))
+}
+
 /// Number of messages of task `key` whose content contains `text`.
 pub async fn messages_containing(pool: &PgPool, key: &str, text: &str) -> Result<i64> {
     sqlx::query_scalar!(

@@ -72,6 +72,8 @@ the contract).
 ```bash
 # Tests use prebuilt plugin components (target wasm32-wasip2 from rust-toolchain.toml):
 cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
+# The probe without CI support (a plugin that doesn't export `ci`), in its own target directory:
+cargo build --target wasm32-wasip2 --no-default-features -p test-probe-plugin --target-dir target/probe-no-ci
 cargo test -p df-plugins
 # Pull request lifecycle against a real Forgejo (variables: see tests/homelab.rs)
 cargo test -p df-plugins --test homelab -- --ignored

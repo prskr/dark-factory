@@ -73,6 +73,12 @@ needs one request per review for its review comments, so a call reads them for t
 reviews only, and sets `truncated` when there are more. The wake message of a webhook tells the agent
 to pass its last `next_since` as `since` ([Forge webhooks](webhooks.md)).
 
+## CI reads
+
+Agents list the open pull requests of their project and read CI checks and job logs with
+`list_pull_requests`, `read_ci_status` and `read_ci_log`. Arguments, results, Forgejo version
+requirements and the GitHub log hosts: [CI reads](ci-reads.md).
+
 ## Plugin images
 
 Each plugin ships as its own image (`FROM scratch`, one file `/plugin.wasm`). The kubelet pulls it

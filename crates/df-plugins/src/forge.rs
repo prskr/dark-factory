@@ -6,15 +6,16 @@ use std::sync::Arc;
 
 use df_core::webhooks::ParsedEvent;
 use df_core::{
-    AuthScheme, AuthorRole, Comment, CredentialRef, Feedback, IntegrationError, Issue,
-    NewPullRequest, PullRequest, PullRequestUpdate, RepoRef, SecretStore,
+    AuthScheme, AuthorRole, CiJobLog, CiStatus, Comment, CredentialRef, Feedback, IntegrationError,
+    Issue, ListedPullRequest, NewPullRequest, PullRequest, PullRequestFilter, PullRequestUpdate,
+    RepoRef, SecretStore,
 };
 use futures::future::BoxFuture;
 use secrecy::SecretString;
 use wasmtime::Store;
 
 use crate::convert;
-use crate::host::{Forge, InstanceSpec, PluginHost, pull_requests::OpenFilter, wit};
+use crate::host::{CiProvider, Export, Forge, InstanceSpec, PluginHost, wit};
 use crate::policy::HttpPolicy;
 use crate::retry::with_retries;
 use crate::state::{State, WebhookCall};
@@ -36,6 +37,7 @@ pub struct PluginForgeClient {
     settings: BTreeMap<String, String>,
     webhook_secret: Option<SecretString>,
     allow_plain_http: bool,
+    extra_hosts: Vec<String>,
 }
 
 /// Why a webhook delivery was not turned into events.
@@ -67,7 +69,15 @@ impl PluginForgeClient {
             settings,
             webhook_secret: None,
             allow_plain_http: false,
+            extra_hosts: Vec::new(),
         }
+    }
+
+    /// Lets the plugin reach `hosts` (`host` or `*.suffix`) without the forge credential.
+    #[must_use]
+    pub fn with_extra_hosts(mut self, hosts: Vec<String>) -> Self {
+        self.extra_hosts = hosts;
+        self
     }
 
     /// Accepts webhooks signed with `secret`.
@@ -106,7 +116,7 @@ impl PluginForgeClient {
         let (headers, body) = (headers.to_vec(), body.to_vec());
         let (events, verified) = self
             .host
-            .run(spec, |plugin, store| {
+            .run(spec, |plugin: &Forge, store| {
                 Box::pin(async move {
                     let parsed = plugin
                         .darkfactory_integrations_webhooks()
@@ -130,7 +140,7 @@ impl PluginForgeClient {
 
     /// Login of the account owning the target's credential.
     pub(crate) async fn whoami(&self, target: &RepoTarget) -> Result<String, IntegrationError> {
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             Box::pin(async move {
                 plugin
                     .darkfactory_integrations_webhooks()
@@ -148,7 +158,7 @@ impl PluginForgeClient {
         login: &str,
     ) -> Result<AuthorRole, IntegrationError> {
         let repo = convert::repo(&target.repo);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (repo, login) = (repo.clone(), login.to_string());
             Box::pin(async move {
                 let webhooks = plugin.darkfactory_integrations_webhooks();
@@ -173,7 +183,7 @@ impl PluginForgeClient {
     ) -> Result<PullRequest, IntegrationError> {
         req.repo = target.repo.clone();
         let request = convert::new_pull_request(req);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let request = request.clone();
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -191,7 +201,7 @@ impl PluginForgeClient {
         base: &str,
     ) -> Result<Option<PullRequest>, IntegrationError> {
         let repo = convert::repo(&target.repo);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (repo, head, base) = (repo.clone(), head.to_string(), base.to_string());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -207,23 +217,90 @@ impl PluginForgeClient {
         target: &RepoTarget,
         head: &str,
     ) -> Result<Vec<PullRequest>, IntegrationError> {
+        let filter = PullRequestFilter::default();
+        let listed = self.list_pull_requests(target, Some(head), &filter).await?;
+        Ok(listed.into_iter().map(|l| l.pr).collect())
+    }
+
+    /// Open pull requests with author and labels; `head` is the exact head branch in the
+    /// repository itself, `filter` the other criteria.
+    pub(crate) async fn list_pull_requests(
+        &self,
+        target: &RepoTarget,
+        head: Option<&str>,
+        filter: &PullRequestFilter,
+    ) -> Result<Vec<ListedPullRequest>, IntegrationError> {
         let repo = convert::repo(&target.repo);
-        self.call(target, |plugin, store| {
-            let filter = OpenFilter {
-                head: head.to_string(),
-                head_prefix: None,
-                author: None,
-                label: None,
-                base: None,
-            };
-            let repo = repo.clone();
+        let filter = convert::open_filter(head, filter);
+        self.call(target, |plugin: &Forge, store| {
+            let (repo, filter) = (repo.clone(), filter.clone());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
                 prs.call_list_open(store, &repo, &filter).await
             })
         })
         .await
-        .map(|prs| prs.into_iter().map(convert::from_pull_request).collect())
+        .map(|prs| prs.into_iter().map(convert::from_listed).collect())
+    }
+
+    pub(crate) async fn get_pull_request(
+        &self,
+        target: &RepoTarget,
+        number: u64,
+    ) -> Result<PullRequest, IntegrationError> {
+        let id = convert::pull_request_ref(&target.repo, number);
+        self.call(target, |plugin: &Forge, store| {
+            let id = id.clone();
+            Box::pin(async move {
+                let prs = plugin.darkfactory_integrations_pull_requests();
+                prs.call_get(store, &id).await
+            })
+        })
+        .await
+        .map(convert::from_pull_request)
+    }
+
+    /// The checks of `git_ref`; `Unsupported` if the plugin has no `ci` export.
+    pub(crate) async fn ci_status(
+        &self,
+        target: &RepoTarget,
+        git_ref: &str,
+    ) -> Result<CiStatus, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        self.call(target, |plugin: &CiProvider, store| {
+            let (repo, git_ref) = (repo.clone(), git_ref.to_string());
+            Box::pin(async move {
+                plugin
+                    .darkfactory_integrations_ci()
+                    .call_status(store, &repo, &git_ref)
+                    .await
+            })
+        })
+        .await
+        .map(convert::from_ci_status)
+    }
+
+    /// The end of the log of `job_id`; `Unsupported` if the plugin has no `ci` export.
+    pub(crate) async fn ci_job_log(
+        &self,
+        target: &RepoTarget,
+        job_id: u64,
+    ) -> Result<CiJobLog, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        self.call(target, |plugin: &CiProvider, store| {
+            let repo = repo.clone();
+            Box::pin(async move {
+                plugin
+                    .darkfactory_integrations_ci()
+                    .call_job_log(store, &repo, job_id)
+                    .await
+            })
+        })
+        .await
+        .map(|log| CiJobLog {
+            text: log.text,
+            head_dropped: log.head_dropped,
+        })
     }
 
     pub(crate) async fn update_pull_request(
@@ -234,7 +311,7 @@ impl PluginForgeClient {
     ) -> Result<PullRequest, IntegrationError> {
         let id = convert::pull_request_ref(&target.repo, number);
         let changes = convert::pull_request_update(ch);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (id, changes) = (id.clone(), changes.clone());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -252,7 +329,7 @@ impl PluginForgeClient {
         head_sha: &str,
     ) -> Result<(), IntegrationError> {
         let id = convert::pull_request_ref(&target.repo, number);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (id, head_sha) = (id.clone(), head_sha.to_string());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -269,7 +346,7 @@ impl PluginForgeClient {
         from: &str,
     ) -> Result<(), IntegrationError> {
         let repo = convert::repo(&target.repo);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (repo, name, from) = (repo.clone(), name.to_string(), from.to_string());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -286,7 +363,7 @@ impl PluginForgeClient {
         since: Option<&str>,
     ) -> Result<Feedback, IntegrationError> {
         let id = convert::pull_request_ref(&target.repo, number);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (id, since) = (id.clone(), since.map(str::to_string));
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -305,7 +382,7 @@ impl PluginForgeClient {
         body: &str,
     ) -> Result<Comment, IntegrationError> {
         let id = convert::pull_request_ref(&target.repo, number);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (id, thread, body) = (id.clone(), thread.to_string(), body.to_string());
             Box::pin(async move {
                 let prs = plugin.darkfactory_integrations_pull_requests();
@@ -322,7 +399,7 @@ impl PluginForgeClient {
         number: u64,
     ) -> Result<Issue, IntegrationError> {
         let id = convert::issue_ref(&target.repo, number);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let id = id.clone();
             Box::pin(async move {
                 let issues = plugin.darkfactory_integrations_issues();
@@ -340,7 +417,7 @@ impl PluginForgeClient {
         body: &str,
     ) -> Result<Comment, IntegrationError> {
         let id = convert::issue_ref(&target.repo, number);
-        self.call(target, |plugin, store| {
+        self.call(target, |plugin: &Forge, store| {
             let (id, body) = (id.clone(), body.to_string());
             Box::pin(async move {
                 let issues = plugin.darkfactory_integrations_issues();
@@ -353,44 +430,56 @@ impl PluginForgeClient {
 
     /// Reads the credential, then runs `op` on a fresh instance allowed to reach the target's base
     /// URL, retrying rate limits and transport errors.
-    async fn call<R, F>(&self, target: &RepoTarget, op: F) -> Result<R, IntegrationError>
+    /// `E` is the export `op` calls (`Forge`, or `CiProvider`, which a component may lack).
+    async fn call<E, R, F>(&self, target: &RepoTarget, op: F) -> Result<R, IntegrationError>
     where
+        E: Export,
         F: for<'a> Fn(
-                &'a Forge,
+                &'a E,
                 &'a mut Store<State>,
             ) -> BoxFuture<'a, wasmtime::Result<Result<R, wit::Error>>>
             + Sync,
     {
-        let token = self
-            .secrets
-            .get(&target.credential.secret)
-            .await
-            .map_err(|e| IntegrationError::Config(format!("reading forge credential: {e}")))?;
+        let token = self.credential(target).await?;
         with_retries(|| async {
-            let mut policy =
-                HttpPolicy::for_base_url(&target.base_url, token.clone(), target.auth_scheme)
-                    .map_err(IntegrationError::Config)?;
-            if self.allow_plain_http {
-                policy = policy.allow_plain_http();
-            }
-            let settings = self
-                .settings
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .chain([("base-url".to_string(), target.base_url.clone())])
-                .collect::<HashMap<_, _>>();
+            let spec = self.instance_spec(target, &token)?;
             self.host
-                .run(
-                    InstanceSpec {
-                        policy: Some(policy),
-                        settings,
-                        webhook: None,
-                    },
-                    |plugin, store| op(plugin, store),
-                )
+                .run(spec, |plugin, store| op(plugin, store))
                 .await
                 .map_err(convert::from_error)
         })
         .await
+    }
+
+    async fn credential(&self, target: &RepoTarget) -> Result<SecretString, IntegrationError> {
+        self.secrets
+            .get(&target.credential.secret)
+            .await
+            .map_err(|e| IntegrationError::Config(format!("reading forge credential: {e}")))
+    }
+
+    fn instance_spec(
+        &self,
+        target: &RepoTarget,
+        token: &SecretString,
+    ) -> Result<InstanceSpec, IntegrationError> {
+        let mut policy =
+            HttpPolicy::for_base_url(&target.base_url, token.clone(), target.auth_scheme)
+                .map_err(IntegrationError::Config)?
+                .with_extra_hosts(&self.extra_hosts);
+        if self.allow_plain_http {
+            policy = policy.allow_plain_http();
+        }
+        let settings = self
+            .settings
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .chain([("base-url".to_string(), target.base_url.clone())])
+            .collect::<HashMap<_, _>>();
+        Ok(InstanceSpec {
+            policy: Some(policy),
+            settings,
+            webhook: None,
+        })
     }
 }

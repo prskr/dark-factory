@@ -6,21 +6,73 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::{Component, Instance, InstancePre, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder};
 
 use crate::policy::HttpPolicy;
 use crate::state::{State, WebhookCall};
 
-wasmtime::component::bindgen!({
-    path: "../../contract/wit/integrations",
-    world: "forge",
-    exports: { default: async },
-});
+/// What every forge plugin exports.
+mod core_bindings {
+    wasmtime::component::bindgen!({
+        path: "../../contract/wit/integrations",
+        world: "forge-core",
+        exports: { default: async },
+    });
+}
 
-pub(crate) use darkfactory::integrations::types as wit;
-pub(crate) use darkfactory::integrations::webhook_signature;
-pub(crate) use exports::darkfactory::integrations::{issues, pull_requests, webhooks};
+/// The optional `ci` export: a plugin without it still loads and its CI calls fail as
+/// `unsupported`. Shares the `types` of the core bindings.
+mod ci_bindings {
+    wasmtime::component::bindgen!({
+        path: "../../contract/wit/integrations",
+        world: "ci-provider",
+        exports: { default: async },
+        with: { "darkfactory:integrations/types": super::core_bindings::darkfactory::integrations::types },
+    });
+}
+
+pub(crate) use ci_bindings::CiProvider;
+pub(crate) use ci_bindings::exports::darkfactory::integrations::ci;
+pub(crate) use core_bindings::ForgeCore as Forge;
+use core_bindings::ForgeCorePre;
+pub(crate) use core_bindings::darkfactory::integrations::types as wit;
+pub(crate) use core_bindings::darkfactory::integrations::webhook_signature;
+pub(crate) use core_bindings::exports::darkfactory::integrations::{
+    issues, pull_requests, webhooks,
+};
+
+/// An export of a plugin instance that `PluginHost::run` can call.
+pub(crate) trait Export: Sized {
+    /// Fails as `unsupported` if the component doesn't have the export.
+    fn check(capabilities: Capabilities, plugin: &str) -> Result<(), wit::Error>;
+    fn load(store: &mut Store<State>, instance: &Instance) -> wasmtime::Result<Self>;
+}
+
+impl Export for Forge {
+    fn check(_: Capabilities, _: &str) -> Result<(), wit::Error> {
+        Ok(())
+    }
+
+    fn load(store: &mut Store<State>, instance: &Instance) -> wasmtime::Result<Self> {
+        Self::new(store, instance)
+    }
+}
+
+impl Export for CiProvider {
+    fn check(capabilities: Capabilities, plugin: &str) -> Result<(), wit::Error> {
+        if capabilities.ci {
+            return Ok(());
+        }
+        Err(wit::Error::Unsupported(format!(
+            "the forge plugin `{plugin}` doesn't support CI reads"
+        )))
+    }
+
+    fn load(store: &mut Store<State>, instance: &Instance) -> wasmtime::Result<Self> {
+        Self::new(store, instance)
+    }
+}
 
 /// Interval of the epoch clock; call timeouts have this granularity.
 const EPOCH_TICK: Duration = Duration::from_millis(50);
@@ -86,6 +138,24 @@ pub struct Capabilities {
     pub issues: bool,
     /// Exports `darkfactory:integrations/webhooks`.
     pub webhooks: bool,
+    /// Exports `darkfactory:integrations/ci`.
+    pub ci: bool,
+}
+
+impl Capabilities {
+    /// The capabilities of a component with these export names (`darkfactory:integrations/<name>@<version>`).
+    fn of_exports(exports: &[&str]) -> Self {
+        let exports_interface = |interface: &str| {
+            let prefix = format!("darkfactory:integrations/{interface}@");
+            exports.iter().any(|e| e.starts_with(&prefix))
+        };
+        Self {
+            pull_requests: exports_interface("pull-requests"),
+            issues: exports_interface("issues"),
+            webhooks: exports_interface("webhooks"),
+            ci: exports_interface("ci"),
+        }
+    }
 }
 
 /// The Wasmtime engine shared by all plugins, with the epoch clock that enforces call timeouts.
@@ -152,7 +222,7 @@ pub struct PluginHost {
     /// Plugin name from the configuration; tags the plugin's log output.
     name: String,
     engine: PluginEngine,
-    pre: ForgePre<State>,
+    pre: InstancePre<State>,
     capabilities: Capabilities,
     call_timeout: Duration,
     memory_limit: usize,
@@ -204,16 +274,7 @@ impl PluginHost {
             return Err(LoadError::ForbiddenImport(name.to_string()));
         }
         let exports: Vec<&str> = ty.exports(engine.engine()).map(|(name, _)| name).collect();
-        let exports_interface = |interface: &str| {
-            exports
-                .iter()
-                .any(|e| e.starts_with(&format!("darkfactory:integrations/{interface}@")))
-        };
-        let capabilities = Capabilities {
-            pull_requests: exports_interface("pull-requests"),
-            issues: exports_interface("issues"),
-            webhooks: exports_interface("webhooks"),
-        };
+        let capabilities = Capabilities::of_exports(&exports);
         if !capabilities.pull_requests && !capabilities.issues {
             return Err(LoadError::NoCapability);
         }
@@ -227,8 +288,12 @@ impl PluginHost {
             |state| state,
         )
         .map_err(invalid)?;
-        let pre =
-            ForgePre::new(linker.instantiate_pre(&component).map_err(invalid)?).map_err(invalid)?;
+        let pre = linker.instantiate_pre(&component).map_err(invalid)?;
+        // Rejects a component whose exports don't match the worlds.
+        ForgeCorePre::new(pre.clone()).map_err(invalid)?;
+        if capabilities.ci {
+            ci_bindings::CiProviderPre::new(pre.clone()).map_err(invalid)?;
+        }
 
         Ok(Self {
             name: name.to_string(),
@@ -247,14 +312,16 @@ impl PluginHost {
 
     /// Runs `call` on a fresh instance. Exceeding the timeout or memory limit fails only this
     /// call; the instance is dropped afterwards.
-    pub(crate) async fn run<T>(
+    /// `E` is the export `call` uses; a component without it fails as `unsupported`.
+    pub(crate) async fn run<E: Export, T>(
         &self,
         spec: InstanceSpec,
         call: impl for<'a> FnOnce(
-            &'a Forge,
+            &'a E,
             &'a mut Store<State>,
         ) -> BoxFuture<'a, wasmtime::Result<Result<T, wit::Error>>>,
     ) -> Result<T, wit::Error> {
+        E::check(self.capabilities, &self.name)?;
         let internal =
             |what: &str, e: wasmtime::Error| wit::Error::Internal(format!("{what}: {e:#}"));
         let limits = StoreLimitsBuilder::new()
@@ -268,11 +335,13 @@ impl PluginHost {
         store.set_epoch_deadline(epoch_deadline(self.call_timeout));
 
         let invoke = async {
-            let plugin = self
+            let instance = self
                 .pre
                 .instantiate_async(&mut store)
                 .await
                 .map_err(|e| internal("instantiating plugin", e))?;
+            let plugin = E::load(&mut store, &instance)
+                .map_err(|e| internal("loading plugin exports", e))?;
             call(&plugin, &mut store)
                 .await
                 .map_err(|e| internal("plugin call failed", e))?
@@ -375,6 +444,21 @@ mod tests {
             "add to ALLOWED_IMPORTS in host.rs: {missing:?}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn a_component_without_the_ci_export_has_no_ci_capability() {
+        let base = [
+            "darkfactory:integrations/pull-requests@0.1.0",
+            "darkfactory:integrations/issues@0.1.0",
+        ];
+        let without = Capabilities::of_exports(&base);
+        assert!(without.pull_requests && without.issues);
+        assert!(!without.webhooks && !without.ci);
+
+        let with =
+            Capabilities::of_exports(&[base[0], base[1], "darkfactory:integrations/ci@0.1.0"]);
+        assert!(with.ci);
     }
 
     #[test]

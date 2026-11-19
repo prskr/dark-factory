@@ -1,17 +1,21 @@
 //! Forgejo REST API (`/api/v1`) behind the `pull-requests` and `issues` interfaces.
 
+use std::cell::Cell;
+
 use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use crate::error;
 use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
 use crate::exports::darkfactory::integrations::pull_requests::{
-    NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
+    ListedPullRequest, NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
 use forge_common::draft;
 use forge_common::http;
 use forge_common::log::Log;
+use forge_common::open_filter::{Candidate, OpenFilter};
 
+mod ci;
 mod feedback;
 mod merge;
 
@@ -25,6 +29,8 @@ pub struct Request {
     pub method: Method,
     pub path: String,
     pub body: Option<Vec<u8>>,
+    /// Besides the JSON `accept` and `content-type`; never `authorization`: the host injects it.
+    pub headers: Vec<(&'static str, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +44,14 @@ pub struct Response {
 /// Sends a request to Forgejo; the host adds credentials.
 pub trait Transport {
     fn send(&self, request: Request) -> Result<Response, Error>;
+
+    /// Like [`Self::send`], but the body is cut to its last `max` bytes; true if its beginning
+    /// was dropped. Implementations may stop reading early instead of buffering a huge body.
+    fn send_tail(&self, request: Request, max: usize) -> Result<(Response, bool), Error> {
+        let mut response = self.send(request)?;
+        let cut = forge_common::log_tail::keep_tail(&mut response.body, max);
+        Ok((response, cut))
+    }
 }
 
 /// A failed request: the error and the HTTP status of the response, if there was one.
@@ -59,6 +73,8 @@ pub struct Forgejo<T, L> {
     transport: T,
     log: L,
     prefixes: Vec<String>,
+    /// Major version of the server, once asked for.
+    version: Cell<Option<u32>>,
 }
 
 impl<T: Transport, L: Log> Forgejo<T, L> {
@@ -67,6 +83,7 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
             transport,
             log,
             prefixes,
+            version: Cell::new(None),
         }
     }
 
@@ -118,14 +135,26 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
         Ok(None)
     }
 
-    /// Every open pull request whose head branch `head` is in `repo` itself, whatever its base.
-    pub fn list_open(&self, repo: &RepoRef, head: &str) -> Result<Vec<PullRequest>, Error> {
+    /// Every open pull request of `repo` that matches `filter`. The author is filtered by Forgejo
+    /// (v10 or later, `unsupported` below), the rest here.
+    pub fn list_open(
+        &self,
+        repo: &RepoRef,
+        filter: &OpenFilter<'_>,
+    ) -> Result<Vec<ListedPullRequest>, Error> {
+        let poster = match filter.author {
+            Some(author) => {
+                self.require_version(10, "filtering pull requests by author needs")?;
+                format!("&poster={}", forge_common::url::encode(author))
+            }
+            None => String::new(),
+        };
         let mut found = Vec::new();
         for page in 1.. {
             let prs: Vec<ApiPullRequest> = self.call(
                 Method::Get,
                 format!(
-                    "{}/pulls?state=open&page={page}&limit={PAGE_SIZE}",
+                    "{}/pulls?state=open{poster}&page={page}&limit={PAGE_SIZE}",
                     repo_path(repo)
                 ),
                 None,
@@ -133,13 +162,60 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
             if prs.is_empty() {
                 break;
             }
-            found.extend(
-                prs.into_iter()
-                    .filter(|pr| pr.state == "open" && pr.head.branch == head && pr.head_in(repo))
-                    .map(|pr| self.pull_request(repo.clone(), pr)),
-            );
+            for pr in prs.into_iter().filter(|pr| pr.state == "open") {
+                let labels: Vec<String> = pr.labels.iter().map(|l| l.name.clone()).collect();
+                let author = pr
+                    .user
+                    .as_ref()
+                    .map(|u| u.login.clone())
+                    .unwrap_or_default();
+                let candidate = Candidate {
+                    head: &pr.head.branch,
+                    head_repo: pr.head.repo.as_ref().map(|r| r.full_name.as_str()),
+                    base: &pr.base.branch,
+                    author: &author,
+                    labels: &labels,
+                };
+                if filter.matches(&repo.owner, &repo.name, &candidate) {
+                    found.push(ListedPullRequest {
+                        pr: self.pull_request(repo.clone(), pr),
+                        author,
+                        labels,
+                    });
+                }
+            }
         }
         Ok(found)
+    }
+
+    /// Forgejo's major version, read once per instance from `/api/v1/version`.
+    fn major_version(&self) -> Result<u32, Error> {
+        if let Some(major) = self.version.get() {
+            return Ok(major);
+        }
+        let v: ApiVersion = self.call(Method::Get, "/api/v1/version".into(), None)?;
+        let digits: String = v
+            .version
+            .trim_start_matches('v')
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        let major = digits.parse().map_err(|_unparsable| {
+            Error::Internal(format!("unexpected Forgejo version `{}`", v.version))
+        })?;
+        self.version.set(Some(major));
+        Ok(major)
+    }
+
+    /// `unsupported` unless Forgejo is at least v`min`; `what` is the subject and verb of the
+    /// message, e.g. `job logs need`.
+    fn require_version(&self, min: u32, what: &str) -> Result<(), Error> {
+        if self.major_version()? >= min {
+            return Ok(());
+        }
+        Err(Error::Unsupported(format!(
+            "{what} Forgejo v{min} or later"
+        )))
     }
 
     pub fn get(&self, id: &PullRequestRef) -> Result<PullRequest, Error> {
@@ -251,7 +327,12 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
             .transpose()
             .map_err(|e| Error::Internal(format!("encoding request: {e}")))?;
         let request = http::request_line(method, &path);
-        let response = self.transport.send(Request { method, path, body })?;
+        let response = self.transport.send(Request {
+            method,
+            path,
+            body,
+            headers: Vec::new(),
+        })?;
         if !(200..300).contains(&response.status) {
             return Err(Failure {
                 status: Some(response.status),
@@ -327,14 +408,6 @@ struct ApiHeadRepo {
     full_name: String,
 }
 
-impl ApiPullRequest {
-    /// Whether the head branch lives in `repo` itself, not in a fork.
-    fn head_in(&self, repo: &RepoRef) -> bool {
-        let full_name = self.head.repo.as_ref().map(|head| head.full_name.as_str());
-        forge_common::open_filter::head_in_repo(full_name, &repo.owner, &repo.name)
-    }
-}
-
 #[derive(Deserialize)]
 struct ApiPullRequest {
     number: u64,
@@ -347,6 +420,29 @@ struct ApiPullRequest {
     merged: bool,
     head: ApiBranch,
     base: ApiBranch,
+    #[serde(default)]
+    user: Option<ApiUser>,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    labels: Vec<ApiLabel>,
+}
+
+/// Forgejo writes an empty list as `null` in places (the statuses past the last page, no labels).
+fn null_as_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
+#[derive(Deserialize)]
+struct ApiVersion {
+    version: String,
+}
+
+#[derive(Deserialize)]
+struct ApiUser {
+    login: String,
 }
 
 #[derive(Deserialize)]
@@ -508,8 +604,11 @@ mod tests {
             ),
             json(200, serde_json::json!([])),
         ]);
-        let prs = plugin(&fake).list_open(&repo(), "fix/shared")?;
-        let found: Vec<_> = prs.iter().map(|p| (p.id.number, p.base.as_str())).collect();
+        let prs = plugin(&fake).list_open(&repo(), &head("fix/shared"))?;
+        let found: Vec<_> = prs
+            .iter()
+            .map(|p| (p.pr.id.number, p.pr.base.as_str()))
+            .collect();
         assert_eq!(found, [(42, "main"), (43, "release/1.2")]);
         assert!(fake.requests.borrow()[1].path.contains("page=2"));
         Ok(())
@@ -523,9 +622,102 @@ mod tests {
             json(200, serde_json::json!([closed])),
             json(200, serde_json::json!([])),
         ]);
-        assert!(plugin(&fake).list_open(&repo(), "fix/login")?.is_empty());
+        assert!(
+            plugin(&fake)
+                .list_open(&repo(), &head("fix/login"))?
+                .is_empty()
+        );
         assert!(fake.requests.borrow()[0].path.contains("state=open"));
         Ok(())
+    }
+
+    fn head(branch: &str) -> OpenFilter<'_> {
+        OpenFilter {
+            head: Some(branch),
+            ..OpenFilter::default()
+        }
+    }
+
+    fn renovate_pr(number: u64, branch: &str, labels: &[&str]) -> serde_json::Value {
+        let mut pr = numbered_pr(number, branch, "main", "o/r");
+        pr["user"] = serde_json::json!({"login": "renovate-bot"});
+        pr["labels"] = labels
+            .iter()
+            .map(|l| serde_json::json!({"name": l}))
+            .collect();
+        pr
+    }
+
+    #[test]
+    fn list_open_filters_by_head_prefix_and_label_and_returns_author_and_labels()
+    -> anyhow::Result<()> {
+        let fake = fake(vec![
+            json(
+                200,
+                serde_json::json!([
+                    renovate_pr(40, "renovate/a", &["major"]),
+                    renovate_pr(41, "renovate/b", &[]),
+                    renovate_pr(44, "fix/login", &["major"]),
+                ]),
+            ),
+            json(200, serde_json::json!([])),
+        ]);
+        let filter = OpenFilter {
+            head_prefix: Some("renovate/"),
+            label: Some("major"),
+            ..OpenFilter::default()
+        };
+
+        let prs = plugin(&fake).list_open(&repo(), &filter)?;
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].pr.id.number, 40);
+        assert_eq!(prs[0].author, "renovate-bot");
+        assert_eq!(prs[0].labels, ["major"]);
+        Ok(())
+    }
+
+    #[test]
+    fn list_open_by_author_asks_forgejo_v10_or_later_for_that_poster() -> anyhow::Result<()> {
+        let fake = fake(vec![
+            json(200, serde_json::json!({"version": "10.0.0+gitea-1.22.0"})),
+            json(200, serde_json::json!([renovate_pr(40, "renovate/a", &[])])),
+            json(200, serde_json::json!([])),
+        ]);
+        let filter = OpenFilter {
+            author: Some("renovate-bot"),
+            ..OpenFilter::default()
+        };
+
+        let prs = plugin(&fake).list_open(&repo(), &filter)?;
+
+        assert_eq!(prs.len(), 1);
+        assert!(
+            fake.requests.borrow()[1]
+                .path
+                .contains("&poster=renovate-bot")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn list_open_by_author_below_v10_is_unsupported() {
+        let fake = fake(vec![json(
+            200,
+            serde_json::json!({"version": "9.0.3+gitea-1.22.0"}),
+        )]);
+        let filter = OpenFilter {
+            author: Some("a"),
+            ..OpenFilter::default()
+        };
+
+        let err = plugin(&fake).list_open(&repo(), &filter).unwrap_err();
+
+        assert!(
+            matches!(&err, Error::Unsupported(m) if m.contains("v10")),
+            "{err:?}"
+        );
+        assert_eq!(fake.requests.borrow().len(), 1);
     }
 
     #[test]
@@ -537,7 +729,11 @@ mod tests {
             ),
             json(200, serde_json::json!([])),
         ]);
-        assert!(plugin(&fake).list_open(&repo(), "fix/login")?.is_empty());
+        assert!(
+            plugin(&fake)
+                .list_open(&repo(), &head("fix/login"))?
+                .is_empty()
+        );
         Ok(())
     }
 

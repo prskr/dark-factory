@@ -1,6 +1,5 @@
 //! GitHub's REST API behind `pull-requests` and `issues`.
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
 
@@ -8,31 +7,24 @@ use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, R
 use crate::error;
 use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
 use crate::exports::darkfactory::integrations::pull_requests::{
-    NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
+    ListedPullRequest, NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
 use crate::settings::Settings;
 use forge_common::draft;
 use forge_common::http;
 use forge_common::log::Log;
+use forge_common::open_filter::{Candidate, OpenFilter};
+use forge_common::url;
 
 /// Pull requests per page of `list-open`; GitHub's maximum.
 const LIST_PAGE_SIZE: usize = 100;
 /// `User-Agent` of every request; GitHub rejects requests without one.
 const USER_AGENT: &str = concat!("dark-factory-github-plugin/", env!("CARGO_PKG_VERSION"));
 
-/// Query values and path segments keep only RFC 3986 unreserved characters; branch names contain `/`.
-const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
-
 /// GitHub's message when a repository or instance rejects native drafts.
 const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
-/// Like [`QUERY_VALUE`], but a branch name keeps its `/` in a path.
-const REF_PATH: &AsciiSet = &QUERY_VALUE.remove(b'/');
-
+mod ci;
 mod feedback;
 mod merge;
 
@@ -59,12 +51,22 @@ pub struct Response {
     pub ratelimit_remaining: Option<u64>,
     /// `x-ratelimit-reset` in Unix seconds, if present and numeric.
     pub ratelimit_reset: Option<u64>,
+    /// `location` of a redirect.
+    pub location: Option<String>,
     pub body: Vec<u8>,
 }
 
 /// Sends a request to GitHub; the host adds credentials.
 pub trait Transport {
     fn send(&self, request: Request) -> Result<Response, Error>;
+
+    /// Like [`Self::send`], but the body is cut to its last `max` bytes; true if its beginning
+    /// was dropped. Implementations may stop reading early instead of buffering a huge body.
+    fn send_tail(&self, request: Request, max: usize) -> Result<(Response, bool), Error> {
+        let mut response = self.send(request)?;
+        let cut = forge_common::log_tail::keep_tail(&mut response.body, max);
+        Ok((response, cut))
+    }
 }
 
 /// The current Unix time in seconds, against which `x-ratelimit-reset` becomes a wait.
@@ -146,8 +148,8 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
         let path = format!(
             "{}/pulls?state=open&head={}&base={}&per_page=100",
             repo_path(repo),
-            utf8_percent_encode(&format!("{}:{head}", repo.owner), QUERY_VALUE),
-            utf8_percent_encode(base, QUERY_VALUE),
+            url::encode(&format!("{}:{head}", repo.owner)),
+            url::encode(base),
         );
         let prs: Vec<ApiPullRequest> = self.rest(Method::Get, &path, None)?;
         Ok(prs
@@ -158,21 +160,53 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
 
     /// Every open pull request whose head branch `head` is in `repo` itself, whatever its base.
     /// `head=<owner>:<branch>` narrows the listing; pages of 100 follow until a short one.
-    pub fn list_open(&self, repo: &RepoRef, head: &str) -> Result<Vec<PullRequest>, Error> {
+    pub fn list_open(
+        &self,
+        repo: &RepoRef,
+        filter: &OpenFilter<'_>,
+    ) -> Result<Vec<ListedPullRequest>, Error> {
+        let head = filter.head.map(|head| {
+            let head = format!("{}:{head}", repo.owner);
+            format!("&head={}", url::encode(&head))
+        });
+        let base = filter
+            .base
+            .map(|base| format!("&base={}", url::encode(base)));
+        let query = format!(
+            "state=open{}{}",
+            head.unwrap_or_default(),
+            base.unwrap_or_default()
+        );
         let mut found = Vec::new();
         for page in 1.. {
             let path = format!(
-                "{}/pulls?state=open&head={}&per_page={LIST_PAGE_SIZE}&page={page}",
+                "{}/pulls?{query}&per_page={LIST_PAGE_SIZE}&page={page}",
                 repo_path(repo),
-                utf8_percent_encode(&format!("{}:{head}", repo.owner), QUERY_VALUE),
             );
             let prs: Vec<ApiPullRequest> = self.rest(Method::Get, &path, None)?;
             let last_page = prs.len() < LIST_PAGE_SIZE;
-            found.extend(
-                prs.into_iter()
-                    .filter(|pr| pr.state == "open" && pr.head.branch == head && pr.head_in(repo))
-                    .map(|pr| self.pull_request(repo.clone(), pr)),
-            );
+            for pr in prs.into_iter().filter(|pr| pr.state == "open") {
+                let labels: Vec<String> = pr.labels.iter().map(|l| l.name.clone()).collect();
+                let author = pr
+                    .user
+                    .as_ref()
+                    .map(|u| u.login.clone())
+                    .unwrap_or_default();
+                let candidate = Candidate {
+                    head: &pr.head.branch,
+                    head_repo: pr.head.repo.as_ref().map(|r| r.full_name.as_str()),
+                    base: &pr.base.branch,
+                    author: &author,
+                    labels: &labels,
+                };
+                if filter.matches(&repo.owner, &repo.name, &candidate) {
+                    found.push(ListedPullRequest {
+                        pr: self.pull_request(repo.clone(), pr),
+                        author,
+                        labels,
+                    });
+                }
+            }
             if last_page {
                 break;
             }
@@ -447,8 +481,8 @@ impl Mutation {
 fn repo_path(repo: &RepoRef) -> String {
     format!(
         "/repos/{}/{}",
-        utf8_percent_encode(&repo.owner, QUERY_VALUE),
-        utf8_percent_encode(&repo.name, QUERY_VALUE)
+        url::encode(&repo.owner),
+        url::encode(&repo.name)
     )
 }
 
@@ -468,16 +502,17 @@ struct ApiHeadRepo {
     full_name: String,
 }
 
-impl ApiPullRequest {
-    /// Whether the head branch lives in `repo` itself, not in a fork.
-    fn head_in(&self, repo: &RepoRef) -> bool {
-        let full_name = self.head.repo.as_ref().map(|head| head.full_name.as_str());
-        forge_common::open_filter::head_in_repo(full_name, &repo.owner, &repo.name)
-    }
+#[derive(Deserialize)]
+struct ApiUser {
+    login: String,
 }
 
 #[derive(Deserialize)]
 struct ApiPullRequest {
+    #[serde(default)]
+    user: Option<ApiUser>,
+    #[serde(default)]
+    labels: Vec<ApiLabel>,
     number: u64,
     /// GraphQL id for the draft mutations.
     #[serde(default)]

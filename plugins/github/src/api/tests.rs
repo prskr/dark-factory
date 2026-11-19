@@ -89,7 +89,52 @@ fn pr_json(title: &str, draft: bool) -> serde_json::Value {
 }
 
 fn list_open(github: &GitHub<&Fake, FixedClock, &Fake>) -> Result<Vec<PullRequest>, Error> {
-    github.list_open(&pr_ref().repo, "fix/shared")
+    let filter = OpenFilter {
+        head: Some("fix/shared"),
+        ..OpenFilter::default()
+    };
+    let listed = github.list_open(&pr_ref().repo, &filter)?;
+    Ok(listed.into_iter().map(|l| l.pr).collect())
+}
+
+// Scenario "Author filter": author, label and prefix are matched on the plugin side, `base` is
+// passed to the API.
+#[test]
+fn list_open_matches_author_label_and_prefix_here_and_passes_base_on() -> anyhow::Result<()> {
+    let pr = |number: u64, branch: &str, login: &str, labels: &[&str]| {
+        let mut pr = shared_pr(number, "main", "o/r");
+        pr["head"]["ref"] = json!(branch);
+        pr["user"] = json!({"login": login});
+        pr["labels"] = labels.iter().map(|l| json!({"name": l})).collect();
+        pr
+    };
+    let fake = fake(vec![reply(
+        200,
+        json!([
+            pr(40, "renovate/a", "renovate[bot]", &["major"]),
+            pr(41, "renovate/b", "renovate[bot]", &[]),
+            pr(44, "fix/login", "alice", &["major"]),
+        ]),
+    )]);
+    let filter = OpenFilter {
+        author: Some("renovate[bot]"),
+        label: Some("major"),
+        head_prefix: Some("renovate/"),
+        base: Some("main"),
+        ..OpenFilter::default()
+    };
+
+    let listed = github(&fake, &[]).list_open(&pr_ref().repo, &filter)?;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].pr.id.number, 40);
+    assert_eq!(listed[0].author, "renovate[bot]");
+    assert_eq!(listed[0].labels, ["major"]);
+    assert_eq!(
+        urls(&fake),
+        ["https://api.github.com/repos/o/r/pulls?state=open&base=main&per_page=100&page=1"]
+    );
+    Ok(())
 }
 
 fn shared_pr(number: u64, base: &str, head_repo: &str) -> serde_json::Value {

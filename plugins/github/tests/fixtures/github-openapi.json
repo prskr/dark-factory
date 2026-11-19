@@ -8,11 +8,36 @@
       }
     },
     "parameters": {
+      "check-name": {
+        "in": "query",
+        "name": "check_name",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "commit-ref": {
+        "in": "path",
+        "name": "ref",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
       "issue-number": {
         "in": "path",
         "name": "issue_number",
         "required": true,
         "schema": {
+          "type": "integer"
+        }
+      },
+      "job-id": {
+        "in": "path",
+        "name": "job_id",
+        "required": true,
+        "schema": {
+          "format": "int64",
           "type": "integer"
         }
       },
@@ -53,6 +78,19 @@
         "name": "repo",
         "required": true,
         "schema": {
+          "type": "string"
+        }
+      },
+      "status": {
+        "in": "query",
+        "name": "status",
+        "required": false,
+        "schema": {
+          "enum": [
+            "queued",
+            "in_progress",
+            "completed"
+          ],
           "type": "string"
         }
       },
@@ -216,6 +254,207 @@
         "title": "Basic Error",
         "type": "object"
       },
+      "check-run": {
+        "properties": {
+          "app": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/integration"
+              }
+            ]
+          },
+          "check_suite": {
+            "properties": {
+              "id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conclusion": {
+            "enum": [
+              "success",
+              "failure",
+              "neutral",
+              "cancelled",
+              "skipped",
+              "timed_out",
+              "action_required",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deployment": {
+            "$ref": "#/components/schemas/deployment-simple"
+          },
+          "details_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "output": {
+            "properties": {
+              "annotations_count": {
+                "type": "integer"
+              },
+              "annotations_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "title",
+              "summary",
+              "text",
+              "annotations_count",
+              "annotations_url"
+            ],
+            "type": "object"
+          },
+          "pull_requests": {
+            "items": {
+              "$ref": "#/components/schemas/pull-request-minimal"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "waiting",
+              "requested",
+              "pending"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "head_sha",
+          "name",
+          "url",
+          "html_url",
+          "details_url",
+          "status",
+          "conclusion",
+          "started_at",
+          "completed_at",
+          "external_id",
+          "check_suite",
+          "output",
+          "app",
+          "pull_requests"
+        ],
+        "title": "CheckRun",
+        "type": "object"
+      },
+      "code-of-conduct": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "html_url": {
+            "format": "uri",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "html_url",
+          "key",
+          "name"
+        ],
+        "title": "Code Of Conduct",
+        "type": "object"
+      },
       "collaborator": {
         "properties": {
           "avatar_url": {
@@ -350,6 +589,122 @@
           "role_name"
         ],
         "title": "Collaborator",
+        "type": "object"
+      },
+      "combined-commit-status": {
+        "properties": {
+          "commit_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/minimal-repository"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "statuses": {
+            "items": {
+              "$ref": "#/components/schemas/simple-commit-status"
+            },
+            "type": "array"
+          },
+          "total_count": {
+            "type": "integer"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "sha",
+          "total_count",
+          "statuses",
+          "repository",
+          "commit_url",
+          "url"
+        ],
+        "title": "Combined Commit Status",
+        "type": "object"
+      },
+      "deployment-simple": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environment": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "original_environment": {
+            "type": "string"
+          },
+          "performed_via_github_app": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/integration"
+              }
+            ]
+          },
+          "production_environment": {
+            "type": "boolean"
+          },
+          "repository_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "statuses_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "transient_environment": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "task",
+          "environment",
+          "description",
+          "statuses_url",
+          "repository_url",
+          "url",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Deployment",
         "type": "object"
       },
       "enterprise": {
@@ -1279,6 +1634,415 @@
         "title": "Milestone",
         "type": "object"
       },
+      "minimal-repository": {
+        "properties": {
+          "allow_forking": {
+            "type": "boolean"
+          },
+          "archive_url": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "assignees_url": {
+            "type": "string"
+          },
+          "blobs_url": {
+            "type": "string"
+          },
+          "branches_url": {
+            "type": "string"
+          },
+          "clone_url": {
+            "type": "string"
+          },
+          "code_of_conduct": {
+            "$ref": "#/components/schemas/code-of-conduct"
+          },
+          "collaborators_url": {
+            "type": "string"
+          },
+          "comments_url": {
+            "type": "string"
+          },
+          "commits_url": {
+            "type": "string"
+          },
+          "compare_url": {
+            "type": "string"
+          },
+          "contents_url": {
+            "type": "string"
+          },
+          "contributors_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "custom_properties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "delete_branch_on_merge": {
+            "type": "boolean"
+          },
+          "deployments_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "downloads_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "events_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "fork": {
+            "type": "boolean"
+          },
+          "forks": {
+            "type": "integer"
+          },
+          "forks_count": {
+            "type": "integer"
+          },
+          "forks_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "git_commits_url": {
+            "type": "string"
+          },
+          "git_refs_url": {
+            "type": "string"
+          },
+          "git_tags_url": {
+            "type": "string"
+          },
+          "git_url": {
+            "type": "string"
+          },
+          "has_discussions": {
+            "type": "boolean"
+          },
+          "has_issues": {
+            "type": "boolean"
+          },
+          "has_pages": {
+            "type": "boolean"
+          },
+          "has_projects": {
+            "type": "boolean"
+          },
+          "has_pull_requests": {
+            "type": "boolean"
+          },
+          "has_wiki": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hooks_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "html_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_template": {
+            "type": "boolean"
+          },
+          "issue_comment_url": {
+            "type": "string"
+          },
+          "issue_events_url": {
+            "type": "string"
+          },
+          "issues_url": {
+            "type": "string"
+          },
+          "keys_url": {
+            "type": "string"
+          },
+          "labels_url": {
+            "type": "string"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "languages_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "license": {
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "node_id": {
+                "type": "string"
+              },
+              "spdx_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "merges_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "milestones_url": {
+            "type": "string"
+          },
+          "mirror_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_count": {
+            "type": "integer"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "notifications_url": {
+            "type": "string"
+          },
+          "open_issues": {
+            "type": "integer"
+          },
+          "open_issues_count": {
+            "type": "integer"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/simple-user"
+          },
+          "permissions": {
+            "properties": {
+              "admin": {
+                "type": "boolean"
+              },
+              "maintain": {
+                "type": "boolean"
+              },
+              "pull": {
+                "type": "boolean"
+              },
+              "push": {
+                "type": "boolean"
+              },
+              "triage": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "pull_request_creation_policy": {
+            "enum": [
+              "all",
+              "collaborators_only"
+            ],
+            "type": "string"
+          },
+          "pulls_url": {
+            "type": "string"
+          },
+          "pushed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "releases_url": {
+            "type": "string"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "security_and_analysis": {
+            "$ref": "#/components/schemas/security-and-analysis"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "ssh_url": {
+            "type": "string"
+          },
+          "stargazers_count": {
+            "type": "integer"
+          },
+          "stargazers_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "statuses_url": {
+            "type": "string"
+          },
+          "subscribers_count": {
+            "type": "integer"
+          },
+          "subscribers_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "subscription_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "svn_url": {
+            "type": "string"
+          },
+          "tags_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "teams_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "temp_clone_token": {
+            "type": "string"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "trees_url": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          },
+          "watchers": {
+            "type": "integer"
+          },
+          "watchers_count": {
+            "type": "integer"
+          },
+          "web_commit_signoff_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "archive_url",
+          "assignees_url",
+          "blobs_url",
+          "branches_url",
+          "collaborators_url",
+          "comments_url",
+          "commits_url",
+          "compare_url",
+          "contents_url",
+          "contributors_url",
+          "deployments_url",
+          "description",
+          "downloads_url",
+          "events_url",
+          "fork",
+          "forks_url",
+          "full_name",
+          "git_commits_url",
+          "git_refs_url",
+          "git_tags_url",
+          "hooks_url",
+          "html_url",
+          "id",
+          "node_id",
+          "issue_comment_url",
+          "issue_events_url",
+          "issues_url",
+          "keys_url",
+          "labels_url",
+          "languages_url",
+          "merges_url",
+          "milestones_url",
+          "name",
+          "notifications_url",
+          "owner",
+          "private",
+          "pulls_url",
+          "releases_url",
+          "stargazers_url",
+          "statuses_url",
+          "subscribers_url",
+          "subscription_url",
+          "tags_url",
+          "teams_url",
+          "trees_url",
+          "url"
+        ],
+        "title": "Minimal Repository",
+        "type": "object"
+      },
       "pinned-issue-comment": {
         "properties": {
           "pinned_at": {
@@ -1684,6 +2448,101 @@
           "review_comments"
         ],
         "title": "Pull Request",
+        "type": "object"
+      },
+      "pull-request-minimal": {
+        "properties": {
+          "base": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "repo": {
+                "properties": {
+                  "id": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "url",
+                  "name"
+                ],
+                "type": "object"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref",
+              "sha",
+              "repo"
+            ],
+            "type": "object"
+          },
+          "head": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "repo": {
+                "properties": {
+                  "id": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "url",
+                  "name"
+                ],
+                "type": "object"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref",
+              "sha",
+              "repo"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "url",
+          "head",
+          "base"
+        ],
+        "title": "Pull Request Minimal",
         "type": "object"
       },
       "pull-request-simple": {
@@ -2624,6 +3483,225 @@
         "title": "Repository Collaborator Permission",
         "type": "object"
       },
+      "security-and-analysis": {
+        "properties": {
+          "advanced_security": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "code_security": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "dependabot_security_updates": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_ai_detection": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_delegated_alert_dismissal": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_delegated_bypass": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_delegated_bypass_options": {
+            "properties": {
+              "reviewers": {
+                "items": {
+                  "properties": {
+                    "mode": {
+                      "default": "ALWAYS",
+                      "enum": [
+                        "ALWAYS",
+                        "EXEMPT"
+                      ],
+                      "type": "string"
+                    },
+                    "reviewer_id": {
+                      "type": "integer"
+                    },
+                    "reviewer_type": {
+                      "enum": [
+                        "TEAM",
+                        "ROLE"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "reviewer_id",
+                    "reviewer_type"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_non_provider_patterns": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret_scanning_push_protection": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "simple-commit-status": {
+        "properties": {
+          "avatar_url": {
+            "format": "uri",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "required": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_url": {
+            "format": "uri",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "node_id",
+          "state",
+          "context",
+          "target_url",
+          "avatar_url",
+          "url",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Simple Commit Status",
+        "type": "object"
+      },
       "simple-user": {
         "properties": {
           "avatar_url": {
@@ -3026,6 +4104,33 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/repos/{owner}/{repo}/actions/jobs/{job_id}/logs": {
+      "get": {
+        "operationId": "actions/download-job-logs-for-workflow-run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "$ref": "#/components/parameters/job-id"
+          }
+        ],
+        "responses": {
+          "302": {
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/collaborators/{username}/permission": {
       "get": {
         "operationId": "repos/get-collaborator-permission-level",
@@ -3046,6 +4151,122 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/repository-collaborator-permission"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/commits/{ref}/check-runs": {
+      "get": {
+        "operationId": "checks/list-for-ref",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "$ref": "#/components/parameters/commit-ref"
+          },
+          {
+            "$ref": "#/components/parameters/check-name"
+          },
+          {
+            "$ref": "#/components/parameters/status"
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "latest",
+              "enum": [
+                "latest",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/per-page"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          },
+          {
+            "in": "query",
+            "name": "app_id",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "check_runs": {
+                      "items": {
+                        "$ref": "#/components/schemas/check-run"
+                      },
+                      "type": "array"
+                    },
+                    "total_count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "total_count",
+                    "check_runs"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "headers": {
+              "Link": {
+                "$ref": "#/components/headers/link"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/commits/{ref}/status": {
+      "get": {
+        "operationId": "repos/get-combined-status-for-ref",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "$ref": "#/components/parameters/commit-ref"
+          },
+          {
+            "$ref": "#/components/parameters/per-page"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/combined-commit-status"
                 }
               }
             }

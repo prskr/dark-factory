@@ -352,6 +352,7 @@ fn component_importing_the_signature_check_loads_with_webhooks() -> anyhow::Resu
             pull_requests: true,
             issues: true,
             webhooks: true,
+            ci: true,
         }
     );
     Ok(())

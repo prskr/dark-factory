@@ -237,7 +237,8 @@ pub(crate) fn forge_client(
         .loaded
         .into_iter()
         .map(|(name, (host, config))| {
-            let mut client = PluginForgeClient::new(host, secrets.clone(), config.settings);
+            let mut client = PluginForgeClient::new(host, secrets.clone(), config.settings)
+                .with_extra_hosts(config.extra_hosts);
             if let Some(secret) = webhook_secrets.remove(&name) {
                 client = client.with_webhook_secret(secret);
             }

@@ -228,6 +228,8 @@ enum StepOutcome {
     RateLimited {
         retry_after_seconds: u64,
     },
+    /// The prompt fails with this message.
+    Failed(String),
 }
 
 async fn handle_prompt(
@@ -256,30 +258,37 @@ async fn handle_prompt(
         .collect::<Vec<_>>()
         .join("\n");
     let mut stop_reason = StopReason::EndTurn;
+    let mut failure = None;
     for step in Step::expand(turn.steps, &prompt) {
         match play_step(step, &mut ctx, cx).await {
             StepOutcome::Continue => {}
             StepOutcome::Stop(reason) => stop_reason = reason,
+            StepOutcome::Failed(message) => {
+                failure = Some(Error::internal_error().data(message));
+                break;
+            }
             StepOutcome::RateLimited {
                 retry_after_seconds,
             } => {
-                return responder.respond_with_error(Error::internal_error().data(
-                    serde_json::json!({
-                        "error": "rate_limited",
-                        "retry_after_seconds": retry_after_seconds,
-                        "message": format!(
-                            "Rate limit exceeded. Retry after {retry_after_seconds} seconds."
-                        )
-                    }),
-                ));
+                failure = Some(Error::internal_error().data(serde_json::json!({
+                    "error": "rate_limited",
+                    "retry_after_seconds": retry_after_seconds,
+                    "message": format!(
+                        "Rate limit exceeded. Retry after {retry_after_seconds} seconds."
+                    )
+                })));
+                break;
             }
         }
     }
 
-    // A cancel only applies to the prompt it was sent for. Resetting here, not at the
-    // start, keeps a cancel that arrives before this task is scheduled.
+    // A cancel only applies to the prompt it was sent for, however the prompt ends. Resetting
+    // here, not at the start, keeps a cancel that arrives before this task is scheduled.
     ctx.cancelled.store(false, Ordering::SeqCst);
-    responder.respond(PromptResponse::new(stop_reason))
+    match failure {
+        Some(error) => responder.respond_with_error(error),
+        None => responder.respond(PromptResponse::new(stop_reason)),
+    }
 }
 
 /// The next scripted turn of a session.
@@ -357,6 +366,19 @@ async fn play_step(step: Step, ctx: &mut TurnContext, cx: &ConnectionTo<Client>)
             let output = run_shell(&cmd, &ctx.cwd).await;
             send_update(cx, &ctx.session_id, text_chunk_update(output, false));
         }
+        Step::ShellVar(var) => {
+            let output = match try_shell(&var.shell, &ctx.cwd).await {
+                Ok(output) => output,
+                Err(message) => {
+                    return StepOutcome::Failed(format!(
+                        "shell_var '{}' failed: {message}",
+                        var.save
+                    ));
+                }
+            };
+            ctx.vars.insert(var.save, output.trim().to_string());
+            store_vars(&ctx.cwd, &ctx.vars);
+        }
         Step::Fetch(fetch) => play_fetch(&fetch, ctx, cx).await,
         Step::Model(model) => play_model(&model, ctx, cx).await,
         Step::Mcp(mcp_step) => play_mcp(mcp_step, ctx, cx).await,
@@ -416,26 +438,32 @@ fn play_plan(plan_step: PlanStep, ctx: &TurnContext, cx: &ConnectionTo<Client>) 
     reason = "the fake agent reports failures on stderr, the harness captures it"
 )]
 pub(crate) async fn run_shell(cmd: &str, cwd: &Path) -> String {
-    let output = tokio::process::Command::new("sh")
+    match try_shell(cmd, cwd).await {
+        Ok(stdout) => stdout,
+        Err(message) => {
+            eprintln!("fake-acp-agent: {message}");
+            String::new()
+        }
+    }
+}
+
+/// Runs a shell command and returns its stdout, or why it failed.
+async fn try_shell(cmd: &str, cwd: &Path) -> Result<String, String> {
+    let out = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(cmd)
         .current_dir(cwd)
         .output()
-        .await;
-    match output {
-        Ok(out) if !out.status.success() => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            eprintln!(
-                "fake-acp-agent: shell command '{cmd}' exited with {}: {stderr}",
-                out.status
-            );
-            String::new()
-        }
-        Ok(out) => String::from_utf8_lossy(&out.stdout).into_owned(),
-        Err(e) => {
-            eprintln!("fake-acp-agent: failed to execute shell command '{cmd}': {e}");
-            String::new()
-        }
+        .await
+        .map_err(|e| format!("failed to execute shell command '{cmd}': {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        Err(format!(
+            "shell command '{cmd}' exited with {}: {stderr}",
+            out.status
+        ))
     }
 }
 

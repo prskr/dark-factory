@@ -20,10 +20,11 @@ mod webhook;
 
 use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use darkfactory::integrations::webhook_signature;
+use exports::darkfactory::integrations::ci::{CiStatus, Guest as CiGuest, LogTail};
 use exports::darkfactory::integrations::issues::{Comment, Guest as IssuesGuest, Issue};
 use exports::darkfactory::integrations::pull_requests::{
-    AuthorRole, Feedback, Guest as PullRequestsGuest, NewPullRequest, OpenFilter, PostedComment,
-    PullRequest, PullRequestUpdate,
+    AuthorRole, Feedback, Guest as PullRequestsGuest, ListedPullRequest, NewPullRequest,
+    OpenFilter, PostedComment, PullRequest, PullRequestUpdate,
 };
 use exports::darkfactory::integrations::webhooks::{Guest as WebhooksGuest, ParsedEvent};
 use forge_common::draft;
@@ -42,9 +43,8 @@ impl PullRequestsGuest for ForgejoPlugin {
         instance()?.find_open(&repo, &head, &base)
     }
 
-    fn list_open(repo: RepoRef, filter: OpenFilter) -> Result<Vec<PullRequest>, Error> {
-        reject_unsupported_filters(&filter)?;
-        instance()?.list_open(&repo, &filter.head)
+    fn list_open(repo: RepoRef, filter: OpenFilter) -> Result<Vec<ListedPullRequest>, Error> {
+        instance()?.list_open(&repo, &open_filter(&filter))
     }
 
     fn get(id: PullRequestRef) -> Result<PullRequest, Error> {
@@ -79,6 +79,16 @@ impl IssuesGuest for ForgejoPlugin {
 
     fn add_comment(id: IssueRef, body: String) -> Result<Comment, Error> {
         instance()?.add_comment(&id, &body)
+    }
+}
+
+impl CiGuest for ForgejoPlugin {
+    fn status(repo: RepoRef, git_ref: String) -> Result<CiStatus, Error> {
+        instance()?.ci_status(&repo, &git_ref)
+    }
+
+    fn job_log(repo: RepoRef, job_id: u64) -> Result<LogTail, Error> {
+        instance()?.job_log(&repo, job_id)
     }
 }
 
@@ -130,15 +140,14 @@ fn config(key: &str) -> Result<Option<String>, Error> {
     wasi::config::store::get(key).map_err(|e| Error::Config(format!("reading `{key}`: {e:?}")))
 }
 
-/// `list-open` filters beyond `head` come with `iter3-ci-tools`.
-fn reject_unsupported_filters(filter: &OpenFilter) -> Result<(), Error> {
-    forge_common::open_filter::reject_unsupported_filters(forge_common::open_filter::SetFilters {
-        head_prefix: filter.head_prefix.is_some(),
-        author: filter.author.is_some(),
-        label: filter.label.is_some(),
-        base: filter.base.is_some(),
-    })
-    .map_err(Error::InvalidInput)
+fn open_filter(filter: &OpenFilter) -> forge_common::open_filter::OpenFilter<'_> {
+    forge_common::open_filter::OpenFilter {
+        head: filter.head.as_deref(),
+        head_prefix: filter.head_prefix.as_deref(),
+        author: filter.author.as_deref(),
+        label: filter.label.as_deref(),
+        base: filter.base.as_deref(),
+    }
 }
 
 #[cfg(test)]
@@ -146,27 +155,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_head_filter_is_supported() {
-        let head = |f: fn(&mut OpenFilter)| {
-            let mut filter = OpenFilter {
-                head: "h".into(),
-                head_prefix: None,
-                author: None,
-                label: None,
-                base: None,
-            };
-            f(&mut filter);
-            reject_unsupported_filters(&filter)
+    fn every_wit_filter_field_reaches_the_common_filter() {
+        let wit = OpenFilter {
+            head: Some("h".into()),
+            head_prefix: Some("p/".into()),
+            author: Some("a".into()),
+            label: Some("l".into()),
+            base: Some("main".into()),
         };
-        assert!(head(|_| {}).is_ok());
-        assert!(matches!(
-            head(|f| f.author = Some("a".into())),
-            Err(Error::InvalidInput(_))
-        ));
-        assert!(matches!(
-            head(|f| f.base = Some("main".into())),
-            Err(Error::InvalidInput(_))
-        ));
+        let common = open_filter(&wit);
+        assert_eq!(
+            (
+                common.head,
+                common.head_prefix,
+                common.author,
+                common.label,
+                common.base
+            ),
+            (Some("h"), Some("p/"), Some("a"), Some("l"), Some("main"))
+        );
     }
 
     #[test]

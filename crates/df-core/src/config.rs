@@ -1036,6 +1036,11 @@ pub struct PluginConfig {
     /// How the host sends the forge credential.
     #[serde(default)]
     pub auth_scheme: AuthSchemeSetting,
+    /// Hosts the plugin may also reach over HTTPS, without the forge credential: a host name or
+    /// `*.suffix` for every subdomain (not the suffix itself). For storage hosts a forge
+    /// redirects to, e.g. GitHub's job logs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_hosts: Vec<String>,
     /// Kubernetes Secret with the webhook secret, read at startup. Unset: no webhook endpoint
     /// for the plugin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1064,6 +1069,7 @@ impl PluginConfig {
             settings: BTreeMap::new(),
             hosts: Vec::new(),
             auth_scheme: AuthSchemeSetting::default(),
+            extra_hosts: Vec::new(),
             webhook_secret: None,
         }
     }

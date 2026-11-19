@@ -2,7 +2,7 @@
 
 use df_core::webhooks::{ParsedEvent, WebhookEvent};
 
-use crate::host::{issues, pull_requests as prs, webhooks, wit};
+use crate::host::{ci, issues, pull_requests as prs, webhooks, wit};
 
 pub(crate) fn repo(r: &df_core::RepoRef) -> wit::RepoRef {
     wit::RepoRef {
@@ -69,6 +69,49 @@ pub(crate) fn from_pull_request(p: prs::PullRequest) -> df_core::PullRequest {
             prs::PullRequestState::Merged => df_core::PullRequestState::Merged,
         },
         head_sha: p.head_sha,
+    }
+}
+
+pub(crate) fn open_filter(head: Option<&str>, f: &df_core::PullRequestFilter) -> prs::OpenFilter {
+    prs::OpenFilter {
+        head: head.map(str::to_string),
+        head_prefix: f.head_prefix.clone(),
+        author: f.author.clone(),
+        label: f.label.clone(),
+        base: f.base.clone(),
+    }
+}
+
+pub(crate) fn from_listed(l: prs::ListedPullRequest) -> df_core::ListedPullRequest {
+    df_core::ListedPullRequest {
+        pr: from_pull_request(l.pr),
+        author: l.author,
+        labels: l.labels,
+    }
+}
+
+fn from_ci_state(s: ci::CiState) -> df_core::CiState {
+    match s {
+        ci::CiState::Success => df_core::CiState::Success,
+        ci::CiState::Pending => df_core::CiState::Pending,
+        ci::CiState::Failure => df_core::CiState::Failure,
+        ci::CiState::None => df_core::CiState::None,
+    }
+}
+
+pub(crate) fn from_ci_status(s: ci::CiStatus) -> df_core::CiStatus {
+    df_core::CiStatus {
+        state: from_ci_state(s.state),
+        checks: s
+            .checks
+            .into_iter()
+            .map(|c| df_core::CiCheck {
+                name: c.name,
+                state: from_ci_state(c.state),
+                url: c.url,
+                job_id: c.job_id,
+            })
+            .collect(),
     }
 }
 
@@ -229,6 +272,7 @@ pub(crate) fn from_error(e: wit::Error) -> df_core::IntegrationError {
         }),
         wit::Error::Config(m) => E::Config(m),
         wit::Error::Transport(m) => E::Transport(m),
+        wit::Error::Unsupported(m) => E::Unsupported(m),
         wit::Error::Internal(m) => E::Internal(m),
     }
 }

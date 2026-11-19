@@ -101,6 +101,10 @@ pub const EXISTING_BRANCH_PROJECT_KEY: &str = "EB";
 pub const EXISTING_BRANCH_PROJECT_NAME: &str = "Existing Branch";
 pub const EXISTING_BRANCH_ATTACHED_MARKER: &str = "[attached]";
 pub const EXISTING_BRANCH_REBASE_MARKER: &str = "[rebase]";
+/// Prompt marker of the CI reads scenario of `existing-branch.yaml`; the script lists the open
+/// pull requests whose head starts with [`CI_READS_BRANCH_PREFIX`].
+pub const EXISTING_BRANCH_CI_MARKER: &str = "[ci]";
+pub const CI_READS_BRANCH_PREFIX: &str = "renovate/e2e-ci-";
 /// The summary the script completes the attached task with.
 pub const EXISTING_BRANCH_SUMMARY: &str = "Bumped the dependency on the bot branch.";
 

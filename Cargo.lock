@@ -1568,6 +1568,7 @@ dependencies = [
  "jsonschema 0.60.0",
  "opentelemetry",
  "opentelemetry_sdk",
+ "regex",
  "serde",
  "serde_json",
  "sqlx",
@@ -2590,6 +2591,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 name = "forge-common"
 version = "0.0.0"
 dependencies = [
+ "percent-encoding",
  "wasip2 2.0.1+wasi-0.2.12",
 ]
 
@@ -2840,7 +2842,6 @@ dependencies = [
  "anyhow",
  "forge-common",
  "hex",
- "percent-encoding",
  "serde",
  "serde_json",
  "wit-bindgen 0.63.0",

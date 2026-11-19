@@ -9,8 +9,8 @@ use crate::wasi::clocks::wall_clock;
 
 pub(crate) struct WasiTransport;
 
-impl Transport for WasiTransport {
-    fn send(&self, request: Request) -> Result<Response, Error> {
+impl WasiTransport {
+    fn raw(request: &Request, tail: Option<usize>) -> Result<http::RawResponse, Error> {
         let (scheme, authority, path) = http::split_url(&request.url).ok_or_else(|| {
             Error::Internal(format!("request URL has no scheme: {}", request.url))
         })?;
@@ -19,22 +19,42 @@ impl Transport for WasiTransport {
             .iter()
             .map(|(name, value)| (*name, value.as_str()))
             .collect();
-        let raw = http::send(&RawRequest {
+        let raw = RawRequest {
             method: request.method,
             scheme,
             authority,
             path: &path,
             headers: &headers,
             body: request.body.as_deref(),
-        })
-        .map_err(into_error)?;
-        Ok(Response {
-            status: raw.status,
-            retry_after: raw.header_number("retry-after"),
-            ratelimit_remaining: raw.header_number("x-ratelimit-remaining"),
-            ratelimit_reset: raw.header_number("x-ratelimit-reset"),
-            body: raw.body,
-        })
+        };
+        match tail {
+            Some(max) => http::send_tail(&raw, max),
+            None => http::send(&raw),
+        }
+        .map_err(into_error)
+    }
+}
+
+fn response_of(raw: http::RawResponse) -> Response {
+    Response {
+        status: raw.status,
+        retry_after: raw.header_number("retry-after"),
+        ratelimit_remaining: raw.header_number("x-ratelimit-remaining"),
+        ratelimit_reset: raw.header_number("x-ratelimit-reset"),
+        location: raw.header("location"),
+        body: raw.body,
+    }
+}
+
+impl Transport for WasiTransport {
+    fn send(&self, request: Request) -> Result<Response, Error> {
+        Ok(response_of(Self::raw(&request, None)?))
+    }
+
+    fn send_tail(&self, request: Request, max: usize) -> Result<(Response, bool), Error> {
+        let raw = Self::raw(&request, Some(max))?;
+        let cut = raw.body_cut;
+        Ok((response_of(raw), cut))
     }
 }
 
