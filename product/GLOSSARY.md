@@ -178,6 +178,24 @@ _Avoid_: Inline comment, line comment
 A review comment together with its replies; it can be resolved.
 _Avoid_: Conversation, discussion
 
+### Personas
+
+**Persona**:
+A role an agent takes on in every project: its instructions, harness, model and persona identity. Every task, chat and routine has exactly one.
+_Avoid_: Agent profile, bot, role
+
+**Persona identity**:
+Who a persona appears as: its handle, display name, commit email and avatar. Every commit an agent makes carries its persona's identity, and no two personas share a commit email.
+_Avoid_: Commit identity, bot identity, Git user
+
+**Handle**:
+The short, unique name that identifies a persona to humans and agents, for example when delegating.
+_Avoid_: Persona name, username, slug
+
+**Signing key**:
+The key Dark Factory signs a persona's commits with. Each persona has its own, and it never enters a sandbox.
+_Avoid_: GPG key, commit key, bot key
+
 ### Authors
 
 **System principal**:
