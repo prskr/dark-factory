@@ -77,11 +77,11 @@ The host SHALL load each plugin component from its configured file path at start
 - **THEN** an info event carries the plugin name, the size in bytes and the load duration (`compile_ms`, everything after the file read)
 
 ### Requirement: Capability detection
-At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, including the interfaces it pulls in transitively, SHALL be accepted.
+At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`, `ci`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, including the interfaces it pulls in transitively, SHALL be accepted.
 
 #### Scenario: Forge plugin
 - **WHEN** the Forgejo component is loaded
-- **THEN** the host reports the capabilities `pull-requests`, `issues` and `webhooks`
+- **THEN** the host reports the capabilities `pull-requests`, `issues`, `webhooks` and `ci`
 
 #### Scenario: Plugin importing filesystem
 - **WHEN** a component imports `wasi:filesystem/preopens`
@@ -94,6 +94,10 @@ At load time the host SHALL detect which capability interfaces (`pull-requests`,
 #### Scenario: Contract gains an import
 - **WHEN** world `plugin-base` imports an interface the host does not accept
 - **THEN** the host's test suite fails naming that interface
+
+#### Scenario: Plugin without CI
+- **WHEN** a component exports `pull-requests` and `issues` but not `ci`
+- **THEN** it loads, and CI tool calls for its projects fail as not supported
 
 ### Requirement: Retries per contract
 The host SHALL retry calls failing with `rate-limited` or `transport`, at most 3 times, and SHALL NOT retry other errors. A `rate-limited` call SHALL be retried after its retry-after (1 s without one); when the retry-after exceeds the cap of 30 s, the host SHALL return the error without retrying.
